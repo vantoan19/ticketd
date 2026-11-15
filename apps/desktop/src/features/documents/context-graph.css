@@ -10,7 +10,7 @@
   position: sticky;
   top: 0;
   z-index: 6;
-  background: var(--background);
+  background: var(--surface);
 }
 .context-graph-page .list-header {
   flex-wrap: nowrap;
@@ -159,9 +159,12 @@
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.context-graph-list li:hover,
-.context-graph-list li:focus-within {
-  background: color-mix(in srgb, var(--muted) 60%, transparent);
+.context-graph-list li:hover {
+  background: var(--hover);
+}
+/* Selected: the accent fill and primary text, stronger than hover. */
+.context-graph-list li:has(> button[aria-current="true"]) {
+  background: var(--accent);
 }
 .context-graph-kind {
   grid-column: 1;
@@ -369,8 +372,8 @@
 }
 /* A mask would clip an outer ring, so the focus ring sits inside the box. */
 .context-graph-unconnected-list:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .context-graph-unconnected button {
   flex: none;
@@ -427,8 +430,8 @@
   background: var(--accent);
 }
 .context-graph-zoom button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .context-graph-zoom svg {
   width: 14px;
@@ -515,8 +518,8 @@
   line-height: var(--text-ui-line);
 }
 .context-graph-search:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .context-graph-switch {
   display: inline-flex;

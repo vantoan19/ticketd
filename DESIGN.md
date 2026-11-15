@@ -41,21 +41,23 @@ Visual simplicity must not erase useful information. Existing prerequisites, dup
 
 These values come directly from the linked reference. The semantic names map them to ticketd; do not substitute approximate grays or another blue.
 
-| Role / token                                  | Reference value       | Ticketd use                                 |
-| --------------------------------------------- | --------------------- | ------------------------------------------- |
-| Canvas / `--background`                       | `#FAFAFA`             | Workspace canvas and navigation             |
-| Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Content panel, menus, dialogs               |
-| Recessed / `--recessed`                       | `#F2F2F2`             | Quiet control surfaces and placeholders     |
-| Primary text / `--foreground`                 | `#171717`             | Titles, authored content, active values     |
-| Secondary text / `--muted-foreground`         | `#4D4D4D`             | Navigation, labels, readable captions       |
-| Decorative/disabled / `--disabled-foreground` | `#8F8F8F`             | Inactive decoration and disabled states     |
-| Hover / `--accent`                            | `#EBEBEB`             | Navigation and row hover/selection          |
-| Interactive / `--interactive`, `--ring`       | `#0072F5`             | Focus, link decoration, interactive accents |
-| Input focus / `--input-focus`                 | `#005FCC`             | Input focus outline                         |
-| Boundary / `--shadow-border-base`             | `0 0 0 1px #00000014` | Shadow-based surface boundary               |
-| Header boundary / `--header-boundary`         | `0 1px 0 0 #0000001A` | Pane header separator                       |
+| Role / token                                  | Reference value       | Ticketd use                                  |
+| --------------------------------------------- | --------------------- | -------------------------------------------- |
+| Canvas / `--background`                       | `#FAFAFA`             | Workspace canvas and navigation              |
+| Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Content panel, menus, dialogs                |
+| Row hover / `--hover`                         | `#F7F7F7`             | Hover on selectable rows and cards           |
+| Recessed / `--recessed`                       | `#F2F2F2`             | Quiet control surfaces and placeholders      |
+| Primary text / `--foreground`                 | `#171717`             | Titles, authored content, active values      |
+| Secondary text / `--muted-foreground`         | `#4D4D4D`             | Navigation, labels, readable captions        |
+| Decorative/disabled / `--disabled-foreground` | `#6B6B6B`             | Disabled labels and placeholders             |
+| Selection / `--accent`                        | `#EBEBEB`             | Selection, current navigation, control hover |
+| Tooltip / `--tooltip`, `--tooltip-foreground` | `#171717` / `#FFFFFF` | The tooltip chip                             |
+| Interactive / `--interactive`, `--ring`       | `#0072F5`             | Focus, link decoration, interactive accents  |
+| Input focus / `--input-focus`                 | `#005FCC`             | Input focus outline                          |
+| Boundary / `--shadow-border-base`             | `0 0 0 1px #00000014` | Shadow-based surface boundary                |
+| Header boundary / `--header-boundary`         | `0 1px 0 0 #0000001A` | Pane header separator                        |
 
-`--muted` and `--secondary` are shadcn aliases of `--recessed`, `--secondary-foreground` of `--muted-foreground`, and `--popover` of `--surface`; new code uses the semantic names. Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
+`--muted` and `--secondary` are shadcn aliases of `--recessed` and `--secondary-foreground` of `--muted-foreground`; new code uses the semantic names. `--popover` is `--surface` in light and one step above it in dark, so menus, popovers, selects and command lists never share the panel's fill; dialogs and sheets stay on `--surface` over their scrim. Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute; disabled labels use `#6B6B6B` (5.3:1 on white) because they stay readable without opacity dimming. Tooltips are one small dark chip in both themes. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
 
 Primary actions invert the existing primary/elevated pair: `#171717` fill and `#FFFFFF` text. Ghost actions begin transparent with secondary text and promote to primary text on `#EBEBEB` hover. Standard prose links may retain primary text with an underline, as in the reference’s standard-link treatment; use the blue token for focus and link decoration. Never reduce contrast merely to make all links blue. Source links use the accessible text-link role `--link-foreground`: `#005FCC` in light and `#52AEFF` in dark; focus and decorative interactive accents keep their existing tokens. Recessed notices and footer bands retain a shadow boundary when their fill alone is too close to the surrounding surface.
 
@@ -68,17 +70,21 @@ The linked reference does not specify a dark palette or complete error callouts.
 | Role                  | Dark extension        |
 | --------------------- | --------------------- |
 | Canvas                | `#0A0A0A`             |
-| Elevated / popover    | `#171717`             |
+| Elevated              | `#171717`             |
+| Popover               | `#1F1F1F`             |
 | Recessed              | `#1A1A1A`             |
+| Row hover             | `#1F1F1F`             |
 | Primary text          | `#EDEDED`             |
 | Secondary text        | `#A1A1A1`             |
-| Disabled decoration   | `#737373`             |
-| Hover / selection     | `#262626`             |
+| Disabled              | `#8A8A8A`             |
+| Selection             | `#262626`             |
+| Tooltip               | `#2E2E2E` / `#EDEDED` |
+| Destructive label     | `#FF6166`             |
 | Shadow boundary       | `0 0 0 1px #FFFFFF24` |
 | Focus and interactive | `#0072F5`             |
 | Input focus           | `#005FCC`             |
 
-Errors use local `error-surface` / `error-foreground` pairs: `#FEF2F2` / `#991B1B` in light and `#2B1414` / `#FECACA` in dark. Destructive labels use the corresponding error foreground. These roles exist for readable failure explanations, not status decoration.
+Errors use local `error-surface` / `error-foreground` pairs: `#FEF2F2` / `#991B1B` in light and `#2B1414` / `#FECACA` in dark. Destructive labels on neutral surfaces (menu items, destructive buttons) use `--destructive`: `#991B1B` in light and `#FF6166` in dark (6.2:1 on `#171717`, 5.6:1 on the popover), because `#FECACA` reads as white there; text on `--error-surface` keeps `--error-foreground`. These roles exist for readable failure explanations, not status decoration.
 
 The theme preference is System, Light, or Dark, chosen in Settings. System is the default and follows the operating system preference live; Light and Dark override it. Theme changes apply immediately without reloading. Sidebar and portaled surfaces use the same semantic roles. Every overlay has an opaque surface; never depend on a parent pane’s background.
 
@@ -131,7 +137,7 @@ Bundle Geist Sans and Geist Mono locally. Use the reference’s actual 400, 500,
 | Caption             | 12px | 400    | 16px        | Normal    | Dates, hints, counts, supporting metadata                |
 | Code / preformatted | 13px | 500    | 20px        | Normal    | Code, references, paths, commit identifiers              |
 
-Use the source’s form tokens for shared inputs: 14px/20px default and 16px/24px large. Its observed native input size is 13.3px; ticketd’s themed form controls use the explicit 14px form token rather than relying on browser-native metrics. Root text size is 16px, so the reference’s `.875rem` form size resolves to 14px.
+Use the source’s form tokens for shared inputs: 14px/20px default and 16px/24px large. Its observed native input size is 13.3px; ticketd’s themed form controls use the explicit 14px form token rather than relying on browser-native metrics. Root text size is 16px, so the reference’s `.875rem` form size resolves to 14px. The root stays 16px for rem maths, but `body`, dialogs, sheets, popovers and menus set the 14/20 working role, so text that no class sizes never renders at 16px; the 16px reading role is opt-in. Prose (paragraphs, captions, ledes, empty-state sentences) wraps with `text-wrap-style: pretty` and headings with `balance`, so blocks do not end in one-word lines.
 
 Do not shrink the entire workspace to a 13px root or scale down type to fit an extra pane. Choose the appropriate existing role instead: captions are 12px, navigation, ticket rows, descriptions, and updates are 14px/20px in the working panes. Semibold is reserved for display/section-title emphasis; small section headings use the real medium weight.
 
@@ -180,7 +186,7 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Standard content width                 | 1200px | Management content maximum                            |
 | Wide content width                     | 1400px | Wide content views where useful                       |
 
-Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline`, and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
+Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline` (`#0000000D` in light, `#FFFFFF14` in dark), and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
 
 Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 
@@ -202,13 +208,17 @@ Use the source’s light-theme definitions, composed with the theme’s boundary
 | Menu             | Border plus `0 1px 1px #00000005, 0 4px 8px -4px #0000000A, 0 16px 24px -8px #0000000F`  |
 | Modal            | Border plus `0 1px 1px #00000005, 0 8px 16px -4px #0000000A, 0 24px 32px -8px #0000000F` |
 | Tooltip          | Border plus `0 1px 1px #00000005, 0 4px 8px #0000000A`                                   |
-| Focus            | `0 0 0 2px var(--ds-background-100), 0 0 0 4px #0072F5`                                  |
+| Focus            | `0 0 0 2px var(--ds-background-100), 0 0 0 4px #0072F5`, drawn as an outline (below)     |
 | Input focus      | `1px` outline in `#005FCC`                                                               |
 | Modal backdrop   | `var(--ds-background-200)` at `0.8` opacity                                              |
 
-For light theme, map `--ds-background-100` to elevated white and `--ds-background-200` to canvas `#FAFAFA`. Dark equivalents use the explicit dark surfaces above. Dark elevation preserves these dimensions and uses the dark boundary role; tune visibility through the documented theme mapping rather than changing the light reference values.
+For light theme, map `--ds-background-100` to elevated white and `--ds-background-200` to canvas `#FAFAFA`. Dark equivalents use the explicit dark surfaces above. Dark elevation preserves these dimensions and uses the dark boundary role; tune visibility through the documented theme mapping rather than changing the light reference values. The reference's black-alpha drop layers vanish on `#0A0A0A` and `#171717`, so in dark the menu, large and tooltip elevations use `0 1px 2px #0000004D, 0 8px 24px -6px #00000080` after the 14% ring, and the modal adds `0 24px 48px -12px #000000A6`.
 
-The document plane, ticket rows, and inline sections remain flat. Floating menus and dialogs use their corresponding elevation. Focus is independent of hover and selection, and uses system-visible outlines under forced colors. Overlays always have an explicit opaque background and foreground, including when rendered through a portal.
+Overlay surfaces: menus, selects, listboxes and command lists use `--popover` with the menu elevation; popovers holding a form use `--popover` with the large elevation; dialogs and sheets use `--surface` with the modal elevation over the 80% canvas scrim. No rule may remove an overlay's shadow.
+
+The document plane, ticket rows, and inline sections remain flat. Floating menus and dialogs use their corresponding elevation. Overlays always have an explicit opaque background and foreground, including when rendered through a portal.
+
+Focus keeps the reference's look but is drawn with `outline`, never `box-shadow`, so it never shares a property with a control's edge or an overlay's elevation: `outline: 2px solid var(--ring)` at a 2px offset on free-standing controls, at −2px on rows inside lists and scrollers (where an outer ring would be clipped or cover the neighbors), and the 1px `--input-focus` outline on text fields. Focus is independent of hover and selection, and uses system-visible outlines under forced colors. After a pointer interaction the modality reset clears `outline` only, so a menu or button focused by script after a click keeps its shadow. Focus moved by script to a container or heading (a pane, a menu or dialog frame, a title after a bulk change, a mention target) never shows a ring. A guard test rejects focus drawn with `box-shadow`, a pointer reset that touches `box-shadow`, `inset var(--focus-ring)`, and any rule that removes an overlay's shadow.
 
 ## 5. Workspace layout
 
@@ -247,7 +257,7 @@ The drawing describes hierarchy, not additional duplicate search fields. Search 
 | List pane       | At least 360px in split mode; remaining width allocated with the detail pane                                                                                  |
 | Detail pane     | At least 480px in split mode; start near 55% of content panel width                                                                                           |
 | Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters                                                                 |
-| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                                                                           |
+| Property rail   | At least 232px beside the document column, on the panel surface, with 20px padding                                                                            |
 | Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                                                                                |
 | Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context                                                               |
 
@@ -282,11 +292,11 @@ The sidebar sits on the canvas surface, top to bottom:
 - **Title bar:** on Windows the app draws its own 32px title bar on the canvas in place of the native one. It is the window's drag handle, and double-clicking it maximizes; Minimize, Maximize or Restore, and Close sit at its end, and Close turns the system red on hover. The window keeps its native resize edges and shadow. macOS keeps its transparent native bar.
 - **Collapse:** a button beside New ticket collapses the sidebar to a 52px rail of icons. Like a navigation rail, it holds a few fixed destinations and never scrolls. Inbox, the three ticket views, Documents and Workspace graph keep their icons. Projects and Plans each fold into one icon that opens a menu of the group's entries and its manage action. Each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner. The window's minimum size, 480 by 600, keeps the rail whole.
 
-Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
+Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses the `--accent` fill and primary text, plus semantic current-state markup. Inactive rows use secondary text; hover promotes the text and uses the quieter `--recessed` fill, so a hovered row never looks current. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
 ### Approved deviations from the base design
 
-- Status group headers use the recessed surface with hairlines above and below in both themes; the canvas surface read as a hole inside the elevated dark panel.
+- Status group headers use the recessed surface with hairlines above and below in both themes; the canvas surface read as a hole inside the elevated dark panel. The same holds for every band inside an elevated surface: group headers, dialog footers, card header bands, code, notices, filter footers and sticky bars use `--recessed` with a hairline (or `--surface`), and the canvas appears only outside the content panel.
 - Tag pills use the shadow-boundary ring (`0 0 0 1px #FFFFFF24` in dark) so they keep their shape on dark surfaces; pane edges and inputs use the same boundary, and links use `--link-foreground` (`#52AEFF` in dark).
 - Sidebar section labels are 12px secondary labels in both themes.
 - Single-status views (a list narrowed to one status, such as Ready or an applied status filter) render no group header (the list title already names the status) and show a one-line view description under the title, rather than the full workflow-ordered set of groups.
@@ -305,7 +315,8 @@ Use stable columns: selection, status, reference, title, then the source pill of
 - Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
-- Row hover uses a quieter fill than selection. Hover actions also appear on focus; essential actions cannot be hover-only.
+- Row hover uses `--hover` (`#F7F7F7` light, `#1F1F1F` dark), quieter than the `--accent` selection and distinct from the recessed group header. Hover actions also appear on focus; essential actions cannot be hover-only.
+- Interaction states follow one matrix. Selectable rows and cards (tickets, Inbox entries, Documents, Plans, Chats, graph lists) hover on `--hover`, and the open or selected one uses `--accent` with `aria-current` or `aria-selected`. Controls (ghost and outline buttons, rail rows, menu items) hover on `--accent`. Pressed toggles and open triggers keep the `--accent` fill with primary text (`aria-pressed`, `[data-state=open]`); the inverted primary fill is reserved for one primary action per surface. A segmented control's chosen segment is `--surface` with the small elevation in light and `--accent` in dark, where the surface is darker than the track. Nav rows on the canvas hover on `--recessed`. Disabled controls use `--disabled-foreground` with no opacity; filled ones keep `--recessed`.
 
 There is no permanent “0 selected” bar. When tickets are selected, show a compact action bar with the count, Change status, Organize, and Clear selection. Organize exposes project, Plan, and explicit tag addition/removal choices. Do not display four inline forms and their submit buttons at once. Keep the count visible after validation errors; show which ticket prevents the batch and state that nothing changed.
 
@@ -328,7 +339,7 @@ For In progress and In review tickets, a Latest update section follows Status in
 
 While Chat is on, a **Chats** section follows Status and Latest update in the rail: one ghost line, "3 Chats · ● Approval needed ›", naming the count and the top-ranked status of the ticket's Chats (only the count when none is live). It opens a menu of those Chats (title, then their status line) ending in Chat about this ticket; under the line, the same action is a ghost button with a plus. With no Chats only the action shows; Chats in Trash never show, and a ticket in Trash keeps the line but not the action. In the chip bar the line is a chip, in rail order. Chat about this ticket is also in the ticket actions menu, after Copy context command.
 
-The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Plan, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel. When the detail pane is too narrow for the rail beside the document column, the rail folds into a wrapping chip bar under the title, in rail order; each chip shows its value and opens the same editor, and Relationships follow the description as a section.
+The **property rail** sits beside the document column on the panel surface (`--surface`), split from it by a 1px rule, in this order: Status, Source, Project, Plan, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel. When the detail pane is too narrow for the rail beside the document column, the rail folds into a wrapping chip bar under the title, in rail order; each chip shows its value and opens the same editor, and Relationships follow the description as a section.
 
 In split view, description text is 14px. In the full-width (expanded) view, the document column is centered at no more than 800px, the property rail stays beside it, and description text is 16px.
 
@@ -380,7 +391,7 @@ Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with
 - Tables stay within a labeled horizontal scroll region. Preserve cell readability instead of shrinking the whole table.
 - Mermaid diagrams fit the reading column and provide source and expand actions. Rendering errors stay beside the diagram; source remains editable and savable.
 - An update is a content entry, not a chat bubble. Show timestamp and supplied editing-agent attribution without inventing human identity.
-- An external source’s description is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The header’s source name and Read-only mark are the provenance signal.
+- An external source’s description is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the recessed surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The header’s source name and Read-only mark are the provenance signal.
 - The source conversation is one connected timeline, like Activity. A comment is a comment row with no card: a 28px badge on the line, a caption header naming the author, “commented on GitHub”, the time, Read-only, and a View link, then the comment body. Its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, are compact rows: a 28px circular icon, the actor, the event, and the time.
 - Activity is one timeline under its composer, joined by a single 2px line as on a GitHub issue. Updates are comment rows on the line, with no card, whose header names the supplied agent and the time. Recorded changes are compact event rows, visually quieter than updates, with their 28px icon on the line; changes made together share one row. All | Updates hides the event rows.
 - The empty update composer begins as a one-line “Write an update…” affordance. Once opened, keep the draft available until submission or explicit discard, with “Add details” and “Attach Document” in one row and “Draft kept on this device” beside Post; blur is not submission. Whitespace-only text cannot be posted. Details are the Document that explains an update; attaching a Document uses a title-search picker, never a raw ID.
@@ -534,15 +545,15 @@ Compose a control before inventing another. Inputs, buttons, menus, fields, noti
 | -------------- | --------------------------------------------------------------------------------------------- |
 | Rest           | Clear label, semantic surface and foreground, stable dimensions                               |
 | Hover          | Subtle neutral fill or border change; no translation or scaling                               |
-| Keyboard focus | Visible ring independent of hover and selection                                               |
-| Pressed/open   | Persistent selected treatment and semantic expanded/pressed state                             |
-| Disabled       | Native disabled semantics, no activation, readable label; explain a non-obvious restriction   |
+| Keyboard focus | Visible outline ring independent of hover and selection (section 4)                           |
+| Pressed/open   | `--accent` fill and semantic expanded/pressed state; never the primary fill                   |
+| Disabled       | Native disabled semantics, no activation, readable label without opacity; explain why         |
 | Pending        | Preserve width, show progress text/icon, block duplicate submission, retain the draft         |
 | Invalid        | Field-level message and invalid semantics; never only a red outline                           |
 | Failure        | Actionable local error with retry where possible; distinguish failed saves from saved content |
 | Success        | Updated value and concise confirmation; avoid repeated success toasts for autosave            |
 
-Primary buttons use the inverted neutral pair. Secondary actions use outline or quiet neutral fill. Tertiary actions use ghost styling with a visible focus state. Inline ticket references are links with consistent hover/focus behavior; they should not resemble a row of submit buttons embedded in prose.
+Primary buttons use the inverted neutral pair. Destructive buttons sit on `--error-surface` with the `--destructive` label, and hover adds a 1px `--destructive` ring; a destructive confirm places Cancel before it. Secondary actions use outline or quiet neutral fill. Tertiary actions use ghost styling with a visible focus state. Inline ticket references are links with consistent hover/focus behavior; they should not resemble a row of submit buttons embedded in prose.
 
 Fields have persistent labels; placeholders are examples, not labels. Forms use aligned full-width inputs, shared field spacing, and a trailing action row. Put the destructive action away from ordinary submit controls. Do not place an unstyled native select beside a themed button and consider the form finished.
 

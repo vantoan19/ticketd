@@ -126,8 +126,8 @@
 }
 .source-link:focus-visible {
   border-radius: var(--radius-segment);
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .source-description .description-document {
   margin-top: 0;
@@ -172,8 +172,8 @@
   border-radius: var(--radius);
 }
 .source-title-trigger:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .source-readonly-explanation {
   display: grid;

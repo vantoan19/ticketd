@@ -93,7 +93,7 @@ export function ChoiceTile({
           : icon
             ? "px-4 py-3.5 gap-3.5"
             : "px-4 py-3.5",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ring)",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring)",
         "disabled:cursor-not-allowed disabled:bg-(--recessed) disabled:text-(--disabled-foreground)",
         className,
       )}

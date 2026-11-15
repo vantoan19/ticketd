@@ -348,7 +348,7 @@ function ToggleChip({
 }) {
   return (
     <Button
-      variant={pressed ? "default" : "outline"}
+      variant="outline"
       size="sm"
       aria-pressed={pressed}
       onClick={onToggle}

@@ -464,6 +464,7 @@ export function ContextGraph({
                     <KindIcon kind={node.kind} />
                     <button
                       type="button"
+                      aria-current={selected === node.id ? "true" : undefined}
                       {...keepScroll(() => setSelected(node.id))}
                     >
                       {nodeName(node)}

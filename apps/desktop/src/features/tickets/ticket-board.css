@@ -79,14 +79,14 @@
   box-shadow: var(--shadow-border-base);
 }
 .ui-button.board-card:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .ui-button.board-card[aria-pressed="true"] {
   background: var(--accent);
 }
 .ui-button.board-card:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .board-card-top {
   display: flex;

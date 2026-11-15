@@ -17,7 +17,7 @@
   border-radius: 0;
 }
 .ticket-rows li:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .ticket-rows li:has(.ticket-row[aria-pressed="true"]) {
   background: var(--accent);
@@ -105,10 +105,10 @@
 .ticket-row-tags [data-slot="badge"] {
   margin-block: -1px;
 }
+/* The focused row's ring is drawn on its full-width band (the li below). */
 .ticket-list .ticket-row:focus-visible {
   position: relative;
   outline: none;
-  box-shadow: var(--focus-ring);
 }
 .ticket-rows input[type="checkbox"] {
   flex: none;
@@ -146,8 +146,8 @@
   gap: 4px;
   width: 100%;
   padding: 0;
-  color: var(--popover-foreground);
-  background: var(--popover);
+  color: var(--foreground);
+  background: var(--surface);
   box-shadow: 0 -1px 0 0 var(--border);
 }
 .bulk-controls {
@@ -419,10 +419,8 @@
   line-height: 16px;
 }
 .ticket-rows li:has(.ticket-row:focus-visible) {
-  box-shadow: var(--focus-ring);
-}
-.ticket-list .ticket-row:focus-visible {
-  box-shadow: none;
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .ticket-row-contextual {
@@ -497,8 +495,7 @@
   font-size: var(--text-caption);
 }
 
-/* Two classes: the generic `.ticket-list > p` padding must not win, or the note
-   starts 4px right of the header title. */
+/* The note starts at the header title's x. */
 .ticket-list > .list-description {
   margin: 0;
   padding: 24px 20px;

@@ -31,9 +31,13 @@
   padding: 0 8px;
 }
 .settings-back:hover,
-.settings-nav li button:hover,
 .settings-nav li button[aria-current="page"] {
   background: var(--accent);
+  color: var(--foreground);
+}
+/* Nav rows on the canvas hover on --recessed, quieter than the current page. */
+.settings-nav li button:hover:not([aria-current="page"]) {
+  background: var(--recessed);
   color: var(--foreground);
 }
 .settings-search-entry {
@@ -54,8 +58,8 @@
 .settings-back:focus-visible,
 .settings-search-entry:focus-visible,
 .settings-nav li button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .settings-nav svg {
   flex: none;
@@ -155,11 +159,11 @@
   background: var(--accent);
 }
 .upload-destination-choice:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .upload-destination-choice:disabled {
-  opacity: 0.6;
+  color: var(--disabled-foreground);
 }
 .upload-destination-choice small {
   display: block;

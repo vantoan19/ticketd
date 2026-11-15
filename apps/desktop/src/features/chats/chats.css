@@ -76,14 +76,14 @@
   text-align: left;
 }
 .chat-row:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .chat-row[aria-current="true"] {
   background: var(--accent);
 }
 .chat-row:focus-visible {
-  outline: none;
-  box-shadow: inset var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .chat-row-mark {
   display: inline-flex;
@@ -378,12 +378,14 @@
   transition: height 150ms ease-out;
 }
 /* While it glides the slot is clipped from the top: the bottom of the card,
-   where its buttons are, shows from the first frame (LIVE2-3). */
+   where its buttons are, shows from the first frame (LIVE2-3). The clip
+   leaves 1px at the sides and bottom, so the card's ring is never cut
+   (chat CH-25). */
 .chat-dock-slot[data-gliding] {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  overflow: hidden;
+  clip-path: inset(0 -1px -1px);
 }
 .chat-dock-slot[data-gliding] > .chat-dock-slot-content {
   flex: none;
@@ -459,8 +461,8 @@
   font-size: var(--text-ui);
 }
 .chat-tile:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-tile .attachment-thumbnail {
   border-radius: var(--radius);
@@ -549,8 +551,8 @@ button.chat-steps:hover {
 }
 .chat-steps:focus-visible,
 .chat-fold:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-row-icon {
   display: inline-flex;
@@ -680,7 +682,7 @@ button.chat-steps:hover {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius);
-  background: var(--code-block, var(--recessed));
+  background: var(--recessed);
   box-shadow: var(--shadow-border-base);
 }
 .chat-output-view {
@@ -689,8 +691,8 @@ button.chat-steps:hover {
   overflow: auto;
 }
 .chat-output-view:focus-visible {
-  outline: none;
-  box-shadow: inset var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .chat-output pre {
   margin: 0;
@@ -779,8 +781,8 @@ button.chat-file-name:hover {
 }
 button.chat-file-name:focus-visible,
 .chat-record-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-step-alert {
   margin: 0 0 4px 24px;
@@ -962,12 +964,6 @@ button.chat-file-name:focus-visible,
 .chat-pick-note {
   padding: 6px 8px;
 }
-/* The Permissions menu wears the picker's popover surface: its edge and shadow
-   set it apart from the New Chat heading it overlaps (LIVE2-5). */
-[data-slot="dropdown-menu-content"]:has(> .chat-pick-note) {
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-large);
-}
 /* The one picker for harness, model and effort (#368): harness tabs, then the
    chosen harness's models, then its efforts in one row. */
 .chat-controls > [data-control="model"] > .harness-mark {
@@ -1015,8 +1011,8 @@ button.chat-file-name:focus-visible,
   color: var(--foreground);
 }
 .chat-picker-harness:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-picker-harness[aria-selected="true"] {
   background: var(--surface);
@@ -1096,8 +1092,8 @@ button.chat-file-name:focus-visible,
   background: var(--accent);
 }
 .chat-picker-model:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .chat-picker-model:disabled {
   color: var(--disabled-foreground);
@@ -1294,8 +1290,8 @@ button.chat-file-name:focus-visible,
   border-color: var(--foreground);
 }
 .chat-option:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-request-command {
   white-space: pre-wrap;
@@ -1556,8 +1552,8 @@ button.chat-file-name:focus-visible,
   color: var(--foreground);
 }
 .chat-chip button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-chip svg {
   flex: none;
@@ -1973,8 +1969,8 @@ button.chat-file-name:focus-visible,
   color: var(--muted-foreground);
 }
 .chat-suggestion:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-suggestion-words {
   flex: 1;

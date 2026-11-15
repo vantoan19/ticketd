@@ -41,18 +41,20 @@ export function ConfirmLeaveDuplicate({
             This removes the duplicate link to {canonical}. Continue?
           </DialogDescription>
         </DialogHeader>
-        <div className="settings-actions">
+        {/* Cancel first, so it takes focus; the destructive action last. */}
+        <div className="settings-actions justify-end">
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            Keep duplicate
+          </Button>
           <Button
             type="button"
+            variant="destructive"
             size="sm"
             onClick={() => {
               if (status) onConfirm(status);
             }}
           >
             Change status
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-            Keep duplicate
           </Button>
         </div>
       </DialogContent>

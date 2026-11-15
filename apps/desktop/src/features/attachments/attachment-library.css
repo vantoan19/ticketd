@@ -106,8 +106,8 @@
   text-decoration: underline;
 }
 .attachment-usage-link:focus-visible {
-  box-shadow: var(--focus-ring);
-  outline: none;
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .attachment-library footer {
   justify-content: flex-end;

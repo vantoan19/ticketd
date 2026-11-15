@@ -687,7 +687,11 @@ export function WorkspaceGraph({
           {graph?.nodes.map((node) => (
             <li key={node.id}>
               <KindIcon kind={node.kind} />
-              <button type="button" {...keepScroll(() => setSelected(node.id))}>
+              <button
+                type="button"
+                aria-current={selected === node.id ? "true" : undefined}
+                {...keepScroll(() => setSelected(node.id))}
+              >
                 {node.label}
                 {node.trashed ? " (Trash)" : ""}
               </button>

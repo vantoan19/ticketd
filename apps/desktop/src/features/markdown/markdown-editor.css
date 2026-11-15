@@ -18,7 +18,7 @@
   gap: 2px;
   min-height: 40px;
   padding: 4px;
-  background: var(--background);
+  background: var(--recessed);
 }
 /* The formatting tools wrap among themselves only when alone on a row; the copy/export/source
    actions are the row's last item, so when both cannot fit it is the actions that drop to a second
@@ -139,7 +139,7 @@
   position: absolute;
   inset: 0 auto auto 0;
   max-width: 100%;
-  color: var(--muted-foreground);
+  color: var(--disabled-foreground);
   pointer-events: none;
   user-select: none;
 }

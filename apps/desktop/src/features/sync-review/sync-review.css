@@ -140,13 +140,15 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.sync-version:hover,
+.sync-version:hover {
+  background: var(--hover);
+}
 .sync-version[aria-current="true"] {
   background: var(--accent);
 }
 .sync-version:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .sync-version small {
   font-size: var(--text-caption);

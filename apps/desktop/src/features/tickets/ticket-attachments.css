@@ -51,8 +51,8 @@
   background: var(--accent);
 }
 .attachment-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .attachment-row > svg {
   width: 16px;
@@ -149,8 +149,13 @@
   accent-color: var(--primary);
   flex: none;
 }
-.attachment-existing-results label:focus-within {
-  box-shadow: var(--focus-ring);
+/* The row rings, not the checkbox inside it. */
+.attachment-existing-results label:has(input:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-existing-results input:focus-visible {
+  outline: none;
 }
 .attachment-thumbnail {
   display: grid;
