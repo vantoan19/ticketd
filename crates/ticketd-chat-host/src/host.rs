@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_core::{ChatItem, ChatMessage, ChatSnapshot, Error, Workspace};
+use ticketd_core::{ChatItem, ChatMessage, ChatObservation, ChatSnapshot, Error, Workspace};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
@@ -848,9 +848,14 @@ impl ChatHost {
         // While a Chat is unattended, whatever is still queued in it is the agent's first
         // message, which the agent never took: the person did not write it, and it must
         // not wait to be sent for them (a reply starts the queue). What the agent did
-        // take is history, not queue, and stays.
-        self.discard_queued_first_message(chat_id);
-        self.set_aside_unconfirmed_first_message(chat_id);
+        // take is history, not queue, and stays. Neither is withdrawn: the run's
+        // instructions stay in the Chat as set aside (#406), and with no turn to carry
+        // the reason, a note says why the agent stopped.
+        let queued = self.set_aside_queued_first_message(chat_id);
+        let unconfirmed = self.set_aside_unconfirmed_first_message(chat_id);
+        if queued || unconfirmed {
+            self.note_stopped(chat_id, why);
+        }
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner
             .board
@@ -859,35 +864,57 @@ impl ChatHost {
         true
     }
 
-    /// Withdraws the Chat's queued input. Best effort: when the Workspace cannot be
-    /// read the run's own failure handling reports the problem.
-    fn discard_queued_first_message(&self, chat_id: &str) {
+    /// Sets the Chat's queued input aside, never to be sent. Best effort: when the
+    /// Workspace cannot be read the run's own failure handling reports the problem.
+    /// Returns whether it set anything aside.
+    fn set_aside_queued_first_message(&self, chat_id: &str) -> bool {
+        let Ok(mut workspace) = self.workspace() else {
+            return false;
+        };
+        let mut any = false;
+        for message in workspace.chat_queue(chat_id).unwrap_or_default() {
+            any |= workspace
+                .set_aside_queued_chat_input(chat_id, &message.id)
+                .is_ok();
+        }
+        any
+    }
+
+    /// Says in the Chat why its agent stopped, when it stopped before any turn could.
+    fn note_stopped(&self, chat_id: &str, why: TicketdStop) {
         let Ok(mut workspace) = self.workspace() else {
             return;
         };
-        for message in workspace.chat_queue(chat_id).unwrap_or_default() {
-            let _ = workspace.withdraw_chat_input(chat_id, &message.id);
-        }
+        let notice = ChatObservation::Notice {
+            notice_id: uuid::Uuid::new_v4().to_string(),
+            text: format!("{}.", why.words()),
+            from_harness: false,
+        };
+        let _ = workspace.record_chat_observations(chat_id, vec![notice]);
     }
 
     /// The same message when it was already handed to the harness but never confirmed
     /// (#387 5A2): closing the harness recorded its delivery as uncertain, which would
     /// ask the person whether to send the agent's instructions as their own. The run
     /// stays in history as it is; the person is not asked, and it is never sent again.
-    fn set_aside_unconfirmed_first_message(&self, chat_id: &str) {
+    fn set_aside_unconfirmed_first_message(&self, chat_id: &str) -> bool {
         let Ok(mut workspace) = self.workspace() else {
-            return;
+            return false;
         };
         let Ok(snapshot) = workspace.chat_snapshot(chat_id, UNCONFIRMED_SCAN) else {
-            return;
+            return false;
         };
+        let mut any = false;
         for item in snapshot.items {
             if let ChatItem::Message(message) = item
                 && message.awaits_decision()
             {
-                let _ = workspace.discard_uncertain_chat_submission(chat_id, &message.id);
+                any |= workspace
+                    .discard_uncertain_chat_submission(chat_id, &message.id)
+                    .is_ok();
             }
         }
+        any
     }
 
     /// Takes the Chat's supervisor out of the host, for the caller to shut down.

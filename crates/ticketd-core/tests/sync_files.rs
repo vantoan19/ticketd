@@ -71,7 +71,7 @@ fn a_ticket_exports_as_one_markdown_file_with_a_yaml_header() {
     assert_eq!(
         record.to_markdown(),
         format!(
-            "---\nkind: ticket\nformat: 2\nid: \"{}\"\nref: \"T-KQ1\"\ntitle: \"Fix \\\"login\\\"\"\nstatus: \"In progress\"\ntags:\n  - \"backend\"\n  - \"urgent\"\ntrashed: false\nfollowing: false\n---\nUsers are logged out.\n\n- after 5 minutes\n",
+            "---\nkind: ticket\nformat: 1\nid: \"{}\"\nref: \"T-KQ1\"\ntitle: \"Fix \\\"login\\\"\"\nstatus: \"In progress\"\ntags:\n  - \"backend\"\n  - \"urgent\"\ntrashed: false\nfollowing: false\n---\nUsers are logged out.\n\n- after 5 minutes\n",
             ticket.id
         )
     );
@@ -424,8 +424,8 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 2", "format: 3"), "newer ticketd"),
-        (good.replace("format: 2", "format: one"), "'format'"),
+        (good.replace("format: 1", "format: 2"), "newer ticketd"),
+        (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
             "'source_",
@@ -501,8 +501,7 @@ fn external_source_provenance_travels_with_the_ticket() {
             .export_sync_record(SyncKind::Ticket, &ticket.id)
             .unwrap()
             .to_markdown(),
-        // A file of an earlier format is read, and written in this version's.
-        text.replace("format: 1", "format: 2")
+        text
     );
     // Another device taking the ticket over arrives as a changed field.
     let taken = SyncRecord::parse(&text.replace(
