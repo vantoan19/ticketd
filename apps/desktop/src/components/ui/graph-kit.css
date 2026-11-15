@@ -429,9 +429,9 @@
 }
 .ui-graph-flow-lane > header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   min-height: 40px;
   padding: 0 8px;
 }
@@ -547,6 +547,12 @@
 }
 .ui-graph-node[data-variant="chip"] .ui-graph-node-meta {
   display: none;
+}
+.ui-graph-node[data-variant="chip"] .ui-graph-node-line {
+  flex: none;
+}
+.ui-graph-node[data-variant="chip"] .ui-graph-node-title {
+  flex: 1;
 }
 .ui-graph-node[data-variant="workspace"]:hover,
 .ui-graph-node[data-variant="chip"]:hover {

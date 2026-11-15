@@ -1,4 +1,5 @@
-/* A Plan: its header spans both panes. One 48px PaneHeader, then a summary; neither changes height with state (DESIGN.md section 10). */
+/* A Plan: its header spans both panes. The responsive PaneHeader and summary
+   reserve their desktop or narrow height across states (DESIGN.md section 10). */
 .plan-header {
   display: flex;
   flex: none;
@@ -177,6 +178,40 @@ button.plan-purpose:focus-visible {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@container plan-workspace (max-width: 640px) {
+  .plan-context {
+    height: 184px;
+  }
+  .plan-summary-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 24px 48px 24px;
+    gap: 8px 14px;
+    height: 112px;
+  }
+  .plan-summary-bar,
+  .plan-summary-loading {
+    width: 100%;
+  }
+  .plan-summary-legend {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-self: start;
+    white-space: normal;
+  }
+  .plan-summary-row > .plan-documents {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-self: start;
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .plan-context-note {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
 }
 
 /* Plans index: management rows (P12), 48px, full-row hover. */
