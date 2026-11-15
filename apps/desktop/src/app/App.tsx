@@ -36,6 +36,7 @@ import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
+import { matchesShortcut } from "@/lib/shortcuts";
 import {
   useWorkspaceChangePoll,
   WorkspaceChangeProvider,
@@ -262,6 +263,30 @@ function AppContent() {
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // C opens New ticket over the current view, unless typing or another
+  // dialog or menu has the keys (P18).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (!matchesShortcut(event, "new-ticket")) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          "input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog], [role=menu], [role=listbox]",
+        )
+      )
+        return;
+      event.preventDefault();
+      const focused = document.activeElement;
+      createTriggerRef.current =
+        focused instanceof HTMLButtonElement ? focused : null;
+      setCreateStatus(undefined);
+      setCreating(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
     projects,
@@ -354,6 +379,10 @@ function AppContent() {
                     openView("settings");
                     setSettingsSection("source-github");
                   },
+                  openSourceSettings: (provider) => {
+                    openView("settings");
+                    setSettingsSection(`source-${provider}`);
+                  },
                   refreshAll: () => refreshSources(),
                 }}
               >
@@ -397,13 +426,6 @@ function AppContent() {
                             openView("chats");
                           }}
                           counts={counts}
-                          activePlanCount={
-                            view === "tickets" &&
-                            navigation.kind !== "trash" &&
-                            navigation.plan
-                              ? (workspace.scopeTotal ?? workspace.total)
-                              : undefined
-                          }
                           view={view}
                           workspaceGraphOpen={graphOrigin === "__workspace__"}
                           setView={openView}
