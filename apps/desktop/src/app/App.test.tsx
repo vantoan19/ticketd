@@ -3145,6 +3145,35 @@ test("workspace Retry protects queued Capture edits before clearing the band", a
   expect(editor).toHaveProperty("value", "Keep the newer draft too");
 });
 
+test("reading another view cannot dismiss a workspace lock while Retry is still pending", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: /^All tickets/ });
+  act(() => reportWorkspaceFailure("workspace_locked", "raw locked"));
+  let reject: ((reason: unknown) => void) | undefined;
+  bridge.invoke.mockImplementation((command: string, args) =>
+    command === "sidebar_counts"
+      ? new Promise((_, fail) => {
+          reject = fail;
+        })
+      : bridgeDefault(command, args),
+  );
+  const message =
+    "Another ticketd operation is using this workspace. Changes can't be saved right now.";
+  const band = screen
+    .getByText(message)
+    .closest("[data-slot=workspace-band]") as HTMLElement;
+  fireEvent.click(within(band).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
+  fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+  await screen.findByRole("heading", { name: "Documents" });
+  expect(screen.getByText(message)).toBeTruthy();
+  await act(async () =>
+    reject?.({ code: "workspace_locked", message: "raw locked" }),
+  );
+  expect(screen.getByText(message)).toBeTruthy();
+});
+
 test("startup permission recovery opens the App without a stale workspace band", async () => {
   let readable = false;
   bridge.invoke.mockImplementation((command: string, args) => {

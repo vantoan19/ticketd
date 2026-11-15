@@ -5,7 +5,6 @@ import {
 } from "@tauri-apps/api/core";
 import { z } from "zod";
 import {
-  noteWorkspaceSuccess,
   reportWorkspaceFailure,
   type WorkspaceState,
 } from "@/lib/workspace-state";
@@ -144,7 +143,6 @@ export async function structured<T>(call: Promise<T>): Promise<T> {
       );
     throw failure;
   }
-  noteWorkspaceSuccess();
   return result;
 }
 

@@ -47,15 +47,6 @@ export function clearWorkspaceFailure(expected: WorkspaceState = state) {
   if (state === expected) publish(null);
 }
 
-/**
- * A command succeeded. A lock is transient (another operation finished), so
- * any success ends it; the other states wait for Retry, because reads still
- * succeed on a read-only or full workspace.
- */
-export function noteWorkspaceSuccess() {
-  if (state?.problem === "workspace_locked") publish(null);
-}
-
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
