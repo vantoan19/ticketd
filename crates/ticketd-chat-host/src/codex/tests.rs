@@ -992,10 +992,9 @@ async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
 /// Codex that says it cannot fails the run before any thread starts.
 #[tokio::test(start_paused = true)]
 async fn an_unattended_run_fails_at_once_when_the_windows_sandbox_is_not_ready() {
-    let problem = open_unattended(fixture!("unattended_sandbox_not_ready"))
-        .await
-        .err()
-        .expect("the run fails");
+    let Err(problem) = open_unattended(fixture!("unattended_sandbox_not_ready")).await else {
+        panic!("the run fails");
+    };
     assert_eq!(
         problem.message,
         "Codex could not start its sandbox on this computer. Update Codex (`codex update`) and try again."

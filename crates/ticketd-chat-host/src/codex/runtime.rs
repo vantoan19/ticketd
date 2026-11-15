@@ -220,10 +220,11 @@ impl Connection {
 
     async fn open_thread(&self, request: &OpenRequest) -> Result<Capabilities, Problem> {
         let platform = self.initialize().await?;
-        if request.unattended.is_some() && platform.as_deref() == Some("windows") {
-            if let Some(problem) = self.windows_sandbox_problem().await {
-                return Err(problem);
-            }
+        if request.unattended.is_some()
+            && platform.as_deref() == Some("windows")
+            && let Some(problem) = self.windows_sandbox_problem().await
+        {
+            return Err(problem);
         }
         // For a person's Chat only the working directory is passed: model, approval
         // policy, sandbox and instructions stay whatever their Codex configuration
