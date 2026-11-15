@@ -2855,10 +2855,18 @@ test.each([
   },
 );
 
-function paletteTickets() {
+function paletteTickets(prefix = "KQ") {
   const tickets = [
-    bulkTicket(1, { title: "Open Ticket" }),
-    bulkTicket(2, { title: "Focused Ticket" }),
+    bulkTicket(1, {
+      title: "Open Ticket",
+      id: prefix === "KQ" ? "1" : `${prefix}1`,
+      reference: `T-${prefix}1`,
+    }),
+    bulkTicket(2, {
+      title: "Focused Ticket",
+      id: prefix === "KQ" ? "2" : `${prefix}2`,
+      reference: `T-${prefix}2`,
+    }),
   ];
   bridge.invoke.mockImplementation(
     (command: string, args?: { reference?: string; id?: string }) => {
@@ -3001,7 +3009,7 @@ test.each([
 );
 
 test("R opens the update composer on the open Ticket", async () => {
-  paletteTickets();
+  paletteTickets("UP");
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
   await screen.findByRole("textbox", { name: "Title" });
@@ -3032,7 +3040,7 @@ test.each([
 );
 
 test("a read-only workspace disables palette mutations and R keeps the composer closed", async () => {
-  paletteTickets();
+  paletteTickets("RO");
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
   await screen.findByRole("textbox", { name: "Title" });

@@ -179,26 +179,6 @@ export const SHORTCUTS = [
     note: "The focused ticket in a list or board, or the open ticket.",
   },
   {
-    id: "palette-drill",
-    keys: [["Tab"], ["→"]],
-    scope: "Dialogs and menus",
-    label: "Open a palette action's options",
-  },
-  {
-    id: "palette-back",
-    keys: [["Backspace"]],
-    scope: "Dialogs and menus",
-    label: "Back to palette actions",
-    note: "From an empty search in a drill-in.",
-  },
-  {
-    id: "palette-pick",
-    keys: [["1–9"]],
-    scope: "Dialogs and menus",
-    label: "Pick a palette option",
-    note: "Inside a property drill-in.",
-  },
-  {
     id: "ticket-edit",
     keys: [["E"]],
     scope: "Ticket",
@@ -274,6 +254,26 @@ export const SHORTCUTS = [
     keys: [["Mod", "Z"]],
     scope: "Chat",
     label: "Take back a suggestion you just chose",
+  },
+  {
+    id: "palette-drill",
+    keys: [["Tab"], ["→"]],
+    scope: "Dialogs and menus",
+    label: "Open a palette action's options",
+  },
+  {
+    id: "palette-back",
+    keys: [["Backspace"]],
+    scope: "Dialogs and menus",
+    label: "Back to palette actions",
+    note: "From an empty search in a drill-in.",
+  },
+  {
+    id: "palette-pick",
+    keys: [["1–9"]],
+    scope: "Dialogs and menus",
+    label: "Pick a palette option",
+    note: "Inside a property drill-in.",
   },
   {
     id: "close",
