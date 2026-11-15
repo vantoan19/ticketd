@@ -840,6 +840,7 @@ export function WorkspaceGraph({
       }}
     >
       <PaneHeader
+        variant="responsive"
         title="Workspace graph"
         count={
           graph && (

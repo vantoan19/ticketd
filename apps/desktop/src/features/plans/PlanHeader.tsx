@@ -49,7 +49,7 @@ import "./plan.css";
 type Mode = "list" | "board" | "dependencies";
 
 /**
- * A Plan's header across both panes (DESIGN.md section 10): one 48px pane
+ * A Plan's header across both panes (DESIGN.md section 10): one responsive pane
  * header (ring, name and count, List/Board/Flow, "Add tickets", "…")
  * and a reserved summary (purpose, split progress and spec). Both keep their
  * height in every state: renaming, editing the
@@ -188,6 +188,7 @@ export function PlanHeader({
   return (
     <div className="plan-header" ref={header}>
       <PaneHeader
+        variant="responsive"
         title={current.name}
         titleId="tickets-heading"
         icon={
