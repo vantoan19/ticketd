@@ -159,7 +159,7 @@ button.plan-purpose:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  margin: 28px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -203,12 +203,10 @@ button.plan-purpose:focus-visible {
   gap: 8px;
 }
 .plan-index-name {
-  overflow: hidden;
   font-size: var(--text-reading);
   line-height: var(--text-doc-line);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .plan-card[data-archived] .plan-index-name {
   color: var(--muted-foreground);

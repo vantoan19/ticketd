@@ -3456,7 +3456,8 @@ test("New Plan is reachable from the palette and its registered page key", async
   const dialog = await screen.findByRole("dialog", { name: "New Plan" });
   fireEvent.keyDown(dialog, { key: "Escape" });
   await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
   fireEvent.keyDown(document.body, { key: "n" });
   expect(await screen.findByRole("dialog", { name: "New Plan" })).toBeTruthy();
 });

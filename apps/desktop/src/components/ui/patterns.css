@@ -606,6 +606,7 @@
 
 /* Centered management pages, with cards under a single header row. */
 .ui-management-page-centered {
+  gap: 28px;
   max-width: 860px;
   margin-inline: auto;
   padding: 44px 40px;
