@@ -545,7 +545,8 @@
   background: var(--card);
   box-shadow: var(--shadow-card);
 }
-.ui-graph-node[data-variant="chip"] .ui-graph-node-meta {
+.ui-graph-node[data-variant="chip"] .ui-graph-node-meta,
+.ui-graph-node[data-variant="chip"] .ui-graph-node-trailing {
   display: none;
 }
 .ui-graph-node[data-variant="chip"] .ui-graph-node-line {
