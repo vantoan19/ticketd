@@ -500,9 +500,12 @@ export function AgentForm({
               <p className="agent-hint">
                 Codex applies its own sandbox: it can read any file you can read
                 on this computer, runs any command, and writes only in the
-                step’s folder and your ticketd data. Your own choices are kept
-                for Claude Code. Codex also reads your own AGENTS.md and skills;
-                ticketd cannot switch that off.
+                step’s folder and your ticketd data. The Read, Edit and Run
+                switches do not apply; your choices are kept for Claude Code.
+                For a run, ticketd switches off your Codex hooks, notify
+                program, project AGENTS.md, memories, sub-agents, computer and
+                browser use, and bundled skills. It cannot switch off your Codex
+                rules, your global AGENTS.md or the skills in ~/.agents/skills.
               </p>
             ) : (
               <p className="agent-hint">
