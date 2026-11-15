@@ -30,15 +30,16 @@ it("the collapsed sidebar keeps the manage menus and the source Retry reachable"
   );
 });
 
-it("the Plan list toolbar shrinks its summary, not its Filter control", () => {
+it("the Plan context line keeps one 32px row; the purpose gives way first", () => {
   const plan = readFileSync(
     join(__dirname, "..", "features/plans/plan.css"),
     "utf8",
   );
-  expect(plan).toMatch(/[.]plan-list-summary [{][^}]*text-overflow: ellipsis;/);
-  expect(plan).toMatch(
-    /[.]plan-list-toolbar > :not[(][^)]*[)] [{]\s*flex: none;/,
-  );
+  const context = /\n[.]plan-context [{]([^}]*)[}]/.exec(plan)?.[1] ?? "";
+  expect(context).toMatch(/height: 32px;/);
+  expect(context).not.toMatch(/flex-wrap: wrap/);
+  expect(plan).toMatch(/[.]plan-purpose-text [{][^}]*text-overflow: ellipsis;/);
+  expect(plan).toMatch(/[.]plan-progress [{][^}]*flex: none;/);
   expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });
 

@@ -4,6 +4,8 @@ import { FailureAlert } from "@/components/ui/failure-alert";
 import { TicketPicker } from "@/features/tickets/TicketPicker";
 import type { Ticket } from "@/lib/api/client";
 import { plansClient, type Plan } from "@/lib/api/plans";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { plural } from "@/lib/format";
 import type { PlanViewState } from "./usePlanView";
 
 /**
@@ -30,6 +32,7 @@ export function AddTicketsDialog({
   // Adding failed while this dialog was open: the cause stays in it.
   const [failed, setFailed] = useState(false);
   const { pending, actionError, run } = state;
+  const statusLine = useStatusLine();
   const nameOf = (id: string) => plans.find((item) => item.id === id)?.name;
   const discard = () => {
     setQuery("");
@@ -55,17 +58,27 @@ export function AddTicketsDialog({
         actionError && <FailureAlert size="compact" failure={actionError} />
       }
       onCancel={discard}
-      onSubmit={() =>
+      onSubmit={() => {
+        const chosen = picked;
         void run(async () => {
-          for (const ticket of picked)
+          for (const ticket of chosen)
             await plansClient.setMember(ticket.reference, plan.id);
         }, `add tickets to ${plan.name}`).then((added) => {
           setFailed(!added);
           if (!added) return;
           discard();
           onOpenChange(false);
-        })
-      }
+          // Undo puts each ticket back where it was, another Plan or none.
+          statusLine.show({
+            message: `Added ${chosen.length === 1 ? chosen[0]?.reference : plural(chosen.length, "ticket")} to ${plan.name}`,
+            undo: () =>
+              state.apply(async () => {
+                for (const ticket of chosen)
+                  await plansClient.setMember(ticket.reference, ticket.plan_id);
+              }),
+          });
+        });
+      }}
     >
       <TicketPicker
         label="Tickets to add"

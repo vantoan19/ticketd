@@ -5,6 +5,10 @@ import {
 } from "@/lib/api/describe-failure";
 import { plansClient, type View } from "@/lib/api/plans";
 import { useWorkspaceChange } from "@/lib/workspace-change";
+import {
+  useStatusLine,
+  type StatusLineMessage,
+} from "@/components/ui/use-status-line";
 
 /**
  * Loads one Plan's counts and members and runs its actions. The view reloads
@@ -60,14 +64,12 @@ export function usePlanView(
   }, [planId, revision, changeVersion, loadAttempt]);
   const current = loaded?.id === planId ? loaded : null;
   /**
-   * Runs a change, refreshes the workspace, and reports whether it worked.
-   * `action` names the change for a failure, such as "archive Docs launch".
+   * Runs a change, then refreshes the workspace and this Plan. A failure
+   * rejects, so the caller reports it where it belongs (`usePlanAction`).
    */
-  const run = useCallback(
-    async (change: () => Promise<unknown>, action = "change this Plan") => {
-      lastChange.current = { change, action };
+  const apply = useCallback(
+    async (change: () => Promise<unknown>) => {
       setPending(true);
-      setActionError(null);
       try {
         await change();
         await refresh();
@@ -76,15 +78,30 @@ export function usePlanView(
           (view) => setLoaded({ id: planId, view, error: null }),
           () => {},
         );
-        return true;
-      } catch (reason) {
-        setActionError(describeFailure(reason, action));
-        return false;
       } finally {
         setPending(false);
       }
     },
     [refresh, planId],
+  );
+  /**
+   * Runs a change and reports whether it worked, keeping a failure as
+   * `actionError` for a dialog to show. `action` names the change for that
+   * failure, such as "add tickets to Docs launch".
+   */
+  const run = useCallback(
+    async (change: () => Promise<unknown>, action = "change this Plan") => {
+      lastChange.current = { change, action };
+      setActionError(null);
+      try {
+        await apply(change);
+        return true;
+      } catch (reason) {
+        setActionError(describeFailure(reason, action));
+        return false;
+      }
+    },
+    [apply],
   );
   /** Repeats the change that failed. */
   const retry = useCallback(() => {
@@ -102,7 +119,45 @@ export function usePlanView(
     adding,
     setAdding,
     run,
+    apply,
   };
 }
 
 export type PlanViewState = ReturnType<typeof usePlanView>;
+
+/**
+ * Runs a Plan change from outside a dialog and reports it on the status line
+ * of the pane it is used in (P6): `outcome` when it worked ("Archived Docs
+ * launch · Undo"), else the failure in plain words with Retry when retrying
+ * can succeed. Resolves to whether the change was made.
+ */
+export function usePlanAction({ apply }: Pick<PlanViewState, "apply">) {
+  const statusLine = useStatusLine();
+  return useCallback(
+    async function act(
+      change: () => Promise<unknown>,
+      action: string,
+      outcome?: StatusLineMessage,
+    ): Promise<boolean> {
+      try {
+        await apply(change);
+        if (outcome) statusLine.show(outcome);
+        return true;
+      } catch (reason) {
+        const failure = describeFailure(reason, action);
+        statusLine.show({
+          tone: "error",
+          message: `${failure.title}. ${failure.sentence}`,
+          ...(failure.action === "retry" && {
+            action: {
+              label: "Retry",
+              run: () => act(change, action, outcome),
+            },
+          }),
+        });
+        return false;
+      }
+    },
+    [apply, statusLine],
+  );
+}

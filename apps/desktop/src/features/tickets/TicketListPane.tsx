@@ -15,12 +15,14 @@ import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
 import { StatusLineRegion } from "@/components/ui/status-line";
-import { useStatusLine } from "@/components/ui/use-status-line";
 import { emptyCopy } from "@/lib/empty-copy";
 import { noun, ofTotal } from "@/lib/format";
-import type { PlanViewState } from "@/features/plans/usePlanView";
+import {
+  usePlanAction,
+  type PlanViewState,
+} from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
-import { planSummary } from "@/features/plans/plan-summary";
+import { allowRemoval } from "@/lib/removal-guard";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
@@ -77,15 +79,10 @@ function TicketListBody({
     offset,
     setOffset,
     plan,
-    setPlan,
     status,
-    setStatus,
     tags,
-    setTags,
     availability,
-    setAvailability,
     family,
-    setFamily,
     source,
     setSource,
     sourceCounts,
@@ -110,7 +107,8 @@ function TicketListBody({
   } = workspace;
   // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
-  const statusLine = useStatusLine();
+  const planAction = usePlanAction(planState);
+  const lastRemoval = useRef(0);
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   // An archived Plan is read-only: no new tickets into it, no removing from it.
@@ -198,27 +196,7 @@ function TicketListBody({
       : navigation.kind === "progress"
         ? "Tickets someone is working on right now."
         : null;
-  const filterProps = {
-    query,
-    setQuery,
-    plan,
-    setPlan,
-    status,
-    setStatus,
-    tags,
-    setTags,
-    availability,
-    setAvailability,
-    family,
-    setFamily,
-    plans,
-    setOffset,
-    navigation,
-    clearFilters,
-    scopeName,
-    total,
-    scopeTotal,
-  };
+  const filterProps = filterPropsOf(workspace);
   return (
     <section
       className="ticket-list"
@@ -226,18 +204,8 @@ function TicketListBody({
       tabIndex={-1}
       aria-labelledby="tickets-heading"
     >
-      {scopedPlan ? (
-        <div className="plan-list-toolbar">
-          {planState.view && (
-            <span className="plan-list-summary">
-              {planSummary(planState.view.members, projects)}
-            </span>
-          )}
-          <span className="plan-list-spacer" />
-          {!bare && <TicketFilters part="controls" {...filterProps} />}
-          {!bare && <DisplayMenu onError={workspace.setError} rowsOnly />}
-        </div>
-      ) : (
+      {/* A Plan's own header, above both panes, holds its controls. */}
+      {!scopedPlan && (
         <PaneHeader
           title={scopeName}
           titleId="tickets-heading"
@@ -524,29 +492,24 @@ function TicketListBody({
                           <IconButton
                             disabled={planState.pending}
                             label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
-                            onClick={() =>
-                              void planState
-                                .run(() =>
-                                  plansClient.setMember(ticket.reference, null),
-                                )
-                                .then((done) => {
-                                  if (!done) return;
-                                  const { reference } = ticket;
-                                  const { id, name } = scopedPlan;
-                                  statusLine.show({
-                                    message: `Removed ${reference} from ${name}`,
-                                    undo: async () => {
-                                      const back = await planState.run(() =>
-                                        plansClient.setMember(reference, id),
-                                      );
-                                      if (!back)
-                                        throw new Error(
-                                          `${reference} is still outside ${name}`,
-                                        );
-                                    },
-                                  });
-                                })
-                            }
+                            onClick={() => {
+                              // A second click lands on the row that moved up:
+                              // ignore clicks for 400ms after a removal (P7).
+                              if (!allowRemoval(lastRemoval)) return;
+                              const { reference } = ticket;
+                              const { id, name } = scopedPlan;
+                              void planAction(
+                                () => plansClient.setMember(reference, null),
+                                `remove ${reference} from ${name}`,
+                                {
+                                  message: `Removed ${reference} from ${name}`,
+                                  undo: () =>
+                                    planState.apply(() =>
+                                      plansClient.setMember(reference, id),
+                                    ),
+                                },
+                              );
+                            }}
                           >
                             <X />
                           </IconButton>
@@ -614,4 +577,46 @@ function TicketListBody({
 /** An empty state's title and sentence from the copy registry. */
 function copyProps(copy: { title: string; sentence: string }) {
   return { title: copy.title, description: copy.sentence };
+}
+
+/** The props the Filters controls and chips share, from the workspace. */
+function filterPropsOf(w: TicketWorkspace) {
+  return {
+    query: w.query,
+    setQuery: w.setQuery,
+    plan: w.plan,
+    setPlan: w.setPlan,
+    status: w.status,
+    setStatus: w.setStatus,
+    tags: w.tags,
+    setTags: w.setTags,
+    availability: w.availability,
+    setAvailability: w.setAvailability,
+    family: w.family,
+    setFamily: w.setFamily,
+    plans: w.plans,
+    setOffset: w.setOffset,
+    navigation: w.navigation,
+    clearFilters: w.clearFilters,
+    scopeName: w.scopeName,
+    total: w.total,
+    scopeTotal: w.scopeTotal,
+  };
+}
+
+/**
+ * Search, Filters and Display for a Plan's list and board. They sit in the
+ * Plan's header, which spans both panes, instead of a second list header.
+ */
+export function PlanListControls({
+  workspace,
+}: {
+  workspace: TicketWorkspace;
+}) {
+  return (
+    <>
+      <TicketFilters part="controls" {...filterPropsOf(workspace)} />
+      <DisplayMenu onError={workspace.setError} rowsOnly />
+    </>
+  );
 }

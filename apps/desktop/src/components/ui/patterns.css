@@ -177,6 +177,21 @@
   flex: none;
   white-space: nowrap;
 }
+/* Input, inline variant: edits text in place in the text's own type. */
+.ui-input.ui-input-inline {
+  padding-block: 0;
+  padding-inline: 6px;
+  font: inherit;
+  letter-spacing: inherit;
+}
+.ui-pane-header-icon {
+  display: inline-flex;
+  color: var(--muted-foreground);
+}
+.ui-pane-header-icon svg {
+  width: 16px;
+  height: 16px;
+}
 .ui-pane-header-actions {
   display: flex;
   flex: none;

@@ -221,12 +221,8 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
       "Blocked by T-KQ2",
     ),
   ).toBeTruthy();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "In review1",
-  );
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Done0",
-  );
+  // Per-status counts live in the columns; the header keeps the progress.
+  expect(screen.getByText("0 of 2 done")).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "My unsaved title",
@@ -262,9 +258,7 @@ test("a delayed previous Plan response cannot replace the current Plan's Board o
   );
   expect(board.getByRole("button", { name: /^T-KQ3\D/ })).toBeTruthy();
   expect(board.queryByRole("button", { name: /^T-KQ1\D/ })).toBeNull();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "In review1",
-  );
+  expect(screen.getByText("0 of 1 done")).toBeTruthy();
 });
 
 test("archiving a Plan on Board preserves ticket editing and restricts Plan membership until reactivation", async () => {
@@ -277,15 +271,17 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
     key: "Enter",
   });
   await settle();
+  // Archiving is reversible, so it acts at once (Undo on the status line).
   fireEvent.click(screen.getByRole("menuitem", { name: /^Archive Plan/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Archive Plan" }));
   await settle();
-  expect(screen.getByText("Archived Plan")).toBeTruthy();
+  expect(
+    screen.getByText("Archived", { selector: '[data-slot="badge"]' }),
+  ).toBeTruthy();
   expect(
     screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
   ).toBe("true");
-  expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Edit purpose" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add to Plan…" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Edit purpose/ })).toBeNull();
   expect(
     screen.queryByRole("button", { name: "Actions for Release specification" }),
   ).toBeNull();
@@ -314,8 +310,10 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   );
   fireEvent.click(screen.getByRole("button", { name: "Reactivate" }));
   await settle();
-  expect(screen.getByText("Active Plan")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
+  expect(
+    screen.queryByText("Archived", { selector: '[data-slot="badge"]' }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Add to Plan…" })).toBeTruthy();
 });
 
 test("Plan ticket details retain their draft and return to the same Board position and card focus after Dependencies", async () => {
@@ -393,11 +391,8 @@ test("Plans remember List and Board independently of Dependencies while preservi
   expect(
     screen.getByRole("button", { name: "Spec: Release specification" }),
   ).toBeTruthy();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Todo1",
-  );
   expect(screen.getByText("1 of 2 done")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add to Plan…" })).toBeTruthy();
   chooseView("Dependencies");
   await settle();
   expect(
@@ -518,12 +513,6 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
       "0 matching tickets",
     ),
   ).toBeTruthy();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Todo55",
-  );
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Done1",
-  );
   expect(screen.getByText("1 of 56 done")).toBeTruthy();
   chooseView("List");
   await settle();

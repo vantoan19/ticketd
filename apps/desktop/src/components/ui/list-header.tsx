@@ -28,12 +28,16 @@ const Collapsed = createContext(false);
  * collapse to icons with tooltips below a 420px pane. A search field marked
  * `data-slot="pane-search"` expands in place over the title. `caption` adds
  * one fixed 28px line under the header ("Todo tickets with nothing left to
- * wait on.").
+ * wait on."). `icon` is a 16px muted mark before the title (a Plan's
+ * Layers); `titleEditor` takes the title's place while it is renamed in
+ * place, at the same height, so nothing around it moves.
  */
 export function PaneHeader({
   title,
   titleId,
   titleLevel = 1,
+  icon,
+  titleEditor,
   count,
   leading,
   children,
@@ -45,6 +49,8 @@ export function PaneHeader({
   /** The heading's id, for `aria-labelledby` and focus after a change. */
   titleId?: string;
   titleLevel?: 1 | 2;
+  icon?: ReactNode;
+  titleEditor?: ReactNode;
   count?: ReactNode;
   leading?: ReactNode;
   children?: ReactNode;
@@ -76,12 +82,19 @@ export function PaneHeader({
       >
         {leading}
         <span className="ui-pane-header-title">
-          {/* The full title while it is cut, below the header. */}
-          <Tooltip content={title} side="bottom" overflowOnly>
-            <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
-              {title}
-            </Heading>
-          </Tooltip>
+          {icon && (
+            <span aria-hidden="true" className="ui-pane-header-icon">
+              {icon}
+            </span>
+          )}
+          {titleEditor ?? (
+            // The full title while it is cut, below the header.
+            <Tooltip content={title} side="bottom" overflowOnly>
+              <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                {title}
+              </Heading>
+            </Tooltip>
+          )}
           {count}
           {children}
         </span>

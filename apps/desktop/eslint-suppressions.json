@@ -67,14 +67,9 @@
       "count": 4
     }
   },
-  "src/features/plans/PlanHeader.tsx": {
-    "shadcn/no-restyle": {
-      "count": 2
-    }
-  },
   "src/features/projects/Projects.tsx": {
     "shadcn/no-restyle": {
-      "count": 3
+      "count": 1
     }
   },
   "src/features/tickets/Activity.tsx": {

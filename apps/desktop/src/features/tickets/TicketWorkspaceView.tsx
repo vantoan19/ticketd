@@ -18,7 +18,10 @@ import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
 import { FilterDockContext } from "@/features/tickets/filter-dock";
-import { TicketListPane } from "@/features/tickets/TicketListPane";
+import {
+  PlanListControls,
+  TicketListPane,
+} from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
@@ -210,6 +213,7 @@ export function TicketWorkspaceView({
             state={planState}
             mode={dependenciesOpen ? "dependencies" : workspace.layout}
             onModeChange={setPlanMode}
+            controls={<PlanListControls workspace={workspace} />}
           />
         )}
         {dependenciesOpen && (
