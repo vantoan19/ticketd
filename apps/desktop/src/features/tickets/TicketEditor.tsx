@@ -655,19 +655,25 @@ export function TicketEditor({
         ) : (
           draft.body && (
             <Tooltip content={blockedReason ?? "Edit description (E)"}>
-              <Button
-                disabled={Boolean(blockedReason)}
-                ref={editButton}
-                variant="ghost"
-                size="sm"
-                type="button"
-                aria-label="Edit description"
-                aria-keyshortcuts="E"
-                onClick={() => setBodyMode("editing")}
+              <span
+                className="description-edit-control"
+                tabIndex={blockedReason ? 0 : undefined}
+                aria-disabled={blockedReason ? true : undefined}
               >
-                Edit
-                <Kbd aria-hidden="true">E</Kbd>
-              </Button>
+                <Button
+                  disabled={Boolean(blockedReason)}
+                  ref={editButton}
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  aria-label="Edit description"
+                  aria-keyshortcuts="E"
+                  onClick={() => setBodyMode("editing")}
+                >
+                  Edit
+                  <Kbd aria-hidden="true">E</Kbd>
+                </Button>
+              </span>
             </Tooltip>
           )
         )}
@@ -716,6 +722,7 @@ export function TicketEditor({
           <div hidden={!editingBody}>
             <LazyMarkdownEditor
               value={draft.body}
+              readOnly={Boolean(blockedReason)}
               recoveryOwner={recoveryOwner}
               attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
@@ -761,16 +768,22 @@ export function TicketEditor({
           ) : (
             // One quiet line that becomes the editor in place (detA DS-06).
             <Tooltip content={blockedReason ?? "Edit description (E)"}>
-              <button
-                disabled={Boolean(blockedReason)}
-                type="button"
-                ref={editButton}
-                className="description-add"
-                aria-keyshortcuts="E"
-                onClick={() => setBodyMode("editing")}
+              <span
+                className="description-edit-control"
+                tabIndex={blockedReason ? 0 : undefined}
+                aria-disabled={blockedReason ? true : undefined}
               >
-                Add a description…
-              </button>
+                <button
+                  disabled={Boolean(blockedReason)}
+                  type="button"
+                  ref={editButton}
+                  className="description-add"
+                  aria-keyshortcuts="E"
+                  onClick={() => setBodyMode("editing")}
+                >
+                  Add a description…
+                </button>
+              </span>
             </Tooltip>
           ))}
       </div>

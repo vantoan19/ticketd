@@ -217,8 +217,8 @@ export function CommandPalette({
             {...(scope && {
               value:
                 highlight ??
-                (actions.options.find((option) => option.selected)?.value ||
-                  actions.options[0]?.value ||
+                ((actions.options.find((option) => option.selected)?.value ??
+                  actions.options[0]?.value) ||
                   "none"),
             })}
             onValueChange={setHighlight}
