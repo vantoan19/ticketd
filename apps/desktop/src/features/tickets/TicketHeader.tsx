@@ -1,3 +1,6 @@
+import { formatDateTime, relativeDateTime } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -9,7 +12,11 @@ import {
   X,
 } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
-import { ReturnCrumb, ShellLeading } from "@/components/ui/list-header";
+import {
+  PaneHeader,
+  ReturnCrumb,
+  ShellLeading,
+} from "@/components/ui/list-header";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useCopy } from "@/components/ui/use-copy";
@@ -82,6 +89,7 @@ export function TicketHeader({
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
+  const now = useNow();
   const chatAbout = useChatAboutTicket(
     ticket,
     projects.find((project) => project.id === ticket?.project_id)?.path ?? null,
@@ -153,204 +161,240 @@ export function TicketHeader({
   }
   const owner = ticket ? externalSource(ticket) : null;
   return (
-    <div className="detail-header" data-empty={!selected || undefined}>
-      <div className="detail-title-group">
-        {/* The narrow window's navigation, when the detail replaces the list. */}
-        {selected && <ShellLeading navOnly />}
-        {selected && expanded && (
-          // The list it came from, by name (P14), not a hard-coded "All tickets".
-          <ReturnCrumb
-            origin={returnLabel}
-            label="Return to ticket list"
-            onReturn={onReturn}
-          />
-        )}
-        {selected && !expanded && (
-          <span className="return-to-list">
-            <IconButton label="Return to ticket list" onClick={onReturn}>
-              <ArrowLeft size={16} />
-            </IconButton>
-          </span>
-        )}
-        <h2
-          id="detail-heading"
-          tabIndex={-1}
-          className={selected ? "detail-reference" : "sr-only"}
-        >
-          {selected ?? "Ticket details"}
-        </h2>
-        {selected && <CopyButton label="Copy reference" text={selected} />}
-        {owner && (
-          <SourceLink url={owner.url} className="header-source-link">
-            <span className="sr-only">Open on {owner.provider_name}: </span>
-            <span className="header-source-place">
-              {owner.place.replace("/", " / ")}
-            </span>{" "}
-            <span className="source-number">{owner.number}</span>
-          </SourceLink>
-        )}
-      </div>
-      {ticket && (
-        <div className="ticket-personal-actions">
-          {onAdjacent && (
-            <div
-              ref={listPosition}
-              className="list-position"
-              role="group"
-              aria-label="Position in the list"
-            >
-              {/* The slot is kept when the ticket has no place in the list, so
-                  the icons never move between tickets. */}
-              <span className="list-position-text">
-                {position ? `${position.index} of ${position.total}` : "–"}
+    <>
+      <PaneHeader
+        title={selected ?? "Ticket details"}
+        hideTitle
+        variant="ticket"
+        leading={
+          <div className="detail-title-group">
+            {selected && <ShellLeading navOnly />}
+
+            {selected && expanded && (
+              // The list it came from, by name (P14), not a hard-coded "All tickets".
+              <ReturnCrumb
+                origin={returnLabel}
+                label="Return to ticket list"
+                onReturn={onReturn}
+              />
+            )}
+            {selected && !expanded && (
+              <span className="return-to-list">
+                <IconButton label="Return to ticket list" onClick={onReturn}>
+                  <ArrowLeft size={16} />
+                </IconButton>
               </span>
-              <IconButton
-                label="Previous ticket"
-                disabled={!position || position.index <= 1}
-                onClick={() => {
-                  adjacentFocus.current = {
-                    label: "Previous ticket",
-                    from: selected,
-                  };
-                  onAdjacent(-1);
-                }}
-              >
-                <ChevronUp />
-              </IconButton>
-              <IconButton
-                label="Next ticket"
-                disabled={!position || position.index >= position.total}
-                onClick={() => {
-                  adjacentFocus.current = {
-                    label: "Next ticket",
-                    from: selected,
-                  };
-                  onAdjacent(1);
-                }}
-              >
-                <ChevronDown />
-              </IconButton>
-            </div>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                ref={actionsTrigger}
-                label="Ticket actions"
-                disabled={trash.pending}
-              >
-                <MoreHorizontal />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuItem
-                  onSelect={() =>
-                    void copyFromMenu("Reference", ticket.reference)
-                  }
-                >
-                  Copy reference
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() =>
-                    void copyFromMenu(
-                      "Context command",
-                      contextCommand(ticket.reference),
-                    )
-                  }
-                >
-                  Copy context command
-                </DropdownMenuItem>
-                {chatAbout && (
-                  <DropdownMenuItem onSelect={chatAbout}>
-                    Chat about this ticket
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  disabled={exporter.busy}
-                  onSelect={() => void exporter.run()}
-                >
-                  Export Markdown with files…
-                </DropdownMenuItem>
-                {/* Only once a source that publishes is set up: without one
-                    there is nothing to publish to, so nothing is offered. */}
-                {!ticket.source && target && (
-                  <DropdownMenuItem
-                    disabled={
-                      !preview ||
-                      (preview.eligibility.kind !== "eligible" &&
-                        preview.eligibility.reason !== "internal_attachments")
-                    }
-                    onSelect={() => setPublishing(true)}
-                    {...(preview &&
-                      preview.eligibility.kind !== "eligible" &&
-                      preview.eligibility.reason !== "internal_attachments" && {
-                        reason: publicationReason(preview),
-                      })}
+            )}
+            <h1
+              id="detail-heading"
+              tabIndex={-1}
+              className={selected ? "detail-reference" : "sr-only"}
+            >
+              {selected ?? "Ticket details"}
+            </h1>
+            {selected && <CopyButton label="Copy reference" text={selected} />}
+            {ticket?.updated_at && (
+              <span className="ticket-header-updated">
+                <span aria-hidden="true">·</span>
+                <Tooltip content={formatDateTime(ticket.updated_at)}>
+                  <time dateTime={ticket.updated_at}>
+                    Updated {relativeDateTime(ticket.updated_at, now)}
+                  </time>
+                </Tooltip>
+              </span>
+            )}
+            {owner && (
+              <SourceLink url={owner.url} className="header-source-link">
+                <span className="sr-only">Open on {owner.provider_name}: </span>
+                <span className="header-source-place">
+                  {owner.place.replace("/", " / ")}
+                </span>{" "}
+                <span className="source-number">{owner.number}</span>
+              </SourceLink>
+            )}
+          </div>
+        }
+        actions={
+          <>
+            {ticket && (
+              <div className="ticket-personal-actions">
+                {onAdjacent && (
+                  <div
+                    ref={listPosition}
+                    className="list-position"
+                    role="group"
+                    aria-label="Position in the list"
                   >
-                    Publish to {preview?.provider_name ?? "GitHub"}…
-                  </DropdownMenuItem>
+                    {/* The slot is kept when the ticket has no place in the list, so
+                  the icons never move between tickets. */}
+                    <span className="list-position-text">
+                      {position
+                        ? `${position.index} of ${position.total}`
+                        : "–"}
+                    </span>
+                    <IconButton
+                      label="Previous ticket"
+                      shortcut="K"
+                      aria-keyshortcuts="K"
+                      disabled={!position || position.index <= 1}
+                      onClick={() => {
+                        adjacentFocus.current = {
+                          label: "Previous ticket",
+                          from: selected,
+                        };
+                        onAdjacent(-1);
+                      }}
+                    >
+                      <ChevronUp />
+                    </IconButton>
+                    <IconButton
+                      label="Next ticket"
+                      shortcut="J"
+                      aria-keyshortcuts="J"
+                      disabled={!position || position.index >= position.total}
+                      onClick={() => {
+                        adjacentFocus.current = {
+                          label: "Next ticket",
+                          from: selected,
+                        };
+                        onAdjacent(1);
+                      }}
+                    >
+                      <ChevronDown />
+                    </IconButton>
+                  </div>
                 )}
-                {!ticket.trashed && (
-                  <>
-                    <DropdownMenuItem onSelect={() => setDuplicateOpen(true)}>
-                      Mark as duplicate…
-                    </DropdownMenuItem>
-                    {onOpenGraph && (
-                      <DropdownMenuItem onSelect={onOpenGraph}>
-                        Open graph
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton
+                      ref={actionsTrigger}
+                      label="Ticket actions"
+                      disabled={trash.pending}
+                    >
+                      <MoreHorizontal />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          void copyFromMenu("Reference", ticket.reference)
+                        }
+                      >
+                        Copy reference
                       </DropdownMenuItem>
-                    )}
-                  </>
-                )}
-                <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                  History…
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                {ticket.trashed ? (
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      void trash.setTrashed(ticket.reference, false)
-                    }
-                  >
-                    Restore
-                  </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          void copyFromMenu(
+                            "Context command",
+                            contextCommand(ticket.reference),
+                          )
+                        }
+                      >
+                        Copy context command
+                      </DropdownMenuItem>
+                      {chatAbout && (
+                        <DropdownMenuItem onSelect={chatAbout}>
+                          Chat about this ticket
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        disabled={exporter.busy}
+                        onSelect={() => void exporter.run()}
+                      >
+                        Export Markdown with files…
+                      </DropdownMenuItem>
+                      {/* Only once a source that publishes is set up: without one
+                    there is nothing to publish to, so nothing is offered. */}
+                      {!ticket.source && target && (
+                        <DropdownMenuItem
+                          disabled={
+                            !preview ||
+                            (preview.eligibility.kind !== "eligible" &&
+                              preview.eligibility.reason !==
+                                "internal_attachments")
+                          }
+                          onSelect={() => setPublishing(true)}
+                          {...(preview &&
+                            preview.eligibility.kind !== "eligible" &&
+                            preview.eligibility.reason !==
+                              "internal_attachments" && {
+                              reason: publicationReason(preview),
+                            })}
+                        >
+                          Publish to {preview?.provider_name ?? "GitHub"}…
+                        </DropdownMenuItem>
+                      )}
+                      {!ticket.trashed && (
+                        <>
+                          <DropdownMenuItem
+                            onSelect={() => setDuplicateOpen(true)}
+                          >
+                            Mark as duplicate…
+                          </DropdownMenuItem>
+                          {onOpenGraph && (
+                            <DropdownMenuItem onSelect={onOpenGraph}>
+                              Open graph
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
+                      <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                        History…
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      {ticket.trashed ? (
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void trash.setTrashed(ticket.reference, false)
+                          }
+                        >
+                          Restore
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() =>
+                            void trash.setTrashed(ticket.reference, true)
+                          }
+                        >
+                          Move to Trash
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {exporter.ui}
+              </div>
+            )}
+            {selected && (
+              <div className="detail-actions">
+                {expanded ? (
+                  <IconButton label="Show beside the list" onClick={onReturn}>
+                    <Minimize2 />
+                  </IconButton>
                 ) : (
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() =>
-                      void trash.setTrashed(ticket.reference, true)
-                    }
-                  >
-                    Move to Trash
-                  </DropdownMenuItem>
+                  <span className="expand-ticket">
+                    <IconButton label="Expand ticket" onClick={onExpand}>
+                      <Maximize2 />
+                    </IconButton>
+                  </span>
                 )}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {exporter.ui}
-        </div>
-      )}
-      {selected && (
-        <div className="detail-actions">
-          {expanded ? (
-            <IconButton label="Show beside the list" onClick={onReturn}>
-              <Minimize2 />
-            </IconButton>
-          ) : (
-            <span className="expand-ticket">
-              <IconButton label="Expand ticket" onClick={onExpand}>
-                <Maximize2 />
-              </IconButton>
-            </span>
-          )}
-          <IconButton label="Close ticket details" onClick={onClose}>
-            <X />
-          </IconButton>
-        </div>
-      )}
+                <IconButton
+                  label="Close ticket details"
+                  shortcut="Esc"
+                  aria-keyshortcuts="Escape"
+                  onClick={onClose}
+                >
+                  <X />
+                </IconButton>
+              </div>
+            )}
+          </>
+        }
+      />
       {ticket && publishing && target && (
         <PublishDialog
           ticket={ticket}
@@ -385,6 +429,6 @@ export function TicketHeader({
           returnFocus={actionsTrigger}
         />
       )}
-    </div>
+    </>
   );
 }

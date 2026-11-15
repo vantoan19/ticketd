@@ -305,8 +305,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 4px;
-  margin: 4px -10px 0;
+  gap: 2px;
+  margin: 14px 0 0 -8px;
 }
 .property-strip .rail-row,
 .property-strip .rail-status > [data-slot="select-trigger"],
@@ -316,7 +316,8 @@
   height: 28px;
   min-height: 28px;
   margin: 0;
-  padding-inline: 10px;
+  padding-inline: 8px;
+  gap: 7px;
   background: transparent;
   box-shadow: none;
 }
@@ -388,4 +389,14 @@
 }
 .reminder-popover [data-slot="command"] {
   margin-inline: -8px;
+}
+
+.ticket-agent-slot {
+  flex-basis: 100%;
+  min-height: 44px;
+  margin-top: 18px;
+}
+.ticket-agent-slot .latest-update-line {
+  width: 100%;
+  min-height: 44px;
 }
