@@ -65,7 +65,7 @@ function DialogContent({
    * DESIGN.md section 11: `sm` 480 (confirm), `md` 640 (form, picker), `lg`
    * 920 (review, compare), all anchored at max(48px, 12vh) so they grow
    * downward and never re-centre; `viewer` (the attachment preview only) is
-   * min(1120px, 100vw − 64) by min(800px, 100vh − 64), centred. Use
+   * min(1120px, 100vw − 64) wide and fits below its 96px top anchor. Use
    * DialogShell for every dialog but the viewer.
    */
   size?: "sm" | "md" | "lg" | "viewer" | "palette";

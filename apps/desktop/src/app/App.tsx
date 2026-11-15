@@ -17,7 +17,10 @@ import {
   Documents,
   type DocumentCommands,
 } from "@/features/documents/Documents";
-import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
+import {
+  AttachmentLibrary,
+  type AttachmentCommands,
+} from "@/features/attachments/AttachmentLibrary";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { type ContextGraph as GraphData } from "@/lib/api/client";
@@ -169,6 +172,8 @@ function AppContent() {
       return release;
     }
   }, [view]);
+  const [attachmentCommands, setAttachmentCommands] =
+    useState<AttachmentCommands | null>(null);
   const [documentCommands, setDocumentCommands] =
     useState<DocumentCommands | null>(null);
   const [documentListRequest, setDocumentListRequest] = useState(0);
@@ -549,6 +554,10 @@ function AppContent() {
                         />
                         <CommandPalette
                           {...{
+                            attachmentCommands:
+                              view === "attachments" && graphOrigin === null
+                                ? attachmentCommands
+                                : null,
                             documentCommands:
                               view === "documents" && graphOrigin === null
                                 ? documentCommands
@@ -740,7 +749,11 @@ function AppContent() {
                                     />
                                   )}
                                 {view === "attachments" &&
-                                  graphOrigin === null && <AttachmentLibrary />}
+                                  graphOrigin === null && (
+                                    <AttachmentLibrary
+                                      onCommandsChange={setAttachmentCommands}
+                                    />
+                                  )}
                                 {
                                   <div
                                     className="management-host"

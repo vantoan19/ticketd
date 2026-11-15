@@ -2482,11 +2482,11 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   width: min(920px, calc(100vw - 32px));
 }
 .ui-dialog[data-size="viewer"] {
-  top: 50%;
-  translate: -50% -50%;
+  --dialog-top: 96px;
+  top: var(--dialog-top);
+  translate: -50% 0;
   width: min(1120px, calc(100vw - 64px));
-  height: min(800px, calc(100dvh - 64px));
-  max-height: none;
+  height: min(800px, calc(100dvh - var(--dialog-top) - 16px));
 }
 
 /* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
@@ -3274,4 +3274,167 @@ kbd,
 .document-list li[data-pinned] .document-list-pin {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* Shared file presentation, referenced by library, ticket, Document and Chat previews. */
+.attachment-cleanup-files > li {
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+.attachment-cleanup-files label {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-cleanup-files small,
+.attachment-cleanup-reason {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-cleanup-files input {
+  accent-color: var(--primary);
+}
+.attachment-cleanup-all {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-inline-preview {
+  color: var(--muted-foreground);
+  border-radius: var(--radius-segment);
+}
+.attachment-preview[data-layout="viewer"] .attachment-preview-stage {
+  box-shadow: inset -1px 0 0 var(--group-hairline);
+}
+.attachment-preview-image {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 0 / 16px 16px;
+  box-shadow: var(--shadow-border-base);
+}
+.attachment-preview-text {
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: 20px;
+}
+.attachment-preview-text-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-facts {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-facts dt {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-facts-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+.attachment-facts-muted {
+  color: var(--muted-foreground);
+}
+.attachment-uses small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.file-thumb {
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.file-thumb[data-size="row"] {
+  border-radius: var(--radius-segment);
+}
+.file-thumb[data-image] {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 0 / 8px 8px;
+}
+.file-thumb svg {
+  color: var(--muted-foreground);
+}
+.file-thumb[data-size="navigator"] {
+  border-radius: var(--radius);
+}
+
+/* Library navigator and file-preview visual variants (S13/S14). */
+.attachment-list-pane {
+  box-shadow: 1px 0 0 var(--border);
+}
+.attachment-mrow-main {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  border-radius: var(--radius-card);
+}
+.attachment-mrow-main:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-mrow-name {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-mrow-caption,
+.attachment-mrow-time {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-mrow-time {
+  font-variant-numeric: tabular-nums;
+}
+.ui-notice-hint {
+  border-radius: var(--radius-panel);
+  box-shadow: inset 0 0 0 1px var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-ui-line);
+}
+.attachment-preview-stage {
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+}
+.attachment-preview-stage[data-image] {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--recessed) 0 50%
+    )
+    0 0 / 20px 20px;
+}
+.attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.attachment-preview-image {
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-notice-hint {
+  flex-direction: row;
+  align-items: center;
+  padding: 14px;
+  line-height: calc(var(--text-caption-line) + 2px);
+  border-radius: calc(var(--radius-panel) - 2px);
+  box-shadow: inset 0 0 0 1.25px var(--border);
+}
+.attachment-preview-title > h2:focus {
+  outline: none;
 }

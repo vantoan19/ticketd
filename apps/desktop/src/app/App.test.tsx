@@ -5443,3 +5443,222 @@ test("New Chat exposes its complete current pick before the first message", asyn
   ).toBeTruthy();
   expect(client.created).toHaveLength(0);
 });
+
+test("Attachments folds search in its header and shares the Documents navigator keys and return focus", async () => {
+  const files = ["icon.png", "notes.txt"].map((name, index) => ({
+    id: `library-${index}`,
+    display_name: name,
+    original_filename: name,
+    size_bytes: index === 0 ? 567 : 17,
+    kind: "local_snapshot",
+    locator: `fixture/${name}`,
+    added_at: "2026-11-14T10:46:00Z",
+  }));
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args: { id?: string; query?: { search: string } } = {},
+    ) => {
+      if (command === "search_attachments")
+        return files
+          .filter((file) =>
+            file.display_name.includes(args.query?.search ?? ""),
+          )
+          .map((attachment) => ({
+            attachment,
+            related: false,
+            usage: {
+              eligible: false,
+              legacy_drafts_pending: false,
+              protections: [
+                {
+                  kind: "ticket_attachment",
+                  owner: "ticket",
+                  ticket_id: "ticket",
+                  trashed: false,
+                },
+              ],
+            },
+          }));
+      if (command === "attachment_preview")
+        return {
+          attachment: files.find((file) => file.id === args.id),
+          status: "unsupported",
+          media_type: null,
+          message: null,
+          can_open: true,
+          text_excerpt: { text: "Launch checklist", truncated: false },
+          usage: { total: 1, legacy_drafts_pending: false, entries: [] },
+        };
+      if (command === "open_attachment") return null;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  await screen.findByRole("button", { name: "icon.png" });
+  const header = screen
+    .getByRole("heading", { name: "Attachments" })
+    .closest("header")!;
+  fireEvent.click(within(header).getByRole("button", { name: "Search files" }));
+  const search = within(header).getByRole("searchbox", {
+    name: "Search files",
+  });
+  fireEvent.change(search, { target: { value: "notes" } });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "icon.png" })).toBeNull(),
+  );
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(within(header).queryByRole("searchbox")).toBeNull();
+  const restored = await screen.findByRole("button", { name: "icon.png" });
+  restored.focus();
+  fireEvent.keyDown(restored, { key: "j" });
+  const second = screen.getByRole("button", { name: "notes.txt" });
+  expect(document.activeElement).toBe(second);
+  expect(screen.queryByRole("region", { name: "notes.txt" })).toBeNull();
+  fireEvent.keyDown(second, { key: "Enter" });
+  const preview = await screen.findByRole("region", { name: "notes.txt" });
+  await within(preview).findByText("Launch checklist");
+  fireEvent.click(within(preview).getByRole("button", { name: "Open file" }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("open_attachment", {
+      id: "library-1",
+    }),
+  );
+  fireEvent.click(
+    within(preview).getByRole("button", { name: "Back to Attachments" }),
+  );
+  expect(document.activeElement).toBe(second);
+  fireEvent.keyDown(second, { key: "Enter" });
+  const reopened = await screen.findByRole("region", { name: "notes.txt" });
+  fireEvent.keyDown(
+    within(reopened).getByRole("heading", { name: "notes.txt" }),
+    { key: "." },
+  );
+  expect(await screen.findByRole("menuitem", { name: "Rename…" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(screen.getByRole("region", { name: "notes.txt" })).toBe(reopened);
+  fireEvent.keyDown(
+    within(reopened).getByRole("heading", { name: "notes.txt" }),
+    { key: "Escape" },
+  );
+  expect(document.activeElement).toBe(second);
+  expect(
+    screen.getByText(
+      "Drop files anywhere on a ticket or Document to attach them. They are kept on this computer.",
+    ),
+  ).toBeTruthy();
+});
+
+test.each(["missing", "quarantined", "unavailable"])(
+  "Attachments keeps %s recovery and Used in navigation in the preview",
+  async (state) => {
+    let restored = false;
+    let retry = false;
+    const file = () => ({
+      id: "attachment-state",
+      display_name: "notes.txt",
+      original_filename: "notes.txt",
+      size_bytes: 17,
+      kind: "local_snapshot",
+      locator: "fixture/notes.txt",
+      quarantined: state === "quarantined" && !restored,
+    });
+    const owner = bulkTicket(1, { title: "Attachment owner" });
+    bridge.invoke.mockImplementation(
+      (command: string, args: { id?: string; reference?: string } = {}) => {
+        if (command === "find_tickets") return [owner];
+        if (command === "show_ticket") return owner;
+        if (command === "search_attachments")
+          return [
+            {
+              attachment: file(),
+              related: false,
+              missing: state === "missing",
+              usage: {
+                eligible: false,
+                legacy_drafts_pending: false,
+                protections: [],
+              },
+            },
+          ];
+        if (command === "attachment_preview")
+          return {
+            attachment: file(),
+            status:
+              state === "missing"
+                ? "missing"
+                : state === "unavailable" && !retry
+                  ? "unavailable"
+                  : "unsupported",
+            media_type: null,
+            message: null,
+            can_open: state !== "missing",
+            text_excerpt: retry
+              ? { text: "Recovered preview", truncated: false }
+              : null,
+            usage: {
+              total: 1,
+              legacy_drafts_pending: false,
+              entries: [
+                {
+                  kind: "ticket_attachment",
+                  owner: "1",
+                  label: "T-KQ1 · Attachment owner",
+                  trashed: false,
+                  target: { kind: "ticket", id: "T-KQ1" },
+                },
+              ],
+            },
+          };
+        if (command === "restore_attachment") {
+          restored = true;
+          return file();
+        }
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    const pane = await screen.findByRole("region", { name: "notes.txt" });
+    const stage = pane.querySelector(".attachment-preview-stage");
+    if (state === "missing") {
+      await within(pane).findByText("This file is missing from this computer");
+      expect(
+        within(pane).getByRole("button", { name: "Open file" }),
+      ).toHaveProperty("disabled", true);
+      expect(
+        within(pane).getByRole("button", { name: "Restore from a backup…" }),
+      ).toBeTruthy();
+    } else if (state === "quarantined") {
+      fireEvent.click(
+        await within(pane).findByRole("button", { name: "Restore file" }),
+      );
+      await vi.waitFor(() =>
+        expect(
+          within(pane).queryByRole("button", { name: "Restore file" }),
+        ).toBeNull(),
+      );
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        "restore_attachment",
+        expect.objectContaining({ id: "attachment-state" }),
+      );
+    } else {
+      await within(pane).findByText("Couldn't read this file");
+      retry = true;
+      fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
+      await within(pane).findByText("Recovered preview");
+    }
+    expect(pane.querySelector(".attachment-preview-stage")).toBe(stage);
+    fireEvent.click(
+      await within(pane).findByRole("button", {
+        name: "T-KQ1 · Attachment owner",
+      }),
+    );
+    expect(
+      await screen.findByRole("textbox", { name: "Title" }),
+    ).toHaveProperty("value", "Attachment owner");
+  },
+);

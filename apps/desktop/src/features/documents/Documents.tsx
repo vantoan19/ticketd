@@ -1,7 +1,8 @@
 import { emptyCopy } from "@/lib/empty-copy";
 import { PaneHeader } from "@/components/ui/list-header";
 import { Count } from "@/components/ui/count";
-import { SearchInput } from "@/components/ui/search-input";
+import { NavigatorSearch } from "@/components/ui/navigator";
+import { focusNavigatorRow } from "@/lib/navigator";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Pager } from "@/components/ui/pager";
@@ -557,17 +558,7 @@ export function Documents({
                           "[data-document-row]",
                         ) ?? []),
                       ];
-                      const at = rows.indexOf(event.currentTarget);
-                      const down =
-                        event.key === "ArrowDown" ||
-                        event.key.toLowerCase() === "j";
-                      const next =
-                        event.key === "Home"
-                          ? rows[0]
-                          : event.key === "End"
-                            ? rows.at(-1)
-                            : rows[at + (down ? 1 : -1)];
-                      next?.focus();
+                      focusNavigatorRow(rows, event.currentTarget, event.key);
                     } else if (
                       matchesShortcut(event, "documents-pin") &&
                       !inTrash
@@ -746,19 +737,15 @@ export function Documents({
           count={<Count>{shownCount}</Count>}
           titleEditor={
             searchOpen ? (
-              <span data-slot="pane-search">
-                <SearchInput
-                  autoFocus
-                  fill
-                  aria-label="Search Documents"
-                  placeholder="Search Documents…"
-                  value={query}
-                  onValueChange={(value) => {
-                    setQuery(value);
-                    setOffset(0);
-                  }}
-                />
-              </span>
+              <NavigatorSearch
+                aria-label="Search Documents"
+                placeholder="Search Documents…"
+                value={query}
+                onValueChange={(value) => {
+                  setQuery(value);
+                  setOffset(0);
+                }}
+              />
             ) : undefined
           }
           actions={
