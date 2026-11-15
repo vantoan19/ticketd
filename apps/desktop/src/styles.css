@@ -2941,6 +2941,7 @@ kbd,
 }
 
 .ui-card-well {
+  overflow: visible;
   background: var(--well);
   border-radius: var(--radius-panel);
   box-shadow: none;
