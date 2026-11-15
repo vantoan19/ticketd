@@ -1,6 +1,7 @@
 import {
   Card,
   CardTitle,
+  CardValue,
   CardCaption,
   CardDescription,
   CardFooter,
@@ -111,7 +112,7 @@ export function PlanCard({
           <span className="plan-card-ring-slot">
             {counts ? (
               <PlanRing name={plan.name} counts={counts} size={20} />
-            ) : (
+            ) : failed ? null : (
               <Skeleton className="size-5" />
             )}
           </span>
@@ -134,13 +135,15 @@ export function PlanCard({
           </div>
           <div className="plan-card-summary">
             {counts ? (
-              <strong>
-                {counts.done} of {countable} done
-              </strong>
-            ) : (
+              <CardValue asChild>
+                <strong>
+                  {counts.done} of {countable} done
+                </strong>
+              </CardValue>
+            ) : failed ? null : (
               <Skeleton className="h-5 w-24" />
             )}
-            {!updated && <Skeleton className="h-4 w-28" />}
+            {!updated && !failed && <Skeleton className="h-4 w-28" />}
             {updated && (
               <CardCaption asChild>
                 <span className="plan-card-caption">

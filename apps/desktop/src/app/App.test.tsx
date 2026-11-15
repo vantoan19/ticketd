@@ -6214,6 +6214,11 @@ test("header Follow keeps failures in the pane status line, retries and respects
   await vi.waitFor(() =>
     expect(follow.getAttribute("aria-pressed")).toBe("true"),
   );
+  following = false;
+  await vi.waitFor(
+    () => expect(follow.getAttribute("aria-pressed")).toBe("false"),
+    { timeout: 3000 },
+  );
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
   expect(follow.hasAttribute("disabled")).toBe(true);
 });

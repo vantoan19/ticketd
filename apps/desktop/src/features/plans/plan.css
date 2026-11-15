@@ -261,10 +261,6 @@ button.plan-purpose:focus-visible {
   flex: none;
   width: 128px;
   min-height: 36px;
-  font-variant-numeric: tabular-nums;
-}
-.plan-card-summary strong {
-  font-weight: 500;
 }
 .plan-card-summary time {
   position: relative;

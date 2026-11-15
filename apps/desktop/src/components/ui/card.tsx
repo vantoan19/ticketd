@@ -81,6 +81,16 @@ function CardTitle({ className, asChild = false, ...props }: Props) {
     />
   );
 }
+function CardValue({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-value"
+      className={cn("ui-card-value", className)}
+      {...props}
+    />
+  );
+}
 function CardCaption({ className, asChild = false, ...props }: Props) {
   const Comp = asChild ? Slot.Root : "div";
   return (
@@ -107,6 +117,7 @@ export {
   CardBody,
   CardFooter,
   CardTitle,
+  CardValue,
   CardCaption,
   CardDescription,
 };

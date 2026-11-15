@@ -3582,3 +3582,13 @@ kbd,
   border-radius: var(--radius);
   background: var(--recessed);
 }
+
+.ui-card-value {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.ui-card-caption time {
+  font-variant-numeric: tabular-nums;
+}
