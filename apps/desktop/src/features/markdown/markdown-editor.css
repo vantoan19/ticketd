@@ -262,6 +262,16 @@
 .markdown-editor :is(.cm-activeLine, .cm-activeLineGutter) {
   background: var(--recessed);
 }
+/* With theme="none" CodeMirror's base selection is a light grey in both themes;
+   the extra classes outrank its focused rule. */
+.markdown-editor .cm-editor .cm-selectionLayer .cm-selectionBackground,
+.markdown-editor
+  .cm-editor.cm-focused
+  > .cm-scroller
+  > .cm-selectionLayer
+  .cm-selectionBackground {
+  background: color-mix(in srgb, var(--ring) 24%, transparent);
+}
 .mermaid-pending {
   height: 160px;
   padding: 12px;
