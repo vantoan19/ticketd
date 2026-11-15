@@ -34,6 +34,7 @@ import { SourceLink } from "@/features/tickets/SourceLink";
 import { externalSource } from "@/features/tickets/ticket-source";
 import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { client, type Project, type Ticket } from "@/lib/api/client";
+import { failureText } from "@/lib/api/describe-failure";
 import "./ticket-detail.css";
 
 /** The shell command an agent runs to read this ticket's context. */
@@ -113,7 +114,12 @@ export function TicketHeader({
       await refresh();
     } catch (reason) {
       setActionError(
-        `Could not ${value ? "move to trash" : "restore"}: ${String(reason)}`,
+        failureText(
+          reason,
+          value
+            ? `move ${ticket.reference} to Trash`
+            : `restore ${ticket.reference}`,
+        ),
       );
     } finally {
       setPending(false);

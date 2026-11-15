@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { client, type FindFilter, type Ticket } from "@/lib/api/client";
+import { failureText } from "@/lib/api/describe-failure";
 import { ticketStatuses, type TicketStatus } from "@/lib/statuses";
 
 const BATCH_SIZE = 50;
@@ -114,7 +115,11 @@ export function useTicketBoard(
           commit(
             saved.current.columns.map((current) =>
               current.status === column.status
-                ? { ...current, loading: false, error: String(reason) }
+                ? {
+                    ...current,
+                    loading: false,
+                    error: failureText(reason, `load ${column.status} tickets`),
+                  }
                 : current,
             ),
           );
@@ -162,7 +167,10 @@ export function useTicketBoard(
       if (request === generation.current) commit({ ...result, loading: false });
     } catch (reason) {
       if (request === generation.current)
-        commit({ loading: false, error: String(reason) });
+        commit({
+          loading: false,
+          error: failureText(reason, `load more ${status} tickets`),
+        });
     } finally {
       if (request === generation.current) loadingMore.current.delete(status);
     }

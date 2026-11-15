@@ -147,7 +147,7 @@ test("a failed takeover says why and a retry reuses the same request id", async 
   };
   await confirm();
   expect(
-    await screen.findByText(/Could not take ownership: database is locked/),
+    await screen.findByText(/Couldn't take ownership of T-KQ1/),
   ).toBeTruthy();
   expect(refresh).not.toHaveBeenCalled();
   fireEvent.click(

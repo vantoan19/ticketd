@@ -2,6 +2,7 @@ import { useContext, useState } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import {
   Popover,
@@ -136,15 +137,14 @@ export function LinkedWork({
               Loading relationships…
             </span>
           )}
-          {current && !current.links && (
-            <span className="linked-work-state" role="alert">
-              Could not load relationships: {current.failure}{" "}
-              <Button variant="link" size="xs" onClick={work.retry}>
-                Try again
-              </Button>
-            </span>
+          {current && !current.links && current.failure && (
+            <FailureState
+              size="inline"
+              failure={current.failure}
+              onRetry={work.retry}
+            />
           )}
-          {error && <p role="alert">{error}</p>}
+          {error && <FailureAlert size="compact" failure={error} />}
           {work.removed && (
             <p role="status" className="linked-work-note">
               Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
@@ -229,11 +229,13 @@ export function LinkedWork({
   return (
     <RailSection label="Relationships">
       <div id={`linked-work-${reference}`} className="linked-work">
-        {error && <p role="alert">{error}</p>}
+        {error && <FailureAlert size="compact" failure={error} />}
         {current.failure && (
-          <p role="alert">
-            Relationships could not be refreshed: {current.failure}
-          </p>
+          <FailureState
+            size="inline"
+            failure={current.failure}
+            onRetry={work.retry}
+          />
         )}
         {work.removed && (
           <p role="status" className="linked-work-note">

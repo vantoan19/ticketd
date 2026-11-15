@@ -191,7 +191,7 @@ test("a refresh keeps the cards in place and a failed reload keeps what was retr
   bridge.invoke.mockRejectedValue("the workspace is busy");
   rerender(view(source({ last_refreshed_at: "2026-02-03T00:00:00Z" })));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "the workspace is busy",
+    "Couldn't load the conversation",
   );
   expect(screen.getByText("first")).toBeTruthy();
   expect(screen.getByText("second")).toBeTruthy();

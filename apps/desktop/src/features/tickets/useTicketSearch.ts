@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useState } from "react";
 import { client, type Ticket } from "@/lib/api/client";
+import { failureText } from "@/lib/api/describe-failure";
 import { typedReference } from "./ticket-references";
 
 const MATCHES = 8;
@@ -52,7 +53,7 @@ export function useTicketSearch(
           );
         },
         (reason: unknown) => {
-          if (active) setError(`Search failed: ${String(reason)}`);
+          if (active) setError(failureText(reason, "search tickets"));
         },
       );
     }, DELAY_MS);

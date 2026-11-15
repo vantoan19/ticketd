@@ -605,7 +605,7 @@ test("reports when a brief cannot be saved locally", async () => {
     target: { value: "Still in the editor" },
   });
   expect(screen.getByRole("alert").textContent).toContain(
-    "Could not save the unpublished update",
+    "Couldn't save the unpublished update",
   );
   expect(
     screen.getByRole("textbox", { name: "New update source" }),

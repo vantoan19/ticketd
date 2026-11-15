@@ -2,6 +2,11 @@ import { progressBrief } from "./progress-brief";
 import { useEffect, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -21,20 +26,24 @@ export function LatestUpdate({
   const now = useNow();
   const [state, setState] = useState<{
     update: Update | null;
-    error: string;
+    error: FailureDescription | null;
     loading: boolean;
-  }>({ update: null, error: "", loading: true });
+  }>({ update: null, error: null, loading: true });
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     if (!active) return;
     let current = true;
     void latestUpdate(reference)
       .then((update) => {
-        if (current) setState({ update, error: "", loading: false });
+        if (current) setState({ update, error: null, loading: false });
       })
       .catch((error: unknown) => {
         if (current)
-          setState({ update: null, error: String(error), loading: false });
+          setState({
+            update: null,
+            error: describeFailure(error, "load the latest update"),
+            loading: false,
+          });
       });
     return () => {
       current = false;
@@ -46,16 +55,11 @@ export function LatestUpdate({
       {loading ? (
         <small className="rail-note">Loading update…</small>
       ) : error ? (
-        <>
-          <small role="alert">Could not load latest update: {error}</small>
-          <Button
-            variant="link"
-            size="sm"
-            onClick={() => setRetry((n) => n + 1)}
-          >
-            Retry
-          </Button>
-        </>
+        <FailureState
+          size="inline"
+          failure={error}
+          onRetry={() => setRetry((n) => n + 1)}
+        />
       ) : update ? (
         <div className="latest-update">
           <p className="latest-update-text">

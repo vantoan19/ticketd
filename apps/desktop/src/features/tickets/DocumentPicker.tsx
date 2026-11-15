@@ -4,6 +4,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { FileText } from "lucide-react";
 import { documents, type DocumentSummary } from "@/features/documents/api";
 import { Input } from "@/components/ui/input";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 
 /**
  * Find a Document by title. With no query it lists the most recent ones, so
@@ -24,7 +29,8 @@ export function DocumentPicker({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DocumentSummary[] | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const listId = useId();
   useEffect(() => {
     let current = true;
@@ -38,11 +44,17 @@ export function DocumentPicker({
           .then((found) => {
             if (current) {
               setResults(found);
-              setError("");
+              setError(null);
             }
           })
           .catch((reason: unknown) => {
-            if (current) setError(String(reason));
+            if (current)
+              setError(
+                describeFailure(
+                  reason,
+                  text ? "search Documents" : "load Documents",
+                ),
+              );
           });
       },
       query ? 150 : 0,
@@ -51,7 +63,7 @@ export function DocumentPicker({
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query, includeSupport]);
+  }, [query, includeSupport, attempt]);
   const shown = (results ?? []).filter((item) => !exclude.includes(item.id));
   // Everything on offer is already chosen, which is not the same as nothing existing.
   const allChosen = !query.trim() && (results?.length ?? 0) > 0;
@@ -66,7 +78,13 @@ export function DocumentPicker({
         aria-controls={listId}
         onChange={(event) => setQuery(event.target.value)}
       />
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <FailureAlert
+          size="compact"
+          failure={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      )}
       <ul id={listId} className="document-picker-list" aria-label="Documents">
         {shown.map((item) => (
           <li key={item.id}>

@@ -36,7 +36,7 @@ test("distinguishes an absent update from a failed read and allows retry", async
     .mockResolvedValueOnce(null);
   render(<LatestUpdate reference="T-KQ1" active revision={0} />);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Database unavailable",
+    "Couldn't load the latest update",
   );
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("No update reported");

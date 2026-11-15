@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
@@ -6,6 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Picker } from "@/components/ui/picker";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useTicketSearch } from "./useTicketSearch";
 import {
   addableKinds,
@@ -31,7 +36,7 @@ export function LinkTicketDialog({
   const [kind, setKind] = useState<AddableKind>("related");
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Ticket | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
   const attempt = useRef<{ key: string; id: string } | null>(null);
   const [wasOpen, setWasOpen] = useState(open);
@@ -61,7 +66,7 @@ export function LinkTicketDialog({
     setQuery("");
     search.reset();
     setChosen(null);
-    setError("");
+    setError(null);
     attempt.current = null;
   }
   function change(next: boolean) {
@@ -72,7 +77,7 @@ export function LinkTicketDialog({
     setDraftFor(ticket.reference);
     setQuery("");
     setChosen(null);
-    setError("");
+    setError(null);
   }
   async function submit() {
     if (!chosen) return;
@@ -81,14 +86,14 @@ export function LinkTicketDialog({
       attempt.current?.key === key ? attempt.current.id : crypto.randomUUID();
     attempt.current = { key, id };
     setPending(true);
-    setError("");
+    setError(null);
     try {
       await addLink(ticket.reference, kind, chosen.reference, id);
       discard();
       change(false);
       await onLinked();
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, `link ${chosen.reference}`));
     } finally {
       setPending(false);
     }
@@ -125,7 +130,7 @@ export function LinkTicketDialog({
                   addableKinds.find((item) => item.kind === value)?.kind ??
                     kind,
                 );
-                setError("");
+                setError(null);
               }}
               options={addableKinds.map((item) => ({
                 value: item.kind,
@@ -134,7 +139,7 @@ export function LinkTicketDialog({
             />
           </div>
         </Field>
-        <Field data-invalid={!!(error || search.error)}>
+        <Field>
           <FieldLabel htmlFor={`link-search-${ticket.id}`}>Ticket</FieldLabel>
           {chosen ? (
             <div className="link-ticket-chosen">
@@ -148,7 +153,7 @@ export function LinkTicketDialog({
                 size="sm"
                 onClick={() => {
                   setChosen(null);
-                  setError("");
+                  setError(null);
                 }}
               >
                 Change ticket
@@ -161,6 +166,7 @@ export function LinkTicketDialog({
                 value={query}
                 placeholder="Search by title, text or reference"
                 autoComplete="off"
+                aria-invalid={!!search.error || undefined}
                 onChange={(event) => setQuery(event.target.value)}
               />
               {visible.length > 0 && (
@@ -171,7 +177,7 @@ export function LinkTicketDialog({
                         type="button"
                         onClick={() => {
                           setChosen(item);
-                          setError("");
+                          setError(null);
                         }}
                       >
                         <StatusIcon status={item.status} size={14} decorative />
@@ -186,12 +192,21 @@ export function LinkTicketDialog({
               )}
             </>
           )}
-          <FieldError>{error || search.error}</FieldError>
+          {/* Only the message is in the error colour; the chosen ticket stays neutral. */}
+          <FieldError>
+            {error
+              ? error.code === "cycle"
+                ? error.sentence
+                : `${error.title}. ${error.sentence}`
+              : search.error}
+          </FieldError>
         </Field>
         {replacedParent && (
-          <p role="status" className="link-ticket-note">
-            This replaces the current parent {replacedParent}.
-          </p>
+          <Alert tone="attention" size="compact" role="status">
+            <AlertDescription>
+              This replaces the current parent {replacedParent}.
+            </AlertDescription>
+          </Alert>
         )}
       </div>
     </DialogShell>

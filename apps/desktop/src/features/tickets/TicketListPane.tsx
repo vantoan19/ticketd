@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
-  AlertCircle,
   Layers,
   Plus,
   RefreshCw,
@@ -10,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import type { PlanViewState } from "@/features/plans/usePlanView";
@@ -85,6 +85,7 @@ export function TicketListPane({
     navigation,
     clearFilters,
     queryError,
+    listFailure,
     refreshFailed,
   } = workspace;
   // An Plan scope shows the Plan's own header instead of a plain title.
@@ -291,7 +292,7 @@ export function TicketListPane({
           {!trash && <TicketFilters part="chips" {...filterProps} />}
 
           {refreshFailed && !queryError && (
-            <p role="status" className="refresh-failed">
+            <div role="status" className="refresh-failed">
               Can’t refresh. Showing the last{" "}
               {workspace.layout === "board" ? "board" : "list"}.{" "}
               <Button
@@ -301,7 +302,10 @@ export function TicketListPane({
               >
                 Retry
               </Button>
-            </p>
+              {workspace.listFailure && (
+                <FailureDetails small details={workspace.listFailure.details} />
+              )}
+            </div>
           )}
           {workspace.layout === "board" ? (
             <TicketBoard
@@ -316,20 +320,18 @@ export function TicketListPane({
           ) : (
             <div className="ticket-scroll">
               {queryError ? (
-                <EmptyState
-                  role="alert"
-                  icon={<AlertCircle />}
-                  title="Could not load tickets"
-                  description="Try refreshing the current view."
-                  action={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refresh({ reportFailure: true })}
-                    >
-                      Retry
-                    </Button>
+                <FailureState
+                  failure={
+                    listFailure ?? {
+                      code: "failed",
+                      title: "Couldn't load tickets",
+                      sentence:
+                        "ticketd couldn't read the list. Nothing changed.",
+                      action: "retry",
+                      details: "",
+                    }
                   }
+                  onRetry={() => void refresh({ reportFailure: true })}
                 />
               ) : loading && tickets.length === 0 ? (
                 <TicketRowsSkeleton />

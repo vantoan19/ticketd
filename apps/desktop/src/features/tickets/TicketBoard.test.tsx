@@ -915,7 +915,7 @@ test("a lost duplicate review response reconciles its saved placement before ret
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
   await settle();
-  expect(screen.getByText("Duplicate response lost")).toBeTruthy();
+  expect(screen.getByText(/Duplicate response lost\./)).toBeTruthy();
   const todo = screen.getByRole("region", {
     name: "Todo column",
     hidden: true,
