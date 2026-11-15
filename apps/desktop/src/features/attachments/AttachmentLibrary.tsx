@@ -41,6 +41,7 @@ export function AttachmentLibrary({
   const [purging, setPurging] = useState<Attachment | null>(null);
   const [removing, setRemoving] = useState<Attachment | null>(null);
   const cleanupTrigger = useRef<HTMLButtonElement>(null);
+  const addTrigger = useRef<HTMLButtonElement>(null);
   const [restoreError, setRestoreError] = useState("");
   const [restoring, setRestoring] = useState<string | null>(null);
   const { files, loading, error } = useAttachmentSearch(
@@ -88,7 +89,11 @@ export function AttachmentLibrary({
                   Clean up
                 </Button>
               )}
-              <Button size="sm" onClick={() => setPicker(true)}>
+              <Button
+                ref={addTrigger}
+                size="sm"
+                onClick={() => setPicker(true)}
+              >
                 <Plus aria-hidden="true" />
                 Add files
               </Button>
@@ -372,7 +377,10 @@ export function AttachmentLibrary({
             file={removing}
             onClose={() => setRemoving(null)}
             onChanged={() => setRefresh((value) => value + 1)}
-            onRemovedFocus={() => cleanupTrigger.current?.focus()}
+            // Clean up leaves with the last file (chrome rule); Add files stays.
+            onRemovedFocus={() =>
+              (cleanupTrigger.current ?? addTrigger.current)?.focus()
+            }
           />
         )}
       </section>
