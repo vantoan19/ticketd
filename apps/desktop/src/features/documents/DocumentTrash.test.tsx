@@ -135,3 +135,44 @@ it("includes Activity details on request and keeps a selected detail", async () 
     ).toBeNull(),
   );
 });
+
+it("says what Restore did and keeps focus in the Trash list", async () => {
+  let trash = [
+    { id: "a", heading: "Alpha" },
+    { id: "b", heading: "Beta" },
+  ];
+  vi.mocked(documents.pins).mockResolvedValue([]);
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.trash).mockImplementation(async () => trash);
+  vi.mocked(documents.setTrashed).mockImplementation(async (id) => {
+    trash = trash.filter((doc) => doc.id !== id);
+    return {
+      id,
+      title: null,
+      body: "",
+      created_at: "now",
+      updated_at: "now",
+      trashed: false,
+    };
+  });
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Trash" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Restore Alpha" }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Restore Beta" }),
+    ),
+  );
+  expect(screen.getByText("Restored Alpha.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+});

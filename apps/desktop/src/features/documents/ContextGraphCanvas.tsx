@@ -605,7 +605,7 @@ export function ContextGraphCanvas({
         </div>
       </div>
       <div className="context-graph-overlay">
-        <GraphLegend />
+        <GraphLegend labels={edges.map((edge) => String(edge.label ?? ""))} />
         {overlay}
       </div>
     </div>

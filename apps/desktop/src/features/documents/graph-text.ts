@@ -1,5 +1,6 @@
 import { MarkerType, type Edge } from "@xyflow/react";
 import type { ContextGraph } from "@/lib/api/client";
+import { plainText } from "@/lib/plain-text";
 
 type GraphNode = ContextGraph["nodes"][number];
 type GraphEdge = ContextGraph["edges"][number];
@@ -87,15 +88,8 @@ export const kindNames: Record<GraphNode["kind"], string> = {
   plan: "Plan",
 };
 
-/** Passages are stored Markdown; show the link text, not the link. */
-export function plainText(markdown: string): string {
-  return markdown
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/ticketd:\/\/\S+/g, "")
-    .replace(/[`*_>#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Passages are stored Markdown; show the link text, not the link.
+export { plainText };
 
 /** Equal ignoring case and punctuation. */
 function sameWords(a: string, b: string): boolean {
@@ -155,7 +149,11 @@ export function describeEdge(
   }
 }
 
-/** React Flow edges that show direction and relationship, one per connection. */
+/**
+ * React Flow edges, one per connection, each named on the line. Only "blocks"
+ * has an arrowhead (the legend's "arrow = waits"); every other line is named by
+ * its label, so an arrow there would claim a direction the legend denies.
+ */
 export function flowEdges(edges: GraphEdge[]): Edge[] {
   return edges.map((edge, index) => ({
     id: `${index}`,
@@ -164,10 +162,12 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
     label: edgeLineLabels[edge.kind] ?? edge.kind,
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: edgeStyle(edge.kind).color,
-    },
+    ...(edge.kind === "blocks" && {
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: edgeStyle(edge.kind).color,
+      },
+    }),
     // Drawn by RoutedEdge, which bends each line around the cards in its way.
     type: "routed",
     style: {
@@ -196,11 +196,38 @@ export function cardParts(node: GraphNode): {
   };
 }
 
-/** Connections touching a node, one row per relationship between the same pair. */
+/** Each relationship named from either end: [from the source, from the target]. */
+const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
+  blocks: ["Blocks", "Blocked by"],
+  subticket: ["Parent of", "Subticket of"],
+  related: ["Related to", "Related to"],
+  discovered: ["Discovered", "Discovered from"],
+  mention: ["Mentions", "Mentioned by"],
+  attached: ["Has", "Attached to"],
+  activity: ["Update mentions", "Mentioned in an update on"],
+  support: ["Update cites", "Cited in an update on"],
+  membership: ["Contains", "In Plan"],
+  document: ["Has document", "Document of"],
+  spec: ["Has spec", "Spec of"],
+};
+
+/** A relationship named from `nodeId`'s side: T-FV1 is "Blocked by" T-FV14, not "Blocks". */
+function roleLabel(edge: GraphEdge, nodeId: string): string {
+  const pair = ROLE_LABELS[edge.kind] ?? [
+    edgeLabels[edge.kind] ?? edge.kind,
+    edgeLabels[edge.kind] ?? edge.kind,
+  ];
+  return edge.source === nodeId ? pair[0] : pair[1];
+}
+
+/**
+ * Connections touching a node, one row per relationship between the same pair.
+ * `label` names the relationship from this node's side.
+ */
 export function connectionRows(
   nodeId: string,
   graph: Pick<ContextGraph, "nodes" | "edges">,
-): { key: string; kind: string; text: string }[] {
+): { key: string; kind: string; label: string; text: string }[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const rows = new Map<
     string,
@@ -216,24 +243,11 @@ export function connectionRows(
   return [...rows.entries()].map(([key, row]) => ({
     key,
     kind: row.kind,
+    label: roleLabel(row.edge, nodeId),
     text:
       describeEdge(row.edge, byId) + (row.extra ? ` (+${row.extra} more)` : ""),
   }));
 }
-
-const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
-  blocks: ["Blocks", "Blocked by"],
-  subticket: ["Parent of", "Subticket of"],
-  related: ["Related to", "Related to"],
-  discovered: ["Discovered", "Discovered from"],
-  mention: ["Mentions", "Mentioned by"],
-  attached: ["Has", "Attached to"],
-  activity: ["Update mentions", "Mentioned in an update on"],
-  support: ["Update cites", "Cited in an update on"],
-  membership: ["Contains", "In Plan"],
-  document: ["Has document", "Document of"],
-  spec: ["Has spec", "Spec of"],
-};
 
 /** A node's connections as labelled rows ("Blocked by", "Parent of", "Mentioned by"), each item once. */
 export function labelledConnections(
@@ -247,8 +261,7 @@ export function labelledConnections(
     const outgoing = edge.source === nodeId;
     const other = byId.get(outgoing ? edge.target : edge.source);
     if (!other) continue;
-    const pair = ROLE_LABELS[edge.kind] ?? [edge.kind, edge.kind];
-    const label = outgoing ? pair[0] : pair[1];
+    const label = roleLabel(edge, nodeId);
     const parts = cardParts(other);
     const text = [parts.ref, parts.title].filter(Boolean).join(" ");
     const items = rows.get(label) ?? [];

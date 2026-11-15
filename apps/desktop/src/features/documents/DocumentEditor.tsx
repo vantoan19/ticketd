@@ -260,6 +260,8 @@ export function DocumentEditor({
   const [failed, setFailed] = useState(false);
   const [failureDetail, setFailureDetail] = useState("");
   const [failedTrash, setFailedTrash] = useState(false);
+  // Where a person tried to go after a failed save, when recovery could not keep the draft.
+  const [draftAtRisk, setDraftAtRisk] = useState<(() => void) | null>(null);
   // Editor state model. A Trash/Restore click is a one-shot intent: it is queued in
   // `transition` until the draft is saved, and dropped (remembered in `failedTransition`
   // for the Retry button only) as soon as anything fails, so autosave never replays it.
@@ -422,6 +424,7 @@ export function DocumentEditor({
     saving.current = true;
     setStatus("Saving…");
     setFailed(false);
+    setDraftAtRisk(null);
     const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
       // Flush first: an explicit save clears a latched recovery failure, so the
@@ -623,19 +626,36 @@ export function DocumentEditor({
     window.requestAnimationFrame(() => noticeRef.current?.focus());
     return true;
   };
-  const navigate = (action: () => void) => {
+  // After a failed save, waiting for the next save would trap the person in the
+  // editor. Leaving keeps the draft in recovery instead, so it comes back on reopen;
+  // only when that store cannot keep it either does leaving need a decision.
+  const leaveKeepingDraft = async (action: () => void) => {
+    try {
+      if (!recovery.active) throw new Error("Draft recovery is unavailable");
+      await recovery.flush();
+      await persistRecovery();
+      await recovery.flush();
+    } catch {
+      setDraftAtRisk(() => action);
+      return;
+    }
+    closeRequested.current = false;
+    afterSave.current = null;
+    action();
+  };
+  const leave = (action: () => void) => {
     if (blockWhileConflicted()) return;
+    if (failed && !saving.current) {
+      void leaveKeepingDraft(action);
+      return;
+    }
     afterSave.current = action;
     closeRequested.current = true;
     void save();
   };
+  const navigate = (action: () => void) => leave(action);
   const requestCloseRef = useRef(() => {});
-  const requestClose = () => {
-    if (blockWhileConflicted()) return;
-    afterSave.current = null;
-    closeRequested.current = true;
-    void save();
-  };
+  const requestClose = () => leave(() => close.current());
   useEffect(() => {
     requestCloseRef.current = requestClose;
   });
@@ -655,6 +675,7 @@ export function DocumentEditor({
   const toggleTrash = () =>
     startTransition({ trashed: !trashed, requestId: crypto.randomUUID() });
   const retry = () => {
+    setDraftAtRisk(null);
     if (failedTrash && failedTransition.current)
       startTransition(failedTransition.current);
     else void save();
@@ -719,9 +740,29 @@ export function DocumentEditor({
       <p>
         {failedTrash
           ? "We couldn’t update Trash. Nothing was lost."
-          : "We couldn’t save your changes. Your draft is still here."}
+          : draftAtRisk
+            ? "We couldn’t save your changes, and this device can’t keep the draft either. Retry, or discard it to close."
+            : recovery.active
+              ? "We couldn’t save your changes. Your draft stays on this device if you close."
+              : "We couldn’t save your changes. Your draft is still here."}
       </p>
-      <Button onClick={retry}>Retry</Button>
+      <Button size="sm" onClick={retry}>
+        Retry
+      </Button>
+      {draftAtRisk && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            closeRequested.current = false;
+            afterSave.current = null;
+            void recovery.put(recoveryOwner, null, []).catch(() => {});
+            draftAtRisk();
+          }}
+        >
+          Discard and close
+        </Button>
+      )}
       {failureDetail && (
         <details>
           <summary>Details</summary>

@@ -99,3 +99,30 @@ it("Retry saves as soon as write access returns, without Retry draft recovery", 
     expect(screen.queryAllByText(/readonly database/)).toHaveLength(0),
   );
 });
+it("closes a capture after a failed save and keeps the draft for next time", async () => {
+  const kept: unknown[] = [];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      const draft = (args as { draft: { revision: number; payload: unknown } })
+        .draft;
+      kept.push(draft.payload);
+      return { ...draft, revision: draft.revision + 1 };
+    }
+    return [];
+  });
+  vi.mocked(documents.links).mockResolvedValue([[], []]);
+  vi.mocked(documents.save).mockRejectedValue("disk full");
+  const close = vi.fn();
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
+  fireEvent.change(await screen.findByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  fireEvent.click(screen.getByText("Done"));
+  await screen.findByText(/couldn’t save your changes/);
+  fireEvent.click(screen.getByRole("button", { name: "Close and return" }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(documents.save).toHaveBeenCalledOnce();
+  expect(JSON.stringify(kept.at(-1))).toContain("A thought");
+});

@@ -139,7 +139,8 @@ test("a rejected blocker is explained next to the form", async () => {
         },
       ];
     if (command === "add_dependency")
-      throw "dependency would create a cycle or self-link";
+      // The core's own message names the loop but not the word "cycle".
+      throw "T-KQ3 can't block T-KQ1: T-KQ1 already reaches T-KQ3 through T-KQ2.";
     return undefined;
   });
   render(
@@ -163,8 +164,15 @@ test("a rejected blocker is explained next to the form", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /T-KQ3/ }));
   fireEvent.click(screen.getByRole("button", { name: "Add blocker" }));
   expect(
-    (await screen.findByText(/already blocks T-KQ3/)).textContent,
-  ).toContain("T-KQ1");
+    await screen.findByText(
+      "T-KQ1 already blocks T-KQ3 through T-KQ2, so T-KQ3 can’t also block it. Choose another ticket.",
+    ),
+  ).toBeTruthy();
+  // The same choice can never succeed, so Add waits for another ticket.
+  expect(
+    (screen.getByRole("button", { name: "Add blocker" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
 });
 
 test("an archived Plan shows its blockers without add or remove controls", async () => {

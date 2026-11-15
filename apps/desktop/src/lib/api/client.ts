@@ -1,6 +1,7 @@
 import { latestUpdateSchema } from "./progress";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { plainLabel } from "@/lib/plain-text";
 import { structured } from "@/lib/api/bridge-failure";
 import { publicationAttemptSchema } from "@/lib/api/publication";
 import { ticketStatuses } from "@/lib/statuses";
@@ -160,7 +161,8 @@ export const contextGraphSchema = z.object({
     z.object({
       id: z.string(),
       kind: z.enum(["ticket", "document", "plan"]),
-      label: z.string(),
+      // A Document's label is its derived first line, which can hold Markdown.
+      label: z.string().transform(plainLabel),
       state: z.string().nullable(),
       trashed: z.boolean(),
       activity_detail: z.boolean(),

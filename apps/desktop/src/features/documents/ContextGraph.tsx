@@ -482,8 +482,7 @@ export function ContextGraph({
                         .filter((row) => !group.kind || row.kind === group.kind)
                         .map((row) => (
                           <p key={row.key}>
-                            <strong>{edgeLabels[row.kind] ?? row.kind}</strong>{" "}
-                            · {row.text}
+                            <strong>{row.label}</strong> · {row.text}
                           </p>
                         ))}
                   </li>

@@ -131,6 +131,23 @@ it("keeps a failed capture open and retries the same request before returning", 
   fireEvent.click(screen.getByText("Done"));
   expect(close).toHaveBeenCalledOnce();
 });
+it("after a failed capture save, closing explains the risk and can discard", async () => {
+  vi.mocked(documents.save).mockRejectedValue("disk full");
+  const close = vi.fn();
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  fireEvent.click(screen.getByText("Done"));
+  await screen.findByText(/couldn’t save your changes/);
+  // Without draft recovery the draft would be lost, so × asks instead of hanging.
+  fireEvent.click(screen.getByRole("button", { name: "Close and return" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Discard and close" }),
+  );
+  expect(close).toHaveBeenCalledOnce();
+  expect(documents.save).toHaveBeenCalledOnce();
+});
 it("notices saved changes beneath a focused draft and offers reload", async () => {
   vi.useFakeTimers();
   const original = {
