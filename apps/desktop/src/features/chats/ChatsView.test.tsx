@@ -1868,7 +1868,7 @@ test("an incompatible harness notice keeps the full stop with the path", async (
       name: "Codex",
       status: "incompatible",
       path,
-      message: `Found Codex 0.1.0 at \`${path}\`. ticketd needs Codex 0.162.1 or newer.`,
+      message: `Found Codex 0.1.0 at \`${path}\`. ticketd needs Codex 0.163.0 or newer.`,
     },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));

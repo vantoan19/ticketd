@@ -7,8 +7,11 @@ use crate::install::Version;
 pub(super) use crate::install::{LaunchEnvironment, Os, parse_version};
 use crate::{Capabilities, Capability, SteeringBehavior};
 
-/// The oldest Codex whose app-server protocol this adapter was written against.
-pub(super) const MINIMUM_VERSION: Version = (0, 162, 1);
+/// The oldest Codex this adapter supports. 0.162.x cannot start its Windows sandbox
+/// whenever another Codex process holds a runtime file open (fixed in 0.163.0, PR
+/// #51822), which would fail every unattended command there. The app-server methods
+/// ticketd uses are unchanged through 0.169.0 (#387).
+pub(super) const MINIMUM_VERSION: Version = (0, 163, 0);
 
 /// Where Codex may be, most specific first: `PATH` in order, then known locations.
 pub(super) fn candidates(os: Os, environment: &LaunchEnvironment) -> Vec<PathBuf> {
@@ -60,7 +63,7 @@ pub(super) fn locate(
 
 pub(super) fn version_requirement() -> String {
     let (major, minor, patch) = MINIMUM_VERSION;
-    format!("Codex {major}.{minor}.{patch} or newer")
+    format!("Codex {major}.{minor}.{patch} or newer (run `codex update`)")
 }
 
 /// What a session on this Codex version supports. An unreadable version is unknown,
@@ -150,7 +153,12 @@ mod tests {
         assert_eq!(parse_version("codex-cli 1.2.3-beta.1"), Some((1, 2, 3)));
         assert_eq!(parse_version("codex-cli unknown"), None);
 
-        assert!(capabilities(Some("0.162.1")).steering.behavior().is_some());
+        assert!(capabilities(Some("0.163.0")).steering.behavior().is_some());
+        // The floor is 0.163.0: the Windows sandbox of 0.162.x fails to start.
+        assert!(matches!(
+            capabilities(Some("0.162.1")).steering,
+            Capability::Unsupported { reason } if reason == "Codex 0.163.0 or newer (run `codex update`)"
+        ));
         assert!(matches!(
             capabilities(Some("0.100.0")).steering,
             Capability::Unsupported { .. }
