@@ -318,7 +318,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 32px 32px 8px;
+  padding: 16px 40px 0;
   overflow-y: auto;
   overflow-anchor: none;
 }
@@ -360,7 +360,7 @@
   flex-direction: column;
   gap: 20px;
   width: 100%;
-  max-width: 600px;
+  max-width: 760px;
   margin: 0 auto;
 }
 .chat-dock {
@@ -368,11 +368,11 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 32px 24px;
+  padding: 16px 40px 18px;
 }
 .chat-dock > * {
   width: 100%;
-  max-width: 600px;
+  max-width: 760px;
   margin: 0 auto;
 }
 /* A dock part whose height glides (DockSlot): 150ms ease-out, clipped only
@@ -409,11 +409,12 @@
 .chat-you {
   max-width: 82%;
   padding: 10px 14px;
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-panel) var(--radius-panel) var(--radius-segment)
+    var(--radius-panel);
   background: var(--accent);
   color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -474,21 +475,16 @@
   line-height: var(--text-caption-line);
 }
 .chat-ai {
-  line-height: 22px;
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
 }
-/* A reply's headings are a step above its text, never display-sized: the
-   Chat's title stays the largest text on screen (LIVE2-10). h1 is 16px and
-   the rest 14px/600, as the type scale has no 15px. */
+/* Reply headings use the document role, keeping the Chat title dominant. */
 .chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
   color: var(--foreground);
-  font-size: var(--text-ui);
+  font-size: var(--text-doc);
   font-weight: 600;
-  line-height: var(--text-ui-line);
+  line-height: var(--text-doc-line);
   letter-spacing: normal;
-}
-.chat-ai .markdown-document h1 {
-  font-size: 16px;
-  line-height: 24px;
 }
 /* A single line break in a reply is a new line, as in other chat apps. A hard
    break already ends in a newline, so its <br> is not drawn twice. */
@@ -813,7 +809,7 @@ button.chat-file-name:focus-visible {
   padding: 12px 8px 8px 16px;
   border-radius: var(--radius-panel);
   background: var(--surface);
-  box-shadow: var(--shadow-border-base), var(--shadow-small);
+  box-shadow: var(--shadow-border-base);
 }
 .chat-composer:focus-within {
   box-shadow: 0 0 0 1px var(--input-focus);
@@ -849,6 +845,7 @@ button.chat-file-name:focus-visible {
    pinned at the end and never collapse. One line at every width: the leading
    controls truncate instead of the end group wrapping (STATIC-6). */
 .chat-composer-row {
+  min-height: 44px;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -998,12 +995,6 @@ button.chat-file-name:focus-visible {
   border-radius: var(--radius-segment);
   color: var(--muted-foreground);
   white-space: nowrap;
-}
-.chat-picker-harness-name {
-  flex: 0 1 auto;
-  min-width: 2ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chat-picker-harness small {
   flex: 0 1000 auto;
@@ -1195,12 +1186,10 @@ button.chat-file-name:focus-visible {
   container-type: inline-size;
   border-radius: var(--radius-panel);
   background: var(--surface);
-  box-shadow: var(--shadow-border-base), var(--shadow-small);
+  box-shadow: var(--shadow-border-base);
 }
 .chat-tray:has(textarea:focus) {
-  box-shadow:
-    0 0 0 1px var(--input-focus),
-    var(--shadow-small);
+  box-shadow: 0 0 0 1px var(--input-focus);
 }
 /* Every section above the message box ends in a hairline. */
 .chat-tray-top .chat-dock-slot-content > * {
@@ -1497,7 +1486,7 @@ button.chat-file-name:focus-visible {
   align-items: center;
   gap: 6px;
   width: 100%;
-  max-width: 600px;
+  max-width: 760px;
   margin: 0 auto;
 }
 /* One line of chips: those that wrap below it are clipped and counted into
@@ -1956,7 +1945,7 @@ button.chat-file-name:focus-visible {
 }
 .chat-pane[data-expanded] .chat-col,
 .chat-pane[data-expanded] .chat-dock > * {
-  max-width: 720px;
+  max-width: 760px;
 }
 .chat-pane[data-expanded] .chat-you {
   max-width: min(82%, 560px);
@@ -1964,7 +1953,7 @@ button.chat-file-name:focus-visible {
 .chat-pane[data-expanded] .chat-you,
 .chat-pane[data-expanded] .chat-ai {
   font-size: var(--text-reading);
-  line-height: 24px;
+  line-height: var(--text-reading-line);
 }
 /* New Chat's suggestions: up to three 36px rows under "Suggested". */
 .chat-suggestions {
@@ -2019,4 +2008,9 @@ button.chat-file-name:focus-visible {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Group labels stay inside the one keyboard-navigable Chat list. */
+.chat-list-group {
+  padding: 16px 16px 6px;
 }

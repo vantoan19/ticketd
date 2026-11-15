@@ -4817,9 +4817,13 @@ test("Workspace graph retries an incomplete island and preserves members and man
     ),
   ).toBeTruthy();
 });
-test.each([true, false])(
-  "ticket agent strip reserves its opening slot and opens the linked Chat (focused: %s)",
-  async (focused) => {
+test.each([
+  [true, "1"],
+  [false, "2"],
+  [true, "3"],
+] as const)(
+  "ticket agent strip and Inbox follow approval answer (focused: %s, choice: %s)",
+  async (focused, choice) => {
     const { notificationClient } = await import("@/lib/api/notifications");
     const nativeNotifications = vi
       .spyOn(notificationClient, "notify")
@@ -4908,12 +4912,16 @@ test.each([true, false])(
           request: "approval",
           title: "wants to run",
           command: "npm test -- board",
-          options: [{ id: "allow", label: "Allow once" }],
+          options: [
+            { id: "allow", label: "Allow once" },
+            { id: "session", label: "Allow for this session" },
+            { id: "deny", label: "Decline" },
+          ],
           state: "pending",
           free_text: false,
         }),
       );
-      const review = await within(strip).findByRole("button", {
+      await within(strip).findByRole("button", {
         name: "Review request",
       });
       expect(
@@ -4926,10 +4934,55 @@ test.each([true, false])(
       // The host owns background gating and delivery; the strip must not send a second notification.
       expect(client.notify).toBe(true);
       expect(nativeNotifications).not.toHaveBeenCalled();
-      fireEvent.click(review);
+      // Inbox projects the same pending request before it is answered.
+      fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+      expect(
+        await screen.findByRole("button", {
+          name: /Approval needed in.*Strip Chat/,
+        }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /All tickets/ }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: /Focused Ticket/ }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Review request" }),
+      );
       expect(
         await screen.findByRole("heading", { name: "Strip Chat" }),
       ).toBeTruthy();
+      const answer = vi.spyOn(client, "answer");
+      const allow = await screen.findByRole("button", { name: "Allow once" });
+      allow.focus();
+      fireEvent.keyDown(allow, { key: choice });
+      await vi.waitFor(() =>
+        expect(answer).toHaveBeenCalledWith("strip-chat", "approval", {
+          option_id:
+            choice === "1" ? "allow" : choice === "2" ? "session" : "deny",
+        }),
+      );
+      expect(
+        await screen.findByRole("button", { name: "Chats, 1 working" }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+      await vi.waitFor(() =>
+        expect(
+          screen.queryByRole("button", {
+            name: /Approval needed in.*Strip Chat/,
+          }),
+        ).toBeNull(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /All tickets/ }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: /Focused Ticket/ }),
+      );
+      const resumed = await screen.findByRole("status", {
+        name: "Ticket agent",
+      });
+      expect(within(resumed).getByText(/is working on this/)).toBeTruthy();
+      expect(
+        within(resumed).queryByRole("button", { name: "Review request" }),
+      ).toBeNull();
     } finally {
       focus.mockRestore();
       nativeNotifications.mockRestore();
@@ -5348,4 +5401,34 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   expect(
     await screen.findByRole("heading", { name: "Guide launch" }),
   ).toBeTruthy();
+});
+
+test("New Chat exposes its complete current pick before the first message", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient } = await import("@/features/chats/mock-client");
+  const client = createMockChatClient({ enabled: true });
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  const trigger = await screen.findByRole("button", {
+    name: "Claude Code, model Opus 5.5, effort Default",
+  });
+  expect(client.created).toHaveLength(0);
+  fireEvent.click(trigger);
+  const tab = await screen.findByRole("tab", { name: "Claude Code" });
+  expect(
+    within(tab).getByText("Claude Code").classList.contains("shrink-0"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("radio", { name: /^Sonnet 5/ }));
+  fireEvent.click(screen.getByRole("radio", { name: "High" }));
+  expect(
+    screen.getByRole("button", {
+      name: "Claude Code, model Sonnet 5, effort High",
+    }),
+  ).toBeTruthy();
+  expect(client.created).toHaveLength(0);
 });
