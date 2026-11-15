@@ -155,8 +155,7 @@ beforeEach(() => {
       if (
         command === "change_ticket" &&
         args?.reference &&
-        args.patch?.status &&
-        args.requestId
+        args.patch?.status
       ) {
         const {
           reference,
@@ -165,7 +164,11 @@ beforeEach(() => {
         } = args;
         if (writeOverride)
           return (
-            await writeOverride({ references: [reference], status, requestId })
+            await writeOverride({
+              references: [reference],
+              status,
+              requestId: requestId ?? "palette",
+            })
           )[0];
         saved = saved.map((item) =>
           item.reference === reference
@@ -518,6 +521,11 @@ test("drag respects external destinations and revalidates source changes made du
   startDrag();
   movePointer(1000);
   expect(screen.queryByText("Drop to change status to Done.")).toBeNull();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByText(
+      "Can't move here",
+    ),
+  ).toBeTruthy();
   releasePointer(1000);
   startDrag();
   movePointer(400);
@@ -671,7 +679,11 @@ test("a failed save keeps its saved column and retries with the same request ide
   render(<App />);
   await settle();
   await showBoard();
-  await chooseStatus("T-KQ1", "Canceled");
+  boardGeometry();
+  startDrag();
+  movePointer(1200);
+  releasePointer(1200);
+  await settle();
   expect(screen.getByRole("alert").textContent).toContain("Database busy");
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
@@ -1563,7 +1575,7 @@ test("board cards and their status actions announce the current status once", as
   await settle();
   await showBoard();
   expect(
-    screen.getByRole("button", { name: "T-KQ2 In review Ticket 2" }),
+    screen.getByRole("button", { name: "T-KQ2 In review Ticket 2 No project" }),
   ).toBeTruthy();
   const trigger = screen.getByRole("button", {
     name: "Change status of T-KQ2, current status: In review",
@@ -1576,11 +1588,82 @@ test("board cards and their status actions announce the current status once", as
   fireEvent.click(screen.getByRole("menuitemradio", { name: "Done" }));
   await settle(20);
   expect(
-    screen.getByRole("button", { name: "T-KQ2 Done Ticket 2" }),
+    screen.getByRole("button", { name: "T-KQ2 Done Ticket 2 No project" }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", {
       name: "Change status of T-KQ2, current status: Done",
     }),
+  ).toBeTruthy();
+});
+
+test("a folded destination stays folded through a deferred save, preserves the measured slot and unfolds only after confirmation", async () => {
+  let resolve!: () => void;
+  writeOverride = async ({ status }) => {
+    await new Promise<void>((done) => {
+      resolve = done;
+    });
+    saved[0] = ticket(1, status);
+    return [saved[0]];
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  const container = document.querySelector<HTMLElement>(
+    '[data-ticket-reference="T-KQ1"]',
+  )!;
+  vi.spyOn(container, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, 0, 240, 126),
+  );
+  startDrag();
+  movePointer(1200);
+  const canceled = screen.getByRole("region", { name: "Canceled column" });
+  expect(canceled.hasAttribute("data-folded")).toBe(true);
+  releasePointer(1200);
+  await settle();
+  expect(canceled.hasAttribute("data-folded")).toBe(true);
+  expect(within(canceled).getByText("Saving…")).toBeTruthy();
+  expect(
+    document.querySelector<HTMLElement>("[data-board-slot]")?.style.height,
+  ).toBe("126px");
+  resolve();
+  await settle();
+  expect(canceled.hasAttribute("data-folded")).toBe(false);
+  await settle(160);
+  expect(document.querySelector("[data-board-slot]")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await settle();
+  resolve();
+  await settle();
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).getByText(
+      "Ticket 1",
+    ),
+  ).toBeTruthy();
+});
+
+test("board arrows reach adjacent cards and S opens the shared status drill for the focused card", async () => {
+  saved.push(ticket(3));
+  render(<App />);
+  await settle();
+  await showBoard();
+  const first = screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(document.activeElement?.textContent).toContain("T-KQ3");
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+  expect(document.activeElement?.textContent).toContain("T-KQ2");
+  fireEvent.keyDown(document.activeElement!, { key: "s" });
+  await settle();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(screen.getByText("Change status")).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: "Done" }));
+  await settle();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByText(
+      "Ticket 2",
+    ),
   ).toBeTruthy();
 });

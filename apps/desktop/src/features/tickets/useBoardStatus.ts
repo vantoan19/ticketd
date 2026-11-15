@@ -7,7 +7,7 @@ import { ticketStatusChoices } from "./ticket-source";
 type Attempt = { ticket: Ticket; status: string; id: string };
 type Review = { ticket: Ticket; status: string };
 /** Where a card was before it moved at once, so a failure can put it back. */
-export type BoardMove = { status: string; index: number };
+export type BoardMove = { status: string; index: number; height?: number };
 type Notice = { message: string; undo?: () => unknown };
 
 /**
@@ -60,7 +60,15 @@ export function useBoardStatus(workspace: {
   }
   /** Shows the move at once; null when the card was not on the board. */
   function moveAtOnce(ticket: Ticket, status: string): BoardMove | null {
-    const from = latest.current.board.placeTicket({ ...ticket, status });
+    const height = document
+      .querySelector<HTMLElement>(
+        `[data-ticket-reference="${ticket.reference}"]`,
+      )
+      ?.getBoundingClientRect().height;
+    const from = {
+      ...latest.current.board.placeTicket({ ...ticket, status }),
+      ...(height && { height }),
+    };
     if (from.index < 0) return null;
     trackMove(ticket.reference, from);
     return from;
