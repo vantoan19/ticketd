@@ -106,7 +106,16 @@ function Request({
         }
         const list = choices(event.currentTarget);
         const at = list.indexOf(event.target as HTMLButtonElement);
-        if (at < 0 || event.altKey || event.metaKey || event.ctrlKey) return;
+        // Opening an approval from Inbox or a notification focuses its title
+        // so the request is announced before the person chooses an answer.
+        if (
+          (at < 0 && event.target !== title.current) ||
+          event.altKey ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.nativeEvent.isComposing
+        )
+          return;
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
           const next = at + (event.key === "ArrowDown" ? 1 : -1);
