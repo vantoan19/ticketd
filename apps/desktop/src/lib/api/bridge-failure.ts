@@ -4,7 +4,10 @@ import {
   type InvokeOptions,
 } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { reportWorkspaceFailure } from "@/lib/workspace-state";
+import {
+  noteWorkspaceSuccess,
+  reportWorkspaceFailure,
+} from "@/lib/workspace-state";
 
 /** Every kind of failure the core reports across the bridge. */
 export const failureCodes = [
@@ -125,14 +128,17 @@ export function toFailure(reason: unknown): BridgeFailure {
  * (read-only, locked, unreadable, disk full) also raises the workspace band.
  */
 export async function structured<T>(call: Promise<T>): Promise<T> {
+  let result: T;
   try {
-    return await call;
+    result = await call;
   } catch (reason) {
     const failure = toFailure(reason);
     if (isWorkspaceCode(failure.kind))
       reportWorkspaceFailure(failure.kind, failure.message);
     throw failure;
   }
+  noteWorkspaceSuccess();
+  return result;
 }
 
 /** Calls a desktop command; every rejection arrives as a BridgeFailure. */
