@@ -101,7 +101,7 @@ test("upload pending: the line counts the changes and says they are saved here",
   );
 });
 
-test("saved locally: offline changes wait, and the popover offers Try now", async () => {
+test("saved locally: offline changes wait, and the popover offers Sync now", async () => {
   await footer(
     syncStatus({
       state: "saved_locally",
@@ -120,7 +120,7 @@ test("saved locally: offline changes wait, and the popover offers Try now", asyn
   );
   api.syncNow.mockImplementation(real.syncNow);
   vi.mocked(invoke).mockRejectedValue(hostFailure("no network"));
-  fireEvent.click(within(dialog).getByRole("button", { name: "Try now" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Sync now" }));
   expect((await within(dialog).findByRole("alert")).textContent).toContain(
     "Couldn't sync. No network.",
   );
@@ -176,16 +176,21 @@ test("needs review: the line counts the tickets and Review opens them", async ()
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
-test("an expired sign-in puts Reconnect on the footer line", async () => {
+test("an expired sign-in offers Reconnect in the popover; the line stays one target", async () => {
   await footer(
     syncStatus({ state: "needs_attention", recovery: "authorization_expired" }),
   );
   expect((await line()).textContent).toBe(
     "Drive sign-in expiredSaved on this computer",
   );
+  // No second button beside the line does a related thing.
+  expect(screen.getAllByRole("button")).toHaveLength(1);
   api.recover.mockResolvedValue(syncStatus());
   api.status.mockResolvedValue(syncStatus());
-  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  const dialog = await popover();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Reconnect" }));
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  fireEvent.keyDown(dialog, { key: "Escape" });
   await waitFor(async () =>
     expect((await line()).textContent).toBe("Drive synced1 min ago"),
   );
@@ -216,7 +221,7 @@ test("saved locally: a busy Drive is named, not called offline", async () => {
   // Sync retries by itself, so the footer carries no action of its own.
   expect(screen.getAllByRole("button")).toHaveLength(1);
   expect(
-    within(await popover()).getByRole("button", { name: "Try now" }),
+    within(await popover()).getByRole("button", { name: "Sync now" }),
   ).toBeTruthy();
 });
 
@@ -242,11 +247,12 @@ test("a sync failure with no state of its own needs attention and offers Retry",
     }),
   );
   expect((await line()).textContent).toContain("Sync needs attention");
-  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-  expect((await popover()).textContent).toContain("disk I/O error");
+  const dialog = await popover();
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(dialog.textContent).toContain("disk I/O error");
 });
 
-test("a conflict waiting while offline: the line offers Review, and the popover keeps Retry", async () => {
+test("a conflict waiting while offline: the popover offers Review and keeps Retry", async () => {
   const status = syncStatus({
     state: "needs_attention",
     recovery: "offline",
@@ -254,13 +260,12 @@ test("a conflict waiting while offline: the line offers Review, and the popover 
   });
   await footer(status);
   expect((await line()).textContent).toBe("1 needs reviewOffline");
-  fireEvent.click(screen.getByRole("button", { name: "Review" }));
-  expect(openReview).toHaveBeenCalledTimes(1);
   const dialog = await popover();
-  expect(within(dialog).getByRole("button", { name: "Review" })).toBeTruthy();
   api.recover.mockResolvedValue(status);
   fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
   expect(api.recover).toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Review" }));
+  expect(openReview).toHaveBeenCalledTimes(1);
 });
 
 test("offline with something else to look at: the line says Offline and counts what waits, once", async () => {
