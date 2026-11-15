@@ -205,7 +205,9 @@ impl Connection {
         else {
             return None;
         };
-        let status = reply["status"].as_str().filter(|status| *status != "ready")?;
+        let status = reply["status"]
+            .as_str()
+            .filter(|status| *status != "ready")?;
         Some(Problem {
             kind: ProblemKind::Other,
             message: "Codex could not start its sandbox on this computer. Update Codex \
