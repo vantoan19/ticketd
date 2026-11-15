@@ -147,13 +147,18 @@ function Tooltip({
       );
   };
   const trigger = React.useRef<HTMLElement | null>(null);
+  const setTrigger = React.useCallback((node: HTMLElement | null) => {
+    if (!node) setOpen(false);
+    trigger.current = node;
+  }, []);
   React.useEffect(trackNavigationKeys, []);
   React.useEffect(() => {
     if (!open) return;
     const observer = new MutationObserver(() => {
-      if (coveredByOverlay(trigger.current)) setOpen(false);
+      if (!trigger.current?.isConnected || coveredByOverlay(trigger.current))
+        setOpen(false);
     });
-    observer.observe(document.body, { childList: true });
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [open]);
 
@@ -182,9 +187,7 @@ function Tooltip({
       <TooltipPrimitive.Trigger
         asChild
         // Radix composes this with the child's own ref.
-        ref={(node) => {
-          trigger.current = node;
-        }}
+        ref={setTrigger}
         onPointerEnter={(event) => measure(event.currentTarget)}
         onFocus={(event) => {
           measure(event.currentTarget);

@@ -1,3 +1,7 @@
+import {
+  ticketCommandActions,
+  type TicketCommandScope,
+} from "@/lib/ticket-command-actions";
 import { CommandPalette } from "./CommandPalette";
 import { useCommandKeys, type GoTo } from "./use-command-keys";
 import {
@@ -63,7 +67,7 @@ import {
 } from "@/lib/draft-recovery-context";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { WorkspaceBand } from "./WorkspaceBand";
-import { useWorkspaceState } from "@/lib/workspace-state";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { AutomationsView } from "@/features/automations/AutomationsView";
 import { RunNavigation } from "@/features/automations/navigation";
@@ -105,6 +109,10 @@ function AppContent() {
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
   const workspaceProblem = useWorkspaceState();
+  const createDisabledReason =
+    workspaceProblem?.problem === "workspace_read_only"
+      ? "The workspace is read-only"
+      : editingBlockedReason(workspaceProblem);
   const recovery = useDraftRecovery();
   const [view, setViewState] = useState<View>("tickets");
   const chat = useChatFeature();
@@ -230,6 +238,10 @@ function AppContent() {
   const setView = (next: typeof view) =>
     navigate({ view: next, keepGraph: keepGraph.current });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteReference, setPaletteReference] = useState<string | null>(null);
+  const [paletteScope, setPaletteScope] = useState<TicketCommandScope | null>(
+    null,
+  );
   const paletteReturn = useRef<HTMLElement | null>(null);
   const [capture, setCapture] = useState(false);
   // Capture has no trigger of its own, so closing it returns focus to whatever opened it.
@@ -296,6 +308,7 @@ function AppContent() {
       )
         return;
       event.preventDefault();
+      if (editingBlockedReason(workspaceProblem)) return;
       const focused = document.activeElement;
       createTriggerRef.current =
         focused instanceof HTMLButtonElement ? focused : null;
@@ -304,7 +317,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [workspaceProblem]);
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
     projects,
@@ -325,18 +338,66 @@ function AppContent() {
   } = workspace;
   const goTo = (target: GoTo) => {
     if (target === "chats" && !chat.enabled) return;
-    if (target === "all" || target === "ready") {
+    if (target === "all" || target === "ready" || target === "trash") {
       scope(target);
       setView("tickets");
     } else openView(target);
   };
-  useCommandKeys(() => {
+  function actionReference() {
+    const focused =
+      document.activeElement instanceof Element
+        ? document.activeElement.closest<HTMLElement>(
+            "[data-ticket-reference], [data-board-reference]",
+          )
+        : null;
+    return (
+      focused?.dataset.ticketReference ??
+      focused?.dataset.boardReference ??
+      (view === "tickets" ? workspace.selected : null)
+    );
+  }
+  function openPalette(scope: TicketCommandScope | null = null) {
     paletteReturn.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
+    setPaletteReference(actionReference());
+    setPaletteScope(scope);
     setPaletteOpen(true);
-  }, goTo);
+  }
+  useCommandKeys(
+    () => openPalette(),
+    goTo,
+    (event) => {
+      const reference = actionReference();
+      if (!reference) return false;
+      const action = ticketCommandActions.find((action) =>
+        matchesShortcut(event, action.shortcut),
+      );
+      if (action) {
+        openPalette(action.scope);
+        return true;
+      }
+      if (matchesShortcut(event, "ticket-copy-reference")) {
+        void navigator.clipboard.writeText(reference);
+        return true;
+      }
+      if (
+        matchesShortcut(event, "ticket-update") &&
+        editingBlockedReason(workspaceProblem) === null &&
+        view === "tickets" &&
+        workspace.selected === reference
+      ) {
+        document
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="Write an update"] .activity-composer-idle',
+          )
+          ?.click();
+        return true;
+      }
+      return false;
+    },
+  );
   useEffect(() => loadCounts.current(), [revision]);
   const openGraphItem = (node: GraphData["nodes"][number]) => {
     keepGraph.current = true;
@@ -464,17 +525,51 @@ function AppContent() {
                         Skip to content
                       </a>
                       <WindowBar />
-                      <CommandPalette
-                        open={paletteOpen}
-                        returnFocus={paletteReturn}
-                        onOpenChange={setPaletteOpen}
-                        go={goTo}
-                        chatsEnabled={chat.enabled}
-                        ticket={(reference) => {
-                          setSelected(reference);
-                          setView("tickets");
-                        }}
-                      />
+                      <StatusLineRegion host={{ current: contentPanel }}>
+                        <CommandPalette
+                          createDisabledReason={createDisabledReason}
+                          create={(kind) => {
+                            if (editingBlockedReason(workspaceProblem)) return;
+                            if (kind === "ticket") {
+                              createTriggerRef.current =
+                                paletteReturn.current instanceof
+                                HTMLButtonElement
+                                  ? paletteReturn.current
+                                  : null;
+                              setCreateStatus(undefined);
+                              setCreating(true);
+                            } else if (kind === "capture")
+                              openCapture(paletteReturn.current);
+                            else {
+                              setNewChatRequest((count) => count + 1);
+                              openView("chats");
+                            }
+                          }}
+                          initialTicket={
+                            workspace.details[paletteReference ?? ""] ??
+                            workspace.tickets.find(
+                              (ticket) => ticket.reference === paletteReference,
+                            ) ??
+                            null
+                          }
+                          reference={paletteReference}
+                          initialScope={paletteScope}
+                          projects={projects}
+                          plans={plans}
+                          refresh={async () => {
+                            await refresh();
+                          }}
+                          open={paletteOpen}
+                          returnFocus={paletteReturn}
+                          onOpenChange={setPaletteOpen}
+                          go={goTo}
+                          chatsEnabled={chat.enabled}
+                          ticket={(reference) => {
+                            setSelected(reference);
+                            setView("tickets");
+                          }}
+                        />
+                      </StatusLineRegion>
                       <div
                         className={
                           view === "settings"
@@ -494,12 +589,13 @@ function AppContent() {
                           />
                         ) : (
                           <WorkspaceSidebar
-                            onCapture={openCapture}
-                            onNewChat={() => {
-                              setNewChatRequest((count) => count + 1);
-                              openView("chats");
-                            }}
+                            onOpenPalette={() => openPalette()}
+                            createDisabledReason={createDisabledReason}
                             counts={counts}
+                            hasTickets={
+                              workspace.tickets.length > 0 ||
+                              (counts?.total ?? 0) > 0
+                            }
                             view={view}
                             workspaceGraphOpen={graphOrigin === "__workspace__"}
                             setView={openView}
@@ -542,6 +638,7 @@ function AppContent() {
                                   isMobile &&
                                   view !== "settings" && (
                                     <NarrowNav
+                                      onOpenPalette={() => openPalette()}
                                       waitingChats={chat.overview.needs_you}
                                       waitingRuns={
                                         chat.enabled

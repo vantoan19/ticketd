@@ -34,6 +34,7 @@ window.ResizeObserver = class {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   // What was typed in one test is not a draft in the next.
   drafts.clear();
 });
@@ -1095,6 +1096,9 @@ test("a failure message without a full stop still ends its sentence", async () =
 });
 
 test("while a turn runs its steps show as they start, and the working line only between steps", async () => {
+  // The elapsed label tests the supplied timestamps, not time spent rendering.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-10T10:00:12Z"));
   const client = await open(
     one(
       {

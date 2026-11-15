@@ -2,13 +2,23 @@ import { useEffect, useEffectEvent } from "react";
 import { matchesShortcut, SHORTCUTS, type Shortcut } from "@/lib/shortcuts";
 
 export type GoTo =
-  "inbox" | "all" | "ready" | "chats" | "documents" | "plans" | "settings";
+  | "inbox"
+  | "all"
+  | "ready"
+  | "chats"
+  | "documents"
+  | "projects"
+  | "plans"
+  | "settings"
+  | "trash";
 const destinations: Record<string, GoTo> = {
   "go-inbox": "inbox",
   "go-all": "all",
   "go-ready": "ready",
   "go-chats": "chats",
   "go-documents": "documents",
+  "go-settings": "settings",
+  "go-trash": "trash",
 };
 const typing =
   "input, textarea, select, [contenteditable]:not([contenteditable=false])";
@@ -16,9 +26,14 @@ const overlays =
   "[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-slot=popover-content]";
 
 /** The shell owns navigation; sequences never escape typing or overlay contexts. */
-export function useCommandKeys(open: () => void, go: (target: GoTo) => void) {
+export function useCommandKeys(
+  open: () => void,
+  go: (target: GoTo) => void,
+  ticketAction: (event: KeyboardEvent) => boolean,
+) {
   const openPalette = useEffectEvent(open);
   const navigate = useEffectEvent(go);
+  const actOnTicket = useEffectEvent(ticketAction);
   useEffect(() => {
     let pending = false;
     let timer: number | undefined;
@@ -45,6 +60,16 @@ export function useCommandKeys(open: () => void, go: (target: GoTo) => void) {
         if (document.querySelector(overlays)) return;
         event.preventDefault();
         openPalette();
+        return;
+      }
+      if (
+        !pending &&
+        !target?.closest(typing) &&
+        !document.querySelector(overlays) &&
+        actOnTicket(event)
+      ) {
+        reset();
+        event.preventDefault();
         return;
       }
       if (

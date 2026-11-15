@@ -281,7 +281,8 @@ test("archiving acts at once with Undo; an archived Plan reactivates from the Pl
   );
   expect(tickets.map((item) => item.status)).toEqual(["Todo", "Done", "Todo"]);
 
-  fireEvent.click(screen.getByRole("button", { name: /^Archived/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Archived" }));
   await screen.findByRole("heading", { name: "Plans" });
   expect(
     screen

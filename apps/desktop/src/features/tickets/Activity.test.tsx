@@ -462,7 +462,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
     expect(screen.getByRole("heading", { name: "Finding" })).toBeTruthy(),
   );
   expect(saved[0]?.brief).toBe("## Finding\n\n- [x] Done");
-  expect(screen.queryByRole("textbox")).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
 });
 

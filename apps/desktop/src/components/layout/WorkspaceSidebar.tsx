@@ -3,23 +3,24 @@ import {
   CirclePlay,
   ListTodo,
   MessagesSquare,
-  MessageSquarePlus,
   Workflow,
   Trash2,
   Settings,
-  ChevronDown,
   SquarePen,
-  NotebookPen,
   Folder,
   Layers,
-  Archive,
   FileText,
   Paperclip,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
   Rows3,
+  Search,
+  LoaderCircle,
 } from "lucide-react";
+import { plansClient, type PlanCounts } from "@/lib/api/plans";
+import { PlanRing } from "@/features/plans/PlanProgress";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   Sidebar,
@@ -38,7 +39,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuShortcut,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -49,7 +49,8 @@ import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
 import {
   useContext,
-  useRef,
+  useEffect,
+  useState,
   type ComponentType,
   type ReactNode,
   type RefObject,
@@ -59,10 +60,13 @@ import { setPreference, usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 import { useChatFeature } from "@/features/chats/use-chats";
+import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
+  if (value === 0) return null;
   return (
     <>
       {" "}
@@ -106,6 +110,7 @@ type GroupEntry = {
   /** The entry's own icon, as on its expanded row. */
   icon: ReactNode;
   onSelect: () => void;
+  count?: string;
 };
 
 /**
@@ -174,109 +179,6 @@ const projectIcon = (unlinked = false) => (
   />
 );
 
-/**
- * New ticket in one click, over the current view, with a chevron beside it
- * for the other ways to create: Capture a thought and, while Chat is on, New
- * Chat. The menu repeats New ticket so it always offers a choice.
- */
-function CreateButtons({
-  onNewTicket,
-  onCapture,
-  onNewChat,
-}: {
-  onNewTicket: (from: HTMLButtonElement | null) => void;
-  onCapture: (from: HTMLElement | null) => void;
-  onNewChat?: (() => void) | undefined;
-}) {
-  const newTrigger = useRef<HTMLButtonElement>(null);
-  const moreTrigger = useRef<HTMLButtonElement>(null);
-  // Choosing an item moves focus on its own; dismissing the menu returns it.
-  const chose = useRef(false);
-  return (
-    <span className="new-ticket-split">
-      <IconButton
-        ref={newTrigger}
-
-        label="New ticket"
-        shortcut={shortcutLabel("new-ticket")}
-        aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
-        onClick={() => onNewTicket(newTrigger.current)}
-      >
-        <SquarePen aria-hidden="true" />
-      </IconButton>
-      {/* With Chat off the menu would hold only Capture and a repeat of New
-          ticket, so the chevron's place is a direct Capture button (P3). */}
-      {!onNewChat ? (
-        <IconButton
-          ref={moreTrigger}
-          label="Capture a thought"
-          shortcut={shortcutLabel("capture")}
-          aria-keyshortcuts={ariaKeyShortcuts("capture")}
-          onClick={() => onCapture(moreTrigger.current)}
-        >
-          <NotebookPen aria-hidden="true" />
-        </IconButton>
-      ) : (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              ref={moreTrigger}
-
-              label="More ways to create"
-            >
-              <ChevronDown aria-hidden="true" />
-            </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            onCloseAutoFocus={(event) => {
-              if (chose.current) event.preventDefault();
-              chose.current = false;
-            }}
-          >
-            <DropdownMenuItem
-              aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
-              onSelect={() => {
-                chose.current = true;
-                // After the menu has closed, so it cannot take focus back.
-                window.setTimeout(() => onNewTicket(moreTrigger.current), 0);
-              }}
-            >
-              <SquarePen aria-hidden />
-              New ticket
-              <DropdownMenuShortcut aria-hidden="true">
-                {shortcutLabel("new-ticket")}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              aria-keyshortcuts={ariaKeyShortcuts("capture")}
-              onSelect={() => {
-                chose.current = true;
-                onCapture(moreTrigger.current);
-              }}
-            >
-              <NotebookPen aria-hidden />
-              Capture a thought
-              <DropdownMenuShortcut aria-hidden="true">
-                {shortcutLabel("capture")}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                chose.current = true;
-                onNewChat();
-              }}
-            >
-              <MessageSquarePlus aria-hidden />
-              New Chat
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </span>
-  );
-}
-
 export type View =
   | "tickets"
   | "projects"
@@ -291,9 +193,10 @@ export type View =
 export function WorkspaceSidebar({
   view: viewName,
   workspaceGraphOpen = false,
-  onCapture,
-  onNewChat,
+  onOpenPalette,
+  createDisabledReason,
   counts,
+  hasTickets,
   setView,
   projects,
   plans,
@@ -311,11 +214,11 @@ export function WorkspaceSidebar({
   view: View;
   /** The workspace graph covers the current view; only its entry is active. */
   workspaceGraphOpen?: boolean;
-  onCapture: (from: HTMLElement | null) => void;
-  /** Opens New Chat; only offered while Chat is turned on. */
-  onNewChat?: () => void;
+  onOpenPalette: () => void;
+  createDisabledReason: string | null;
   /** Work-view counts; Projects and Plans carry none (DESIGN.md section 6). */
   counts: SidebarCounts | null;
+  hasTickets: boolean;
   setView: (view: View) => void;
   projects: Project[];
   plans: { id: string; name: string; archived: boolean }[];
@@ -336,15 +239,43 @@ export function WorkspaceSidebar({
   // The sheet below 768px is never collapsed to icons.
   const collapsed = !isMobile && sidebarCollapsed;
   const openGraph = useContext(ContextGraphNavigation);
+  const change = useWorkspaceChange();
+  const [planProgress, setPlanProgress] = useState<Record<string, PlanCounts>>(
+    {},
+  );
+  useEffect(() => {
+    let live = true;
+    void Promise.all(
+      plans
+        .filter((plan) => !plan.archived)
+        .map(async (plan) => {
+          try {
+            return [plan.id, (await plansClient.show(plan.id)).counts] as const;
+          } catch {
+            return null;
+          }
+        }),
+    ).then((results) => {
+      if (live)
+        setPlanProgress(
+          Object.fromEntries(results.filter((result) => result !== null)),
+        );
+    });
+    return () => {
+      live = false;
+    };
+  }, [plans, change]);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const chat = useChatFeature();
   // Waiting for the person (a request, uncertain delivery, an unseen failure),
   // then finished turns not yet seen. Working never counts.
   const waiting = chat.overview.needs_you;
   const unreadChats = chat.overview.unread;
+  const working = chat.overview.working;
   const chatCounts = [
     waiting > 0 && `${waiting} waiting`,
     unreadChats > 0 && `${unreadChats} unread`,
+    waiting === 0 && unreadChats === 0 && working > 0 && `${working} working`,
   ].filter((part): part is string => Boolean(part));
   const chatsLabel = ["Chats", ...chatCounts].join(" · ");
   const chatsName = ["Chats", ...chatCounts].join(", ");
@@ -371,16 +302,16 @@ export function WorkspaceSidebar({
         key: e.id,
         label: e.name,
         active: navigation.plan === e.id && view === "tickets",
-        icon: <Layers size={16} aria-hidden="true" />,
+        icon: planProgress[e.id] ? (
+          <PlanRing name={e.name} counts={planProgress[e.id]!} decorative />
+        ) : (
+          <Layers size={16} aria-hidden="true" />
+        ),
+        count: planProgress[e.id]
+          ? `${planProgress[e.id]!.done}/${planProgress[e.id]!.todo + planProgress[e.id]!.in_progress + planProgress[e.id]!.in_review + planProgress[e.id]!.done}`
+          : "",
         onSelect: () => scope("all", "all", e.id),
       })),
-    {
-      key: "archived",
-      label: "Archived Plans",
-      active: view === "archived-plans",
-      icon: <Archive size={16} aria-hidden="true" />,
-      onSelect: () => setView("archived-plans"),
-    },
   ];
   // Ended as Needs attention, and not yet run again, taken over or dismissed.
   const runsWaiting = counts?.runs_needing_you ?? 0;
@@ -396,8 +327,7 @@ export function WorkspaceSidebar({
       closeOnAction
     >
       <SidebarHeader className="sidebar-header">
-        <div className="brand">
-          <strong>ticketd</strong>
+        <div className="sidebar-top" data-tauri-drag-region>
           {!isMobile && (
             <IconButton
               label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -416,16 +346,44 @@ export function WorkspaceSidebar({
               )}
             </IconButton>
           )}
-          <CreateButtons
-            onNewTicket={(from) => {
-              // Opens over the current view, as Capture does.
-              createTriggerRef.current = from;
-              setCreating(true);
-            }}
-            onCapture={onCapture}
-            onNewChat={chat.enabled ? onNewChat : undefined}
-          />
+          <Tooltip
+            content={createDisabledReason ?? "New ticket"}
+            shortcut={shortcutLabel("new-ticket")}
+          >
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="New ticket"
+              aria-disabled={!!createDisabledReason}
+              aria-description={createDisabledReason ?? undefined}
+              aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
+              onClick={(event) => {
+                if (createDisabledReason) return;
+                createTriggerRef.current = event.currentTarget;
+                setCreating(true);
+              }}
+            >
+              <SquarePen aria-hidden="true" />
+            </Button>
+          </Tooltip>
         </div>
+        <Tooltip
+          content="Search or jump to…"
+          shortcut={shortcutLabel("command-palette")}
+        >
+          <Button
+            variant="jump"
+            aria-label="Search or jump to…"
+            aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
+            onClick={onOpenPalette}
+          >
+            <Search aria-hidden="true" />
+            <span>Search or jump to…</span>
+            {!collapsed && (
+              <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
+            )}
+          </Button>
+        </Tooltip>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
         <nav aria-label="Workspace views" className="sidebar-nav">
@@ -444,8 +402,7 @@ export function WorkspaceSidebar({
                 <Inbox size={16} /> Inbox
                 {unread && (
                   <span className="sidebar-count" aria-hidden="true">
-                    <StatusDot tone="unread" />
-                    {counts?.unread_inbox}
+                    <StatusDot tone="unread" size={6} />
                   </span>
                 )}
               </SidebarMenuButton>
@@ -496,10 +453,20 @@ export function WorkspaceSidebar({
                   onClick={() => setView("chats")}
                 >
                   <MessagesSquare size={16} /> Chats
-                  {(waiting > 0 || unreadChats > 0) && (
+                  {(waiting > 0 || working > 0 || unreadChats > 0) && (
                     <span className="sidebar-count" aria-hidden="true">
-                      <StatusDot tone={waiting > 0 ? "attention" : "unread"} />
-                      {waiting > 0 ? waiting : unreadChats}
+                      {waiting === 0 && working > 0 ? (
+                        <LoaderCircle
+                          className="sidebar-working animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <StatusDot
+                          tone={waiting > 0 ? "attention" : "unread"}
+                          size={6}
+                        />
+                      )}
+                      {waiting > 0 ? waiting : working > 0 ? working : null}
                     </span>
                   )}
                 </SidebarMenuButton>
@@ -516,7 +483,7 @@ export function WorkspaceSidebar({
                   <Workflow size={16} /> Automations
                   {runsWaiting > 0 && (
                     <span className="sidebar-count" aria-hidden="true">
-                      <StatusDot tone="attention" />
+                      <StatusDot tone="attention" size={6} />
                       {runsWaiting}
                     </span>
                   )}
@@ -537,49 +504,107 @@ export function WorkspaceSidebar({
           {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}
         </span>
         <div className="sidebar-scroll">
-          <SidebarGroup className="sidebar-group">
-            {collapsed ? (
-              <nav aria-label="Projects" className="sidebar-nav">
-                <SidebarMenu>
-                  <GroupMenu
-                    label="Projects"
-                    icon={Folder}
-                    entries={projectEntries}
-                    manage={{
-                      label: "All projects",
-                      current: view === "projects",
-                      onSelect: () => setView("projects"),
-                    }}
-                  />
-                </SidebarMenu>
-              </nav>
-            ) : (
-              <>
-                <GroupHeading
-                  label="Projects"
-                  current={view === "projects"}
-                  onOpen={() => setView("projects")}
-                />
-                <nav aria-label="Project scopes" className="sidebar-nav">
+          {(projects.length > 0 || hasTickets) && (
+            <SidebarGroup className="sidebar-group">
+              {collapsed ? (
+                <nav aria-label="Projects" className="sidebar-nav">
                   <SidebarMenu>
-                    {projectEntries.map((entry) => (
-                      <SidebarMenuItem key={entry.key}>
-                        <SidebarMenuButton
-                          isActive={entry.active}
-                          onClick={entry.onSelect}
-                        >
-                          {entry.icon}{" "}
-                          <Tooltip content={entry.label} overflowOnly>
-                            <span>{entry.label}</span>
-                          </Tooltip>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
+                    <GroupMenu
+                      label="Projects"
+                      icon={Folder}
+                      entries={projectEntries}
+                      manage={{
+                        label: "All projects",
+                        current: view === "projects",
+                        onSelect: () => setView("projects"),
+                      }}
+                    />
                   </SidebarMenu>
                 </nav>
-              </>
-            )}
-          </SidebarGroup>
+              ) : (
+                <>
+                  <GroupHeading
+                    label="Projects"
+                    current={view === "projects"}
+                    onOpen={() => setView("projects")}
+                  />
+                  <nav aria-label="Project scopes" className="sidebar-nav">
+                    <SidebarMenu>
+                      {projectEntries.map((entry) => (
+                        <SidebarMenuItem key={entry.key}>
+                          <SidebarMenuButton
+                            isActive={entry.active}
+                            onClick={entry.onSelect}
+                          >
+                            {entry.icon}{" "}
+                            <Tooltip content={entry.label} overflowOnly>
+                              <span>{entry.label}</span>
+                            </Tooltip>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </nav>
+                </>
+              )}
+            </SidebarGroup>
+          )}
+          {(plans.length > 0 || hasTickets) && (
+            <SidebarGroup className="sidebar-group">
+              {collapsed ? (
+                <nav aria-label="Plans" className="sidebar-nav">
+                  <SidebarMenu>
+                    <GroupMenu
+                      label="Plans"
+                      icon={Layers}
+                      entries={planEntries}
+                      manage={{
+                        label: "All Plans",
+                        current: view === "plans",
+                        onSelect: () => setView("plans"),
+                      }}
+                    />
+                  </SidebarMenu>
+                </nav>
+              ) : (
+                <>
+                  <GroupHeading
+                    label="Plans"
+                    current={view === "plans"}
+                    onOpen={() => setView("plans")}
+                  />
+                  <nav aria-label="Plan scopes" className="sidebar-nav">
+                    <SidebarMenu>
+                      {planEntries.map((entry) => (
+                        <SidebarMenuItem key={entry.key}>
+                          <SidebarMenuButton
+                            isActive={entry.active}
+                            aria-label={entry.label}
+                            aria-description={
+                              entry.count
+                                ? `${entry.count} completed`
+                                : undefined
+                            }
+                            onClick={entry.onSelect}
+                          >
+                            {entry.icon}{" "}
+                            <Tooltip content={entry.label} overflowOnly>
+                              <span>{entry.label}</span>
+                            </Tooltip>
+                            {entry.count && (
+                              <span className="sidebar-count">
+                                {entry.count}
+                              </span>
+                            )}
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </nav>
+                </>
+              )}
+            </SidebarGroup>
+          )}
           <SidebarGroup className="sidebar-group">
             {!collapsed && <div className="sidebar-heading">Context</div>}
             <nav aria-label="Context" className="sidebar-nav">
@@ -614,75 +639,34 @@ export function WorkspaceSidebar({
               </SidebarMenu>
             </nav>
           </SidebarGroup>
-          <SidebarGroup className="sidebar-group">
-            {collapsed ? (
-              <nav aria-label="Plans" className="sidebar-nav">
-                <SidebarMenu>
-                  <GroupMenu
-                    label="Plans"
-                    icon={Layers}
-                    entries={planEntries}
-                    manage={{
-                      label: "All Plans",
-                      current: view === "plans",
-                      onSelect: () => setView("plans"),
-                    }}
-                  />
-                </SidebarMenu>
-              </nav>
-            ) : (
-              <>
-                <GroupHeading
-                  label="Plans"
-                  current={view === "plans"}
-                  onOpen={() => setView("plans")}
-                />
-                <nav aria-label="Plan scopes" className="sidebar-nav">
-                  <SidebarMenu>
-                    {planEntries.map((entry) => (
-                      <SidebarMenuItem key={entry.key}>
-                        <SidebarMenuButton
-                          isActive={entry.active}
-                          onClick={entry.onSelect}
-                        >
-                          {entry.icon}{" "}
-                          <Tooltip content={entry.label} overflowOnly>
-                            <span>{entry.label}</span>
-                          </Tooltip>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </nav>
-              </>
-            )}
-          </SidebarGroup>
         </div>
       </SidebarContent>
       <SidebarFooter className="sidebar-footer">
         <SourceStatusFooter />
-        <nav aria-label="Trash and settings" className="sidebar-nav">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={navigation.kind === "trash" && view === "tickets"}
-                tooltip="Trash"
-                onClick={() => scope("trash")}
-              >
-                <Trash2 size={16} /> Trash
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                id="sidebar-settings"
-                isActive={view === "settings"}
-                tooltip="Settings"
-                onClick={() => setView("settings")}
-              >
-                <Settings size={16} /> Settings
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+        <nav aria-label="Trash and settings" className="sidebar-footer-actions">
+          <IconButton
+            id="sidebar-settings"
+            label="Settings"
+            shortcut={shortcutLabel("go-settings")}
+            aria-keyshortcuts={ariaKeyShortcuts("go-settings")}
+            aria-current={view === "settings" ? "page" : undefined}
+            onClick={() => setView("settings")}
+          >
+            <Settings aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            label="Trash"
+            shortcut={shortcutLabel("go-trash")}
+            aria-keyshortcuts={ariaKeyShortcuts("go-trash")}
+            aria-current={
+              navigation.kind === "trash" && view === "tickets"
+                ? "page"
+                : undefined
+            }
+            onClick={() => scope("trash")}
+          >
+            <Trash2 aria-hidden="true" />
+          </IconButton>
         </nav>
       </SidebarFooter>
     </Sidebar>

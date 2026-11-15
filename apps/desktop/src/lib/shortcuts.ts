@@ -51,6 +51,8 @@ export const SHORTCUTS = [
       ["go-ready", "R", "Go to Ready"],
       ["go-chats", "C", "Go to Chats"],
       ["go-documents", "D", "Go to Documents"],
+      ["go-settings", "S", "Go to Settings"],
+      ["go-trash", "X", "Go to Trash"],
     ] as const
   ).map(([id, key, label]) => ({
     id,
@@ -155,6 +157,29 @@ export const SHORTCUTS = [
     label: "Resize the list and detail",
     note: "Focus the divider first.",
   },
+  ...(
+    [
+      ["ticket-status", "S", "Change status"],
+      ["ticket-project", "P", "Change project"],
+      ["ticket-plan", "L", "Move to Plan"],
+      ["ticket-tags", "T", "Edit tags"],
+      ["ticket-reminder", "H", "Remind me"],
+      ["ticket-update", "R", "Write an update"],
+    ] as const
+  ).map(([id, key, label]) => ({
+    id,
+    keys: [[key]],
+    scope: "Ticket" as const,
+    label,
+    note: "On the focused ticket in a list or board, or the open ticket; not while typing.",
+  })),
+  {
+    id: "ticket-copy-reference",
+    keys: [["Mod", "Shift", "C"]],
+    scope: "Ticket",
+    label: "Copy reference",
+    note: "The focused ticket in a list or board, or the open ticket.",
+  },
   {
     id: "ticket-edit",
     keys: [["E"]],
@@ -231,6 +256,26 @@ export const SHORTCUTS = [
     keys: [["Mod", "Z"]],
     scope: "Chat",
     label: "Take back a suggestion you just chose",
+  },
+  {
+    id: "palette-drill",
+    keys: [["Tab"], ["→"]],
+    scope: "Dialogs and menus",
+    label: "Open a palette action's options",
+  },
+  {
+    id: "palette-back",
+    keys: [["Backspace"]],
+    scope: "Dialogs and menus",
+    label: "Back to palette actions",
+    note: "From an empty search in a drill-in.",
+  },
+  {
+    id: "palette-pick",
+    keys: [["1–9"]],
+    scope: "Dialogs and menus",
+    label: "Pick a palette option",
+    note: "Inside a property drill-in.",
   },
   {
     id: "close",

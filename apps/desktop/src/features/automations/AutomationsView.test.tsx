@@ -967,9 +967,9 @@ test("a list row names a status trigger with what changes, and gives every name 
   ];
   show();
 
-  const row = within(
+  const row = await within(
     await screen.findByRole("list", { name: "Automations" }),
-  ).getByRole("button");
+  ).findByRole("button");
   expect(row.querySelector(".chat-row-title")?.textContent).toBe(long);
   expect(row.querySelector(".auto-row-start")?.textContent).toBe(
     "Status → Done",
@@ -977,9 +977,9 @@ test("a list row names a status trigger with what changes, and gives every name 
   expect(row.querySelector(".auto-row-start svg")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("radio", { name: /^Agents/ }));
-  const agent = within(
+  const agent = await within(
     await screen.findByRole("list", { name: "Agents" }),
-  ).getByRole("button");
+  ).findByRole("button");
   expect(agent.querySelector(".chat-row-title")?.textContent).toBe("Verifier");
 
   fireEvent.click(screen.getByRole("radio", { name: /^Runs/ }));
