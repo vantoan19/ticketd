@@ -84,6 +84,9 @@ const preview: DiscoveryPreview = {
 
 beforeEach(() => {
   vi.mocked(sourcesClient.options).mockResolvedValue([]);
+  vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
+    account: "octo",
+  });
 });
 afterEach(() => {
   cleanup();
@@ -91,12 +94,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** The status label at the end of the Discovery heading row. */
-function discoveryStatus() {
-  const section = screen.getByRole("region", { name: "Discovery" });
-  return section.querySelector('[data-slot="status-label"]')?.textContent;
-}
-/** The short save state in the panel bar's end slot. */
+/** The short save state in the panel bar's end slot: the rules' one label. */
 function panelStatus() {
   return document.querySelector(".settings-panel-bar-end")?.textContent;
 }
@@ -141,25 +139,25 @@ async function addRepository(name: string) {
 
 test("a new source is not configured and cannot be saved before a preview", async () => {
   render(<SourceCard entry={entry} />);
-  expect(discoveryStatus()).toBe("Not configured");
+  expect(panelStatus()).toBe("Not configured");
   const save = screen.getByRole("button", { name: "Save" });
   expect((save as HTMLButtonElement).disabled).toBe(true);
   await addRepository("o/r");
-  expect(discoveryStatus()).toBe("Unsaved changes");
+  expect(panelStatus()).toBe("Unsaved changes");
   expect((save as HTMLButtonElement).disabled).toBe(true);
   expect(
     screen.queryByText("Preview the matching issues before saving."),
   ).toBeNull();
 });
 
-test("Preview matches needs a repository; Refresh now needs a saved configuration", async () => {
+test("Preview matches needs a repository; Sync now needs a saved configuration", async () => {
   render(<SourceCard entry={entry} />);
   const previewButton = () =>
     screen.getByRole("button", {
       name: "Preview matches",
     }) as HTMLButtonElement;
   const refresh = screen.getByRole("button", {
-    name: "Refresh now",
+    name: "Sync now",
   }) as HTMLButtonElement;
   expect(previewButton().disabled).toBe(true);
   expect(refresh.disabled).toBe(true);
@@ -197,11 +195,11 @@ test("preview lists matches, then Save turns discovery on without importing at o
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText(/Matching issues are imported on the next refresh/);
+  await screen.findByText(/Matching issues are imported on the next sync/);
   expect(sourcesClient.save).toHaveBeenCalledWith("github", {
     repositories: ["o/r"],
   });
-  expect(discoveryStatus()).toBe("Saved configuration");
+  expect(panelStatus()).toBe("Saved configuration");
 });
 
 test("editing after a preview makes the preview stale and blocks Save", async () => {
@@ -231,7 +229,7 @@ test("an empty preview is allowed and a provider failure keeps the draft", async
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't preview matching issues. The account needs to be connected again.",
+    "The account needs to be connected again.",
   );
   expect(screen.getByRole("button", { name: "Remove o/r" })).toBeTruthy();
   expect(
@@ -296,14 +294,14 @@ test("a saved configuration is shown as saved until edited", () => {
       }}
     />,
   );
-  expect(discoveryStatus()).toBe("Saved configuration");
+  expect(panelStatus()).toBe("Saved configuration");
   expect((screen.getByLabelText(/Assignee/) as HTMLInputElement).value).toBe(
     "octo",
   );
   fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "someone" },
   });
-  expect(discoveryStatus()).toBe("Unsaved changes");
+  expect(panelStatus()).toBe("Unsaved changes");
   expect(screen.getByText(/still applies until you save/)).toBeTruthy();
 });
 
@@ -327,13 +325,26 @@ test("dynamic suggestions come from the connector and can be picked", async () =
   expect(screen.getByRole("button", { name: "Remove o/alpha" })).toBeTruthy();
 });
 
-test("checking the connection names the account", async () => {
-  vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
-    account: "octo",
-  });
+test("the account is checked once on opening, apart from the saved rules", async () => {
   render(<SourceCard entry={entry} />);
+  // Signed in, but no rules are saved: the workspace is not connected yet.
+  await screen.findByText("Signed in as octo");
+  expect(screen.getByText("Not connected")).toBeTruthy();
+  expect(sourcesClient.checkConnection).toHaveBeenCalledTimes(1);
+  vi.mocked(sourcesClient.checkConnection).mockRejectedValue(
+    new SourceFailure("unauthenticated", "GitHub rejected the credential"),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
-  await screen.findByText("Connected as octo.");
+  await screen.findByText("Not signed in to GitHub");
+  expect(screen.queryByText(/rejected the credential/)).toBeNull();
+});
+
+test("a hidden source page does not check the account until it is shown", async () => {
+  const { rerender } = render(<SourceCard entry={entry} hidden />);
+  await act(async () => {});
+  expect(sourcesClient.checkConnection).not.toHaveBeenCalled();
+  rerender(<SourceCard entry={entry} />);
+  await screen.findByText("Signed in as octo");
 });
 
 test("the section list offers a source only when its connector is available", async () => {
@@ -477,7 +488,7 @@ test("a saved source says how often it refreshes, when it last did, and the core
     </SourceActivityContext.Provider>,
   );
   expect(screen.getByText(/every 5 minutes while it is open/)).toBeTruthy();
-  expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
+  expect(screen.getByText(/Synced 4 min ago/)).toBeTruthy();
   expect(screen.getByText(/18 GitHub tickets checked/)).toBeTruthy();
 });
 
@@ -498,7 +509,7 @@ test("rules equal to the saved configuration are not described as changed", asyn
   );
   fireEvent.click(screen.getByRole("button", { name: "Remove o/r" }));
   await addRepository("o/r");
-  expect(discoveryStatus()).toBe("Saved configuration");
+  expect(panelStatus()).toBe("Saved configuration");
   expect(screen.queryByText(/The rules changed/)).toBeNull();
   expect(
     screen.getByText(/These rules are the saved configuration/),
@@ -546,11 +557,11 @@ test("an unavailable source never claims a fresh sync or a green configuration",
     </SourceActivityContext.Provider>,
   );
   expect(screen.getByText(/Last synced 4 min ago/)).toBeTruthy();
-  expect(screen.queryByText(/Last refreshed/)).toBeNull();
+  expect(screen.queryByText(/^Synced/)).toBeNull();
   expect(screen.getByText(/GitHub is unavailable/)).toBeTruthy();
   expect(screen.getByText("Connected as octo")).toBeTruthy();
   // The saved configuration is a separate fact and is not shown as healthy.
-  expect(discoveryStatus()).toBe("Saved configuration");
+  expect(panelStatus()).toBe("Saved configuration");
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
   ).toBeNull();
@@ -592,7 +603,7 @@ test("discovery uses the core's imported references and Discard restores saved r
   expect(table.textContent).toContain("Already T-KQ142");
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
   expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "");
-  expect(discoveryStatus()).toBe("Saved configuration");
+  expect(panelStatus()).toBe("Saved configuration");
   expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
     "disabled",
     true,
@@ -656,9 +667,9 @@ test("the panel bar and the save bar follow the draft: not configured, unsaved, 
   ).toBeNull();
 
   fireEvent.click(within(saveBar()).getByRole("button", { name: "Save" }));
-  await screen.findByText(/Matching issues are imported on the next refresh/);
+  await screen.findByText(/Matching issues are imported on the next sync/);
   expect(panelStatus()).toBe("Saved configuration");
-  expect(saveBar().textContent).toContain("saved");
+  expect(saveBar().textContent).toMatch(/saved/i);
   expect(
     within(saveBar())
       .getByRole("button", { name: "Discard changes" })
@@ -712,18 +723,16 @@ test("the Sync section shows the refresh command with a copy button", () => {
   render(<SourceCard entry={entry} />);
   const sync = screen.getByRole("region", { name: "Sync" });
   expect(sync.textContent).toContain(
-    "Agents can refresh without the desktop open",
+    "Agents can sync without the desktop open",
   );
   expect(sync.textContent).toContain("ticketd source refresh");
   expect(
-    within(sync).getByRole("button", { name: "Copy refresh command" }),
+    within(sync).getByRole("button", { name: "Copy sync command" }),
   ).toBeTruthy();
-  expect(
-    within(sync).getByRole("button", { name: "Refresh now" }),
-  ).toBeTruthy();
+  expect(within(sync).getByRole("button", { name: "Sync now" })).toBeTruthy();
 });
 
-test("a failed preview is announced beside the Discovery fields and keeps the save bar usable", async () => {
+test("a failed preview is said in the save bar, beside its actions, with no summary in the form", async () => {
   vi.mocked(sourcesClient.preview).mockRejectedValue(
     new SourceFailure("unauthenticated", "GitHub rejected the credential"),
   );
@@ -732,11 +741,12 @@ test("a failed preview is announced beside the Discovery fields and keeps the sa
   fireEvent.click(
     within(saveBar()).getByRole("button", { name: "Preview matches" }),
   );
-  const alert = await screen.findByRole("alert");
+  const alert = await within(saveBar()).findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't preview matching issues");
   expect(
-    within(screen.getByRole("region", { name: "Discovery" })).getByRole(
+    within(screen.getByRole("region", { name: "Discovery" })).queryByRole(
       "alert",
     ),
-  ).toBe(alert);
+  ).toBeNull();
   expect(panelStatus()).toBe("Unsaved changes");
 });
