@@ -1872,7 +1872,7 @@ test("an incompatible harness notice keeps the full stop with the path", async (
     },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  const sentence = await screen.findByText(/ticketd needs Codex 0\.162\.1/);
+  const sentence = await screen.findByText(/ticketd needs Codex 0\.163\.0/);
   const wrapper = sentence.querySelector(".notice-path");
   expect(wrapper?.textContent?.endsWith(".")).toBe(true);
   expect(wrapper?.nextSibling?.textContent?.startsWith(".")).toBe(false);
