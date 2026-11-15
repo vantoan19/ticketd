@@ -133,7 +133,7 @@ test("Attachment download pending: the line counts files and what is left", asyn
       attachment_downloads: { count: 2, bytes_left: 6.4 * 1048576 },
     }),
   );
-  expect((await line()).textContent).toBe("Downloading 2 files…6.4 MiB left");
+  expect((await line()).textContent).toBe("Downloading 2 files…6.4 MB left");
   const dialog = await popover();
   expect(within(dialog).getByRole("listitem").textContent).toBe(
     "2 Attachments downloading",

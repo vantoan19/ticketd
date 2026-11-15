@@ -8,8 +8,6 @@ import { ContextGraph } from "@/features/documents/ContextGraph";
 import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
 import { Documents } from "@/features/documents/Documents";
 import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
-import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
-import type { Attachment } from "@/lib/api/attachments";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { type ContextGraph as GraphData } from "@/lib/api/client";
@@ -39,7 +37,13 @@ import { WindowBar } from "@/components/layout/WindowBar";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ContextType,
+  type ReactNode,
+} from "react";
 import { matchesShortcut } from "@/lib/shortcuts";
 import {
   useWorkspaceChangePoll,
@@ -51,6 +55,7 @@ import { ExitDialog } from "@/features/sync/ExitDialog";
 import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
+import { SettingsNavigation } from "@/lib/settings-navigation";
 import {
   useDraftRecovery,
   useDraftRecoveryGeneration,
@@ -126,9 +131,6 @@ function AppContent() {
   const [newChatRequest, setNewChatRequest] = useState(0);
   // Menus and popovers opened in the content panel stay inside it (P3).
   const [contentPanel, setContentPanel] = useState<HTMLElement | null>(null);
-  const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
-    null,
-  );
   const [settingsSection, setSettingsSection] =
     useState<SettingsPageId>("appearance");
   useThemeSync();
@@ -217,8 +219,6 @@ function AppContent() {
     graph?: string | null;
     keepGraph?: boolean;
   }) => {
-    if ((next.view && next.view !== "attachments") || next.graph)
-      setAttachmentPreview(null);
     if (next.keepGraph) {
       setGraphOrigin(null);
       if (next.view) setViewState(next.view);
@@ -356,10 +356,17 @@ function AppContent() {
   });
   const isMobile = useIsMobile();
   return (
-    <ContextGraphNavigation.Provider
-      value={(id, options) => {
+    <ShellNavigation
+      graph={(id, options) => {
+        // A ticket's graph opened from its header or rail starts on its
+        // dependencies; anything else shows all connections.
         setGraphDependencies(options?.dependencies ?? false);
         navigate({ graph: id });
+      }}
+      settings={(page) => {
+        // Opening Settings starts on Appearance, so choose the page after.
+        openView("settings");
+        setSettingsSection(page);
       }}
     >
       <TicketNavigation.Provider
@@ -566,27 +573,7 @@ function AppContent() {
                                 />
                               )}
                               {view === "attachments" &&
-                                graphOrigin === null && (
-                                  <AttachmentLibrary
-                                    onPreview={setAttachmentPreview}
-                                    onOpenSettings={() => {
-                                      // Opening Settings starts on Appearance, so choose the page after.
-                                      openView("settings");
-                                      setSettingsSection("attachments");
-                                    }}
-                                  />
-                                )}
-                              {view === "attachments" &&
-                                graphOrigin === null &&
-                                attachmentPreview && (
-                                  <AttachmentPreview
-                                    target={{
-                                      id: attachmentPreview.id,
-                                      initial: attachmentPreview,
-                                    }}
-                                    onClose={() => setAttachmentPreview(null)}
-                                  />
-                                )}
+                                graphOrigin === null && <AttachmentLibrary />}
                               {
                                 <div
                                   className="management-host"
@@ -780,7 +767,7 @@ function AppContent() {
           </ProjectNavigation.Provider>
         </PlanNavigation.Provider>
       </TicketNavigation.Provider>
-    </ContextGraphNavigation.Provider>
+    </ShellNavigation>
   );
 }
 
@@ -823,4 +810,23 @@ function PreferenceFailure({
     return () => line.dismiss();
   }, [line, message]);
   return null;
+}
+
+/** The shell's two ways out of a view: a context graph, and one Settings page. */
+function ShellNavigation({
+  graph,
+  settings,
+  children,
+}: {
+  graph: ContextType<typeof ContextGraphNavigation>;
+  settings: (page: SettingsPageId) => void;
+  children: ReactNode;
+}) {
+  return (
+    <SettingsNavigation.Provider value={settings}>
+      <ContextGraphNavigation.Provider value={graph}>
+        {children}
+      </ContextGraphNavigation.Provider>
+    </SettingsNavigation.Provider>
+  );
 }

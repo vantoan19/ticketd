@@ -1,0 +1,47 @@
+/* AttachmentThumbnail: a recessed tile holding the image or the family glyph.
+   `icon` 36px (rail, pickers), `row` 24px (library rows), `tile` 96×72 (Chat). */
+.file-thumb {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.file-thumb[data-size="row"] {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-segment);
+}
+.file-thumb[data-size="tile"] {
+  width: 96px;
+  height: 72px;
+}
+.file-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.file-thumb[data-size="tile"] img {
+  object-fit: cover;
+}
+/* A white or transparent image stays visible on the light theme. */
+.file-thumb[data-image] {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 0 / 8px 8px;
+}
+.file-thumb svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+}
+.file-thumb[data-size="row"] svg {
+  width: 14px;
+  height: 14px;
+}

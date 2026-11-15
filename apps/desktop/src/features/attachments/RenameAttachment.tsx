@@ -1,14 +1,21 @@
 import { useRef, useState } from "react";
-import { DialogShell } from "@/components/ui/dialog-shell";
+import { Button } from "@/components/ui/button";
+import { FailureCaption } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { FailureAlert } from "@/components/ui/failure-alert";
+import { Tooltip } from "@/components/ui/tooltip";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 
+/**
+ * Renames a file in place, in the preview header: the title becomes the
+ * field, with Save and Cancel beside it (never a dialog over the preview).
+ * Only the name ticketd shows changes; links keep their text. Enter saves,
+ * Escape cancels. A save that failed keeps the draft and its request
+ * identity, so Retry repeats the same request.
+ */
 export function RenameAttachment({
   file,
   onClose,
@@ -22,7 +29,13 @@ export function RenameAttachment({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<FailureDescription | null>(null);
   const request = useRef<{ name: string; id: string } | null>(null);
+  const blocked = name.trim() ? null : "Enter a name.";
   async function save() {
+    if (blocked || busy) return;
+    if (name === file.display_name) {
+      onClose();
+      return;
+    }
     setBusy(true);
     setError(null);
     if (request.current?.name !== name)
@@ -41,44 +54,63 @@ export function RenameAttachment({
       setBusy(false);
     }
   }
+  const saveButton = (
+    <Button type="submit" size="sm" disabled={busy || blocked !== null}>
+      {busy ? "Saving…" : "Save name"}
+    </Button>
+  );
   return (
-    <DialogShell
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
+    <form
+      className="attachment-rename"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
       }}
-      size="sm"
-      title="Rename attachment"
-      description="The name ticketd shows for this file."
-      primaryLabel="Save name"
-      blockedReason={
-        busy ? "Saving…" : name.trim() ? null : "Enter a display name."
-      }
-      busy={busy}
-      error={
-        error && (
-          <FailureAlert
-            size="compact"
+    >
+      <Input
+        aria-label="Display name"
+        className="h-8"
+        autoFocus
+        value={name}
+        disabled={busy}
+        aria-invalid={blocked ? true : undefined}
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+      />
+      {blocked ? (
+        <Tooltip content={blocked}>
+          <span tabIndex={0} className="inline-flex">
+            {saveButton}
+          </span>
+        </Tooltip>
+      ) : (
+        saveButton
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        onClick={onClose}
+      >
+        Cancel
+      </Button>
+      {error && (
+        <div className="attachment-rename-failure">
+          <FailureCaption
+            label="Not renamed"
             failure={error}
             onRetry={() => void save()}
           />
-        )
-      }
-      onSubmit={() => void save()}
-    >
-      <Label htmlFor="attachment-display-name">Display name</Label>
-      <Input
-        id="attachment-display-name"
-        value={name}
-        disabled={busy}
-        onChange={(event) => setName(event.target.value)}
-      />
-      <p className="attachment-hint">
-        Original filename: {file.original_filename}
-      </p>
-      <p className="attachment-hint">
-        Links keep their text; only the name shown in ticketd changes.
-      </p>
-    </DialogShell>
+        </div>
+      )}
+    </form>
   );
 }

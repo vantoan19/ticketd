@@ -55,13 +55,18 @@ export function DialogShell({
   primaryFirst = false,
   children,
   busy = false,
+  tabs,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
   size?: "sm" | "md" | "lg";
-  primaryLabel: string;
+  /**
+   * The primary's label; null where there is nothing to confirm (an empty
+   * review), so the footer holds only the dismissing button.
+   */
+  primaryLabel: string | null;
   /** `destructive` when confirming stops or removes something. */
   primaryVariant?: "default" | "destructive";
   /** The dismissing button, when Cancel would mislead: Later, Close. */
@@ -97,6 +102,11 @@ export function DialogShell({
   children?: ReactNode;
   /** A submitted write is still in flight, so dismissing must wait for its result. */
   busy?: boolean;
+  /**
+   * A view switch under the header (Upload, Existing files, Google Drive): a
+   * SegmentedControl that stays put while the body below it changes.
+   */
+  tabs?: ReactNode;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
@@ -105,6 +115,16 @@ export function DialogShell({
   const focus =
     initialFocus ?? (primaryVariant === "destructive" ? "cancel" : "first");
   const note = blockedReason ?? footerNote;
+  const header = (
+    <div
+      className={`flex flex-col gap-1 pt-6 pr-16 pl-6 ${children || tabs ? "" : "pb-5"}`}
+    >
+      <DialogTitle>{title}</DialogTitle>
+      <DialogDescription className={description ? "" : "sr-only"}>
+        {description ?? title}
+      </DialogDescription>
+    </div>
+  );
   const cancel = (
     <DialogClose asChild key="cancel">
       <Button
@@ -119,7 +139,7 @@ export function DialogShell({
       </Button>
     </DialogClose>
   );
-  const submit = (
+  const submit = primaryLabel !== null && (
     <Button
       key="submit"
       ref={primary}
@@ -130,6 +150,13 @@ export function DialogShell({
       {...(primaryFirst && { className: "order-1" })}
       disabled={blocked}
       {...(blocked && { "aria-describedby": reasonId })}
+      // Submits here rather than through the form's default action, which an
+      // ancestor in the React tree (a rich editor holding the opener) may
+      // cancel. Enter in a field still clicks this button.
+      onClick={(event) => {
+        event.preventDefault();
+        if (!blocked) onSubmit();
+      }}
     >
       {primaryLabel}
       {primaryHint && (
@@ -163,21 +190,25 @@ export function DialogShell({
           },
         })}
       >
+        {tabs && (
+          <>
+            {header}
+            {/* Outside the form: a SegmentedControl's radios are view choices,
+                not fields the form submits. */}
+            <div className="shrink-0 px-6 pt-5">{tabs}</div>
+          </>
+        )}
         <form
-          className="dialog-shell-form relative min-w-0"
+          className={`dialog-shell-form min-w-0 ${tabs ? "" : "relative"}`}
           onSubmit={(event) => {
             event.preventDefault();
+            // A dialog opened from another dialog's form (Attach file inside New
+            // ticket) is portalled, but React still bubbles its submit there.
+            event.stopPropagation();
             if (!blocked) onSubmit();
           }}
         >
-          <div
-            className={`flex flex-col gap-1 pt-6 pr-16 pl-6 ${children ? "" : "pb-5"}`}
-          >
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription className={description ? "" : "sr-only"}>
-              {description ?? title}
-            </DialogDescription>
-          </div>
+          {!tabs && header}
           {children && (
             <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
               {children}

@@ -122,11 +122,12 @@ const COPY = {
   },
   "attachments-quarantine": {
     title: "Quarantine is empty",
-    sentence: "Files you clean up wait here until you restore or purge them.",
+    sentence:
+      "Files you clean up wait here until you restore them or delete them permanently.",
     action: "Show all files",
   },
-  "attachments-more": {
-    title: "No more files",
+  "attachments-select": {
+    title: "Select a file to preview it",
     sentence: "",
   },
   "workspace-graph": {

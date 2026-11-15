@@ -13,6 +13,16 @@ import { RemoveRemoteAttachment } from "./RemoveRemoteAttachment";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+
+/** Opens a row's "…" menu the way a pointer does and picks an item. */
+async function choose(row: string, item: string) {
+  const trigger = await screen.findByRole("button", {
+    name: `More actions for ${row}`,
+  });
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+  return trigger;
+}
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -106,13 +116,11 @@ test("remote removal is explicit, keeps a Drive link and retries the same reques
     }
     throw new Error(`Unexpected ${command}`);
   });
-  render(<AttachmentLibrary onPreview={() => {}} />);
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Remove Uploaded diagnostic.zip from ticketd",
-    }),
-  );
-  await screen.findByRole("dialog", { name: "Remove from ticketd?" });
+  render(<AttachmentLibrary />);
+  await choose("Uploaded diagnostic.zip", "Remove from ticketd…");
+  await screen.findByRole("dialog", {
+    name: "Remove Uploaded diagnostic.zip from ticketd?",
+  });
   await waitFor(() =>
     expect(
       (
@@ -123,15 +131,11 @@ test("remote removal is explicit, keeps a Drive link and retries the same reques
     ).toBe(false),
   );
   expect(
-    screen.getByText(/including copies uploaded by ticketd/i),
+    screen.getByText(/including for copies ticketd uploaded/i),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(requests).toHaveLength(0);
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Remove Uploaded diagnostic.zip from ticketd",
-    }),
-  );
+  await choose("Uploaded diagnostic.zip", "Remove from ticketd…");
   await waitFor(() =>
     expect(
       (
@@ -144,12 +148,12 @@ test("remote removal is explicit, keeps a Drive link and retries the same reques
   fireEvent.click(screen.getByRole("button", { name: "Remove from ticketd" }));
   await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button", { name: "Remove from ticketd" }));
-  await screen.findByRole("dialog", { name: "Removed from ticketd" });
+  // The dialog closes; the status line says so and keeps the Drive link.
+  await screen.findByText("Removed Uploaded diagnostic.zip from ticketd");
   expect(requests).toHaveLength(2);
   expect(requests[0]).toEqual(requests[1]);
+  expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByRole("button", { name: "Open in Drive" })).toBeTruthy();
-  expect(screen.getByText(/choose it again.*Google Drive/i)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() =>
     expect(
       screen.queryByRole("button", { name: file.display_name }),

@@ -43,6 +43,8 @@ const attachmentSearchResultSchema = z.object({
   attachment: attachmentSchema,
   usage: attachmentUsageSchema,
   related: z.boolean(),
+  /** A kept local file whose stored copy is no longer on this computer. */
+  missing: z.boolean().optional(),
 });
 export type AttachmentSearchResult = z.infer<
   typeof attachmentSearchResultSchema
@@ -76,6 +78,11 @@ const previewSchema = z.object({
     .nullable(),
   message: z.string().nullable(),
   can_open: z.boolean(),
+  /** The start of a plain-text file, shown in place of a media preview. */
+  text_excerpt: z
+    .object({ text: z.string(), truncated: z.boolean() })
+    .nullable()
+    .optional(),
   usage: z.object({
     total: z.number().int().nonnegative(),
     legacy_drafts_pending: z.boolean(),

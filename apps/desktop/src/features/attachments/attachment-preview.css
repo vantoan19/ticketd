@@ -14,164 +14,271 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-/* The flush dialog's frame: header, scrolling body and footer. */
-.attachment-preview-frame {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 100%;
+
+/* The preview, in the viewer dialog and the library's detail pane: a 48px
+   header, then the stage and the facts (beside each other in the viewer,
+   stacked in a pane). */
+.attachment-preview {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 .attachment-preview-header {
   display: flex;
-  flex-direction: row;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 22px 52px 20px 24px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  overflow-wrap: anywhere;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 8px 8px 16px;
+  box-shadow: inset 0 -1px 0 var(--header-boundary);
 }
-.attachment-preview-heading {
+.attachment-preview[data-layout="pane"] .attachment-preview-header {
+  padding-inline-start: 32px;
+}
+.attachment-preview-glyph {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.attachment-preview-title {
+  flex: 1 1 auto;
   min-width: 0;
-  display: grid;
+}
+.attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-preview-title > h2:focus {
+  outline: none;
+}
+.attachment-preview-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
   gap: 4px;
 }
-.attachment-preview-file-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
+.attachment-preview-actions > :first-child {
+  margin-inline-end: 4px;
 }
-.attachment-preview-layout {
+.attachment-rename {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.attachment-rename > input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.attachment-rename-failure {
+  flex-basis: 100%;
+}
+.attachment-preview-failure {
+  flex: none;
+  margin: 12px 16px 0;
+}
+.attachment-preview-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+.attachment-preview[data-layout="viewer"] .attachment-preview-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
-  overflow-y: auto;
-  min-height: 0;
+  overflow: hidden;
 }
+
+/* The stage: a recessed band under a hairline; the file sits in it. */
 .attachment-preview-stage {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  min-height: 400px;
-  padding: 28px;
-  background: var(--muted);
-}
-.attachment-preview-stage img,
-.attachment-preview-stage video {
-  max-width: 100%;
-  max-height: 60dvh;
-  object-fit: contain;
-}
-.attachment-preview-stage audio {
-  width: 100%;
-  max-width: 500px;
-}
-.attachment-preview-fallback {
-  max-width: 440px;
-  text-align: center;
-  display: grid;
-  justify-items: center;
-  gap: 16px;
-  overflow-wrap: anywhere;
-}
-.attachment-preview-fallback > svg {
-  width: 40px;
-  height: 40px;
-  color: var(--muted-foreground);
-}
-.attachment-preview-fallback p {
-  color: var(--muted-foreground);
-}
-.attachment-preview-info {
+  flex: none;
+  flex-direction: column;
+  gap: 12px;
   min-width: 0;
   padding: 24px;
-  border-left: 1px solid var(--border);
+  background: var(--recessed);
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+.attachment-preview[data-layout="viewer"] .attachment-preview-stage {
+  min-height: 0;
+  overflow: auto;
+  box-shadow: inset -1px 0 0 var(--group-hairline);
+}
+.attachment-preview-canvas {
   display: flex;
-  flex-direction: column;
-  gap: 18px;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  min-width: 0;
+}
+.attachment-preview[data-layout="pane"] .attachment-preview-canvas {
+  min-height: min(420px, 50vh);
+}
+.attachment-preview-loading {
+  align-self: stretch;
+  width: 100%;
+}
+/* Images sit on a checkerboard, so a white or transparent one stays visible on
+   the light stage; a tiny one is drawn at least 128px (shell AT-09). */
+.attachment-preview-image {
+  max-width: 100%;
+  max-height: 60dvh;
+  min-width: min(128px, 100%);
+  min-height: 128px;
+  object-fit: contain;
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 0 / 16px 16px;
+  box-shadow: var(--shadow-border-base);
+}
+.attachment-preview-canvas video {
+  max-width: 100%;
+  max-height: 60dvh;
+}
+.attachment-preview-canvas audio {
+  width: 100%;
+  max-width: 480px;
+}
+.attachment-preview-text {
+  align-self: stretch;
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+  padding: 16px 20px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: 20px;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.attachment-preview-info h3 {
+.attachment-preview-textual {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+}
+.attachment-preview-text:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.attachment-preview-text-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-align: center;
+}
+.attachment-preview-awaited {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.attachment-preview-missing {
+  max-width: 480px;
+}
+
+/* The facts: one label column, values at full contrast. */
+.attachment-preview-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px 32px 32px;
+}
+.attachment-preview[data-layout="viewer"] .attachment-preview-facts {
+  padding: 24px;
+  overflow-y: auto;
+}
+.attachment-facts {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px 16px;
+  margin: 0;
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
-  font-weight: 500;
 }
-.attachment-preview-usage {
-  border-top: 1px solid var(--border);
-  padding-top: 18px;
+.attachment-preview[data-layout="viewer"] .attachment-facts {
+  grid-template-columns: 88px minmax(0, 1fr);
 }
-.attachment-preview-usage ul {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: grid;
-  gap: 12px;
+.attachment-facts dt {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
-.attachment-preview-usage li {
-  font-size: 14px;
+.attachment-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
-.attachment-preview-usage strong {
-  font-weight: 500;
+.attachment-facts-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
 }
-.attachment-preview-usage small {
-  display: block;
-  margin-top: 4px;
+.attachment-facts-muted {
   color: var(--muted-foreground);
 }
-.attachment-preview-footer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--border);
+.attachment-uses {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attachment-uses li {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
 }
-.attachment-preview-footer .attachment-actions {
-  flex-wrap: wrap;
+.attachment-uses [data-slot="record-link"] {
+  text-align: start;
 }
-@media (max-width: 640px) {
-  .attachment-preview-header {
-    position: static;
+.attachment-uses small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-preview-extra {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .attachment-preview[data-layout="viewer"] .attachment-preview-body {
+    display: flex;
+    overflow-y: auto;
   }
-  .attachment-preview-file-actions {
-    width: 100%;
+  .attachment-preview[data-layout="viewer"] .attachment-preview-stage {
+    flex: none;
+    box-shadow: inset 0 -1px 0 var(--group-hairline);
   }
-  .attachment-preview-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .attachment-preview-layout {
-    display: block;
-  }
-  .attachment-preview-stage {
-    min-height: 220px;
-    padding: 20px;
-  }
-  .attachment-preview-stage img,
-  .attachment-preview-stage video {
-    max-height: 40dvh;
-  }
-  .attachment-preview-info {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding: 20px;
-  }
-  .attachment-preview-footer {
-    padding: 12px 16px;
-    gap: 8px;
-    display: grid;
-    grid-template-rows: auto auto;
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .attachment-preview-footer > .attachment-hint {
-    font-size: 12px;
-  }
-  .attachment-preview-footer .attachment-actions {
-    width: 100%;
-    justify-content: flex-end;
-    gap: 4px;
+  .attachment-preview-facts {
+    padding: 20px 16px;
   }
 }

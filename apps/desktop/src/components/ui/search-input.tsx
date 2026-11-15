@@ -56,6 +56,7 @@ function SearchInput({
       />
       {value && (
         <IconButton
+          type="button"
           data-slot="search-clear"
           label="Clear search"
           size="icon-xs"
