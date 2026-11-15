@@ -2855,7 +2855,7 @@ test.each([
   },
 );
 
-function paletteTickets(prefix = "KQ") {
+function paletteTickets(prefix = "KQ", status = "Todo") {
   const tickets = [
     bulkTicket(1, {
       title: "Open Ticket",
@@ -2864,6 +2864,8 @@ function paletteTickets(prefix = "KQ") {
     }),
     bulkTicket(2, {
       title: "Focused Ticket",
+      status,
+      duplicate_of: status === "Duplicate" ? `T-${prefix}1` : null,
       id: prefix === "KQ" ? "2" : `${prefix}2`,
       reference: `T-${prefix}2`,
     }),
@@ -2905,22 +2907,27 @@ test("palette actions come first, > excludes ticket search, and Tab and Backspac
   ).toBe(false);
 });
 
-test("Duplicate chooses the existing canonical-ticket review without a direct status write", async () => {
-  paletteTickets();
-  render(<App />);
-  const row = await screen.findByRole("button", { name: /Focused Ticket/ });
-  row.focus();
-  fireEvent.keyDown(row, { key: "s" });
-  fireEvent.click(
-    await screen.findByRole("option", { name: /^Mark as duplicate/ }),
-  );
-  expect(
-    await screen.findByRole("dialog", { name: "Mark T-KQ2 as a duplicate" }),
-  ).toBeTruthy();
-  expect(
-    bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
-  ).toBe(false);
-});
+test.each(["Todo", "Duplicate"])(
+  "Duplicate from %s chooses the existing canonical-ticket review without a direct status write",
+  async (status) => {
+    paletteTickets("KQ", status);
+    render(<App />);
+    const row = await screen.findByRole("button", { name: /Focused Ticket/ });
+    row.focus();
+    fireEvent.keyDown(row, { key: "s" });
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: /^(Mark as duplicate|Change canonical ticket)/,
+      }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Mark T-KQ2 as a duplicate" }),
+    ).toBeTruthy();
+    expect(
+      bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
+    ).toBe(false);
+  },
+);
 
 test("copy reference prefers the focused row over the open Ticket", async () => {
   paletteTickets();

@@ -4,7 +4,10 @@ import { invoke } from "@/lib/api/bridge-failure";
 import { failureText } from "@/lib/api/describe-failure";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { ticketStatusChoices } from "@/features/tickets/ticket-source";
+import {
+  externalSource,
+  ticketStatusChoices,
+} from "@/features/tickets/ticket-source";
 import { reminderPresets } from "@/features/tickets/reminder-presets";
 import type { TicketCommandScope } from "@/lib/ticket-command-actions";
 
@@ -101,7 +104,12 @@ export function useTicketCommands({
     if (scope === "Status")
       options = ticketStatusChoices(ticket).map((value) => ({
         value,
-        label: value === "Duplicate" ? "Mark as duplicate…" : value,
+        label:
+          value === "Duplicate"
+            ? ticket.status === "Duplicate"
+              ? "Change canonical ticket…"
+              : "Mark as duplicate…"
+            : value,
         selected: ticket.status === value,
       }));
     if (scope === "Project")
@@ -162,7 +170,11 @@ export function useTicketCommands({
       (scope === "Reminder" && reminderLoaded !== ticket.reference)
     )
       return;
-    if (scope === "Status" && ticket.status === value) {
+    if (
+      scope === "Status" &&
+      ticket.status === value &&
+      (value !== "Duplicate" || externalSource(ticket))
+    ) {
       close();
       return;
     }
