@@ -76,9 +76,9 @@
 .settings-search mark {
   background: transparent;
   color: inherit;
+  /* Semibold with an underline in the text's own colour: no status colour. */
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--status-blocked);
-}
-.settings-search > .settings-list {
-  margin-top: 28px;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
 }

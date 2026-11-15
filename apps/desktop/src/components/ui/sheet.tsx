@@ -44,6 +44,7 @@ function SheetContent({
   className,
   children,
   side = "right",
+  size = "default",
   showCloseButton = true,
   returnFocus,
   onOpenAutoFocus,
@@ -51,6 +52,11 @@ function SheetContent({
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
+  /**
+   * `nav`: a navigation sheet (DESIGN section 5), at most 280px or the window
+   * less 32px, with no inset: the nav inside sets its own.
+   */
+  size?: "default" | "nav";
   showCloseButton?: boolean;
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
@@ -65,10 +71,15 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         data-side={side}
+        data-size={size}
         className={cn(
-          "ui-sheet fixed z-50 flex flex-col gap-4",
-          side === "right" && "inset-y-0 right-0 h-full w-3/4 sm:max-w-sm",
-          side === "left" && "inset-y-0 left-0 h-full w-3/4 sm:max-w-sm",
+          "ui-sheet fixed z-50 flex flex-col",
+          size === "default" && "gap-4",
+          side === "right" && "inset-y-0 right-0 h-full",
+          side === "left" && "inset-y-0 left-0 h-full",
+          (side === "right" || side === "left") &&
+            size === "default" &&
+            "w-3/4 sm:max-w-sm",
           side === "top" && "inset-x-0 top-0 h-auto",
           side === "bottom" && "inset-x-0 bottom-0 h-auto",
           className,

@@ -4,11 +4,11 @@ import { useWorkspaceChange } from "@/lib/workspace-change";
 
 const POLL_MS = 2000;
 
-/** The Storage wording of a managed Attachment; without sync every file is local. */
+/** Where a managed Attachment's file is, in the app's storage words (set CO-16): "On this computer" or "In Google Drive"; without sync every file is local. */
 export function storageWord(availability: Availability | undefined): string {
   if (availability?.state === "downloading") return "Downloading…";
-  if (availability?.state === "not_downloaded") return "Not downloaded";
-  return "Local snapshot";
+  if (availability?.state === "not_downloaded") return "In Google Drive";
+  return "On this computer";
 }
 
 /**

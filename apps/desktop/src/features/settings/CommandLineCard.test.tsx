@@ -44,7 +44,11 @@ test("shows Installed with version and path when everything matches", async () =
   invoke.mockResolvedValue(base);
   render(<CommandLineCard />);
   expect(await screen.findByText("Installed")).toBeTruthy();
-  expect(screen.getByText("/Users/a/.local/bin/ticketd")).toBeTruthy();
+  // The path once, as PathText (never split mid-word), not again in prose.
+  expect(
+    document.querySelector('[data-slot="path-text"]')?.textContent,
+  ).toContain(".local/bin/ticketd");
+  expect(screen.queryByText(/Found at/)).toBeNull();
   expect(screen.getByText(/Uses this workspace/)).toBeTruthy();
 });
 

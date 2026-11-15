@@ -65,8 +65,11 @@ export function ChoiceTile({
   disabled = false,
   className,
   children,
+  "aria-label": ariaLabel,
 }: {
   value: string;
+  /** A name for the choice when its text says too much or too little (a long value). */
+  "aria-label"?: string;
   title: ReactNode;
   description?: ReactNode;
   preview?: ReactNode;
@@ -88,6 +91,7 @@ export function ChoiceTile({
       data-slot="choice-tile"
       value={value}
       disabled={disabled}
+      aria-label={ariaLabel}
       className={cn(
         "group flex flex-col gap-3 rounded-(--radius-panel) bg-(--surface) text-left text-sm text-foreground shadow-(--shadow-border) outline-none",
         preview

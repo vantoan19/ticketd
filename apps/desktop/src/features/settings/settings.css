@@ -9,55 +9,42 @@
   background: var(--background);
   color: var(--foreground);
 }
+/* Every entry, Search included, is one 32px row: icon, label, then a key
+   hint or a dot. Hover is --recessed on the canvas, the open page --accent. */
 .settings-back,
-.settings-search-entry,
-.settings-nav li button {
+.settings-nav-row {
   display: flex;
   align-items: center;
+  gap: 10px;
   width: 100%;
   height: 32px;
   min-height: 32px;
   flex: none;
+  padding: 0 8px;
   border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
 }
 .settings-back {
   gap: 8px;
-  padding: 0 8px;
-}
-.settings-nav li button {
-  gap: 10px;
-  padding: 0 8px;
 }
 .settings-back:hover,
-.settings-nav li button[aria-current="page"] {
+.settings-nav-row[aria-current="page"] {
   background: var(--accent);
   color: var(--foreground);
 }
-/* Nav rows on the canvas hover on --recessed, quieter than the current page. */
-.settings-nav li button:hover:not([aria-current="page"]) {
+.settings-nav-row:hover:not([aria-current="page"]) {
   background: var(--recessed);
   color: var(--foreground);
 }
 .settings-search-entry {
-  gap: 8px;
-  margin: 8px 0 6px;
-  padding: 0 6px 0 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  color: var(--disabled-foreground);
+  margin-top: 8px;
 }
-.settings-search-entry:hover {
-  box-shadow: 0 0 0 1px var(--control-boundary);
-}
-.settings-search-entry[aria-current="page"] {
-  box-shadow: 0 0 0 1px var(--input-focus);
-  color: var(--foreground);
+.settings-nav-query {
+  color: var(--muted-foreground);
 }
 .settings-back:focus-visible,
-.settings-search-entry:focus-visible,
-.settings-nav li button:focus-visible {
+.settings-nav-row:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
@@ -93,42 +80,13 @@
   color: var(--muted-foreground);
 }
 
-/* The shell stacks the section list above the content on narrow windows. */
-@media (max-width: 767px) {
-  .workspace.settings-open {
-    flex-direction: column;
-  }
-  /* The sections become one wrapping strip, so the page below is never covered. */
-  .settings-nav {
-    width: 100%;
-    max-height: none;
-    overflow: visible;
-    gap: 4px;
-    padding-bottom: 4px;
-  }
-  .settings-nav nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .settings-nav [role="group"] {
-    display: contents;
-  }
-  .settings-nav-heading {
-    display: none;
-  }
-  .settings-nav ul {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .settings-search-entry {
-    margin: 0;
-  }
-  .settings-nav li button {
-    width: auto;
-    white-space: nowrap;
-  }
+/* Below 768px the same nav is the navigation sheet (DESIGN section 5): at
+   most 280px, or the window less 32px, opened from the panel bar. */
+.settings-nav.settings-nav-sheet {
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  background: var(--surface);
 }
 
 .settings-hint {
@@ -137,44 +95,6 @@
   line-height: 16px;
   color: var(--muted-foreground);
 }
-/* Destination choice, still used by the sync conflict review. */
-.upload-destination-choice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  text-align: left;
-}
-.upload-destination-choice[data-state="checked"] {
-  border-color: var(--primary);
-  background: var(--accent);
-}
-.upload-destination-choice:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.upload-destination-choice:disabled {
-  color: var(--disabled-foreground);
-}
-.upload-destination-choice small {
-  display: block;
-  font-size: var(--text-caption);
-  color: var(--muted-foreground);
-}
-/* The radio indicator: a ring, filled with the selection blue when chosen. */
-.layout-choice-dot {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  box-shadow: inset 0 0 0 1.5px var(--control-boundary);
-}
-.upload-destination-choice[data-state="checked"] .layout-choice-dot {
-  box-shadow: inset 0 0 0 4px var(--ring);
-}
-
 /* Command line page: the details list under the status row. */
 .cli-details {
   display: grid;
@@ -202,6 +122,33 @@
 }
 .command-part {
   white-space: nowrap;
+}
+/* Agent skills: the skill folder as one PathText line; the Replace review's folder. */
+.agent-skill-path {
+  display: flex;
+  min-width: 0;
+}
+.agent-skill-folder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.agent-skill-folder-label {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+
+/* Mono values in the details are 13px code, like every other mono value. */
+.cli-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+.cli-path {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .settings-actions {

@@ -88,7 +88,7 @@ test("the two-ways-in figure is one labelled image", async () => {
   expect(screen.getAllByRole("img")).toHaveLength(1);
 });
 
-test("Copy path copies the full path and confirms in the list footer", async () => {
+test("Copy path copies the full path and confirms on the button", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -97,19 +97,19 @@ test("Copy path copies the full path and confirms in the list footer", async () 
   render(<LocationPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(info.path));
-  expect((await screen.findByRole("status", { name: "" })).textContent).toBe(
-    "Path copied.",
-  );
+  expect((await screen.findByText("Copied")).textContent).toBe("Copied");
 });
 
-test("a failed copy says so in the footer", async () => {
+test("a failed copy says so on the button", async () => {
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
   });
   render(<LocationPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
-  expect(await screen.findByText(/Couldn't copy the path/)).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: "Copy unavailable" }),
+  ).toBeTruthy();
 });
 
 test("Show in the file manager reveals the file, and a failure lands in the footer", async () => {
@@ -121,9 +121,9 @@ test("Show in the file manager reveals the file, and a failure lands in the foot
   );
   vi.mocked(workspaceClient.reveal).mockRejectedValueOnce(new Error("nope"));
   fireEvent.click(show);
-  expect(
-    await screen.findByText(/Couldn't show the file in .*\. Nope\./),
-  ).toBeTruthy();
+  expect((await screen.findByRole("alert")).textContent).toMatch(
+    /Couldn't show the file in .*\. Nope\./,
+  );
 });
 
 test("a workspace that cannot be read says so, and Retry reads it again", async () => {

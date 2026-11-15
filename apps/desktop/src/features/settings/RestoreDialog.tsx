@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, Database, ShieldCheck, Terminal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { Disclosure } from "@/components/ui/disclosure";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import { PathText } from "@/components/ui/path-text";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
-import { StatusDot } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { client } from "@/lib/api/client";
 import {
@@ -19,8 +21,6 @@ import {
 } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
-import { writeClipboard } from "@/lib/clipboard";
-import { revealFile } from "@/lib/reveal";
 import { splitPath } from "@/features/settings/settings-format";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "@/features/settings/restore-review.css";
@@ -42,6 +42,9 @@ type Phase =
 const UNCHANGED = "Your workspace hasn't changed.";
 const LAST_CHANGE =
   "The latest ticket history, Activity, Document, or evidence change. Some other edits are not dated.";
+/** The footer note while the review is open: the safety net, then the one ask. */
+const SAFETY_NOTE =
+  "A safety backup of this workspace is saved first. Pause ticketd commands until it finishes.";
 
 function formatWhen(timestamp: string | null) {
   return timestamp ? formatDateTime(timestamp) : "No changes yet";
@@ -80,34 +83,35 @@ function differences(current: WorkspaceSummary, backup: WorkspaceSummary) {
   return `The backup has ${joined}.`;
 }
 
+/** Why a chosen file cannot be restored: a title without a period, one sentence. */
 function problem(inspection: BackupInspection) {
   const { check } = inspection;
   switch (check.status) {
     case "newer_format":
       return {
-        title: "This backup can't be restored by this version.",
-        detail: `It was saved by a newer ticketd (workspace format ${check.backup_version}; this app reads up to ${check.supported_version}). Update ticketd, then try again.`,
+        title: "Saved by a newer ticketd",
+        detail: `It uses workspace format ${check.backup_version}; this app reads up to ${check.supported_version}. Update ticketd, then try again.`,
       };
     case "not_ticketd":
       return {
-        title: "This isn't a ticketd backup.",
+        title: "Not a ticketd backup",
         detail:
-          "The file isn't a ticketd workspace. Choose a file saved with Back up now… or ticketd backup.",
+          "Choose a file made with Back up now or the ticketd backup command.",
       };
     case "missing_tables":
       return {
-        title: "This backup is incomplete.",
+        title: "This backup is incomplete",
         detail: `It is missing tables ticketd needs: ${check.tables.join(", ")}.`,
       };
     case "current_workspace":
       return {
-        title: "This is the current workspace.",
+        title: "This is the current workspace",
         detail:
           "Restoring a file over itself would change nothing. Choose a backup file instead.",
       };
     case "damaged":
       return {
-        title: "This backup is damaged.",
+        title: "This backup is damaged",
         detail: `It failed ticketd's checks: ${check.reason}.`,
       };
     case "valid":
@@ -115,13 +119,16 @@ function problem(inspection: BackupInspection) {
   }
 }
 
+/** This workspace beside the backup, at 14/20; a value that differs is weight 500. */
 function Comparison({
   current,
   backup,
 }: {
-  current: WorkspaceSummary;
-  backup: WorkspaceSummary;
+  current: WorkspaceSummary | null;
+  backup: WorkspaceSummary | null;
 }) {
+  const cell = (summary: WorkspaceSummary | null, value: () => string) =>
+    summary ? value() : <Skeleton className="h-2.5 w-12" />;
   return (
     <table className="restore-compare">
       <caption className="sr-only">
@@ -130,38 +137,58 @@ function Comparison({
       </caption>
       <thead>
         <tr>
-          <th scope="col">Replaces</th>
-          <th scope="col">Current workspace</th>
-          <th scope="col">This backup</th>
+          <td />
+          <th scope="col">This workspace</th>
+          <th scope="col">Backup</th>
         </tr>
       </thead>
       <tbody>
+        {COUNTS.map(([key, label]) => (
+          <tr key={key}>
+            <th scope="row">{label}</th>
+            <td>{cell(current, () => String(current?.[key]))}</td>
+            <td
+              data-differs={
+                current && backup ? backup[key] !== current[key] : undefined
+              }
+            >
+              {cell(backup, () => String(backup?.[key]))}
+            </td>
+          </tr>
+        ))}
         <tr>
           <th scope="row">
             <Tooltip content={LAST_CHANGE}>
               <span tabIndex={0} aria-description={LAST_CHANGE}>
-                Last recorded change
+                Last change
               </span>
             </Tooltip>
           </th>
-          <td>{formatWhen(current.last_change)}</td>
-          <td>{formatWhen(backup.last_change)}</td>
+          <td>
+            {cell(current, () => formatWhen(current?.last_change ?? null))}
+          </td>
+          <td
+            data-differs={
+              current && backup
+                ? backup.last_change !== current.last_change
+                : undefined
+            }
+          >
+            {cell(backup, () => formatWhen(backup?.last_change ?? null))}
+          </td>
         </tr>
-        {COUNTS.map(([key, label]) => (
-          <tr key={key}>
-            <th scope="row">{label}</th>
-            <td>{current[key]}</td>
-            <td data-differs={backup[key] !== current[key]}>{backup[key]}</td>
-          </tr>
-        ))}
       </tbody>
     </table>
   );
 }
 
 /**
- * Reviews a backup before it replaces the workspace. Nothing changes until
- * Replace workspace is chosen. Opens only with a file already picked.
+ * Reviews a backup before it replaces the workspace (DESIGN section 10): the
+ * consequence first as an attention notice, then this workspace beside the
+ * backup, then attachment details behind one disclosure. The footer says a
+ * safety backup comes first; the destructive primary names the result. A file
+ * that cannot be restored hides it and offers another file instead. Nothing
+ * changes until Replace workspace is chosen. Opens with a file already picked.
  */
 export function RestoreDialog({
   path,
@@ -176,7 +203,9 @@ export function RestoreDialog({
   const [file, setFile] = useState(path);
   const [phase, setPhase] = useState<Phase>({ name: "checking" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
-  const [copied, setCopied] = useState("");
+  const [revealFailure, setRevealFailure] = useState<FailureDescription | null>(
+    null,
+  );
   const latest = useRef(0);
   const recovery = useDraftRecovery();
 
@@ -249,17 +278,17 @@ export function RestoreDialog({
     setPhase({ name: "done", inspection, safetyPath, warning, reloadFailure });
   }
 
-  async function copy(text: string) {
-    const failure = await writeClipboard(text);
-    setCopied(
-      failure === null ? "Path copied." : `Couldn't copy the path: ${failure}.`,
-    );
-  }
   async function reveal(target: string) {
-    setCopied((await revealFile(target)) ?? "");
+    try {
+      await workspaceClient.reveal(target);
+      setRevealFailure(null);
+    } catch (reason) {
+      setRevealFailure(
+        describeFailure(reason, `show the file in ${fileManagerName()}`),
+      );
+    }
   }
 
-  const busy = phase.name === "restoring" || phase.name === "checking";
   const done = phase.name === "done";
   const inspection =
     phase.name === "review" || phase.name === "restoring"
@@ -268,8 +297,9 @@ export function RestoreDialog({
   const valid =
     inspection && inspection.check.status === "valid" ? inspection.check : null;
   const issue = inspection ? problem(inspection) : null;
-  const { folder, name } = splitPath(file);
+  const { name } = splitPath(file);
   const manager = fileManagerName();
+  const attachments = inspection?.attachment_content;
 
   // A file that cannot be restored offers the way forward, not a dead button.
   const invalid = phase.name === "unreadable" || issue !== null;
@@ -281,11 +311,11 @@ export function RestoreDialog({
       }}
       size="lg"
       busy={phase.name === "restoring"}
-      title="Restore from backup"
+      title={done ? "Workspace restored" : "Replace this workspace?"}
       description={
         done
           ? "The workspace now matches the backup."
-          : "Check what this backup contains. Nothing changes until you confirm."
+          : `${name}. Nothing changes until you replace the workspace.`
       }
       {...(done
         ? {
@@ -298,206 +328,165 @@ export function RestoreDialog({
           }
         : invalid
           ? {
-              primaryLabel: "Choose another…",
+              primaryLabel: "Choose another file…",
               blockedReason: null,
-              footerNote: "Choose a backup saved by this version or earlier.",
               onSubmit: () => void chooseAnother(),
             }
           : {
-              primaryLabel: "Replace workspace with backup",
+              primaryLabel:
+                phase.name === "restoring" ? "Replacing…" : "Replace workspace",
               primaryVariant: "destructive" as const,
               blockedReason:
                 phase.name === "checking"
                   ? "Checking the backup…"
                   : phase.name === "restoring"
-                    ? "Restoring…"
+                    ? SAFETY_NOTE
                     : null,
+              footerNote: SAFETY_NOTE,
               onSubmit: () => inspection && void replace(inspection),
             })}
-      {...(failure && {
-        error: <FailureAlert size="compact" failure={failure} />,
+      {...((failure ?? revealFailure) && {
+        error: (
+          <FailureAlert
+            size="compact"
+            failure={(failure ?? revealFailure) as FailureDescription}
+          />
+        ),
       })}
     >
-      {/* Focusable so End, Page Down and the arrow keys scroll the review; focus is otherwise on the buttons outside it. */}
-      <div
-        className="restore-body"
-        role="region"
-        aria-label="Backup review"
-        tabIndex={0}
-      >
+      {/* A file that can't be restored: the reason first, the fix is the primary. */}
+      {phase.name === "unreadable" && (
+        <FailureAlert
+          failure={{
+            ...phase.failure,
+            sentence: `${phase.failure.sentence} ${UNCHANGED}`,
+          }}
+        />
+      )}
+      {issue && (
+        <Alert tone="error">
+          <AlertTitle>{issue.title}</AlertTitle>
+          <AlertDescription>
+            {issue.detail} {UNCHANGED}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* The consequence first, then the comparison. Checking reserves the
+          same layout, so the dialog does not grow when the check returns. */}
+      {(phase.name === "checking" || valid) && (
+        <>
+          <Alert tone="attention" role="note">
+            <AlertTitle>This replaces everything in this workspace</AlertTitle>
+            <AlertDescription>
+              Including follows, reminders and inbox state.
+              {valid &&
+                inspection &&
+                ` ${differences(inspection.current, valid.summary)}`}
+            </AlertDescription>
+          </Alert>
+          <Comparison
+            current={inspection?.current ?? null}
+            backup={valid?.summary ?? null}
+          />
+        </>
+      )}
+
+      {!done && (
         <div className="restore-file">
-          <span className="restore-file-tile" aria-hidden="true">
-            <Database />
+          <span className="restore-file-path" aria-label="Chosen backup file">
+            <PathText path={file} />
           </span>
-          <span className="restore-file-text">
-            <code aria-label="Chosen backup file">{name}</code>
-            <span>
-              <Tooltip content={folder} overflowOnly>
-                <span aria-label="Backup folder">{folder}</span>
-              </Tooltip>
-              {valid && (
-                <span className="restore-file-check">
-                  {" · "}
-                  <StatusLabel tone="checked" size="caption">
-                    Integrity checked · format version {valid.format_version}
-                  </StatusLabel>
-                </span>
-              )}
+          {valid && (
+            <StatusLabel tone="checked" size="caption">
+              Integrity checked · format {valid.format_version}
+            </StatusLabel>
+          )}
+          {phase.name === "checking" && (
+            <span role="status" className="restore-muted">
+              Checking the backup…
             </span>
-          </span>
-          {!done && !invalid && (
+          )}
+          {!invalid && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              disabled={busy}
+              disabled={phase.name !== "review"}
               onClick={() => void chooseAnother()}
             >
               Choose another…
             </Button>
           )}
         </div>
+      )}
 
-        {phase.name === "checking" && (
-          <p role="status" className="restore-muted">
-            Checking the backup…
-          </p>
-        )}
-
-        {phase.name === "unreadable" && (
-          <FailureAlert
-            failure={{
-              ...phase.failure,
-              sentence: `${phase.failure.sentence} ${UNCHANGED}`,
-            }}
-          />
-        )}
-
-        {issue && (
-          <Alert tone="error">
-            <AlertTitle>{issue.title}</AlertTitle>
-            <AlertDescription>
-              {issue.detail} {UNCHANGED}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {valid && inspection && (
-          <>
-            <Comparison current={inspection.current} backup={valid.summary} />
+      {valid && attachments && (
+        <Disclosure label="Attachment details">
+          <div
+            className="restore-attachments"
+            aria-label="Attachment completeness"
+          >
             <p>
-              {differences(inspection.current, valid.summary)} Restoring
-              replaces everything in this workspace, including follows,
-              reminders and inbox state.
-              {inspection.attachment_content &&
-                " Local attachment bytes in the backup are complete."}
+              Local attachment files in the backup are complete:{" "}
+              {attachments.local_snapshots}{" "}
+              {attachments.local_snapshots === 1 ? "file" : "files"} on this
+              computer; {attachments.retained_files} retained{" "}
+              {attachments.retained_files === 1 ? "file" : "files"},{" "}
+              {attachments.retained_bytes.toLocaleString()} bytes. Includes
+              unused files, files in Trash, and retained quarantine.
             </p>
-            {inspection.attachment_content && (
-              <div
-                className="restore-attachments"
-                aria-label="Attachment completeness"
-              >
-                <p>
-                  {inspection.attachment_content.local_snapshots} local{" "}
-                  {inspection.attachment_content.local_snapshots === 1
-                    ? "snapshot"
-                    : "snapshots"}
-                  ; {inspection.attachment_content.retained_files} retained{" "}
-                  {inspection.attachment_content.retained_files === 1
-                    ? "file"
-                    : "files"}
-                  ,{" "}
-                  {inspection.attachment_content.retained_bytes.toLocaleString()}{" "}
-                  bytes. Includes unused files, files in Trash, and retained
-                  quarantine.
-                </p>
-                <p>
-                  {inspection.attachment_content.remote_references} remote{" "}
-                  {inspection.attachment_content.remote_references === 1
-                    ? "reference"
-                    : "references"}
-                  : links and metadata only. Remote file bytes and account
-                  credentials are not backed up.
-                </p>
-                {inspection.attachment_content.remote_references > 0 && (
-                  <p>
-                    Restoring does not verify Drive access. If unavailable,
-                    connect the appropriate account and select the file again in
-                    the attachment picker's Google Drive tab. Last-known names
-                    and references are preserved.
-                  </p>
-                )}
-              </div>
-            )}
-          </>
-        )}
-
-        {phase.name === "done" && phase.inspection.check.status === "valid" && (
-          <div role="status" className="restore-done">
-            <p className="restore-checked">
-              <StatusDot tone="checked" />
-              <span>
-                <strong>Workspace restored.</strong>{" "}
-                <span className="restore-muted">
-                  You're now working from the backup:{" "}
-                  {phase.inspection.check.summary.tickets} tickets,{" "}
-                  {phase.inspection.check.summary.activities} activities.
-                </span>
-              </span>
+            <p>
+              {attachments.remote_references}{" "}
+              {attachments.remote_references === 1 ? "file" : "files"} in Google
+              Drive: links and their details only. Files in Google Drive and
+              account sign-ins are not backed up.
             </p>
-            <div className="restore-notes">
+            {attachments.remote_references > 0 && (
               <p>
-                <strong>Safety backup of the previous workspace</strong>
-              </p>
-              <code aria-label="Safety backup path">{phase.safetyPath}</code>
-              <div className="restore-actions">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void copy(phase.safetyPath)}
-                >
-                  <Copy aria-hidden="true" />
-                  Copy path
-                </Button>
-              </div>
-            </div>
-            {phase.warning && (
-              <Alert tone="attention" size="compact">
-                <AlertDescription>{phase.warning}</AlertDescription>
-              </Alert>
-            )}
-            {phase.reloadFailure ? (
-              <FailureAlert size="compact" failure={phase.reloadFailure} />
-            ) : (
-              <p className="restore-muted">
-                Open tickets and views were reloaded from the restored
-                workspace.
+                Restoring does not check Google Drive access. If a file is
+                unavailable, connect the account and choose the file again in
+                the attachment picker's Google Drive tab. Names and links are
+                kept.
               </p>
             )}
-            <p role="status" className="restore-muted">
-              {copied}
-            </p>
           </div>
-        )}
-      </div>
+        </Disclosure>
+      )}
 
-      {valid && (
-        <div className="restore-pinned">
-          <div className="restore-pin">
-            <ShieldCheck aria-hidden="true" />
-            <span>
-              <strong>A safety backup comes first</strong>
-              <span>Restore that safety backup to undo.</span>
+      {phase.name === "done" && phase.inspection.check.status === "valid" && (
+        <div role="status" className="restore-done">
+          <p>
+            You're now working from the backup:{" "}
+            {phase.inspection.check.summary.tickets} tickets,{" "}
+            {phase.inspection.check.summary.activities} activities.
+          </p>
+          <div className="restore-safety">
+            <span className="restore-safety-text">
+              <span className="restore-safety-label">
+                Safety backup of the previous workspace
+              </span>
+              <PathText path={phase.safetyPath} />
             </span>
+            {/* Show in Finder is the footer's primary. */}
+            <CopyButton
+              text={phase.safetyPath}
+              label="Copy path"
+              subject={phase.safetyPath}
+            />
           </div>
-          <div className="restore-pin">
-            <Terminal aria-hidden="true" />
-            <span>
-              <strong>Pause ticketd CLI commands</strong>
-              <span>Agents should stop recording while the restore runs.</span>
-            </span>
-          </div>
+          {phase.warning && (
+            <Alert tone="attention" size="compact">
+              <AlertDescription>{phase.warning}</AlertDescription>
+            </Alert>
+          )}
+          {phase.reloadFailure ? (
+            <FailureAlert size="compact" failure={phase.reloadFailure} />
+          ) : (
+            <p className="restore-muted">
+              Open tickets and views were reloaded from the restored workspace.
+            </p>
+          )}
         </div>
       )}
     </DialogShell>

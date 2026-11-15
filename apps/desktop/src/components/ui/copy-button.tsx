@@ -34,7 +34,9 @@ export function CopyButton({
         {...name}
         data-copied={copied ? "" : undefined}
         {...(className && { className })}
-        onClick={() => void copy(label, text)}
+        // useCopy names what is copied ("path"), not the button ("Copy
+        // path"), so a failure reads "Couldn't copy path: …".
+        onClick={() => void copy(label.replace(/^copy\s+/i, ""), text)}
       >
         {copied ? <Check /> : <Copy />}
       </IconButton>

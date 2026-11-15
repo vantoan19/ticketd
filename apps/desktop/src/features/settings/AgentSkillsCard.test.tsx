@@ -134,7 +134,7 @@ test("an unreadable folder or a linked SKILL.md stays in its row with no Replace
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Access is denied.",
   );
-  expect(screen.getByText("Could not check")).toBeTruthy();
+  expect(screen.getByText("Couldn't check")).toBeTruthy();
   expect(screen.getByText(/is a link or folder/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Replace/ })).toBeNull();
   expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
@@ -207,7 +207,9 @@ test("the Replace review shows the folder, and the footnote opens Command line",
     await screen.findByRole("button", { name: "Replace for Claude Code" }),
   );
   const dialog = await screen.findByRole("dialog");
-  expect(within(dialog).getByText("~/.claude/skills/ticketd")).toBeTruthy();
+  // The folder as PathText: its last folder on line one, the rest under it.
+  expect(within(dialog).getByText("ticketd")).toBeTruthy();
+  expect(dialog.textContent).toContain(".claude/skills");
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   expect(
     screen.getByRole("button", { name: "Check the command line" }).dataset.slot,

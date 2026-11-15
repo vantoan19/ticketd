@@ -57,7 +57,8 @@ test("Export… saves to the chosen file and the footer names it with a way to s
   renderPage();
   expect(screen.queryByText(/Export saved to/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  const status = await screen.findByText(/Export saved to/);
+  // A check and the words, then the file as PathText; the full path is spoken.
+  const status = await screen.findByText("Export saved");
   expect(status.textContent).toBe("Export saved to /tmp/out.json");
   expect(workspaceClient.chooseSavePath).toHaveBeenCalledWith(
     expect.objectContaining({ filterName: "JSON", extension: "json" }),

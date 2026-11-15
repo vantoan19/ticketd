@@ -1,6 +1,6 @@
 import { emptyCopy } from "@/lib/empty-copy";
 import { Fragment, useEffect, useId, useMemo, useRef } from "react";
-import { ChevronRight, Search, type LucideIcon } from "lucide-react";
+import { ChevronRight, Search, SearchX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -126,7 +126,14 @@ export function SearchPage() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
-        <p className="settings-search-status" id={statusId} role="status">
+        {/* With no match the empty state says it; the status stays for screen readers. */}
+        <p
+          className={
+            needle && hits.length === 0 ? "sr-only" : "settings-search-status"
+          }
+          id={statusId}
+          role="status"
+        >
           {status}
         </p>
         {groups.map(({ page, hits: rows }) => {
@@ -172,24 +179,23 @@ export function SearchPage() {
           );
         })}
         {needle && hits.length === 0 && (
-          <SettingsList>
-            <EmptyState
-              icon={<Search />}
-              title={emptyCopy("settings-search", { query: needle }).title}
-              description={emptyCopy("settings-search").sentence}
-              action={shortcuts.map((shortcut) => (
-                <Button
-                  key={shortcut.id}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openPage(shortcut.id)}
-                >
-                  {shortcut.label}
-                </Button>
-              ))}
-            />
-          </SettingsList>
+          // Unboxed, like every view's no-match block.
+          <EmptyState
+            icon={<SearchX />}
+            title={emptyCopy("settings-search", { query: needle }).title}
+            description={emptyCopy("settings-search").sentence}
+            action={shortcuts.map((shortcut) => (
+              <Button
+                key={shortcut.id}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => openPage(shortcut.id)}
+              >
+                {shortcut.label}
+              </Button>
+            ))}
+          />
         )}
       </div>
     </SettingsPage>

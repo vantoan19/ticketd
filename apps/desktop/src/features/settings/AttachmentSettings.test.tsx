@@ -171,11 +171,9 @@ test("a failed save keeps what was typed and shows the reason without Saved", as
 test("the local tile lists what local storage gives", async () => {
   answer();
   render(<AttachmentSettings />);
-  const local = await screen.findByRole("radio", { name: /Local workspace/ });
+  const local = await screen.findByRole("radio", { name: /On this computer/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
-  expect(local.textContent).toContain(
-    "Files are stored beside the workspace on this computer.",
-  );
+  expect(local.textContent).toContain("Files are stored beside the workspace.");
   expect(local.textContent).toContain("Available offline");
   expect(local.textContent).toContain("Included in backups");
 });
@@ -216,7 +214,7 @@ test("Drive stays selectable and shows no setup link when it is configured", asy
 test("choosing Drive picks a writable folder, shows the folder row, and a failed change keeps it", async () => {
   answer();
   render(<AttachmentSettings />);
-  const local = await screen.findByRole("radio", { name: /Local workspace/ });
+  const local = await screen.findByRole("radio", { name: /On this computer/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
   fireEvent.click(screen.getByRole("radio", { name: /Google Drive/ }));
   await screen.findByText("Team files");
@@ -247,7 +245,7 @@ test("an unreadable destination offers Retry and the footnote stays", async () =
   );
   answer();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  const local = await screen.findByRole("radio", { name: /Local workspace/ });
+  const local = await screen.findByRole("radio", { name: /On this computer/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(

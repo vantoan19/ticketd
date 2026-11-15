@@ -13,9 +13,18 @@
 .export-commands .export-command-label:not(:first-child) {
   margin-top: 8px;
 }
-.export-saved-path {
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
+/* Export saved: a check and the words, then the file as PathText. */
+.export-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.export-saved-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--foreground);
 }
 .export-comparison {
   width: 100%;

@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { CopyButton } from "@/components/ui/copy-button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Picker } from "@/components/ui/picker";
@@ -127,4 +134,18 @@ test("focus rings are for the keyboard: a click marks pointer input, a key resto
   expect(root.dataset.input).toBe("pointer");
   fireEvent.keyDown(document.body, { key: "Tab" });
   expect(root.dataset.input).toBe("keyboard");
+});
+
+test("a copy that fails names what it copied, not its own label", async () => {
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    configurable: true,
+  });
+  render(<CopyButton label="Copy path" text="/work/app" />);
+  fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe(
+      "Couldn't copy path: the clipboard refused it.",
+    ),
+  );
 });

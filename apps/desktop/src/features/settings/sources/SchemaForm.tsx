@@ -4,6 +4,12 @@ import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { failureText } from "@/lib/api/describe-failure";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import type { ChoiceOption, SchemaField } from "@/lib/api/sources";
 import type { Draft } from "@/features/settings/sources/config-values";
 
@@ -44,41 +50,51 @@ function FieldNote({
   /** Why Enter did not add the typed text; it replaces the other messages. */
   refused?: string;
 }) {
-  const text = pending.trim();
-  if (refused)
-    return (
-      <>
-        {field.help && (
-          <p className="settings-hint" id={`${id}-help`}>
-            {field.help}
-          </p>
-        )}
-        <p id={`${id}-error`} role="alert" className="settings-failure">
-          {refused}
+  const messages = fieldMessages(field, errors, pending, refused);
+  return (
+    <>
+      {field.help && (
+        <p className="source-field-note" id={`${id}-help`}>
+          {field.help}
         </p>
-      </>
-    );
-  const explained = text !== "" && errors.length > 0;
-  if (explained) {
+      )}
+      {/* At the field it describes, never a summary elsewhere (set SR-05). */}
+      {messages.length > 0 && (
+        <FieldError id={`${id}-error`}>{messages.join(" ")}</FieldError>
+      )}
+    </>
+  );
+}
+
+/** What is wrong with the field, in the order it should be fixed. */
+function fieldMessages(
+  field: SchemaField,
+  errors: string[],
+  pending: string,
+  refused: string,
+) {
+  if (refused) return [refused];
+  const text = pending.trim();
+  if (text !== "" && errors.length > 0) {
     const shape =
       field.type === "multi_select" && field.format === "owner_name"
         ? "is not a repository; expected owner/name, then press Enter to add it."
         : "has not been added; press Enter to add it.";
-    errors = [`“${text}” ${shape}`];
+    return [`“${text}” ${shape}`];
   }
+  return errors.map((message) => `${field.label} ${message}`);
+}
+
+/** The ids that describe a field: its help, then its error when there is one. */
+function describedBy(
+  id: string,
+  field: SchemaField,
+  messages: string[],
+): string | undefined {
   return (
-    <>
-      {field.help && (
-        <p className="settings-hint" id={`${id}-help`}>
-          {field.help}
-        </p>
-      )}
-      {errors.map((message) => (
-        <FieldError key={message}>
-          {explained ? message : `${field.label} ${message}`}
-        </FieldError>
-      ))}
-    </>
+    [field.help && `${id}-help`, messages.length > 0 && `${id}-error`]
+      .filter(Boolean)
+      .join(" ") || undefined
   );
 }
 
@@ -106,6 +122,13 @@ function MultiSelectField({
   const [refused, setRefused] = useState("");
   const requests = useRef(0);
   const container = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** Inside the field or its suggestions, which render in a portal. */
+  const inside = (node: Node | null) =>
+    node !== null &&
+    (container.current?.contains(node) === true ||
+      panel.current?.contains(node) === true);
   const full = value.length >= field.max_items;
   const dynamic = field.options.source === "dynamic";
 
@@ -146,7 +169,12 @@ function MultiSelectField({
       if ((event as CustomEvent<string>).detail !== id) setOpen(false);
     };
     const pressed = (event: Event) => {
-      if (!container.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (
+        !container.current?.contains(target) &&
+        !panel.current?.contains(target)
+      )
+        setOpen(false);
     };
     window.addEventListener(OPENED, otherOpened);
     document.addEventListener("pointerdown", pressed, true);
@@ -190,6 +218,17 @@ function MultiSelectField({
         })
       : suggestions;
   const available = offered.filter((option) => !value.includes(option.value));
+  const messages = fieldMessages(field, errors, query, refused);
+  /** Arrow keys move through the suggestions; they live in a portal. */
+  function moveFocus(from: Element | null, step: 1 | -1) {
+    const options = Array.from(
+      panel.current?.querySelectorAll<HTMLButtonElement>("button") ?? [],
+    );
+    const at = from ? options.indexOf(from as HTMLButtonElement) : -1;
+    const next = at + step;
+    if (next < 0) inputRef.current?.focus();
+    else options[Math.min(next, options.length - 1)]?.focus();
+  }
   return (
     <div
       ref={container}
@@ -200,110 +239,136 @@ function MultiSelectField({
         if (event.key === "Escape" && open) {
           event.stopPropagation();
           setOpen(false);
+          inputRef.current?.focus();
         }
       }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null))
-          setOpen(false);
+        if (!inside(event.relatedTarget as Node | null)) setOpen(false);
       }}
     >
       <Label htmlFor={id}>
         {field.label}
         {!field.required && <span className="source-required">Optional</span>}
       </Label>
-      <div className="source-chip-input">
-        {value.length > 0 && (
-          <ul className="source-chips" aria-label={`Selected ${field.label}`}>
-            {value.map((item) => (
-              <li key={item} className="source-chip">
-                <span>{item}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${item}`}
-                  disabled={disabled}
-                  onClick={() => onChange(value.filter((v) => v !== item))}
-                >
-                  <X aria-hidden="true" size={12} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <Input
-          id={id}
-          value={query}
-          disabled={disabled || full}
-          placeholder={
-            field.key === "repositories"
-              ? value.length > 0
-                ? "Add another repository"
-                : "e.g. acme/billing-api"
-              : field.key === "labels"
-                ? "e.g. bug, payments"
-                : "Search or type, then press Enter"
-          }
-          aria-describedby={
-            [field.help && `${id}-help`, refused && `${id}-error`]
-              .filter(Boolean)
-              .join(" ") || undefined
-          }
-          aria-invalid={errors.length > 0 || refused !== "" || undefined}
-          onFocus={() => {
-            if (!open) show();
-          }}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setRefused("");
-            show();
-          }}
+      <Popover open={open && !full}>
+        <PopoverAnchor asChild>
+          <div className="source-chip-input">
+            {value.length > 0 && (
+              <ul
+                className="source-chips"
+                aria-label={`Selected ${field.label}`}
+              >
+                {value.map((item) => (
+                  <li key={item} className="source-chip">
+                    <Badge>{item}</Badge>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${item}`}
+                      disabled={disabled}
+                      onClick={() => onChange(value.filter((v) => v !== item))}
+                    >
+                      <X aria-hidden="true" size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Input
+              ref={inputRef}
+              id={id}
+              value={query}
+              disabled={disabled || full}
+              placeholder={
+                field.key === "repositories"
+                  ? value.length > 0
+                    ? "Add another repository"
+                    : "e.g. acme/billing-api"
+                  : field.key === "labels"
+                    ? "e.g. bug, payments"
+                    : "Search or type, then press Enter"
+              }
+              aria-describedby={describedBy(id, field, messages)}
+              aria-invalid={messages.length > 0 || undefined}
+              onFocus={() => {
+                if (!open) show();
+              }}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setRefused("");
+                show();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (field.allow_custom) add(query);
+                } else if (event.key === "ArrowDown" && open) {
+                  event.preventDefault();
+                  moveFocus(null, 1);
+                }
+              }}
+            />
+          </div>
+        </PopoverAnchor>
+        {/* Portaled with the menu elevation; it flips above rather than run
+            under the save bar stuck to the panel's foot (set SR-04). Focus
+            stays in the field: the list is reached with the arrow keys. */}
+        <PopoverContent
+          ref={panel}
+          variant="list"
+          side="bottom"
+          align="start"
+          role="group"
+          aria-label={`${field.label} suggestions`}
+          collisionPadding={{ top: 16, right: 16, bottom: 72, left: 16 }}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
           onKeyDown={(event) => {
-            if (event.key === "Enter") {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
-              if (field.allow_custom) add(query);
+              moveFocus(
+                document.activeElement,
+                event.key === "ArrowDown" ? 1 : -1,
+              );
             }
           }}
-        />
-      </div>
+        >
+          <div className="source-suggestions">
+            {loading && <p className="source-suggestions-note">Searching…</p>}
+            {!loading && failure && <FieldError>{failure}</FieldError>}
+            {!loading && !failure && available.length === 0 && (
+              <p className="source-suggestions-note">
+                {query.trim() === ""
+                  ? "Start typing to search."
+                  : "No suggestions."}
+              </p>
+            )}
+            {!loading && available.length > 0 && (
+              <ul>
+                {available.map((option) => (
+                  <li key={option.value}>
+                    <button
+                      type="button"
+                      onClick={() => add(option.value)}
+                      aria-label={`Add ${option.label}`}
+                    >
+                      <span>{option.label}</span>
+                      {option.description && (
+                        <span className="source-suggestions-meta">
+                          {option.description}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
       {full && (
-        <p className="settings-hint">
+        <p className="source-field-note">
           {`Up to ${field.max_items} ${field.label.toLowerCase()} can be selected.`}
         </p>
-      )}
-      {open && !full && (
-        <div
-          className="source-suggestions"
-          aria-label={`${field.label} suggestions`}
-        >
-          {loading && <p className="settings-hint">Searching…</p>}
-          {!loading && failure && <FieldError>{failure}</FieldError>}
-          {!loading && !failure && available.length === 0 && (
-            <p className="settings-hint">
-              {query.trim() === ""
-                ? "Start typing to search."
-                : "No suggestions."}
-            </p>
-          )}
-          {!loading && (
-            <ul>
-              {available.map((option) => (
-                <li key={option.value}>
-                  <button
-                    type="button"
-                    onClick={() => add(option.value)}
-                    aria-label={`Add ${option.label}`}
-                  >
-                    <span>{option.label}</span>
-                    {option.description && (
-                      <span className="settings-hint">
-                        {option.description}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       )}
       <FieldNote
         id={id}
@@ -404,7 +469,11 @@ function TextField({
               ? `e.g. ${field.placeholder}`
               : undefined
         }
-        aria-describedby={field.help ? `${id}-help` : undefined}
+        aria-describedby={describedBy(
+          id,
+          field,
+          fieldMessages(field, errors, "", ""),
+        )}
         aria-invalid={errors.length > 0 || undefined}
         onChange={(event) => onChange(event.target.value)}
       />
