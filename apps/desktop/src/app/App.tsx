@@ -26,6 +26,7 @@ import { useReminderNotifications } from "@/features/tickets/useReminderNotifica
 import { usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -54,12 +55,15 @@ import { useChatFeature } from "@/features/chats/use-chats";
 export function App() {
   return (
     <WorkspaceChangeProvider value={useWorkspaceChangePoll()}>
-      <SyncStatusProvider>
-        <ChatProvider>
-          <AppContent />
-        </ChatProvider>
-        <ExitDialog />
-      </SyncStatusProvider>
+      {/* One tooltip delay for the whole app (DESIGN.md section 4). */}
+      <TooltipProvider>
+        <SyncStatusProvider>
+          <ChatProvider>
+            <AppContent />
+          </ChatProvider>
+          <ExitDialog />
+        </SyncStatusProvider>
+      </TooltipProvider>
     </WorkspaceChangeProvider>
   );
 }

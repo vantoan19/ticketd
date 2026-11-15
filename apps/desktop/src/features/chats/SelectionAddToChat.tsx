@@ -8,12 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   useChatClient,
   type ChatSummary,
@@ -224,24 +219,19 @@ export function SelectionAddToChat() {
             setOpen(next);
           }}
         >
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    tabIndex={-1}
-                    aria-keyshortcuts="Meta+L Control+L"
-                  >
-                    <MessageSquarePlus aria-hidden />
-                    Add to chat
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Add to chat (⌘L)</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip content="Add to chat" shortcut="⌘L">
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                tabIndex={-1}
+                aria-keyshortcuts="Meta+L Control+L"
+              >
+                <MessageSquarePlus aria-hidden />
+                Add to chat
+              </Button>
+            </DropdownMenuTrigger>
+          </Tooltip>
           <DropdownMenuContent
             align="start"
             collisionPadding={8}

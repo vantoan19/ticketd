@@ -103,6 +103,9 @@
   --error-foreground: #991b1b;
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
+  /* One tooltip chip in both themes (DESIGN.md section 4): dark on light. */
+  --tooltip: #171717;
+  --tooltip-foreground: #ffffff;
   --radius: 6px;
   --radius-segment: 4px;
   --radius-panel: 12px;
@@ -186,6 +189,9 @@
   --error-foreground: #fecaca;
   --destructive: #fecaca;
   --shadow-border-base: 0 0 0 1px #ffffff24;
+  /* A step above the dark panel; --shadow-tooltip adds the 14% ring. */
+  --tooltip: #2e2e2e;
+  --tooltip-foreground: #ededed;
   --status-ready: #45a557;
   --status-checked: #45a557;
   --status-blocked: #ff990a;
@@ -2068,6 +2074,27 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   order: -2;
 }
 
+/* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
+   240px, no arrow. */
+.ui-tooltip {
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  background: var(--tooltip);
+  color: var(--tooltip-foreground);
+  box-shadow: var(--shadow-tooltip);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
+}
+.ui-tooltip[data-state="delayed-open"],
+.ui-tooltip[data-state="instant-open"] {
+  animation: tooltip-enter 0.15s var(--motion-swift);
+}
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+  }
+}
 /* A tooltip only labels; its positioning wrapper must not cover the controls
    beside the trigger (it hid "Clear filters" after the search popover closed). */
 [data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {

@@ -375,7 +375,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  await openManageMenu("Manage projects", "All projects");
+  fireEvent.click(screen.getByRole("button", { name: "All projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
@@ -562,6 +562,7 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   const trigger = screen.getByRole("button", { name: "New ticket" });
+  fireEvent.keyDown(document.body, { key: "Tab" });
   trigger.focus();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1385,7 +1386,7 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  await openManageMenu("Manage projects", "All projects");
+  fireEvent.click(screen.getByRole("button", { name: "All projects" }));
   unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -1458,8 +1459,8 @@ test("the narrow navigation trigger shows its label and gets focus back when the
   trigger.focus();
   fireEvent.click(trigger);
   expect(screen.getByRole("dialog", { name: "Navigation" })).toBeTruthy();
-  // Focus lands on a control with a tooltip; the first Escape closes the tooltip.
-  fireEvent.keyDown(document, { key: "Escape" });
+  // Focus lands on a row whose rail tooltip is not mounted in the sheet, so
+  // the first Escape closes the sheet (shell SH-17).
   fireEvent.keyDown(document, { key: "Escape" });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
@@ -2179,7 +2180,7 @@ test("opening the workspace graph from Plans does not stack the Plans list", asy
       omitted_groups: [],
     }),
   });
-  await openManageMenu("Manage Plans", "All Plans");
+  fireEvent.click(screen.getByRole("button", { name: "All Plans" }));
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {
@@ -2315,9 +2316,30 @@ test("the folded sidebar opens Projects and Plans as one menu each", async () =>
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   // The rail holds one entry per group, not a row per project or Plan.
-  expect(screen.queryByRole("button", { name: "Manage projects" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "All projects" })).toBeNull();
   await openManageMenu("Projects", "All projects");
   expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
   await openManageMenu("Plans", "All Plans");
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
+});
+
+test("every icon on the folded rail names itself in a tooltip", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  const rail = document.querySelector<HTMLElement>(".sidebar")!;
+  const unnamed = within(rail)
+    .getAllByRole("button")
+    .filter((button) => {
+      // Shell SH-07: Attachments had no tooltip on the folded rail.
+      fireEvent.keyDown(document.body, { key: "Tab" });
+      act(() => button.focus());
+      const shown = screen
+        .queryAllByRole("tooltip")
+        .some((tip) => tip.textContent?.trim());
+      act(() => button.blur());
+      return !shown;
+    })
+    .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  expect(unnamed).toEqual([]);
 });

@@ -39,12 +39,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Reference } from "@/components/ui/reference";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { DocumentNavigation } from "@/features/documents/navigation";
@@ -602,16 +597,9 @@ export function StepRow({
   );
   return (
     <>
-      {decision ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>{row}</TooltipTrigger>
-            <TooltipContent side="right">{decision}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        row
-      )}
+      <Tooltip content={decision} side="right">
+        {row}
+      </Tooltip>
       {failure && (
         <p className="chat-fine chat-step-alert" role="alert">
           {failure}
