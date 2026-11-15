@@ -6346,3 +6346,25 @@ test("header Follow keeps failures in the pane status line, retries and respects
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
   expect(follow.hasAttribute("disabled")).toBe(true);
 });
+
+test.each([
+  ["Agent skills", "Agent skills"],
+  ["Google Drive sync", "Google Drive"],
+])(
+  "first run's %s action is also reachable in the palette",
+  async (command, heading) => {
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(<App />);
+    await screen.findByRole("region", { name: "Your workspace is ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+    const palette = await screen.findByRole("dialog", {
+      name: "Go anywhere",
+    });
+    fireEvent.click(
+      within(palette).getByRole("option", { name: new RegExp(command) }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: heading }),
+    ).toBeTruthy();
+  },
+);

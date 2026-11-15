@@ -13,7 +13,13 @@ import { isMacPlatform } from "@/lib/platform";
  */
 
 export type ShortcutScope =
-  "Everywhere" | "Lists" | "Ticket" | "Plans" | "Chat" | "Dialogs and menus";
+  | "Everywhere"
+  | "Lists"
+  | "Ticket"
+  | "Plans"
+  | "Chat"
+  | "First run"
+  | "Dialogs and menus";
 
 export type Shortcut = {
   id: string;
@@ -34,21 +40,10 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
   Plans: "On a Plan or the Plans page, as noted.",
   Chat: "In a Chat's message box and its requests.",
   "Dialogs and menus": "In any dialog, menu or sheet.",
+  "First run": "While the guide button or its palette command is focused.",
 };
 
 export const SHORTCUTS = [
-  ...(
-    [
-      ["go-agent-skills", "Open Agent skills"],
-      ["go-sync", "Open Google Drive sync"],
-    ] as const
-  ).map(([id, label]) => ({
-    id,
-    label,
-    keys: [["Enter"]],
-    scope: "Dialogs and menus" as const,
-    note: "While the first-run button is focused.",
-  })),
   {
     id: "go-automations",
     keys: [],
@@ -392,6 +387,18 @@ export const SHORTCUTS = [
     label: "Close the top surface",
     note: "Closes only the foremost dialog, menu or sheet, and never throws away a draft.",
   },
+  ...(
+    [
+      ["go-agent-skills", "Open Agent skills"],
+      ["go-sync", "Open Google Drive sync"],
+    ] as const
+  ).map(([id, label]) => ({
+    id,
+    label,
+    keys: [["Enter"]],
+    scope: "First run" as const,
+    note: "While the guide button or its palette command is focused.",
+  })),
 ] as const satisfies readonly Shortcut[];
 
 export type ShortcutId = (typeof SHORTCUTS)[number]["id"];
