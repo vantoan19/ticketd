@@ -4006,23 +4006,27 @@ test("ticket state lanes join ranked linked Chats without changing unrelated row
   );
   const first = await screen.findByRole("button", { name: /First/ });
   await vi.waitFor(() =>
-    expect(within(first).getByText("Approval needed")).toBeTruthy(),
+    expect(within(first).getByLabelText("Approval needed")).toBeTruthy(),
   );
   const second = screen.getByRole("button", { name: /Second/ });
-  expect(within(second).getByText("Working")).toBeTruthy();
-  expect(within(second).getByRole("img", { name: "codex" })).toBeTruthy();
+  expect(within(second).getByLabelText("Working")).toBeTruthy();
+  expect(
+    within(within(second).getByLabelText("Working")).getByRole("img", {
+      name: "codex",
+    }),
+  ).toBeTruthy();
   const unrelated = screen.getByRole("button", { name: /Unrelated/ });
   expect(within(unrelated).queryByText(/Working|Approval needed/)).toBeNull();
-  expect(within(unrelated).getByText("Reminder due")).toBeTruthy();
+  expect(within(unrelated).getByLabelText("Reminder due")).toBeTruthy();
   expect(
-    within(screen.getByRole("button", { name: /Duplicate ticket/ })).getByText(
-      "Duplicate of T-KQ9",
-    ),
+    within(
+      screen.getByRole("button", { name: /Duplicate ticket/ }),
+    ).getByLabelText("Duplicate of T-KQ9"),
   ).toBeTruthy();
   list.mockResolvedValue([]);
   act(() => notify());
   await vi.waitFor(() =>
-    expect(within(first).getByText("Blocked by T-KQ9")).toBeTruthy(),
+    expect(within(first).getByLabelText("Blocked by T-KQ9")).toBeTruthy(),
   );
   expect(within(second).queryByText("Working")).toBeNull();
 });
@@ -4079,7 +4083,7 @@ test.each([
       null;
     render(<App />);
     const row = await screen.findByRole("button", { name: /First/ });
-    expect(within(row).getByText("Ready for review")).toBeTruthy();
+    expect(within(row).getByLabelText("Ready for review")).toBeTruthy();
     expect(publisherMark(row)).toBe(viewBox);
     fireEvent.click(row);
     const update = await screen.findByRole("article", {
