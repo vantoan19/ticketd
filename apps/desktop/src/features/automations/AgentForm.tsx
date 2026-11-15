@@ -506,6 +506,7 @@ export function AgentForm({
                 program, project AGENTS.md, memories, sub-agents, computer and
                 browser use, and bundled skills. It cannot switch off your Codex
                 rules, your global AGENTS.md or the skills in ~/.agents/skills.
+                Your “always allow” rules apply only when Run commands is on.
               </p>
             ) : (
               <p className="agent-hint">
