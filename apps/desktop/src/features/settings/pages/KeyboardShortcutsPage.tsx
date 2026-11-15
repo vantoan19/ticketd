@@ -25,7 +25,7 @@ function matches(shortcut: Shortcut, query: string) {
   return [
     shortcut.label,
     shortcut.note ?? "",
-    spokenKeys(shortcut.keys),
+    spokenKeys(shortcut.keys, undefined, shortcut.sequences),
     shortcut.scope,
   ]
     .join(" ")
@@ -77,7 +77,7 @@ export function KeyboardShortcutsPage() {
                 {...(item.note ? { description: item.note } : {})}
                 trailing={
                   <span className="shortcut-keys">
-                    <KeyChords keys={item.keys} />
+                    <KeyChords keys={item.keys} sequences={item.sequences} />
                   </span>
                 }
               />

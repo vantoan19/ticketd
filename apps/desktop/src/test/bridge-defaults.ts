@@ -37,6 +37,9 @@ export function bridgeDefault(
     case "list_projects":
     case "list_plans":
     case "find_tickets":
+    case "search_tickets":
+    case "recent_documents":
+    case "pinned_documents":
     case "activity_feed":
     case "ticket_history":
     case "list_evidence":
