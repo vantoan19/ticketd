@@ -214,7 +214,9 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   // Measured again whenever the message's width changes: a pane narrowed after
   // the message was shown clamps it, and then it needs Show more. A clamped box
   // reports only its four lines as its scroll height in WebKit and Chrome, so the
-  // full height is read with the clamp lifted for the measurement.
+  // full height is read with the clamp lifted for the measurement. Only a hidden
+  // line counts: a mention's 24px hit area pokes 2px out of a 20px line (CH-31),
+  // so anything under half a line is not more text.
   useLayoutEffect(() => {
     const box = text.current;
     if (!box || more) return;
@@ -223,7 +225,8 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
       box.removeAttribute("data-clamped");
       const full = box.scrollHeight;
       box.setAttribute("data-clamped", "");
-      setLong(full > clamped + 1);
+      const line = Number.parseFloat(getComputedStyle(box).lineHeight) || 0;
+      setLong(full - clamped > Math.max(1, line / 2));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
