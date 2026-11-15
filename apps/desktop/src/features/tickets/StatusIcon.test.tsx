@@ -18,3 +18,16 @@ test("is named by its status unless decorative", () => {
   expect(directStatuses).not.toContain("Duplicate");
   expect(directStatuses).toContain("Canceled");
 });
+
+for (const status of ticketStatuses) {
+  for (const size of [16, 14, 12]) {
+    test(`${status} is spoken at ${size}px and silent beside its label`, () => {
+      const { rerender } = render(<StatusIcon status={status} size={size} />);
+      expect(
+        screen.getByRole("img", { name: status }).getAttribute("width"),
+      ).toBe(String(size));
+      rerender(<StatusIcon status={status} size={size} decorative />);
+      expect(screen.queryByRole("img")).toBeNull();
+    });
+  }
+}

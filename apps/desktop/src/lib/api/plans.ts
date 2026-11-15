@@ -37,6 +37,7 @@ const viewSchema = z.object({
 
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
+export type PlanCounts = View["counts"];
 export const plansClient = {
   async setDocument(planId: string, documentId: string, present: boolean) {
     await invoke("set_plan_document", {

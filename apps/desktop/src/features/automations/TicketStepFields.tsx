@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Bell, Braces, CircleDot, SquarePen } from "lucide-react";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { Bell, Braces, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -215,7 +216,7 @@ export function ChangeTicketFields({
           <Picker
             stacked
             label="Status"
-            icon={<CircleDot aria-hidden />}
+            icon={<StatusIcon status={change.status} decorative />}
             value={change.status}
             onValueChange={(status) => onChange({ ...change, status })}
             options={STATUSES}

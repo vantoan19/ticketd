@@ -1,6 +1,5 @@
 import {
   Inbox,
-  CircleDot,
   CirclePlay,
   ListTodo,
   MessagesSquare,
@@ -21,6 +20,7 @@ import {
   PanelLeftOpen,
   Rows3,
 } from "lucide-react";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   Sidebar,
   SidebarHeader,
@@ -483,7 +483,7 @@ export function WorkspaceSidebar({
                 tooltip="In progress"
                 onClick={() => scope("progress")}
               >
-                <CircleDot size={16} /> In progress
+                <StatusIcon status="In progress" decorative /> In progress
                 {counts && <SidebarCount value={counts.in_progress} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
