@@ -299,7 +299,7 @@ blockquote.chat-quote {
   font-size: inherit;
   text-decoration: none;
 }
-/* Add to chat: one ghost button at the selection's end. */
+/* Add to chat: one ghost button above the selection (selection-bar.ts). */
 /* ⌘L with nothing selected: a short line at the foot of the window. */
 .add-to-chat-hint {
   position: fixed;
@@ -322,6 +322,10 @@ blockquote.chat-quote {
   border-radius: var(--radius);
   background: var(--popover);
   box-shadow: var(--shadow-menu);
+}
+/* The open menu takes the bar's place; the button stays as its anchor. */
+.add-to-chat-bar[data-open] {
+  visibility: hidden;
 }
 @media (prefers-reduced-motion: reduce) {
   .add-to-chat-bar {
