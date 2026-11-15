@@ -245,7 +245,11 @@ export function TicketHeader({
                         : "–"}
                     </span>
                     <IconButton
-                      label="Previous ticket"
+                      label={
+                        returnLabel === "Inbox"
+                          ? "Previous entry"
+                          : "Previous ticket"
+                      }
                       shortcut="K"
                       aria-keyshortcuts="K"
                       disabled={!position || position.index <= 1}
@@ -260,7 +264,9 @@ export function TicketHeader({
                       <ChevronUp />
                     </IconButton>
                     <IconButton
-                      label="Next ticket"
+                      label={
+                        returnLabel === "Inbox" ? "Next entry" : "Next ticket"
+                      }
                       shortcut="J"
                       aria-keyshortcuts="J"
                       disabled={!position || position.index >= position.total}

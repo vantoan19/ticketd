@@ -1,3 +1,5 @@
+import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
+import { requestTicketUpdate } from "@/features/tickets/activity-composer-request";
 import {
   TicketCommandContext,
   ticketCommandActions,
@@ -402,11 +404,7 @@ function AppContent() {
         view === "tickets" &&
         workspace.selected === reference
       ) {
-        document
-          .querySelector<HTMLButtonElement>(
-            '[aria-label="Write an update"] .activity-composer-idle',
-          )
-          ?.click();
+        requestTicketUpdate(reference);
         return true;
       }
       return false;
@@ -922,45 +920,49 @@ function AppContent() {
                                     setPaletteOpen(true);
                                   }}
                                 >
-                                  <TicketWorkspaceView
-                                    key={`tickets:${recoveryGeneration}`}
-                                    workspace={workspace}
-                                    bulk={bulk}
-                                    hidden={
-                                      (view !== "tickets" &&
-                                        view !== "inbox") ||
-                                      graphOrigin !== null
-                                    }
-                                    inboxTarget={inboxTarget}
-                                    // The Inbox is a triage split: entries open
-                                    // beside it, without leaving the view (S6).
-                                    {...(view === "inbox" && {
-                                      inbox: (
-                                        <Inbox
-                                          revision={revision}
-                                          selected={workspace.selected}
-                                          onBrowse={() => setView("tickets")}
-                                          select={(reference, noteId) => {
-                                            setInboxTarget(
-                                              noteId
-                                                ? {
-                                                    reference,
-                                                    id: noteId,
-                                                    key: Date.now(),
-                                                  }
-                                                : null,
-                                            );
-                                            setSelected(reference);
-                                          }}
-                                        />
-                                      ),
-                                    })}
-                                    onCreate={(trigger, status) => {
-                                      createTriggerRef.current = trigger;
-                                      setCreateStatus(status);
-                                      setCreating(true);
-                                    }}
-                                  />
+                                  <InboxTriageProvider
+                                    active={view === "inbox"}
+                                  >
+                                    <TicketWorkspaceView
+                                      key={`tickets:${recoveryGeneration}`}
+                                      workspace={workspace}
+                                      bulk={bulk}
+                                      hidden={
+                                        (view !== "tickets" &&
+                                          view !== "inbox") ||
+                                        graphOrigin !== null
+                                      }
+                                      inboxTarget={inboxTarget}
+                                      // The Inbox is a triage split: entries open
+                                      // beside it, without leaving the view (S6).
+                                      {...(view === "inbox" && {
+                                        inbox: (
+                                          <Inbox
+                                            revision={revision}
+                                            selected={workspace.selected}
+                                            onBrowse={() => setView("tickets")}
+                                            select={(reference, noteId) => {
+                                              setInboxTarget(
+                                                noteId && reference
+                                                  ? {
+                                                      reference,
+                                                      id: noteId,
+                                                      key: Date.now(),
+                                                    }
+                                                  : null,
+                                              );
+                                              setSelected(reference);
+                                            }}
+                                          />
+                                        ),
+                                      })}
+                                      onCreate={(trigger, status) => {
+                                        createTriggerRef.current = trigger;
+                                        setCreateStatus(status);
+                                        setCreating(true);
+                                      }}
+                                    />
+                                  </InboxTriageProvider>
                                 </TicketCommandContext.Provider>
                               </ShellSlotProvider>
                             </StatusLineRegion>

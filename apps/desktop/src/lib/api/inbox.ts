@@ -23,11 +23,15 @@ export const inboxClient = {
   async list(options: { offset: number; limit: number; unreadOnly: boolean }) {
     return z.array(entrySchema).parse(await invoke("inbox", options));
   },
-  async setRead(ids: number[], read: boolean) {
+  async setRead(
+    ids: number[],
+    read: boolean,
+    requestId: string = crypto.randomUUID(),
+  ) {
     await invoke("set_inbox_read", {
       ids,
       read,
-      requestId: crypto.randomUUID(),
+      requestId,
     });
   },
   async reminder(reference: string) {
@@ -36,11 +40,15 @@ export const inboxClient = {
       .nullable()
       .parse(await invoke("reminder", { reference }));
   },
-  async snooze(reference: string, dueAt: string) {
+  async snooze(
+    reference: string,
+    dueAt: string | null,
+    requestId: string = crypto.randomUUID(),
+  ) {
     await invoke("set_reminder", {
       reference,
       dueAt,
-      requestId: crypto.randomUUID(),
+      requestId,
     });
   },
   async isFollowing(reference: string) {

@@ -1,3 +1,5 @@
+import { useInboxTriage } from "./inbox-triage-context";
+import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useState } from "react";
@@ -27,6 +29,7 @@ function newest(
 
 export function TicketDetails({
   selected,
+  hidden = false,
   mention,
   inboxTarget,
   expanded,
@@ -47,6 +50,7 @@ export function TicketDetails({
   onRetry,
 }: {
   outsideResults?: boolean;
+  hidden?: boolean;
   /** Why the selected ticket could not be fetched; shown in place of it. */
   failure?: FailureDescription | null;
   onRetry?: () => void;
@@ -71,6 +75,7 @@ export function TicketDetails({
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
+  const triage = useInboxTriage();
   // Relationship links unmount their focused control. Keep keyboard navigation
   // on the selected reference without stealing focus from Previous/Next.
   useEffect(() => {
@@ -100,6 +105,7 @@ export function TicketDetails({
     <section
       ref={setBoundary}
       className="ticket-detail"
+      hidden={hidden}
       data-expanded={expanded || undefined}
       data-empty={selected === null || undefined}
       aria-labelledby="detail-heading"
@@ -142,6 +148,11 @@ export function TicketDetails({
                 }}
                 data-agent-loading={agentLoading || undefined}
               >
+                <InboxTriageCard
+                  ticket={ticket}
+                  refresh={refresh}
+                  updateTicket={updateTicket}
+                />
                 {agentLoading && (
                   <div
                     className="detail-document"
@@ -154,7 +165,7 @@ export function TicketDetails({
                     <Skeleton className="mt-6 h-24 w-full" />
                   </div>
                 )}
-                {selected === null && (
+                {selected === null && !triage?.selection && (
                   <EmptyState
                     size="hint"
                     title="Select a ticket to read it here"

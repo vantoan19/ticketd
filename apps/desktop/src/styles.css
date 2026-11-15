@@ -3324,3 +3324,30 @@ kbd,
   border-radius: var(--radius);
   background: var(--recessed);
 }
+
+/* Triage shares the Card surface; its reading hierarchy sits above a Ticket. */
+.ui-card-triage {
+  background: var(--well);
+  border-radius: var(--radius-card);
+  box-shadow: none;
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+}
+.ui-card-triage [data-slot="triage-context"],
+.ui-card-triage [data-slot="triage-reason"] {
+  color: var(--muted-foreground);
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
+}
+.ui-card-triage [data-slot="triage-context"] > span:first-of-type {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-card-triage p {
+  margin: 8px 0 0;
+}
+.ui-card-triage [data-slot="triage-evidence"] {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}

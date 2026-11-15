@@ -1,3 +1,6 @@
+import { useInboxTriage, triageId } from "./inbox-triage-context";
+import { ChatDetail } from "@/features/chats/ChatDetail";
+import "@/features/chats/chats.css";
 import {
   useEffect,
   useLayoutEffect,
@@ -65,6 +68,10 @@ export function TicketWorkspaceView({
 }) {
   const { selected, setSelected, clearMention } = workspace;
   const inboxMode = Boolean(inbox);
+  const triage = useInboxTriage();
+  const displayedSelection =
+    selected ??
+    (inboxMode && triage?.selection ? triageId(triage.selection) : null);
   // Entering or leaving the Inbox starts without an open ticket: the detail
   // beside it belongs to the list it was opened from.
   const wasInbox = useRef(inboxMode);
@@ -227,11 +234,12 @@ export function TicketWorkspaceView({
     setPreviousNarrow(narrow);
     if (narrow && selected) setNarrowDetail(true);
   }
-  const [previousSelection, setPreviousSelection] = useState(selected);
-  if (previousSelection !== selected) {
-    setPreviousSelection(selected);
-    setNarrowDetail(selected !== null);
-    if (!selected) setExpanded(false);
+  const [previousSelection, setPreviousSelection] =
+    useState(displayedSelection);
+  if (previousSelection !== displayedSelection) {
+    setPreviousSelection(displayedSelection);
+    setNarrowDetail(displayedSelection !== null);
+    if (!displayedSelection) setExpanded(false);
   }
   // Choosing a sidebar scope while a ticket is open shows that scope's list, even
   // where the panes are stacked and the ticket would otherwise keep the screen.
@@ -282,13 +290,13 @@ export function TicketWorkspaceView({
           orientation="horizontal"
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={narrow || expanded || !selected || peek}
+          disabled={narrow || expanded || !displayedSelection || peek}
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
             board && "board-layout",
-            !selected && "unselected",
+            !displayedSelection && "unselected",
           )}
           data-peek={peek || undefined}
           groupRef={groupRef}
@@ -364,8 +372,22 @@ export function TicketWorkspaceView({
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
             style={DETAIL_PANEL_STYLE}
           >
+            {inboxMode && triage?.chatId ? (
+              <div className="inbox-chat-detail" data-inbox-chat>
+                <ChatDetail
+                  id={triage.chatId}
+                  expanded={expanded}
+                  single={narrow || expanded}
+                  onExpand={() => setExpanded(true)}
+                  onReturn={() => triage.openChat(null)}
+                  onClose={() => triage.openChat(null)}
+                  focusRequest
+                />
+              </div>
+            ) : null}
             <TicketDetailPane
               workspace={workspace}
+              hidden={inboxMode && !!triage?.chatId}
               {...(inboxMode && { context: "inbox" as const })}
               expanded={expanded}
               inboxTarget={inboxTarget}
