@@ -10,7 +10,7 @@
   position: sticky;
   top: 0;
   z-index: 6;
-  background: var(--background);
+  background: var(--surface);
 }
 .context-graph-page .list-header {
   flex-wrap: nowrap;

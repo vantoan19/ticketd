@@ -121,7 +121,7 @@
   flex: none;
   height: 52px;
   padding: 0 12px 0 16px;
-  background: var(--background);
+  background: var(--recessed);
   box-shadow: 0 -1px 0 0 var(--group-hairline);
   color: var(--muted-foreground);
   font-size: var(--text-caption);

@@ -1,4 +1,4 @@
-/* The property rail: labeled sections on the canvas surface, beside the
+/* The property rail: labeled sections on the panel surface, beside the
    document column. Below 652px (a 420px document column plus a 232px rail)
    the pane shows the chip bar instead; see useNarrowPane. */
 .ticket-properties {
@@ -8,7 +8,7 @@
   gap: 20px;
   min-width: 0;
   padding: 20px 20px 48px;
-  background: var(--background);
+  background: var(--surface);
 }
 @container ticket-detail (min-width: 652px) {
   /* A flat rail split from the document by a 1px rule; it scrolls on its own

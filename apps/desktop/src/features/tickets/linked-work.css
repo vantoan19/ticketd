@@ -191,7 +191,7 @@
     position: absolute;
     top: 24px;
     right: 0;
-    background: var(--background);
+    background: var(--surface);
   }
   .linked-work-rows
     > [data-slot="item"]:has(.linked-work-label[data-repeat])

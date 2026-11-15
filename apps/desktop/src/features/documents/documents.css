@@ -43,7 +43,7 @@
   align-content: start;
   max-height: calc(100dvh - 16px);
   overflow: auto;
-  background: var(--background);
+  background: var(--surface);
   color: var(--foreground);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-modal);

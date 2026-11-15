@@ -495,8 +495,7 @@
   font-size: var(--text-caption);
 }
 
-/* Two classes: the generic `.ticket-list > p` padding must not win, or the note
-   starts 4px right of the header title. */
+/* The note starts at the header title's x. */
 .ticket-list > .list-description {
   margin: 0;
   padding: 24px 20px;
