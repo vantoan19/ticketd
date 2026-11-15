@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { FailureDetails } from "@/components/ui/failure-alert";
+import { IconTile } from "@/components/ui/icon-tile";
 import { PathText } from "@/components/ui/path-text";
 import { toFailure } from "@/lib/api/bridge-failure";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -53,8 +54,11 @@ function WorkspacePath({ path }: { path: string }) {
 
 /**
  * Startup: the workspace could not be opened, so nothing else can show. A calm
- * full-window screen in the app's theme: wordmark, what happened in plain
- * words, the file, Retry, and the raw cause only under Details.
+ * full-window screen in the app's theme: wordmark, an alert tile, what
+ * happened in plain words, the file, Retry, and the raw cause only under
+ * Details. "Restore from a backup…" and "Choose another workspace…" are not
+ * offered: restoring needs a readable workspace for its safety copy, and the
+ * workspace location is fixed, so neither could work from here.
  */
 export function RecoveryScreen({
   reason,
@@ -80,6 +84,9 @@ export function RecoveryScreen({
     <main className="recovery-screen">
       <div role="alert" className="recovery-screen-body">
         <p className="recovery-wordmark">ticketd</p>
+        <IconTile>
+          <TriangleAlert />
+        </IconTile>
         <h1 className="recovery-title">ticketd can't open this workspace</h1>
         <p className="recovery-sentence">
           {cause(reason)} Nothing in it was changed.
@@ -89,6 +96,8 @@ export function RecoveryScreen({
           <Button type="button" size="sm" onClick={onRetry}>
             Retry
           </Button>
+        </div>
+        <div className="recovery-details">
           <FailureDetails details={toFailure(reason).message} />
         </div>
       </div>
