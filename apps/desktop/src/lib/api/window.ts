@@ -9,7 +9,9 @@ export const windowClient = {
   /** The desktop starts hidden so its stored theme is painted before showing. */
   async show() {
     if (!("__TAURI_INTERNALS__" in window)) return;
-    await getCurrentWindow().show();
+    const win = getCurrentWindow();
+    await win.show();
+    await win.emitTo({ kind: "App" }, "ticketd://startup-revealed");
   },
   /**
    * Holds the window open when the person closes it and calls `handler`, which

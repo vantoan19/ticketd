@@ -1581,9 +1581,22 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(move |app| {
             // The theme-first frontend reveal is the fast path. A broken module
             // or stalled painting IPC must never leave the process invisible.
+            let (revealed, initial_reveal) = tokio::sync::oneshot::channel();
+            let startup_event =
+                tauri::Listener::once(app, "ticketd://startup-revealed", move |_| {
+                    let _ = revealed.send(());
+                });
             let startup_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // Once startup succeeds, visibility belongs to the person. In
+                // particular, Cmd+H during these five seconds must stay hidden.
+                if tokio::time::timeout(std::time::Duration::from_secs(5), initial_reveal)
+                    .await
+                    .is_ok()
+                {
+                    return;
+                }
+                tauri::Listener::unlisten(&startup_app, startup_event);
                 if let Some(window) = tauri::Manager::get_webview_window(&startup_app, "main") {
                     match window.is_visible() {
                         Ok(true) => return,
