@@ -8,24 +8,25 @@ import {
   Eye,
   FileWarning,
   GitCompare,
-  Inbox as InboxIcon,
+  CheckCheck,
   Link2,
   MessageSquare,
   Workflow,
 } from "lucide-react";
+import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
-import { Pager } from "@/components/ui/pager";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
 import { RunNavigation } from "@/features/automations/navigation";
@@ -35,19 +36,18 @@ import { inboxClient } from "@/lib/api/inbox";
 import { StatusIcon } from "./StatusIcon";
 import {
   entryNoun,
-  groupEntries,
+  attentionGroup,
+  needsYou,
   snoozeChoices,
   snoozeInstant,
   summarize,
   type Entry,
   type SnoozeChoice,
 } from "./inboxModel";
-import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./inbox.css";
 import { Reference } from "@/components/ui/reference";
 import { ConflictReview } from "@/features/sync-review/ConflictReview";
 import {
-  mergeByTime,
   useSyncEntries,
   type SyncEntry,
 } from "@/features/sync-review/inbox-entries";
@@ -58,33 +58,37 @@ import {
 } from "@/lib/api/describe-failure";
 import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
 
+import { InboxAttentionProvider } from "./inbox-attention";
+import { useInboxAttention } from "./use-inbox-attention";
+import { useChatClient } from "@/features/chats/client";
+import { useChatFeature } from "@/features/chats/use-chats";
+import { HarnessMark } from "@/features/chats/HarnessMark";
+import { Count } from "@/components/ui/count";
 const PAGE_SIZE = 50;
 const MARK_BATCH = 100;
 
-type InboxFilter = "all" | "unread";
-
-async function fetchEntries(
-  filter: InboxFilter,
-  pages: number,
-): Promise<{ entries: Entry[]; more: boolean }> {
-  const entries: Entry[] = [];
-  let more = false;
-  for (let page = 0; page < pages; page++) {
-    const chunk = await inboxClient.list({
-      offset: page * PAGE_SIZE,
-      limit: PAGE_SIZE,
-      unreadOnly: filter === "unread",
-    });
-    entries.push(...chunk);
-    more = chunk.length === PAGE_SIZE;
-    if (!more) break;
-  }
-  return { entries, more };
-}
-
 function EntryIcon({ entry }: { entry: Entry }) {
   if (entry.kind === "reminder") return <AlarmClock aria-hidden="true" />;
-  if (entry.kind === "activity") return <MessageSquare aria-hidden="true" />;
+  if (entry.kind === "activity") {
+    const agent = entry.editing_agent?.toLowerCase();
+    const harness =
+      agent === "codex"
+        ? "codex"
+        : agent === "claude" ||
+            agent === "claude-code" ||
+            agent === "claude code"
+          ? "claude-code"
+          : null;
+    return harness ? (
+      <HarnessMark
+        harness={harness}
+        name={entry.editing_agent ?? ""}
+        decorative
+      />
+    ) : (
+      <MessageSquare aria-hidden="true" />
+    );
+  }
   if (entry.kind === "automation_run") return <Workflow aria-hidden="true" />;
   if (entry.kind === "status")
     return <StatusIcon status={entry.to_value} decorative />;
@@ -127,6 +131,8 @@ function Snooze({
         </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" aria-label="Snooze until">
+        <DropdownMenuLabel>Snooze until</DropdownMenuLabel>
+        <DropdownMenuSeparator />
         {snoozeChoices.map((choice) => (
           <DropdownMenuItem
             key={choice.value}
@@ -145,7 +151,7 @@ function Snooze({
 }
 
 /**
- * One Inbox row, in the ticket row's anatomy (S6): unread dot, kind icon,
+ * One Inbox row, in the triage row anatomy (S08): unread dot, kind icon,
  * mono Reference and title; the summary on line two; the relative time at
  * the end, with the exact time in its tooltip. Actions overlay the time on
  * hover or focus. E marks the focused row read or unread; H snoozes it.
@@ -165,7 +171,7 @@ function InboxRow({
 }: {
   reference: string | null;
   title: string;
-  summary: string;
+  summary: React.ReactNode;
   icon: React.ReactNode;
   read: boolean;
   timestamp: string;
@@ -184,20 +190,26 @@ function InboxRow({
       aria-current={current || undefined}
     >
       <span className="inbox-dot">
-        {!read && <StatusDot tone="unread" size={8} />}
+        {!read && <StatusDot tone="unread" size={6} />}
       </span>
       <button
         type="button"
         className="inbox-ticket"
         aria-keyshortcuts={snooze ? "E H" : "E"}
-        onClick={onOpen}
+        onClick={(event) => {
+          onOpen();
+          // Opening the detail must leave entry shortcuts on the entry.
+          event.currentTarget.focus();
+        }}
         onKeyDown={(event) => {
           if (event.metaKey || event.ctrlKey || event.altKey) return;
           if (event.key === "e" || event.key === "E") {
             event.preventDefault();
+            event.stopPropagation();
             onMark();
           } else if (snooze && (event.key === "h" || event.key === "H")) {
             event.preventDefault();
+            event.stopPropagation();
             setSnoozeRequest((value) => value + 1);
           } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             // ↑/↓ move between rows, as in every list.
@@ -278,14 +290,29 @@ function SyncRow({
 }
 
 /**
- * The Inbox (DESIGN.md section 9, S6): the list half of a triage split. An
+ * The Inbox (DESIGN.md section 9, S08): the list half of a triage split. An
  * entry opens its ticket in the detail pane beside it, so several can be
  * read in a row without leaving the Inbox.
  */
-export function Inbox({
+export function Inbox(props: {
+  revision: number;
+  select: (reference: string, noteId?: string) => void;
+  onBrowse: () => void;
+  selected?: string | null;
+}) {
+  const attention = useInboxAttention();
+  return attention ? (
+    <InboxContent {...props} />
+  ) : (
+    <InboxAttentionProvider revision={props.revision}>
+      <InboxContent {...props} />
+    </InboxAttentionProvider>
+  );
+}
+
+function InboxContent({
   revision,
   select,
-  onBrowse,
   selected = null,
 }: {
   revision: number;
@@ -295,52 +322,27 @@ export function Inbox({
   /** The ticket open beside the Inbox. */
   selected?: string | null;
 }) {
-  const [filter, setFilter] = useState<InboxFilter>("all");
+  const attention = useInboxAttention()!;
+  const chats = useChatClient();
+  const chatFeature = useChatFeature();
+  const now = useNow();
   const [pages, setPages] = useState(1);
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const [more, setMore] = useState(false);
-  // A failed read can be retried by reading again; a failed mark or snooze is
-  // said once and done again by the person.
-  const [loadError, setLoadError] = useState<FailureDescription | null>(null);
+  // Attention never disappears behind update paging, even when its event is old.
+  const urgent = attention.entries.filter((entry) =>
+    needsYou(entry, attention, new Date(now)),
+  );
+  const updates = attention.entries.filter(
+    (entry) => !needsYou(entry, attention, new Date(now)),
+  );
+  const entries = [...urgent, ...updates.slice(0, pages * PAGE_SIZE)];
+  const more = pages * PAGE_SIZE < updates.length;
   const [actionError, setError] = useState<FailureDescription | null>(null);
-  const error = actionError ?? loadError;
-  const [tick, setTick] = useState(0);
-  const changeVersion = useWorkspaceChange();
+  const error = actionError ?? attention.error;
+  const loading = attention.loading;
   const openRun = useContext(RunNavigation);
   const sync = useSyncEntries(revision);
   const [reviewing, setReviewing] = useState<ConflictSummary | null>(null);
-  const reload = () => setTick((value) => value + 1);
-  // Loading while the last finished read is not the one asked for now.
-  const readKey = JSON.stringify([
-    filter,
-    pages,
-    revision,
-    tick,
-    changeVersion,
-  ]);
-  const [readDone, setReadDone] = useState("");
-  const loading = readDone !== readKey;
-  useEffect(() => {
-    let active = true;
-    void fetchEntries(filter, pages)
-      .then(
-        (result) => {
-          if (!active) return;
-          setEntries(result.entries);
-          setMore(result.more);
-          setLoadError(null);
-        },
-        (e: unknown) => {
-          if (active) setLoadError(describeFailure(e, "load the Inbox"));
-        },
-      )
-      .finally(() => {
-        if (active) setReadDone(readKey);
-      });
-    return () => {
-      active = false;
-    };
-  }, [filter, pages, revision, tick, changeVersion, readKey]);
+  const reload = attention.reload;
   async function mark(ids: number[], read: boolean) {
     try {
       for (let start = 0; start < ids.length; start += MARK_BATCH)
@@ -363,12 +365,6 @@ export function Inbox({
       setError(describeFailure(e, `snooze ${entry.reference}`));
     }
   }
-  function changeFilter(next: InboxFilter) {
-    setFilter(next);
-    setPages(1);
-    setEntries([]);
-    setMore(false);
-  }
   async function markSync(ids: string[], read: boolean) {
     try {
       if (ids.length) await syncReview.setRead(ids, read);
@@ -379,16 +375,59 @@ export function Inbox({
       );
     }
   }
-  const syncShown = sync.entries.filter((e) => filter === "all" || !e.read);
+  const syncShown = sync.entries;
   const unreadShown = entries.filter((e) => !e.read);
   const unreadSync = syncShown.filter((e) => !e.read).map((e) => e.id);
-  const unreadCount = unreadShown.length + unreadSync.length;
-  const groups = groupEntries(mergeByTime(entries, syncShown), new Date());
-  const empty = entries.length + syncShown.length === 0 && !error && !loading;
+  const unreadApprovals = attention.approvals.filter(
+    (chat) => chat.status.unseen,
+  );
+  const unreadCount =
+    unreadShown.length + unreadSync.length + unreadApprovals.length;
+  const grouped = new Map<string, (Entry | SyncEntry)[]>([
+    ["Needs you", []],
+    ["Updates", []],
+    ["Earlier", []],
+  ]);
+  for (const entry of [...entries, ...syncShown].sort((a, b) =>
+    b.timestamp.localeCompare(a.timestamp),
+  )) {
+    const group =
+      "summary" in entry
+        ? attentionGroup(entry, new Date(now))
+        : needsYou(entry, attention, new Date(now))
+          ? "Needs you"
+          : attentionGroup(entry, new Date(now));
+    grouped.get(group)?.push(entry);
+  }
+  grouped.get("Needs you")?.sort((a, b) => {
+    const priority = (entry: Entry | SyncEntry) =>
+      "kind" in entry && entry.kind === "status" ? 0 : 1;
+    return priority(a) - priority(b);
+  });
+  const groups = [...grouped].filter(
+    ([group, items]) =>
+      items.length || (group === "Needs you" && attention.approvals.length),
+  );
+  async function markChat(id: string, read: boolean) {
+    try {
+      if (read) await chats.markRead(id);
+      else await chats.markUnread(id);
+      reload();
+    } catch (reason) {
+      setError(describeFailure(reason, "mark the Chat as read"));
+    }
+  }
   // "Show 50 more": the first new row takes focus when the button had it.
   const arriving = useRef<number | null>(null);
+  const revealingRead = useRef(false);
   const body = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (revealingRead.current) {
+      body.current
+        ?.querySelector<HTMLElement>('[data-read="true"] .inbox-ticket')
+        ?.focus();
+      revealingRead.current = false;
+    }
     const from = arriving.current;
     if (from === null || entries.length <= from) return;
     arriving.current = null;
@@ -410,25 +449,16 @@ export function Inbox({
                   true,
                 );
                 void markSync(unreadSync, true);
+                for (const chat of unreadApprovals)
+                  void markChat(chat.id, true);
               }}
             >
-              <Check />
-              Mark shown as read
+              <CheckCheck />
+              Mark all read
             </Button>
           )
         }
-      >
-        <SegmentedControl
-          aria-label="Show"
-          compact
-          value={filter}
-          onValueChange={changeFilter}
-          options={[
-            { value: "all", label: "All" },
-            { value: "unread", label: "Unread" },
-          ]}
-        />
-      </PaneHeader>
+      />
       <div className="inbox-body" ref={body}>
         {error && (
           <FailureAlert
@@ -437,10 +467,95 @@ export function Inbox({
             {...(!actionError && { onRetry: reload })}
           />
         )}
-        {groups.map(({ group, entries: items }) => (
+        {!loading && !error && attention.needsCount === 0 && (
+          <EmptyState
+            icon={<CheckCheck />}
+            title={emptyCopy("inbox-caught-up").title}
+            description={emptyCopy("inbox-caught-up").sentence}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const allPages = Math.max(
+                    1,
+                    Math.ceil(updates.length / PAGE_SIZE),
+                  );
+                  if (pages < allPages) {
+                    revealingRead.current = true;
+                    setPages(allPages);
+                  } else {
+                    body.current
+                      ?.querySelector<HTMLElement>(
+                        '[data-read="true"] .inbox-ticket',
+                      )
+                      ?.focus();
+                  }
+                }}
+              >
+                {emptyCopy("inbox-caught-up").action}
+              </Button>
+            }
+          />
+        )}
+        {groups.map(([group, items]) => (
           <section key={group} aria-labelledby={`inbox-group-${group}`}>
-            <h2 id={`inbox-group-${group}`}>{group}</h2>
+            <h2 id={`inbox-group-${group}`}>
+              {group === "Needs you" && <StatusDot tone="attention" size={6} />}
+              {group}
+              <Count>
+                {items.length +
+                  (group === "Needs you" ? attention.approvals.length : 0)}
+              </Count>
+            </h2>
             <ul className="inbox-entries">
+              {group === "Needs you" &&
+                attention.approvals.map((chat) => (
+                  <InboxRow
+                    key={`chat:${chat.id}`}
+                    reference={
+                      chat.tickets[0]?.reference ?? chat.first_ticket ?? null
+                    }
+                    title={`Approval needed in “${chat.title}”`}
+                    summary={
+                      <>
+                        <span className="inbox-agent-name">
+                          {chat.harness_name}
+                        </span>
+                        {chat.status.detail ? (
+                          <>
+                            {" "}
+                            wants to run{" "}
+                            <code className="inbox-command">
+                              {chat.status.detail}
+                            </code>
+                          </>
+                        ) : (
+                          " · Approval needed"
+                        )}
+                      </>
+                    }
+                    icon={
+                      <HarnessMark
+                        harness={chat.harness_id ?? ""}
+                        name={chat.harness_name}
+                        decorative
+                      />
+                    }
+                    read={!chat.status.unseen}
+                    timestamp={chat.updated_at}
+                    current={false}
+                    markLabel={`Mark ${chat.title} ${chat.status.unseen ? "read" : "unread"}`}
+                    onMark={() => void markChat(chat.id, !chat.status.unseen)}
+                    onOpen={() =>
+                      chatFeature.requestChat({
+                        kind: "open",
+                        chatId: chat.id,
+                        retention: chat.retention,
+                      })
+                    }
+                  />
+                ))}
               {items.map((e) => {
                 if ("summary" in e)
                   return (
@@ -460,7 +575,28 @@ export function Inbox({
                     key={e.id}
                     reference={e.reference}
                     title={e.title}
-                    summary={summarize(e)}
+                    summary={
+                      needsYou(e, attention, new Date(now)) &&
+                      e.kind === "status" ? (
+                        <>
+                          <span className="inbox-agent-name">
+                            {e.editing_agent}
+                          </span>{" "}
+                          moved it to In review, waiting for you
+                        </>
+                      ) : e.kind === "activity" &&
+                        !e.deleted &&
+                        e.editing_agent ? (
+                        <>
+                          <span className="inbox-agent-name">
+                            {e.editing_agent}
+                          </span>
+                          : {e.to_value}
+                        </>
+                      ) : (
+                        summarize(e)
+                      )
+                    }
                     icon={<EntryIcon entry={e} />}
                     read={e.read}
                     timestamp={e.timestamp}
@@ -506,40 +642,6 @@ export function Inbox({
             }}
           />
         )}
-        {empty &&
-          (filter === "unread" ? (
-            <EmptyState
-              icon={<Check />}
-              title={emptyCopy("inbox-unread").title}
-              description={emptyCopy("inbox-unread").sentence}
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => changeFilter("all")}
-                >
-                  Show all
-                </Button>
-              }
-            />
-          ) : (
-            <EmptyState
-              icon={<InboxIcon />}
-              title={emptyCopy("inbox-all").title}
-              description={emptyCopy("inbox-all").sentence}
-              action={
-                <Button variant="outline" size="sm" onClick={onBrowse}>
-                  Browse tickets to follow
-                </Button>
-              }
-              footnote={
-                <>
-                  <Eye aria-hidden="true" />
-                  Follow and Remind me live in each ticket’s Attention section.
-                </>
-              }
-            />
-          ))}
         {reviewing && (
           <ConflictReview
             conflict={reviewing}

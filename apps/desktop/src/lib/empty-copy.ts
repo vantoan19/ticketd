@@ -67,14 +67,11 @@ const COPY = {
   },
   "board-column": { title: "No tickets", sentence: "" },
   "board-column-filtered": { title: "No matches", sentence: "" },
-  "inbox-all": {
-    title: "No updates to review",
-    sentence: "Changes on tickets you follow appear here.",
-  },
-  "inbox-unread": {
+  "inbox-caught-up": {
     title: "You're all caught up",
-    sentence: "Read changes stay under All.",
-    action: "Show all",
+    sentence:
+      "Approvals, reviews and reminders land here first, then updates from your agents on tickets you follow.",
+    action: "Show read entries",
   },
   plans: {
     title: "No Plans yet",

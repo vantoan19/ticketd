@@ -1518,7 +1518,10 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(screen.getByRole("button", { name: "Inbox, 3 unread" })).toBeTruthy();
+  const unreadInbox = screen.getByRole("button", { name: "Inbox, 3 unread" });
+  expect(unreadInbox.querySelector('[data-tone="unread"]')).toBeTruthy();
+  expect(unreadInbox.querySelector('[data-tone="attention"]')).toBeNull();
+  expect(unreadInbox.querySelector(".sidebar-count")?.textContent).toBe("");
   expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Ready 4" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "In progress 2" })).toBeTruthy();
@@ -3282,4 +3285,67 @@ test("ledger uses the existing page update in Detailed and clears checkbox selec
   checkbox.focus();
   fireEvent.keyDown(checkbox, { key: "Escape" });
   expect((checkbox as HTMLInputElement).checked).toBe(false);
+});
+
+test("Inbox shares Needs you counts with the sidebar and keeps E/H on the opened entry", async () => {
+  const due = "2020-01-01T00:00:00Z";
+  const ticket = bulkTicket(1, { status: "In review" });
+  let read = false;
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    reminder: () => due,
+    sidebar_counts: () => ({
+      unread_inbox: read ? 0 : 1,
+      total: 1,
+      ready: 0,
+      in_progress: 0,
+    }),
+    inbox: () => [
+      {
+        id: 71,
+        reference: "T-KQ1",
+        title: "First",
+        kind: "reminder",
+        from_value: "",
+        to_value: due,
+        timestamp: new Date().toISOString(),
+        read,
+        editing_agent: null,
+      },
+    ],
+    set_inbox_read: ({ read: next }: { read: boolean }) => {
+      read = next;
+    },
+  });
+  const inbox = screen.getByRole("button", {
+    name: "Inbox, 1 entry needs you",
+  });
+  expect(inbox.querySelector('[data-tone="attention"]')).toBeTruthy();
+  fireEvent.click(inbox);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", {
+    name: /T-KQ1.*First.*Your reminder/,
+  });
+  fireEvent.click(row);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(document.activeElement).toBe(row);
+  fireEvent.keyDown(row, { key: "e" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(read).toBe(false);
+  expect(
+    screen.getByRole("button", { name: "Inbox, 1 entry needs you" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(row, { key: "h" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText("Snooze until")).toBeTruthy();
+  expect(screen.queryByRole("dialog", { name: /command/i })).toBeNull();
 });
