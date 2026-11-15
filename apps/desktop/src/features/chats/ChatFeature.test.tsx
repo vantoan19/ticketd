@@ -112,12 +112,12 @@ test("the Show Chat row explains itself and the notice links to About", async ()
   ).toBeTruthy();
   expect(
     screen.getByText(
-      "Adds Chats to the sidebar, where you start and follow conversations with your agent.",
+      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
     ),
   ).toBeTruthy();
   expect(
     screen.getByText(
-      "Turning Chat off hides it and keeps your Chats. Running Chats are stopped first, after you confirm.",
+      "Turning Chat off hides Chats and Automations and keeps them. Running Chats and runs are stopped first, after you confirm.",
     ),
   ).toBeTruthy();
   fireEvent.click(
@@ -147,13 +147,59 @@ test("turning Chat off while Chats work asks first, and stops them only on confi
   fireEvent.click(chatSwitch());
   dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
   fireEvent.click(
-    within(dialog).getByRole("button", { name: "Stop Chats and turn off" }),
+    within(dialog).getByRole("button", { name: "Stop it and turn off" }),
   );
   await waitFor(() =>
     expect(chatSwitch().getAttribute("aria-checked")).toBe("false"),
   );
   // The Chat is kept, stopped, and will not restart by itself.
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
+});
+
+test("turning Chat off while a run is going and no Chat works asks first, naming both", async () => {
+  const client = createMockChatClient({ enabled: true });
+  client.runsGoing = 2;
+  settings(client);
+  await waitFor(() =>
+    expect(chatSwitch().getAttribute("aria-checked")).toBe("true"),
+  );
+  fireEvent.click(chatSwitch());
+  let dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
+  expect(dialog.textContent).toContain(
+    "2 runs are working. Turning Chat off stops them first.",
+  );
+  // #387 M28: what happens to the runs it stops, and to queued ones.
+  expect(dialog.textContent).toContain(
+    "A stopped run ends as Needs attention. Queued runs wait until Chat is on again.",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Keep Chat on" }));
+  expect(await client.getEnabled()).toBe(true);
+
+  client.runsGoing = 1;
+  await client.createChat({
+    command_id: "c",
+    harness_id: "codex",
+    folder: null,
+    links: [],
+    message: "go",
+  });
+  fireEvent.click(chatSwitch());
+  dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
+  expect(dialog.textContent).toContain(
+    "1 Chat and 1 run are working. Turning Chat off stops them first.",
+  );
+});
+
+test("Quit names the runs it would stop", async () => {
+  const client = createMockChatClient({ enabled: true });
+  client.runsGoing = 1;
+  settings(client);
+  act(() => client.requestQuit());
+  const dialog = await screen.findByRole("dialog", { name: "Quit ticketd?" });
+  expect(dialog.textContent).toContain(
+    "1 run is still working. Quitting stops it. Closing the window instead keeps it running.",
+  );
+  expect(client.quit).toBe(false);
 });
 
 test("Quit asks before stopping working Chats; Cancel leaves them running", async () => {
@@ -196,11 +242,29 @@ test("with Chat off, nothing about Chat is in the workspace", async () => {
   app(createMockChatClient({ chats: [waitingChat()] }));
   await screen.findByRole("button", { name: /All tickets/ });
   expect(screen.queryByRole("button", { name: /^Chats/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Automations" })).toBeNull();
   fireEvent.keyDown(screen.getByRole("button", { name: "New ticket" }), {
     key: "Enter",
   });
   await screen.findByRole("menuitem", { name: "Capture a thought" });
   expect(screen.queryByRole("menuitem", { name: "New Chat" })).toBeNull();
+});
+
+test("with Chat on, Automations follows Chats in the sidebar and opens its page", async () => {
+  app(createMockChatClient({ enabled: true }));
+  const chats = await screen.findByRole("button", { name: "Chats" });
+  const entry = screen.getByRole("button", { name: "Automations" });
+  expect(
+    chats.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  fireEvent.click(entry);
+
+  expect(entry.getAttribute("aria-current")).toBe("page");
+  const tabs = within(await screen.findByRole("radiogroup", { name: "Show" }));
+  expect(tabs.getByRole("radio", { name: /^Automations/ })).toBeTruthy();
+  fireEvent.click(tabs.getByRole("radio", { name: /^Agents/ }));
+  expect(await screen.findByRole("list", { name: "Agents" })).toBeTruthy();
 });
 
 test("with Chat on, the sidebar entry says how many Chats wait and opens them", async () => {

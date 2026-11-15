@@ -1,5 +1,5 @@
-//! Sync files: every ticket, Document, Plan and project as one Markdown file with a
-//! YAML header, and back. The convention is recorded in `docs/sync-file-format.md`.
+//! Sync files: every ticket, Document, Plan, project, Automation and Automation
+//! agent as one Markdown file with a YAML header, and back. The convention is recorded in `docs/sync-file-format.md`.
 //!
 //! One table of fields per block ([`shape`]) drives writing, parsing and validation,
 //! so the three cannot drift apart. Applying a record writes only the fields that
@@ -23,10 +23,20 @@ pub enum SyncKind {
     Document,
     Plan,
     Ticket,
+    /// Before Automations, whose steps name agents.
+    AutomationAgent,
+    Automation,
 }
 
 impl SyncKind {
-    pub const ALL: [Self; 4] = [Self::Project, Self::Document, Self::Plan, Self::Ticket];
+    pub const ALL: [Self; 6] = [
+        Self::Project,
+        Self::Document,
+        Self::Plan,
+        Self::Ticket,
+        Self::AutomationAgent,
+        Self::Automation,
+    ];
 
     /// The kind as a file's `kind` field and the sync tables spell it.
     pub(crate) fn name(self) -> &'static str {
@@ -35,6 +45,8 @@ impl SyncKind {
             Self::Document => "document",
             Self::Plan => "plan",
             Self::Ticket => "ticket",
+            Self::AutomationAgent => "automation_agent",
+            Self::Automation => "automation",
         }
     }
 
@@ -49,6 +61,8 @@ impl SyncKind {
             Self::Document => "documents",
             Self::Plan => "plans",
             Self::Ticket => "tickets",
+            Self::AutomationAgent => "automation_agents",
+            Self::Automation => "automations",
         }
     }
 }
@@ -150,6 +164,10 @@ enum Type {
     /// Items of `<GUID>` or `<GUID> <time>`: relationships sync removed to break a loop.
     Removed,
     Tags,
+    /// A list of text items in no order, such as the commands an agent may run.
+    Texts,
+    /// A whole number of at least 1.
+    Count,
     Status,
     Reference,
     Choice(&'static [&'static str]),
@@ -233,6 +251,27 @@ const PLAN: &[Field] = &[
     ("documents", Type::Ids, false),
 ];
 const PROJECT: &[Field] = &[("name", Type::Name, true)];
+/// The text after the header is the agent's instructions.
+const AUTOMATION_AGENT: &[Field] = &[
+    ("name", Type::Text, false),
+    ("harness", Type::Choice(&["claude-code", "codex"]), true),
+    ("model", Type::Text, false),
+    ("turn_limit", Type::Count, true),
+    ("time_limit_minutes", Type::Count, true),
+    ("read_files", Type::Flag, false),
+    ("edit_files", Type::Flag, false),
+    ("run_commands", Type::Flag, false),
+    // A field of its own, so it merges as one value: two desktops that each
+    // shorten `allowed_commands` to nothing never add up to "any command".
+    ("any_command", Type::Flag, false),
+    ("allowed_commands", Type::Texts, false),
+    ("use_web", Type::Flag, false),
+    ("trashed", Type::Flag, false),
+];
+/// The text after the header is the trigger, conditions and steps: one block of
+/// JSON, because steps nest and a header does not. It is one field, so it merges
+/// and goes to review as a whole.
+const AUTOMATION: &[Field] = &[("name", Type::Text, false), ("trashed", Type::Flag, false)];
 const ACTIVITY: &[Field] = &[
     ("reported_at", Type::Time, true),
     ("updated_at", Type::Time, true),
@@ -281,6 +320,8 @@ fn shape(block: Block) -> (&'static [Field], bool) {
         Block::Record(SyncKind::Document) => (DOCUMENT, true),
         Block::Record(SyncKind::Plan) => (PLAN, true),
         Block::Record(SyncKind::Project) => (PROJECT, false),
+        Block::Record(SyncKind::AutomationAgent) => (AUTOMATION_AGENT, true),
+        Block::Record(SyncKind::Automation) => (AUTOMATION, true),
         Block::Part(SyncPartKind::Activity) => (ACTIVITY, true),
         Block::Part(SyncPartKind::Evidence) => (EVIDENCE, false),
     }
@@ -412,6 +453,11 @@ fn text<'a>(fields: &'a Fields, name: &str) -> Option<&'a str> {
     }
 }
 
+/// A `Count` field as the number it was checked to be.
+fn count(fields: &Fields, name: &str) -> Option<u32> {
+    text(fields, name)?.parse().ok()
+}
+
 fn set(fields: &Fields, name: &str) -> BTreeSet<String> {
     match fields.get(name) {
         Some(SyncValue::Set(members)) => members.clone(),
@@ -469,6 +515,8 @@ fn expected(kind: Type) -> String {
         Type::Ticket => "a ticket: its id (a lowercase GUID) or its Ticket reference".into(),
         Type::Tickets => "a list of tickets: ids (lowercase GUIDs) or Ticket references".into(),
         Type::Tags => "a list of tags".into(),
+        Type::Texts => "a list of text items; put each in quotes".into(),
+        Type::Count => "a whole number of at least 1".into(),
         Type::Edges => {
             "a list of items such as \"<id of the blocking ticket> 2026-11-11T09:30:00Z\"".into()
         }
@@ -493,8 +541,19 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
         (Type::Removed, SyncValue::Set(items)) => items
             .iter()
             .all(|item| is_guid(item) || edge_time(item).is_some() || removal_number(item)),
-        (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed, _)
+        (Type::Texts, SyncValue::Set(items)) => items.iter().all(|item| !item.trim().is_empty()),
+        (
+            Type::Flag
+            | Type::Ids
+            | Type::Tickets
+            | Type::Tags
+            | Type::Texts
+            | Type::Edges
+            | Type::Removed,
+            _,
+        )
         | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => false,
+        (Type::Count, SyncValue::Text(text)) => text.parse::<u32>().is_ok_and(|count| count > 0),
         (Type::Text, SyncValue::Text(_)) => true,
         (Type::Name, SyncValue::Text(text)) => !text.trim().is_empty(),
         (Type::Time, SyncValue::Text(text)) => chrono::DateTime::parse_from_rfc3339(text).is_ok(),
@@ -582,6 +641,10 @@ fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels
     out.push_str(&format!("id: {}\n", quote(id)));
     for (name, kind, _) in schema {
         match fields.get(*name) {
+            // Checked to be digits when the record was read.
+            Some(SyncValue::Text(text)) if matches!(kind, Type::Count) => {
+                out.push_str(&format!("{name}: {text}\n"));
+            }
             Some(SyncValue::Text(text)) => out.push_str(&format!("{name}: {}\n", quote(text))),
             Some(SyncValue::Flag(flag)) => out.push_str(&format!("{name}: {flag}\n")),
             Some(SyncValue::Set(members)) if !members.is_empty() => {
@@ -711,7 +774,7 @@ fn typed(
             (_, Raw::Null) => continue,
             (Type::Flag, Raw::Flag(flag)) => SyncValue::Flag(flag),
             (
-                Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed,
+                Type::Ids | Type::Tickets | Type::Tags | Type::Texts | Type::Edges | Type::Removed,
                 Raw::List(items),
             ) => {
                 let mut members = BTreeSet::new();
@@ -728,11 +791,18 @@ fn typed(
                 SyncValue::Set(members)
             }
             (
-                Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed,
+                Type::Flag
+                | Type::Ids
+                | Type::Tickets
+                | Type::Tags
+                | Type::Texts
+                | Type::Edges
+                | Type::Removed,
                 _,
             ) => {
                 return Err(invalid());
             }
+            (Type::Count, Raw::Integer(count)) => SyncValue::Text(count.to_string()),
             (Type::Status, Raw::Text(text)) => {
                 SyncValue::Text(canonical_status(&text).unwrap_or(text))
             }
@@ -888,7 +958,10 @@ impl SyncRecord {
         let name = match self.kind {
             SyncKind::Ticket => format!("{} {}", field("ref"), field("title")),
             SyncKind::Document => field("title").to_owned(),
-            SyncKind::Plan | SyncKind::Project => field("name").to_owned(),
+            SyncKind::Plan
+            | SyncKind::Project
+            | SyncKind::AutomationAgent
+            | SyncKind::Automation => field("name").to_owned(),
         };
         // Characters a file system or a storage listing would not show as typed.
         let name: String = name
@@ -928,7 +1001,7 @@ impl SyncRecord {
                         _ => None,
                     }
                     .ok_or_else(|| {
-                        bad("field 'kind' must be one of project, document, plan, ticket")
+                        bad("field 'kind' must be one of project, document, plan, ticket, automation_agent, automation")
                     })?;
                     match take("format") {
                         // Files from before the marker are format 1.
@@ -974,6 +1047,9 @@ impl SyncRecord {
             {
                 return Err(bad(format!("Activity '{}' has no brief", part.id)));
             }
+        }
+        if self.kind == SyncKind::Automation {
+            crate::automations::from_file_body(text(&self.fields, "body").unwrap_or(""))?;
         }
         if self.kind != SyncKind::Ticket {
             return Ok(());
@@ -1073,6 +1149,28 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
             "SELECT name, purpose, archived, spec_document_id FROM plans WHERE id = ?1",
             &["name", "body", "archived", "spec"],
         )],
+        SyncKind::AutomationAgent => &[(
+            "SELECT name, harness, model, CAST(turn_limit AS TEXT), CAST(time_limit_minutes AS TEXT), read_files, edit_files, run_commands, any_command, allowed_commands, use_web, instructions, trashed FROM automation_agents WHERE id = ?1",
+            &[
+                "name",
+                "harness",
+                "model",
+                "turn_limit",
+                "time_limit_minutes",
+                "read_files",
+                "edit_files",
+                "run_commands",
+                "any_command",
+                "allowed_commands",
+                "use_web",
+                "body",
+                "trashed",
+            ],
+        )],
+        SyncKind::Automation => &[(
+            "SELECT name, definition, trashed FROM automations WHERE id = ?1",
+            &["name", "body", "trashed"],
+        )],
         SyncKind::Ticket => &[
             (
                 &follows,
@@ -1115,6 +1213,23 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
                 fields.insert((*name).to_owned(), SyncValue::Set(members));
             }
         }
+    }
+    // The two columns stored as JSON are written for a reader.
+    match kind {
+        SyncKind::AutomationAgent => {
+            let commands: BTreeSet<String> =
+                serde_json::from_str(text(&fields, "allowed_commands").unwrap_or("[]"))
+                    .map_err(|error| Error::InvalidAutomationAgent(error.to_string()))?;
+            fields.remove("allowed_commands");
+            if !commands.is_empty() {
+                fields.insert("allowed_commands".into(), SyncValue::Set(commands));
+            }
+        }
+        SyncKind::Automation => {
+            let body = crate::automations::file_body(text(&fields, "body").unwrap_or(""))?;
+            fields.insert("body".into(), SyncValue::Text(body));
+        }
+        SyncKind::Project | SyncKind::Document | SyncKind::Plan | SyncKind::Ticket => {}
     }
     let mut parts = Vec::new();
     if kind == SyncKind::Ticket {
@@ -1274,6 +1389,19 @@ impl Apply<'_> {
                     params![id, reference, text(fields, "title")],
                 )?;
             }
+            SyncKind::AutomationAgent => {
+                // Every field differs from these or is written next.
+                c.execute(
+                    "INSERT INTO automation_agents (id, name, harness, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes) VALUES (?1, '', ?2, '', 0, 0, 0, '[]', 0, ?3, ?4)",
+                    params![
+                        id,
+                        text(fields, "harness"),
+                        count(fields, "turn_limit"),
+                        count(fields, "time_limit_minutes")
+                    ],
+                )?;
+            }
+            SyncKind::Automation => crate::automations::create_arrived(c, id)?,
         }
         Ok(())
     }
@@ -1326,6 +1454,42 @@ impl Apply<'_> {
                     &format!("UPDATE documents SET {field} = ?2, updated_at = {NOW} WHERE id = ?1"),
                     params![id, value],
                 )?;
+            }
+            (SyncKind::AutomationAgent, "body") => {
+                put(c, table, "instructions", id, &value.unwrap_or(""))?;
+            }
+            (SyncKind::AutomationAgent, "model") => {
+                put(
+                    c,
+                    table,
+                    field,
+                    id,
+                    &value.filter(|model| !model.is_empty()),
+                )?;
+            }
+            (SyncKind::AutomationAgent, "harness") => put(c, table, field, id, &value)?,
+            (SyncKind::AutomationAgent, "turn_limit" | "time_limit_minutes") => {
+                put(c, table, field, id, &count(fields, field))?;
+            }
+            (
+                SyncKind::AutomationAgent,
+                "read_files" | "edit_files" | "run_commands" | "any_command" | "use_web",
+            ) => {
+                put(c, table, field, id, &flag)?;
+            }
+            (SyncKind::AutomationAgent, "allowed_commands") => {
+                let commands = serde_json::to_string(&set(fields, field))
+                    .map_err(|error| bad(error.to_string()))?;
+                put(c, table, field, id, &commands)?;
+            }
+            (SyncKind::Automation, "body") => {
+                let definition = crate::automations::from_file_body(value.unwrap_or(""))?;
+                crate::automations::restart_schedule_if_trigger_changes(c, id, &definition)?;
+                put(c, table, "definition", id, &definition)?;
+            }
+            // Neither needs a name.
+            (SyncKind::AutomationAgent | SyncKind::Automation, "name") => {
+                put(c, table, field, id, &value.unwrap_or(""))?;
             }
             (SyncKind::Ticket, "body") => put(c, table, field, id, &value.unwrap_or(""))?,
             (SyncKind::Plan, "body") => put(c, table, "purpose", id, &value.unwrap_or(""))?,
@@ -1406,7 +1570,7 @@ impl Apply<'_> {
             (SyncKind::Ticket, _) if field.starts_with("source_") => self.write_source()?,
             _ => {}
         }
-        if field == "body" && record.kind != SyncKind::Plan {
+        if field == "body" && matches!(record.kind, SyncKind::Ticket | SyncKind::Document) {
             // Links to files that have not arrived must not make the text unreadable.
             document_links::index_external_body(c, id, value.unwrap_or(""))?;
         }
@@ -1545,8 +1709,14 @@ impl Apply<'_> {
                     reindex_mentions(c, text(&record.fields, "ref").unwrap_or_default())?;
                 }
                 SyncKind::Document | SyncKind::Plan => reindex_mentions(c, &record.id)?,
-                SyncKind::Project => {}
+                SyncKind::Project | SyncKind::AutomationAgent | SyncKind::Automation => {}
             }
+        }
+        if matches!(
+            record.kind,
+            SyncKind::AutomationAgent | SyncKind::Automation
+        ) {
+            crate::automations::switch_off_unfinished(c)?;
         }
         Ok(())
     }
@@ -1612,6 +1782,8 @@ impl Workspace {
             SyncKind::Document => Error::DocumentNotFound(id.to_owned()),
             SyncKind::Plan => Error::PlanNotFound(id.to_owned()),
             SyncKind::Ticket => Error::NotFound(id.to_owned()),
+            SyncKind::AutomationAgent => Error::AutomationAgentNotFound(id.to_owned()),
+            SyncKind::Automation => Error::AutomationNotFound(id.to_owned()),
         })
     }
 
@@ -1676,12 +1848,16 @@ pub(crate) fn find_record(
 mod tests {
     use super::*;
 
-    /// What a file of format 1 holds after `kind`, `format` and `id`.
+    /// What a file of format 1 holds after `kind`, `format` and `id`. Automations
+    /// and their agents joined without a new number: a ticketd from before them
+    /// does not look in their folders, so it never meets a kind it does not know.
     const FORMAT_1: &str = "\
 project: name
 document: title created_at tags origin_activity trashed kept pinned
 plan: name archived spec documents
 ticket: ref title status project plan parent blocked_by blocked_since blocked_by_removed parent_removed related discovered duplicate_of duplicate_restore tags documents attachments trashed following reminder source_provider source_external_id source_locator source_display source_url source_origin source_linked_at source_authority source_authority_changed_at source_state source_closure_reason source_updated_at
+automation_agent: name harness model turn_limit time_limit_minutes read_files edit_files run_commands any_command allowed_commands use_web trashed
+automation: name trashed
 <!-- ticketd:activity -->: reported_at updated_at agent document
 <!-- ticketd:evidence -->: kind name value created_at updated_at agent
 ";

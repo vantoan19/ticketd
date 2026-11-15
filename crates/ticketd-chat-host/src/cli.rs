@@ -293,6 +293,14 @@ pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
     )
 }
 
+/// The executable `locate` reports, found the same way but without running it.
+/// Blocking only the first time on Unix, where it asks the login shell for its PATH.
+pub fn executable() -> Option<PathBuf> {
+    let app = std::env::current_exe().ok();
+    find_executable(&path_directories())
+        .or_else(|| find_executable(&fallback_directories(app.as_deref())))
+}
+
 impl CliStatus {
     /// Why a hosted agent cannot be pointed at this executable, in words for the user.
     /// `None` means it runs, matches the app's version, and is not known to use

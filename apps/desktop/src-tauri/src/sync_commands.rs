@@ -113,7 +113,7 @@ fn name_this_desktop(
 
 /// What the scheduler does at launch and once a day while the app stays open.
 pub fn upkeep(workspace: &mut Workspace) -> Result<(), Error> {
-    workspace.expire_versions(None).map(drop)
+    workspace.upkeep(None)
 }
 
 /// What the desktop does once when it starts, before the first sync run.
@@ -362,8 +362,10 @@ fn resolve(
                 (Choice::Local, _) => SyncChoice::Local,
                 (Choice::Remote, _) => SyncChoice::Remote,
                 // Only Markdown text is edited by hand; other fields have set values.
+                // An Automation's body is its steps: taken whole from one desktop.
                 (Choice::Edited, Some(value))
-                    if resolution.field == "body" || resolution.field.ends_with(":body") =>
+                    if kind != SyncKind::Automation
+                        && (resolution.field == "body" || resolution.field.ends_with(":body")) =>
                 {
                     SyncChoice::Edited(value)
                 }

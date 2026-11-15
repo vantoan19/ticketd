@@ -28,6 +28,7 @@ import {
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useNow } from "@/lib/use-now";
 import type { ChatSummary, Retention } from "@/features/chats/client";
+import { useTakenOverLine } from "@/features/automations/use-taken-over-line";
 import { ChatDetail } from "@/features/chats/ChatDetail";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { ChatStatus } from "@/features/chats/ChatStatus";
@@ -253,6 +254,7 @@ export function ChatsView({
 }) {
   const [scope, setScope] = useState<Retention>("active");
   const [open, setOpen] = useState<Open>(null);
+  const takenOver = useTakenOverLine(open?.kind === "chat" ? open.id : null);
   const [expanded, setExpanded] = useState(false);
   const [seenRequest, setSeenRequest] = useState(0);
   const [failure, setFailure] = useState("");
@@ -430,6 +432,7 @@ export function ChatsView({
       <ChatDetail
         key={open.id}
         id={open.id}
+        notice={takenOver}
         {...paneProps}
         {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
         focusRequest={Boolean(open.notified)}

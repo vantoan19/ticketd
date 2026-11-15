@@ -41,6 +41,9 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -655,11 +658,58 @@ async fn a_new_session_opens_with_new_chats_picks() {
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
         settings: StartSettings {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
             permission: Some("acceptEdits".to_owned()),
         },
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// #387 M1, D11: a Chat taken over from a run resumes the agent's session with what
+/// an untouched New Chat sends ("Ask before edits" on Claude Code's default model),
+/// never the agent's "don't ask" nor whatever Claude Code's own `defaultMode` says.
+#[tokio::test(start_paused = true)]
+async fn a_chat_taken_over_from_a_run_resumes_with_new_chats_defaults() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("takeover_resume"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: true,
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// #387 5A1: the same when the run never got a session, so the Chat opens a fresh one.
+#[tokio::test(start_paused = true)]
+async fn a_chat_taken_over_before_its_session_exists_opens_with_new_chats_defaults() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("takeover_fresh"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: true,
+        settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
     let (opened, ()) = tokio::join!(opening, peer.play());
@@ -796,7 +846,7 @@ async fn the_built_bridge_answers_hello() {
         eprintln!("skipped: {} has not been built", bridge.display());
         return;
     }
-    let mut io = spawn(&bridge, &[], None).expect("the bridge starts");
+    let mut io = spawn(&bridge, &[], crate::stdio::Serving::Nothing).expect("the bridge starts");
     let hello = b"{\"id\":\"t1\",\"cmd\":\"hello\",\"protocol\":1}\n";
     io.stdin.write_all(hello).await.expect("stdin");
     io.stdin.flush().await.expect("stdin");
@@ -854,6 +904,208 @@ async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound
     assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
 }
 
+/// An agent that may read files and run `npm test`, on a named model.
+fn reader_that_tests() -> crate::Unattended {
+    crate::Unattended {
+        run_id: "run-1".into(),
+        model: Some("claude-test".into()),
+        tools: ticketd_core::AutomationAgentTools {
+            read_files: true,
+            edit_files: false,
+            run_commands: true,
+            any_command: false,
+            allowed_commands: vec!["npm test".into()],
+            use_web: false,
+        },
+        turn_limit: 40,
+    }
+}
+
+/// The ticketd CLI by its name, in both shells: the rules every agent has.
+const CLI_RULES: [&str; 4] = [
+    "Bash(ticketd *)",
+    "PowerShell(ticketd *)",
+    "Bash(ticketd.exe *)",
+    "PowerShell(ticketd.exe *)",
+];
+
+#[test]
+fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else() {
+    let mut unattended = reader_that_tests();
+    unattended.model = None;
+    unattended.tools = ticketd_core::AutomationAgentTools {
+        read_files: false,
+        edit_files: false,
+        run_commands: false,
+        any_command: true,
+        allowed_commands: vec!["npm test".into()],
+        use_web: false,
+    };
+
+    assert_eq!(
+        super::unattended_options(&unattended),
+        json!({
+            "allowed_tools": CLI_RULES,
+            "disallowed_tools": [
+                "Read", "Glob", "Grep", "LSP", "Edit", "Write", "NotebookEdit", "WebFetch",
+                "WebSearch"
+            ],
+            "max_turns": 40,
+        })
+    );
+
+    // Running commands allows any command only when the agent says so outright.
+    unattended.tools.run_commands = true;
+    let options = super::unattended_options(&unattended);
+    let mut any = CLI_RULES.to_vec();
+    any.extend(["Bash", "PowerShell"]);
+    assert_eq!(options["allowed_tools"], json!(any));
+
+    // An empty list is not "any command": it allows none but the ticketd CLI.
+    unattended.tools.any_command = false;
+    unattended.tools.allowed_commands.clear();
+    let options = super::unattended_options(&unattended);
+    assert_eq!(options["allowed_tools"], json!(CLI_RULES));
+}
+
+/// #387 M12, D15: Claude Code's `Edit` refuses a file it has not read, so "Edit
+/// files" also leaves `Read` on (not `Glob` or `Grep`), even with "Read files" off.
+/// 3B1: edits are allowed only below the step's folder, Claude Code's working
+/// directory, by the one rule that covers Edit, Write and NotebookEdit there.
+#[test]
+fn an_agent_that_edits_files_may_read_the_files_it_changes() {
+    let mut unattended = reader_that_tests();
+    unattended.tools.read_files = false;
+    unattended.tools.edit_files = true;
+    let options = super::unattended_options(&unattended);
+
+    let mut expected = vec!["Edit(./**)"];
+    expected.extend(CLI_RULES);
+    expected.extend(["Bash(npm test *)", "PowerShell(npm test *)"]);
+    assert_eq!(options["allowed_tools"], json!(expected));
+    assert_eq!(
+        options["disallowed_tools"],
+        json!(["Glob", "Grep", "LSP", "WebFetch", "WebSearch"])
+    );
+}
+
+/// #387 3B1: no switch allows a file tool by its bare name, which Claude Code reads
+/// as "on any path". Reading needs no rule in the step's folder (and is refused
+/// outside it); editing is allowed below the folder only.
+#[test]
+fn no_switch_allows_a_file_tool_outside_the_steps_folder() {
+    for (read_files, edit_files) in [(true, false), (false, true), (true, true)] {
+        let mut unattended = reader_that_tests();
+        unattended.tools.read_files = read_files;
+        unattended.tools.edit_files = edit_files;
+        let options = super::unattended_options(&unattended);
+        let file_rules: Vec<_> = options["allowed_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|rule| rule.as_str())
+            .filter(|rule| !rule.starts_with("Bash(") && !rule.starts_with("PowerShell("))
+            .collect();
+        let expected: &[&str] = if edit_files { &["Edit(./**)"] } else { &[] };
+        assert_eq!(file_rules, expected, "read {read_files}, edit {edit_files}");
+    }
+}
+
+/// #387 M19: a denied command's control characters (here a backspace, as `\b` in a
+/// Windows path written into JSON becomes) never reach the run's reason.
+#[test]
+fn a_denied_commands_control_characters_are_not_printed() {
+    let denied = super::session::denials(&json!({"denials": [
+        {"tool_name": "PowerShell", "command": "& \"C:\\x\u{8}in\\ticketd.exe\" add-tag\u{7}"}
+    ]}));
+    assert_eq!(denied, ["PowerShell `& \"C:\\x in\\ticketd.exe\" add-tag`"]);
+}
+
+/// #387 3B1: a file tool refused outside the step's folder is named with its path,
+/// so the run's reason says what the agent tried to reach.
+#[test]
+fn a_denied_file_tool_is_named_with_its_path() {
+    let denied = super::session::denials(&json!({"denials": [
+        {"tool_name": "Write", "command": null, "path": "C:\\outside\\w.txt"},
+        {"tool_name": "Read", "command": null, "path": "C:\\Users\\me\\notes.txt"},
+        {"tool_name": "WebSearch", "command": null, "path": null},
+    ]}));
+    assert_eq!(
+        denied,
+        [
+            "Write `C:\\outside\\w.txt`",
+            "Read `C:\\Users\\me\\notes.txt`",
+            "WebSearch"
+        ]
+    );
+}
+
+/// L1: a list of commands allows exactly those, in both shells, besides the CLI.
+/// No rule names the CLI's path: the agent runs it by name from its `PATH`.
+#[test]
+fn an_agent_with_a_command_list_may_run_those_and_the_ticketd_cli_by_name() {
+    let mut unattended = reader_that_tests();
+    unattended.tools.read_files = false;
+    let mut expected = CLI_RULES.to_vec();
+    expected.extend(["Bash(npm test *)", "PowerShell(npm test *)"]);
+    assert_eq!(
+        super::unattended_options(&unattended)["allowed_tools"],
+        json!(expected)
+    );
+}
+
+/// The open command carries the agent's model, tools and turn limit (the fixture
+/// checks the frame), and the two endings only an unattended session has are told
+/// apart: the turn limit, and a tool Claude Code denied.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_and_denial() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("unattended"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(reader_that_tests()),
+        ticketd_cli: None,
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+    let mut opened = opened.expect("the session opens");
+    drain(&mut opened.events).await;
+
+    let mut ended = async |peer: &mut Peer, id: &str| {
+        submit(
+            peer,
+            &opened.runtime,
+            start_turn(id, if id == "sub-1" { "Go" } else { "Again" }),
+        )
+        .await;
+        match drain(&mut opened.events).await.pop() {
+            Some(EventKind::TurnEnded {
+                outcome: crate::TurnOutcome::Failed(problem),
+                ..
+            }) => (problem.kind, problem.message),
+            other => panic!("a failed turn, got {other:?}"),
+        }
+    };
+
+    assert_eq!(
+        ended(&mut peer, "sub-1").await.0,
+        ProblemKind::TurnLimitReached
+    );
+    // The agent ended its turn itself, but without the tool it was denied. L6: each
+    // distinct denial is named once, a shell's with its command on one line.
+    assert_eq!(
+        ended(&mut peer, "sub-2").await,
+        (
+            ProblemKind::ToolDenied,
+            "Claude Code was denied: PowerShell `node test.js`; Write.".to_owned()
+        )
+    );
+}
 /// A tool the person declined comes back as an error result; it is told as declined,
 /// and a later failure of another tool is still a failure.
 #[test]
@@ -893,6 +1145,35 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
         .event("tool_result", &result("toolu_2"))
         .expect("modeled");
     assert_eq!(status(events), ToolStatus::Failed);
+}
+
+/// #387 3B3: Claude Code answers the tool a Stop cuts off with an error result ("The
+/// user doesn't want to proceed with this tool use", seen in live transcripts). It
+/// is left unfinished, which the turn then shows as "not finished", not failed.
+#[test]
+fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
+    use super::session::Session;
+    use crate::ToolStatus;
+    let mut session = Session::default();
+    session.event("assistant_content", &json!({"blocks": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ticketd list"}}], "parent_tool_use_id": null}));
+    session.interrupt_written();
+    let (events, _) = session
+        .event(
+            "tool_result",
+            &json!({"tool_use_id": "toolu_1", "is_error": true, "text": "The user doesn't want to proceed with this tool use."}),
+        )
+        .expect("modeled");
+
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: ToolStatus::Failed,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
 }
 
 /// The lines an edit added and removed, from its result, stay with the tool so its
@@ -1103,6 +1384,41 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
         permission.refusal("acceptEdits").as_deref(),
         Some("Set in Claude Code's settings")
     );
+}
+
+/// #387 M15: modes ticketd does not offer are named in words, and a run's agent
+/// reports its settings read-only, with why, instead of offering refused choices.
+#[test]
+fn a_runs_agent_reports_its_settings_read_only_and_named() {
+    use super::session::Session;
+    let label = |settings: &crate::HarnessSettings| {
+        let permission = settings.permission.as_ref().expect("permission");
+        let current = permission.current.clone().unwrap();
+        let option = permission.options.iter().find(|o| o.id == current).unwrap();
+        (option.label.clone(), permission.unchangeable.clone())
+    };
+    let settings_after = |session: &mut Session, mode: &str| {
+        let info = json!({"model": "claude-haiku-test", "permission_mode": mode});
+        let (events, _) = session.event("session_info", &info).expect("modeled");
+        match events.last() {
+            Some(EventKind::SettingsState(settings)) => settings.clone(),
+            other => panic!("settings, got {other:?}"),
+        }
+    };
+
+    let mut agent = Session::default();
+    agent.mark_unattended();
+    let settings = settings_after(&mut agent, "dontAsk");
+    let locked = Some(
+        "An Automation is running this Chat. Reply or stop it to take it over first.".to_owned(),
+    );
+    assert_eq!(label(&settings), ("Never asks".to_owned(), locked.clone()));
+    assert_eq!(settings.model.as_ref().unwrap().unchangeable, locked);
+
+    let mut chat = Session::default();
+    let settings = settings_after(&mut chat, "auto");
+    assert_eq!(label(&settings), ("Auto".to_owned(), None));
+    assert_eq!(settings.model.as_ref().unwrap().unchangeable, None);
 }
 
 /// LIVE2-11: a question names the AskUserQuestion tool use it was asked from, so

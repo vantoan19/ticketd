@@ -9,7 +9,7 @@ use ticketd_chat_host::attention::{self, Facts, Status};
 use ticketd_chat_host::conditions::ChatProblemKind;
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, InteractionKind, ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
+    ChatProblem, InteractionKind, ProblemKind, StopState, TicketdStop, problem_kind,
 };
 use ticketd_chat_host::{FileChangeKind, diffstat};
 use ticketd_core::{
@@ -243,7 +243,7 @@ pub enum Item {
         turn_id: String,
         started_at: String,
         ended_at: Option<String>,
-        /// `active`, `completed`, `stopped` (by the person), `quit` (ticketd quit),
+        /// `active`, `completed`, `stopped` (by the person), `quit` (ticketd stopped it),
         /// `failed` or `lost` (contact was lost, so how it ended is unknown).
         outcome: &'static str,
     },
@@ -1332,17 +1332,19 @@ pub fn item(
             }
         }
         ChatItem::Turn(turn) => {
-            let (reason, message) = match turn.state {
-                ChatTurnState::Active | ChatTurnState::Completed => return None,
-                ChatTurnState::Interrupted => ("stopped", turn.detail.clone()),
-                ChatTurnState::Failed => (
+            let stop = TicketdStop::of(turn.detail.as_deref());
+            let (reason, message) = match (turn.state, stop) {
+                (ChatTurnState::Active | ChatTurnState::Completed, _) => return None,
+                // ticketd stopped it, whether or not the harness reported the turn.
+                (ChatTurnState::Interrupted | ChatTurnState::Unknown, Some(stop)) => {
+                    (stop.marker(), None)
+                }
+                (ChatTurnState::Interrupted, None) => ("stopped", turn.detail.clone()),
+                (ChatTurnState::Failed, _) => (
                     "failed",
                     Some(turn.detail.clone().unwrap_or("The turn failed.".to_owned())),
                 ),
-                ChatTurnState::Unknown if turn.detail.as_deref() == Some(STOPPED_BY_TICKETD) => {
-                    ("quit", None)
-                }
-                ChatTurnState::Unknown => (
+                (ChatTurnState::Unknown, None) => (
                     "note",
                     Some(format!(
                         "Contact with {harness} was lost ({}). Whether this turn finished is unknown.",
@@ -1470,7 +1472,7 @@ fn turn_item(turn: &ChatTurn) -> Item {
             ChatTurnState::Completed => "completed",
             ChatTurnState::Interrupted => "stopped",
             ChatTurnState::Failed => "failed",
-            ChatTurnState::Unknown if turn.detail.as_deref() == Some(STOPPED_BY_TICKETD) => "quit",
+            ChatTurnState::Unknown if TicketdStop::of(turn.detail.as_deref()).is_some() => "quit",
             ChatTurnState::Unknown => "lost",
         },
     }
@@ -1827,7 +1829,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         _ if activity != "interrupted" => None,
         _ if live.stop == Some(StopState::Unconfirmed) => Some("unconfirmed"),
         Some(turn) if turn.state == ChatTurnState::Interrupted => Some("stopped"),
-        Some(turn) if turn.detail.as_deref() == Some(STOPPED_BY_TICKETD) => Some("quit"),
+        Some(turn) if TicketdStop::of(turn.detail.as_deref()).is_some() => Some("quit"),
         _ => None,
     };
     Summary {
@@ -1880,10 +1882,11 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
 mod tests {
     use super::{
         Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatLive, ChatTool,
-        ChatToolState, ChatTurn, ChatTurnState, Item, STOPPED_BY_TICKETD, Step, Tracker, items,
-        opening, request, steps,
+        ChatToolState, ChatTurn, ChatTurnState, Item, Step, TicketdStop, Tracker, items, opening,
+        request, steps,
     };
     use serde_json::json;
+    use ticketd_chat_host::STOPPED_BY_TICKETD;
     use ticketd_core::ChatItem;
     use ticketd_core::ChatSessionOrigin;
 
@@ -2514,6 +2517,42 @@ mod tests {
             ("quit", 1)
         );
         assert_eq!(outcome(&turn(ChatTurnState::Unknown, None)), ("lost", 1));
+
+        // L15: the end marker says why ticketd stopped the turn, whether the harness
+        // reported it interrupted (Codex) or never did (Claude Code's closed bridge).
+        let marker = |record: &ChatItem| match items(
+            record,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Tracker::default(),
+        )
+        .as_slice()
+        {
+            [Item::Turn { .. }, Item::Marker { reason, .. }] => *reason,
+            other => panic!("expected the turn and its marker: {other:?}"),
+        };
+        let taken_over = Some(TicketdStop::TakenOver.detail());
+        assert_eq!(
+            marker(&turn(ChatTurnState::Unknown, taken_over)),
+            "taken_over"
+        );
+        assert_eq!(
+            marker(&turn(ChatTurnState::Interrupted, taken_over)),
+            "taken_over"
+        );
+        assert_eq!(
+            marker(&turn(
+                ChatTurnState::Unknown,
+                Some(TicketdStop::TurnedOff.detail())
+            )),
+            "turned_off"
+        );
+        assert_eq!(
+            marker(&turn(ChatTurnState::Unknown, Some(STOPPED_BY_TICKETD))),
+            "quit"
+        );
+        assert_eq!(marker(&turn(ChatTurnState::Interrupted, None)), "stopped");
     }
 
     #[test]

@@ -8,18 +8,21 @@ import { cn } from "cn";
  */
 export function ListHeader({
   title,
+  hideTitle = false,
   children,
   actions,
   className,
 }: {
   title: string;
+  /** Keeps the title for screen readers only, where a control in the header names the view. */
+  hideTitle?: boolean;
   children?: ReactNode;
   actions?: ReactNode;
   className?: string;
 }) {
   return (
     <header data-slot="list-header" className={cn("list-header", className)}>
-      <h1>{title}</h1>
+      <h1 className={hideTitle ? "sr-only" : undefined}>{title}</h1>
       {children}
       <span className="flex-1" />
       {actions}

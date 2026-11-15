@@ -18,9 +18,9 @@ use ticketd_chat_host::{
     UnconfirmedCleanup, WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
-    BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
-    ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
-    ChatTurnState, NewChat, Workspace,
+    AutomationRunStatus, BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding,
+    ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
+    ChatSubmissionIntent, ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -259,6 +259,21 @@ pub struct Overview {
     /// Waiting Chats that are not muted: the app-icon count.
     pub app_icon: usize,
     pub working: usize,
+}
+
+/// What turning Chat off, quitting or closing would stop: Chats with work in progress
+/// or a request waiting, and runs that are going. A run's own Chat is counted as its
+/// run, not as a Chat, since it is not in the Chat list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Stopping {
+    pub chats: usize,
+    pub runs: usize,
+}
+
+impl Stopping {
+    pub fn any(self) -> bool {
+        self.chats + self.runs > 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -840,6 +855,12 @@ impl Chats {
         Ok(started)
     }
 
+    /// The host for Automation runs, or `None` while nothing may run: Chat is off,
+    /// a backup is being restored, or the host could not start.
+    pub fn automation_host(&self) -> Option<ChatHost> {
+        self.host().ok()
+    }
+
     /// Starts the host if Chat is on, so its change signal can be watched.
     pub fn start(&self) -> Outcome<()> {
         self.host().map(|_| ())
@@ -891,6 +912,45 @@ impl Chats {
             .flat_map(HashMap::into_values)
             .filter(|live| live.activity != Activity::Idle)
             .count()
+    }
+
+    /// What turning Chat off or quitting would stop now. With Chat off nothing runs.
+    /// Runs are read from the Workspace, so one between agents counts too; when it
+    /// cannot be read, every live Chat counts as a Chat rather than nothing at all.
+    pub fn stopping(&self) -> Stopping {
+        if !self.enabled() {
+            return Stopping::default();
+        }
+        let mut live = self
+            .started_host()
+            .map(|host| host.live())
+            .unwrap_or_default();
+        live.retain(|_, live| live.activity != Activity::Idle);
+        let runs = self
+            .workspace()
+            .ok()
+            .and_then(|workspace| workspace.all_automation_runs().ok())
+            .unwrap_or_default();
+        let going: Vec<_> = runs
+            .iter()
+            .filter(|run| run.status == AutomationRunStatus::Running)
+            .collect();
+        for step in going.iter().flat_map(|run| &run.steps) {
+            if let Some(chat_id) = &step.chat_id {
+                live.remove(chat_id);
+            }
+        }
+        Stopping {
+            chats: live.len(),
+            runs: going.len(),
+        }
+    }
+
+    /// Whether any Automation is on for this device. One that is keeps ticketd in the
+    /// tray when the window closes, since Automations run only in this process.
+    pub fn automations_on(&self) -> bool {
+        self.workspace()
+            .is_ok_and(|workspace| workspace.any_automation_on().unwrap_or(false))
     }
 
     /// Before the workspace is replaced by a backup: stops every running Chat, so no
@@ -2138,12 +2198,14 @@ pub fn overview_of(rows: &[Summary]) -> Overview {
 pub enum CloseAction {
     /// As before Chat existed: the window closes and the app exits.
     Exit,
-    /// The window is hidden and Chats keep running in this process.
+    /// The window is hidden; Chats and Automations keep running in this process.
     KeepRunning,
 }
 
-pub fn close_action(enabled: bool, working: usize) -> CloseAction {
-    if enabled && working > 0 {
+/// ticketd stays for a Chat that is working, a run that is going, and an Automation
+/// that is on, which may start a run at any time. With Chat off none of them runs.
+pub fn close_action(enabled: bool, stopping: Stopping, automations_on: bool) -> CloseAction {
+    if enabled && (stopping.any() || automations_on) {
         CloseAction::KeepRunning
     } else {
         CloseAction::Exit
@@ -2153,15 +2215,15 @@ pub fn close_action(enabled: bool, working: usize) -> CloseAction {
 /// What a request to quit does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuitAction {
-    /// Ask the person first: this many Chats would be stopped.
-    Confirm(usize),
+    /// Ask the person first: this would be stopped.
+    Confirm(Stopping),
     /// Stop app-owned execution, then exit.
     Quit,
 }
 
-pub fn quit_action(working: usize, confirmed: bool) -> QuitAction {
-    if working > 0 && !confirmed {
-        QuitAction::Confirm(working)
+pub fn quit_action(stopping: Stopping, confirmed: bool) -> QuitAction {
+    if stopping.any() && !confirmed {
+        QuitAction::Confirm(stopping)
     } else {
         QuitAction::Quit
     }

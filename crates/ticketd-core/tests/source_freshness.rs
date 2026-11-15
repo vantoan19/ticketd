@@ -122,6 +122,7 @@ impl Connector for Fake {
                     code: "not_found".into(),
                     message: format!("{name}: was not found"),
                     field: None,
+                    partition: name.clone(),
                 })
                 .collect(),
         })

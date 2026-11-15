@@ -19,7 +19,8 @@ import {
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
-import { FileText, Layers, Maximize, Minus, Plus } from "lucide-react";
+import { FileText, Layers } from "lucide-react";
+import { ZoomControl } from "@/components/ui/zoom-control";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   centerZoom,
@@ -564,44 +565,28 @@ export function ContextGraphCanvas({
             <Background />
           </ReactFlow>
         </div>
-        <div className="context-graph-zoom" role="group" aria-label="Zoom">
-          <button
-            type="button"
-            aria-label="Zoom out"
-            onClick={() => stepZoom(1 / ZOOM_STEP)}
-          >
-            <Minus aria-hidden="true" />
-          </button>
-          <span aria-live="polite">{Math.round(viewport.zoom * 100)}%</span>
-          <button
-            type="button"
-            aria-label="Zoom in"
-            onClick={() => stepZoom(ZOOM_STEP)}
-          >
-            <Plus aria-hidden="true" />
-          </button>
-          <span className="context-graph-zoom-rule" aria-hidden="true" />
-          <button
-            type="button"
-            onClick={() => {
+        <div className="context-graph-zoom">
+          <ZoomControl
+            zoom={viewport.zoom}
+            onZoomOut={() => stepZoom(1 / ZOOM_STEP)}
+            onZoomIn={() => stepZoom(ZOOM_STEP)}
+            onFit={() => {
               autoFitted.current = true;
               void instance.current?.fitView(
                 fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
               );
             }}
           >
-            <Maximize aria-hidden="true" />
-            Fit
-          </button>
-          {notFullyShown > 0 && (
-            <>
-              <span className="context-graph-zoom-rule" aria-hidden="true" />
-              <span role="status">
-                {notFullyShown} {notFullyShown === 1 ? "item" : "items"} not
-                fully shown
-              </span>
-            </>
-          )}
+            {notFullyShown > 0 && (
+              <>
+                <span className="zoom-control-rule" aria-hidden="true" />
+                <span role="status">
+                  {notFullyShown} {notFullyShown === 1 ? "item" : "items"} not
+                  fully shown
+                </span>
+              </>
+            )}
+          </ZoomControl>
         </div>
       </div>
       <div className="context-graph-overlay">

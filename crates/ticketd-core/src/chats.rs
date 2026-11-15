@@ -737,7 +737,12 @@ fn invalid(message: impl Into<String>) -> Error {
 }
 
 /// Appends a change entry and returns its sequence, which also orders new history items.
-fn log(connection: &Connection, chat_id: &str, kind: &str, subject: &str) -> Result<i64, Error> {
+pub(crate) fn log(
+    connection: &Connection,
+    chat_id: &str,
+    kind: &str,
+    subject: &str,
+) -> Result<i64, Error> {
     connection.execute(
         "INSERT INTO chat_changes (chat_id, kind, subject_id) VALUES (?1, ?2, ?3)",
         params![chat_id, kind, subject],
@@ -1482,6 +1487,31 @@ fn lose_contact(connection: &Connection, chat_id: &str, detail: &str) -> Result<
     trim(connection, chat_id)
 }
 
+/// Removes the Chats matching `filter` (a condition on `chats`) with every record
+/// they hold. Only run retention deletes a Chat; a person's Chats are trashed.
+pub(crate) fn delete_where(connection: &Connection, filter: &str) -> Result<(), Error> {
+    // Children before the rows they reference.
+    for table in [
+        "chat_record_writes",
+        "chat_changes",
+        "chat_notices",
+        "chat_interactions",
+        "chat_tools",
+        "chat_submission_attempts",
+        "chat_messages",
+        "chat_turns",
+        "chat_sessions",
+        "chat_links",
+    ] {
+        connection.execute(
+            &format!("DELETE FROM {table} WHERE chat_id IN (SELECT id FROM chats WHERE {filter})"),
+            [],
+        )?;
+    }
+    connection.execute(&format!("DELETE FROM chats WHERE {filter}"), [])?;
+    Ok(())
+}
+
 impl Workspace {
     /// One immediate transaction: records and their change entries commit together or not at all.
     fn chat_write<T>(
@@ -1512,6 +1542,17 @@ impl Workspace {
 
     /// Create a Chat. Repeating `command_id` with the same content returns the first Chat.
     pub fn create_chat(&mut self, command_id: Option<&str>, chat: NewChat) -> Result<Chat, Error> {
+        self.create_chat_with(command_id, chat, |_, _| Ok(()))
+    }
+
+    /// Creates a Chat and, in the same transaction, runs `also` with its id: when
+    /// `also` refuses, no Chat is left behind.
+    pub(crate) fn create_chat_with(
+        &mut self,
+        command_id: Option<&str>,
+        chat: NewChat,
+        also: impl FnOnce(&Connection, &str) -> Result<(), Error>,
+    ) -> Result<Chat, Error> {
         if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
             return Err(invalid("a Chat needs a harness and an execution folder"));
         }
@@ -1530,12 +1571,25 @@ impl Workspace {
                 log(connection, &id, "chat", &id)?;
                 Ok(id)
             })?;
+            also(connection, &id)?;
             read_chat(connection, &id)
         })
     }
 
     pub fn chat(&self, id: &str) -> Result<Chat, Error> {
         read_chat(&self.connection, id)
+    }
+
+    /// The Chat's most recent turn, whatever its state.
+    pub fn chat_latest_turn(&self, chat_id: &str) -> Result<Option<ChatTurn>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                &format!("{TURN} WHERE chat_id = ?1 ORDER BY position DESC LIMIT 1"),
+                [chat_id],
+                turn_from_row,
+            )
+            .optional()?)
     }
 
     /// The Chat's linked records as they are now, in link order.
@@ -1583,8 +1637,9 @@ impl Workspace {
             ChatListFilter::Archived => "trashed = 0 AND archived = 1",
             ChatListFilter::Trashed => "trashed = 1",
         };
+        // A Chat owned by an Automation run is reached from its run, not from here.
         let mut statement = self.connection.prepare(&format!(
-            "SELECT id FROM chats WHERE {scope} ORDER BY (SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id"
+            "SELECT id FROM chats WHERE {scope} AND automation_run_id IS NULL ORDER BY (SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id"
         ))?;
         let ids = statement
             .query_map([], |row| row.get::<_, String>(0))?
@@ -1842,6 +1897,38 @@ impl Workspace {
             )?;
             connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
             Ok(())
+        })
+    }
+
+    /// Set queued input aside without sending it: it moves from the queue to the end of
+    /// the history as input that was never delivered and is never sent. For input the
+    /// person did not write, which must not wait to go out for them.
+    pub fn set_aside_queued_chat_input(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<ChatMessage, Error> {
+        self.chat_write(|connection| {
+            let message = require_input(connection, chat_id, message_id)?;
+            if !message.queued {
+                return Err(invalid("this input is not in the queue"));
+            }
+            connection.execute(
+                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, decision) VALUES (?1, ?2, ?3, ?4, 'not_delivered', 'discarded')",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    chat_id,
+                    message_id,
+                    name(ChatSubmissionIntent::NewTurn)?
+                ],
+            )?;
+            let sequence = log(connection, chat_id, "message", message_id)?;
+            connection.execute(
+                "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
+                params![sequence, message_id],
+            )?;
+            trim(connection, chat_id)?;
+            read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
         })
     }
 

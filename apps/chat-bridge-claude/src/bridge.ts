@@ -399,6 +399,46 @@ export function createBridge(deps: BridgeDeps) {
       ...(command.permission_mode && {
         permissionMode: command.permission_mode,
       }),
+      // Last, so nothing above changes how an unattended session runs.
+      ...(command.unattended && {
+        permissionMode: "dontAsk" as const,
+        // The agent's allowlist is the whole of what it may do, so none of the
+        // person's user, project or local settings are loaded: an allow rule there
+        // would widen it. This also leaves out their hooks, CLAUDE.md, and any
+        // sign-in or environment set through those files. Settings an
+        // administrator manages still apply.
+        settingSources: [],
+        // The agent's file tools stay in the step's folder (its working directory,
+        // and no other is added): Claude Code refuses Read, Glob, Grep and LSP
+        // outside it, and Edit, Write and NotebookEdit there, in every mode and
+        // whatever an allow rule says. Shell commands Claude Code recognizes as
+        // reading a path outside it are asked about, so "don't ask" denies them
+        // (#387 3B1; settings reference, `permissions.block*OutsideWorkingDirectories`).
+        settings: {
+          permissions: {
+            blockReadsOutsideWorkingDirectories: true,
+            blockWritesOutsideWorkingDirectories: true,
+          },
+        },
+        // None of the person's MCP servers, claude.ai connectors or skills
+        // either: the agent has Claude Code's own tools and nothing they added.
+        mcpServers: {},
+        strictMcpConfig: true,
+        skills: [],
+        // The SDK replaces the environment when `env` is given, so the bridge's
+        // own (with the ticketd CLI's folder on PATH) is passed on whole.
+        env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
+        allowedTools: command.unattended.allowed_tools,
+        disallowedTools: command.unattended.disallowed_tools,
+        maxTurns: command.unattended.max_turns,
+        ...(command.unattended.model && { model: command.unattended.model }),
+        // "Don't ask" denies before this is reached. Should a request arrive
+        // anyway, it is denied here: nobody is there for the host to ask.
+        canUseTool: async () => ({
+          behavior: "deny" as const,
+          message: "This tool is not among the agent's allowed tools.",
+        }),
+      }),
     };
     let opening: Session;
     try {
@@ -989,9 +1029,22 @@ export function createBridge(deps: BridgeDeps) {
       errors: strings(message.errors),
       stop_reason: text(message.stop_reason),
       terminal_reason: text(message.terminal_reason),
-      denied_tool_names: blocks(message.permission_denials).flatMap(
-        (denial) => text(denial.tool_name) ?? [],
-      ),
+      denials: blocks(message.permission_denials).flatMap((denial) => {
+        const tool = text(denial.tool_name);
+        if (!tool) return [];
+        const input = isObject(denial.tool_input) ? denial.tool_input : {};
+        return [
+          {
+            tool_name: tool,
+            command: text(input.command),
+            // The file tools' path fields, as `sdk-tools.d.ts` names them.
+            path:
+              text(input.file_path) ??
+              text(input.notebook_path) ??
+              text(input.path),
+          },
+        ];
+      }),
       queued_turn_count: number(message.queued_turn_count),
       num_turns: number(message.num_turns),
       duration_ms: number(message.duration_ms),

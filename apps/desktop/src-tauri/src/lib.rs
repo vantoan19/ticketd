@@ -2,6 +2,8 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
+mod automation_commands;
+mod automation_runner;
 mod chat_commands;
 mod chat_reports;
 mod chat_ticketd;
@@ -1491,7 +1493,9 @@ pub fn run() -> Result<(), tauri::Error> {
         })
         .setup(move |app| {
             let version = app.package_info().version.to_string();
-            tauri::Manager::manage(app, chat_commands::ChatBridge::new(version));
+            let chat = chat_commands::ChatBridge::new(version);
+            automation_runner::start(chat.chats(), app.handle().clone());
+            tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             start_periodic_refresh(coordinator);
             sync.start(started, sync_commands::at_launch);
@@ -1517,6 +1521,11 @@ pub fn run() -> Result<(), tauri::Error> {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Registered for the Rust API only: no capability grants the page its commands.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             drive_commands::drive_configuration,
             drive_commands::drive_reference,
@@ -1535,6 +1544,32 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::import_attachment,
             attachment_commands::capture_attachment,
             attachment_commands::cancel_attachment_upload,
+            automation_commands::automation_agent_list,
+            automation_commands::automation_agent_create,
+            automation_commands::automation_agent_update,
+            automation_commands::automation_agent_delete,
+            automation_commands::automation_list,
+            automation_commands::automation_create,
+            automation_commands::automation_create_example,
+            automation_commands::automation_duplicate,
+            automation_commands::automation_update,
+            automation_commands::automation_delete,
+            automation_commands::automation_set_enabled,
+            automation_commands::automation_run_list,
+            automation_commands::automation_run_list_all,
+            automation_commands::automation_text_preview,
+            automation_commands::automation_run_get,
+            automation_commands::automation_run_stop,
+            automation_commands::automation_run_again,
+            automation_commands::automation_run_now,
+            automation_commands::automation_run_dismiss,
+            automation_commands::automation_run_taken_over_in,
+            automation_commands::automation_run_list_for_ticket,
+            automation_commands::automation_stop_and_turn_off,
+            automation_commands::automation_runs_at_once,
+            automation_commands::set_automation_runs_at_once,
+            automation_commands::start_at_login,
+            automation_commands::set_start_at_login,
             attachment_commands::attachment_upload_limit,
             attachment_commands::attachment_workspace_id,
             attachment_commands::set_attachment_upload_limit,
@@ -1706,6 +1741,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_open_folder,
             project_icon,
             chat_commands::chat_answer_quit,
+            chat_commands::chat_stopping,
             chat_commands::close_keeps_running,
             sync_commands::sync_conflicts,
             sync_commands::sync_conflict,
