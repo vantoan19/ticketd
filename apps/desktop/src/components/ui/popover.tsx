@@ -1,6 +1,7 @@
 import * as React from "react";
 import { cn } from "cn";
 import { Popover as PopoverPrimitive } from "radix-ui";
+import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
 
 function Popover({
   ...props
@@ -14,13 +15,20 @@ function PopoverTrigger({
   return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />;
 }
 
+/**
+ * A popover holds a small form or a ChoiceList (P3), never a column of
+ * buttons; when its trigger is icon-only it carries a title. It opens below
+ * the trigger inside the nearest OverlayBoundary with 16px clearance.
+ */
 function PopoverContent({
   className,
   align = "center",
   sideOffset = 4,
   collisionPadding = 16,
+  collisionBoundary,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+  const boundary = useOverlayBoundary();
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
@@ -28,6 +36,7 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
+        collisionBoundary={collisionBoundary ?? boundary}
         className={cn(
           "ui-popover z-50 w-72 origin-(--radix-popover-content-transform-origin) p-4 outline-hidden",
           className,

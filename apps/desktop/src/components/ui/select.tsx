@@ -2,6 +2,7 @@ import * as React from "react";
 import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
+import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
 
 function Select({
   ...props
@@ -69,26 +70,37 @@ function SelectTrigger({
   );
 }
 
+/**
+ * The list of a Select (P3): a popper below its trigger, flipping above only
+ * on collision, 4px away, at least as wide as the trigger, inside the nearest
+ * OverlayBoundary with 16px clearance. It opens with the current value
+ * highlighted. `item-aligned` (the list over its own trigger) is not used.
+ */
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
-  align = "center",
+  position = "popper",
+  align = "start",
+  sideOffset = 4,
   collisionPadding = 16,
+  collisionBoundary,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const boundary = useOverlayBoundary();
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
           "ui-menu relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto",
-          position === "popper" &&
-            "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
         )}
         position={position}
         align={align}
+        {...(position === "popper" && {
+          sideOffset,
+          collisionBoundary: collisionBoundary ?? boundary,
+        })}
         collisionPadding={collisionPadding}
         {...props}
       >

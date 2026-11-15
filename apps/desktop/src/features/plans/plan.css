@@ -471,29 +471,6 @@
   display: none;
 }
 
-/* The Plan actions menu is 237px wide, rows 30px (board E). */
-.plan-actions-menu {
-  box-sizing: border-box;
-  width: 235.5px;
-  padding: 6px;
-  font-size: var(--text-code);
-}
-/* Frame E: 30px rows with 8px inset, 14px icons, and a hairline that runs edge to edge. */
-.plan-actions-menu [data-slot="dropdown-menu-item"] {
-  height: 30px;
-  min-height: 30px;
-  padding: 0 8px;
-  font-size: var(--text-code);
-  line-height: 20px;
-}
-.plan-actions-menu [data-slot="dropdown-menu-item"] svg:not([class*="size-"]) {
-  width: 14px;
-  height: 14px;
-}
-.plan-actions-menu [data-slot="dropdown-menu-separator"] {
-  height: 1px;
-  margin: 6px -6px;
-}
 .plan-actions [aria-expanded="true"] {
   background: var(--accent);
 }

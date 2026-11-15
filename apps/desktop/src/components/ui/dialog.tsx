@@ -4,6 +4,7 @@ import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
+import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useFocusReturn } from "@/components/ui/use-focus-return";
 
 function Dialog({
@@ -90,7 +91,8 @@ function DialogContent({
         {...props}
         {...focus}
       >
-        {children}
+        {/* Overlays inside a dialog are bounded by the window, not the pane below. */}
+        <OverlayBoundary element={null}>{children}</OverlayBoundary>
         {showCloseButton && (
           <DialogPrimitive.Close asChild>
             <Button

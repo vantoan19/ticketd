@@ -579,15 +579,43 @@ body:has([data-slot="dialog-overlay"])
   line-height: 32px;
   letter-spacing: -0.6px;
 }
+/* A choice list's search row (P3): 32px, a hairline under it. */
 [data-slot="command-input-wrapper"] {
-  height: 40px;
+  height: 32px;
+  padding-inline: 8px;
   border: 0;
-  box-shadow: 0 1px var(--border);
+  box-shadow: 0 1px var(--group-hairline);
 }
 [data-slot="command-input"] {
-  height: 40px;
+  height: 32px;
   background: transparent;
   box-shadow: none;
+}
+[data-slot="command-item"][data-size="tall"] {
+  min-height: 36px;
+}
+/* A disabled menu row's reason: a readable line under the label, aligned
+   with the label when the row has an icon (P3). */
+[data-slot="dropdown-menu-item"][data-reason] {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+[data-slot="dropdown-menu-item-reason"] {
+  flex-basis: 100%;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+[data-slot="dropdown-menu-item"]:has(> svg:first-child)
+  > [data-slot="dropdown-menu-item-reason"] {
+  padding-left: 24px;
+}
+/* Menus and select lists stop at 320px and scroll inside (P3). */
+[data-slot="select-content"] {
+  max-height: min(320px, var(--radix-select-content-available-height));
+}
+[data-slot="dropdown-menu-content"] {
+  max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
 }
 [data-slot="command-item"],
 [data-slot="select-item"],

@@ -207,21 +207,6 @@
 .publication-footer > p {
   margin-right: auto;
 }
-.publication-menu-item {
-  flex-direction: column;
-  align-items: flex-start;
-  white-space: normal;
-}
-.publication-menu-item small {
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.ticket-actions-menu {
-  width: 260px;
-}
-.ticket-actions-menu [data-slot="dropdown-menu-item"] {
-  min-height: 36px;
-}
 .rail-publish-link {
   padding: 0;
   color: var(--link-foreground);
