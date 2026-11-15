@@ -12,6 +12,13 @@ import {
 } from "react";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { FieldError } from "@/components/ui/field";
+import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Kbd } from "@/components/ui/kbd";
 import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
@@ -190,7 +197,7 @@ export function TicketEditor({
   const [state, setState] = useState<"idle" | "saved" | "pending" | "failed">(
     "idle",
   );
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [retry, setRetry] = useState(0);
   // "Keep my draft" saves at once instead of waiting out the typing delay.
   const immediate = useRef(false);
@@ -307,6 +314,10 @@ export function TicketEditor({
   }, [shown]);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
   const titleDirty = draft.title !== saved.title;
+  // A ticket always has a title: an empty one is never sent (the core would
+  // refuse it), the last saved title stays, and the field says why.
+  const titleInvalid = titleDirty && draft.title.trim() === "";
+  const unsent = (titleDirty && !titleInvalid) || draft.body !== saved.body;
   const bodyDirty = draft.body !== saved.body;
   const externalChange =
     (titleDirty && ticket.title !== saved.title) ||
@@ -329,7 +340,7 @@ export function TicketEditor({
   }
 
   useEffect(() => {
-    if (!dirty || externalChange || inFlight.current || state === "failed")
+    if (!unsent || externalChange || inFlight.current || state === "failed")
       return;
     const delay = immediate.current ? 0 : 500;
     const timer = window.setTimeout(() => {
@@ -338,7 +349,8 @@ export function TicketEditor({
       setSaving(true);
       setState("pending");
       const patch: { title?: string; body?: string } = {};
-      if (draft.title !== saved.title) patch.title = draft.title;
+      if (draft.title !== saved.title && !titleInvalid)
+        patch.title = draft.title;
       if (draft.body !== saved.body) patch.body = draft.body;
       setSavedField(
         patch.title !== undefined && patch.body !== undefined
@@ -360,15 +372,18 @@ export function TicketEditor({
         .then((result) => {
           setSaved({ title: result.title, body: result.body });
           setDraft((current) => ({
-            title: current.title === draft.title ? result.title : current.title,
+            title:
+              patch.title !== undefined && current.title === draft.title
+                ? result.title
+                : current.title,
             body: current.body === draft.body ? result.body : current.body,
           }));
           onSaved(result);
-          setError("");
+          setError(null);
           setState("saved");
         })
         .catch(async (reason: unknown) => {
-          if (String(reason).includes("changed elsewhere")) {
+          if (toFailure(reason).kind === "conflict") {
             try {
               const latest = await client.showTicket(ticket.reference);
               // The parent adopts the stored ticket, so the notice below compares
@@ -386,7 +401,16 @@ export function TicketEditor({
               /* Fall through to the ordinary failure. */
             }
           }
-          setError(String(reason));
+          setError(
+            describeFailure(
+              reason,
+              patch.title !== undefined && patch.body !== undefined
+                ? "save the title and description"
+                : patch.title !== undefined
+                  ? "save the title"
+                  : "save the description",
+            ),
+          );
           setState("failed");
         })
         .finally(() => {
@@ -399,7 +423,8 @@ export function TicketEditor({
   }, [
     draft,
     saved,
-    dirty,
+    unsent,
+    titleInvalid,
     externalChange,
     ticket.reference,
     onSaved,
@@ -520,9 +545,20 @@ export function TicketEditor({
           aria-label="Title"
           rows={1}
           value={draft.title}
+          aria-invalid={titleInvalid || undefined}
+          aria-describedby={
+            titleInvalid ? `title-error-${ticket.id}` : undefined
+          }
           onChange={(event) => edit({ ...draft, title: event.target.value })}
         />
       </label>
+      {titleInvalid && (
+        <div className="editor-title-error">
+          <FieldError id={`title-error-${ticket.id}`}>
+            A ticket needs a title.
+          </FieldError>
+        </div>
+      )}
       {children}
       <div
         className="editor-body"
@@ -656,7 +692,7 @@ export function TicketEditor({
           ? "Saving…"
           : conflict
             ? "Unsaved — choose a version"
-            : dirty && state !== "failed"
+            : unsent && state !== "failed"
               ? "Pending save"
               : state === "failed"
                 ? `${savedField} not saved`
@@ -664,24 +700,16 @@ export function TicketEditor({
                   ? `${savedField} saved`
                   : ""}
       </p>
-      {state === "failed" && (
-        <div role="alert" className="document-save-error ticket-save-error">
-          <p>Couldn&apos;t save your changes. Your draft is still here.</p>
-          <Button
-            size="sm"
-            onClick={() => {
+      {state === "failed" && error && (
+        <div className="ticket-save-error">
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => {
               setState("pending");
               setRetry((value) => value + 1);
             }}
-          >
-            Retry
-          </Button>
-          {error && (
-            <details>
-              <summary>Details</summary>
-              <pre>{error}</pre>
-            </details>
-          )}
+          />
         </div>
       )}
     </div>

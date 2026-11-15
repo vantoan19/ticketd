@@ -500,12 +500,33 @@ test("an empty description has one add affordance and keeps focus when editing e
   );
 });
 
+test("an empty title is never sent: the field says why and the saved title stays", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockResolvedValue(initial);
+  render(<Harness />);
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "   " },
+  });
+  await autosave();
+  expect(bridge.invoke).not.toHaveBeenCalled();
+  expect(screen.getByText("A ticket needs a title.")).toBeTruthy();
+  expect(screen.getByLabelText("Title").getAttribute("aria-invalid")).toBe(
+    "true",
+  );
+  // No failure, and no Retry that could never succeed.
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("");
+});
+
 test("a save the core refuses as stale keeps the draft and offers the choice", async () => {
   vi.useFakeTimers();
   const agent = { ...initial, title: "Agent title", body: "Agent wrote this" };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "change_ticket")
-      throw "ticket 'T-KQ1' was changed elsewhere since it was loaded";
+      throw {
+        code: "conflict",
+        message: "ticket 'T-KQ1' was changed elsewhere since it was loaded",
+      };
     return agent;
   });
   render(<Harness />);

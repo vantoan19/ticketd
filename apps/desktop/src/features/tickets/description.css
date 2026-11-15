@@ -89,8 +89,10 @@
 }
 
 .ticket-save-error {
-  font-size: var(--text-ui);
-  line-height: 20px;
+  margin-top: 8px;
+}
+.editor-title-error {
+  margin: -4px 0 8px;
 }
 
 /* The Edit button appears over the description's corner on hover or focus. */
