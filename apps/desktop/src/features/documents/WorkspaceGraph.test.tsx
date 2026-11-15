@@ -5,7 +5,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
@@ -19,15 +18,23 @@ vi.mock("./ContextGraphCanvas", () => ({
     nodes,
     notice,
     footnote,
+    onSelect,
   }: {
     edges: { label?: string }[];
-    nodes: { id: string }[];
+    nodes: { id: string; label: string }[];
+    onSelect: (id: string) => void;
     notice?: import("react").ReactNode;
     footnote?: import("react").ReactNode;
   }) => (
     <div data-testid="canvas">
       {nodes.map((node) => (
-        <i key={node.id} data-card={node.id} />
+        <button
+          key={node.id}
+          data-card={node.id}
+          onClick={() => onSelect(node.id)}
+        >
+          {node.label.replace(/^[^:]+: /, "")}
+        </button>
       ))}
       {edges.map((edge, index) => (
         <span key={index}>{edge.label}</span>
@@ -44,7 +51,9 @@ vi.mock("@xyflow/react", () => ({
   Controls: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
 }));
-vi.mock("@/lib/api/client", () => ({ client: { workspaceGraph: vi.fn() } }));
+vi.mock("@/lib/api/client", () => ({
+  client: { workspaceGraph: vi.fn(), listPlans: vi.fn().mockResolvedValue([]) },
+}));
 
 test("filters workspace results and focuses a selected item deliberately", async () => {
   vi.mocked(client.workspaceGraph).mockResolvedValue({
@@ -80,7 +89,8 @@ test("filters workspace results and focuses a selected item deliberately", async
     (await screen.findAllByRole("button", { name: "Discovery" })).at(-1)!,
   );
   fireEvent.click(screen.getByRole("button", { name: "Center here" }));
-  expect(focus).toHaveBeenCalledWith("doc");
+  expect(focus).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
   fireEvent.change(screen.getByLabelText("Search"), {
     target: { value: "needle" },
   });
@@ -210,6 +220,7 @@ test("a filter with no matches says so and can be cleared", async () => {
       onOpen={vi.fn()}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
   fireEvent.change(await screen.findByLabelText("Search"), {
     target: { value: "zzz" },
   });
@@ -300,7 +311,7 @@ test("marks items in the Trash", async () => {
   ).toBeTruthy();
 });
 
-test("a crowded workspace opens as a list and the map is one click away", async () => {
+test("a crowded workspace opens Graph with every loaded item", async () => {
   vi.mocked(client.workspaceGraph).mockResolvedValue({
     node_tags: {},
     connection_counts: { n0: 49 },
@@ -328,29 +339,22 @@ test("a crowded workspace opens as a list and the map is one click away", async 
     />,
   );
   await screen.findByRole("button", { name: "Doc 0" });
-  fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
+  expect(
+    screen.getByRole("radio", { name: "Graph" }).getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(
+    screen.getByTestId("canvas").querySelectorAll("[data-card]"),
+  ).toHaveLength(13);
   expect(screen.getByRole("radio", { name: "List" })).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "List" }));
   fireEvent.click(screen.getByRole("button", { name: "Doc 0" }));
   expect(screen.getByText(/49 connections in total/)).toBeTruthy();
 });
 
-test("items with no relationship leave the canvas for the panel's No links list", async () => {
+test("items with no relationship remain available on the canvas", async () => {
   vi.mocked(client.workspaceGraph)
     .mockReset()
-    .mockResolvedValue({
-      ...graphOf(
-        [
-          nodeOf("one", "T-KQ1 · First"),
-          nodeOf("two", "T-KQ2 · Second"),
-          nodeOf("lone", "T-KQ4 · Dark mode"),
-        ],
-        null,
-      ),
-      edges: [
-        { source: "one", target: "two", kind: "blocks", explanation: null },
-      ],
-    });
+    .mockResolvedValue(graphOf([nodeOf("lone", "T-KQ4 · Dark mode")], null));
   render(
     <WorkspaceGraph
       active
@@ -360,20 +364,10 @@ test("items with no relationship leave the canvas for the panel's No links list"
       onOpen={vi.fn()}
     />,
   );
-  await screen.findByText("3 items");
-  const canvas = screen.getByTestId("canvas");
-  expect(canvas.querySelectorAll("[data-card]")).toHaveLength(2);
-  expect(canvas.querySelector('[data-card="lone"]')).toBeNull();
-  expect(
-    screen.getByRole("heading", { name: "No links to other items 1" }),
-  ).toBeTruthy();
-  const group = screen.getByRole("list", { name: "Not connected" });
   fireEvent.click(
-    within(group).getByRole("button", { name: "T-KQ4 · Dark mode" }),
+    await screen.findByRole("button", { name: "T-KQ4 · Dark mode" }),
   );
-  expect(
-    await screen.findByRole("button", { name: "Open T-KQ4" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open T-KQ4" })).toBeTruthy();
 });
 
 test("an item created while the graph is open is added, not left counted but unseen", async () => {
@@ -399,13 +393,8 @@ test("an item created while the graph is open is added, not left counted but uns
   await screen.findByText(/Showing 1 of 1 item/);
   rerender(<WorkspaceGraph {...props} revision={1} />);
   await screen.findByText(/Showing 2 of 2 items/);
-  expect(screen.getByText("2 items")).toBeTruthy();
-  expect(
-    within(screen.getByRole("list", { name: "Not connected" })).getByRole(
-      "button",
-      { name: "Untitled" },
-    ),
-  ).toBeTruthy();
+  expect(screen.getByText("2 items · 0 connections")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Untitled" })).toBeTruthy();
 });
 
 test("a selected ticket offers Open and, with connections, Center here", async () => {
@@ -445,5 +434,5 @@ test("a selected ticket offers Open and, with connections, Center here", async (
   fireEvent.click(screen.getByRole("button", { name: "Open T-KQ1" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));
   fireEvent.click(screen.getByRole("button", { name: "Center here" }));
-  expect(focus).toHaveBeenCalledWith("one");
+  expect(focus).not.toHaveBeenCalled();
 });

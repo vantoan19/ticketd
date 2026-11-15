@@ -544,6 +544,7 @@ function AppContent() {
                         />
                         <CommandPalette
                           currentPlan={navigation.plan || null}
+                          workspaceGraphActive={graphOrigin === "__workspace__"}
                           createDisabledReason={createDisabledReason}
                           create={(kind) => {
                             if (editingBlockedReason(workspaceProblem)) return;
