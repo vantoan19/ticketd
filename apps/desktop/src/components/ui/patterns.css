@@ -619,3 +619,22 @@
     padding: 24px 16px;
   }
 }
+
+/* Floating action failures replace the controls that failed, with wrapping copy. */
+.ui-notice.ui-notice-floating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+.ui-notice-floating [data-slot="alert-description"] {
+  flex-basis: 180px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

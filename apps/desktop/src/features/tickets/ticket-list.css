@@ -1,231 +1,196 @@
 .ticket-list {
   container-type: inline-size;
+  position: relative;
 }
 .ticket-rows {
   margin: 0;
-  padding: 0 0 24px;
+  padding: 4px 0 64px;
   list-style: none;
 }
 .ticket-rows li {
   display: flex;
   align-items: flex-start;
   min-width: 0;
-  margin-block: 0;
-  /* Bands and the selected row run the full pane width (board A: x 224-608);
-     row content keeps its 8px / 6px insets inside them. */
-  padding-inline: 8px 6px;
-  border-radius: 0;
-}
-.ticket-rows li:hover {
-  background: var(--hover);
-}
-.ticket-rows li:has(.ticket-row[aria-pressed="true"]) {
-  background: var(--accent);
-  box-shadow: none;
+  margin: 0 8px;
+  padding: 0 10px 0 4px;
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 16px 64px minmax(0, 1fr) auto;
-  column-gap: 4px;
-  row-gap: 2px;
+  grid-template-columns: 26px 62px minmax(0, 1fr) 168px 140px 152px 44px;
+  align-items: center;
   width: 100%;
   min-width: 0;
-  /* Two lines: 8 + 20 + 2 + 16 + 6 = 52px (design frame A). */
-  min-height: 52px;
-  padding: 8px 6px 6px 0;
+  height: 36px;
+  padding: 0;
   text-align: left;
-  border-radius: var(--radius);
-  background: transparent;
 }
 .ticket-row-status {
   display: flex;
   align-items: center;
-  height: 20px;
-  color: var(--muted-foreground);
 }
-.ticket-row-status svg {
-  flex: none;
+.ticket-row > [data-slot="reference"] {
+  margin-left: 0;
 }
-.ticket-title {
-  min-width: 0;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 400;
-  line-height: 20px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ticket-row-meta {
+.ticket-title-lane {
   display: flex;
-  grid-column: 2 / -1;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 16px;
-  overflow: clip;
-  overflow-clip-margin: 2px;
-}
-.ticket-row-state {
-  display: inline-flex;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
   align-items: center;
   gap: 6px;
-  white-space: nowrap;
-}
-.ticket-row-state-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.ticket-row-context {
-  flex: 0 1 auto;
+.ticket-title {
+  flex: 1;
   min-width: 0;
+  margin-left: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Tags take only the space the readiness and context leave. Pills that don't
-   fit wrap onto a hidden second line, so none is ever cut in half. */
+.ticket-row-state,
+.ticket-row-context,
+.ticket-row-time,
+.ticket-row-update {
+  min-width: 0;
+}
+.ticket-row-state {
+  margin-left: 20px;
+}
+.ticket-row-state-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ticket-row-state-label,
+.ticket-row-context-label,
+.ticket-row-update-brief {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-row-state-content > [data-slot="status-dot"] {
+  flex: none;
+}
+.ticket-row-tags-lane {
+  min-width: 0;
+  margin-left: 12px;
+}
 .ticket-row-tags {
   display: flex;
-  flex: 1 1 0;
-  flex-wrap: wrap;
-  gap: 0 8px;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
-  height: 16px;
-  overflow: clip;
-  overflow-clip-margin: 1px;
 }
-/* Row tags are 18px on a 16px line; the negative margin keeps the line 16px. */
 .ticket-row-tags [data-slot="badge"] {
-  margin-block: -1px;
+  min-width: 0;
+  max-width: 100%;
 }
-/* The focused row's ring is drawn on its full-width band (the li below). */
-.ticket-list .ticket-row:focus-visible {
-  position: relative;
-  outline: none;
+.ticket-row-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 20px;
 }
-.ticket-rows input[type="checkbox"] {
+.ticket-row-context svg {
   flex: none;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--foreground);
-  cursor: pointer;
+  width: 14px;
+  height: 14px;
+}
+.ticket-row-time {
+  margin-left: 14px;
+  text-align: right;
+  white-space: nowrap;
+}
+.ticket-row-update {
+  grid-column: 3 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 0;
+  padding-right: 44px;
+}
+.ticket-row-update .harness-mark {
+  width: 12px;
+  height: 12px;
+}
+.ticket-row-update .harness-mark svg {
+  width: 12px;
+  height: 12px;
+}
+.ticket-list .ticket-row[data-rows="detailed"] {
+  height: 56px;
+  grid-template-rows: 24px 16px;
+  padding-top: 6px;
+  padding-bottom: 10px;
+}
+.ticket-title-lane > [data-slot="badge"] {
+  flex: none;
 }
 .ticket-select {
   display: grid;
   place-items: center;
   flex: none;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 36px;
   cursor: pointer;
 }
-.ticket-rows input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 4px;
-}
-.ticket-skeleton-icon {
-  align-self: center;
-  width: 16px;
-  height: 16px;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-}
-/* The bulk bar floats 8px above the bottom of the list (S4): popover surface,
-   menu shadow, panel radius. The rows keep a bottom inset so the last one
-   can scroll clear of it. */
-.ticket-list {
-  position: relative;
-}
-.bulk-controls {
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  z-index: 10;
-  width: max-content;
-  max-width: calc(100% - 16px);
-  transform: translateX(-50%);
-  color: var(--foreground);
-}
-.bulk-controls[hidden] {
-  display: none;
-}
-.ticket-list:has(.bulk-bar) .ticket-rows {
-  padding-bottom: 72px;
-}
-.bulk-bar {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 4px;
-  height: 48px;
-  padding: 0 4px 0 12px;
-  border-radius: var(--radius-panel);
-  background: var(--popover);
-  box-shadow: var(--shadow-menu);
-  white-space: nowrap;
-}
-.bulk-spacer {
-  flex: 1;
-}
-.bulk-menu-caption {
-  max-width: 240px;
-  padding: 4px 8px 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  white-space: normal;
-}
-.bulk-status-check {
+.ticket-rows input[type="checkbox"] {
   width: 14px;
   height: 14px;
-  margin-left: auto;
+  margin: 0;
+  cursor: pointer;
 }
-.bulk-count {
-  padding-inline: 4px 8px;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
+.ticket-rows li.ticket-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 6px 8px 0;
+  padding: 0 10px 0 12px;
+}
+.ticket-rows li.ticket-group-header:first-child {
+  margin-top: 0;
+}
+.ticket-group-header svg {
+  flex: none;
+}
+.ticket-group-meta {
   white-space: nowrap;
 }
-.bulk-menu-count {
+.ticket-group-add {
+  display: flex;
   margin-left: auto;
-  padding-left: 16px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
+  padding-inline: 2px;
 }
-/* The tag choice list sits in the dialog body inside a control outline. */
-.bulk-tag-choices {
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-border-base);
-  overflow: hidden;
-}
-
 .ticket-row-action {
   display: flex;
   flex: none;
   align-items: center;
-  height: 32px;
-  margin-top: 8px;
+  height: 36px;
   padding-right: 4px;
 }
+.ticket-skeleton-icon {
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+}
 @media (hover: hover) and (pointer: fine) {
+  .ticket-select input:not(:checked),
+  .ticket-group-add,
   .ticket-row-action {
     opacity: 0;
   }
+  .ticket-rows li:hover .ticket-select input,
+  .ticket-rows li:focus-within .ticket-select input,
+  .ticket-rows:has(input:checked) .ticket-select input,
+  .ticket-group-header:hover .ticket-group-add,
+  .ticket-group-add:focus-within,
   .ticket-rows li:hover .ticket-row-action,
   .ticket-rows li:focus-within .ticket-row-action {
     opacity: 1;
   }
-  /* The action floats over the trailing edge instead of reserving a column,
-     so the time stays on that edge in every list. It takes the time's place
-     only while it is shown. */
   .ticket-rows li:has(.ticket-row-action) {
     position: relative;
   }
@@ -239,73 +204,88 @@
     opacity: 0;
   }
 }
-/* Reveal selection without moving the identifier or title columns. */
-@media (hover: hover) and (pointer: fine) {
-  .ticket-select input:not(:checked) {
-    opacity: 0;
+@container (max-width: 999px) {
+  .ticket-list .ticket-row {
+    grid-template-columns: 26px 62px minmax(0, 1fr) 168px 152px 44px;
   }
-  .ticket-rows li:hover .ticket-select input,
-  .ticket-rows li:focus-within .ticket-select input,
-  .ticket-rows:has(input:checked) .ticket-select input {
-    opacity: 1;
+  .ticket-row-tags-lane {
+    display: none;
   }
 }
-/* A status group's header is a 32px recessed band with a hairline above and below. Rows and
-   headers share one list, so a row that changes group is not remounted. */
-/* Sticky (list R-09): at any depth the rows keep their group's name. The band
-   is opaque, so rows scroll under it. */
-.ticket-rows li.ticket-group-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  margin-top: 0;
-  margin-bottom: 0;
-  padding: 0 4px 0 36px;
-  background: var(--recessed);
-  box-shadow:
-    0 1px 0 0 var(--group-hairline),
-    0 -1px 0 0 var(--group-hairline);
+@container (max-width: 799px) {
+  .ticket-list .ticket-row {
+    grid-template-columns: 26px 62px minmax(0, 1fr) 168px 44px;
+  }
+  .ticket-row-context {
+    display: none;
+  }
 }
-.ticket-rows li.ticket-group-header:hover {
-  background: var(--recessed);
+@container (max-width: 619px) {
+  .ticket-list .ticket-row {
+    grid-template-columns: 26px 62px minmax(0, 1fr) 32px 44px;
+  }
+  .ticket-row-state {
+    margin-left: 16px;
+  }
+  .ticket-row-state-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    clip-path: inset(50%);
+    overflow: hidden;
+  }
 }
-.ticket-rows li.ticket-group-header:first-child {
-  margin-top: 0;
-  /* The first band starts flush under the header rule. */
-  box-shadow: 0 1px 0 0 var(--group-hairline);
+
+/* The bulk bar floats 8px above the bottom of the list (S4): popover surface,
+   menu shadow, panel radius. The rows keep a bottom inset so the last one
+   can scroll clear of it. */
+.ticket-list {
+  position: relative;
 }
-.ticket-group-header svg {
-  flex: none;
-  color: var(--muted-foreground);
+.bulk-controls {
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
 }
-.ticket-group-header h2 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
+.bulk-controls[hidden] {
+  display: none;
 }
-.ticket-group-meta {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  white-space: nowrap;
+.ticket-list:has(.bulk-bar) .ticket-rows {
+  padding-bottom: 72px;
 }
-.ticket-group-add {
+.bulk-bar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 0 4px 0 12px;
+  white-space: normal;
+}
+.bulk-spacer {
+  flex: 1;
+}
+.bulk-menu-caption {
+  max-width: 240px;
+  padding: 4px 8px 6px;
+  white-space: normal;
+}
+.bulk-status-check {
+  width: 14px;
+  height: 14px;
   margin-left: auto;
 }
-/* Revealed on the header's hover or focus; always shown on touch (R-03). */
-@media (hover: hover) and (pointer: fine) {
-  .ticket-group-add {
-    opacity: 0;
-  }
-  .ticket-group-header:hover .ticket-group-add,
-  .ticket-group-add:focus-within {
-    opacity: 1;
-  }
+.bulk-count {
+  padding-inline: 4px 8px;
+  white-space: nowrap;
+}
+.bulk-menu-count {
+  margin-left: auto;
+  padding-left: 16px;
+}
+/* The tag choice list sits in the dialog body inside a control outline. */
+.bulk-tag-choices {
+  overflow: hidden;
 }
 
 /* Source filter follows the inset canvas composition. */
@@ -313,112 +293,16 @@
   padding: 8px 8px 0;
 }
 .source-filter [data-slot="segmented-control"] {
-  background: transparent;
   padding: 0;
-  box-shadow: none;
 }
 .source-filter [role="radio"] {
   height: 32px;
-  border-radius: var(--radius);
-}
-.source-filter [role="radio"][data-state="checked"] {
-  background: var(--accent);
-  box-shadow: none;
-}
-.source-filter [role="radio"]:hover {
-  background: var(--recessed);
 }
 .source-refresh {
   max-width: 130px;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.ticket-row-time {
-  flex: none;
-  margin-left: auto;
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
-}
-.ticket-row-meta:has(.ticket-row-time) {
-  flex-wrap: wrap;
-}
-.ticket-row-tags {
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.ticket-rows li:has(.ticket-row:focus-visible) {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-
-.ticket-row-contextual {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  overflow: clip;
-  overflow-clip-margin: 2px;
-}
-/* Priority when the line is tight: the state keeps its words, the context and
-   tags shrink with an ellipsis and never to nothing. */
-.ticket-row-contextual .ticket-row-state {
-  flex: 0 0 auto;
-}
-.ticket-row-contextual .ticket-row-context {
-  flex: 0 1 auto;
-  min-width: 6ch;
-}
-.ticket-row-contextual .ticket-row-tags {
-  display: flex;
-  flex: 0 100 auto;
-  flex-wrap: nowrap;
-  gap: 8px;
-  min-width: 4ch;
-  height: auto;
-}
-.ticket-row-contextual [data-slot="badge"] {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-/* The first tag keeps its whole name (up to a cap); only "+N" is fixed. */
-.ticket-row-contextual .ticket-row-tags {
-  flex: none;
-  min-width: 0;
-  max-width: 50%;
-}
-/* The first tag is never the part that gives: the context name truncates first. */
-.ticket-row-contextual [data-slot="badge"]:first-child {
-  flex: none;
-  max-width: 100%;
-}
-.ticket-row-contextual [data-slot="badge"][data-more] {
-  flex: none;
-}
-/* The context item carries its type icon: layers for a Plan, a folder for a
-   project, so the two names are never mistaken for each other. */
-.ticket-row-context {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.ticket-row-context svg {
-  flex: none;
-  width: 12px;
-  height: 12px;
-}
-.ticket-row-context-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ticket-row-meta:has(.ticket-row-time) {
-  flex-wrap: nowrap;
 }
 
 .refresh-failed {
@@ -428,45 +312,42 @@
   gap: 4px;
   margin: 0;
   padding: 4px 12px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 
 /* The note starts at the header title's x. */
 .ticket-list > .list-description {
   margin: 0;
   padding: 24px 20px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
-/* Simple rows: one line of status icon, reference, title, source, dot and time. */
-.ticket-list .ticket-row[data-rows="simple"] {
+
+@container (max-width: 480px) {
+  .bulk-bar {
+    justify-content: center;
+  }
+  .bulk-bar > .bulk-count,
+  .bulk-controls [data-slot="alert"] > .bulk-count {
+    width: 100%;
+    text-align: center;
+    padding-block: 4px;
+  }
+}
+
+.ticket-list-overlays {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 2;
   display: flex;
-  align-items: center;
-  min-height: 36px;
-  padding-block: 8px;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50%;
+  overflow: auto;
+  padding: 2px;
 }
-.ticket-row[data-rows="simple"] .ticket-title {
-  flex: 1 1 0;
+.ticket-list-overlays:empty {
+  display: none;
 }
-.ticket-row[data-rows="simple"] .ticket-row-meta {
-  flex: none;
-  gap: 6px;
-}
-.ticket-row[data-rows="simple"] .ticket-row-status {
-  width: 16px;
-}
-.ticket-row[data-rows="simple"] [data-slot="reference"] {
-  flex: none;
-  min-width: 64px;
-}
-.ticket-row[data-rows="simple"] > [data-slot="badge"] {
-  flex: none;
-}
-.ticket-row[data-rows="simple"] .ticket-row-meta:has(.ticket-row-time) {
-  flex-wrap: nowrap;
-}
-.ticket-row[data-rows="simple"] .ticket-row-contextual {
-  flex: none;
+.ticket-list .ticket-rows {
+  padding-bottom: calc(64px + var(--list-overlays-height));
 }
