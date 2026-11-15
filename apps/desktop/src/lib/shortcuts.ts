@@ -50,6 +50,13 @@ export const SHORTCUTS = [
     note: "While the first-run button is focused.",
   })),
   {
+    id: "go-automations",
+    keys: [],
+    scope: "Everywhere",
+    label: "Go to Automations",
+    note: "Available in the command palette while Chat is enabled.",
+  },
+  {
     id: "command-palette",
     keys: [["Mod", "K"]],
     scope: "Everywhere",

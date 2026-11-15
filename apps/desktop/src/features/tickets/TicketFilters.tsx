@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   CircleDashed,
   CornerDownRight,
@@ -161,9 +167,58 @@ export function TicketFilters(p: Props) {
 }
 
 function FiltersMenu(
-  p: Props & { menu: FiltersMenuState; filterCount: number },
+  applied: Props & { menu: FiltersMenuState; filterCount: number },
 ) {
-  const { menu, filterCount } = p;
+  const { menu, filterCount } = applied;
+  const current = {
+    status: applied.status,
+    availability: applied.availability,
+    plan: applied.plan,
+    tags: applied.tags,
+    family: applied.family,
+  };
+  const [draft, setDraft] = useState(current);
+  const [wasOpen, setWasOpen] = useState(menu.open);
+  if (menu.open !== wasOpen) {
+    setWasOpen(menu.open);
+    if (menu.open) setDraft(current);
+  }
+  const commit = useEffectEvent(() => {
+    if (draft.status !== applied.status) applied.setStatus(draft.status);
+    if (draft.availability !== applied.availability)
+      applied.setAvailability(draft.availability);
+    if (draft.plan !== applied.plan) applied.setPlan(draft.plan);
+    if (draft.tags !== applied.tags) applied.setTags(draft.tags);
+    if (draft.family !== applied.family) applied.setFamily(draft.family);
+    if (
+      Object.keys(draft).some(
+        (key) =>
+          draft[key as keyof typeof draft] !==
+          current[key as keyof typeof current],
+      )
+    )
+      applied.resetPaging();
+  });
+  const previousOpen = useRef(false);
+  useEffect(() => {
+    if (previousOpen.current && !menu.open) commit();
+    previousOpen.current = menu.open;
+  }, [menu.open]);
+  function stage(key: keyof typeof draft, value: string) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+  // Drafts apply only after the picker closes; rows stay in place while choosing.
+  const setOpen = menu.setOpen;
+  const p = {
+    ...applied,
+    ...(menu.open ? draft : current),
+    setStatus: (value: string) => stage("status", value),
+    setAvailability: (value: string) => stage("availability", value),
+    setPlan: (value: string) => stage("plan", value),
+    setTags: (value: string) => stage("tags", value),
+    setFamily: (value: string) => stage("family", value),
+    resetPaging: () => {},
+  };
   const { shown, tagList, update } = dimensions(p);
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   useEffect(() => {
@@ -199,7 +254,7 @@ function FiltersMenu(
   const valueMeta = (value: string | undefined) =>
     value ? <span className="filters-menu-value">{value}</span> : null;
   return (
-    <DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
+    <DropdownMenu open={menu.open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <PaneHeaderButton
           icon={<ListFilter />}
@@ -489,6 +544,12 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
   }, [key, all.length]);
   if (all.length === 0) return null;
   const hidden = all.length - fits;
+  function returnToFilters() {
+    row.current
+      ?.closest(".ticket-list")
+      ?.querySelector<HTMLButtonElement>('button[aria-label^="Filters"]')
+      ?.focus({ preventScroll: true });
+  }
   return (
     <div ref={row} className="filter-chips" aria-label="Active filters">
       {all.slice(0, fits).map((chip) => (
@@ -501,7 +562,10 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
                 ? `Remove Search: ${chip.value}`
                 : `Remove ${chip.dimension} filter`
             }
-            onRemove={chip.clear}
+            onRemove={() => {
+              returnToFilters();
+              chip.clear();
+            }}
             {...(chip.dimension !== "Search" && {
               onEdit: () => {
                 p.menu.setOpen(true);
@@ -523,7 +587,14 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
       )}
       {chips.length > 0 && (
         <span data-filter-tail="" className="filter-chips-tail">
-          <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              returnToFilters();
+              p.clearFilters();
+            }}
+          >
             Clear filters
           </Button>
         </span>

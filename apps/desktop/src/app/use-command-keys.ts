@@ -6,6 +6,7 @@ export type GoTo =
   | "all"
   | "ready"
   | "chats"
+  | "automations"
   | "documents"
   | "projects"
   | "plans"

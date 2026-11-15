@@ -426,3 +426,21 @@
 .detail-scroll[data-agent-loading] > .detail-content {
   visibility: hidden;
 }
+
+.ticket-command-anchor {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.ticket-command-custom {
+  display: grid;
+  gap: 12px;
+  padding: 8px;
+}
+.property-strip .rail-row:has(.rail-tags) {
+  height: 28px;
+  padding: 0 6px;
+}
+.property-strip .rail-tags {
+  flex-wrap: nowrap;
+}

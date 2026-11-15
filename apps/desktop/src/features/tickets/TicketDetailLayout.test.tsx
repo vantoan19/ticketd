@@ -151,17 +151,18 @@ test("the reading column runs title, state, description, then Linked, and keeps 
   expect(rail.contains(title)).toBe(false);
 });
 
-test("Follow, the reminder, and the properties live in the rail, not the header", async () => {
+test("Follow lives in the header while reminder and properties stay in the property bar", async () => {
   renderDetails();
   const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  const follow = await within(rail).findByRole("button", { name: "Follow" });
+  const header = document.querySelector(".detail-header") as HTMLElement;
+  const follow = await within(header).findByRole("button", { name: "Follow" });
   expect(follow.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(follow);
   await waitFor(() =>
     expect(
-      within(rail)
+      within(header)
         .getByRole("button", { name: "Follow" })
         .getAttribute("aria-pressed"),
     ).toBe("true"),
@@ -171,8 +172,7 @@ test("Follow, the reminder, and the properties live in the rail, not the header"
   expect(
     within(rail).getByRole("button", { name: "Manage reminder" }),
   ).toBeTruthy();
-  const header = document.querySelector(".detail-header") as HTMLElement;
-  expect(within(header).queryByRole("button", { name: /Follow/ })).toBeNull();
+  expect(within(rail).queryByRole("button", { name: /Follow/ })).toBeNull();
   expect(
     within(header).queryByRole("button", { name: /Manage reminder/ }),
   ).toBeNull();

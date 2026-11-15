@@ -1,3 +1,13 @@
+import {
+  Card,
+  CardTitle,
+  CardValue,
+  CardCaption,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
+import { ProgressKey } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useContext, useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { type Project, type Ticket } from "@/lib/api/client";
@@ -87,127 +97,173 @@ export function PlanCard({
       document.id === view.plan.spec_document_id && !document.trashed,
   );
   return (
-    <article className="plan-card" data-archived={plan.archived || undefined}>
-      <Tooltip content="Open Plan" shortcut={shortcutLabel("list-open")}>
-        <button
-          className="plan-card-open"
-          type="button"
-          aria-label={`Open Plan ${plan.name}`}
-          onClick={onOpen}
-        />
-      </Tooltip>
-      <div className="plan-card-heading">
-        {counts && <PlanRing name={plan.name} counts={counts} size={20} />}
-        <div className="plan-card-description">
-          <div className="plan-card-title">
-            <span className="plan-index-name">{plan.name}</span>
-            {project && <span className="plan-card-caption">{project}</span>}
-          </div>
-          {plan.purpose && <p>{plan.purpose}</p>}
-        </div>
-        <div className="plan-card-summary">
-          {counts && (
-            <strong>
-              {counts.done} of {countable} done
-            </strong>
-          )}
-          {updated && (
-            <span className="plan-card-caption">
-              Updated <Time value={updated} />
-            </span>
-          )}
-        </div>
-      </div>
-      {counts && (
-        <>
-          <PlanSplitBar name={plan.name} counts={counts} decorative />
-          <div className="plan-card-legend">
-            <span>
-              <i data-segment="done" />
-              {counts.done} done
-            </span>
-            <span>
-              <i data-segment="review" />
-              {counts.in_review} in review
-            </span>
-            <span>
-              <i data-segment="progress" />
-              {counts.in_progress} in progress
-            </span>
-            <span>
-              <i data-segment="todo" />
-              {counts.todo} to do
-              {ready !== undefined &&
-                blocked !== undefined &&
-                ` · ${ready} ready, ${blocked} blocked`}
-            </span>
-            {counts.canceled > 0 && (
-              <span>{counts.canceled} canceled, not counted</span>
+    <Card variant="summary" asChild>
+      <article className="plan-card" data-archived={plan.archived || undefined}>
+        <Tooltip content="Open Plan" shortcut={shortcutLabel("list-open")}>
+          <button
+            data-slot="card-open"
+            className="plan-card-open"
+            type="button"
+            aria-label={`Open Plan ${plan.name}`}
+            onClick={onOpen}
+          />
+        </Tooltip>
+        <div className="plan-card-heading">
+          <span className="plan-card-ring-slot">
+            {counts ? (
+              <PlanRing name={plan.name} counts={counts} size={20} />
+            ) : failed ? null : (
+              <Skeleton className="size-5" />
             )}
-            {counts.duplicate > 0 && (
-              <span>
-                {counts.duplicate}{" "}
-                {counts.duplicate === 1 ? "duplicate" : "duplicates"}, not
-                counted
-              </span>
-            )}
-          </div>
-        </>
-      )}
-      <div className="plan-card-next">
-        <span className="plan-card-caption">Next up</span>
-        {next ? (
-          <>
-            <StatusIcon status={next.status} decorative />
-            <Tooltip
-              content="Open ticket"
-              shortcut={shortcutLabel("list-open")}
-            >
-              <RecordLink
-                reference={next.reference}
-                onClick={() => onTicket?.(next.reference)}
-              >
-                {next.title}
-              </RecordLink>
-            </Tooltip>
-            <span className="plan-card-ready">
-              <StatusDot tone="ready" size={6} />
-              Ready
-            </span>
-          </>
-        ) : (
-          <span className="plan-card-caption">
-            {members
-              ? "No Ready tickets"
-              : failed
-                ? "Couldn't load next ticket"
-                : "Loading…"}
           </span>
-        )}
-        {spec && (
-          <Tooltip
-            content="Open spec Document"
-            shortcut={shortcutLabel("list-open")}
-          >
-            <Badge variant="doc" tone="raised" asChild>
-              <button
-                type="button"
-                className="plan-card-spec"
-                onClick={() => openDocument?.(spec.id, "Back to Plans")}
-              >
-                <FileText aria-hidden="true" />
-                <span className="truncate">{spec.heading || "Untitled"}</span>
-              </button>
-            </Badge>
-          </Tooltip>
-        )}
-      </div>
-      {failed && (
-        <p className="plan-card-caption">
-          Some Plan details couldn't load. Open the Plan to retry.
-        </p>
-      )}
-      {children}
-    </article>
+          <div className="plan-card-description">
+            <div className="plan-card-title">
+              <CardTitle asChild>
+                <span className="plan-index-name">{plan.name}</span>
+              </CardTitle>
+              {project && (
+                <CardCaption asChild>
+                  <span className="plan-card-caption">{project}</span>
+                </CardCaption>
+              )}
+            </div>
+            {plan.purpose && (
+              <CardDescription asChild>
+                <p>{plan.purpose}</p>
+              </CardDescription>
+            )}
+          </div>
+          <div className="plan-card-summary">
+            {counts ? (
+              <CardValue asChild>
+                <strong>
+                  {counts.done} of {countable} done
+                </strong>
+              </CardValue>
+            ) : failed ? null : (
+              <Skeleton className="h-5 w-24" />
+            )}
+            {!updated && !failed && <Skeleton className="h-4 w-28" />}
+            {updated && (
+              <CardCaption asChild>
+                <span className="plan-card-caption">
+                  Updated <Time value={updated} />
+                </span>
+              </CardCaption>
+            )}
+          </div>
+        </div>
+        <div
+          className="plan-card-progress-slot"
+          data-unavailable={(failed && !counts) || undefined}
+          aria-hidden={(failed && !counts) || undefined}
+        >
+          {counts ? (
+            <PlanSplitBar name={plan.name} counts={counts} decorative />
+          ) : (
+            <Skeleton className="h-1.5 w-full" />
+          )}
+          <CardCaption asChild>
+            <div className="plan-card-legend">
+              <ProgressKey segment="done">
+                {counts ? counts.done : <Skeleton className="h-3 w-2" />} done
+              </ProgressKey>
+              <ProgressKey segment="review">
+                {counts ? counts.in_review : <Skeleton className="h-3 w-2" />}{" "}
+                in review
+              </ProgressKey>
+              <ProgressKey segment="progress">
+                {counts ? counts.in_progress : <Skeleton className="h-3 w-2" />}{" "}
+                in progress
+              </ProgressKey>
+              <ProgressKey segment="todo">
+                {counts ? counts.todo : <Skeleton className="h-3 w-2" />} to do
+                {ready !== undefined &&
+                  blocked !== undefined &&
+                  ` · ${ready} ready, ${blocked} blocked`}
+              </ProgressKey>
+              {counts && counts.canceled > 0 && (
+                <span>{counts.canceled} canceled, not counted</span>
+              )}
+              {counts && counts.duplicate > 0 && (
+                <span>
+                  {counts.duplicate}{" "}
+                  {counts.duplicate === 1 ? "duplicate" : "duplicates"}, not
+                  counted
+                </span>
+              )}
+            </div>
+          </CardCaption>
+        </div>
+        <div className="plan-card-footer">
+          <CardFooter variant="summary" asChild>
+            <div className="plan-card-next">
+              <CardCaption asChild>
+                <span className="plan-card-caption">Next up</span>
+              </CardCaption>
+              {next ? (
+                <>
+                  <StatusIcon status={next.status} decorative />
+                  <Tooltip
+                    content="Open ticket"
+                    shortcut={shortcutLabel("list-open")}
+                  >
+                    <RecordLink
+                      reference={next.reference}
+                      onClick={() => onTicket?.(next.reference)}
+                    >
+                      {next.title}
+                    </RecordLink>
+                  </Tooltip>
+                  <CardCaption asChild>
+                    <span className="plan-card-ready">
+                      <StatusDot tone="ready" size={6} />
+                      Ready
+                    </span>
+                  </CardCaption>
+                </>
+              ) : (
+                <CardCaption asChild>
+                  <span className="plan-card-caption">
+                    {members
+                      ? "No Ready tickets"
+                      : failed
+                        ? "Couldn't load next ticket"
+                        : "Loading…"}
+                  </span>
+                </CardCaption>
+              )}
+              {spec && (
+                <Tooltip
+                  content="Open spec Document"
+                  shortcut={shortcutLabel("list-open")}
+                >
+                  <Badge variant="doc" tone="raised" asChild>
+                    <button
+                      type="button"
+                      className="plan-card-spec"
+                      onClick={() => openDocument?.(spec.id, "Back to Plans")}
+                    >
+                      <FileText aria-hidden="true" />
+                      <span className="truncate">
+                        {spec.heading || "Untitled"}
+                      </span>
+                    </button>
+                  </Badge>
+                </Tooltip>
+              )}
+            </div>
+          </CardFooter>
+          <CardCaption asChild>
+            <p className="plan-card-failure" aria-live="polite">
+              {failed
+                ? "Some Plan details couldn't load. Open the Plan to retry."
+                : ""}
+            </p>
+          </CardCaption>
+        </div>
+        {children}
+      </article>
+    </Card>
   );
 }

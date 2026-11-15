@@ -3433,11 +3433,26 @@ test.each([
     fireEvent.click(
       await screen.findByRole("button", { name: /Document target/ }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: chip }));
-    expect(await screen.findByText(`${scope} of T-FV1`)).toBeTruthy();
-    fireEvent.click(
-      await screen.findByRole("option", { name: new RegExp(`^${label}`) }),
+    if (scope === "Reminder") {
+      expect(screen.queryByRole("button", { name: "Remind me" })).toBeNull();
+      fireEvent.keyDown(
+        await screen.findByRole("button", { name: "Add ticket property" }),
+        { key: "ArrowDown" },
+      );
+      fireEvent.click(
+        await screen.findByRole("menuitem", { name: "Reminder" }),
+      );
+    } else fireEvent.click(await screen.findByRole("button", { name: chip }));
+    const choices = await screen.findByText(`${scope} of T-FV1`);
+    expect(choices.closest('[data-slot="popover-content"]')).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+    const option = await screen.findByRole("option", {
+      name: new RegExp(`^${label}`),
+    });
+    await vi.waitFor(() =>
+      expect(option.getAttribute("aria-disabled")).not.toBe("true"),
     );
+    fireEvent.click(option);
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith(
         command,
@@ -5151,6 +5166,175 @@ test.each([null, "codex"])(
   },
 );
 
+test("palette orders Go to before Create and joins fuzzy Tickets, Documents and active Plans", async () => {
+  const ticket = bulkTicket(1, { reference: "T-FV1", title: "Board geometry" });
+  const doc = { id: "doc-board", heading: "Board handoff" };
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "list_plans")
+      return [
+        { id: "plan-board", name: "Board polish", archived: false },
+        { id: "plan-old", name: "Board retired", archived: true },
+      ];
+    if (command === "recent_documents") return [doc];
+    if (command === "show_plan")
+      return {
+        plan: { id: "plan-board", name: "Board polish", archived: false },
+        members: [],
+        counts: {
+          todo: 2,
+          in_progress: 1,
+          in_review: 0,
+          done: 2,
+          canceled: 5,
+          duplicate: 1,
+        },
+      };
+    if (command === "sidebar_counts")
+      return { unread_inbox: 0, ready: 7, in_progress: 1 };
+    if (command === "document_tags") return [];
+    if (command === "open_document" || command === "show_document")
+      return {
+        id: doc.id,
+        title: doc.heading,
+        body: "A board handoff.",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        trashed: false,
+      };
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: /Board geometry/ });
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  const labels = screen
+    .getAllByRole("option")
+    .map((row) => row.getAttribute("data-value"));
+  expect(labels.indexOf("inbox")).toBeLessThan(labels.indexOf("create-ticket"));
+  expect(labels.filter((label) => label?.startsWith("create-"))).toEqual([
+    "create-ticket",
+    "create-capture",
+    "create-chat",
+    "create-plan",
+  ]);
+  expect(screen.getByRole("option", { name: /Ready/ }).textContent).toContain(
+    "7 tickets",
+  );
+  fireEvent.change(input, { target: { value: "brd" } });
+  expect(await screen.findByRole("option", { name: /T-FV1/ })).toBeTruthy();
+  const documentResult = await screen.findByRole("option", {
+    name: /Board handoff/,
+  });
+  expect(documentResult.querySelectorAll("mark").length).toBeGreaterThan(1);
+  const plan = await screen.findByRole("option", { name: /Board polish/ });
+  await vi.waitFor(() => expect(plan.textContent).toContain("2 of 5 done"));
+  expect(screen.queryByRole("option", { name: /Board retired/ })).toBeNull();
+  fireEvent.change(input, { target: { value: "T-FV" } });
+  expect(await screen.findByRole("option", { name: /T-FV1/ })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: /Board handoff/ })).toBeNull();
+  expect(screen.queryByRole("option", { name: /New ticket/ })).toBeNull();
+  fireEvent.change(input, { target: { value: "> brd" } });
+  expect(
+    screen.queryByRole("option", { name: /Board handoff|Board polish|T-FV1/ }),
+  ).toBeNull();
+  fireEvent.change(input, { target: { value: "brd hnd" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Board handoff/ }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("open_document", {
+      id: "doc-board",
+    }),
+  );
+  expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+});
+
+test("palette opens a named active Plan through the workspace navigation", async () => {
+  bridge.invoke.mockImplementation((command: string, args?: object) =>
+    command === "list_plans"
+      ? [{ id: "plan-board", name: "Board polish", archived: false }]
+      : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await screen.findByRole("button", { name: /Attachments/ });
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.change(input, { target: { value: "brd plsh" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Board polish/ }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("find_tickets", {
+      filter: expect.objectContaining({ plan: "plan-board" }),
+    }),
+  );
+  expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+});
+
+test("filter checks stay staged until the menu closes, then the bar follows the header", async () => {
+  const tickets = [
+    bulkTicket(1, { title: "First retained row", tags: ["polish"] }),
+    bulkTicket(2, { title: "Second retained row", tags: [] }),
+  ];
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: { filter?: { tags: string[] }; id?: string; reference?: string },
+    ) => {
+      if (command === "find_tickets")
+        return args?.filter?.tags.length ? tickets.slice(0, 1) : tickets;
+      if (command === "search_tags") return ["polish"];
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const first = await screen.findByRole("button", {
+    name: /First retained row/,
+  });
+  const second = await screen.findByRole("button", {
+    name: /Second retained row/,
+  });
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Filters" }), {
+    key: "Enter",
+  });
+  fireEvent.keyDown(await screen.findByRole("menuitem", { name: /^Tags/ }), {
+    key: "ArrowRight",
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitemcheckbox", { name: "polish" }),
+  );
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  expect(first.isConnected).toBe(true);
+  expect(second.isConnected).toBe(true);
+  expect(
+    bridge.invoke.mock.calls
+      .filter(([name]) => name === "find_tickets")
+      .at(-1)?.[1],
+  ).toEqual(
+    expect.objectContaining({ filter: expect.objectContaining({ tags: [] }) }),
+  );
+  for (let step = 0; step < 3 && screen.queryAllByRole("menu").length; step++) {
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    await act(async () => {});
+  }
+  const bar = await screen.findByLabelText("Active filters");
+  expect(bar.previousElementSibling?.getAttribute("data-slot")).toBe(
+    "pane-header",
+  );
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: /Second retained row/ }),
+    ).toBeNull(),
+  );
+  fireEvent.click(within(bar).getByRole("button", { name: "Clear filters" }));
+  await screen.findByRole("button", { name: /Second retained row/ });
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
 test("Documents folds local search in its header and navigates one row stop without replacing the reader metadata", async () => {
   const docs = [
     {
@@ -6115,3 +6299,50 @@ test.each(["ready", "trashed"] as const)(
     expect(screen.queryByRole("button", { name: "Install skill" })).toBeNull();
   },
 );
+test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
+  const current = bulkTicket(1, { title: "Follow outcome" });
+  let following = false;
+  let failed = true;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { following?: boolean }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "is_following") return following;
+      if (command === "set_following") {
+        if (failed) throw new Error("Storage is busy");
+        following = args?.following ?? false;
+        return null;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Follow outcome/ }),
+  );
+  const follow = await screen.findByRole("button", { name: "Follow" });
+  const header = follow.closest("header");
+  expect(header).toBeTruthy();
+  expect(
+    within(
+      screen.getByRole("group", { name: "Ticket properties" }),
+    ).queryByRole("button", { name: "Follow" }),
+  ).toBeNull();
+  fireEvent.click(follow);
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(follow.closest("header")).toBe(header);
+  expect(header?.querySelector('[role="alert"]')).toBeNull();
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  failed = false;
+  fireEvent.click(retry);
+  await vi.waitFor(() =>
+    expect(follow.getAttribute("aria-pressed")).toBe("true"),
+  );
+  following = false;
+  await vi.waitFor(
+    () => expect(follow.getAttribute("aria-pressed")).toBe("false"),
+    { timeout: 3000 },
+  );
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  expect(follow.hasAttribute("disabled")).toBe(true);
+});

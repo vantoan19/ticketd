@@ -113,7 +113,7 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   expect(screen.queryByRole("complementary")).toBeNull();
   // Rail order, each chip named by its property and value. No source is set
   // up, so there is no Source chip and nothing says "Local".
-  await within(bar).findByRole("button", { name: "Follow" });
+  await screen.findByRole("button", { name: "Follow" });
   expect(
     [...bar.querySelectorAll("button, [role=combobox]")].map(
       (chip) => chip.getAttribute("aria-label") ?? chip.textContent,
@@ -123,14 +123,13 @@ test("a narrow pane folds the rail into chips that open the same editors", async
     "Project: No project",
     "Plan: No Plan",
     "Tags: release",
-    "Follow",
     "Manage reminder",
     "Add ticket property",
   ]);
   expect(bar.textContent).not.toContain("Local");
   // Follow is an icon toggle: its name stays "Follow" and aria-pressed says
   // whether it is on.
-  const follow = within(bar).getByRole("button", { name: "Follow" });
+  const follow = screen.getByRole("button", { name: "Follow" });
   expect(follow.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(follow);
   await waitFor(() => expect(follow.getAttribute("aria-pressed")).toBe("true"));
@@ -181,7 +180,7 @@ test("a hidden pane reports no width and keeps its layout", async () => {
   ).toBeNull();
 });
 
-test("narrow, an active ticket still shows its Latest update under the chips", async () => {
+test("narrow, an agent update keeps its reserved strip after the property controls", async () => {
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "latest_update")
       return {
@@ -200,8 +199,10 @@ test("narrow, an active ticket still shows its Latest update under the chips", a
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   // One line: who and when, then the excerpt.
-  const latest = (await within(bar).findByText("Drafted a fix")).parentElement!;
-  expect(latest.textContent).toMatch(/^codex · .*Drafted a fix$/);
+  const latest = (await within(bar).findByText(/Drafted a fix/)).closest(
+    ".ticket-agent-strip",
+  )!;
+  expect(latest.textContent).toMatch(/^codex · .*Drafted a fix/);
   // On its own line after the last chip, not between Status and the others.
   const last = within(bar).getByRole("button", { name: "Manage reminder" });
   expect(
