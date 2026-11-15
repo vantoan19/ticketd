@@ -26,6 +26,7 @@ export function TicketPicker({
   label = "Tickets",
   query: controlledQuery,
   onQueryChange,
+  rows = 6,
 }: {
   onPick: (ticket: Ticket) => void;
   /** Which tickets may be offered at all (not the ticket itself, say). */
@@ -40,6 +41,7 @@ export function TicketPicker({
   /** The typed search, when the caller keeps it (a draft kept on Escape). */
   query?: string;
   onQueryChange?: (query: string) => void;
+  rows?: number;
 }) {
   const [ownQuery, setOwnQuery] = useState("");
   const query = controlledQuery ?? ownQuery;
@@ -58,7 +60,7 @@ export function TicketPicker({
       query={query}
       onQueryChange={setQuery}
       size="tall"
-      rows={6}
+      rows={rows}
       groups={results.map((ticket) => {
         const meta = caption?.(ticket);
         return {
