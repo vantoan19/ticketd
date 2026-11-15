@@ -1,3 +1,5 @@
+import { FirstRunGuide } from "@/features/tickets/FirstRunGuide";
+import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
 import {
   TicketCommandContext,
   ticketCommandActions,
@@ -23,7 +25,7 @@ import {
 } from "@/features/attachments/AttachmentLibrary";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
-import { type ContextGraph as GraphData } from "@/lib/api/client";
+import { client, type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { InboxAttentionProvider } from "@/features/tickets/inbox-attention";
 import { Inbox } from "@/features/tickets/Inbox";
@@ -355,6 +357,53 @@ function AppContent() {
     scope,
     navigation,
   } = workspace;
+  // Workspace info excludes Trash. Join the existing Trash read before
+  // treating an empty filtered list as a brand-new Workspace.
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void workspaceClient
+      .info()
+      .then(async (info) => {
+        if (info.tickets === 0 && (await client.listTrash()).length > 0)
+          return null;
+        return info;
+      })
+      .then(
+        (info) => {
+          if (live) setWorkspaceInfo(info);
+        },
+        () => {
+          if (live) setWorkspaceInfo(null);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [revision]);
+  const firstRun =
+    workspaceInfo?.tickets === 0 &&
+    workspaceInfo.documents === 0 &&
+    workspaceInfo.projects === 0 &&
+    workspaceInfo.active_plans === 0 &&
+    projects.length === 0 &&
+    plans.length === 0 &&
+    !loading &&
+    !error &&
+    workspace.tickets.length === 0 &&
+    Object.keys(workspace.details).length === 0 &&
+    (counts?.total ?? 0) === 0 &&
+    (workspace.counts?.total ?? 0) === 0 &&
+    navigation.kind === "all" &&
+    navigation.project === "all" &&
+    !navigation.plan &&
+    !workspace.query &&
+    !workspace.status &&
+    !workspace.tags.length &&
+    !workspace.availability &&
+    workspace.source === "all";
   const goTo = (target: GoTo) => {
     if ((target === "chats" || target === "automations") && !chat.enabled)
       return;
@@ -955,11 +1004,24 @@ function AppContent() {
                                     setPaletteOpen(true);
                                   }}
                                 >
+                                  {firstRun &&
+                                    view === "tickets" &&
+                                    graphOrigin === null && (
+                                      <FirstRunGuide
+                                        disabledReason={createDisabledReason}
+                                        onCreate={(trigger) => {
+                                          createTriggerRef.current = trigger;
+                                          setCreateStatus(undefined);
+                                          setCreating(true);
+                                        }}
+                                      />
+                                    )}
                                   <TicketWorkspaceView
                                     key={`tickets:${recoveryGeneration}`}
                                     workspace={workspace}
                                     bulk={bulk}
                                     hidden={
+                                      (firstRun && view === "tickets") ||
                                       (view !== "tickets" &&
                                         view !== "inbox") ||
                                       graphOrigin !== null

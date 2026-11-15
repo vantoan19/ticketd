@@ -934,3 +934,22 @@ Color is only the existing small status dot beside a word. The one live signal i
 ### Accessibility
 
 Every state is a word; icons, spinners and clocks are `aria-hidden`. Rows that open are buttons with `aria-expanded`. One polite status announces a turn starting, waiting and ending, and a request arriving, never each step. Command output is a focusable named region, and the New marker is a separator named "New since you left".
+
+## 16. First run
+
+A confirmed empty Workspace opens under the All tickets pane header with a
+centred column, at most 560px of content, 96px below the header. The shared 40px
+IconTile introduces “Your workspace is ready” in display type (32/40), followed
+by the 15/24 local-storage explanation. Three numbered setting rows lead to the
+existing New ticket dialog, Settings › Agent skills and Settings › Google Drive;
+the last step is optional. A completed step shows a check and muted text from
+existing installed-skill and sync state. The actions keep their positions as
+completion changes. The footer names the command-palette shortcut.
+
+The guide requires workspace-wide ticket totals including Trash and no existing
+projects, Plans or Documents. Empty filtered lists retain their ordinary empty
+states. The first Ticket immediately replaces the guide with the normal ticket
+workspace. Sidebar creation, C and palette creation keep the same dialog and
+save path. Narrow windows reflow the actions below their row copy and scroll the
+page; the fixed pane header remains reachable. Native light/dark and zoom review
+remains part of visual acceptance.

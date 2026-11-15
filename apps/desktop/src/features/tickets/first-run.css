@@ -1,0 +1,23 @@
+.first-run-host {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.first-run-host .ui-management-page-guide {
+  width: 100%;
+  max-width: 608px;
+  margin-inline: auto;
+  padding: 96px 24px 40px;
+  gap: 10px;
+}
+.first-run-host .ui-management-page-guide > [data-slot="steps"] {
+  margin-top: 18px;
+}
+.first-run-host .ui-guide-title {
+  margin-top: 10px;
+}
+.first-run-host .ui-guide-hint {
+  margin-top: 14px;
+}

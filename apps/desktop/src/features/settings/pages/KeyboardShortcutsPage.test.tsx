@@ -26,6 +26,7 @@ const ALL = [
   "Plans",
   "Chat",
   "Dialogs and menus",
+  "First run",
 ];
 
 test("every real shortcut is listed under its scope", () => {
