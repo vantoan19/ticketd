@@ -18,7 +18,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
-import { syncStatus } from "@/features/sync/sync-fixtures";
+import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
 
 class ResizeObserverStub {
   constructor(private callback: ResizeObserverCallback) {}
@@ -6176,6 +6176,130 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
   ).toHaveProperty("value", "A retained update draft");
 });
 
+test("first run creates through the shared dialog and gives way to the ticket list", async () => {
+  let created = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "find_tickets") return created ? [bulkTicket(1)] : [];
+      if (command === "create_ticket") {
+        created = true;
+        return bulkTicket(1);
+      }
+      if (command === "show_ticket") return bulkTicket(1);
+      if (command === "workspace_info")
+        return {
+          ...((await bridgeDefault(command)) as object),
+          tickets: created ? 1 : 0,
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const guide = await screen.findByRole("region", {
+    name: "Your workspace is ready",
+  });
+  fireEvent.click(within(guide).getByRole("button", { name: /New ticket/ }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "First" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await screen.findByRole("button", { name: /First/ });
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).toBeNull();
+});
+
+test("first run reads completed steps and opens the exact existing Settings sections", async () => {
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "agent_skills")
+        return [
+          {
+            id: "claude",
+            name: "Claude Code",
+            path: "/fake/skills",
+            detected: true,
+            state: "installed",
+            error: null,
+          },
+        ];
+      if (command === "sync_status")
+        return syncStatus({ connection: "connected" });
+      if (command === "sync_settings") return syncSettings();
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const guide = await screen.findByRole("region", {
+    name: "Your workspace is ready",
+  });
+  expect(await within(guide).findByText(/Let your agents in/)).toBeTruthy();
+  await act(async () => {});
+  expect(
+    within(guide)
+      .getByText(/Let your agents in/)
+      .closest('[data-slot="step"]')
+      ?.getAttribute("data-state"),
+  ).toBe("done");
+  expect(
+    within(guide)
+      .getByText(/Keep it on every Mac/)
+      .closest('[data-slot="step"]')
+      ?.getAttribute("data-state"),
+  ).toBe("done");
+  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Agent skills" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
+  fireEvent.click(
+    within(
+      await screen.findByRole("region", { name: "Your workspace is ready" }),
+    ).getByRole("button", { name: "Set up" }),
+  );
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Google Drive" }),
+  ).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) =>
+      ["install_agent_skill", "sync_connect", "sync_setup"].includes(command),
+    ),
+  ).toBe(false);
+});
+
+test.each(["ready", "trashed"] as const)(
+  "first run stays absent when existing tickets are %s",
+  async (kind) => {
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>) => {
+        if (command === "workspace_info")
+          return {
+            ...((await bridgeDefault(command)) as object),
+            tickets: kind === "ready" ? 1 : 0,
+          };
+        if (command === "list_trash")
+          return [{ ...bulkTicket(1), trashed: true }];
+        if (command === "find_tickets") return [];
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    await act(async () => {});
+    expect(await screen.findByText("No tickets yet")).toBeTruthy();
+    if (kind === "ready")
+      fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+    else fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+    expect(
+      await screen.findByText(
+        kind === "ready" ? "No Ready tickets" : "Trash is empty",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Your workspace is ready" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Install skill" })).toBeNull();
+  },
+);
 test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
   const current = bulkTicket(1, { title: "Follow outcome" });
   let following = false;
@@ -6638,3 +6762,25 @@ test("Capture keeps its editor open if the browser cannot verify a text draft", 
     blocked.mockRestore();
   }
 });
+
+test.each([
+  ["Agent skills", "Agent skills"],
+  ["Google Drive sync", "Google Drive"],
+])(
+  "first run's %s action is also reachable in the palette",
+  async (command, heading) => {
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(<App />);
+    await screen.findByRole("region", { name: "Your workspace is ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+    const palette = await screen.findByRole("dialog", {
+      name: "Go anywhere",
+    });
+    fireEvent.click(
+      within(palette).getByRole("option", { name: new RegExp(command) }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: heading }),
+    ).toBeTruthy();
+  },
+);

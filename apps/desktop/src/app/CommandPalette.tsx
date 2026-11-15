@@ -1,3 +1,4 @@
+import { SettingsNavigation } from "@/lib/settings-navigation";
 import { searchMatch } from "@/lib/search-match";
 import { documents, type DocumentSummary } from "@/features/documents/api";
 import {
@@ -17,6 +18,8 @@ import { localInstants, localValue } from "@/features/tickets/reminder-time";
 import { reminderPresets } from "@/features/tickets/reminder-presets";
 import { Button } from "@/components/ui/button";
 import {
+  Bot,
+  Cloud,
   Check,
   Circle,
   Folder,
@@ -143,6 +146,7 @@ export function CommandPalette({
   ticket: (reference: string) => void;
   chatsEnabled: boolean;
 }) {
+  const navigateSettings = useContext(SettingsNavigation);
   const openGraph = useContext(ContextGraphNavigation);
   const openDocument = useContext(DocumentNavigation);
   const openPlan = useContext(PlanNavigation);
@@ -878,6 +882,41 @@ export function CommandPalette({
                         </CommandItem>
                       );
                     })}
+                  {(
+                    [
+                      {
+                        id: "go-agent-skills",
+                        section: "agent-skills",
+                        label: "Agent skills",
+                        icon: Bot,
+                      },
+                      {
+                        id: "go-sync",
+                        section: "google-drive",
+                        label: "Google Drive sync",
+                        icon: Cloud,
+                      },
+                    ] as const
+                  )
+                    .filter((target) => matches(target.label))
+                    .map((target) => (
+                      <CommandItem
+                        key={target.id}
+                        value={target.id}
+                        disabled={!navigateSettings}
+                        onSelect={() =>
+                          run(() => navigateSettings?.(target.section))
+                        }
+                      >
+                        <target.icon aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={target.label} query={filter} />
+                        </span>
+                        <CommandShortcut>
+                          <KeyChords keys={shortcut(target.id).keys} />
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
                   {plans
                     .filter(
                       (plan) =>
