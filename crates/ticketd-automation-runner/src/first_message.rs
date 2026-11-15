@@ -2,8 +2,9 @@
 
 use ticketd_core::{AutomationRun, Trigger, WorkspaceEvent, WorkspaceEventType};
 
-/// The CLI is allowed only by its name; a path to it is denied (#387 L1).
-const CALL_BY_NAME: &str = "Run it as `ticketd`, by that name, never by a path.";
+/// The CLI is allowed only by its name; a path to it is denied (#387 L1), and so is a
+/// compound command: the model chains `ticketd ...; echo $?` and loses the whole call (8A1).
+const CALL_BY_NAME: &str = "Run it as `ticketd`, by that name, never by a path. Run one ticketd command per call, with nothing chained, piped or redirected.";
 
 /// The agent's instructions, then what started the run: the ticket's reference and
 /// title and what changed, or that a schedule or the person did and there is no
