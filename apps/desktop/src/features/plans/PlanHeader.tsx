@@ -10,7 +10,6 @@ import {
   Archive,
   ArchiveRestore,
   FileText,
-  Layers,
   MoreHorizontal,
   Network,
   Pencil,
@@ -30,7 +29,12 @@ import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { PaneHeader, PaneHeaderButton } from "@/components/ui/list-header";
-import { Progress } from "@/components/ui/progress";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
@@ -38,6 +42,7 @@ import { noun } from "@/lib/format";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import { PlanDocuments } from "./PlanDocuments";
+import { PlanRing, PlanSplitBar } from "./PlanProgress";
 import { usePlanAction, type PlanViewState } from "./usePlanView";
 import "./plan.css";
 
@@ -45,9 +50,9 @@ type Mode = "list" | "board" | "dependencies";
 
 /**
  * A Plan's header across both panes (DESIGN.md section 10): one 48px pane
- * header (Layers, name and count, the list controls, List/Board/Dependencies,
- * "Add to Plan…", "…") and one 32px context line (purpose, "2 of 5 done", the
- * spec chip). Both keep their height in every state: renaming, editing the
+ * header (ring, name and count, List/Board/Flow, "Add tickets", "…")
+ * and a reserved summary (purpose, split progress and spec). Both keep their
+ * height in every state: renaming, editing the
  * purpose, archived, failed. Outcomes and failures go to the status line;
  * archiving acts at once with Undo.
  */
@@ -74,6 +79,7 @@ export function PlanHeader({
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState("");
   const [linking, setLinking] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   // The list's own copy is current after a change; the loaded view adds counts.
   const current = view?.plan.id === plan.id ? view.plan : plan;
 
@@ -81,7 +87,7 @@ export function PlanHeader({
   const nameInput = useRef<HTMLInputElement>(null);
   const actionsButton = useRef<HTMLButtonElement>(null);
   // What a menu item opened, so the menu does not take focus back from it.
-  const afterMenu = useRef<"rename" | "link" | null>(null);
+  const afterMenu = useRef<"rename" | "link" | "options" | null>(null);
   function startRename() {
     setName(current.name);
     setNameError("");
@@ -175,7 +181,7 @@ export function PlanHeader({
       options={[
         { value: "list", label: "List" },
         { value: "board", label: "Board" },
-        { value: "dependencies", label: "Dependencies" },
+        { value: "dependencies", label: "Flow" },
       ]}
     />
   );
@@ -184,7 +190,13 @@ export function PlanHeader({
       <PaneHeader
         title={current.name}
         titleId="tickets-heading"
-        icon={<Layers />}
+        icon={
+          view ? (
+            <PlanRing name={current.name} counts={view.counts} decorative />
+          ) : (
+            <span className="plan-ring-slot" />
+          )
+        }
         titleEditor={
           renaming ? (
             // The field takes the title's place at its height and weight.
@@ -217,7 +229,6 @@ export function PlanHeader({
         }
         actions={
           <>
-            {mode !== "dependencies" && controls}
             {viewSwitch}
             {current.archived ? (
               <PaneHeaderButton
@@ -231,112 +242,155 @@ export function PlanHeader({
               <PaneHeaderButton
                 variant="outline"
                 icon={<Plus />}
-                label="Add to Plan…"
+                label="Add tickets"
                 disabled={pending}
                 onClick={() => setAdding(true)}
               />
             )}
             {/* An archived Plan has one action left: a direct button, not a
                 one-item menu (plans PL-11). */}
-            {current.archived
-              ? openGraph && (
-                  <IconButton
-                    label="Open graph"
-                    onClick={() => openGraph(plan.id)}
-                  >
-                    <Network />
-                  </IconButton>
-                )
-              : !renaming && (
-                  <DropdownMenu>
+            {current.archived ? (
+              openGraph && (
+                <IconButton
+                  label="Open graph"
+                  onClick={() => openGraph(plan.id)}
+                >
+                  <Network />
+                </IconButton>
+              )
+            ) : (
+              <Popover open={optionsOpen} onOpenChange={setOptionsOpen}>
+                <DropdownMenu>
+                  <PopoverAnchor asChild>
                     <DropdownMenuTrigger asChild>
                       <IconButton ref={actionsButton} label="Plan actions">
                         <MoreHorizontal />
                       </IconButton>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="end"
-                      onCloseAutoFocus={(event) => {
-                        // Rename and Link move focus to what they opened.
-                        if (!afterMenu.current) return;
-                        event.preventDefault();
-                        afterMenu.current = null;
+                  </PopoverAnchor>
+                  <DropdownMenuContent
+                    align="end"
+                    onCloseAutoFocus={(event) => {
+                      // Rename and Link move focus to what they opened.
+                      if (!afterMenu.current) return;
+                      event.preventDefault();
+                      if (afterMenu.current === "rename") {
+                        nameInput.current?.focus();
+                        nameInput.current?.select();
+                      }
+                      afterMenu.current = null;
+                    }}
+                  >
+                    <DropdownMenuItem
+                      disabled={pending}
+                      onSelect={() => {
+                        afterMenu.current = "rename";
+                        startRename();
                       }}
                     >
+                      <Pencil /> Rename
+                      <DropdownMenuShortcut>F2</DropdownMenuShortcut>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={pending}
+                      onSelect={() => {
+                        afterMenu.current = "link";
+                        setLinking(true);
+                      }}
+                    >
+                      <FileText /> Link a Document…
+                    </DropdownMenuItem>
+                    {openGraph && (
+                      <DropdownMenuItem onSelect={() => openGraph(plan.id)}>
+                        <Network /> Open graph
+                      </DropdownMenuItem>
+                    )}
+                    {controls && (
                       <DropdownMenuItem
-                        disabled={pending}
                         onSelect={() => {
-                          afterMenu.current = "rename";
-                          startRename();
+                          afterMenu.current = "options";
+                          setOptionsOpen(true);
                         }}
                       >
-                        <Pencil /> Rename
-                        <DropdownMenuShortcut>F2</DropdownMenuShortcut>
+                        Filter and display…
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={pending}
-                        onSelect={() => {
-                          afterMenu.current = "link";
-                          setLinking(true);
-                        }}
-                      >
-                        <FileText /> Link a Document…
-                      </DropdownMenuItem>
-                      {openGraph && (
-                        <DropdownMenuItem onSelect={() => openGraph(plan.id)}>
-                          <Network /> Open graph
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem disabled={pending} onSelect={archive}>
-                        <Archive /> Archive Plan
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem disabled={pending} onSelect={archive}>
+                      <Archive /> Archive Plan
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <PopoverContent align="end" aria-label="Plan list options">
+                  <div className="plan-list-options">{controls}</div>
+                </PopoverContent>
+              </Popover>
+            )}
           </>
         }
       >
         {current.archived && <Badge size="sm">Archived</Badge>}
       </PaneHeader>
-      <div className="plan-context" aria-label="Plan context" role="group">
-        {renaming ? (
-          // The rename's hint and its error share the reserved line.
-          <span
-            id="plan-context-note"
-            className="plan-context-note"
-            data-invalid={nameError ? "" : undefined}
-            role={nameError ? "alert" : undefined}
-          >
-            {nameError || "Enter saves · Esc cancels"}
-          </span>
-        ) : loadError ? (
-          <FailureState size="inline" failure={loadError} onRetry={reload} />
-        ) : (
-          <>
-            <PlanPurpose
-              key={plan.id}
-              purpose={current.purpose}
-              readOnly={current.archived}
-              pending={pending}
-              save={(purpose) =>
-                act(
-                  () => plansClient.setPurpose(plan.id, purpose),
-                  "save the purpose",
-                )
-              }
-            />
-            {counted > 0 && (
-              <span className="plan-progress">
-                <Progress
-                  aria-label="Plan progress"
-                  value={done}
-                  max={counted}
-                />
+      <div
+        className="plan-context ui-plan-summary"
+        aria-label="Plan context"
+        role="group"
+        aria-busy={!view && !loadError}
+      >
+        <PlanPurpose
+          key={plan.id}
+          purpose={current.purpose}
+          readOnly={current.archived || renaming}
+          pending={pending}
+          save={(purpose) =>
+            act(
+              () => plansClient.setPurpose(plan.id, purpose),
+              "save the purpose",
+            )
+          }
+        />
+        <div className="plan-summary-row">
+          {renaming ? (
+            <span
+              id="plan-context-note"
+              className="plan-context-note"
+              data-invalid={nameError ? "" : undefined}
+              role={nameError ? "alert" : undefined}
+            >
+              {nameError || "Enter saves · Esc cancels"}
+            </span>
+          ) : loadError ? (
+            <FailureState size="inline" failure={loadError} onRetry={reload} />
+          ) : view ? (
+            <>
+              <PlanSplitBar
+                variant="summary"
+                className="plan-summary-bar"
+                name={current.name}
+                counts={view.counts}
+              />
+              <span className="plan-progress ui-plan-progress">
                 {done} of {counted} done
               </span>
-            )}
-            {view && (
+              <span className="plan-summary-legend">
+                {[
+                  view.counts.in_review
+                    ? `${view.counts.in_review} in review`
+                    : null,
+                  view.counts.in_progress
+                    ? `${view.counts.in_progress} in progress`
+                    : null,
+                  `${view.counts.todo} to do, ${view.members.filter((member) => member.availability === "Ready").length} ready`,
+                  view.counts.canceled
+                    ? `${view.counts.canceled} canceled, not counted`
+                    : null,
+                  view.counts.duplicate
+                    ? `${view.counts.duplicate} duplicates, not counted`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
               <PlanDocuments
                 view={view}
                 state={state}
@@ -344,9 +398,16 @@ export function PlanHeader({
                 onLinkingChange={setLinking}
                 returnFocus={actionsButton}
               />
-            )}
-          </>
-        )}
+            </>
+          ) : (
+            <div
+              className="plan-summary-loading"
+              aria-label="Loading Plan progress"
+            >
+              <Skeleton className="h-2 w-full" />
+            </div>
+          )}
+        </div>
       </div>
       <AddTicketsDialog
         plan={current}
@@ -379,13 +440,13 @@ function PlanPurpose({
   const button = useRef<HTMLButtonElement>(null);
   const saving = useRef(false);
   if (readOnly)
-    return purpose ? (
+    return (
       <Tooltip content={purpose} overflowOnly>
-        <span className="plan-purpose" tabIndex={0}>
-          {purpose}
+        <span className="plan-purpose ui-plan-purpose" tabIndex={0}>
+          {purpose || "No purpose"}
         </span>
       </Tooltip>
-    ) : null;
+    );
   async function commit() {
     // Enter then the blur it causes must save once.
     if (draft === null || saving.current) return;
@@ -401,7 +462,7 @@ function PlanPurpose({
   }
   if (draft !== null)
     return (
-      <span className="plan-purpose-field">
+      <span className="plan-purpose-field ui-plan-purpose">
         <Input
           variant="inline"
           className="h-6"
@@ -431,7 +492,7 @@ function PlanPurpose({
       <button
         ref={button}
         type="button"
-        className="plan-purpose"
+        className="plan-purpose ui-plan-purpose"
         data-empty={purpose ? undefined : ""}
         onClick={() => setDraft(purpose)}
       >

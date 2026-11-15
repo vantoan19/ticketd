@@ -512,6 +512,7 @@ function TicketListBody({
                           <IconButton
                             disabled={planState.pending}
                             label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                            tooltipSide="top"
                             onClick={() => {
                               // A second click lands on the row that moved up:
                               // ignore clicks for 400ms after a removal (P7).

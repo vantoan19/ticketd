@@ -639,3 +639,20 @@
   overflow-wrap: anywhere;
   white-space: normal;
 }
+
+/* Plan summary roles: shared pane typography and boundary, feature CSS owns geometry. */
+.ui-plan-summary {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  box-shadow: 0 1px 0 0 var(--group-hairline);
+}
+.ui-plan-purpose {
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+}
+.ui-plan-progress {
+  color: var(--foreground);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}

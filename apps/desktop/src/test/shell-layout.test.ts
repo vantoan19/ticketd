@@ -30,13 +30,13 @@ it("the collapsed sidebar keeps the manage menus and the source Retry reachable"
   );
 });
 
-it("the Plan context line keeps one 32px row; the purpose gives way first", () => {
+it("the Plan summary reserves its two rows and truncates the purpose", () => {
   const plan = readFileSync(
     join(__dirname, "..", "features/plans/plan.css"),
     "utf8",
   );
   const context = /\n[.]plan-context [{]([^}]*)[}]/.exec(plan)?.[1] ?? "";
-  expect(context).toMatch(/height: 32px;/);
+  expect(context).toMatch(/height: 96px;/);
   expect(context).not.toMatch(/flex-wrap: wrap/);
   expect(plan).toMatch(/[.]plan-purpose-text [{][^}]*text-overflow: ellipsis;/);
   expect(plan).toMatch(/[.]plan-progress [{][^}]*flex: none;/);
