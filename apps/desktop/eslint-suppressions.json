@@ -87,11 +87,6 @@
       "count": 1
     }
   },
-  "src/features/tickets/Inbox.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
   "src/features/tickets/LinkedWork.tsx": {
     "shadcn/no-restyle": {
       "count": 5

@@ -8,6 +8,8 @@ import {
   Settings,
   ChevronRight,
   SquarePen,
+  ChevronDown,
+  Lightbulb,
   Folder,
   Layers,
   Archive,
@@ -31,6 +33,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -45,6 +48,7 @@ import { setPreference, usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 import { useChatFeature } from "@/features/chats/use-chats";
+import { shortcutLabel } from "@/lib/shortcuts";
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
@@ -188,6 +192,7 @@ export function WorkspaceSidebar({
   // The sheet below 768px is never collapsed to icons.
   const collapsed = !isMobile && sidebarCollapsed;
   const newTrigger = useRef<HTMLButtonElement>(null);
+  const moreTrigger = useRef<HTMLButtonElement>(null);
   // Choosing an item moves focus on its own; dismissing the menu returns it to New.
   const chose = useRef(false);
   const openGraph = useContext(ContextGraphNavigation);
@@ -232,54 +237,72 @@ export function WorkspaceSidebar({
               )}
             </IconButton>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                ref={newTrigger}
-                className="new-ticket"
-                label="New ticket"
-              >
-                <SquarePen aria-hidden="true" />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              onCloseAutoFocus={(event) => {
-                if (chose.current) event.preventDefault();
-                chose.current = false;
+          {/* New ticket in one click (S1); the other ways to create sit
+              behind the chevron beside it. */}
+          <span className="new-ticket-split">
+            <IconButton
+              ref={newTrigger}
+              className="new-ticket"
+              label="New ticket"
+              onClick={() => {
+                createTriggerRef.current = newTrigger.current;
+                // Opens over the current view, as Capture does.
+                setCreating(true);
               }}
             >
-              <DropdownMenuItem
-                onSelect={() => {
-                  chose.current = true;
-                  createTriggerRef.current = newTrigger.current;
-                  // Opens over the current view, as Capture does.
-                  // After the menu has closed, so it cannot take focus back.
-                  window.setTimeout(() => setCreating(true), 0);
-                }}
-              >
-                New ticket
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  chose.current = true;
-                  onCapture(newTrigger.current);
-                }}
-              >
-                Capture a thought
-              </DropdownMenuItem>
-              {chat.enabled && onNewChat && (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    chose.current = true;
-                    onNewChat();
+              <SquarePen aria-hidden="true" />
+            </IconButton>
+            {chat.enabled && onNewChat ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton ref={moreTrigger} label="More ways to create">
+                    <ChevronDown aria-hidden="true" />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => {
+                    if (chose.current) event.preventDefault();
+                    chose.current = false;
                   }}
                 >
-                  New Chat
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      chose.current = true;
+                      onCapture(moreTrigger.current);
+                    }}
+                  >
+                    <Lightbulb aria-hidden="true" />
+                    Capture a thought
+                    <DropdownMenuShortcut>
+                      {shortcutLabel("capture")}
+                    </DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  {onNewChat && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        chose.current = true;
+                        onNewChat();
+                      }}
+                    >
+                      <MessagesSquare aria-hidden="true" />
+                      New Chat
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              // A one-item menu would be a detour (P3): Capture is direct.
+              <IconButton
+                ref={moreTrigger}
+                label="Capture a thought"
+                shortcut={shortcutLabel("capture")}
+                onClick={() => onCapture(moreTrigger.current)}
+              >
+                <Lightbulb aria-hidden="true" />
+              </IconButton>
+            )}
+          </span>
         </div>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">

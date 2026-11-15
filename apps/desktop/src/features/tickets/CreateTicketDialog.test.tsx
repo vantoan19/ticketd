@@ -327,6 +327,8 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   screen.getByRole("button", { name: "Create ticket" }).focus();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(screen.getByText("Created T-KQ1")).toBeTruthy());
+  // Said where it can be seen too, in the footer's note slot (list C-06).
+  expect(screen.getByText("Created T-KQ1.")).toBeTruthy();
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(title).toHaveProperty("value", "");
   expect(document.activeElement).toBe(title);

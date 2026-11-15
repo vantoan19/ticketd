@@ -146,11 +146,8 @@ const sidebarNewTicket = () =>
   screen.getAllByRole("button", { name: "New ticket" })[0]!;
 
 async function openNewTicket(trigger = sidebarNewTicket()) {
-  fireEvent.keyDown(trigger, { key: "Enter" });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  fireEvent.click(screen.getByRole("menuitem", { name: "New ticket" }));
+  // One click: New ticket is a direct action, not a menu (S1, list C-01).
+  fireEvent.click(trigger);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });

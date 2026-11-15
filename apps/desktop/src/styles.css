@@ -1435,6 +1435,15 @@ html[data-window-bar] {
   width: 32px;
   padding: 0;
 }
+/* New ticket in one click, the other ways to create behind a 20px chevron. */
+.new-ticket-split {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.new-ticket-split > [data-slot="button"]:last-child {
+  width: 20px;
+}
 .sidebar-nav {
   display: grid;
   gap: 0;

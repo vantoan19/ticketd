@@ -70,10 +70,6 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
-.create-restored {
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-}
 /* Group labels (Status, Project, Plan, Tags) read at the form label size. */
 .create-form span[aria-hidden="true"] {
   font-size: var(--text-ui);
