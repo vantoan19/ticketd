@@ -1,3 +1,5 @@
+import { CommandPalette } from "./CommandPalette";
+import { useCommandKeys, type GoTo } from "./use-command-keys";
 import {
   ContextGraphNavigation,
   DocumentNavigation,
@@ -227,6 +229,8 @@ function AppContent() {
   const keepGraph = useRef(false);
   const setView = (next: typeof view) =>
     navigate({ view: next, keepGraph: keepGraph.current });
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteReturn = useRef<HTMLElement | null>(null);
   const [capture, setCapture] = useState(false);
   // Capture has no trigger of its own, so closing it returns focus to whatever opened it.
   const captureReturn = useRef<HTMLElement | null>(null);
@@ -319,6 +323,20 @@ function AppContent() {
     scope,
     navigation,
   } = workspace;
+  const goTo = (target: GoTo) => {
+    if (target === "chats" && !chat.enabled) return;
+    if (target === "all" || target === "ready") {
+      scope(target);
+      setView("tickets");
+    } else openView(target);
+  };
+  useCommandKeys(() => {
+    paletteReturn.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setPaletteOpen(true);
+  }, goTo);
   useEffect(() => loadCounts.current(), [revision]);
   const openGraphItem = (node: GraphData["nodes"][number]) => {
     keepGraph.current = true;
@@ -446,6 +464,17 @@ function AppContent() {
                         Skip to content
                       </a>
                       <WindowBar />
+                      <CommandPalette
+                        open={paletteOpen}
+                        returnFocus={paletteReturn}
+                        onOpenChange={setPaletteOpen}
+                        go={goTo}
+                        chatsEnabled={chat.enabled}
+                        ticket={(reference) => {
+                          setSelected(reference);
+                          setView("tickets");
+                        }}
+                      />
                       <div
                         className={
                           view === "settings"

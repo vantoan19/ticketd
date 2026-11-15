@@ -77,3 +77,12 @@ test("no match says so and Clear search brings everything back", () => {
   expect((filter() as HTMLInputElement).value).toBe("");
   expect(groupNames()).toEqual(ALL);
 });
+
+test("navigation sequences are spoken as ordered keys from the registry", () => {
+  render(<KeyboardShortcutsPage />);
+  for (const key of ["I", "A", "R", "C", "D"])
+    expect(screen.getByRole("img", { name: `G then ${key}` })).toBeTruthy();
+  fireEvent.change(filter(), { target: { value: "G then D" } });
+  expect(screen.getByText("Go to Documents")).toBeTruthy();
+  expect(screen.queryByText("Go to Inbox")).toBeNull();
+});

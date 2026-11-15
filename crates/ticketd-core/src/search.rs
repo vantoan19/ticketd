@@ -224,7 +224,8 @@ impl Workspace {
     }
 
     /// Search saved content using a literal, ASCII case-insensitive substring.
-    /// Results are ordered by descending ticket reference and limited to 100 per page.
+    /// Exact references lead, then reference matches, then saved content matches.
+    /// Each group is ordered by descending ticket reference; at most 100 per page.
     pub fn search_tickets(
         &self,
         query: &str,
@@ -240,7 +241,7 @@ impl Workspace {
             self.show_project(id)?;
         }
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5"
         )?;
         let mut tickets = statement
             .query_map(

@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Command as CommandPrimitive } from "cmdk";
+import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { cn } from "cn";
 import { SearchIcon } from "lucide-react";
+import { Kbd } from "@/components/ui/kbd";
 
 import {
   Dialog,
@@ -15,18 +16,41 @@ import {
 
 function Command({
   className,
+  variant = "default",
+  children,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive>) {
+}: React.ComponentProps<typeof CommandPrimitive> & {
+  variant?: "default" | "palette";
+}) {
   return (
     <CommandPrimitive
       data-slot="command"
+      data-variant={variant}
       className={cn(
         "flex h-full w-full flex-col overflow-hidden rounded-md",
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+      <CommandActiveOption />
+    </CommandPrimitive>
   );
+}
+
+/** cmdk 1.1.1 can publish its selected id before React commits the selected row.
+ * Resolve the committed option for assistive technology, including on first open. */
+function CommandActiveOption() {
+  const value = useCommandState((state) => state.value);
+  const marker = React.useRef<HTMLSpanElement>(null);
+  React.useLayoutEffect(() => {
+    const root = marker.current?.closest("[cmdk-root]");
+    const input = root?.querySelector("[cmdk-input]");
+    const selected = root?.querySelector('[cmdk-item][aria-selected="true"]');
+    if (selected?.id) input?.setAttribute("aria-activedescendant", selected.id);
+    else input?.removeAttribute("aria-activedescendant");
+  }, [value]);
+  return <span ref={marker} hidden />;
 }
 
 function CommandDialog({
@@ -44,14 +68,14 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn("overflow-hidden p-0", className)}
         showCloseButton={showCloseButton}
       >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
         <Command className="**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           {children}
         </Command>
@@ -62,8 +86,11 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  escapeHint = false,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  escapeHint?: boolean;
+}) {
   return (
     <div
       data-slot="command-input-wrapper"
@@ -78,6 +105,7 @@ function CommandInput({
         )}
         {...props}
       />
+      {escapeHint && <Kbd aria-hidden="true">esc</Kbd>}
     </div>
   );
 }
@@ -166,6 +194,22 @@ function CommandItem({
   );
 }
 
+/** A literal search match keeps the text's original case and readable context. */
+function CommandMatch({ text, query }: { text: string; query: string }) {
+  const needle = query.trim().toLowerCase();
+  const start = needle ? text.toLowerCase().indexOf(needle) : -1;
+  if (start < 0) return text;
+  return (
+    <>
+      {text.slice(0, start)}
+      <mark className="ui-command-match">
+        {text.slice(start, start + needle.length)}
+      </mark>
+      {text.slice(start + needle.length)}
+    </>
+  );
+}
+
 function CommandShortcut({
   className,
   ...props
@@ -191,5 +235,6 @@ export {
   CommandGroup,
   CommandItem,
   CommandShortcut,
+  CommandMatch,
   CommandSeparator,
 };

@@ -753,6 +753,23 @@ Buttons and links change color/background without scale, translation, or opacity
 
 The interaction timings retain distinct tokens: `--dur-exit` 100ms for exit, `--dur-lift` 120ms for lifting and short reveals, `--dur-settle` 160ms for card settle, `--dur-arrival` 1200ms for an arrival highlight, `--dur-loading-delay` 300ms for skeletons, `--dur-spin` 900ms for a spinner revolution, and `--dur-instant` 0ms. These follow the next-generation motion contract, including the spinner’s 0.9s linear rotation. Tailwind transition and spinner defaults use these tokens too. Reduced motion zeroes every duration and delay, including in theme previews, disables animations, and leaves spinners as static rings. Motion never conveys completion or selection by itself.
 
+The global command palette uses the shared `Command` palette variant inside a
+`DialogContent` of size `palette`: 640px wide (window minus 32px on narrow
+windows), top 96px, popover surface, panel radius and modal shadow, with a soft
+scrim (`--scrim-soft`: light `#17171714`, dark `#00000066`, from S07). Its input is 56px, rows are 38px with 8px corners, section labels 28px,
+and footer 40px. It rises 8px and scales from .985 over `--dur-3`; reduced
+motion is immediate. The empty query lists destinations immediately. Search
+uses the existing global core query, including literal partial references
+without `T-`, with reference matches before content matches. Every TicketPicker
+uses that same search. Escape restores the opener; navigation focuses the
+destination content. Mod+K opens from views and plain fields; rich editor carets
+keep Mod+K for links. G then I/A/R/C/D navigates outside typing and overlays,
+with a one-second sequence timeout. Chat destinations are unavailable while
+Chat is off. The single shortcut registry represents sequences separately from
+simultaneous chords; Settings and palette hints render that registry. The
+palette currently offers Ticket search and navigation; action drill-ins build
+on this shared surface.
+
 Keyboard access must cover navigation, row selection/opening, resizing, property changes, editing, overlay dismissal, and return to the list. Preserve distinct focus and selection. Announce save errors and meaningful async results without repeatedly announcing background polling. Use landmark regions and a logical heading sequence. Do not assign a visual heading level solely to obtain a font size.
 
 Support text selection and copying of references, paths, evidence, and errors. At 200% zoom, labels and actions remain reachable. Test long translations, filenames, and titles as layout stress cases even while English is the initial interface language.

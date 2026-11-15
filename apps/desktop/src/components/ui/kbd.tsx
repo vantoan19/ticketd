@@ -1,6 +1,6 @@
 import * as React from "react";
 import { cn } from "cn";
-import { keyGlyph, spokenKeys } from "@/lib/shortcuts";
+import { keyGlyph, spokenKeys, type Shortcut } from "@/lib/shortcuts";
 import "./patterns.css";
 
 /**
@@ -37,19 +37,42 @@ function Kbd({
  */
 function KeyChords({
   keys,
+  sequences,
+  sequenceStyle = "words",
   tone = "default",
   className,
 }: {
   keys: readonly (readonly string[])[];
+  sequences?: Shortcut["sequences"];
+  sequenceStyle?: "words" | "compact";
   tone?: "default" | "inverted";
   className?: string;
 }) {
   return (
     <span
       role="img"
-      aria-label={spokenKeys(keys)}
+      aria-label={spokenKeys(keys, undefined, sequences)}
       className={cn("ui-kbd-group", className)}
     >
+      {sequences?.map((sequence, index) => (
+        <span key={index} className="ui-kbd-group">
+          {index > 0 && <span aria-hidden="true">or</span>}
+          {sequence.map((chord, step) => (
+            <span key={step} className="ui-kbd-group">
+              {step > 0 && sequenceStyle === "words" && (
+                <span aria-hidden="true" className="px-1 text-muted-foreground">
+                  then
+                </span>
+              )}
+              {chord.map((key) => (
+                <Kbd key={key} tone={tone} aria-hidden="true">
+                  {keyGlyph(key)}
+                </Kbd>
+              ))}
+            </span>
+          ))}
+        </span>
+      ))}
       {keys.map((chord, index) => (
         <span key={chord.join("+")} className="ui-kbd-group">
           {index > 0 && (

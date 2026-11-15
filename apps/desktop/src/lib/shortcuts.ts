@@ -19,6 +19,8 @@ export type Shortcut = {
   id: string;
   /** Alternatives, each a chord of keys pressed together. */
   keys: string[][];
+  /** Alternatives of ordered chords (G, then I); never simultaneous keys. */
+  sequences?: readonly (readonly (readonly string[])[])[];
   scope: ShortcutScope;
   label: string;
   /** One sentence where the label alone would surprise. */
@@ -35,6 +37,32 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
 };
 
 export const SHORTCUTS = [
+  {
+    id: "command-palette",
+    keys: [["Mod", "K"]],
+    scope: "Everywhere",
+    label: "Search tickets and go anywhere",
+    note: "In the rich editor, this inserts a link.",
+  },
+  ...(
+    [
+      ["go-inbox", "I", "Go to Inbox"],
+      ["go-all", "A", "Go to All tickets"],
+      ["go-ready", "R", "Go to Ready"],
+      ["go-chats", "C", "Go to Chats"],
+      ["go-documents", "D", "Go to Documents"],
+    ] as const
+  ).map(([id, key, label]) => ({
+    id,
+    keys: [],
+    sequences: [[["G"], [key]]],
+    scope: "Everywhere" as const,
+    label,
+    note:
+      id === "go-chats"
+        ? "Not while typing or using an overlay. Requires Chat to be enabled."
+        : "Not while typing or using an overlay.",
+  })),
   {
     id: "new-ticket",
     keys: [["C"]],
@@ -247,9 +275,13 @@ export function chordLabel(chord: readonly string[], mac = isMacPlatform()) {
   return [...modifiers, ...rest].map((key) => keyGlyph(key, true)).join("");
 }
 
-/** The first chord of a shortcut as a tooltip label ("⌘L"), for `IconButton shortcut`. */
+/** The first alternative as a tooltip label: "⌘L" or "G then I". */
 export function shortcutLabel(id: ShortcutId, mac = isMacPlatform()): string {
-  const [first = []] = shortcut(id).keys;
+  const entry = shortcut(id);
+  const sequence = entry.sequences?.[0];
+  if (sequence)
+    return sequence.map((chord) => chordLabel(chord, mac)).join(" then ");
+  const [first = []] = entry.keys;
   return chordLabel(first, mac);
 }
 
@@ -290,7 +322,14 @@ const SPOKEN: Record<string, string> = {
 export function spokenKeys(
   keys: readonly (readonly string[])[],
   mac = isMacPlatform(),
-) {
+  sequences?: Shortcut["sequences"],
+): string {
+  if (sequences?.length)
+    return sequences
+      .map((sequence) =>
+        sequence.map((chord) => spokenKeys([chord], mac)).join(" then "),
+      )
+      .join(" or ");
   return keys
     .map((chord) =>
       chord
