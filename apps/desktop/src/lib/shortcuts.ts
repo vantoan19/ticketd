@@ -99,6 +99,25 @@ export const SHORTCUTS = [
     label: "Search Settings",
     note: "While Settings is open.",
   },
+  ...(
+    [
+      ["attachments-search", [["/"]], "Search files"],
+      [
+        "attachments-move",
+        [["↑"], ["↓"], ["J"], ["K"], ["Home"], ["End"]],
+        "Move between Attachments",
+      ],
+      ["attachments-add", [["Mod", "Shift", "U"]], "Add files"],
+      ["attachments-open", [["O"]], "Open file"],
+      ["attachments-more", [["."]], "More file actions"],
+      ["attachments-back", [["Escape"]], "Back to Attachments"],
+    ] as const
+  ).map(([id, keys, label]) => ({
+    id,
+    keys: keys.map((chord) => [...chord]),
+    label,
+    scope: "Lists" as const,
+  })),
   {
     id: "documents-search",
     keys: [["/"]],

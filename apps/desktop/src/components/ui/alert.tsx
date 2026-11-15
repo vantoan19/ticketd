@@ -8,6 +8,7 @@ const alertVariants = cva("ui-notice", {
     presentation: {
       inline: "",
       floating: "ui-notice-floating",
+      hint: "ui-notice-hint",
     },
     tone: {
       neutral: "",

@@ -217,10 +217,12 @@
   margin-inline-start: auto;
 }
 /* Search expands in place: the title gives way, Filters and Display stay. */
-.ui-pane-header:has([data-slot="pane-search"]) .ui-pane-header-title {
+.ui-pane-header:not([data-title-editor]):has([data-slot="pane-search"])
+  .ui-pane-header-title {
   display: none;
 }
-.ui-pane-header:has([data-slot="pane-search"]) .ui-pane-header-actions {
+.ui-pane-header:not([data-title-editor]):has([data-slot="pane-search"])
+  .ui-pane-header-actions {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -668,4 +670,27 @@
   color: var(--foreground);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.ui-pane-header[data-title-editor]:has([data-slot="pane-search"])
+  .ui-pane-header-title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.ui-pane-header[data-title-editor]
+  .ui-pane-header-title
+  > [data-slot="pane-search"] {
+  flex: 1;
+  min-width: 0;
+}
+.ui-pane-header[data-title-editor]
+  [data-slot="pane-search"]
+  [data-slot="search-input"] {
+  width: 100%;
+  min-width: 0;
+}
+.ui-pane-header-title > .attachment-preview-title {
+  flex: 1;
+  min-width: 0;
 }

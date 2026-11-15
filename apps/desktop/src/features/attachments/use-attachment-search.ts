@@ -38,8 +38,14 @@ export function useAttachmentSearch(
   ticket: string | null,
   limit: number = ATTACHMENT_PAGE,
   refresh = 0,
+  holdLiveChanges = false,
 ) {
-  const revision = useWorkspaceChange();
+  const incomingRevision = useWorkspaceChange();
+  const [revision, setRevision] = useState(incomingRevision);
+  // Explicit search/filter/retry still answers immediately. Only unrelated live
+  // refreshes wait until the person leaves the navigator and its focused rows.
+  if (!holdLiveChanges && revision !== incomingRevision)
+    setRevision(incomingRevision);
   const [query, setQuery] = useState(search);
   useEffect(() => {
     if (query === search) return;
