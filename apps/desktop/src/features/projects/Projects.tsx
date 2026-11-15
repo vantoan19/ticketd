@@ -381,7 +381,9 @@ export function Projects({
           count: <Count>{projects.length}</Count>,
           actions: newProject,
         })}
-        lede="A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in."
+        {...(projects.length > 0 && {
+          lede: "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
+        })}
       />
       {loading && projects.length === 0 ? (
         <div

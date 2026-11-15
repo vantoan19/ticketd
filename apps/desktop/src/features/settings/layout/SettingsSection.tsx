@@ -4,7 +4,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 /**
  * A titled group on a Settings page: a level 2 heading row with an optional
  * caption and actions (Check again, Refresh now, a status label), then the
- * content, usually a `SettingsList`. Sections sit 40px apart.
+ * content, usually a `SettingsList`. Sections sit 32px apart.
  */
 export function SettingsSection({
   title,

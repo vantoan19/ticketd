@@ -15,12 +15,15 @@ export function ChoiceTiles({
   disabled = false,
   className,
   children,
+  variant = "default",
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledby,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   columns?: 2 | 3;
+  /** Neutral preview tiles or grouped rows, as used by preferences. */
+  variant?: "default" | "preview" | "rows";
   disabled?: boolean;
   "aria-label"?: string;
   "aria-labelledby"?: string;
@@ -30,15 +33,20 @@ export function ChoiceTiles({
   return (
     <RadioGroup.Root
       data-slot="choice-tiles"
+      data-variant={variant}
       value={value}
       onValueChange={onValueChange}
       disabled={disabled}
-      orientation="horizontal"
+      orientation={variant === "rows" ? "vertical" : "horizontal"}
       aria-label={ariaLabel}
       aria-labelledby={ariaLabelledby}
       className={cn(
-        "grid gap-3 max-sm:grid-cols-1",
-        columns === 3 ? "grid-cols-3" : "grid-cols-2",
+        variant === "rows"
+          ? "flex flex-col"
+          : columns === 3
+            ? "grid grid-cols-3 gap-3"
+            : "grid grid-cols-2 gap-3",
+        variant === "default" && "max-sm:grid-cols-1",
         className,
       )}
     >
