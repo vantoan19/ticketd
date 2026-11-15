@@ -1,5 +1,5 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
@@ -266,7 +266,7 @@ export function CommandLineCard({
   const { openPage } = useSettingsState();
   const [check, setCheck] = useState<Check>({ phase: "checking" });
   const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
-  const load = useCallback(() => {
+  const load = () => {
     void cliClient.check().then(
       (status) => {
         setCheck({ phase: "done", status });
@@ -274,9 +274,13 @@ export function CommandLineCard({
       },
       () => setCheck({ phase: "failed" }),
     );
-  }, [onChecked]);
+  };
   // Detect on first show; Check again picks up a later installation.
-  useEffect(load, [load]);
+  // Reporting the result to the nav is not a reason to start another check.
+  const firstCheck = useEffectEvent(load);
+  useEffect(() => {
+    firstCheck();
+  }, []);
   const run = () => {
     setCheck({ phase: "checking" });
     load();
