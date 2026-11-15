@@ -99,6 +99,18 @@ export const SHORTCUTS = [
     label: "Move between cards and columns",
   },
   {
+    id: "workspace-graph-filter",
+    keys: [["F"]],
+    scope: "Lists",
+    label: "Filter the Workspace graph",
+  },
+  {
+    id: "workspace-graph-view",
+    keys: [["Shift", "V"]],
+    scope: "Lists",
+    label: "Switch Workspace graph between Graph and List",
+  },
+  {
     id: "list-move",
     keys: [["↑"], ["↓"], ["J"], ["K"]],
     scope: "Lists",

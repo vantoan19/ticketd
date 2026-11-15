@@ -191,7 +191,7 @@ export function GraphNodeCard({
   meta?: string;
   trailing?: ReactNode;
   title: string;
-  variant?: "flow";
+  variant?: "flow" | "workspace" | "chip";
   reason?: string;
   selected?: boolean;
   outside?: boolean;
@@ -419,5 +419,33 @@ export function GraphFlowLane({
       </header>
       {children}
     </section>
+  );
+}
+
+/** A Plan's well and selectable label; its members stay independent canvas cards. */
+export function GraphIsland({
+  title,
+  caption,
+  icon,
+  onSelect,
+}: {
+  title: string;
+  caption: string;
+  icon?: ReactNode;
+  onSelect: () => void;
+}) {
+  return (
+    <div className="ui-graph-island" data-unplanned={!caption || undefined}>
+      <button type="button" onClick={onSelect}>
+        {icon}
+        {title}
+        {caption && (
+          <>
+            <span>·</span>
+            <span>{caption}</span>
+          </>
+        )}
+      </button>
+    </div>
   );
 }

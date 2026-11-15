@@ -2236,6 +2236,8 @@ test.each(["ticket", "document", "plan"] as const)(
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
+    fireEvent.click(screen.getByRole("radio", { name: "List" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "First" },
     });
@@ -2256,6 +2258,8 @@ test.each(["ticket", "document", "plan"] as const)(
       back.closest('[data-slot="pane-header"], .shell-row'),
     ).not.toBeNull();
     fireEvent.click(back);
+    if (!screen.queryByLabelText("Search"))
+      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
       "First",
     );
@@ -2401,10 +2405,11 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   fireEvent.click(
     screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
+  fireEvent.click(screen.getByRole("button", { name: "Focus on this item" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -4327,15 +4332,25 @@ test("Plan Flow uses all members, selects only incident edges, opens tickets and
         );
       if (command === "workspace_graph")
         return {
-          nodes: tickets.map((ticket) => ({
-            id: ticket.id,
-            kind: "ticket",
-            label: ticket.title,
-            state: ticket.status,
-            trashed: false,
-            activity_detail: false,
-            ticket_reference: ticket.reference,
-          })),
+          nodes: [
+            {
+              id: "outside-plan",
+              kind: "document",
+              label: "Unrelated outside item",
+              state: null,
+              trashed: false,
+              activity_detail: false,
+            },
+            ...tickets.map((ticket) => ({
+              id: ticket.id,
+              kind: "ticket",
+              label: ticket.title,
+              state: ticket.status,
+              trashed: false,
+              activity_detail: false,
+              ticket_reference: ticket.reference,
+            })),
+          ],
           edges: [],
           omitted: false,
           omitted_groups: [],
@@ -4393,6 +4408,16 @@ test("Plan Flow uses all members, selects only incident edges, opens tickets and
   graphCard.focus();
   fireEvent.keyDown(graphCard, { key: "G", shiftKey: true });
   expect(await screen.findByText("Filtered to this Plan")).toBeTruthy();
+  const workspace = screen.getByRole("region", { name: "Workspace graph" });
+  expect(
+    await within(workspace).findByText("4 tickets, 0 Documents"),
+  ).toBeTruthy();
+  expect(
+    within(workspace)
+      .getByRole("radio", { name: "Graph" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(within(workspace).queryByText("Unrelated outside item")).toBeNull();
   expect(bridge.invoke).toHaveBeenCalledWith(
     "workspace_graph",
     expect.objectContaining({
@@ -4463,4 +4488,234 @@ test("Flow loads members beyond the first page before deriving blocking depth", 
     ),
   ).toBeTruthy();
   expect(within(flow).getByText("Waits on T-KQ52")).toBeTruthy();
+});
+
+test("Workspace graph opens Graph, groups Plan members and keeps identical items in List", async () => {
+  const plan = { id: "P-island", name: "Island example", archived: false };
+  const tickets = [
+    bulkTicket(1, { title: "Island member", plan_id: plan.id }),
+    bulkTicket(2, { title: "Unplanned ticket" }),
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets")
+        return (args.filter as { plan?: string }).plan ? [tickets[0]] : tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args.reference);
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 1 }),
+          members: [tickets[0]],
+          documents: [],
+        };
+      if (command === "workspace_graph")
+        return {
+          nodes: [
+            {
+              id: plan.id,
+              kind: "plan",
+              label: plan.name,
+              state: "Active",
+              trashed: false,
+              activity_detail: false,
+            },
+            ...tickets.map((ticket) => ({
+              id: ticket.id,
+              kind: "ticket",
+              label: `${ticket.reference} · ${ticket.title}`,
+              state: ticket.status,
+              trashed: false,
+              activity_detail: false,
+              ticket_reference: ticket.reference,
+            })),
+          ],
+          edges: [],
+          omitted: false,
+          omitted_groups: [],
+          next_cursor: null,
+          total: 3,
+          node_tags: {},
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Workspace graph" }),
+  );
+  const graph = screen.getByRole("region", { name: "Workspace graph" });
+  expect(
+    within(graph)
+      .getByRole("radio", { name: "Graph" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(
+    await within(graph).findByRole("button", {
+      name: /T-KQ1 Island member/,
+      hidden: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    within(graph).getByRole("button", {
+      name: /T-KQ2 Unplanned ticket/,
+      hidden: true,
+    }),
+  ).toBeTruthy();
+  expect(within(graph).getByText("1 ticket, 0 Documents")).toBeTruthy();
+  expect(within(graph).getByText("Not in a Plan · 1")).toBeTruthy();
+  fireEvent.click(within(graph).getByRole("radio", { name: "List" }));
+  expect(
+    within(graph).getByRole("button", {
+      name: /T-KQ1 · Island member/,
+      hidden: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    within(graph).getByRole("button", {
+      name: /T-KQ2 · Unplanned ticket/,
+      hidden: true,
+    }),
+  ).toBeTruthy();
+  expect(within(graph).getByText("3 items · 1 connection")).toBeTruthy();
+  const listChoice = within(graph).getByRole("radio", { name: "List" });
+  listChoice.focus();
+  fireEvent.keyDown(listChoice, { key: "V", shiftKey: true });
+  expect(
+    within(graph)
+      .getByRole("radio", { name: "Graph" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  const filterButton = within(graph).getByRole("button", { name: "Filter" });
+  filterButton.focus();
+  fireEvent.keyDown(filterButton, { key: "f" });
+  expect(screen.getByLabelText("Search")).toBeTruthy();
+});
+
+test("Workspace graph retries an incomplete island and preserves members and mandatory links across hydration batches", async () => {
+  const plan = {
+    id: "P-complete-island",
+    name: "Complete island",
+    archived: false,
+    spec_document_id: "spec-island",
+  };
+  const members: Ticket[] = Array.from({ length: 101 }, (_, index) => ({
+    ...bulkTicket(index + 1),
+    title: `Island ticket ${index + 1}`,
+    plan_id: plan.id,
+  }));
+  members[0] = {
+    ...members[0]!,
+    prerequisites: [
+      {
+        reference: "T-KQ101",
+        title: "Island ticket 101",
+        status: "Todo",
+        trashed: false,
+        unresolved: true,
+      },
+    ],
+  };
+  let incomplete = true;
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets") {
+        const filter = args.filter as { offset: number; limit: number };
+        return members.slice(filter.offset, filter.offset + filter.limit);
+      }
+      if (command === "show_ticket")
+        return members.find((ticket) => ticket.reference === args.reference);
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 101 }),
+          members,
+          documents: [
+            {
+              id: "spec-island",
+              heading: "Island specification",
+              trashed: false,
+            },
+          ],
+        };
+      if (command === "workspace_graph") {
+        const request = args.request as {
+          hydrate_only: boolean;
+          visible_ids: string[];
+        };
+        const all = [
+          {
+            id: plan.id,
+            kind: "plan",
+            label: plan.name,
+            state: "Active",
+            trashed: false,
+            activity_detail: false,
+          },
+          {
+            id: "spec-island",
+            kind: "document",
+            label: "Island specification",
+            state: null,
+            trashed: false,
+            activity_detail: false,
+          },
+          ...members.map((ticket) => ({
+            id: ticket.id,
+            kind: "ticket",
+            label: `${ticket.reference} · ${ticket.title}`,
+            ticket_reference: ticket.reference,
+            state: ticket.status,
+            trashed: false,
+            activity_detail: false,
+          })),
+        ];
+        const nodes = request.hydrate_only
+          ? all.filter(
+              (node) =>
+                request.visible_ids.includes(node.id) &&
+                (!incomplete || node.id !== members[100]!.id),
+            )
+          : [];
+        return {
+          nodes,
+          edges: [],
+          omitted: false,
+          omitted_groups: [],
+          next_cursor: null,
+          total: 103,
+          node_tags: {},
+        };
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Workspace graph" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  incomplete = false;
+  const graph = screen.getByRole("region", { name: "Workspace graph" });
+  expect(
+    await within(graph).findByText("101 tickets, 1 Document"),
+  ).toBeTruthy();
+  fireEvent.click(within(graph).getByRole("radio", { name: "List" }));
+  expect(
+    within(graph).getByRole("button", { name: "T-KQ101 · Island ticket 101" }),
+  ).toBeTruthy();
+  expect(within(graph).getByText("103 items · 103 connections")).toBeTruthy();
+  fireEvent.click(
+    within(graph).getByRole("button", { name: "T-KQ1 · Island ticket 1" }),
+  );
+  expect(
+    within(graph).getByRole("region", { name: "Blocked by" }),
+  ).toBeTruthy();
+  expect(
+    within(graph).getByText(
+      /Some connections across the 100-item graph limit are hidden/,
+    ),
+  ).toBeTruthy();
 });

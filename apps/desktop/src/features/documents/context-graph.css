@@ -170,3 +170,17 @@
     width: auto;
   }
 }
+
+.cgraph-workspace-filters {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.cgraph-workspace-filters .cgraph-switch {
+  margin-left: 0;
+}
+.cgraph-scope {
+  flex: none;
+  padding: 4px 20px;
+}
