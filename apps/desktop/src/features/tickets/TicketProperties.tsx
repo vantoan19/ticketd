@@ -116,7 +116,7 @@ export function PropertyPicker({
       </PopoverTrigger>
       <PopoverContent
         align={align}
-        className="property-popover"
+        variant="list"
         aria-label={`${label} choices`}
       >
         <ChoiceList

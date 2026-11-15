@@ -19,6 +19,8 @@ function PopoverTrigger({
  * A popover holds a small form or a ChoiceList (P3), never a column of
  * buttons; when its trigger is icon-only it carries a title. It opens below
  * the trigger inside the nearest OverlayBoundary with 16px clearance.
+ * `variant="list"` holds a ChoiceList or picker: 4px padding, at least as
+ * wide as the trigger and 280px.
  */
 function PopoverContent({
   className,
@@ -26,19 +28,24 @@ function PopoverContent({
   sideOffset = 4,
   collisionPadding = 16,
   collisionBoundary,
+  variant = "form",
   ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+}: React.ComponentProps<typeof PopoverPrimitive.Content> & {
+  variant?: "form" | "list";
+}) {
   const boundary = useOverlayBoundary();
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
         data-slot="popover-content"
+        data-variant={variant}
         align={align}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         collisionBoundary={collisionBoundary ?? boundary}
         className={cn(
-          "ui-popover z-50 w-72 origin-(--radix-popover-content-transform-origin) p-4 outline-hidden",
+          "ui-popover z-50 origin-(--radix-popover-content-transform-origin) outline-hidden",
+          variant === "form" && "w-72 p-4",
           className,
         )}
         {...props}

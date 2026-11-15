@@ -610,6 +610,11 @@ body:has([data-slot="dialog-overlay"])
   > [data-slot="dropdown-menu-item-reason"] {
   padding-left: 24px;
 }
+/* A popover holding a choice list or picker (P3). */
+.ui-popover[data-variant="list"] {
+  width: max(var(--radix-popover-trigger-width), 280px);
+  padding: 4px;
+}
 /* Menus and select lists stop at 320px and scroll inside (P3). */
 [data-slot="select-content"] {
   max-height: min(320px, var(--radix-select-content-available-height));
