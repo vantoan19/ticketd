@@ -56,6 +56,7 @@ export function DialogShell({
   children,
   busy = false,
   tabs,
+  bodyBoundary = "none",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -107,6 +108,8 @@ export function DialogShell({
    * SegmentedControl that stays put while the body below it changes.
    */
   tabs?: ReactNode;
+  /** Separate a long review from its fixed header while its body scrolls. */
+  bodyBoundary?: "none" | "divider";
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
@@ -210,7 +213,10 @@ export function DialogShell({
         >
           {!tabs && header}
           {children && (
-            <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
+            <div
+              className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6"
+              data-boundary={bodyBoundary}
+            >
               {children}
             </div>
           )}

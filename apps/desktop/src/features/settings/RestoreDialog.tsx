@@ -208,6 +208,7 @@ export function RestoreDialog({
   );
   const latest = useRef(0);
   const recovery = useDraftRecovery();
+  const attachmentDetails = useRef<HTMLDivElement>(null);
 
   const check = useCallback(async (next: string) => {
     const request = ++latest.current;
@@ -311,7 +312,14 @@ export function RestoreDialog({
       }}
       size="lg"
       busy={phase.name === "restoring"}
-      title={done ? "Workspace restored" : "Replace this workspace?"}
+      title={
+        done
+          ? "Workspace restored"
+          : invalid
+            ? "Review backup"
+            : "Replace this workspace?"
+      }
+      bodyBoundary="divider"
       description={
         done
           ? "The workspace now matches the backup."
@@ -422,8 +430,17 @@ export function RestoreDialog({
       )}
 
       {valid && attachments && (
-        <Disclosure label="Attachment details">
+        <Disclosure
+          label="Attachment details"
+          onOpenChange={(open) => {
+            if (open)
+              requestAnimationFrame(() =>
+                attachmentDetails.current?.scrollIntoView({ block: "nearest" }),
+              );
+          }}
+        >
           <div
+            ref={attachmentDetails}
             className="restore-attachments"
             aria-label="Attachment completeness"
           >
