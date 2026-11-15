@@ -1550,3 +1550,15 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         }
     );
 }
+
+#[test]
+fn open_refuses_a_codex_below_the_floor_with_the_picker_reason() {
+    let problem = super::too_old("codex-cli 0.162.1\n").unwrap();
+    assert_eq!(problem.kind, ProblemKind::IncompatibleVersion);
+    assert_eq!(
+        problem.message,
+        "ticketd needs Codex 0.163.0 or newer (run `codex update`)."
+    );
+    assert!(super::too_old("codex-cli 0.163.0").is_none());
+    assert!(super::too_old("codex-cli unknown").is_none());
+}
