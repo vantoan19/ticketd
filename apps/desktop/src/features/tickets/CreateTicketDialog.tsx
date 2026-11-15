@@ -1,3 +1,4 @@
+import { TicketLinksIncomplete } from "./create-ticket-failure";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
@@ -5,27 +6,24 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field } from "@/components/ui/field";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
-import { Folder, Layers } from "lucide-react";
+import { Folder, Layers, Tags, Maximize2, Minimize2 } from "lucide-react";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { Picker } from "@/components/ui/picker";
+import { DraftPropertyPicker, DraftBlockerPicker } from "./DraftPropertyPicker";
+import { IconButton } from "@/components/ui/icon-button";
+import { matchesShortcut, shortcutLabel } from "@/lib/shortcuts";
 import { Switch } from "@/components/ui/switch";
-import { TagPicker } from "@/components/ui/tag-picker";
 import { client, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
-import { modifierKeyLabel } from "@/lib/platform";
 import { loadPreferences } from "@/lib/preferences";
 import { z } from "zod";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "./create-ticket.css";
-
-// Select items cannot have an empty value, so "none" stands for no Project or Plan.
-const NONE = "none";
 
 type Draft = {
   title: string;
@@ -34,6 +32,7 @@ type Draft = {
   project: string;
   plan: string;
   tags: string[];
+  blockers?: string[] | undefined;
   restored: boolean;
   requestId?: string | undefined;
   followCreated?: boolean | undefined;
@@ -46,6 +45,7 @@ const draftSchema = z.object({
   project: z.string(),
   plan: z.string(),
   tags: z.array(z.string()),
+  blockers: z.array(z.string()).optional(),
   restored: z.boolean(),
   requestId: z.string().uuid().optional(),
   followCreated: z.boolean().optional(),
@@ -79,9 +79,11 @@ export function CreateTicketDialog({
     keepOpen: boolean,
     requestId?: string,
     followCreated?: boolean,
+    blockers?: string[],
   ) => Promise<string>;
 }) {
   const recovery = useDraftRecovery();
+  const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(() => {
     const saved = recovery.read("new-ticket", draftSchema);
     return saved ? { ...saved, restored: true } : null;
@@ -187,6 +189,8 @@ export function CreateTicketDialog({
   }
   async function submit() {
     const currentDraft = draft!;
+    if (workspaceBlocked && !currentDraft.requestId && !completedCreation)
+      return;
     if (
       lock.current ||
       (!completedCreation &&
@@ -228,6 +232,7 @@ export function CreateTicketDialog({
           createMore,
           submission.requestId,
           submission.followCreated,
+          ...(submission.blockers?.length ? [submission.blockers] : []),
         );
         submittedCreation = { reference, createMore };
         setCompletedCreation(submittedCreation);
@@ -247,6 +252,7 @@ export function CreateTicketDialog({
           project: submission.project,
           plan: submission.plan,
           tags: submission.tags,
+          blockers: submission.blockers ?? [],
           restored: false,
         });
         setAnnouncement(`Created ${submittedCreation.reference}`);
@@ -259,6 +265,8 @@ export function CreateTicketDialog({
           ...failure,
           sentence: `${submittedCreation.reference} was created. ${failure.sentence}`,
         });
+      } else if (reason instanceof TicketLinksIncomplete) {
+        setError(reason.failure);
       } else if (creationAttempted) {
         const failure = describeFailure(reason, "confirm the new ticket");
         setError({
@@ -316,7 +324,7 @@ export function CreateTicketDialog({
       ? // Right after Create more, the result keeps the slot (list C-06).
         announcement
         ? `${announcement}.`
-        : "Add a title to create"
+        : ""
       : pending
         ? "Creating…"
         : workspaceBlocked && !error
@@ -327,8 +335,38 @@ export function CreateTicketDialog({
       open={open}
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
       title="New ticket"
+      variant="create"
+      expanded={expanded}
+      headerActions={
+        <IconButton
+          type="button"
+          label={expanded ? "Collapse" : "Expand"}
+          shortcut={shortcutLabel("create-expand")}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? <Minimize2 /> : <Maximize2 />}
+        </IconButton>
+      }
+      onKeyDownCapture={(event) => {
+        if (
+          !matchesShortcut(event.nativeEvent, "create-submit") ||
+          event.nativeEvent.isComposing ||
+          event.keyCode === 229
+        )
+          return;
+        // Rich/source editors and nested choice lists own their key first.
+        if (
+          (event.target as HTMLElement).closest(
+            ".create-description, [cmdk-root]",
+          )
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        void submit();
+      }}
       primaryLabel={primaryLabel}
-      primaryHint={`${modifierKeyLabel()}↵`}
+      primaryHint={shortcutLabel("create-submit")}
       footerLeading={
         <label className="create-more">
           <Switch
@@ -370,34 +408,22 @@ export function CreateTicketDialog({
       returnFocus={triggerRef}
       busy={pending || !!completedCreation}
     >
-      <div
-        className="create-form flex flex-col gap-4"
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-            event.preventDefault();
-            event.currentTarget.closest("form")?.requestSubmit();
-          }
-        }}
-      >
+      <div className="create-form flex flex-col gap-4">
         <fieldset disabled={fieldsLocked} className="contents">
           <Field data-disabled={fieldsLocked}>
-            <FieldLabel htmlFor="create-title">Title</FieldLabel>
             <Input
               id="create-title"
+              aria-label="Title"
+              variant="document-title"
               ref={titleRef}
               autoFocus
-              placeholder="e.g. Export fails on large workspaces"
+              placeholder="Ticket title"
               disabled={fieldsLocked}
               value={draft.title}
               onChange={(event) => update({ title: event.target.value })}
             />
           </Field>
           <Field data-disabled={fieldsLocked}>
-            <FieldLabel asChild>
-              <span>
-                Description <small>Optional</small>
-              </span>
-            </FieldLabel>
             <div
               // The editor owns its keys (Enter, slash menu, IME, Escape,
               // CodeMirror bindings), so they stop here. The one exception is
@@ -429,16 +455,13 @@ export function CreateTicketDialog({
                 key={editorGeneration}
                 recoveryOwner="new-ticket"
                 label="Description"
-                placeholder="Steps, acceptance criteria, or a checklist"
+                placeholder="Markdown works here; type / for blocks."
                 readOnly={fieldsLocked}
                 // The quick-composer chrome: its controls are always in
                 // place, so focusing the field never moves the form (C-04).
                 value={draft.body}
                 onChange={(body) => update({ body })}
               />
-              <small className="create-description-hint">
-                Markdown works · type / for blocks
-              </small>
             </div>
           </Field>
           <div
@@ -446,79 +469,88 @@ export function CreateTicketDialog({
             role="group"
             aria-label="Initial properties"
           >
-            <Picker
+            <DraftPropertyPicker
               label="Status"
-              stacked
-              icon={<StatusIcon status={draft.status} size={16} decorative />}
-              value={draft.status}
+              display={draft.status}
+              icon={<StatusIcon status={draft.status} decorative />}
+              selected={draft.status}
               disabled={fieldsLocked}
-              onValueChange={(status) => update({ status })}
+              shortcut="ticket-status"
+              onSelect={(status) => update({ status })}
               options={directStatuses.map((status) => ({
                 value: status,
                 label: status,
-                icon: <StatusIcon status={status} size={16} decorative />,
+                icon: <StatusIcon status={status} decorative />,
               }))}
             />
-            <Picker
+            <DraftPropertyPicker
               label="Project"
-              stacked
-              icon={<Folder aria-hidden="true" />}
-              value={draft.project || NONE}
-              disabled={fieldsLocked}
-              onValueChange={(project) =>
-                update({ project: project === NONE ? "" : project })
+              display={
+                projects.find((project) => project.id === draft.project)
+                  ?.name ?? "No project"
               }
+              icon={<Folder />}
+              selected={draft.project}
+              disabled={fieldsLocked}
+              shortcut="ticket-project"
+              onSelect={(project) => update({ project })}
               options={[
-                ...projects.map((p) => ({
-                  value: p.id,
-                  label: p.name,
-                  icon: <Folder aria-hidden="true" />,
+                ...projects.map((project) => ({
+                  value: project.id,
+                  label: project.name,
+                  icon: <Folder />,
                 })),
-                {
-                  value: NONE,
-                  label: "No project",
-                  icon: <Folder aria-hidden="true" />,
-                  clear: true,
-                },
+                { value: "", label: "No project" },
               ]}
             />
-            <Picker
+            <DraftPropertyPicker
               label="Plan"
-              stacked
-              icon={<Layers aria-hidden="true" />}
-              value={draft.plan || NONE}
-              disabled={fieldsLocked}
-              onValueChange={(plan) =>
-                update({ plan: plan === NONE ? "" : plan })
+              display={
+                plans.find((plan) => plan.id === draft.plan)?.name ?? "No Plan"
               }
+              icon={<Layers />}
+              selected={draft.plan}
+              disabled={fieldsLocked}
+              shortcut="ticket-plan"
+              onSelect={(plan) => update({ plan })}
               options={[
                 ...plans
-                  .filter((e) => !e.archived)
-                  .map((e) => ({
-                    value: e.id,
-                    label: e.name,
-                    icon: <Layers aria-hidden="true" />,
+                  .filter((plan) => !plan.archived)
+                  .map((plan) => ({
+                    value: plan.id,
+                    label: plan.name,
+                    icon: <Layers />,
                   })),
-                {
-                  value: NONE,
-                  label: "No Plan",
-                  icon: <Layers aria-hidden="true" />,
-                  clear: true,
-                },
+                { value: "", label: "No Plan" },
               ]}
             />
-          </div>
-          <div className="flex flex-col gap-2">
-            <span aria-hidden="true">Tags</span>
-            <TagPicker
+            <DraftPropertyPicker
               label="Tags"
-              placeholder="Add tags"
-              suggestions={vocabulary}
-              values={draft.tags}
+              display={draft.tags.length ? draft.tags.join(", ") : "Tags"}
+              icon={<Tags />}
+              selected={draft.tags}
               disabled={fieldsLocked}
-              onChange={(tags) =>
-                update({ tags: tags.map((tag) => tag.toLowerCase()) })
+              shortcut="ticket-tags"
+              options={[...new Set([...draft.tags, ...vocabulary])].map(
+                (tag) => ({ value: tag, label: tag }),
+              )}
+              onSelect={(tag) =>
+                update({
+                  tags: draft.tags.includes(tag)
+                    ? draft.tags.filter((value) => value !== tag)
+                    : [...draft.tags, tag],
+                })
               }
+              onCreate={(value) => {
+                const tag = value.trim().toLowerCase();
+                if (tag && !draft.tags.includes(tag))
+                  update({ tags: [...draft.tags, tag] });
+              }}
+            />
+            <DraftBlockerPicker
+              values={draft.blockers ?? []}
+              disabled={fieldsLocked}
+              onChange={(blockers) => update({ blockers })}
             />
           </div>
         </fieldset>

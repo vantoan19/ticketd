@@ -256,6 +256,12 @@ export const SHORTCUTS = [
     label: "Edit the description",
   },
   {
+    id: "create-expand",
+    keys: [],
+    scope: "Dialogs and menus",
+    label: "Expand the New ticket draft",
+  },
+  {
     id: "create-submit",
     keys: [["Mod", "Enter"]],
     scope: "Ticket",

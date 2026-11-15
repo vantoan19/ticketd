@@ -1,6 +1,6 @@
 import "./properties.css";
 import { useRef, useState, type ReactNode } from "react";
-import { ChoiceList } from "@/components/ui/choice-list";
+import { ChoiceList, type Choice } from "@/components/ui/choice-list";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -169,35 +169,20 @@ export function TicketCommandPicker({
               </Button>
             </div>
           ) : (
-            <ChoiceList
-              label={`${scope} choices`}
-              searchPlaceholder={`Search ${scope.toLowerCase()}…`}
+            <TicketPropertyChoices
+              scope={scope}
+              selected={selected ?? []}
+              disabled={actions.pending || actions.blocked}
+              options={actions.options.map((option) => ({
+                value: option.value,
+                label: option.label,
+                ...(scope === "Status" && {
+                  icon: <StatusIcon status={option.value} decorative />,
+                }),
+              }))}
+              onSelect={choose}
               query={query}
               onQueryChange={setQuery}
-              {...(selected !== undefined && { selected })}
-              {...((scope === "Project" || scope === "Plan") &&
-                actions.options.some((option) => option.value === "") && {
-                  clear: {
-                    value: "",
-                    label: scope === "Project" ? "No project" : "No Plan",
-                    disabled: actions.pending || actions.blocked,
-                  },
-                })}
-              groups={actions.options
-                .filter(
-                  (option) =>
-                    option.value !== "" ||
-                    (scope !== "Project" && scope !== "Plan"),
-                )
-                .map((option) => ({
-                  value: option.value,
-                  label: option.label,
-                  disabled: actions.pending || actions.blocked,
-                  ...(scope === "Status" && {
-                    icon: <StatusIcon status={option.value} decorative />,
-                  }),
-                }))}
-              onSelect={choose}
             />
           )}
         </PopoverContent>
@@ -224,5 +209,46 @@ export function TicketCommandPicker({
         }}
       />
     </>
+  );
+}
+
+/** Shared choice presentation for persisted ticket properties and unpublished drafts. */
+export function TicketPropertyChoices({
+  scope,
+  options,
+  selected,
+  disabled = false,
+  onSelect,
+  onCreate,
+  query,
+  onQueryChange,
+}: {
+  query?: string;
+  onQueryChange?: (query: string) => void;
+  scope: string;
+  options: Choice[];
+  selected: string | readonly string[];
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+  onCreate?: (value: string) => void;
+}) {
+  const clear = options.find((option) => option.value === "");
+  return (
+    <ChoiceList
+      label={`${scope} choices`}
+      searchPlaceholder={`Search ${scope.toLowerCase()}…`}
+      selected={selected}
+      {...(query !== undefined && { query })}
+      {...(onQueryChange && { onQueryChange })}
+      groups={options
+        .filter((option) => option.value !== "")
+        .map((option) => ({
+          ...option,
+          disabled: disabled || (option.disabled ?? false),
+        }))}
+      {...(clear && { clear: { ...clear, disabled } })}
+      {...(onCreate && { create: onCreate })}
+      onSelect={onSelect}
+    />
   );
 }

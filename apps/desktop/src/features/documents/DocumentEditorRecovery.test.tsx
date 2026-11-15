@@ -89,7 +89,7 @@ it("Retry saves as soon as write access returns, without Retry draft recovery", 
   fireEvent.change(await screen.findByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await screen.findAllByText(/readonly database/);
   expect(documents.save).not.toHaveBeenCalled();
   writable = true;
@@ -119,9 +119,9 @@ it("closes a capture after a failed save and keeps the draft for next time", asy
   fireEvent.change(await screen.findByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await screen.findByText(/Your draft stays on this device if you close/);
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(documents.save).toHaveBeenCalledOnce();
   expect(JSON.stringify(kept.at(-1))).toContain("A thought");
@@ -149,7 +149,7 @@ it("offers Close and keep draft when a close waited on a save that failed", asyn
   fireEvent.change(await screen.findByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(
     await screen.findByText(
       "The workspace is read-only, so nothing changed. Your draft stays on this device if you close.",

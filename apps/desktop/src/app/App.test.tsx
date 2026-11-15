@@ -1,3 +1,4 @@
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
 import {
   reportWorkspaceFailure,
@@ -1996,7 +1997,7 @@ test("a group's Add action starts a ticket in that status", async () => {
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "New ticket" });
   expect(
-    within(dialog).getByRole("combobox", { name: "Status: In review" }),
+    within(dialog).getByRole("button", { name: "Status: In review" }),
   ).toBeTruthy();
 });
 
@@ -6221,4 +6222,419 @@ test("header Follow keeps failures in the pane status line, retries and respects
   );
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
   expect(follow.hasAttribute("disabled")).toBe(true);
+});
+
+test("New ticket expands without replacing the rich draft and creates once from a focused property", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  const created = bulkTicket(16, { title: "Keep every keystroke" });
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "create_ticket") return created;
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await openNewTicket();
+  const title = screen.getByRole("textbox", { name: "Title" });
+  expect(document.activeElement).toBe(title);
+  fireEvent.change(title, { target: { value: "Keep every keystroke" } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(
+    screen.getByRole("textbox", { name: "Description rich text" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Description source" }),
+    {
+      target: {
+        value:
+          "# Exact draft\n\n- [ ] Keep **this**\n\n```mermaid\ngraph LR; A-->B\n```",
+      },
+    },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
+  const beforeExpand = screen.getByRole("textbox", {
+    name: "Description rich text",
+  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "New ticket" }))
+      .getAllByRole("button", { name: "Expand" })
+      .at(-1)!,
+  );
+  expect(screen.getByRole("textbox", { name: "Description rich text" })).toBe(
+    beforeExpand,
+  );
+  fireEvent.click(screen.getByRole("switch", { name: "Create more" }));
+  const status = screen.getByRole("button", { name: "Status: Todo" });
+  status.focus();
+  fireEvent.keyDown(status, { key: "Enter", ctrlKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "create_ticket",
+  );
+  expect(writes).toHaveLength(1);
+  expect(writes[0]?.[1]).toMatchObject({
+    title: "Keep every keystroke",
+    body: expect.stringContaining("A-->B"),
+  });
+  expect(screen.queryByRole("listbox", { name: "Status choices" })).toBeNull();
+  expect(screen.getByText("Created T-KQ16.")).toBeTruthy();
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: "Title" }),
+  );
+});
+
+test("Capture saves a linked Document without changing the thought and keeps it in Documents", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  const ticket = bulkTicket(1);
+  let documentBody: string | null = null;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { body?: string }) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "show_ticket") return ticket;
+      if (command === "save_document") {
+        documentBody = args?.body ?? "";
+        return {
+          id: "capture-1",
+          title: "Drag idea",
+          body: documentBody,
+          created_at: "2026-11-16",
+          updated_at: "2026-11-16",
+          trashed: false,
+        };
+      }
+      if (command === "recent_documents" && documentBody !== null)
+        return [{ id: "capture-1", heading: "Drag idea" }];
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const card = within(screen.getByRole("dialog", { name: "New Document" }));
+  expect(card.getByText("Linked to")).toBeTruthy();
+  expect(card.getByText("T-KQ1")).toBeTruthy();
+  expect(card.getByText("Kept in Documents")).toBeTruthy();
+  fireEvent.change(card.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Drag idea" },
+  });
+  fireEvent.click(card.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(card.getByRole("textbox", { name: "Your thought source" }), {
+    target: { value: "Reserve column height." },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(documentBody).toBe(
+    "Reserve column height.\n\n[T-KQ1](ticketd://ticket/T-KQ1)",
+  );
+  expect(
+    card.getByRole("textbox", { name: "Your thought source" }),
+  ).toHaveProperty("value", "Reserve column height.");
+  expect(card.getByText("Saved")).toBeTruthy();
+  fireEvent.click(card.getByRole("button", { name: "Close" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(
+    screen.getAllByRole("button", { name: /Drag idea/ }).length,
+  ).toBeGreaterThan(0);
+});
+
+test("read-only Capture keeps an exact text draft across restart and retries the original save", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  let writable = false;
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { draft?: { revision: number }; body?: string },
+    ) => {
+      if (command === "draft_retentions") return [];
+      if (command === "draft_cutover_pending") return false;
+      if (command === "retain_draft") {
+        if (!writable)
+          throw { code: "workspace_read_only", message: "read-only" };
+        return { ...args?.draft, revision: (args?.draft?.revision ?? 0) + 1 };
+      }
+      if (command === "save_document")
+        return {
+          id: "recovered-capture",
+          title: null,
+          body: args?.body ?? "",
+          created_at: "2026-11-16",
+          updated_at: "2026-11-16",
+          trashed: false,
+        };
+      return bridgeDefault(command);
+    },
+  );
+  const first = render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const exact = "# Retry policy\n\n- [ ] Keep **all** keystrokes\n";
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+    { target: { value: exact } },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close and keep draft" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("dialog", { name: "New Document" })).toBeNull();
+  first.unmount();
+  clearWorkspaceFailure();
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  expect(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+  ).toHaveProperty("value", exact);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  writable = true;
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "New Document" })).getByRole(
+      "button",
+      { name: "Retry" },
+    ),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText("Saved")).toBeTruthy();
+  const saves = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "save_document",
+  );
+  expect(saves).toHaveLength(1);
+  expect(saves[0]?.[1]).toMatchObject({ body: exact });
+  expect(
+    localStorage.getItem("ticketd:capture-text-fallback:workspace-test"),
+  ).toBeNull();
+});
+
+test("Capture refuses browser-only recovery for canonical attachment references", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft")
+      throw { code: "workspace_read_only", message: "read-only" };
+    return bridgeDefault(command);
+  });
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const exact =
+    "[Trace][file]\n\n[file]: ticketd&#58;//attachment/workspace-test/file-1";
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+    { target: { value: exact } },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close and keep draft" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("dialog", { name: "New Document" })).toBeTruthy();
+  expect(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+  ).toHaveProperty("value", exact);
+  expect(
+    screen.queryByRole("button", { name: "Close and keep draft" }),
+  ).toBeNull();
+  expect(
+    localStorage.getItem("ticketd:capture-text-fallback:workspace-test"),
+  ).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "save_document"),
+  ).toHaveLength(0);
+});
+
+test("New ticket changes draft properties locally and safely retries partially linked blockers", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  const blocker = bulkTicket(1);
+  const created = bulkTicket(2, { title: "Dependent" });
+  let failLink = true;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "search_tickets" || command === "find_tickets")
+      return [blocker];
+    if (command === "show_ticket") return created;
+    if (command === "create_ticket") return created;
+    if (command === "add_dependency") {
+      if (failLink) {
+        failLink = false;
+        throw new Error("Link temporarily unavailable");
+      }
+      return created;
+    }
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await openNewTicket();
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Dependent" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Status: Todo" }));
+  fireEvent.click(screen.getByRole("option", { name: "In progress" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Blocked by: none" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(150);
+  });
+  fireEvent.click(screen.getByRole("option", { name: /T-KQ1.*First/ }));
+  fireEvent.keyDown(
+    screen.getByRole("dialog", { name: "Blocked by choices" }),
+    { key: "Escape" },
+  );
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) =>
+      ["create_ticket", "add_dependency", "change_ticket"].includes(command),
+    ),
+  ).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry safely" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry safely" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const creates = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "create_ticket",
+  );
+  expect(creates).toHaveLength(2);
+  expect(creates[0]?.[1]).toEqual(creates[1]?.[1]);
+  expect(creates[0]?.[1]).toMatchObject({ status: "In progress" });
+  const links = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "add_dependency",
+  );
+  expect(links.map(([, args]) => args)).toEqual([
+    { blocker: "T-KQ1", dependent: "T-KQ2" },
+    { blocker: "T-KQ1", dependent: "T-KQ2" },
+  ]);
+  expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+});
+
+test("Capture keeps its editor open if the browser cannot verify a text draft", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft")
+      throw { code: "workspace_read_only", message: "read-only" };
+    return bridgeDefault(command);
+  });
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+    { target: { value: "Still here." } },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  const store = Storage.prototype.setItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("ticketd:capture-text-fallback:"))
+        throw new Error("Browser storage is full");
+      store.call(this, key, value);
+    });
+  try {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close and keep draft" }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("dialog", { name: "New Document" })).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", { name: "Your thought source" }),
+    ).toHaveProperty("value", "Still here.");
+    expect(screen.getByRole("button", { name: "Copy text" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Close and keep draft" }),
+    ).toBeNull();
+  } finally {
+    blocked.mockRestore();
+  }
 });
