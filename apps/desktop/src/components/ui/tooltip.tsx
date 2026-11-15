@@ -85,9 +85,10 @@ function focusFromNavigation() {
 }
 
 // A label must not open, or outlive the moment, a menu, select or dialog is
-// layered over its trigger. A tooltip inside that overlay is unaffected.
+// layered over its trigger. A tooltip inside that overlay is unaffected, and a
+// list always shown in a dialog or pane (a picker) is not an overlay.
 const OVERLAY =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [data-radix-popper-content-wrapper] [role="listbox"]';
 
 function coveredByOverlay(trigger: Element | null) {
   if (typeof document === "undefined") return false;
