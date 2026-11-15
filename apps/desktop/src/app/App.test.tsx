@@ -16,6 +16,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
@@ -5106,6 +5107,7 @@ test.each([
 ] as const)(
   "ticket agent strip and Inbox follow approval answer (focused: %s, choice: %s)",
   async (focused, choice) => {
+    const user = userEvent.setup();
     const { notificationClient } = await import("@/lib/api/notifications");
     const nativeNotifications = vi
       .spyOn(notificationClient, "notify")
@@ -5234,9 +5236,31 @@ test.each([
         await screen.findByRole("heading", { name: "Strip Chat" }),
       ).toBeTruthy();
       const answer = vi.spyOn(client, "answer");
-      const allow = await screen.findByRole("button", { name: "Allow once" });
+      const box = screen.getByRole("textbox", { name: /Codex/ });
+      if (choice === "1") {
+        box.focus();
+        await user.keyboard("123");
+        expect(box).toHaveProperty("value", "123");
+        expect(answer).not.toHaveBeenCalled();
+        await user.clear(box);
+        screen.getByRole("button", { name: /^Codex, model/ }).focus();
+        await user.keyboard("{Enter}");
+        await screen.findByRole("dialog", { name: "Harness and model" });
+        await user.keyboard("123");
+        expect(answer).not.toHaveBeenCalled();
+        await user.keyboard("{Escape}");
+      }
+      const allow = screen.getByRole("button", { name: "Allow once" });
       allow.focus();
-      fireEvent.keyDown(allow, { key: choice });
+      if (choice === "1") {
+        await user.keyboard("{ArrowDown}{ArrowDown}");
+        expect(document.activeElement).toBe(
+          screen.getByRole("button", { name: "Decline" }),
+        );
+        await user.keyboard("{ArrowUp}{ArrowUp}");
+        expect(document.activeElement).toBe(allow);
+      }
+      await user.keyboard(choice);
       await vi.waitFor(() =>
         expect(answer).toHaveBeenCalledWith("strip-chat", "approval", {
           option_id:
@@ -6575,6 +6599,7 @@ test("Inbox triage accepts review with Undo, keeps the reading queue still, and 
 test.each(["1", "2", "3"])(
   "Inbox approval %s stays beside the queue and J returns to its next Ticket",
   async (choice) => {
+    const user = userEvent.setup();
     const { ChatClientContext } = await import("@/features/chats/client");
     const { createMockChatClient, chatState } =
       await import("@/features/chats/mock-client");
@@ -6666,19 +6691,40 @@ test.each(["1", "2", "3"])(
       }),
     ).toBeTruthy();
     const queue = document.querySelector(".inbox");
-    fireEvent.keyDown(approval, { key: "Enter" });
+    approval.focus();
+    await user.keyboard("{Enter}");
     const heading = await screen.findByRole("heading", { name: "Triage Chat" });
     expect(heading.closest("#detail")).toBeTruthy();
     act(() => releaseContext());
     expect(document.querySelector(".inbox")).toBe(queue);
     expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
     const answer = vi.spyOn(chats, "answer");
-    const allow = await screen.findByRole("button", { name: "Allow once" });
-    fireEvent.keyDown(allow, { key: choice });
+    const requestTitle = await screen.findByRole("heading", {
+      name: "wants to run",
+    });
+    expect(document.activeElement).toBe(requestTitle);
+    await user.keyboard(choice);
     await vi.waitFor(() =>
       expect(answer).toHaveBeenCalledWith("triage-chat", "triage-request", {
         option_id:
           choice === "1" ? "allow" : choice === "2" ? "session" : "deny",
+      }),
+    );
+    const label =
+      choice === "1"
+        ? "Allow once"
+        : choice === "2"
+          ? "Allow for this session"
+          : "Decline";
+    expect(screen.queryByRole("group", { name: "wants to run" })).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: "Chats, 1 working" }),
+    ).toBeTruthy();
+    expect((await chats.openChat("triage-chat")).items).toContainEqual(
+      expect.objectContaining({
+        id: "triage-request",
+        state: "answered",
+        outcome: `You chose "${label}"`,
       }),
     );
     expect(
@@ -6694,7 +6740,8 @@ test.each(["1", "2", "3"])(
       }),
     );
     expect(await screen.findByText("The board checks passed.")).toBeTruthy();
-    fireEvent.keyDown(heading, { key: "j" });
+    approval.focus();
+    await user.keyboard("j");
     const next = await screen.findByRole("region", { name: "Inbox triage" });
     expect(
       within(next).getByRole("button", { name: /Clear reminder/ }),
