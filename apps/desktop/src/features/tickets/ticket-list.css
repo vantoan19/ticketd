@@ -407,3 +407,9 @@
   grid-row: 2;
   margin-left: 0;
 }
+
+.ticket-navigator-caption .harness-mark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
