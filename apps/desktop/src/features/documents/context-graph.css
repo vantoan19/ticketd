@@ -114,7 +114,7 @@
 /* The whole canvas (cards, edges, labels, dots, zoom control) fades in as one
    once its first fit is painted. */
 .cgraph-canvas {
-  transition: opacity 160ms ease-out;
+  transition: opacity var(--dur-settle) var(--ease-out);
 }
 .cgraph-canvas[data-pending] {
   opacity: 0;

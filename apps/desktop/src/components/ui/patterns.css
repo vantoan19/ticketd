@@ -19,7 +19,7 @@
   box-shadow: var(--shadow-menu);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
-  animation: status-line-enter 0.2s var(--motion-swift);
+  animation: status-line-enter var(--dur-2) var(--ease-out);
 }
 .ui-status-line-icon {
   display: inline-flex;
@@ -55,7 +55,8 @@
 .ui-skeleton {
   border-radius: var(--radius);
   background: var(--accent);
-  animation: skeleton-appear 1ms linear 300ms both;
+  animation: skeleton-appear var(--dur-instant) linear var(--dur-loading-delay)
+    both;
 }
 @keyframes skeleton-appear {
   from {
@@ -381,7 +382,7 @@
   width: 16px;
   height: 16px;
   color: var(--muted-foreground);
-  transition: transform 0.15s var(--motion-swift);
+  transition: transform var(--dur-2) var(--ease-out);
 }
 .ui-disclosure-trigger[aria-expanded="true"] > svg {
   transform: rotate(90deg);
@@ -592,7 +593,7 @@
 }
 .ui-arrived {
   border-radius: var(--radius);
-  animation: arrival-flash 1.2s ease-out 0.2s both;
+  animation: arrival-flash var(--dur-arrival) var(--ease-out) var(--dur-3) both;
 }
 .ui-arrived:focus {
   outline: none;

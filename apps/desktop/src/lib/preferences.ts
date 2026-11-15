@@ -207,10 +207,17 @@ function syncWindowColor(resolved: "light" | "dark") {
  * startup recovery screen, which renders without the app and its
  * `useThemeSync`) never sits under a light title bar in dark.
  */
-export function applyStoredTheme() {
+export async function applyStoredTheme() {
   const { theme } = loadPreferences();
   const resolved = resolveTheme(theme, systemPrefersDark());
   applyTheme(resolved);
-  syncWindowTheme(theme);
-  syncWindowColor(resolved);
+  // Both IPC requests must finish before the initially hidden native window
+  // becomes visible; firing them before React alone still paints a light frame.
+  await Promise.allSettled([
+    windowClient.setTheme(theme === "system" ? null : theme),
+    windowClient.setBackgroundColor(
+      resolved === "dark" ? "#0A0A0A" : "#FAFAFA",
+    ),
+  ]);
+  await windowClient.show();
 }

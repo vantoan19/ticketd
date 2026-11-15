@@ -66,12 +66,32 @@
   --text-ui-line: 20px;
   --text-code: 13px;
   --text-reading: 16px;
+  --text-reading-line: 26px;
+  --text-doc: 15px;
+  --text-doc-line: 24px;
+  --text-doc-title: 28px;
+  --text-doc-title-line: 36px;
+  --text-doc-title-tracking: -0.84px;
+  --text-section-line: 40px;
+  --text-section-tracking: -1.1px;
   --text-title: 24px;
   --text-title-line: 32px;
   --text-section: 32px;
   background: var(--background);
   color-scheme: light;
   --background: #fafafa;
+  --card: #ffffff;
+  --card-hover: #fbfbfb;
+  --well: #f5f5f5;
+  --track: #e8e8e8;
+  --faint: #8f8f8f;
+  --seg-done: #171717;
+  --seg-review: #707070;
+  --seg-progress: #b8b8b8;
+  --shadow-panel: 0 0 0 1px #00000012, 0 1px 3px #0000000a;
+  --shadow-card: 0 0 0 1px #0000000f, 0 1px 2px #0000000d;
+  --shadow-card-lift:
+    0 0 0 1px #00000014, 0 12px 28px -8px #00000033, 0 4px 8px -4px #0000001a;
   --surface: #fff;
   --recessed: #f2f2f2;
   --foreground: #171717;
@@ -79,7 +99,7 @@
   --disabled-foreground: #6b6b6b;
   --primary: #171717;
   --primary-foreground: #fff;
-  --primary-hover: #4d4d4d;
+  --primary-hover: #383838;
   --secondary: #f2f2f2;
   --secondary-foreground: #4d4d4d;
   --accent: #ebebeb;
@@ -112,6 +132,9 @@
   --tooltip: #171717;
   --tooltip-foreground: #fff;
   --radius: 6px;
+  --radius-card: 8px;
+  --header-control-height: 28px;
+  --icon-stroke: 1.75;
   --radius-segment: 4px;
   --radius-panel: 12px;
   --radius-pill: 9999px;
@@ -149,6 +172,20 @@
   --teal: #067a6e;
   --pink: #ea3e83;
   --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--ring);
+  --dur-1: 80ms;
+  --dur-2: 140ms;
+  --dur-3: 180ms;
+  --dur-4: 240ms;
+  --dur-exit: 100ms;
+  --dur-lift: 120ms;
+  --dur-settle: 160ms;
+  --dur-arrival: 1200ms;
+  --dur-loading-delay: 300ms;
+  --dur-spin: 1000ms;
+  --dur-instant: 0ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --motion-swift: cubic-bezier(0.175, 0.885, 0.32, 1.1);
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
@@ -173,6 +210,18 @@
 [data-theme-preview="dark"] {
   color-scheme: dark;
   --background: #0a0a0a;
+  --card: #1f1f1f;
+  --card-hover: #242424;
+  --well: #1b1b1b;
+  --track: #2e2e2e;
+  --faint: #5c5c5c;
+  --seg-done: #ededed;
+  --seg-review: #8f8f8f;
+  --seg-progress: #4f4f4f;
+  --shadow-panel: 0 0 0 1px #ffffff17;
+  --shadow-card: 0 0 0 1px #ffffff12, 0 1px 2px #00000066;
+  --shadow-card-lift:
+    0 0 0 1px #ffffff24, 0 16px 32px -8px #000000b3, 0 4px 10px -4px #00000080;
   --surface: #171717;
   --popover: #1f1f1f;
   --hover: #1f1f1f;
@@ -235,6 +284,9 @@
 }
 
 @theme inline {
+  --default-transition-duration: var(--dur-2);
+  --default-transition-timing-function: var(--ease-out);
+  --animate-spin: spin var(--dur-spin) linear infinite;
   --color-background: var(--background);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
@@ -649,11 +701,11 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover[data-state="open"],
 .ui-menu[data-state="open"] {
-  animation: overlay-enter 0.2s var(--motion-swift);
+  animation: overlay-enter var(--dur-3) var(--ease-out);
 }
 .ui-dialog[data-state="open"],
 .ui-sheet[data-state="open"] {
-  animation: overlay-enter 0.3s var(--motion-swift);
+  animation: overlay-enter var(--dur-4) var(--ease-out);
 }
 @keyframes overlay-enter {
   from {
@@ -1729,7 +1781,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   position: relative;
   overflow: clip;
   background: var(--surface);
-  box-shadow: var(--shadow-small);
+  box-shadow: var(--shadow-panel);
 }
 .content-panel:focus {
   outline: none;
@@ -2321,12 +2373,26 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 /* !important is the point: reduced motion must beat every component's own
    transition and animation timing. */
 @media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme-preview] {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --dur-exit: 0ms;
+    --dur-lift: 0ms;
+    --dur-settle: 0ms;
+    --dur-arrival: 0ms;
+    --dur-loading-delay: 0ms;
+    --dur-spin: 0ms;
+    --dur-instant: 0ms;
+  }
   *,
   *::before,
   *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-instant) !important;
+    transition-delay: var(--dur-instant) !important;
+    animation: none !important;
   }
 }
 
@@ -2417,7 +2483,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .ui-tooltip[data-state="delayed-open"],
 .ui-tooltip[data-state="instant-open"] {
-  animation: tooltip-enter 0.15s var(--motion-swift);
+  animation: tooltip-enter var(--dur-2) var(--ease-out);
 }
 @keyframes tooltip-enter {
   from {
@@ -2592,4 +2658,30 @@ html[data-input="pointer"] .sidebar-nav button:focus-visible {
 }
 .portable-export-files p {
   color: var(--muted-foreground);
+}
+
+/* One stroke weight for all Lucide icons, including portalled controls. */
+svg.lucide {
+  stroke-width: var(--icon-stroke);
+}
+
+kbd,
+[data-slot="kbd"] {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+/* Compact header controls retain the pane's existing height and position. */
+:is(.detail-header, .ui-section-header[data-bar]) .ui-button {
+  height: var(--header-control-height);
+}
+:is(.detail-header, .ui-section-header[data-bar])
+  .ui-button[data-size^="icon"] {
+  width: var(--header-control-height);
+}
+@media (pointer: coarse) {
+  :is(.detail-header, .ui-section-header[data-bar]) .ui-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

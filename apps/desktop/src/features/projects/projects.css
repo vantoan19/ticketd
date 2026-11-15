@@ -43,7 +43,7 @@
   height: 16px;
   margin-inline-end: -4px;
   color: var(--muted-foreground);
-  transition: transform 0.15s var(--motion-swift);
+  transition: transform var(--dur-2) var(--ease-out);
 }
 .project-row-toggle[aria-expanded="true"] .project-row-chevron {
   transform: rotate(90deg);
