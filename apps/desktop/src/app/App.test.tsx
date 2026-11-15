@@ -649,7 +649,9 @@ test("C opens New ticket from anywhere, but not while typing", async () => {
 
 test("the Projects and Plans headings open their pages and mark them current", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(bridgeDefault);
+  bridge.invoke.mockImplementation((command: string) =>
+    command === "find_tickets" ? [bulkTicket(1)] : bridgeDefault(command),
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1499,12 +1501,8 @@ test("shows attention for a reminder while another view is active and after reop
     async (command: string, args?: { id?: string }) => {
       if (command === "sidebar_counts")
         return { unread_inbox: unread, ready: 4, in_progress: 2 };
-      if (
-        command === "list_projects" ||
-        command === "list_plans" ||
-        command === "find_tickets"
-      )
-        return [];
+      if (command === "find_tickets") return [bulkTicket(1)];
+      if (command === "list_projects" || command === "list_plans") return [];
       return bridgeDefault(command, args);
     },
   );
@@ -2612,7 +2610,9 @@ test.each(["fv1", "T-FV11", "Unloaded title"])(
 test.each(["Inbox", "Documents", "Plans", "Settings", "Attachments"])(
   "palette opens over %s and Enter goes to Ready",
   async (view) => {
-    bridge.invoke.mockImplementation(bridgeDefault);
+    bridge.invoke.mockImplementation((command: string) =>
+      command === "find_tickets" ? [bulkTicket(1)] : bridgeDefault(command),
+    );
     render(<App />);
     fireEvent.click(
       await screen.findByRole("button", { name: new RegExp(`^${view}$`) }),
@@ -2711,7 +2711,7 @@ test("G then C opens Chats when the feature is enabled", async () => {
 });
 
 test.each([
-  { key: "x" },
+  { key: "z" },
   { key: "Shift", shiftKey: true },
   { key: "g", repeat: true },
   { key: "g", isComposing: true },
@@ -3113,4 +3113,132 @@ test("palette offers the focused Ticket's linked Chat and opens that Chat", asyn
     }),
   );
   await vi.waitFor(() => expect(open).toHaveBeenCalledWith("linked-chat"));
+});
+
+test("sidebar jump opens the palette and footer icons navigate", async () => {
+  bridge.invoke.mockImplementation((command: string) =>
+    command === "list_trash" ? [] : bridgeDefault(command),
+  );
+  render(<App />);
+  const jump = await screen.findByRole("button", {
+    name: "Search or jump to…",
+  });
+  fireEvent.click(jump);
+  expect(
+    await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    }),
+  ).toBeTruthy();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  expect(await screen.findByRole("heading", { name: "Trash" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("navigation", { name: "Settings sections" }),
+  ).toBeTruthy();
+});
+
+test("read-only creation explains the disabled sidebar action and C cannot open it", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: "Search or jump to…" });
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  const create = screen.getAllByRole("button", { name: "New ticket" })[0]!;
+  expect(create.getAttribute("aria-disabled")).toBe("true");
+  expect(create.getAttribute("aria-description")).toBe(
+    "The workspace is read-only",
+  );
+  fireEvent.click(create);
+  fireEvent.keyDown(document.body, { key: "c" });
+  expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+});
+
+test("first-run sidebar omits zero counts and empty scope groups", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  const all = await screen.findByRole("button", { name: "All tickets" });
+  expect(all.textContent?.trim()).toBe("All tickets");
+  expect(
+    screen.getByRole("button", { name: "Ready" }).textContent?.trim(),
+  ).toBe("Ready");
+  expect(screen.queryByRole("button", { name: "Projects" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Plans" })).toBeNull();
+  expect(screen.queryByText("Archived Plans")).toBeNull();
+});
+
+test("narrow header Search opens the shared palette outside the navigation sheet", async () => {
+  narrowViewport = true;
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Search" }));
+  expect(
+    await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    }),
+  ).toBeTruthy();
+});
+
+test("sidebar Plan progress uses full Plan counts and omits archived rows", async () => {
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans")
+        return [
+          { id: "P-1", name: "Board polish", archived: false },
+          { id: "P-2", name: "Old plan", archived: true },
+        ];
+      if (command === "show_plan")
+        return {
+          plan: { id: args.id, name: "Board polish", archived: false },
+          members: [],
+          counts: {
+            todo: 2,
+            in_progress: 1,
+            in_review: 1,
+            done: 1,
+            canceled: 2,
+            duplicate: 1,
+          },
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const plan = await screen.findByRole("button", { name: /Board polish/ });
+  await vi.waitFor(() => expect(plan.textContent).toContain("1/5"));
+  expect(screen.queryByText("Old plan")).toBeNull();
+});
+
+test("footer destinations share their registered go-to sequences", async () => {
+  bridge.invoke.mockImplementation((command: string) =>
+    command === "list_trash" ? [] : bridgeDefault(command),
+  );
+  render(<App />);
+  await screen.findByRole("button", { name: "Search or jump to…" });
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key: "s" });
+  expect(
+    await screen.findByRole("navigation", { name: "Settings sections" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key: "x" });
+  expect(await screen.findByRole("heading", { name: "Trash" })).toBeTruthy();
+});
+
+test("palette keeps New ticket and Capture reachable after removing the create menu", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search or jump to…" }),
+  );
+  expect(
+    await screen.findByRole("option", { name: /Capture a thought/ }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: /^New ticket/ }));
+  const dialog = await screen.findByRole("dialog", { name: "New ticket" });
+  await vi.waitFor(() =>
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("textbox", { name: "Title" }),
+    ),
+  );
 });

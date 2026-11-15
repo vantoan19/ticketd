@@ -6,7 +6,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { Tooltip } from "@/components/ui/tooltip";
 
 window.ResizeObserver = class {
@@ -65,4 +65,20 @@ test("with nothing to say no tooltip is mounted, so Escape reaches the page", ()
   tabTo(button);
   fireEvent.keyDown(button, { key: "Escape" });
   expect(escapes).toBe(1);
+});
+
+test("an open tooltip closes when its trigger disappears while the tooltip survives", async () => {
+  const { rerender } = render(
+    <Tooltip content="Destination">
+      <button>Go</button>
+    </Tooltip>,
+  );
+  tabTo(screen.getByRole("button", { name: "Go" }));
+  await screen.findByRole("tooltip");
+  rerender(
+    <Tooltip content="Destination">
+      <span>Gone</span>
+    </Tooltip>,
+  );
+  await vi.waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
 });

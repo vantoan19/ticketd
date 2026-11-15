@@ -746,7 +746,7 @@ test("a successful status save refreshes sidebar counts immediately", async () =
   render(<App />);
   await settle();
   await showBoard();
-  expect(screen.getByRole("button", { name: "In progress 0" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "In progress" })).toBeTruthy();
   await chooseStatus("T-KQ1", "In progress");
   expect(screen.getByRole("button", { name: "In progress 1" })).toBeTruthy();
 });

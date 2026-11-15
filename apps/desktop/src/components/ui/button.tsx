@@ -14,6 +14,7 @@ const buttonVariants = cva(
         secondary: "ui-button-secondary",
         ghost: "ui-button-ghost",
         link: "ui-button-link",
+        jump: "ui-button-jump",
       },
       size: {
         default: "h-10 px-4",

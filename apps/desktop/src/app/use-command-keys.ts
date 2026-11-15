@@ -2,13 +2,23 @@ import { useEffect, useEffectEvent } from "react";
 import { matchesShortcut, SHORTCUTS, type Shortcut } from "@/lib/shortcuts";
 
 export type GoTo =
-  "inbox" | "all" | "ready" | "chats" | "documents" | "plans" | "settings";
+  | "inbox"
+  | "all"
+  | "ready"
+  | "chats"
+  | "documents"
+  | "projects"
+  | "plans"
+  | "settings"
+  | "trash";
 const destinations: Record<string, GoTo> = {
   "go-inbox": "inbox",
   "go-all": "all",
   "go-ready": "ready",
   "go-chats": "chats",
   "go-documents": "documents",
+  "go-settings": "settings",
+  "go-trash": "trash",
 };
 const typing =
   "input, textarea, select, [contenteditable]:not([contenteditable=false])";

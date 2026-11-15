@@ -109,6 +109,10 @@ function AppContent() {
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
   const workspaceProblem = useWorkspaceState();
+  const createDisabledReason =
+    workspaceProblem?.problem === "workspace_read_only"
+      ? "The workspace is read-only"
+      : editingBlockedReason(workspaceProblem);
   const recovery = useDraftRecovery();
   const [view, setViewState] = useState<View>("tickets");
   const chat = useChatFeature();
@@ -304,6 +308,7 @@ function AppContent() {
       )
         return;
       event.preventDefault();
+      if (editingBlockedReason(workspaceProblem)) return;
       const focused = document.activeElement;
       createTriggerRef.current =
         focused instanceof HTMLButtonElement ? focused : null;
@@ -312,7 +317,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [workspaceProblem]);
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
     projects,
@@ -333,7 +338,7 @@ function AppContent() {
   } = workspace;
   const goTo = (target: GoTo) => {
     if (target === "chats" && !chat.enabled) return;
-    if (target === "all" || target === "ready") {
+    if (target === "all" || target === "ready" || target === "trash") {
       scope(target);
       setView("tickets");
     } else openView(target);
@@ -522,6 +527,24 @@ function AppContent() {
                       <WindowBar />
                       <StatusLineRegion host={{ current: contentPanel }}>
                         <CommandPalette
+                          createDisabledReason={createDisabledReason}
+                          create={(kind) => {
+                            if (editingBlockedReason(workspaceProblem)) return;
+                            if (kind === "ticket") {
+                              createTriggerRef.current =
+                                paletteReturn.current instanceof
+                                HTMLButtonElement
+                                  ? paletteReturn.current
+                                  : null;
+                              setCreateStatus(undefined);
+                              setCreating(true);
+                            } else if (kind === "capture")
+                              openCapture(paletteReturn.current);
+                            else {
+                              setNewChatRequest((count) => count + 1);
+                              openView("chats");
+                            }
+                          }}
                           initialTicket={
                             workspace.details[paletteReference ?? ""] ??
                             workspace.tickets.find(
@@ -566,12 +589,13 @@ function AppContent() {
                           />
                         ) : (
                           <WorkspaceSidebar
-                            onCapture={openCapture}
-                            onNewChat={() => {
-                              setNewChatRequest((count) => count + 1);
-                              openView("chats");
-                            }}
+                            onOpenPalette={() => openPalette()}
+                            createDisabledReason={createDisabledReason}
                             counts={counts}
+                            hasTickets={
+                              workspace.tickets.length > 0 ||
+                              (counts?.total ?? 0) > 0
+                            }
                             view={view}
                             workspaceGraphOpen={graphOrigin === "__workspace__"}
                             setView={openView}
@@ -614,6 +638,7 @@ function AppContent() {
                                   isMobile &&
                                   view !== "settings" && (
                                     <NarrowNav
+                                      onOpenPalette={() => openPalette()}
                                       waitingChats={chat.overview.needs_you}
                                       waitingRuns={
                                         chat.enabled

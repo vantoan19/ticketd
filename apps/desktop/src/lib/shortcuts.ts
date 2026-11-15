@@ -51,6 +51,8 @@ export const SHORTCUTS = [
       ["go-ready", "R", "Go to Ready"],
       ["go-chats", "C", "Go to Chats"],
       ["go-documents", "D", "Go to Documents"],
+      ["go-settings", "S", "Go to Settings"],
+      ["go-trash", "X", "Go to Trash"],
     ] as const
   ).map(([id, key, label]) => ({
     id,

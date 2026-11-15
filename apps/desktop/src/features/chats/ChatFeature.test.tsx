@@ -33,6 +33,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         : bridgeDefault(command, args),
 }));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
+Element.prototype.scrollIntoView = () => {};
 window.ResizeObserver = class {
   observe() {}
   unobserve() {}
@@ -243,10 +244,10 @@ test("with Chat off, nothing about Chat is in the workspace", async () => {
   await screen.findByRole("button", { name: /All tickets/ });
   expect(screen.queryByRole("button", { name: /^Chats/ })).toBeNull();
   expect(screen.queryByRole("button", { name: "Automations" })).toBeNull();
-  // With Chat off, Capture is a direct action beside New ticket.
+  // Capture moved from the header to the shared palette.
   expect(
-    screen.getByRole("button", { name: "Capture a thought" }),
-  ).toBeTruthy();
+    screen.queryByRole("button", { name: "Capture a thought" }),
+  ).toBeNull();
   expect(
     screen.queryByRole("button", { name: "More ways to create" }),
   ).toBeNull();
@@ -290,11 +291,8 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
     ).findByRole("button", { name: "Chats" }),
   ).toBeTruthy();
 
-  fireEvent.keyDown(
-    screen.getByRole("button", { name: "More ways to create" }),
-    { key: "Enter" },
-  );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "New Chat" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+  fireEvent.click(await screen.findByRole("option", { name: "New Chat" }));
   expect(
     await screen.findByRole("heading", { name: "What should we work on?" }),
   ).toBeTruthy();

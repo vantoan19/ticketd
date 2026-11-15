@@ -31,6 +31,10 @@ import {
   Files,
   Layers,
   Settings,
+  Trash2,
+  SquarePen,
+  NotebookPen,
+  MessageSquarePlus,
 } from "lucide-react";
 import {
   Command,
@@ -61,11 +65,15 @@ const targets = [
   { id: "ready", label: "Ready", icon: CircleCheck, key: "go-ready" },
   { id: "chats", label: "Chats", icon: MessagesSquare, key: "go-chats" },
   { id: "documents", label: "Documents", icon: Files, key: "go-documents" },
+  { id: "projects", label: "Projects", icon: Folder },
   { id: "plans", label: "Plans", icon: Layers },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "settings", label: "Settings", icon: Settings, key: "go-settings" },
+  { id: "trash", label: "Trash", icon: Trash2, key: "go-trash" },
 ] satisfies { id: GoTo; label: string; icon: typeof Inbox; key?: ShortcutId }[];
 
 export function CommandPalette({
+  create,
+  createDisabledReason,
   open,
   onOpenChange,
   go,
@@ -79,6 +87,8 @@ export function CommandPalette({
   plans,
   refresh,
 }: {
+  create: (kind: "ticket" | "capture" | "chat") => void;
+  createDisabledReason: string | null;
   initialTicket: Ticket | null;
   reference: string | null;
   initialScope: TicketCommandScope | null;
@@ -180,7 +190,13 @@ export function CommandPalette({
           onCloseAutoFocus={(event) => {
             if (navigated.current) {
               event.preventDefault();
-              document.getElementById("main-content")?.focus();
+              // A create command opens a dialog whose autofocus must win.
+              if (
+                !document.querySelector(
+                  '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+                )
+              )
+                document.getElementById("main-content")?.focus();
             }
           }}
           onEscapeKeyDown={(event) => {
@@ -460,6 +476,59 @@ export function CommandPalette({
                       </span>
                     </CommandItem>
                   ))}
+                </CommandGroup>
+              )}
+              {!scope && (
+                <CommandGroup heading="Create">
+                  {(
+                    [
+                      {
+                        id: "ticket",
+                        label: "New ticket",
+                        icon: SquarePen,
+                        key: "new-ticket",
+                      },
+                      {
+                        id: "capture",
+                        label: "Capture a thought",
+                        icon: NotebookPen,
+                        key: "capture",
+                      },
+                      {
+                        id: "chat",
+                        label: "New Chat",
+                        icon: MessageSquarePlus,
+                      },
+                    ] as const
+                  )
+                    .filter((item) =>
+                      item.label
+                        .toLowerCase()
+                        .includes(filter.trim().toLowerCase()),
+                    )
+                    .map((item) => (
+                      <CommandItem
+                        key={item.id}
+                        value={`create-${item.id}`}
+                        disabled={
+                          !!createDisabledReason ||
+                          (item.id === "chat" && !chatsEnabled)
+                        }
+                        onSelect={() => run(() => create(item.id))}
+                      >
+                        <item.icon aria-hidden="true" />
+                        <span className="flex-1">{item.label}</span>
+                        {createDisabledReason ? (
+                          <CommandShortcut>
+                            {createDisabledReason}
+                          </CommandShortcut>
+                        ) : "key" in item ? (
+                          <CommandShortcut>
+                            <KeyChords keys={shortcut(item.key).keys} />
+                          </CommandShortcut>
+                        ) : null}
+                      </CommandItem>
+                    ))}
                 </CommandGroup>
               )}
               {!scope && (
