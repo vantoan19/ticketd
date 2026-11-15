@@ -1,5 +1,5 @@
 import { useNow } from "@/lib/use-now";
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   Cloud,
   Copy,
@@ -86,6 +86,9 @@ export function TicketList({
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
   );
   const rows = useRef(new Map<string, HTMLButtonElement>());
+  // The list is one Tab stop (roving tabindex, list R-08): the row last
+  // focused, else the open ticket, else the first row.
+  const [focusedRow, setFocusedRow] = useState<string | null>(null);
   // Groups and rows share one list so a row that changes group keeps its
   // element and the list keeps its scroll position.
   const entries: (
@@ -100,6 +103,13 @@ export function TicketList({
   const ordered = entries.flatMap((entry) =>
     "ticket" in entry ? [entry.ticket] : [],
   );
+  const tabStop =
+    ordered.find((ticket) => ticket.id === focusedRow)?.id ??
+    ordered.find((ticket) => ticket.reference === selected)?.id ??
+    ordered[0]?.id;
+  const focusRow = (ticket: Ticket | undefined) => {
+    if (ticket) rows.current.get(ticket.id)?.focus();
+  };
   return (
     <TooltipProvider delayDuration={400}>
       <ul className="ticket-rows">
@@ -167,16 +177,28 @@ export function TicketList({
                 data-ticket-reference={ticket.reference}
                 data-rows={simple ? "simple" : undefined}
                 aria-pressed={ticket.reference === selected}
+                tabIndex={ticket.id === tabStop ? 0 : -1}
                 onClick={() => onOpen(ticket.reference)}
-                onFocus={(event) =>
-                  event.currentTarget.scrollIntoView?.({ block: "nearest" })
-                }
+                onFocus={(event) => {
+                  setFocusedRow(ticket.id);
+                  event.currentTarget.scrollIntoView?.({ block: "nearest" });
+                }}
                 onKeyDown={(event) => {
-                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  const plain =
+                    !event.metaKey && !event.ctrlKey && !event.altKey;
+                  if (
+                    event.key === "ArrowDown" ||
+                    event.key === "ArrowUp" ||
+                    (plain && (event.key === "j" || event.key === "k"))
+                  ) {
                     event.preventDefault();
-                    const next =
-                      ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
-                    if (next) rows.current.get(next.id)?.focus();
+                    const down = event.key === "ArrowDown" || event.key === "j";
+                    focusRow(ordered[index + (down ? 1 : -1)]);
+                  } else if (event.key === "Home" || event.key === "End") {
+                    event.preventDefault();
+                    focusRow(
+                      event.key === "Home" ? ordered[0] : ordered.at(-1),
+                    );
                   } else if (event.key === "Enter") {
                     event.preventDefault();
                     onOpen(ticket.reference);

@@ -341,3 +341,29 @@ test("a simple row's name carries its Ready and Blocked words", () => {
     screen.getByRole("button", { name: /Second ticket.*Blocked/ }),
   ).toBeTruthy();
 });
+
+test("the list is one Tab stop and arrows, J/K, Home and End move within it", () => {
+  // list R-08: every row used to be its own Tab stop.
+  renderList(
+    [1, 2, 3].map((n) =>
+      ticket({ id: String(n), reference: `T-KQ${n}`, title: `Ticket ${n}` }),
+    ),
+    { selected: "T-KQ2" },
+  );
+  const rows = () =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".ticket-row"));
+  const stops = () => rows().filter((row) => row.tabIndex === 0);
+  // The open ticket holds the stop until another row takes focus.
+  expect(stops()).toEqual([rows()[1]]);
+  rows()[1]!.focus();
+  fireEvent.keyDown(rows()[1]!, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(rows()[2]);
+  expect(stops()).toEqual([rows()[2]]);
+  fireEvent.keyDown(rows()[2]!, { key: "k" });
+  expect(document.activeElement).toBe(rows()[1]);
+  fireEvent.keyDown(rows()[1]!, { key: "Home" });
+  expect(document.activeElement).toBe(rows()[0]);
+  fireEvent.keyDown(rows()[0]!, { key: "End" });
+  expect(document.activeElement).toBe(rows()[2]);
+  expect(stops()).toHaveLength(1);
+});

@@ -53,7 +53,8 @@ test("keys use platform glyphs and are read as words", () => {
     Array.from(capture.querySelectorAll("kbd")).map((key) => key.textContent),
   ).toEqual(mac ? ["⌘", "⇧", "N"] : ["Ctrl", "Shift", "N"]);
   expect(
-    screen.getAllByRole("img", { name: "Up arrow or Down arrow" }).length,
+    screen.getAllByRole("img", { name: "Up arrow or Down arrow or J or K" })
+      .length,
   ).toBe(1);
   expect(
     screen.getByRole("img", { name: "Left arrow or Right arrow" }),

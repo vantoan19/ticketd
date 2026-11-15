@@ -57,7 +57,7 @@ export const SHORTCUTS = [
   },
   {
     id: "list-move",
-    keys: [["↑"], ["↓"]],
+    keys: [["↑"], ["↓"], ["J"], ["K"]],
     scope: "Lists",
     label: "Move between tickets",
   },
