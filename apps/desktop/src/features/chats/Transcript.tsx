@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Reference } from "@/components/ui/reference";
+import { RecordLink } from "@/components/ui/record-link";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useCopy } from "@/components/ui/use-copy";
@@ -50,6 +50,7 @@ import {
   type ChatState,
   type RecordChange,
   type Step,
+  type TicketdCall,
   type TranscriptItem,
   type ItemOf,
   type LinkedRecord,
@@ -141,7 +142,7 @@ function SentMention({
   if (trashed)
     return (
       <>
-        {ticket ? <code className="chat-mono">{text}</code> : text}
+        {ticket ? <RecordLink gone reference={text} /> : text}
         {goneWords("trashed")}
       </>
     );
@@ -151,17 +152,10 @@ function SentMention({
       : record.kind === "document"
         ? openDocument?.(record.id)
         : openProject?.(record.id);
-  return (
-    // Inline text, not a Button: it reads as a link inside the message.
-    <button
-      type="button"
-      className={
-        ticket ? "chat-records-ref" : "chat-records-ref chat-records-name"
-      }
-      onClick={open}
-    >
-      {text}
-    </button>
+  return ticket ? (
+    <RecordLink reference={text} onClick={open} />
+  ) : (
+    <RecordLink onClick={open}>{text}</RecordLink>
   );
 }
 
@@ -337,6 +331,31 @@ const STEP_ICONS: Record<Step["kind"], LucideIcon> = {
   other: Wrench,
 };
 
+/**
+ * A command that only calls ticketd reads as what it does, so its icon is
+ * its first verb's, not the terminal's: "Read T-12" takes the eye (CH-29).
+ */
+const TICKETD_ICONS: Record<TicketdCall["verb"], LucideIcon> = {
+  read: Eye,
+  list: Eye,
+  search: Search,
+  create: SquarePlus,
+  add: SquarePlus,
+  change: Pencil,
+  set: Pencil,
+  move: Pencil,
+  restore: Pencil,
+  tag: Pencil,
+  untag: Pencil,
+  post: MessageSquareText,
+  run: Terminal,
+};
+
+const stepIcon = (step: Step): LucideIcon => {
+  const call = step.kind === "run" ? step.ticketd?.[0] : undefined;
+  return call ? TICKETD_ICONS[call.verb] : STEP_ICONS[step.kind];
+};
+
 /** Whether a step's targets are files that can still be opened. */
 const opensFiles = (step: Step) =>
   (step.kind === "read" && step.variant !== "list") ||
@@ -486,7 +505,7 @@ export function StepRow({
   // A row that opens is a button already, so its names cannot be buttons too.
   const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];
   const names = shownNames(files.map((target) => target.text));
-  const Icon = STEP_ICONS[step.kind];
+  const Icon = stepIcon(step);
   const line = (
     <RowLine
       icon={
@@ -604,6 +623,14 @@ export function StepRow({
 /** A record the agent changed, as a step row: verb first, the reference in mono. */
 function RecordStep({ change }: { change: RecordChange }) {
   const openDocument = useContext(DocumentNavigation);
+  const openTicket = useContext(TicketNavigation);
+  // A reference that opens is a RecordLink; one that is gone is plain (CH-28).
+  const ticket = (reference: string) =>
+    change.gone || !openTicket ? (
+      <RecordLink gone reference={reference} />
+    ) : (
+      <RecordLink reference={reference} onClick={() => openTicket(reference)} />
+    );
   let icon: ReactNode;
   let words: ReactNode;
   switch (change.kind) {
@@ -611,7 +638,7 @@ function RecordStep({ change }: { change: RecordChange }) {
       icon = <StatusIcon status={change.to} decorative />;
       words = (
         <>
-          Moved <Reference>{change.reference}</Reference>
+          Moved {ticket(change.reference)}
           {goneWords(change.gone)} to {change.to}
         </>
       );
@@ -620,7 +647,7 @@ function RecordStep({ change }: { change: RecordChange }) {
       icon = <MessageSquareText size={16} />;
       words = (
         <>
-          Posted an update on <Reference>{change.reference}</Reference>
+          Posted an update on {ticket(change.reference)}
           {goneWords(change.gone)}
         </>
       );
@@ -632,14 +659,9 @@ function RecordStep({ change }: { change: RecordChange }) {
         <>
           Created the Document{" "}
           {openDocument && !change.gone ? (
-            // Inline text, not a Button: it reads as a link inside the sentence.
-            <button
-              type="button"
-              className="chat-record-link"
-              onClick={() => openDocument(change.document_id)}
-            >
+            <RecordLink onClick={() => openDocument(change.document_id)}>
               {change.title}
-            </button>
+            </RecordLink>
           ) : (
             <>
               {change.title}
@@ -657,6 +679,20 @@ function RecordStep({ change }: { change: RecordChange }) {
   );
 }
 
+/**
+ * "Answered · Fail open", or "Expired · `npm test`": what expired is a
+ * command or path, so it is set in mono as step targets are (CH-30).
+ */
+function ReceiptWords({ item }: { item: ItemOf<"request"> }) {
+  if (item.state !== "expired" || item.request === "question")
+    return receiptLine(item);
+  return (
+    <>
+      Expired · <code className="chat-mono">{item.subject ?? item.title}</code>
+    </>
+  );
+}
+
 /** An answered question or an expired request, in regular weight with no fill. */
 function Receipt({ item }: { item: ItemOf<"request"> }) {
   return (
@@ -666,7 +702,7 @@ function Receipt({ item }: { item: ItemOf<"request"> }) {
           item.state === "expired" ? <Clock size={16} /> : <Check size={16} />
         }
       >
-        {receiptLine(item)}
+        <ReceiptWords item={item} />
       </RowLine>
     </div>
   );

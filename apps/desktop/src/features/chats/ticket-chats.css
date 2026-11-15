@@ -262,9 +262,12 @@ blockquote.chat-quote {
 .chat-records > svg {
   flex: none;
 }
+/* The 4px under the line keeps the links' underline inside the clip. */
 .chat-records-items {
-  overflow: hidden;
   min-width: 0;
+  margin-bottom: -4px;
+  padding-bottom: 4px;
+  overflow: hidden;
   white-space: nowrap;
 }
 .chat-records-ref {
@@ -283,11 +286,6 @@ blockquote.chat-quote {
 }
 .chat-records-ref:hover {
   color: var(--interactive);
-}
-/* A Document is named in sans; only references are mono. */
-.chat-records-name {
-  font-family: inherit;
-  font-size: inherit;
 }
 .chat-records-more {
   display: inline-flex;
