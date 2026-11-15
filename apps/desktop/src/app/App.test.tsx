@@ -1513,7 +1513,7 @@ test("the narrow navigation trigger shows its label and gets focus back when the
   expect(document.activeElement).toBe(trigger);
 });
 
-test("Settings reads fresh data on every visit, checks the CLI only once opened, and moves focus in and out", async () => {
+test("Settings reads fresh data on every visit, checks the CLI at startup and again once opened, and moves focus in and out", async () => {
   vi.useFakeTimers();
   let tickets = 1;
   const calls: string[] = [];
@@ -1541,12 +1541,14 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(calls).not.toContain("check_cli");
+  // Read at startup for the Settings nav dot, so it is there on first paint.
+  const cliChecks = () => calls.filter((call) => call === "check_cli").length;
+  expect(cliChecks()).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(calls).toContain("check_cli");
+  expect(cliChecks()).toBeGreaterThan(1);
   expect(document.activeElement).toBe(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
   );
