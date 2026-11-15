@@ -4,6 +4,18 @@
 .chats-workspace #chat-detail {
   min-width: 0;
 }
+/* One pane at a time below 840px and in Expanded. The panes stay mounted and
+   are hidden instead (DESIGN §5). !important: the panel library sets flex and
+   size inline on each panel, which only !important beats. */
+.chats-workspace[data-single] [data-slot="resizable-handle"],
+.chats-workspace[data-single="list"] #chat-detail,
+.chats-workspace[data-single="detail"] #chat-list {
+  display: none !important;
+}
+.chats-workspace[data-single="list"] #chat-list,
+.chats-workspace[data-single="detail"] #chat-detail {
+  flex: 1 1 0 !important;
+}
 .chat-pane {
   container: ticket-detail / inline-size;
   display: flex;

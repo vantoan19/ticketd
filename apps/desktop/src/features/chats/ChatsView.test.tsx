@@ -2329,3 +2329,36 @@ test("MOTION-14: the list is one Tab stop; arrows move between rows and to a row
     "Actions for Second",
   );
 });
+
+test("CH-12: Expand keeps New Chat's links and harness check, and the list stays mounted", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  client.projectFolders.set("p1", "/work/storefront");
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(button("Link a ticket, Document or Project"));
+  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  const linked = () =>
+    screen.queryByRole("button", {
+      name: "Remove the link to the Project Storefront",
+    });
+  const folder = () =>
+    screen.queryByRole("button", { name: "Folder: /work/storefront" });
+  await waitFor(() => expect(folder()).not.toBeNull());
+  expect(linked()).not.toBeNull();
+  const probes = vi.spyOn(client, "harnesses");
+  const pane = document.querySelector(".chat-new");
+  const list = document.querySelector(".chat-rows");
+  fireEvent.click(button("Expand Chat"));
+  // The same New Chat, not a remount: its links stay and no second check runs.
+  expect(document.querySelector(".chat-new")).toBe(pane);
+  expect(linked()).not.toBeNull();
+  expect(folder()).not.toBeNull();
+  expect(probes).not.toHaveBeenCalled();
+  expect(
+    document.querySelector(".chats-workspace")?.getAttribute("data-single"),
+  ).toBe("detail");
+  fireEvent.click(button("Show beside the list"));
+  expect(document.querySelector(".chat-new")).toBe(pane);
+  expect(document.querySelector(".chat-rows")).toBe(list);
+  expect(linked()).not.toBeNull();
+});
