@@ -18,6 +18,7 @@
         "minWidth": 480,
         "minHeight": 600,
         "titleBarStyle": "Transparent",
+        "hiddenTitle": true,
         "backgroundColor": "#FAFAFA"
       }
     ],

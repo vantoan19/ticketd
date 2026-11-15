@@ -30,15 +30,16 @@ it("the collapsed sidebar keeps the manage menus and the source Retry reachable"
   );
 });
 
-it("the Plan list toolbar shrinks its summary, not its Filter control", () => {
+it("the Plan context line keeps one 32px row; the purpose gives way first", () => {
   const plan = readFileSync(
     join(__dirname, "..", "features/plans/plan.css"),
     "utf8",
   );
-  expect(plan).toMatch(/[.]plan-list-summary [{][^}]*text-overflow: ellipsis;/);
-  expect(plan).toMatch(
-    /[.]plan-list-toolbar > :not[(][^)]*[)] [{]\s*flex: none;/,
-  );
+  const context = /\n[.]plan-context [{]([^}]*)[}]/.exec(plan)?.[1] ?? "";
+  expect(context).toMatch(/height: 32px;/);
+  expect(context).not.toMatch(/flex-wrap: wrap/);
+  expect(plan).toMatch(/[.]plan-purpose-text [{][^}]*text-overflow: ellipsis;/);
+  expect(plan).toMatch(/[.]plan-progress [{][^}]*flex: none;/);
   expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });
 
@@ -77,7 +78,7 @@ it("the window never scrolls and only the list rows scroll under a fixed header"
 
 it("a path shortens in its middle first, then at its end, always with an ellipsis", () => {
   const paths = readFileSync(
-    join(__dirname, "..", "features/projects/projects.css"),
+    join(__dirname, "..", "components/ui/patterns.css"),
     "utf8",
   );
   const block = (selector: string) =>
@@ -88,14 +89,14 @@ it("a path shortens in its middle first, then at its end, always with an ellipsi
   // ellipsis then takes two characters. Only one part may flex at a time: the
   // middle grows into the room the end leaves (never past its own text) and
   // never shrinks below room for its ellipsis; the end only shrinks.
-  expect(block(".path-middle")).toMatch(/flex: 1 0 0;/);
-  expect(block(".path-middle")).toMatch(/min-width: [1-9]/);
-  expect(block(".path-middle")).toMatch(/max-width: max-content;/);
+  expect(block(".ui-path-middle")).toMatch(/flex: 1 0 0;/);
+  expect(block(".ui-path-middle")).toMatch(/min-width: [1-9]/);
+  expect(block(".ui-path-middle")).toMatch(/max-width: max-content;/);
   // Then the last folders, which the line's edge must never cut mid-character.
-  expect(block(".path-tail")).toMatch(/flex: 0 1 auto;/);
-  expect(block(".path-tail")).toMatch(/min-width: 0;/);
-  expect(block(".path-tail")).toMatch(/overflow: hidden;/);
-  expect(block(".path-tail")).toMatch(/text-overflow: ellipsis;/);
+  expect(block(".ui-path-tail")).toMatch(/flex: 0 1 auto;/);
+  expect(block(".ui-path-tail")).toMatch(/min-width: 0;/);
+  expect(block(".ui-path-tail")).toMatch(/overflow: hidden;/);
+  expect(block(".ui-path-tail")).toMatch(/text-overflow: ellipsis;/);
 });
 
 it("a long Chat title gives way before the harness and folder trigger", () => {

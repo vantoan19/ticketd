@@ -26,7 +26,7 @@ test("shows the reported brief and opens its exact Activity", async () => {
   render(<LatestUpdate reference="T-KQ1" active revision={0} onOpen={open} />);
   await screen.findByText("Review complete: details");
   expect(screen.getByText(/Agent/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Go to update" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Go to update/ }));
   expect(open).toHaveBeenCalledWith("a-1");
 });
 
@@ -36,7 +36,7 @@ test("distinguishes an absent update from a failed read and allows retry", async
     .mockResolvedValueOnce(null);
   render(<LatestUpdate reference="T-KQ1" active revision={0} />);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Database unavailable",
+    "Couldn't load the latest update",
   );
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("No update reported");

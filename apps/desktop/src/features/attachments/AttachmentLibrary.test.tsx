@@ -4,12 +4,21 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentLibrary } from "./AttachmentLibrary";
 import { AttachmentCleanup } from "./AttachmentCleanup";
+import { SettingsNavigation } from "@/lib/settings-navigation";
+
+/** Opens a Radix menu the way a pointer does. */
+async function openMenu(name: string) {
+  const trigger = await screen.findByRole("button", { name });
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  await screen.findByRole("menu");
+}
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -42,10 +51,10 @@ test("discovery identifies uploaded copies without opening each preview", async 
       ];
     throw new Error(`Unexpected ${command}`);
   });
-  render(<AttachmentLibrary onPreview={() => {}} />);
+  render(<AttachmentLibrary />);
   await screen.findByRole("button", { name: "Uploaded trace" });
-  expect(screen.getByRole("cell", { name: "Uploaded copy" })).toBeTruthy();
-  expect(screen.queryByRole("cell", { name: "External reference" })).toBeNull();
+  expect(screen.getByText(/Uploaded copy/)).toBeTruthy();
+  expect(screen.queryByText(/External reference/)).toBeNull();
   expect(invoke).not.toHaveBeenCalledWith(
     "attachment_preview",
     expect.anything(),
@@ -117,16 +126,20 @@ test("explicit local cleanup reviews protections and restores quarantine", async
     }
     throw new Error(`Unexpected ${command}`);
   });
-  render(<AttachmentLibrary onPreview={() => {}} />);
+  render(<AttachmentLibrary />);
   await screen.findByRole("button", { name: "Unused trace" });
-  expect(screen.getByRole("columnheader", { name: "Added" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Clean up" }));
-  await screen.findByRole("dialog", { name: "Review unused attachments" });
+  await openMenu("More library actions");
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Clean up unused files…" }),
+  );
+  await screen.findByRole("dialog", { name: "Clean up unused files" });
   await screen.findByRole("checkbox", { name: "Select Unused trace" });
-  const protections = screen.getByText("Protected or unavailable (1)");
-  expect(protections.closest("details")).toHaveProperty("open", false);
+  const protections = screen.getByRole("button", {
+    name: /^Protected\s*1$/,
+  });
+  expect(protections.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(protections);
-  expect(screen.getByText("Protected · Recoverable draft")).toBeTruthy();
+  expect(screen.getByText("In an unsaved draft")).toBeTruthy();
   expect(screen.queryByText("Protected by recoverable draft")).toBeNull();
   expect(
     screen.getByRole("checkbox", { name: "Select Draft trace" }),
@@ -142,13 +155,13 @@ test("explicit local cleanup reviews protections and restores quarantine", async
     screen.getByRole("checkbox", { name: "Select Unused trace" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Move to quarantine" }));
-  await screen.findByRole("button", { name: "Restore Unused trace" });
-  fireEvent.click(screen.getByRole("button", { name: "Restore Unused trace" }));
-  await waitFor(() =>
-    expect(
-      screen.queryByRole("button", { name: "Restore Unused trace" }),
-    ).toBeNull(),
-  );
+  // The status line says what moved and offers Undo.
+  await screen.findByText("Moved Unused trace to quarantine");
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+  await screen.findByText("Quarantined");
+  await openMenu("More actions for Unused trace");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }));
+  await waitFor(() => expect(screen.queryByText("Quarantined")).toBeNull());
   expect(
     vi
       .mocked(invoke)
@@ -220,11 +233,10 @@ test("external references with unknown size stay external and are not fetched fo
       usage: { eligible: true, legacy_drafts_pending: false, protections: [] },
     },
   ]);
-  render(<AttachmentLibrary onPreview={() => {}} />);
+  render(<AttachmentLibrary />);
   await screen.findByRole("button", { name: "Current plan" });
-  expect(screen.getByText("External reference")).toBeTruthy();
-  expect(screen.getByText("—")).toBeTruthy();
-  expect(screen.queryByText("0 B")).toBeNull();
+  expect(screen.getByText(/Google Drive/)).toBeTruthy();
+  expect(screen.queryByText(/0 B/)).toBeNull();
   expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
     "search_attachments",
   ]);
@@ -258,20 +270,29 @@ test("library searches core metadata and state and opens the chosen stable file"
     }
     throw new Error(`Unexpected ${command}`);
   });
-  const preview = vi.fn();
-  render(<AttachmentLibrary onPreview={preview} />);
+  render(<AttachmentLibrary />);
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-  expect(preview).toHaveBeenCalledWith(file);
-  fireEvent.click(screen.getByRole("radio", { name: "Unused" }));
+  // The file opens in the detail pane beside the list.
+  expect(await screen.findByRole("region", { name: "Trace" })).toBeTruthy();
+  await openMenu("Filters");
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Unused" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenLastCalledWith("search_attachments", {
       query: expect.objectContaining({ state: "unused", limit: 50 }),
     }),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Search files" }));
   fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
     target: { value: "no match" },
   });
-  await screen.findByText("No matching files");
+  await screen.findByText("No attachments match “no match”");
+  expect(screen.queryByRole("list", { name: "Files" })).toBeNull();
+  // The empty state's Clear search, not the search field's own clear button.
+  const empty = screen
+    .getByText("No attachments match “no match”")
+    .closest<HTMLElement>('[data-slot="empty-state"]')!;
+  fireEvent.click(within(empty).getByRole("button", { name: "Clear search" }));
+  expect(await screen.findByRole("button", { name: "Trace" })).toBeTruthy();
 });
 
 test("adding files to the library offers storage without an insertion into nowhere", async () => {
@@ -282,23 +303,28 @@ test("adding files to the library offers storage without an insertion into nowhe
         ? "workspace"
         : 104857600,
   );
-  render(<AttachmentLibrary onPreview={() => {}} />);
+  render(<AttachmentLibrary />);
   fireEvent.click(screen.getByRole("button", { name: "Add files" }));
   expect(screen.getByRole("dialog", { name: "Add files" })).toBeTruthy();
   expect(screen.queryByRole("radio", { name: "Existing files" })).toBeNull();
   expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
 });
 
-test("the library offers the existing storage settings without losing its search surface", async () => {
+test("the library opens its storage settings from the header menu", async () => {
   vi.mocked(invoke).mockResolvedValue([]);
   const settings = vi.fn();
-  render(<AttachmentLibrary onPreview={() => {}} onOpenSettings={settings} />);
-  fireEvent.click(screen.getByRole("button", { name: "Storage settings" }));
-  expect(settings).toHaveBeenCalledOnce();
-  expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
+  render(
+    <SettingsNavigation.Provider value={settings}>
+      <AttachmentLibrary />
+    </SettingsNavigation.Provider>,
+  );
+  await screen.findByText("No attachments yet");
+  await openMenu("More library actions");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Storage settings" }));
+  expect(settings).toHaveBeenCalledWith("attachments");
 });
 
-test("usage stays compact in the table and opens details without labeling recovery as unused", async () => {
+test("usage stays compact in the row without labeling recovery as unused", async () => {
   const file = {
     id: "protected",
     display_name: "Trace",
@@ -336,13 +362,67 @@ test("usage stays compact in the table and opens details without labeling recove
       usage: { eligible: false, legacy_drafts_pending: true, protections: [] },
     },
   ]);
-  const preview = vi.fn();
-  render(<AttachmentLibrary onPreview={preview} />);
-  fireEvent.click(await screen.findByRole("button", { name: "2 places" }));
-  expect(preview).toHaveBeenCalledWith(file);
+  render(<AttachmentLibrary />);
+  expect(await screen.findByText(/Used in 2/)).toBeTruthy();
   expect(screen.queryByText(/not a direct ticket attachment/)).toBeNull();
-  expect(screen.queryByRole("button", { name: "Unused" })).toBeNull();
+  expect(screen.queryByText(/Unused/)).toBeNull();
+  expect(screen.getByText(/Kept for recovery/)).toBeTruthy();
+});
+
+test("an empty library says so, with no table, paging or Clean up over nothing", async () => {
+  vi.mocked(invoke).mockResolvedValue([]);
+  render(<AttachmentLibrary />);
+  expect(await screen.findByText("No attachments yet")).toBeTruthy();
+  expect(screen.queryByText(/No attachments match/)).toBeNull();
+  expect(screen.queryByRole("list", { name: "Files" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Show \d+ more/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Search files" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Filters" })).toBeNull();
   expect(
-    screen.getByRole("button", { name: "Recovery protected" }),
-  ).toBeTruthy();
+    screen.queryByRole("button", { name: "More library actions" }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Add files" })).toBeTruthy();
+});
+
+test("typing a search keeps the rows in place until the new answer arrives", async () => {
+  const row = (id: string) => ({
+    attachment: {
+      id,
+      display_name: id,
+      original_filename: `${id}.txt`,
+      size_bytes: 1,
+      kind: "local_snapshot",
+      locator: `${id}/bytes/${id}.txt`,
+    },
+    related: false,
+    usage: { eligible: true, legacy_drafts_pending: false, protections: [] },
+  });
+  let answer: (rows: unknown[]) => void = () => {};
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command !== "search_attachments") return [];
+    const { query } = args as { query: { search: string } };
+    if (query.search === "") return [row("Trace"), row("Notes")];
+    return new Promise((done) => {
+      answer = done;
+    });
+  });
+  render(<AttachmentLibrary />);
+  await screen.findByRole("button", { name: "Trace" });
+  fireEvent.click(screen.getByRole("button", { name: "Search files" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
+    target: { value: "no" },
+  });
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("search_attachments", {
+      query: expect.objectContaining({ search: "no" }),
+    }),
+  );
+  // No blank "Loading files…" between keystrokes: the old rows stay.
+  expect(screen.queryByText("Loading files…")).toBeNull();
+  expect(screen.getByRole("button", { name: "Trace" })).toBeTruthy();
+  answer([row("Notes")]);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Trace" })).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "Notes" })).toBeTruthy();
 });

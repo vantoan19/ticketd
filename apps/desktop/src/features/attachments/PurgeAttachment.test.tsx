@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,6 +13,16 @@ import { AttachmentLibrary } from "./AttachmentLibrary";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+
+/** Opens a row's "…" menu the way a pointer does and picks an item. */
+async function choose(row: string, item: string) {
+  const trigger = await screen.findByRole("button", {
+    name: `More actions for ${row}`,
+  });
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+  return trigger;
+}
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -57,35 +68,29 @@ test("pending purge keeps technical diagnostics collapsed and retries without cl
     }
     throw new Error(`Unexpected ${command}`);
   });
-  render(<AttachmentLibrary onPreview={() => {}} />);
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Permanently purge Pending trace",
-    }),
-  );
+  render(<AttachmentLibrary />);
+  await choose("Pending trace", "Delete permanently…");
   const confirm = await screen.findByRole("button", {
-    name: "Permanently purge file",
+    name: "Delete permanently",
   });
   await waitFor(() => expect(confirm).toHaveProperty("disabled", false));
   fireEvent.click(confirm);
-  await screen.findByRole("button", { name: "Retry permanent purge" });
+  await screen.findByRole("button", { name: "Finish deleting" });
   const alert = screen.getByRole("alert");
   expect(alert.textContent).toContain("pending");
   expect(alert.textContent).not.toContain(id);
   expect(alert.textContent).not.toContain("attachment:");
   expect(alert.textContent).not.toContain("repairing managed storage");
-  const details = screen.getByText("Details").closest("details");
-  expect(details).toHaveProperty("open", false);
-  expect(details?.textContent).toContain(diagnostic);
-  fireEvent.click(screen.getByText("Details"));
-  expect(details).toHaveProperty("open", true);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Retry permanent purge" }),
-  );
+  // The raw diagnostic stays under Details until asked for.
+  const toggle = within(alert).getByRole("button", { name: "Details" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(alert.textContent).not.toContain(diagnostic);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(alert.textContent).toContain(diagnostic);
+  fireEvent.click(screen.getByRole("button", { name: "Finish deleting" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(
-    await screen.findByText("Permanently purged · Bytes unavailable"),
-  ).toBeTruthy();
+  expect(await screen.findByText("Deleted")).toBeTruthy();
 });
 
 test("quarantine separates restore from confirmed purge and keeps failures actionable", async () => {
@@ -126,24 +131,24 @@ test("quarantine separates restore from confirmed purge and keeps failures actio
     }
     throw new Error(`Unexpected ${command}`);
   });
-  render(<AttachmentLibrary onPreview={() => {}} />);
-  await screen.findByRole("button", { name: "Restore Unused trace" });
-  const trigger = screen.getByRole("button", {
-    name: "Permanently purge Unused trace",
+  render(<AttachmentLibrary />);
+  await screen.findByText("Quarantined");
+  await choose("Unused trace", "Delete permanently…");
+  await screen.findByRole("dialog", {
+    name: "Delete Unused trace permanently?",
   });
-  trigger.focus();
-  fireEvent.click(trigger);
-  await screen.findByRole("dialog", { name: "Permanently purge this file?" });
   expect(attempts).toBe(0);
-  expect(screen.getByText(/cannot be undone/i)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  await waitFor(() => expect(document.activeElement).toBe(trigger));
-  expect(attempts).toBe(0);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Permanently purge Unused trace" }),
+  expect(screen.getByText(/can't be undone/i)).toBeTruthy();
+  // Cancel is where focus starts on a destructive confirm.
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Cancel" }),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(attempts).toBe(0);
+  await choose("Unused trace", "Delete permanently…");
   const confirm = await screen.findByRole("button", {
-    name: "Permanently purge file",
+    name: "Delete permanently",
   });
   await waitFor(() => expect(confirm).toHaveProperty("disabled", false));
   fireEvent.click(confirm);
@@ -152,14 +157,10 @@ test("quarantine separates restore from confirmed purge and keeps failures actio
     expect.stringContaining("newly retained draft"),
   );
   expect(screen.getByRole("dialog")).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Permanently purge file" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(await screen.findByText("Deleted")).toBeTruthy();
   expect(
-    await screen.findByText("Permanently purged · Bytes unavailable"),
+    await screen.findByText("Deleted Unused trace permanently"),
   ).toBeTruthy();
-  expect(
-    screen.queryByRole("button", { name: "Restore Unused trace" }),
-  ).toBeNull();
 });

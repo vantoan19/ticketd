@@ -5,19 +5,24 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { PlanDependencies } from "./PlanDependencies";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
-vi.mock("@/features/tickets/DependencyGraph", () => ({
+vi.mock("@/features/tickets/DependencyGraph", async (original) => ({
+  ...(await original<typeof import("@/features/tickets/DependencyGraph")>()),
+  // The canvas is React Flow; the panel and rows are what these tests read.
   Canvas: ({
     graph,
     onSelect,
+    footnote,
   }: {
     graph: { nodes: { reference: string; title: string }[] };
     onSelect: (ref: string) => void;
+    footnote?: import("react").ReactNode;
   }) => (
     <div>
       {graph.nodes.map((node) => (
@@ -25,50 +30,101 @@ vi.mock("@/features/tickets/DependencyGraph", () => ({
           {node.title}
         </button>
       ))}
+      <p>{footnote}</p>
     </div>
   ),
-  SelectionPanel: ({ ticket }: { ticket: { reference: string } }) => (
-    <aside aria-label="Selected ticket">{ticket.reference}</aside>
-  ),
 }));
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
-test("shows outside blockers and edits dependencies through the shared workflow", async () => {
-  bridge.invoke.mockImplementation(async (command: string) =>
-    command === "plan_dependency_graph"
-      ? {
-          nodes: [
-            {
-              id: "1",
-              reference: "T-KQ1",
-              title: "Member",
-              status: "Todo",
-              availability: "Blocked",
-              trashed: false,
-              boundary: false,
-            },
-            {
-              id: "2",
-              reference: "T-KQ2",
-              title: "Outside",
-              status: "Todo",
-              availability: "Ready",
-              trashed: false,
-              boundary: true,
-            },
-          ],
-          edges: [{ blocker: "T-KQ2", dependent: "T-KQ1" }],
-          max_nodes: 50,
-          max_depth: 1,
-          max_edges: 300,
-          max_work: 3000,
-          omitted_neighbors: false,
-          omitted_edges: false,
-          truncated: false,
-        }
-      : undefined,
+
+const node = (
+  reference: string,
+  title: string,
+  availability: string,
+  boundary = false,
+) => ({
+  id: reference,
+  reference,
+  title,
+  status: "Todo",
+  availability,
+  trashed: false,
+  boundary,
+});
+const graphWith = (
+  nodes: ReturnType<typeof node>[],
+  edges: { blocker: string; dependent: string }[],
+) => ({
+  nodes,
+  edges,
+  max_nodes: 50,
+  max_depth: 1,
+  max_edges: 300,
+  max_work: 3000,
+  omitted_neighbors: false,
+  omitted_edges: false,
+  truncated: false,
+});
+const empty = { items: [], next_offset: null };
+function answer(graph: ReturnType<typeof graphWith>) {
+  return async (command: string) => {
+    if (command === "plan_dependency_graph") return graph;
+    if (command === "show_ticket")
+      return {
+        ...node("T-KQ1", "Member", "Blocked"),
+        body: "",
+        tags: [],
+        project_id: null,
+        plan_id: "plan",
+        parent: null,
+        children: [],
+        prerequisites: [
+          {
+            reference: "T-KQ2",
+            title: "Outside",
+            status: "Todo",
+            trashed: false,
+            unresolved: true,
+          },
+        ],
+      };
+    if (command === "contextual_relationships")
+      return {
+        relationships: {
+          parent: null,
+          children: empty,
+          children_progress: { total: 0, done: 0 },
+          prerequisites: empty,
+          blocking: empty,
+          related: empty,
+          discovered_while: empty,
+          discoveries: empty,
+          duplicate_of: null,
+          duplicates: empty,
+        },
+      };
+    return undefined;
+  };
+}
+
+test("the panel lists the Plan's tickets; a ticket shows its blockers, removed with Undo", async () => {
+  bridge.invoke.mockImplementation(
+    answer(
+      graphWith(
+        [
+          node("T-KQ1", "Member", "Blocked"),
+          node("T-KQ2", "Outside", "Ready", true),
+        ],
+        [{ blocker: "T-KQ2", dependent: "T-KQ1" }],
+      ),
+    ),
   );
   const refresh = vi.fn(async () => {});
   render(
@@ -81,12 +137,18 @@ test("shows outside blockers and edits dependencies through the shared workflow"
       onClose={vi.fn()}
     />,
   );
+  // One panel, one row per member with its open blockers; outside tickets are a caption.
+  const tickets = await screen.findByRole("list", { name: "Plan tickets" });
+  expect(within(tickets).getAllByRole("listitem")).toHaveLength(1);
+  expect(screen.getByText(/Dashed: 1 ticket outside this Plan/)).toBeTruthy();
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-KQ1: 1 open blocker/ }),
+    within(tickets).getByRole("button", { name: /T-KQ1 Member, 1 open/ }),
   );
-  expect(screen.getByText(/Todo, so it blocks until it is Done/)).toBeTruthy();
+  const panel = screen.getByRole("complementary", { name: "Selected ticket" });
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove blocker T-KQ2 from T-KQ1" }),
+    await within(panel).findByRole("button", {
+      name: "Remove blocker T-KQ2 from T-KQ1",
+    }),
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("remove_dependency", {
@@ -94,54 +156,25 @@ test("shows outside blockers and edits dependencies through the shared workflow"
       dependent: "T-KQ1",
     }),
   );
+  expect(
+    await screen.findByText("Removed T-KQ2 as a blocker of T-KQ1"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("add_dependency", {
+      blocker: "T-KQ2",
+      dependent: "T-KQ1",
+    }),
+  );
+  // Back to the Plan's tickets from the panel.
+  fireEvent.click(within(panel).getByRole("button", { name: "Plan tickets" }));
+  expect(screen.getByRole("list", { name: "Plan tickets" })).toBeTruthy();
 });
 
-test("a rejected blocker is explained next to the form", async () => {
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "plan_dependency_graph")
-      return {
-        nodes: [
-          {
-            id: "1",
-            reference: "T-KQ1",
-            title: "Member",
-            status: "Todo",
-            availability: "Ready",
-            trashed: false,
-            boundary: false,
-          },
-        ],
-        edges: [],
-        max_nodes: 50,
-        max_depth: 1,
-        max_edges: 300,
-        max_work: 3000,
-        omitted_neighbors: false,
-        omitted_edges: false,
-        truncated: false,
-      };
-    if (command === "search_tickets")
-      return [
-        {
-          id: "3",
-          reference: "T-KQ3",
-          title: "Other",
-          status: "Todo",
-          body: "",
-          trashed: false,
-          tags: [],
-          plan_id: null,
-          project_id: null,
-          availability: "Ready",
-          prerequisites: [],
-          parent: null,
-          children: [],
-        },
-      ];
-    if (command === "add_dependency")
-      throw "dependency would create a cycle or self-link";
-    return undefined;
-  });
+test("with nothing to draw, Add blocker… opens the Link ticket dialog on Blocked by", async () => {
+  bridge.invoke.mockImplementation(
+    answer(graphWith([node("T-KQ1", "Member", "Ready")], [])),
+  );
   render(
     <PlanDependencies
       id="plan"
@@ -155,52 +188,24 @@ test("a rejected blocker is explained next to the form", async () => {
   expect(
     await screen.findByText("Nothing blocks anything in this Plan yet"),
   ).toBeTruthy();
-  expect(screen.getByText(/T-KQ1 is its only ticket/)).toBeTruthy();
+  // The empty state's action selects the ticket, so its panel shows the way to add.
   fireEvent.click(screen.getByRole("button", { name: "Add blocker…" }));
-  fireEvent.change(await screen.findByLabelText("Add a blocker"), {
-    target: { value: "Other" },
-  });
-  fireEvent.click(await screen.findByRole("button", { name: /T-KQ3/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Add blocker" }));
-  expect(
-    (await screen.findByText(/already blocks T-KQ3/)).textContent,
-  ).toContain("T-KQ1");
+  const panel = screen.getByRole("complementary", { name: "Selected ticket" });
+  fireEvent.click(
+    await within(panel).findByRole("button", { name: "Add blocker…" }),
+  );
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("is blocked by")).toBeTruthy();
 });
 
-test("an archived Plan shows its blockers without add or remove controls", async () => {
-  bridge.invoke.mockImplementation(async (command: string) =>
-    command === "plan_dependency_graph"
-      ? {
-          nodes: [
-            {
-              id: "1",
-              reference: "T-KQ1",
-              title: "Member",
-              status: "Todo",
-              availability: "Blocked",
-              trashed: false,
-              boundary: false,
-            },
-            {
-              id: "2",
-              reference: "T-KQ2",
-              title: "Other",
-              status: "Todo",
-              availability: "Ready",
-              trashed: false,
-              boundary: false,
-            },
-          ],
-          edges: [{ blocker: "T-KQ2", dependent: "T-KQ1" }],
-          max_nodes: 50,
-          max_depth: 1,
-          max_edges: 300,
-          max_work: 3000,
-          omitted_neighbors: false,
-          omitted_edges: false,
-          truncated: false,
-        }
-      : [],
+test("an archived Plan reads its blockers without add or remove controls", async () => {
+  bridge.invoke.mockImplementation(
+    answer(
+      graphWith(
+        [node("T-KQ1", "Member", "Blocked"), node("T-KQ2", "Outside", "Ready")],
+        [{ blocker: "T-KQ2", dependent: "T-KQ1" }],
+      ),
+    ),
   );
   render(
     <PlanDependencies
@@ -214,11 +219,13 @@ test("an archived Plan shows its blockers without add or remove controls", async
     />,
   );
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-KQ1: 1 open blocker/ }),
+    await screen.findByRole("button", { name: /T-KQ1 Member, 1 open/ }),
   );
-  expect(screen.getByLabelText("Blockers of T-KQ1")).toBeTruthy();
+  const panel = screen.getByRole("complementary", { name: "Selected ticket" });
+  expect(
+    await within(panel).findByText("Read-only while archived."),
+  ).toBeTruthy();
+  expect(within(panel).getByText("Outside")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Remove blocker/ })).toBeNull();
-  expect(screen.queryByLabelText("Add a blocker")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /^T-KQ2: No blockers/ }));
-  expect(screen.queryByLabelText("Add a blocker")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add blocker…" })).toBeNull();
 });

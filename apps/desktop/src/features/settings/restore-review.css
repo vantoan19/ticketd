@@ -1,56 +1,27 @@
-/* Backups page. */
-.backups-title-line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.backups-file {
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  overflow-wrap: anywhere;
-  user-select: text;
-}
-/* One line: the file name stays whole and the folder gives way with an ellipsis. */
-.backups-last-path {
-  display: flex;
-  min-width: 0;
-}
-.backups-last-path .backups-file {
-  flex: none;
-  max-width: 60%;
-}
-.backups-last-folder {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* pre, not nowrap: a flex item drops its leading space before the "·". */
-  white-space: pre;
-}
-.backups-icon-error {
-  color: var(--error-foreground);
-}
-.backups-icon-muted {
-  color: var(--disabled-foreground);
-}
-.backups-failure {
-  margin: 4px 0 0;
-  color: var(--error-foreground);
-}
-.backups-message {
-  margin: 4px 0 0;
-}
-.backups-message:empty {
-  display: none;
+/* Backups page. Status never colours an icon: the words carry it. */
+.backups-when {
+  font-weight: 400;
+  color: var(--muted-foreground);
 }
 .backups-contains {
-  list-style: none;
-  margin: 0;
-  padding: 20px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 24px;
+  gap: 16px 24px;
+  padding: 16px 20px 20px;
+}
+.backups-contains-heading {
+  margin: 0 0 8px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.backups-contains ul {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .backups-contains li {
   display: flex;
@@ -60,12 +31,7 @@
 .backups-contains svg {
   flex: none;
   margin-top: 2px;
-}
-.backups-contains .included {
-  color: var(--status-ready);
-}
-.backups-contains .excluded {
-  color: var(--disabled-foreground);
+  color: var(--muted-foreground);
 }
 .backups-contains li > span {
   display: flex;
@@ -89,272 +55,97 @@
   }
 }
 
-/* Restore review dialog. */
-.restore-dialog {
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-  max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-}
-.restore-head,
-.restore-pinned,
-.restore-footer {
-  flex: none;
-}
-.restore-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 20px 56px 0 24px;
-}
-.restore-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px 24px 24px;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  /* Edge shadows appear only while there is more to scroll to. */
-  background:
-    linear-gradient(var(--popover) 30%, transparent) top / 100% 24px local,
-    linear-gradient(transparent, var(--popover) 70%) bottom / 100% 24px local,
-    linear-gradient(var(--header-boundary), transparent) top / 100% 8px scroll,
-    linear-gradient(transparent, var(--header-boundary)) bottom / 100% 8px
-      scroll;
-  background-repeat: no-repeat;
-}
-/* A fade pinned to the bottom edge shows there is more below, and never covers the last row at rest. */
-.restore-body::after {
-  content: "";
-  flex: none;
-  position: sticky;
-  bottom: 0;
-  height: 24px;
-  margin-top: -16px;
-  pointer-events: none;
-  background: linear-gradient(transparent, var(--popover));
-}
-/* The ring sits inside the box: the dialog clips anything outside it. */
-.restore-body:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.restore-body p {
-  margin: 0;
-}
+/* Restore review (DialogShell lg): the consequence notice, the comparison at
+   14/20 on hairlines, the chosen file, then details behind a disclosure. */
 .restore-muted {
   color: var(--muted-foreground);
+}
+.restore-compare {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.restore-compare thead th,
+.restore-compare thead td {
+  height: 32px;
+  padding: 0;
+  text-align: left;
+  vertical-align: middle;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.restore-compare thead td {
+  width: 36%;
+}
+.restore-compare thead th {
+  width: 32%;
+}
+.restore-compare tbody th,
+.restore-compare tbody td {
+  height: 40px;
+  padding: 0 12px 0 0;
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 400;
+  border-top: 1px solid var(--group-hairline);
+}
+.restore-compare tbody tr:last-child th,
+.restore-compare tbody tr:last-child td {
+  border-bottom: 1px solid var(--group-hairline);
+}
+.restore-compare td[data-differs="true"] {
+  font-weight: 500;
 }
 .restore-file {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-border-base);
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 40px;
+  margin-top: 8px;
 }
-.restore-file-tile {
-  flex: none;
+.restore-file-path {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
-}
-.restore-file-tile svg {
-  width: 16px;
-  height: 16px;
-}
-.restore-file-text {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.restore-file-text code {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.restore-file-text > span {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  color: var(--muted-foreground);
-}
-/* The folder gives way with an ellipsis; the check result never wraps. */
-.restore-file-text > span > [aria-label="Backup folder"] {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.restore-file-check {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-inline-start: 6px;
-  white-space: nowrap;
-}
-.restore-file-text [data-slot="status-label"] {
-  color: inherit;
-}
-.restore-checked {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-.restore-checked [data-slot="status-dot"] {
-  margin-top: 6px;
-}
-.restore-compare {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-border-base);
-  overflow: hidden;
-  font-variant-numeric: tabular-nums;
-}
-.restore-compare th,
-.restore-compare td {
-  padding: 10px 16px;
-  text-align: left;
-  vertical-align: top;
-}
-.restore-compare tbody tr td,
-.restore-compare tbody tr th {
-  box-shadow: inset 0 1px 0 var(--group-hairline);
-}
-.restore-compare thead th {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 400;
-  color: var(--muted-foreground);
-  background: var(--recessed);
-}
-.restore-compare tbody th {
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.restore-compare td {
-  white-space: nowrap;
-}
-.restore-compare td[data-differs="true"] {
-  font-weight: 600;
-}
-@media (max-width: 480px) {
-  .restore-compare {
-    table-layout: fixed;
-  }
-  .restore-compare th:first-child {
-    width: 40%;
-  }
-  .restore-compare th,
-  .restore-compare td {
-    padding: 8px 10px;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
 }
 .restore-attachments {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding-top: 4px;
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   color: var(--muted-foreground);
 }
-.restore-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-}
-/* The safety notes stay in view above the footer however far the body scrolls. */
-.restore-pinned {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 0 24px 16px;
-}
-@media (max-width: 480px) {
-  .restore-pinned {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.restore-pin {
-  display: flex;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-border-base);
-}
-.restore-pin > svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  color: var(--muted-foreground);
-}
-.restore-pin > span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.restore-pin strong {
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
-}
-.restore-pin > span > span {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  color: var(--muted-foreground);
-}
-.restore-notes code {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  line-height: 20px;
-  font-weight: 500;
-  overflow-wrap: anywhere;
-  user-select: text;
+.restore-attachments p,
+.restore-done p {
+  margin: 0;
 }
 .restore-done {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-.restore-actions {
+.restore-safety {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.restore-footer {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  min-height: 60px;
-  padding: 12px 16px 12px 24px;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-panel);
   background: var(--recessed);
-  box-shadow: inset 0 1px 0 var(--header-boundary);
-  font-size: var(--text-caption);
-  line-height: 16px;
+  box-shadow: var(--shadow-border-base);
+}
+.restore-safety-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.restore-safety-label {
+  font-weight: 500;
 }

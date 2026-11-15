@@ -1,12 +1,5 @@
 import type { RefObject } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
 
 /** Leaving Duplicate removes its canonical relationship in the same core write. */
 export function ConfirmLeaveDuplicate({
@@ -23,39 +16,23 @@ export function ConfirmLeaveDuplicate({
   returnFocus: RefObject<HTMLElement | null>;
 }) {
   return (
-    <Dialog
+    <DialogShell
       open={status !== null}
       onOpenChange={(open) => {
         if (!open) onCancel();
       }}
-    >
-      <DialogContent
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          returnFocus.current?.focus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>Remove the duplicate link?</DialogTitle>
-          <DialogDescription>
-            This removes the duplicate link to {canonical}. Continue?
-          </DialogDescription>
-        </DialogHeader>
-        <div className="settings-actions">
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              if (status) onConfirm(status);
-            }}
-          >
-            Change status
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-            Keep duplicate
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+      size="sm"
+      title={`Change the status to ${status ?? ""}?`}
+      description={`This removes the duplicate link to ${canonical}.`}
+      primaryLabel="Change status"
+      // Removing the link is destructive: focus starts on Keep duplicate.
+      primaryVariant="destructive"
+      cancelLabel="Keep duplicate"
+      blockedReason={null}
+      returnFocus={returnFocus}
+      onSubmit={() => {
+        if (status) onConfirm(status);
+      }}
+    />
   );
 }

@@ -1,5 +1,6 @@
 import { Fragment, useContext } from "react";
 import { ChevronRight, FileText, MessageSquareText } from "lucide-react";
+import { RecordLink } from "@/components/ui/record-link";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
@@ -33,31 +34,22 @@ function Sentence({ change }: { change: RecordChange }) {
     return (
       <>
         Created{" "}
-        {/* Inline text, not a Button: it reads as a link inside the sentence. */}
-        <button
-          type="button"
-          className="chat-records-ref chat-records-name"
-          onClick={() => openDocument?.(change.document_id)}
-        >
+        <RecordLink onClick={() => openDocument?.(change.document_id)}>
           {change.title}
-        </button>
+        </RecordLink>
       </>
     );
   const reference = change.gone ? (
-    // No longer there to open: plain mono, then what became of it.
+    // No longer there to open: the plain reference, then what became of it.
     <>
-      <code className="chat-mono">{change.reference}</code>
+      <RecordLink gone reference={change.reference} />
       {goneWords(change.gone)}
     </>
   ) : (
-    // Inline text, not a Button: it reads as a link inside the sentence.
-    <button
-      type="button"
-      className="chat-records-ref"
+    <RecordLink
+      reference={change.reference}
       onClick={() => openTicket?.(change.reference)}
-    >
-      {change.reference}
-    </button>
+    />
   );
   return change.kind === "status" ? (
     <>

@@ -4,7 +4,9 @@ import { useEffect } from "react";
  * Records on <html data-input="pointer|keyboard"> how the user last
  * interacted. CSS hides focus rings for "pointer", so a click leaves no stale
  * ring (even when focus is later moved by code), while keyboard focus always
- * shows one. Text fields keep their ring either way.
+ * shows one. Text fields keep their ring either way. Focus is an outline, and
+ * the reset clears only outline, so elevation and edges drawn with box-shadow
+ * survive a click.
  */
 export function useInputModality() {
   useEffect(() => {

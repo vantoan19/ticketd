@@ -4,60 +4,75 @@
 .evidence-section [data-slot="section-header"] {
   margin-bottom: 8px;
 }
-.evidence-label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
 .evidence-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
+/* A record row (P12): the same three lines at any width. Line 1 the name and
+   its actions, line 2 the caption, line 3 the value (detB DB-24). */
 .evidence-item {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
 }
-/* The actions keep the top-right corner; a long name or meta line wraps
-   beside them instead of pushing them onto a line of their own. */
+.evidence-item:hover {
+  background: var(--hover);
+}
 .evidence-item-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
+  min-height: 24px;
 }
-.evidence-item-title {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
+.evidence-item-name {
+  flex: 1 1 auto;
   min-width: 0;
-  /* Centers the first line on the 32px action buttons. */
-  padding-top: 6px;
-}
-.evidence-item-title > strong {
-  min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
   font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evidence-item-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin: -4px -4px -4px 0;
+}
+/* Copy and "…" wait in their slot until the row is hovered or focused. */
+.evidence-reveal {
+  display: inline-flex;
+  visibility: hidden;
+}
+.evidence-item:hover .evidence-reveal,
+.evidence-item:focus-within .evidence-reveal,
+.evidence-item[data-open] .evidence-reveal,
+.evidence-reveal:has([data-state="open"], [data-copied]) {
+  visibility: visible;
+}
+@media (hover: none) {
+  .evidence-item .evidence-reveal {
+    visibility: visible;
+  }
 }
 .evidence-item-meta {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.evidence-item-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
+.evidence-item > [data-slot="button"],
+.evidence-item > button {
+  max-width: 100%;
+  justify-content: flex-start;
 }
 .evidence-item-value {
   max-height: 96px;
@@ -72,12 +87,33 @@
   font-size: var(--text-code);
   font-variant-ligatures: none;
 }
+.evidence-confirm-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.evidence-confirm-text {
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.evidence-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
 
-.evidence-confirm {
+/* The calm empty ticket: one quiet row of adds under the description
+   instead of a stack of empty sections (detB DB-30, S11). */
+.ticket-add-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: var(--text-ui);
+  gap: 4px;
+  margin: 24px -8px 0;
+}
+.ticket-add-row .ui-button {
+  color: var(--muted-foreground);
 }

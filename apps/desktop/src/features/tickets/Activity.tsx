@@ -1,10 +1,11 @@
+import { Pager } from "@/components/ui/pager";
 import { SectionHeader } from "@/components/ui/section-header";
+import { Tooltip } from "@/components/ui/tooltip";
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "./DocumentPicker";
 import { hasVisibleText } from "./brief-text";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DocumentNavigation } from "@/features/documents/navigation";
-import { useNow } from "@/lib/use-now";
 import {
   useCallback,
   useContext,
@@ -13,27 +14,44 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type ReactNode,
+  type KeyboardEvent,
 } from "react";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Kbd } from "@/components/ui/kbd";
+import { Clamp } from "@/components/ui/disclosure";
+import { Time } from "@/components/ui/time";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Bot,
   FileText,
+  Link2,
   MessageSquare,
   MoreHorizontal,
   Plus,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
@@ -52,7 +70,8 @@ import {
 import type { Entry } from "@/lib/api/history";
 import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
-import { relativeDateTime, formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
+import { shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
@@ -82,6 +101,11 @@ const editDraftSchema = z.object({
 const requestSchema = z.object({ payload: z.string(), id: z.string() });
 const drafts = new Map<string, Draft>();
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
+
+/** A failure on this device's draft storage: plain words, nothing for Details. */
+function draftFailure(title: string, text: string): FailureDescription {
+  return { code: "failed", title, sentence: text, action: null, details: "" };
+}
 // Earlier versions kept details and the attachment under their own keys.
 const legacyDetailKey = (reference: string) =>
   `ticketd:activity-details:${reference}`;
@@ -125,21 +149,6 @@ function loadDraft(reference: string): Draft {
 
 const hasDraft = (draft: Draft) =>
   draft.brief !== "" || draft.details !== null || draft.support !== "";
-
-/** Below this width the composer's secondary actions share one Add menu. */
-const COMPACT_WIDTH = 460;
-function useCompactComposer(element: HTMLElement | null) {
-  const [compact, setCompact] = useState(false);
-  useLayoutEffect(() => {
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const measure = () => setCompact(element.clientWidth < COMPACT_WIDTH);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [element]);
-  return compact;
-}
 
 /** The first sentence of an update, short enough to quote in a reply. */
 function quoteOf(brief: string): string {
@@ -188,9 +197,9 @@ export function Activity({
 }) {
   const recovery = useDraftRecovery();
   const recoveryOwner = `activity:${ticketId}`;
-  const now = useNow();
-  const [feedback, setFeedback] = useState("");
-  const [loadError, setLoadError] = useState("");
+  const statusLine = useStatusLine();
+  const submitHint = shortcutLabel("update-post");
+  const [loadError, setLoadError] = useState<FailureDescription | null>(null);
   const [targetMissing, setTargetMissing] = useState<string | null>(null);
   const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
   const targetRequest = useRef<{ id: string } | null>(null);
@@ -223,7 +232,7 @@ export function Activity({
       })
       .catch((reason: unknown) => {
         if (current && targetRequest.current === request)
-          setLoadError(String(reason));
+          setLoadError(describeFailure(reason, "load the linked update"));
       });
     return () => {
       current = false;
@@ -236,10 +245,7 @@ export function Activity({
   if (wasActive !== active || wasReference !== reference) {
     setWasActive(active);
     setWasReference(reference);
-    if (!active || wasReference !== reference) {
-      setTargetMissing(null);
-      setFeedback("");
-    }
+    if (!active || wasReference !== reference) setTargetMissing(null);
   }
   const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
   const notes = feed.flatMap((item) =>
@@ -263,7 +269,7 @@ export function Activity({
       return rows;
     }, []);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [saved, setSaved] = useState<Draft>(
     () =>
       recovery.read(recoveryOwner, recoveryDraftSchema) ??
@@ -301,7 +307,12 @@ export function Activity({
       localStorage.removeItem(legacySupportKey(ticketId));
       if (patch.support !== undefined) localStorage.removeItem(requestKey);
     } catch {
-      setError("Could not save the unpublished update on this device.");
+      setError(
+        draftFailure(
+          "Couldn't save the unpublished update on this device",
+          "Copy it before you close ticketd.",
+        ),
+      );
     }
   }
   // Write the draft once more as the page goes away, so a quick quit keeps it.
@@ -334,7 +345,12 @@ export function Activity({
     try {
       localStorage.removeItem(requestKey);
     } catch {
-      setError("Could not clear the unpublished update on this device.");
+      setError(
+        draftFailure(
+          "Couldn't clear the unpublished update on this device",
+          "It may come back the next time this ticket opens.",
+        ),
+      );
     }
   }
   const draft = saved.brief;
@@ -350,9 +366,13 @@ export function Activity({
     Record<string, { heading: string; trashed: boolean; attached: boolean }>
   >({});
   const [picking, setPicking] = useState(false);
-  const attachButton = useRef<HTMLButtonElement>(null);
-  const [composer, setComposer] = useState<HTMLFormElement | null>(null);
-  const compact = useCompactComposer(composer);
+  const composerRef = useRef<HTMLFormElement>(null);
+  // Where the editors put their controls: the composer's and the edit's bottom row.
+  const [controlsHost, setControlsHost] = useState<HTMLSpanElement | null>(
+    null,
+  );
+  const [editControlsHost, setEditControlsHost] =
+    useState<HTMLSpanElement | null>(null);
   // Bumped to put the caret in the update editor / the new Details editor.
   const [focusUpdate, setFocusUpdate] = useState(0);
   const [focusDetails, setFocusDetails] = useState(false);
@@ -370,7 +390,8 @@ export function Activity({
           setSupportTitle(document.title || document.heading || "Document");
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "load the attached Document"));
       });
     return () => {
       current = false;
@@ -408,11 +429,11 @@ export function Activity({
       .then(() => loadNotes())
       .then(() => {
         if (current) {
-          setLoadError("");
+          setLoadError(null);
         }
       })
       .catch((reason: unknown) => {
-        if (current) setLoadError(String(reason));
+        if (current) setLoadError(describeFailure(reason, "load activity"));
       })
       .finally(() => {
         if (current) setLoading(false);
@@ -432,8 +453,17 @@ export function Activity({
     setComposing(true);
     setDraft(`${base}> Re: ${quoteOf(brief)}\n\n`);
     replied.current = true;
+    // The composer may be far above the row replied to.
+    window.requestAnimationFrame(() => {
+      if (composerRef.current) revealInDetail(composerRef.current);
+    });
   }
-  async function save(event: FormEvent<HTMLFormElement>) {
+  const post = (event: FormEvent<HTMLFormElement>) => save(event, null);
+  const saveEdit = (event: FormEvent<HTMLFormElement>) => save(event, edit);
+  async function save(
+    event: FormEvent<HTMLFormElement>,
+    edit: { id: string; original: string; content: string } | null,
+  ) {
     event.preventDefault();
     if (
       event.target !== event.currentTarget ||
@@ -444,7 +474,7 @@ export function Activity({
       return;
     busy.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       await recovery.flush();
       if (edit) {
@@ -515,7 +545,9 @@ export function Activity({
       await loadNotes();
       await onChanged?.();
     } catch (reason) {
-      setError(String(reason));
+      setError(
+        describeFailure(reason, edit ? "save the update" : "post the update"),
+      );
     } finally {
       busy.current = false;
       setPending(false);
@@ -525,24 +557,25 @@ export function Activity({
     if (busy.current) return;
     busy.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       const hadSupport = notes.some(
         (note) => note.id === id && note.supporting_document_id,
       );
       await client.deleteActivity(reference, id);
       setConfirmDelete(null);
-      setFeedback(
-        hadSupport
-          ? "Update deleted. Its details stay in Documents."
-          : "Update deleted.",
-      );
+      // An outcome, said in the pane's status line, never inserted (DB-09).
+      statusLine.show({
+        message: hadSupport
+          ? "Deleted the update. Its details stay in Documents."
+          : "Deleted the update",
+      });
       if (targetRequest.current?.id === id) targetRequest.current = null;
       setTargetNote((previous) => (previous?.id === id ? null : previous));
       await loadNotes();
       await onChanged?.();
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "delete the update"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -552,14 +585,14 @@ export function Activity({
     if (busy.current) return;
     busy.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       const page = await client.activityFeed(reference, feed.length);
       pages.current += 1;
       setFeed((previous) => [...previous, ...page]);
       setMore(page.length === 50);
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "load more activity"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -602,11 +635,6 @@ export function Activity({
       current = false;
     };
   }, [active, detailIdsKey, revision]);
-  const changed =
-    edit &&
-    !displayedNotes.some(
-      (note) => note.id === edit.id && note.brief === edit.original,
-    );
   useLayoutEffect(() => {
     if (!active || targetId === undefined || targetKey === undefined) {
       revealedTarget.current = null;
@@ -621,12 +649,9 @@ export function Activity({
     if (!element) return;
     revealInDetail(element);
     element.focus({ preventScroll: true });
-    // A brief highlight shows which update was asked for.
-    element.classList.add("activity-entry-target");
-    window.setTimeout(
-      () => element.classList.remove("activity-entry-target"),
-      2000,
-    );
+    // The arrival flash shows which update was asked for (P2).
+    element.classList.add("ui-arrived");
+    window.setTimeout(() => element.classList.remove("ui-arrived"), 1600);
     revealedTarget.current = { id: targetId, key: targetKey };
   }, [active, targetId, targetKey, feed, targetNote]);
   const entries = [
@@ -656,324 +681,353 @@ export function Activity({
       projects.find((project) => project.id === id)?.name,
     plan: (id: string) => plans.find((plan) => plan.id === id)?.name,
   };
-  const draftText = edit ? edit.content : draft;
+  const hasText = hasVisibleText(draft);
+  const postHintId = `post-hint-${ticketId}`;
+  // ⌘↵ / Ctrl+Enter posts from anywhere in the frame (DB-10).
+  const submitKey = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.requestSubmit();
+    }
+  };
+  // What "+" offers: details, or one of the person's Documents as details.
+  const offerDetails = !showDetails && !support;
+  const plus = offerDetails && (
+    <Popover open={picking} onOpenChange={setPicking}>
+      <DropdownMenu>
+        <PopoverAnchor asChild>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              type="button"
+              label="Add details or a Document"
+              disabled={pending}
+            >
+              <Plus aria-hidden="true" />
+            </IconButton>
+          </DropdownMenuTrigger>
+        </PopoverAnchor>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={startDetails}>
+            <FileText aria-hidden="true" />
+            Add details
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            // The picker opens once the menu has closed, under the same "+".
+            onSelect={() => window.setTimeout(() => setPicking(true), 0)}
+          >
+            <Link2 aria-hidden="true" />
+            Use a Document as details…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <PopoverContent variant="list" align="end" aria-label="Choose a Document">
+        <DocumentPicker
+          onPick={(picked) => {
+            setSupport(picked.id);
+            setSupportTitle(picked.heading);
+            setPicking(false);
+            setFocusUpdate((count) => count + 1);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+  /** The editor an update's row becomes while it is edited (DB-08). */
+  const editForm = (
+    edit: { id: string; original: string; content: string },
+    savedBrief: string,
+  ) => (
+    <form
+      className="activity-edit"
+      aria-label="Edit update"
+      onSubmit={(event) => void saveEdit(event)}
+      onKeyDown={submitKey}
+    >
+      {savedBrief !== edit.original && (
+        <Alert tone="attention" size="compact" role="status">
+          <AlertDescription>
+            The saved update changed while you were editing.
+          </AlertDescription>
+          <AlertActions>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setEdit({
+                  ...edit,
+                  original: savedBrief,
+                  content: savedBrief,
+                })
+              }
+            >
+              Use saved version
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setEdit({ ...edit, original: savedBrief })}
+            >
+              Keep my draft
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+      <LazyMarkdownEditor
+        attachmentTicketReference={reference}
+        key={`${edit.id}:${edit.original}`}
+        recoveryOwner={`activity-edit:${ticketId}`}
+        label="Edit update"
+        value={edit.content}
+        onChange={(content) => setEdit({ ...edit, content })}
+        readOnly={pending}
+        chromeHost={editControlsHost}
+        autoFocus
+      />
+      <div className="activity-composer-row">
+        <span ref={setEditControlsHost} className="activity-controls" />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={pending}
+          onClick={() => setEdit(null)}
+        >
+          Cancel edit
+        </Button>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={pending || !hasVisibleText(edit.content)}
+        >
+          {pending ? "Saving…" : "Save update"}
+        </Button>
+      </div>
+    </form>
+  );
   return (
     <section className="activity" aria-label="Activity">
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
         title="Activity"
+        count={notes.length || undefined}
         caption={
           sourceName && <>Only in ticketd · never sent to {sourceName}</>
         }
-      >
-        <SegmentedControl
-          aria-label="Show activity"
-          value={view}
-          onValueChange={setView}
-          options={[
-            { value: "all", label: "All" },
-            { value: "updates", label: "Updates" },
-          ]}
-        />
-      </SectionHeader>
-      {feedback && (
-        <p role="status" className="activity-muted">
-          {feedback}
-        </p>
-      )}
+        actions={
+          <SegmentedControl
+            aria-label="Show activity"
+            compact
+            value={view}
+            onValueChange={setView}
+            options={[
+              { value: "all", label: "All" },
+              { value: "updates", label: "Updates" },
+            ]}
+          />
+        }
+      />
       {targetMissing === targetId && targetId !== undefined && (
-        <Alert>
+        <Alert size="compact">
           <AlertDescription>
-            This update is no longer available. Refresh updates to see the
-            current activity.
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() => {
-                setTargetMissing(null);
-                void onChanged?.();
-              }}
-            >
-              Refresh updates
-            </Button>
+            This update is no longer available.
           </AlertDescription>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setTargetMissing(null);
+              void onChanged?.();
+            }}
+          >
+            Refresh updates
+          </Button>
         </Alert>
       )}
-      {(error || loadError) && (
-        <Alert tone="error">
-          <AlertDescription>{error || loadError}</AlertDescription>
-        </Alert>
+      {error ? (
+        <FailureAlert size="compact" failure={error} />
+      ) : (
+        loadError && (
+          <FailureAlert
+            size="compact"
+            failure={loadError}
+            onRetry={() => {
+              setLoadError(null);
+              void loadNotes().catch((reason: unknown) =>
+                setLoadError(describeFailure(reason, "load activity")),
+              );
+            }}
+          />
+        )
       )}
-      {!trashed && !composing && !edit && (
-        <button
-          type="button"
-          className="activity-compact-composer"
-          onClick={() => {
-            setComposing(true);
-            setFocusUpdate((count) => count + 1);
-          }}
-        >
-          Write an update…
-        </button>
-      )}
-      {!trashed && (composing || edit) && (
+      {!trashed && (
+        // One frame from the first frame (P16): idle it is a one-line field;
+        // opened, it holds the editor and grows only downward as you type.
         <form
-          ref={setComposer}
+          ref={composerRef}
           className="activity-composer"
-          onSubmit={(event) => void save(event)}
+          data-open={composing || undefined}
+          aria-label="Write an update"
+          onSubmit={(event) => void post(event)}
+          onKeyDown={submitKey}
         >
-          <FieldGroup>
-            <Field data-disabled={pending}>
-              <FieldLabel className="sr-only" asChild>
-                <span>{edit ? "Edit update" : "New update"}</span>
-              </FieldLabel>
+          {composing ? (
+            <>
               <LazyMarkdownEditor
                 attachmentTicketReference={reference}
-                key={edit?.id ?? "new"}
-                recoveryOwner={
-                  edit ? `activity-edit:${ticketId}` : recoveryOwner
-                }
-                label={edit ? "Edit update" : "New update"}
+                recoveryOwner={recoveryOwner}
+                label="New update"
                 placeholder="Write an update…"
-                value={draftText}
-                onChange={(content) =>
-                  edit ? setEdit({ ...edit, content }) : setDraft(content)
-                }
+                value={draft}
+                onChange={setDraft}
                 readOnly={pending}
                 focusRequest={focusUpdate}
+                chromeHost={controlsHost}
                 paragraphAfterQuote
               />
-            </Field>
-          </FieldGroup>
-          {!edit && showDetails && (
-            <Field>
-              <FieldLabel asChild>
-                <span>Details</span>
-              </FieldLabel>
-              <LazyMarkdownEditor
-                attachmentTicketReference={reference}
-                label="Details"
-                recoveryOwner={`${recoveryOwner}:details`}
-                placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
-                value={details}
-                onChange={setDetails}
-                readOnly={pending}
-                autoFocus={focusDetails}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={pending}
-                onClick={() => {
-                  setFocusDetails(false);
-                  updateDraft({ details: null });
-                  try {
-                    localStorage.removeItem(requestKey);
-                  } catch {
-                    /* The retry id is best effort. */
-                  }
-                }}
-              >
-                Remove details
-              </Button>
-            </Field>
-          )}
-          {!edit && support && (
-            <p className="activity-attached">
-              <FileText aria-hidden="true" />
-              <span className="truncate">
-                Attached: {supportTitle || "Document"}
-              </span>
-              <span aria-hidden="true">·</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label="Remove attached Document"
-                onClick={() => setSupport("")}
-              >
-                Remove
-              </Button>
-              <span className="activity-muted">
-                Remove it to write details instead.
-              </span>
-            </p>
-          )}
-          {!edit && picking && (
-            <div
-              onKeyDown={(event) => {
-                if (event.key !== "Escape") return;
-                event.preventDefault();
-                event.stopPropagation();
-                setPicking(false);
-                attachButton.current?.focus();
-              }}
-            >
-              <DocumentPicker
-                onPick={(picked) => {
-                  setSupport(picked.id);
-                  setSupportTitle(picked.heading);
-                  setPicking(false);
-                }}
-              />
-            </div>
-          )}
-          {changed && (
-            <p role="status" className="activity-muted">
-              The saved update changed while you were editing. Your draft is
-              preserved; saving will replace the saved content.
-            </p>
-          )}
-          <div
-            className="activity-actions"
-            data-sticky={(!edit && showDetails) || undefined}
-          >
-            {!edit && !showDetails && compact && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Add details or a Document"
-                  >
-                    <Plus aria-hidden="true" />
-                    Add
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem
-                    disabled={!!support}
-                    onSelect={startDetails}
-                  >
-                    Add details
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!!support}
-                    onSelect={() => setPicking(true)}
-                  >
-                    Attach Document
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {!edit && !showDetails && !compact && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={!!support}
-                title={
-                  support
-                    ? "Remove the attached Document to write details instead"
-                    : undefined
-                }
-                onClick={startDetails}
-              >
-                <Plus aria-hidden="true" />
-                Add details
-              </Button>
-            )}
-            {!edit && !showDetails && !support && !compact && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                ref={attachButton}
-                aria-expanded={picking}
-                className={picking ? "bg-accent" : undefined}
-                onClick={() => setPicking(!picking)}
-              >
-                <FileText aria-hidden="true" />
-                Attach Document
-              </Button>
-            )}
-            <span className="activity-actions-end">
-              {edit ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => setEdit(null)}
-                >
-                  Cancel edit
-                </Button>
-              ) : hasDraft(saved) ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+              {showDetails && (
+                <div className="activity-details">
+                  <span className="activity-details-label">
+                    <span>Details</span>
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon-sm"
+                      size="sm"
                       disabled={pending}
-                      aria-label="Draft actions"
-                    >
-                      <MoreHorizontal aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() => {
-                        clearDraft();
-                        setPicking(false);
-                        setComposing(false);
+                      onClick={() => {
+                        setFocusDetails(false);
+                        updateDraft({ details: null });
+                        try {
+                          localStorage.removeItem(requestKey);
+                        } catch {
+                          /* The retry id is best effort. */
+                        }
                       }}
                     >
-                      Discard draft
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
+                      Remove details
+                    </Button>
+                  </span>
+                  <LazyMarkdownEditor
+                    attachmentTicketReference={reference}
+                    label="Details"
+                    recoveryOwner={`${recoveryOwner}:details`}
+                    placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
+                    value={details}
+                    onChange={setDetails}
+                    readOnly={pending}
+                    autoFocus={focusDetails}
+                  />
+                </div>
+              )}
+              {support && (
+                <div className="activity-attached">
+                  <Badge variant="record">
+                    <FileText aria-hidden="true" />
+                    <span className="truncate">
+                      {supportTitle || "Document"}
+                    </span>
+                    <button
+                      type="button"
+                      data-slot="badge-remove"
+                      aria-label="Remove attached Document"
+                      onClick={() => setSupport("")}
+                    >
+                      <X aria-hidden="true" />
+                    </button>
+                  </Badge>
+                </div>
+              )}
+              <div className="activity-composer-row">
+                <span className="activity-caption">
+                  {hasDraft(saved) ? "Draft saved" : ""}
+                </span>
+                <span ref={setControlsHost} className="activity-controls" />
+                {plus}
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   disabled={pending}
                   onClick={() => {
+                    if (hasDraft(saved)) clearDraft();
                     setPicking(false);
                     setComposing(false);
                   }}
                 >
-                  Cancel
+                  {hasDraft(saved) ? "Discard draft" : "Cancel"}
                 </Button>
-              )}
-              <Button
-                type="submit"
-                size="sm"
-                disabled={pending || !hasVisibleText(draftText)}
-                aria-describedby={
-                  !pending && !hasVisibleText(draftText)
-                    ? `post-hint-${ticketId}`
-                    : undefined
-                }
-              >
-                {pending ? "Saving…" : edit ? "Save update" : "Post update"}
-              </Button>
-            </span>
-          </div>
-          {!pending && !hasVisibleText(draftText) && (
-            <p id={`post-hint-${ticketId}`} className="activity-caption">
-              {edit ? "An update needs some text." : "Write an update to post."}
-            </p>
-          )}
-          {!edit && hasDraft(saved) && (
-            <p className="activity-caption">Draft kept on this device</p>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={pending || !hasText}
+                  aria-describedby={!hasText ? postHintId : undefined}
+                >
+                  {pending ? "Saving…" : "Post update"}
+                  {!pending && (
+                    <Kbd tone="inverted" aria-hidden="true">
+                      {submitHint}
+                    </Kbd>
+                  )}
+                </Button>
+                <span id={postHintId} className="sr-only">
+                  Write an update to post.
+                </span>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="activity-composer-idle"
+              onClick={() => {
+                setComposing(true);
+                setFocusUpdate((count) => count + 1);
+              }}
+            >
+              Write an update…
+            </button>
           )}
         </form>
       )}
+      {edit &&
+        !displayedNotes.some((note) => note.id === edit.id) &&
+        // A recovered edit of an update not on this page is never lost.
+        editForm(edit, edit.original)}
       {loading && entries.length === 0 ? (
         <p className="activity-muted" role="status">
           Loading activity…
         </p>
       ) : entries.length === 0 && !error && !loadError ? (
-        <EmptyState
-          size="inline"
-          plain
-          description="No updates or recorded changes yet."
-        />
+        // The filter can hide the history alone: say what is really empty (DB-21).
+        view === "updates" && history.length > 0 ? (
+          <EmptyState
+            size="inline"
+            plain
+            description="No updates yet."
+            action={
+              <Button
+                variant="link"
+                size="inline"
+                onClick={() => setView("all")}
+              >
+                Show all activity
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            size="inline"
+            plain
+            description="No updates or recorded changes yet."
+          />
+        )
       ) : (
         <Timeline aria-label="Activity timeline">
           {entries.map((item) =>
@@ -1003,150 +1057,96 @@ export function Activity({
                     ? "Selected update"
                     : undefined
                 }
+                data-open={confirmDelete === item.note.id || undefined}
                 header={
+                  // One line: who · when · edited, then Latest (DB-12, DB-18).
                   <span className="activity-author">
                     <strong>{item.note.editing_agent ?? "You"}</strong>
-                    <span>
-                      update ·{" "}
-                      <time
-                        dateTime={item.note.reported_at}
-                        title={formatDateTime(item.note.reported_at)}
-                      >
-                        {relativeDateTime(item.note.reported_at, now)}
-                      </time>
-                    </span>
-                  </span>
-                }
-                actions={
-                  <span className="activity-header-end">
+                    <span aria-hidden="true">·</span>
+                    <Time value={item.note.reported_at} />
+                    {item.note.updated_at !== item.note.reported_at && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <Tooltip
+                          content={`Edited ${formatDateTime(item.note.updated_at)}`}
+                        >
+                          <span tabIndex={0}>edited</span>
+                        </Tooltip>
+                      </>
+                    )}
                     {item.note.id === (newestNoteId ?? latestNoteId) && (
                       <Badge size="sm">Latest</Badge>
                     )}
-                    {item.note.updated_at !== item.note.reported_at && (
-                      <span>Edited {formatDateTime(item.note.updated_at)}</span>
-                    )}
-                    {!trashed && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            disabled={pending}
-                            aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
-                          >
-                            <MoreHorizontal />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          onCloseAutoFocus={(event) => {
-                            // Focus goes to the composer, not back to the menu button.
-                            if (replied.current) {
-                              event.preventDefault();
-                              replied.current = false;
-                              setFocusUpdate((count) => count + 1);
-                            }
-                          }}
-                        >
-                          <DropdownMenuItem
-                            disabled={!!edit}
-                            onSelect={() => reply(item.note.brief)}
-                          >
-                            Reply
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              setEdit({
-                                id: item.note.id,
-                                original: item.note.brief,
-                                content: item.note.brief,
-                              })
-                            }
-                          >
-                            Edit update
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => setConfirmDelete(item.note.id)}
-                          >
-                            Delete update
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
                   </span>
                 }
-              >
-                {confirmDelete === item.note.id && (
-                  <p role="alertdialog" className="activity-confirm">
-                    {item.note.supporting_document_id
-                      ? "Delete update? Its details stay in Documents."
-                      : "Delete update?"}
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
+                actions={
+                  !trashed &&
+                  edit?.id !== item.note.id && (
+                    <UpdateActions
+                      when={formatDateTime(item.note.reported_at)}
                       disabled={pending}
-                      onClick={() => void remove(item.note.id)}
-                    >
-                      Delete update
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setConfirmDelete(null)}
-                    >
-                      Keep update
-                    </Button>
-                  </p>
-                )}
-                <div
-                  {...chatSource(`${reference} · Update`, {
-                    kind: "ticket",
-                    id: ticketId,
-                  })}
-                >
-                  <ClampedBrief>
-                    <MarkdownDocument
-                      source={item.note.brief}
-                      select={select}
-                      revision={revision}
-                    />
-                  </ClampedBrief>
-                </div>
-                {item.note.supporting_document_id && (
-                  <div>
-                    <DetailsLink
-                      info={detailDocuments[item.note.supporting_document_id]}
-                      open={() =>
-                        openDocument?.(item.note.supporting_document_id!)
+                      editing={Boolean(edit)}
+                      confirming={confirmDelete === item.note.id}
+                      hasDetails={Boolean(item.note.supporting_document_id)}
+                      onReply={() => reply(item.note.brief)}
+                      onEdit={() =>
+                        setEdit({
+                          id: item.note.id,
+                          original: item.note.brief,
+                          content: item.note.brief,
+                        })
                       }
+                      onConfirm={(open) =>
+                        setConfirmDelete(open ? item.note.id : null)
+                      }
+                      onDelete={() => void remove(item.note.id)}
+                      repliedRef={replied}
+                      focusComposer={() => setFocusUpdate((count) => count + 1)}
                     />
+                  )
+                }
+              >
+                {edit?.id === item.note.id ? (
+                  // Edit in place: the row's body becomes the editor (DB-08).
+                  editForm(edit, item.note.brief)
+                ) : (
+                  <div
+                    {...chatSource(`${reference} · Update`, {
+                      kind: "ticket",
+                      id: ticketId,
+                    })}
+                  >
+                    <div className="markdown-preview activity-note">
+                      <Clamp>
+                        <MarkdownDocument
+                          source={item.note.brief}
+                          select={select}
+                          revision={revision}
+                        />
+                      </Clamp>
+                    </div>
                   </div>
+                )}
+                {item.note.supporting_document_id && (
+                  <DetailsChip
+                    info={detailDocuments[item.note.supporting_document_id]}
+                    open={() =>
+                      openDocument?.(item.note.supporting_document_id!)
+                    }
+                  />
                 )}
               </CommentRow>
             ) : (
               <EventRow
                 key={`history-${item.index}`}
                 icon={historyIcon(item.entry.kind, item.entry.to_value)}
+                time={<Time value={item.entry.timestamp} format="compact" />}
                 meta={
-                  <>
-                    ·{" "}
-                    <time
-                      dateTime={item.entry.timestamp}
-                      title={formatDateTime(item.entry.timestamp)}
-                    >
-                      {relativeDateTime(item.entry.timestamp, now)}
-                    </time>
-                    {item.entry.editing_agent && (
-                      <>
-                        {" "}
-                        · <span>{attribution(item.entry.editing_agent)}</span>
-                      </>
-                    )}
-                  </>
+                  item.entry.editing_agent && (
+                    <span className="activity-agent">
+                      {attribution(item.entry.editing_agent)}
+                    </span>
+                  )
                 }
               >
                 {item.values.length > 1
@@ -1158,87 +1158,160 @@ export function Activity({
         </Timeline>
       )}
       {more && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => void loadMore()}
-        >
-          Load more activity
-        </Button>
+        <Pager
+          noun="activity"
+          loading={pending}
+          onMore={() => void loadMore()}
+        />
       )}
     </section>
   );
 }
 
-/** The link from an update to its details Document, named by what it holds. */
-/** A long update stays a few lines tall until Show more is chosen. */
-function ClampedBrief({ children }: { children: ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [clipped, setClipped] = useState(false);
-  useLayoutEffect(() => {
-    const element = box.current;
-    if (!element) return;
-    const measure = () => {
-      if (!expanded)
-        setClipped(element.scrollHeight > element.clientHeight + 1);
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [expanded]);
+/**
+ * An update's "…" (Reply, Edit update, Delete update), revealed on row hover
+ * and focus. Delete asks in a small popover anchored to the same "…" (P7).
+ */
+function UpdateActions({
+  when,
+  disabled,
+  editing,
+  confirming,
+  hasDetails,
+  onReply,
+  onEdit,
+  onConfirm,
+  onDelete,
+  repliedRef,
+  focusComposer,
+}: {
+  when: string;
+  disabled: boolean;
+  editing: boolean;
+  confirming: boolean;
+  hasDetails: boolean;
+  onReply: () => void;
+  onEdit: () => void;
+  onConfirm: (open: boolean) => void;
+  onDelete: () => void;
+  repliedRef: React.RefObject<boolean>;
+  focusComposer: () => void;
+}) {
   return (
-    <>
-      <div
-        ref={box}
-        className="markdown-preview activity-note"
-        data-expanded={expanded || undefined}
-      >
-        {children}
-      </div>
-      {(clipped || expanded) && (
-        <Button
-          type="button"
-          variant="link"
-          size="sm"
-          aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
+    <span className="activity-row-actions">
+      <Popover open={confirming} onOpenChange={onConfirm}>
+        <DropdownMenu>
+          <PopoverAnchor asChild>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                type="button"
+                tooltipSide="top"
+                disabled={disabled}
+                label={`Actions for update from ${when}`}
+              >
+                <MoreHorizontal />
+              </IconButton>
+            </DropdownMenuTrigger>
+          </PopoverAnchor>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              // Focus goes to the composer, not back to the menu button.
+              if (repliedRef.current) {
+                event.preventDefault();
+                repliedRef.current = false;
+                focusComposer();
+              }
+            }}
+          >
+            <DropdownMenuItem disabled={editing} onSelect={onReply}>
+              Reply
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={editing} onSelect={onEdit}>
+              Edit update
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => window.setTimeout(() => onConfirm(true), 0)}
+            >
+              Delete update
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <PopoverContent
+          align="end"
+          role="alertdialog"
+          aria-label="Delete this update?"
+          onOpenAutoFocus={(event) => {
+            // Cancel takes focus: a destructive answer is never the default.
+            event.preventDefault();
+            (event.currentTarget as HTMLElement | null)
+              ?.querySelector<HTMLButtonElement>("[data-cancel]")
+              ?.focus();
+          }}
         >
-          {expanded ? "Show less" : "Show more"}
-        </Button>
-      )}
-    </>
+          <p className="activity-confirm-title">Delete this update?</p>
+          <p className="activity-confirm-text">
+            {hasDetails
+              ? "Its details stay in Documents."
+              : "This can't be undone."}
+          </p>
+          <div className="activity-confirm-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-cancel
+              onClick={() => onConfirm(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={disabled}
+              onClick={onDelete}
+            >
+              Delete update
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </span>
   );
 }
 
-function DetailsLink({
+/** An update's details: a Document chip named by what it holds (DB-14). */
+function DetailsChip({
   info,
   open,
 }: {
   info: { heading: string; trashed: boolean; attached: boolean } | undefined;
   open: () => void;
 }) {
-  if (!info)
-    return (
-      <Button type="button" variant="link" onClick={open}>
-        Open details
-      </Button>
-    );
   return (
-    <Button
-      type="button"
-      variant="link"
-      className="activity-details-link"
-      onClick={open}
-    >
-      <span className="truncate">
-        {info.attached ? "Attached" : "Details"} · {info.heading}
-      </span>
-      {info.trashed && <span className="activity-muted">In Trash</span>}
-    </Button>
+    <span className="activity-details-chip">
+      <Badge variant="record" asChild>
+        <button
+          type="button"
+          onClick={open}
+          aria-label={
+            info
+              ? `${info.attached ? "Attached" : "Details"}: ${info.heading}`
+              : "Open details"
+          }
+        >
+          <FileText aria-hidden="true" />
+          <span className="truncate">
+            {info
+              ? `${info.attached ? "Attached" : "Details"} · ${info.heading}`
+              : "Details"}
+          </span>
+        </button>
+      </Badge>
+      {info?.trashed && <Badge size="sm">In Trash</Badge>}
+    </span>
   );
 }

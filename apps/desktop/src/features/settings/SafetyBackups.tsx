@@ -1,24 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { FolderOpen, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
-import { IconButton } from "@/components/ui/icon-button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import { PathText } from "@/components/ui/path-text";
+import { RevealButton } from "@/components/ui/reveal-button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { workspaceClient, type SafetyBackup } from "@/lib/api/workspace";
-import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
-import { revealFile } from "@/lib/reveal";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
   SettingsList,
   SettingsListFooter,
   SettingsRow,
-  SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
 
 const KIND_LABEL: Record<SafetyBackup["kind"], string> = {
@@ -28,13 +24,28 @@ const KIND_LABEL: Record<SafetyBackup["kind"], string> = {
 
 type Listing =
   | { status: "loading" }
-  | { status: "failed"; reason: string }
+  | { status: "failed"; failure: FailureDescription }
   | { status: "ready"; backups: SafetyBackup[] };
 
-/** The safety and pre-migration backups kept next to the workspace. */
-export function SafetyBackups() {
+function listFailure(reason: unknown) {
+  return describeFailure(reason, "list safety backups");
+}
+
+/**
+ * The safety and pre-migration backups kept next to the workspace. Each one
+ * restores through the same review as any other backup: that is how a
+ * restore is undone.
+ */
+export function SafetyBackups({
+  onRestore,
+}: {
+  /** Opens the restore review for this file. */
+  onRestore: (path: string) => void;
+}) {
   const [listing, setListing] = useState<Listing>({ status: "loading" });
-  const [revealFailure, setRevealFailure] = useState("");
+  const [revealFailure, setRevealFailure] = useState<FailureDescription | null>(
+    null,
+  );
   const load = useCallback(async () => {
     setListing({ status: "loading" });
     try {
@@ -43,7 +54,7 @@ export function SafetyBackups() {
         backups: await workspaceClient.safetyBackups(),
       });
     } catch (reason) {
-      setListing({ status: "failed", reason: String(reason) });
+      setListing({ status: "failed", failure: listFailure(reason) });
     }
   }, []);
   useEffect(() => {
@@ -55,41 +66,29 @@ export function SafetyBackups() {
         if (current) setListing({ status: "ready", backups });
       })
       .catch((reason: unknown) => {
-        if (current) setListing({ status: "failed", reason: String(reason) });
+        if (current)
+          setListing({ status: "failed", failure: listFailure(reason) });
       });
     return () => {
       current = false;
     };
   }, []);
-  async function reveal(path: string) {
-    setRevealFailure((await revealFile(path)) ?? "");
-  }
-  const manager = fileManagerName();
   return (
     <SettingsSection
       title="Safety backups"
-      caption="Kept next to the workspace before a restore or a format upgrade, including every retained local attachment file. Restore one the same way as any other backup."
+      caption="Saved next to the workspace before a restore or a format upgrade, with every retained local attachment file. Restore one to undo."
     >
       {listing.status === "failed" ? (
-        <Alert tone="error">
-          <AlertTitle>Could not list safety backups</AlertTitle>
-          <AlertDescription>{listing.reason}</AlertDescription>
-          <AlertActions>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void load()}
-            >
-              Try again
-            </Button>
-          </AlertActions>
-        </Alert>
+        <FailureState
+          size="inline"
+          failure={listing.failure}
+          onRetry={() => void load()}
+        />
       ) : (
         <SettingsList>
           {listing.status === "loading" && (
             <div role="status" aria-label="Listing safety backups">
-              <SettingsRow leading={<SettingsRowTile>{null}</SettingsRowTile>}>
+              <SettingsRow>
                 <Skeleton className="h-2.5 w-45" />
                 <Skeleton className="mt-2 h-2 w-70" />
               </SettingsRow>
@@ -97,11 +96,6 @@ export function SafetyBackups() {
           )}
           {listing.status === "ready" && listing.backups.length === 0 && (
             <SettingsRow
-              leading={
-                <SettingsRowTile>
-                  <ShieldCheck size={20} className="backups-icon-muted" />
-                </SettingsRowTile>
-              }
               title="No safety backups yet"
               description="One appears here the first time ticketd restores a backup or upgrades the workspace."
             />
@@ -110,34 +104,40 @@ export function SafetyBackups() {
             listing.backups.map((backup) => (
               <SettingsRow
                 key={backup.path}
-                leading={
-                  <SettingsRowTile>
-                    <ShieldCheck size={20} />
-                  </SettingsRowTile>
-                }
-                title={KIND_LABEL[backup.kind]}
-                description={
+                title={
                   <>
-                    {formatDateTime(backup.saved_at)}
-                    {" · "}
-                    <code className="backups-file">{backup.path}</code>
+                    <span>{KIND_LABEL[backup.kind]}</span>
+                    <span className="backups-when">
+                      {" · "}
+                      {formatDateTime(backup.saved_at)}
+                    </span>
                   </>
                 }
+                description={<PathText path={backup.path} />}
                 trailing={
-                  <IconButton
-                    label={`Show ${backup.path} in ${manager}`}
-                    onClick={() => void reveal(backup.path)}
-                  >
-                    <FolderOpen aria-hidden="true" />
-                  </IconButton>
+                  <>
+                    <RevealButton
+                      display="icon"
+                      path={backup.path}
+                      subject={backup.path}
+                      onFailure={setRevealFailure}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Restore… ${backup.path}`}
+                      onClick={() => onRestore(backup.path)}
+                    >
+                      Restore…
+                    </Button>
+                  </>
                 }
               />
             ))}
           {revealFailure && (
             <SettingsListFooter>
-              <p role="alert" className="backups-failure">
-                {revealFailure}
-              </p>
+              <FailureAlert size="compact" failure={revealFailure} />
             </SettingsListFooter>
           )}
         </SettingsList>

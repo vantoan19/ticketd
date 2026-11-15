@@ -1,228 +1,272 @@
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Disclosure } from "@/components/ui/disclosure";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import { Pager } from "@/components/ui/pager";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   attachments,
+  type Attachment,
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { AttachmentThumbnail } from "./AttachmentThumbnail";
+import { fileType, purged } from "./file-words";
 import { formatSize } from "./format-size";
 import { usageContext } from "./usage-context";
 
+const PAGE = 50;
+
+/**
+ * Clean up unused files (shell AT-14, set EM-10): one DialogShell md listing
+ * the unused files with their checkboxes on the left and Select all; the
+ * files something still uses fold under "Protected", each with its reason.
+ * The note counts the choice and its size; the primary keeps one label.
+ * Moving them is reversible: the library offers Undo in its status line.
+ */
 export function AttachmentCleanup({
   onClose,
   onChanged,
+  onMoved,
 }: {
   onClose: () => void;
   onChanged: () => void;
+  /** The files moved to quarantine, for the library's "Moved … · Undo". */
+  onMoved?: (files: Attachment[]) => void;
 }) {
   const [rows, setRows] = useState<AttachmentCleanupReview[]>([]);
   const [offset, setOffset] = useState(0);
+  const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [selected, setSelected] = useState<{ id: string; requestId: string }[]>(
-    [],
-  );
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [loadError, setLoadError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [selected, setSelected] = useState<
+    { id: string; requestId: string; file: Attachment }[]
+  >([]);
   useEffect(() => {
     let current = true;
     void attachments
       .cleanupReviews(offset)
       .then((next) => {
-        if (current) {
-          setRows(next);
-          setLoading(false);
-        }
+        if (!current) return;
+        setRows((previous) => (offset === 0 ? next : [...previous, ...next]));
+        setMore(next.length >= PAGE);
+        setLoadError(null);
+        setLoading(false);
       })
       .catch((reason: unknown) => {
-        if (current) {
-          setError(String(reason));
-          setLoading(false);
-        }
+        if (!current) return;
+        setLoadError(describeFailure(reason, "review unused files"));
+        setLoading(false);
       });
     return () => {
       current = false;
     };
-  }, [offset]);
+  }, [offset, attempt]);
+  // Only the first read hides the list; "Show 50 more" keeps it in place.
+  const reviewing = loading && rows.length === 0;
+  const eligible = rows.filter((row) => row.eligible);
+  const kept = rows.filter((row) => !row.eligible);
   async function quarantine() {
     setBusy(true);
-    setError("");
-    let completed = 0;
+    setError(null);
+    const moved: Attachment[] = [];
     try {
       for (const item of selected) {
         await attachments.quarantine(item.id, item.requestId);
-        completed += 1;
+        moved.push(item.file);
         setSelected((previous) => previous.filter((row) => row.id !== item.id));
       }
       onClose();
     } catch (reason) {
-      setError(
-        `${completed ? `${completed} moved to quarantine. ` : ""}${String(reason)}. Remaining files were not confirmed; retry or review them again.`,
-      );
+      const failure = describeFailure(reason, "move the remaining files");
+      setError({
+        ...failure,
+        sentence: `${moved.length ? `${moved.length} moved to quarantine. ` : ""}${failure.sentence} The rest stay where they are.`,
+      });
     } finally {
       setBusy(false);
       onChanged();
+      if (moved.length) onMoved?.(moved);
     }
   }
-  function page(next: number) {
-    setSelected([]);
-    setRows([]);
-    setLoading(true);
-    setError("");
-    setOffset(next);
+  function toggle(row: AttachmentCleanupReview, checked: boolean) {
+    setSelected((previous) =>
+      checked
+        ? [
+            ...previous,
+            {
+              id: row.attachment.id,
+              requestId: crypto.randomUUID(),
+              file: row.attachment,
+            },
+          ]
+        : previous.filter((item) => item.id !== row.attachment.id),
+    );
   }
+  const bytes = selected.reduce(
+    (sum, item) => sum + (item.file.size_bytes ?? 0),
+    0,
+  );
+  const allChosen =
+    eligible.length > 0 &&
+    eligible.every((row) =>
+      selected.some((item) => item.id === row.attachment.id),
+    );
   function fileRow(row: AttachmentCleanupReview) {
+    const file = row.attachment;
     return (
-      <li key={row.attachment.id}>
+      <li key={file.id}>
         <label>
           <input
             type="checkbox"
-            aria-label={`Select ${row.attachment.display_name}`}
+            aria-label={`Select ${file.display_name}`}
             disabled={busy || !row.eligible}
-            checked={selected.some((item) => item.id === row.attachment.id)}
-            onChange={(event) => {
-              if (event.target.checked)
-                setSelected((previous) => [
-                  ...previous,
-                  {
-                    id: row.attachment.id,
-                    requestId: crypto.randomUUID(),
-                  },
-                ]);
-              else
-                setSelected((previous) =>
-                  previous.filter((item) => item.id !== row.attachment.id),
-                );
-            }}
+            checked={selected.some((item) => item.id === file.id)}
+            onChange={(event) => toggle(row, event.target.checked)}
           />
+          <AttachmentThumbnail file={file} size="row" />
           <span>
-            {row.attachment.display_name}
+            {file.display_name}
             <small>
-              {row.attachment.size_bytes != null
-                ? `${formatSize(row.attachment.size_bytes)} · `
-                : ""}
-              {row.attachment.kind === "local_snapshot"
-                ? "Local snapshot"
-                : "External reference"}
+              {[
+                fileType(file.original_filename).word,
+                file.size_bytes != null && formatSize(file.size_bytes),
+                file.kind === "external_reference" && "Google Drive",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </small>
           </span>
         </label>
-        <p>
-          {row.attachment.purge_state === "pending" ||
-          row.attachment.purge_state === "purged"
-            ? row.reason
-            : row.usage.protections.length
-              ? `Protected · ${usageContext(row.usage)}`
-              : row.reason}
-        </p>
-        {row.usage.protections.length > 0 && (
-          <details>
-            <summary>
-              Protected references ({row.usage.protections.length})
-            </summary>
-            <ul>
-              {row.usage.protections.map((use) => (
-                <li key={`${use.kind}:${use.owner}`}>
-                  {usageContext({ ...row.usage, protections: [use] })}
-                </li>
-              ))}
-            </ul>
-          </details>
+        {!row.eligible && (
+          <p className="attachment-cleanup-reason">
+            {purged(file) || !row.usage.protections.length
+              ? row.reason
+              : usageContext(row.usage)}
+          </p>
         )}
       </li>
     );
   }
+  const empty = !reviewing && !loadError && eligible.length === 0;
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
+      title="Clean up unused files"
+      description="Move unused files to quarantine. You can restore them until you delete them permanently."
+      primaryLabel={empty || loadError ? null : "Move to quarantine"}
+      cancelLabel={empty || loadError ? "Close" : "Cancel"}
+      blockedReason={
+        busy
+          ? "Moving files…"
+          : reviewing
+            ? "Reviewing files…"
+            : selected.length
+              ? null
+              : "Choose files to move."
+      }
+      footerNote={`${selected.length} selected · ${formatSize(bytes)}`}
+      busy={busy}
+      error={
+        error && (
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => void quarantine()}
+          />
+        )
+      }
+      onSubmit={() => void quarantine()}
     >
-      <DialogContent
-        className="sm:max-w-170 max-h-dvh overflow-y-auto"
-        showCloseButton={!busy}
-      >
-        <DialogHeader>
-          <DialogTitle>Review unused attachments</DialogTitle>
-          <DialogDescription>
-            Choose files to move out of your active workspace. Eligibility is
-            checked again before cleanup.
-          </DialogDescription>
-        </DialogHeader>
-        <p className="attachment-hint">
-          Local files move to reversible quarantine. They remain in complete
-          backups and continue to occupy disk space until explicitly purged.
-          Remote files are never deleted.
-        </p>
-        {error && <p role="alert">{error}</p>}
-        {loading ? (
-          <p role="status">Reviewing files…</p>
-        ) : (
-          <>
-            <p className="attachment-hint">
-              {rows.filter((row) => row.eligible).length} eligible on this page
-              · {rows.filter((row) => !row.eligible).length} protected or
-              unavailable
-            </p>
-            <ul
-              className="attachment-cleanup-files"
-              aria-label="Eligible local files"
-            >
-              {rows.filter((row) => row.eligible).map(fileRow)}
-            </ul>
-            {!rows.some((row) => row.eligible) && (
-              <p>No eligible files on this page.</p>
-            )}
-            {rows.some((row) => !row.eligible) && (
-              <details className="attachment-cleanup-protected">
-                <summary>
-                  Protected or unavailable (
-                  {rows.filter((row) => !row.eligible).length})
-                </summary>
-                <ul
-                  className="attachment-cleanup-files"
-                  aria-label="Protected or unavailable files"
-                >
-                  {rows.filter((row) => !row.eligible).map(fileRow)}
-                </ul>
-              </details>
-            )}
-            <div className="attachment-actions">
-              <Button
-                variant="ghost"
-                disabled={busy || offset === 0}
-                onClick={() => page(Math.max(0, offset - 50))}
-              >
-                Previous files
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={busy || rows.length < 50}
-                onClick={() => page(offset + 50)}
-              >
-                Next files
-              </Button>
-            </div>
-          </>
-        )}
-        <div className="attachment-actions attachment-cleanup-footer">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            disabled={busy || loading || !selected.length}
-            onClick={() => void quarantine()}
-          >
-            {busy ? "Moving files…" : "Move to quarantine"}
-          </Button>
+      {loadError ? (
+        <FailureState
+          failure={loadError}
+          onRetry={() => {
+            setLoading(true);
+            setAttempt((value) => value + 1);
+          }}
+        />
+      ) : reviewing ? (
+        <div role="status" aria-label="Reviewing files" className="grid gap-3">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-2/3" />
         </div>
-      </DialogContent>
-    </Dialog>
+      ) : (
+        <>
+          {empty ? (
+            <EmptyState
+              size="inline"
+              plain
+              title="No unused files."
+              description="Files no ticket or Document uses show up here."
+            />
+          ) : (
+            <>
+              <label className="attachment-cleanup-all">
+                <input
+                  type="checkbox"
+                  aria-label="Select all unused files"
+                  disabled={busy}
+                  checked={allChosen}
+                  onChange={(event) =>
+                    setSelected(
+                      event.target.checked
+                        ? eligible.map((row) => ({
+                            id: row.attachment.id,
+                            requestId:
+                              selected.find(
+                                (item) => item.id === row.attachment.id,
+                              )?.requestId ?? crypto.randomUUID(),
+                            file: row.attachment,
+                          }))
+                        : [],
+                    )
+                  }
+                />
+                Select all
+              </label>
+              <ul
+                className="attachment-cleanup-files"
+                aria-label="Unused files"
+              >
+                {eligible.map(fileRow)}
+              </ul>
+            </>
+          )}
+          {kept.length > 0 && (
+            <Disclosure label="Protected" count={kept.length}>
+              <ul
+                className="attachment-cleanup-files"
+                aria-label="Protected files"
+              >
+                {kept.map(fileRow)}
+              </ul>
+            </Disclosure>
+          )}
+          {more && (
+            <Pager
+              more={PAGE}
+              noun="files"
+              loading={loading}
+              onMore={() => {
+                setLoading(true);
+                setOffset((value) => value + PAGE);
+              }}
+            />
+          )}
+        </>
+      )}
+    </DialogShell>
   );
 }

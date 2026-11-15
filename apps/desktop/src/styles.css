@@ -101,8 +101,16 @@
   --window-close-foreground: #ffffff;
   --error-surface: #fef2f2;
   --error-foreground: #991b1b;
+  /* Menus, popovers, selects and command lists. Dialogs and sheets stay on
+     --surface (they sit over a scrim); in dark, floating overlays lift one
+     step above the panel so they never share its fill. */
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
+  /* Hover on selectable rows and cards: quieter than the --accent selection. */
+  --hover: #f7f7f7;
+  /* The tooltip chip: dark in both themes. */
+  --tooltip: #171717;
+  --tooltip-foreground: #fff;
   --radius: 6px;
   --radius-segment: 4px;
   --radius-panel: 12px;
@@ -166,9 +174,12 @@
   color-scheme: dark;
   --background: #0a0a0a;
   --surface: #171717;
+  --popover: #1f1f1f;
+  --hover: #1f1f1f;
+  --tooltip: #2e2e2e;
+  --tooltip-foreground: #ededed;
   --link-foreground: #52aeff;
   --recessed: #1a1a1a;
-  --code-block: #171717;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
   --disabled-foreground: #8a8a8a;
@@ -189,8 +200,25 @@
   --control-boundary: #6b6b6b;
   --error-surface: #2b1414;
   --error-foreground: #fecaca;
-  --destructive: #fecaca;
+  /* Destructive labels on neutral surfaces: 6.2:1 on #171717, 5.6:1 on the
+     #1f1f1f popover. Text on --error-surface keeps --error-foreground. */
+  --destructive: #ff6166;
   --shadow-border-base: 0 0 0 1px #ffffff24;
+  /* The reference's black-alpha drop layers vanish on #0a0a0a and #171717, so
+     dark overlays carry deeper ones. The 14% ring comes from
+     --shadow-border-base (and gives the dark tooltip chip its edge). */
+  --shadow-tooltip:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    var(--shadow-background-border);
+  --shadow-menu:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    var(--shadow-background-border);
+  --shadow-large:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    var(--shadow-background-border);
+  --shadow-modal:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    0 24px 48px -12px #000000a6, var(--shadow-background-border);
   --status-ready: #45a557;
   --status-checked: #45a557;
   --status-blocked: #ff990a;
@@ -241,68 +269,38 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* One control for a canvas: zoom out, percentage, zoom in, Fit
-   (components/ui/zoom-control.tsx). */
-.zoom-control {
-  height: 32px;
-  display: flex;
-  align-items: center;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  font-size: var(--text-caption);
-  color: var(--muted-foreground);
-}
-.zoom-control button {
-  height: 32px;
-  min-width: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--radius);
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.zoom-control button:hover {
-  color: var(--foreground);
-  background: var(--accent);
-}
-.zoom-control button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.zoom-control svg {
-  width: 14px;
-  height: 14px;
-}
-.zoom-control > span:not(.zoom-control-rule) {
-  width: 44px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.zoom-control > span[role="status"] {
-  width: auto;
-  padding: 0 8px;
-  white-space: nowrap;
-}
-.zoom-control-rule {
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-}
-
 @layer base {
   * {
     box-sizing: border-box;
     border-color: var(--border);
   }
+  /* The base text role. The 16px root stays for rem maths; text that no
+     class sizes reads at the 14/20 working size, never at 16px. Portalled
+     overlays are outside body's flow of classes, so they set it too.
+     --text-reading stays opt-in. */
+  body,
+  .ui-dialog,
+  .ui-sheet,
+  .ui-popover,
+  .ui-menu {
+    font-size: var(--text-ui);
+    line-height: var(--text-ui-line);
+  }
   body {
     margin: 0;
+  }
+  /* Prose wraps without one-word last lines; short headings balance. Only the
+     style longhand is set, so nowrap and truncation are left alone. */
+  p,
+  figcaption,
+  blockquote {
+    text-wrap-style: pretty;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap-style: balance;
   }
   button {
     cursor: pointer;
@@ -349,13 +347,14 @@
     font-variant-ligatures: none;
     font-feature-settings: normal;
   }
-  button:focus-visible,
-  summary:focus-visible,
-  a:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
+  /* Keyboard focus is an outline (DESIGN.md section 4), never a box-shadow,
+     so it cannot erase a control's edge or an overlay's elevation. Rows inside
+     scrollers draw it inset; text fields draw the 1px input focus below. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
-  input:not([type="checkbox"]),
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
   select,
   textarea {
     min-width: 0;
@@ -368,11 +367,16 @@
     line-height: 20px;
     padding: 8px 12px;
   }
-  input:not([type="checkbox"]),
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
   select {
     height: 40px;
   }
-  input:focus-visible,
+  input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="file"]
+    ):focus-visible,
   textarea:focus-visible,
   select:focus-visible {
     outline: 1px solid var(--input-focus);
@@ -387,6 +391,10 @@
   select option {
     background: var(--surface);
   }
+  /* A placeholder is an example, not content (T6). */
+  ::placeholder {
+    color: var(--disabled-foreground);
+  }
 }
 
 .ui-button {
@@ -397,15 +405,13 @@
   line-height: 14px;
 }
 .ui-button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ui-navigation-button:focus-visible {
   /* Navigation rows touch their scroll container's edges and each other.
      Keep focus inside the row so clipping and selected neighbors cannot hide it. */
-  outline: 2px solid var(--ring);
   outline-offset: -2px;
-  box-shadow: none;
 }
 .ui-button-primary {
   color: var(--primary-foreground);
@@ -437,20 +443,31 @@
   background: transparent;
 }
 .ui-button-link {
-  color: var(--foreground);
+  color: var(--link-foreground);
   background: transparent;
   text-underline-offset: 4px;
 }
 .ui-button-link:hover {
   text-decoration: underline;
 }
+/* Pressed toggles and open triggers: the accent fill with primary text, never
+   the inverted primary fill (DESIGN.md section 6, state matrix). */
+.ui-button-outline[aria-pressed="true"],
+.ui-button-ghost[aria-pressed="true"],
+.ui-button-outline[data-state="open"],
+.ui-button-ghost[data-state="open"] {
+  color: var(--foreground);
+  background: var(--accent);
+}
+/* Destructive (DESIGN.md section 11): the error surface with the destructive
+   label at rest, and a 1px destructive ring on hover. Never the inverted
+   primary pair, so it cannot read as the ordinary submit. */
 .ui-button-destructive {
   color: var(--destructive);
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
+  background: var(--error-surface);
 }
 .ui-button-destructive:hover {
-  background: var(--error-surface);
+  box-shadow: inset 0 0 0 1px var(--destructive);
 }
 .ui-button:disabled {
   color: var(--disabled-foreground);
@@ -528,6 +545,21 @@
   [data-slot="choice-tile-radio"] {
   box-shadow: inset 0 0 0 5px var(--interactive);
 }
+/* Dark: --surface is darker than the --recessed track, so the chosen segment
+   rises on --accent instead. */
+:where(:root[data-theme="dark"], [data-theme-preview="dark"])
+  [data-slot="segmented-control"]:not([data-theme-preview="light"] *)
+  [role="radio"][data-state="checked"] {
+  background: var(--accent);
+}
+/* A disabled switch keeps its shape at full strength: a recessed track and a
+   disabled-foreground thumb, no opacity. */
+[data-slot="switch"]:disabled {
+  background: var(--recessed);
+}
+[data-slot="switch"]:disabled > [data-slot="switch-thumb"] {
+  background: var(--disabled-foreground);
+}
 [data-slot="command-block"] {
   box-shadow: inset 0 0 0 1px var(--border);
 }
@@ -548,11 +580,13 @@
   box-shadow: inset 0 0 0 1px var(--border);
 }
 .ui-select:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
+/* A placeholder is an example, not content (T6): it reads quieter than any
+   value. */
 .ui-input::placeholder {
-  color: var(--muted-foreground);
+  color: var(--disabled-foreground);
 }
 .ui-input[aria-invalid="true"],
 .ui-select[aria-invalid="true"] {
@@ -564,11 +598,13 @@
   background: var(--recessed);
 }
 .ui-popover,
-.ui-menu,
-.ui-dialog {
+.ui-menu {
   color: var(--popover-foreground);
   background: var(--popover);
   border: 0;
+  border-radius: var(--radius-panel);
+}
+.ui-dialog {
   border-radius: var(--radius-panel);
 }
 .ui-popover {
@@ -588,8 +624,8 @@
 }
 .ui-dialog,
 .ui-sheet {
-  color: var(--popover-foreground);
-  background: var(--popover);
+  color: var(--foreground);
+  background: var(--surface);
   border: 0;
   box-shadow: var(--shadow-modal);
 }
@@ -598,6 +634,10 @@
 }
 .ui-sheet[data-side="right"] {
   border-radius: var(--radius-panel) 0 0 var(--radius-panel);
+}
+/* A navigation sheet: at most 280px, or the window less 32px (section 5). */
+.ui-sheet[data-size="nav"] {
+  width: min(280px, calc(100vw - 32px));
 }
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
@@ -634,24 +674,60 @@ body:has([data-slot="dialog-overlay"])
   background: var(--accent);
   color: var(--foreground);
 }
-.ui-select[data-variant="ghost"]:focus-visible {
-  box-shadow: var(--focus-ring);
-}
 .ui-section-title {
   font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
 }
+/* A choice list's search row (P3): 32px, a hairline under it. */
 [data-slot="command-input-wrapper"] {
-  height: 40px;
+  height: 32px;
+  padding-inline: 8px;
   border: 0;
-  box-shadow: 0 1px var(--border);
+  box-shadow: 0 1px var(--group-hairline);
 }
 [data-slot="command-input"] {
-  height: 40px;
+  height: 32px;
   background: transparent;
   box-shadow: none;
+}
+[data-slot="command-item"][data-size="tall"] {
+  min-height: 36px;
+}
+/* A disabled menu row's reason: a readable line under the label, aligned
+   with the label when the row has an icon (P3). */
+[data-slot="dropdown-menu-item"][data-reason] {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+[data-slot="dropdown-menu-item-reason"] {
+  flex-basis: 100%;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+[data-slot="dropdown-menu-item"]:has(> svg:first-child)
+  > [data-slot="dropdown-menu-item-reason"] {
+  padding-left: 24px;
+}
+/* A popover holding a choice list or picker (P3). */
+.ui-popover[data-variant="list"] {
+  width: max(var(--radix-popover-trigger-width), 280px);
+  padding: 4px;
+}
+/* A row of icon buttons over content (the editor's selection bubble). */
+.ui-popover[data-variant="bar"] {
+  display: flex;
+  padding: 4px;
+  box-shadow: var(--shadow-menu);
+}
+/* Menus and select lists stop at 320px and scroll inside (P3). */
+[data-slot="select-content"] {
+  max-height: min(320px, var(--radix-select-content-available-height));
+}
+[data-slot="dropdown-menu-content"] {
+  max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
 }
 [data-slot="command-item"],
 [data-slot="select-item"],
@@ -697,6 +773,18 @@ body:has([data-slot="dialog-overlay"])
 .ui-notice-error .ui-notice-description {
   color: var(--error-foreground);
 }
+/* A notice that is a section of a surface with its own ring. */
+.ui-notice-flat,
+.ui-notice-error.ui-notice-flat {
+  gap: 8px;
+  padding-block: 12px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.ui-notice-error.ui-notice-flat .ui-notice-description {
+  color: var(--muted-foreground);
+}
 .ui-notice-compact {
   flex-direction: row;
   align-items: center;
@@ -707,6 +795,198 @@ body:has([data-slot="dialog-overlay"])
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.ui-notice-title-inline {
+  font-weight: 500;
+}
+
+/* Failure Details: raw text in 12px mono with Copy details, only on request. */
+.ui-failure-details {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-failure-details pre {
+  width: 100%;
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ui-failure-details-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+
+/* A region that could not load: the empty-state block with an alert icon. */
+.ui-failure-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 360px;
+  margin: 48px auto 0;
+  padding: 0 16px;
+  text-align: center;
+  text-wrap: pretty;
+}
+.ui-failure-state-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.ui-failure-state-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.ui-failure-state-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.ui-failure-state-sentence {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-failure-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ui-failure-state-actions .ui-failure-details {
+  align-items: center;
+  text-align: left;
+}
+
+/* Startup recovery: the workspace could not be opened (DESIGN.md section 12). */
+.recovery-screen {
+  display: grid;
+  min-height: 100vh;
+  padding: 48px 16px;
+  background: var(--background);
+  color: var(--foreground);
+  place-items: start center;
+}
+/* One 520px column, 120px from the top: wordmark, tile, title, sentence, the
+   file, Retry, then Details on a line of its own. */
+.recovery-screen-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 520px;
+  margin-top: 72px;
+  text-wrap: pretty;
+}
+.recovery-wordmark {
+  font-size: var(--text-wordmark);
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: -0.3px;
+}
+.recovery-screen-body > [data-slot="icon-tile"] {
+  margin-top: 24px;
+}
+.recovery-title {
+  margin-top: 16px;
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: var(--text-title-line);
+  letter-spacing: -0.6px;
+}
+.recovery-sentence {
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.recovery-path {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  gap: 4px;
+  margin-top: 24px;
+  padding: 10px 8px 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.recovery-path [data-slot="path-text"] {
+  flex: 1;
+  min-width: 0;
+}
+.recovery-path-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+.recovery-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* The workspace band: one 40px line for workspace-level state, at the top of the content panel. */
+.workspace-band {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 40px;
+  padding: 4px 8px 4px 16px;
+  background: var(--recessed);
+  box-shadow: inset 0 -1px 0 var(--border);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.workspace-band-message {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Dense rows and the rail: "● Not saved · Retry" on one caption line. */
+.ui-failure-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 
 /* Card: surface, header band, body and recessed footer. */
@@ -723,7 +1003,8 @@ body:has([data-slot="dialog-overlay"])
   gap: 8px;
   min-height: 40px;
   padding: 4px 4px 4px 16px;
-  background: var(--background);
+  /* A band inside an elevated surface is recessed, never the canvas. */
+  background: var(--recessed);
   box-shadow: inset 0 -1px 0 0 var(--border);
   color: var(--muted-foreground);
   font-size: var(--text-caption);
@@ -781,7 +1062,7 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-event-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   min-height: 28px;
   color: var(--muted-foreground);
@@ -811,8 +1092,20 @@ body:has([data-slot="dialog-overlay"])
   color: var(--foreground);
   font-weight: 500;
 }
+/* The sentence starts on the badge's midline; a second line hangs under it. */
 .ui-event-row-text {
+  flex: 1 1 auto;
   min-width: 0;
+  padding-top: 4px;
+}
+/* The time column: right-aligned, never wrapped (detB DB-13). */
+.ui-event-row-time {
+  flex: none;
+  padding-top: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
 }
 .ui-event-row-meta {
   margin-inline-start: 6px;
@@ -833,10 +1126,11 @@ body:has([data-slot="dialog-overlay"])
   gap: 4px;
   min-width: 0;
 }
+/* One line at any width: the meta truncates, the actions keep their slot (DB-12). */
 .ui-comment-row-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: space-between;
   gap: 4px 8px;
   min-height: 28px;
@@ -889,8 +1183,8 @@ body:has([data-slot="dialog-overlay"])
   align-items: center;
 }
 .ui-badge:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ui-badge svg {
   width: 12px;
@@ -1114,16 +1408,18 @@ html[data-window-bar] {
 }
 .skip-link:focus {
   transform: none;
-  outline: none;
-  box-shadow: var(--shadow-menu), var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .sidebar {
   width: 224px;
   flex: none;
   display: flex;
   flex-direction: column;
-  /* The nav column is 208px wide, 8px from the window edge (design frame A). */
-  padding: 0 8px 12px 8px;
+  /* The nav column is 208px wide, 8px from the window edge (design frame A).
+     8px on top, as the content panel, so the brand row shares the pane
+     header's midline. */
+  padding: 8px 8px 12px 8px;
   background: var(--background);
   color: var(--foreground);
 }
@@ -1186,9 +1482,8 @@ html[data-window-bar] {
   text-underline-offset: 2px;
 }
 .sidebar-source-line:focus-visible {
-  border-radius: var(--radius-segment);
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .brand {
   display: flex;
@@ -1206,9 +1501,27 @@ html[data-window-bar] {
 .brand strong + button {
   margin-left: auto;
 }
-.new-ticket {
-  width: 32px;
-  padding: 0;
+/* New ticket in one click; the chevron beside it holds the other ways to create. */
+.new-ticket-split {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.new-ticket-split > button:last-child {
+  width: 20px;
+}
+.new-ticket-split > button:last-child svg {
+  width: 14px;
+  height: 14px;
+}
+/* New ticket in one click, the other ways to create behind a 20px chevron. */
+.new-ticket-split {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.new-ticket-split > [data-slot="button"]:last-child {
+  width: 20px;
 }
 .sidebar-nav {
   display: grid;
@@ -1252,7 +1565,8 @@ html[data-window-bar] {
   color: var(--muted-foreground);
 }
 .sidebar-nav button:hover {
-  background: var(--accent);
+  /* Hover is quieter than the current row (--accent). */
+  background: var(--recessed);
   color: var(--foreground);
 }
 .sidebar-nav button[data-active="true"] {
@@ -1283,24 +1597,28 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-weight: 500;
   line-height: 16px;
 }
-/* The Projects page is open: its heading reads as the selected row. */
-.sidebar-heading[data-active] {
+/* Projects and Plans headings open their page: the nav row's hover and
+   current fills on the label, with the text where it rests (no shift). */
+.sidebar-heading:has(.sidebar-heading-link) {
+  padding-left: 0;
+}
+.sidebar-heading-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
   height: 28px;
-  padding-left: 4px;
+  padding: 0 12px;
   border-radius: var(--radius);
-  background: var(--sidebar-accent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.sidebar-heading-link:hover {
+  background: var(--recessed);
   color: var(--foreground);
 }
-.sidebar-heading button {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-}
-.sidebar-heading button:hover {
-  background: var(--recessed);
+.sidebar-heading-link[aria-current="page"] {
+  background: var(--accent);
   color: var(--foreground);
 }
 .sidebar-heading + .sidebar-nav {
@@ -1319,7 +1637,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .sidebar[data-collapsed] .brand {
   flex-direction: column;
   height: auto;
-  padding: 8px 0;
+  padding: 0 0 8px;
 }
 .sidebar[data-collapsed] .brand strong {
   display: none;
@@ -1336,29 +1654,47 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   gap: 0;
   font-size: 0;
 }
+/* The dot alone, centred on the icon's top-right corner, cut out of the row
+   by a 2px ring in the row's own fill (DESIGN.md section 6). */
 .sidebar[data-collapsed] .sidebar-count {
   position: absolute;
   top: 6px;
   right: 6px;
+  display: flex;
   margin: 0;
   gap: 0;
   font-size: 0;
+  line-height: 0;
 }
 .sidebar[data-collapsed] .sidebar-count > :not([data-slot="status-dot"]) {
   display: none;
 }
-/* A heading becomes a divider. One that carries a manage menu keeps its button,
-   so the Projects and Plans pages stay one click away. */
-.sidebar[data-collapsed] .sidebar-heading {
-  justify-content: center;
-  margin: 10px 0 0;
-  padding: 0;
-  font-size: 0;
+.sidebar[data-collapsed] .sidebar-count [data-slot="status-dot"] {
+  box-shadow: 0 0 0 2px var(--sidebar);
 }
-.sidebar[data-collapsed] .sidebar-heading:not(:has(button)) {
+.sidebar[data-collapsed] .sidebar-nav button:hover [data-slot="status-dot"] {
+  box-shadow: 0 0 0 2px var(--recessed);
+}
+.sidebar[data-collapsed]
+  .sidebar-nav
+  button[data-active="true"]
+  [data-slot="status-dot"] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+/* One line between groups: work views │ Projects │ Context │ Plans. */
+.sidebar[data-collapsed] .sidebar-group::before {
+  content: "";
+  display: block;
   height: 1px;
   margin: 10px 8px;
   background: var(--border);
+}
+.sidebar[data-collapsed] .new-ticket-split {
+  flex-direction: column;
+}
+.sidebar[data-collapsed] .new-ticket-split > button:last-child {
+  width: 32px;
+  height: 20px;
 }
 .sidebar[data-collapsed] .sidebar-sources {
   align-items: center;
@@ -1398,12 +1734,20 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .content-panel:focus {
   outline: none;
 }
-.mobile-nav-bar {
-  display: flex;
-  align-items: center;
-  height: 48px;
+/* The narrow window's navigation button in a header's leading slot, with what
+   waits in the sheet as a dot on its corner, cut out by the panel's fill. */
+.shell-nav {
+  position: relative;
+  display: inline-flex;
   flex: none;
-  padding-inline: 8px;
+  align-self: center;
+}
+.shell-nav > [data-slot="status-dot"] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
 }
 .icon-button {
   display: inline-flex;
@@ -1418,10 +1762,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .icon-button:hover {
   background: var(--accent);
   color: var(--foreground);
-}
-.list-refresh {
-  margin-left: auto;
-  color: var(--muted-foreground);
 }
 .ticket-workspace {
   display: flex;
@@ -1455,43 +1795,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   overflow-x: hidden;
   overflow-y: auto;
 }
-.list-header {
-  box-shadow: 0 1px 0 0 var(--header-boundary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 48px;
-  padding: 0 8px 0 16px;
-}
-.management h1 {
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
-  color: var(--foreground);
-}
-.list-header h1 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
-}
-.list-header p {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.management > p {
-  margin-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.list-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 0;
+/* Keeps the Projects page mounted while hidden; ManagementPage lays it out. */
+.management-host:not([hidden]) {
+  display: contents;
 }
 .search {
   display: flex;
@@ -1520,22 +1826,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .search input:focus-visible {
   outline: none;
-}
-.filters-content {
-  width: 320px;
-}
-.filters-content fieldset {
-  padding: 0;
-  border: 0;
-}
-.filters-content legend {
-  margin-bottom: 16px;
-  font-size: var(--text-ui);
-  font-weight: 500;
-}
-.ticket-list > p {
-  color: var(--muted-foreground);
-  padding: 24px;
 }
 .pagination {
   display: flex;
@@ -1568,12 +1858,18 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0 4px;
-  min-height: 48px;
-  padding: 0 8px 0 20px;
+  height: 48px;
+  /* The reference starts on the document's 32px gutter; the header never
+     wraps and never grows a row (feedback goes to the status line). */
+  padding: 0 8px 0 32px;
   background: var(--surface);
   color: var(--muted-foreground);
+}
+/* Nothing selected: no band over the empty pane, only the hint below. */
+.detail-header[data-empty] {
+  box-shadow: none;
 }
 .detail-header h2 {
   font-size: var(--text-ui);
@@ -1592,7 +1888,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   align-items: center;
   gap: 4px;
 }
-/* The reading column and the property rail. Below 652px the rail is
+/* The reading column and the property rail. Below 760px the rail is
    replaced by a chip bar under the title; see properties.css. */
 .detail-content {
   min-height: 100%;
@@ -1607,7 +1903,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   min-width: 0;
   padding: 24px 32px 48px;
 }
-@container ticket-detail (min-width: 652px) {
+@container ticket-detail (min-width: 760px) {
   /* Side by side, the document and the rail each scroll on their own. */
   .detail-scroll {
     display: flex;
@@ -1706,28 +2002,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .ticket-workspace.expanded #detail {
   flex: 1 1 0 !important;
 }
-#detail-heading:focus-visible,
-#tickets-heading:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 4px;
-}
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 64px 24px;
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-}
-.empty-state strong {
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
-  letter-spacing: -0.28px;
-}
 /* One content gutter for the management pages (Projects, Plans, Documents):
    their titles start at the same x, whatever each column's width. */
 :root {
@@ -1737,18 +2011,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   :root {
     --page-gutter: 16px;
   }
-}
-.management {
-  width: 100%;
-  max-width: 1200px;
-  padding: 32px var(--page-gutter) 48px;
-  overflow-y: auto;
-}
-.management h2 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
 }
 .create-panel {
   width: min(720px, calc(100vw - 32px));
@@ -1780,13 +2042,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .create-actions small {
   color: var(--muted-foreground);
-}
-.global-error {
-  flex: none;
-  padding: 12px 24px;
-  background: var(--error-surface);
-  color: var(--error-foreground);
-  font-size: var(--text-ui);
 }
 
 /* Description and note content share a readable document surface. */
@@ -1831,22 +2086,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .markdown-document li.task-list-item {
   list-style: none;
   margin-left: -20px;
-}
-.markdown-document .context-link {
-  display: inline;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  text-align: inherit;
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: var(--interactive);
-  text-underline-offset: 4px;
-  cursor: pointer;
-}
-.markdown-document .context-link:hover {
-  color: var(--interactive);
 }
 .markdown-document li + li {
   margin-top: 4px;
@@ -1898,7 +2137,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 /* One monochrome block: the language caption and the icon copy button share a
    32px row above the code (no second tone, no syntax colors). */
 .markdown-code-block {
-  background: var(--code-block, var(--recessed));
+  background: var(--recessed);
 }
 .markdown-code-block pre {
   padding: 0 12px 12px;
@@ -1928,6 +2167,52 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .markdown-block-toolbar > :first-child {
   margin-right: auto;
+}
+/* BlockHeader: the label at the left, icon buttons at the right (P16). */
+.markdown-block-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* A read-only checklist box: drawn, never a disabled control (detA DS-08). */
+.markdown-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  border-radius: var(--radius-segment);
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+  color: var(--foreground);
+}
+.markdown-check[data-checked] {
+  background: var(--recessed);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.markdown-check svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 3;
+}
+/* An attachment picture in the text: up to the column's width; opens the preview. */
+.markdown-image {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  vertical-align: top;
+  cursor: zoom-in;
+}
+.markdown-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-border-base);
 }
 .markdown-table-scroll {
   overflow-x: auto;
@@ -1961,19 +2246,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   gap: 2px;
 }
 .mermaid-block > .markdown-block-toolbar {
-  min-height: 36px;
-  padding: 0 4px 0 12px;
   background: var(--recessed);
   box-shadow: 0 1px 0 0 var(--border);
-}
-.mermaid-block > .markdown-block-toolbar button {
-  height: 28px;
-  gap: 6px;
-  padding: 0 8px;
-}
-.mermaid-block > .markdown-block-toolbar button svg {
-  width: 14px;
-  height: 14px;
 }
 .mermaid-canvas {
   width: 100%;
@@ -1987,10 +2261,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   display: block;
   max-width: 100%;
   height: auto;
-}
-.mermaid-expanded {
-  width: calc(100vw - 48px);
-  max-width: none;
 }
 .mermaid-expanded .mermaid-viewer {
   max-height: 70vh;
@@ -2036,9 +2306,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   }
 }
 @media (max-width: 440px) {
-  .management {
-    padding-inline: 16px;
-  }
   .detail-header,
   .detail-document,
   .ticket-properties {
@@ -2046,12 +2313,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   }
   .detail-header {
     gap: 4px;
-  }
-  .list-header {
-    padding-inline: 16px 8px;
-  }
-  .list-controls {
-    padding-inline: 16px;
   }
   .create-actions {
     flex-wrap: wrap;
@@ -2078,11 +2339,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .ui-input:focus-visible {
   box-shadow: none;
   outline-offset: 0;
-}
-#detail-heading:focus-visible {
-  outline: none;
-  border-radius: var(--radius);
-  box-shadow: var(--focus-ring);
 }
 .pagination {
   padding: 12px 8px;
@@ -2119,25 +2375,55 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   list-style: none;
 }
 
+/* Dialogs are anchored at the top and grow downward, so a result, a note or
+   a typed search never re-centres them (DESIGN.md section 11). */
 .ui-dialog {
-  max-height: calc(100dvh - 32px);
+  --dialog-top: max(48px, 12vh);
+  top: var(--dialog-top);
+  left: 50%;
+  translate: -50% 0;
+  width: min(512px, calc(100vw - 32px));
+  max-height: calc(100dvh - var(--dialog-top) - 16px);
   overflow-y: auto;
 }
+.ui-dialog[data-size="sm"] {
+  width: min(480px, calc(100vw - 32px));
+}
+.ui-dialog[data-size="md"] {
+  width: min(640px, calc(100vw - 32px));
+}
+.ui-dialog[data-size="lg"] {
+  width: min(920px, calc(100vw - 32px));
+}
+.ui-dialog[data-size="viewer"] {
+  top: 50%;
+  translate: -50% -50%;
+  width: min(1120px, calc(100vw - 64px));
+  height: min(800px, calc(100dvh - 64px));
+  max-height: none;
+}
 
-.list-header:has(.source-refresh:not(:empty)) > p {
-  display: none;
+/* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
+   240px, no arrow. */
+.ui-tooltip {
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  background: var(--tooltip);
+  color: var(--tooltip-foreground);
+  box-shadow: var(--shadow-tooltip);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
 }
-.list-header .source-refresh {
-  order: -1;
-  max-width: 130px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.ui-tooltip[data-state="delayed-open"],
+.ui-tooltip[data-state="instant-open"] {
+  animation: tooltip-enter 0.15s var(--motion-swift);
 }
-.list-header h1 {
-  order: -2;
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+  }
 }
-
 /* A tooltip only labels; its positioning wrapper must not cover the controls
    beside the trigger (it hid "Clear filters" after the search popover closed). */
 [data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
@@ -2145,7 +2431,10 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 
 /* After a pointer interaction controls show no focus ring (see
-   useInputModality); text fields keep their outline so typing stays visible. */
+   useInputModality); text fields keep their outline so typing stays visible.
+   Focus is drawn with outline only, so this clears outline and nothing else:
+   a menu, select or outline button focused by script after a click keeps its
+   box-shadow edge and elevation (shell SH-01). */
 html[data-input="pointer"]
   :is(
     button,
@@ -2162,22 +2451,33 @@ html[data-input="pointer"]
   ):focus-visible,
 html[data-input="pointer"] .ticket-rows li:has(.ticket-row:focus-visible),
 html[data-input="pointer"] .sidebar-nav button:focus-visible {
-  box-shadow: none;
   outline: none;
 }
-/* A dialog opened by a click autofocuses its first control. When that is a
-   Picker the rule above would strip its only edge, so it keeps the outline. */
-html[data-input="pointer"]
-  .ui-select.ui-picker:focus-visible:where(
-    :not([aria-invalid="true"], :disabled)
+/* Focus moved by script to a container or heading (a pane, a menu or dialog
+   frame, the list title after a bulk change, a mention target) never rings:
+   nobody pressed a key to put it there. Controls with tabindex -1 (roving
+   rows, tabs, menu items) still ring when the keyboard reaches them. */
+[tabindex="-1"]:focus:not(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="link"],
+    [role="tab"],
+    [role="radio"],
+    [role="checkbox"],
+    [role="switch"],
+    [role="option"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="treeitem"],
+    [role="gridcell"]
   ) {
-  box-shadow: inset var(--shadow-border-base);
-}
-html[data-theme="dark"][data-input="pointer"]
-  .ui-select.ui-picker:focus-visible:where(
-    :not([aria-invalid="true"], :disabled)
-  ) {
-  box-shadow: inset 0 0 0 1px var(--control-boundary);
+  outline: none;
 }
 .rail-trash-note {
   display: flex;
@@ -2209,54 +2509,37 @@ html[data-theme="dark"][data-input="pointer"]
   cursor: default;
 }
 
-/* Every dialog shell keeps its footer inside the viewport: a tall body
-   (an alert, a long review) scrolls instead of pushing the footer out. */
+/* Every dialog shell keeps its header and footer in place: a tall body (an
+   alert, a long review, the New ticket editor growing its toolbar) scrolls
+   inside instead of pushing the footer out. */
 .ui-dialog:has(.dialog-shell-form) {
-  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.ui-dialog:has(.dialog-shell-form) .dialog-shell-form {
+.dialog-shell-form {
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1;
 }
-.ui-dialog:has(.dialog-shell-form) .dialog-shell-body {
+.dialog-shell-body {
   min-height: 0;
   overflow-y: auto;
 }
-
-/* The New ticket dialog grows by the docked editor toolbar on focus. Its top
-   edge is anchored at a fixed offset so it never moves (board D: 112px in the frame, 84px in the webview under the 28px title bar), and the body scrolls
-   inside a viewport-bound dialog so the growth never pushes the footer off. */
-.ui-dialog:has(.create-form) {
-  top: 84px;
-  translate: -50% 0;
-  max-height: calc(100dvh - 84px - 16px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+/* The footer band: recessed under a hairline, one note slot beside Cancel
+   and the primary. */
+.dialog-shell-footer {
+  min-height: 60px;
+  background: var(--recessed);
+  box-shadow: inset 0 1px 0 var(--group-hairline);
 }
-.ui-dialog:has(.create-form) .dialog-shell-form {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
-.ui-dialog:has(.create-form) .dialog-shell-body {
-  min-height: 0;
-  overflow-y: auto;
-}
-/* Filters panel open (board C): the panel covers the left of the detail pane,
-   so the empty state centres in the space to its right (centre x 1120) and sits
-   23.5px higher, as the frame draws it. */
-.ticket-workspace[data-filters-open]
-  .ticket-detail[data-empty]
-  [data-slot="empty-state"][data-size="hint"] {
-  padding-left: calc(24px + 360px);
-  padding-bottom: calc(48px + 47px);
+.dialog-shell-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-align: right;
+  text-wrap: pretty;
 }
 /* Export results share the existing dialog tokens in light and dark themes. */
 .portable-export-files {

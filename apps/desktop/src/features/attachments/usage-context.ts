@@ -1,17 +1,19 @@
 import type { AttachmentUsage } from "@/lib/api/attachments";
 
+const places: Record<string, string> = {
+  ticket_attachment: "Attached to a ticket",
+  ticket_body: "In a ticket description",
+  document_body: "In a Document",
+  activity_brief: "In an update",
+  draft: "In an unsaved draft",
+  undo: "Kept for Undo",
+};
+
+/** Where a file is used, in plain words: "In a Document · in Trash; Kept for Undo". */
 export function usageContext(usage: AttachmentUsage) {
-  const labels: Record<string, string> = {
-    ticket_attachment: "Direct attachment",
-    ticket_body: "Ticket description",
-    document_body: "Document · not a direct ticket attachment",
-    activity_brief: "Update brief",
-    draft: "Recoverable draft",
-    undo: "Recoverable Undo",
-  };
   const reasons = usage.protections.map(
     (use) =>
-      `${labels[use.kind] ?? use.kind}${use.trashed ? " · in Trash" : ""}`,
+      `${places[use.kind] ?? use.kind}${use.trashed ? " · in Trash" : ""}`,
   );
-  return [...new Set(reasons)].join("; ") || "Not used yet";
+  return [...new Set(reasons)].join("; ") || "Unused";
 }

@@ -1,0 +1,419 @@
+/* The graph kit (DESIGN.md section 10). Every graph draws its canvas, legend,
+   zoom control, node cards, selection panel and rows from these rules. */
+
+/* Canvas: the surface with neutral dots; the graph fills it. React Flow reads
+   its own colours from these custom properties. */
+.ui-graph-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  --xy-background-color: var(--surface);
+  --xy-background-pattern-color: var(--border);
+  --xy-edge-stroke: var(--muted-foreground);
+  --xy-edge-stroke-width: 1.5;
+}
+.ui-graph-canvas .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.ui-graph-canvas .react-flow__edge-path {
+  stroke: var(--muted-foreground);
+}
+.ui-graph-canvas .react-flow__attribution {
+  display: none;
+}
+/* React Flow turns pointer events off on nodes without its own handlers. */
+.ui-graph-canvas .react-flow__node {
+  pointer-events: auto;
+}
+
+/* Empty and limited states sit centred in the canvas, above the dots. */
+.ui-graph-notice {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+}
+.ui-graph-notice > * {
+  pointer-events: auto;
+}
+
+/* Legend: one row inside the canvas, top-right. */
+.ui-graph-legend {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  overflow: hidden;
+  list-style: none;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.ui-graph-legend li {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.ui-graph-legend svg {
+  flex: none;
+}
+.ui-graph-legend svg path {
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+.ui-graph-legend svg polygon {
+  fill: var(--muted-foreground);
+}
+.ui-graph-legend svg[data-mark="dashed"] path {
+  stroke-dasharray: 4 3;
+}
+.ui-graph-legend svg[data-mark="dotted"] path {
+  stroke-dasharray: 1.5 3;
+}
+.ui-graph-legend-outside {
+  flex: none;
+  width: 14px;
+  height: 10px;
+  border-radius: var(--radius-segment);
+  outline: 1px dashed var(--control-boundary);
+  outline-offset: -1px;
+}
+
+/* Foot: the zoom control bottom-left with an optional caption beside it. */
+.ui-graph-foot {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+.ui-graph-foot > * {
+  pointer-events: auto;
+}
+.ui-graph-footnote {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-graph-zoom {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-graph-zoom [data-slot="button"] {
+  width: 28px;
+  height: 28px;
+}
+.ui-graph-zoom-percent {
+  min-width: 44px;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.ui-graph-zoom-percent:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.ui-graph-zoom-percent:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ui-graph-zoom-note {
+  padding: 0 8px 0 6px;
+  white-space: nowrap;
+}
+
+/* Node card: 224 by 64, two lines that never wrap. */
+.ui-graph-node {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 224px;
+  height: 64px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-graph-node:hover {
+  background: var(--hover);
+}
+.ui-graph-node[data-selected] {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--interactive);
+}
+.ui-graph-node[data-outside] {
+  box-shadow: none;
+  outline: 1px dashed var(--control-boundary);
+  outline-offset: -1px;
+}
+.ui-graph-node[data-outside][data-selected] {
+  box-shadow: 0 0 0 1px var(--interactive);
+}
+.ui-graph-node:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ui-graph-node-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.ui-graph-node-line .ui-reference {
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-graph-node-icon {
+  display: inline-flex;
+  flex: none;
+}
+.ui-graph-node-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-graph-node-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui-graph-node-trailing {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+}
+.ui-graph-node-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-graph-availability {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+
+/* Selection panel: a fixed 280px column at the canvas's right edge. */
+.ui-graph-panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 280px;
+  min-height: 0;
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--border);
+}
+.ui-graph-panel-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+.ui-graph-panel-footer {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+.ui-graph-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ui-graph-panel-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-graph-panel-eyebrow svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-graph-panel-eyebrow .ui-reference {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-graph-panel-head h2 {
+  margin: 2px 0 0;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
+}
+.ui-graph-panel-head h2:focus:not(:focus-visible) {
+  outline: none;
+}
+.ui-graph-panel-caption {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-graph-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ui-graph-panel-section > h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+}
+.ui-graph-panel-section > p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+/* Row: [icon][Reference][caption] then the title, two lines at most. */
+.ui-graph-row {
+  position: relative;
+  margin: 0 -8px;
+  border-radius: var(--radius);
+}
+.ui-graph-row:hover {
+  background: var(--hover);
+}
+.ui-graph-row[data-current] {
+  background: var(--accent);
+}
+.ui-graph-row > button {
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 2px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: left;
+  cursor: pointer;
+}
+.ui-graph-row:has(> .ui-graph-row-trailing) > button {
+  padding-right: 40px;
+}
+.ui-graph-row > button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ui-graph-row-icon {
+  display: inline-flex;
+  color: var(--muted-foreground);
+}
+.ui-graph-row-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.ui-graph-row-caption {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-graph-row-title {
+  grid-column: 2 / 4;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ui-graph-row-title[data-inline] {
+  grid-column: 2 / 3;
+  -webkit-line-clamp: 1;
+}
+.ui-graph-row-trailing {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+}
+.ui-graph-row:hover > .ui-graph-row-trailing,
+.ui-graph-row:focus-within > .ui-graph-row-trailing {
+  opacity: 1;
+}

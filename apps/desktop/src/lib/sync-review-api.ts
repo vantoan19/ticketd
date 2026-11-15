@@ -1,6 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { structured } from "@/lib/api/bridge-failure";
+import { invoke, structured } from "@/lib/api/bridge-failure";
 
 /**
  * The bridge contract for reviewing what sync did: conflicts that need a

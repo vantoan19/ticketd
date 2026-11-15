@@ -1,3 +1,21 @@
+import type { FailureDescription } from "@/lib/api/describe-failure";
+
+/**
+ * A failure a helper already put in one line, such as revealFile's
+ * "Couldn't show the file in Finder. It was moved.", as an Alert's title and
+ * sentence. It carries no raw text, so it has no Details.
+ */
+export function lineFailure(text: string): FailureDescription {
+  const cut = text.indexOf(". ");
+  return {
+    code: "failed",
+    title: (cut < 0 ? text : text.slice(0, cut)).replace(/\.$/, ""),
+    sentence: cut < 0 ? "" : text.slice(cut + 2),
+    action: null,
+    details: "",
+  };
+}
+
 /** Today's date as YYYY-MM-DD in local time, for suggested file names. */
 export function localDate() {
   const now = new Date();

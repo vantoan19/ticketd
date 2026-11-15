@@ -16,7 +16,7 @@ export function providerName(provider: string): string {
  */
 export function attribution(agent: string): string {
   const name = providerName(agent);
-  return name === agent ? `Agent: ${agent}` : `Changed on ${name}`;
+  return name === agent ? agent : `Changed on ${name}`;
 }
 
 /** The source of a ticket the provider currently owns; null for local tickets. */

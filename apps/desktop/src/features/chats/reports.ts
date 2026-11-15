@@ -6,6 +6,7 @@ import type {
   ItemOf,
 } from "@/features/chats/client";
 import { duration, reasoningShown } from "@/features/chats/model";
+import { formatTime } from "@/lib/format";
 
 export { reasoningShown };
 
@@ -157,11 +158,8 @@ export function contextWords(context: ContextUsage) {
   };
 }
 
-export const clockTime = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+/** A clock time in the computer's own format, as every clock time in the app reads. */
+export const clockTime = (ms: number) => formatTime(new Date(ms));
 
 /** The plan of the turn in progress, for the dock's pill. */
 export function runningPlan(

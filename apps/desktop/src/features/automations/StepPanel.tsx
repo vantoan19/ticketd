@@ -19,7 +19,7 @@ import {
   useHarnessStatus,
 } from "@/features/automations/use-harnesses";
 import { useChatClient } from "@/features/chats/client";
-import { withoutVerbatim } from "@/features/projects/paths";
+import { withoutVerbatim } from "@/lib/paths";
 import type { Project } from "@/lib/api/client";
 
 /**

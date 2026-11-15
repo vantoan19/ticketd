@@ -14,6 +14,13 @@ import { documents } from "./api";
 import { TickingChanges } from "@/test/ticking-changes";
 import { syncReview } from "@/lib/sync-review-api";
 
+window.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+// The Document picker's list (cmdk) scrolls the highlighted row into view.
+Element.prototype.scrollIntoView ??= () => {};
 vi.mock("@/lib/sync-review-api", () => ({
   syncReview: {
     conflicts: vi.fn(async () => []),
@@ -74,7 +81,7 @@ it("disables Done with a stated reason until a thought is written", async () => 
   const done = screen.getByRole("button", { name: "Done" });
   expect((done as HTMLButtonElement).disabled).toBe(true);
   expect(done.getAttribute("aria-describedby")).toBeTruthy();
-  expect(screen.getByText("Write a thought to finish")).toBeTruthy();
+  expect(screen.getByText("Write a thought to finish.")).toBeTruthy();
   fireEvent.click(done);
   expect(close).not.toHaveBeenCalled();
   expect(documents.save).not.toHaveBeenCalled();
@@ -105,7 +112,7 @@ it("tells a capture it is saved to Documents once it has text", async () => {
 });
 it("keeps a failed capture open and retries the same request before returning", async () => {
   vi.mocked(documents.save)
-    .mockRejectedValueOnce("disk full")
+    .mockRejectedValueOnce({ code: "disk_full", message: "disk full" })
     .mockResolvedValueOnce({
       id: "d1",
       title: null,
@@ -120,7 +127,7 @@ it("keeps a failed capture open and retries the same request before returning", 
     target: { value: "A thought" },
   });
   fireEvent.click(screen.getByText("Done"));
-  await screen.findByText(/couldn’t save your changes/);
+  await screen.findByText(/Couldn't save the Document/);
   expect(close).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retry"));
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
@@ -130,6 +137,32 @@ it("keeps a failed capture open and retries the same request before returning", 
   await screen.findByText("Saved to Documents as you type");
   fireEvent.click(screen.getByText("Done"));
   expect(close).toHaveBeenCalledOnce();
+});
+it("after a failed capture save, closing explains the risk and can discard", async () => {
+  // DR-08: closing never waits on a save that cannot succeed.
+  vi.mocked(documents.save).mockRejectedValue({
+    code: "workspace_read_only",
+    message: "workspace database error: attempt to write a readonly database",
+  });
+  const close = vi.fn();
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  fireEvent.click(screen.getByText("Done"));
+  expect(
+    await screen.findByText(
+      "The workspace is read-only, so nothing changed. Your draft is still here.",
+    ),
+  ).toBeTruthy();
+  expect(close).not.toHaveBeenCalled();
+  // Without draft recovery the draft would be lost, so Cancel asks instead of hanging.
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Discard and close" }),
+  );
+  expect(close).toHaveBeenCalledOnce();
+  expect(documents.save).toHaveBeenCalledOnce();
 });
 it("notices saved changes beneath a focused draft and offers reload", async () => {
   vi.useFakeTimers();
@@ -147,7 +180,7 @@ it("notices saved changes beneath a focused draft and offers reload", async () =
     body: "Changed externally",
   });
   renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
   fireEvent.change(editor, { target: { value: "Local draft" } });
@@ -184,7 +217,7 @@ it("preserves an unrelated saved title when saving over a conflicting body", asy
     body: "External body",
   });
   renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
@@ -238,9 +271,9 @@ it("inserts a link to a Document chosen by title into the draft", async () => {
       onClose={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.click(screen.getByRole("button", { name: "Link a Document" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Release plan" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Release plan/ }));
   await waitFor(() =>
     expect(
       (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,
@@ -278,7 +311,7 @@ it("opens a connected ticket after saving a document draft", async () => {
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
   await screen.findByText(/^From\s*“/);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
   });
@@ -308,7 +341,7 @@ it("opens a trashed Document readably and restores it", async () => {
       .some((s) => s.textContent?.includes("In Trash")),
   ).toBe(true);
   expect(screen.getByText("Preserved")).toBeTruthy();
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getByLabelText("Title")).toHaveProperty("readOnly", true);
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
   await screen.findByRole("button", { name: "Document actions" });
@@ -385,11 +418,11 @@ it("saves a draft before opening the context graph without a dialog", async () =
   );
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByText("Original")).toBeTruthy();
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
 });
@@ -434,8 +467,10 @@ it("reads an untitled Document with its core heading and current save details", 
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "First line" })).toBeTruthy();
   expect(screen.getAllByText(/before/).length).toBeGreaterThan(0);
+  // The save state shows only while editing, in the session row (DR-09).
+  expect(screen.queryAllByText("Saved on this computer")).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getAllByText("Saved on this computer")).toHaveLength(1);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Changed" },
   });
@@ -465,11 +500,11 @@ it("consumes graph navigation after saving so later edits stay on the Document",
   renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "First" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
   await act(async () => {});
   expect(graph).toHaveBeenCalledTimes(1);
   fireEvent.change(screen.getByLabelText("Your thought"), {
@@ -511,7 +546,7 @@ it("preserves successive unrelated saved title changes under a body conflict", a
     })
     .mockResolvedValue({ ...doc, title: "External 2", body: "External body" });
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Local draft" },
   });
@@ -700,7 +735,7 @@ it("Edit shows the heading once: the title field holds it and the editor keeps t
     trashed: false,
   };
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Checkout spec",
@@ -748,7 +783,7 @@ it("edits the title in place without repeating the heading as a placeholder", ()
     body: "First line\nMore",
   };
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   const title = screen.getByRole("textbox", { name: "Title" });
   expect(title.getAttribute("placeholder")).toBe("Title");
   expect(screen.queryByText("Optional title")).toBeNull();
@@ -771,7 +806,7 @@ it("clears the conflict notice once the outside change is undone", async () => {
   vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "Typed" });
   outside({ ...stored, body: "Outside" });
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Typed" },
   });
@@ -791,7 +826,7 @@ it("refreshes silently when an outside change arrives and nothing is unsaved", a
   vi.useFakeTimers();
   outside({ ...stored, body: "Outside" });
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
   await tick(2000);
@@ -800,12 +835,13 @@ it("refreshes silently when an outside change arrives and nothing is unsaved", a
 });
 it("sends the loaded revision and keeps the draft when the save is stale", async () => {
   vi.useFakeTimers();
-  vi.mocked(documents.save).mockRejectedValueOnce(
-    "document 'd1' was changed elsewhere since it was loaded",
-  );
+  vi.mocked(documents.save).mockRejectedValueOnce({
+    code: "conflict",
+    message: "document 'd1' was changed elsewhere since it was loaded",
+  });
   outside({ ...stored, body: "Via CLI", updated_at: "later" });
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Typed" },
   });
@@ -833,7 +869,7 @@ it("drops a failed Trash request instead of replaying it on the next autosave", 
   fireEvent.click(screen.getByRole("menuitem", { name: "Move to Trash" }));
   await tick(0);
   expect(documents.setTrashed).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "More" },
   });
@@ -847,7 +883,7 @@ it("ignores Back to work under the conflict notice instead of replaying it", asy
   vi.mocked(documents.save).mockRejectedValue("offline");
   outside({ ...stored, body: "Outside" });
   renderEditor(<DocumentEditor initial={stored} onClose={close} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
@@ -866,7 +902,7 @@ it("restores a Document trashed elsewhere without resending the unsaved draft", 
     trashed: false,
   });
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
@@ -883,7 +919,7 @@ it("does not report a conflict after saving a whitespace-only title", async () =
   vi.mocked(documents.save).mockResolvedValue({ ...stored, title: null });
   outside({ ...stored, title: null });
   renderEditor(<DocumentEditor initial={titled} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   screen.getByLabelText("Title").focus();
   fireEvent.change(screen.getByLabelText("Title"), {
     target: { value: "   " },
@@ -920,7 +956,7 @@ it("says nothing is saved and explains a blocked Back to work while the conflict
   vi.mocked(documents.save).mockRejectedValueOnce("offline");
   outside({ ...stored, body: "Outside" });
   renderEditor(<DocumentEditor initial={stored} onClose={close} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Typed" },
   });
@@ -974,7 +1010,7 @@ it("asks the editor to take focus back after each conflict action (D2)", async (
   vi.mocked(documents.save).mockRejectedValue("offline");
   outside({ ...original, body: "Changed externally" });
   renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   const editor = screen.getByLabelText("Your thought");
   fireEvent.change(editor, { target: { value: "Local draft" } });
   await act(async () => {
@@ -998,7 +1034,7 @@ it("shows the title once and edits it in place without a separate title field", 
   expect(
     screen.getAllByRole("heading", { level: 1, name: "Checkout spec" }),
   ).toHaveLength(1);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   expect(screen.queryByLabelText("Optional title")).toBeNull();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
@@ -1020,11 +1056,11 @@ it("keeps Link a Document, Create ticket and Context graph in Read and Edit", ()
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={vi.fn()} />,
   );
   const names = () =>
-    ["Link a Document", "Create ticket from this", "Open context graph"].map(
+    ["Link a Document", "Create ticket from this", "Open graph"].map(
       (name) => screen.queryByRole("button", { name }) !== null,
     );
   expect(names()).toEqual([true, true, true]);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(names()).toEqual([true, true, true]);
 });
 it("quotes a passage shared by several connections once", async () => {
@@ -1098,7 +1134,7 @@ it("shows the restored text at once after a History restore", async () => {
   vi.mocked(syncReview.restore).mockResolvedValue();
   // No workspace change is reported: the restore itself must refresh the editor.
   render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Document actions" }),
     { button: 0, ctrlKey: false },

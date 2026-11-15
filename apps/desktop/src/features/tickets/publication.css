@@ -22,7 +22,7 @@
   padding-top: 24px;
   padding-bottom: 8px;
   padding-inline: 24px 64px;
-  background: var(--popover);
+  background: var(--surface);
   z-index: 2;
 }
 .publication-dialog .ui-dialog-header-close {
@@ -46,7 +46,7 @@
   display: grid;
   gap: 4px;
 }
-.publication-attachment-links .context-link {
+.publication-attachment-links [data-slot="record-link"] {
   justify-self: start;
   text-align: left;
   overflow-wrap: anywhere;
@@ -136,23 +136,11 @@
   gap: 8px;
 }
 
-.ui-dialog.publish-dialog {
-  top: 96px;
-  /* Only `translate` moves the dialog: the minifier folds a `translate: none`
-     reset into `transform`, which left the utility's translate active. */
-  translate: -50% 0;
-  max-height: calc(100dvh - 112px);
-  gap: 20px;
-}
 .publication-dialog [data-slot="dialog-title"] {
   font-size: var(--text-title);
   line-height: var(--text-title-line);
   font-weight: 600;
   letter-spacing: -0.6px;
-}
-.publication-reference {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
 }
 .publication-repository {
   width: 100%;
@@ -193,43 +181,6 @@
   font-size: var(--text-ui);
   line-height: 20px;
 }
-.publication-footer {
-  position: sticky;
-  bottom: -24px;
-  flex-flow: row wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0 -24px -24px;
-  padding: 12px 24px;
-  background: var(--recessed);
-  box-shadow: 0 -1px 0 var(--border);
-}
-.publication-footer > p {
-  margin-right: auto;
-}
-.publication-menu-item {
-  flex-direction: column;
-  align-items: flex-start;
-  white-space: normal;
-}
-.publication-menu-item small {
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.ticket-actions-menu {
-  width: 260px;
-}
-.ticket-actions-menu [data-slot="dropdown-menu-item"] {
-  min-height: 36px;
-}
-.rail-publish-link {
-  padding: 0;
-  color: var(--link-foreground);
-  text-decoration: none;
-}
-.rail-publish-link:hover {
-  text-decoration: underline;
-}
 .publication-inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -252,30 +203,7 @@
   line-height: 20px;
   font-weight: 500;
 }
-.publication-dialog [data-slot="dialog-footer"]:not(.publication-footer) {
-  position: sticky;
-  bottom: -24px;
-  background: var(--popover);
-  padding-block: 8px;
-}
 
-.publish-dialog[data-state="open"] {
-  animation: publication-enter 0.2s ease-out;
-}
-@keyframes publication-enter {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-@media (max-height: 480px) {
-  .publish-dialog {
-    top: 16px;
-    max-height: calc(100dvh - 32px);
-  }
-}
 .publication-attach {
   flex-wrap: wrap;
 }
@@ -284,34 +212,8 @@
   min-width: 0;
 }
 
-.rail-source .ui-button.rail-publish-link {
-  margin-left: 0;
-  padding: 0;
-}
-.rail-source-actions [data-variant="link"] {
-  color: var(--link-foreground);
-  text-decoration: none;
-  padding-inline: 0;
-}
-
 /* A fixed repository is still essential preview content, so keep it readable. */
 .publication-repository[data-readonly]:disabled {
   color: var(--foreground);
   background: var(--surface);
-}
-
-/* An inline link in a rail note: one 12px/16px caption, the link inline with
-   the sentence. The focus ring is a box-shadow and may pass over the next line. */
-.rail-note .rail-publish-link {
-  display: inline;
-  height: auto;
-  min-height: 0;
-  font-size: inherit;
-  line-height: inherit;
-  vertical-align: baseline;
-  border-radius: var(--radius-segment);
-}
-.rail-source .rail-note .ui-button.rail-publish-link {
-  padding: 0;
-  margin: 0;
 }

@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import {
   useEffect,
   useEffectEvent,
@@ -246,7 +247,7 @@ export function ComposerField({
                           linked.id === record.id,
                       ),
                   ),
-                  "Recently updated",
+                  "Recent",
                 ),
               ]
             : recordOptions(
@@ -279,7 +280,7 @@ export function ComposerField({
           key: openKey,
           options: [],
           state: "failed",
-          error: reason instanceof Error ? reason.message : String(reason),
+          error: failureText(reason, "search"),
         }),
     );
     return () => {
@@ -377,6 +378,12 @@ export function ComposerField({
           pick(option);
           return;
         }
+        // While the menu is open, Enter never sends, even with no row to
+        // insert yet (still searching, or nothing matches) (CH-46).
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          return;
+        }
       }
       if (event.key === "Escape") {
         // Closes the menu and keeps the text; a second Escape is Stop's.
@@ -451,7 +458,7 @@ export function ComposerField({
   const empty =
     shown && shown.state !== "searching" && options.length === 0
       ? shown.state === "failed"
-        ? `Search failed: ${shown.error ?? ""}`
+        ? (shown.error ?? "Couldn't search.")
         : shown.trigger.char === "@"
           ? query
             ? `No file or folder matches “${query}”.`

@@ -17,11 +17,13 @@ vi.mock("./ContextGraphCanvas", () => ({
   ContextGraphCanvas: ({
     edges,
     nodes,
-    overlay,
+    notice,
+    footnote,
   }: {
     edges: { label?: string }[];
     nodes: { id: string }[];
-    overlay?: import("react").ReactNode;
+    notice?: import("react").ReactNode;
+    footnote?: import("react").ReactNode;
   }) => (
     <div data-testid="canvas">
       {nodes.map((node) => (
@@ -30,13 +32,15 @@ vi.mock("./ContextGraphCanvas", () => ({
       {edges.map((edge, index) => (
         <span key={index}>{edge.label}</span>
       ))}
-      {overlay}
+      {notice}
+      <p>{footnote}</p>
     </div>
   ),
 }));
 vi.mock("@xyflow/react", () => ({
   ReactFlow: () => <div>Canvas</div>,
   Background: () => null,
+  BackgroundVariant: { Dots: "dots" },
   Controls: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
 }));
@@ -57,6 +61,7 @@ test("filters workspace results and focuses a selected item deliberately", async
       },
     ],
     edges: [],
+    connection_counts: { doc: 2 },
     next_cursor: null,
     omitted: false,
     omitted_groups: [],
@@ -74,9 +79,7 @@ test("filters workspace results and focuses a selected item deliberately", async
   fireEvent.click(
     (await screen.findAllByRole("button", { name: "Discovery" })).at(-1)!,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show only its neighbors" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   expect(focus).toHaveBeenCalledWith("doc");
   fireEvent.change(screen.getByLabelText("Search"), {
     target: { value: "needle" },
@@ -103,6 +106,7 @@ test("expands omitted connections while retaining the selected item", async () =
       },
     ],
     edges: [],
+    connection_counts: { one: 3 },
     next_cursor: null,
     omitted: true,
     omitted_groups: ["blocks"],
@@ -127,9 +131,7 @@ test("expands omitted connections while retaining the selected item", async () =
       expect.objectContaining({ adjacency_limit: 6 }),
     ),
   );
-  expect(
-    screen.getByRole("button", { name: "Show only its neighbors" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Center here" })).toBeTruthy();
 });
 
 test("connects visible items across candidate pages", async () => {
@@ -325,13 +327,15 @@ test("a crowded workspace opens as a list and the map is one click away", async 
       onOpen={vi.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole("radio", { name: "Graph" }));
+  await screen.findByRole("button", { name: "Doc 0" });
+  fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
   expect(screen.getByRole("radio", { name: "List" })).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "List" }));
-  expect(screen.getByText(/49 connections/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Doc 0" }));
+  expect(screen.getByText(/49 connections in total/)).toBeTruthy();
 });
 
-test("items with no relationship leave the canvas for a Not connected list", async () => {
+test("items with no relationship leave the canvas for the panel's No links list", async () => {
   vi.mocked(client.workspaceGraph)
     .mockReset()
     .mockResolvedValue({
@@ -356,17 +360,19 @@ test("items with no relationship leave the canvas for a Not connected list", asy
       onOpen={vi.fn()}
     />,
   );
-  await screen.findByText("3 items · 1 relationship");
+  await screen.findByText("3 items");
   const canvas = screen.getByTestId("canvas");
   expect(canvas.querySelectorAll("[data-card]")).toHaveLength(2);
   expect(canvas.querySelector('[data-card="lone"]')).toBeNull();
-  const group = screen.getByRole("group", { name: "Not connected" });
-  expect(group.textContent).toContain("Not connected · 1");
+  expect(
+    screen.getByRole("heading", { name: "No links to other items 1" }),
+  ).toBeTruthy();
+  const group = screen.getByRole("list", { name: "Not connected" });
   fireEvent.click(
     within(group).getByRole("button", { name: "T-KQ4 · Dark mode" }),
   );
   expect(
-    await screen.findByRole("button", { name: "Open ticket" }),
+    await screen.findByRole("button", { name: "Open T-KQ4" }),
   ).toBeTruthy();
 });
 
@@ -393,16 +399,16 @@ test("an item created while the graph is open is added, not left counted but uns
   await screen.findByText(/Showing 1 of 1 item/);
   rerender(<WorkspaceGraph {...props} revision={1} />);
   await screen.findByText(/Showing 2 of 2 items/);
-  expect(screen.getByText("2 items · 0 relationships")).toBeTruthy();
+  expect(screen.getByText("2 items")).toBeTruthy();
   expect(
-    within(screen.getByRole("group", { name: "Not connected" })).getByRole(
+    within(screen.getByRole("list", { name: "Not connected" })).getByRole(
       "button",
       { name: "Untitled" },
     ),
   ).toBeTruthy();
 });
 
-test("a selected ticket offers Open ticket and Show only its neighbors", async () => {
+test("a selected ticket offers Open and, with connections, Center here", async () => {
   vi.mocked(client.workspaceGraph).mockResolvedValue({
     node_tags: {},
     total: 1,
@@ -417,6 +423,7 @@ test("a selected ticket offers Open ticket and Show only its neighbors", async (
       },
     ],
     edges: [],
+    connection_counts: { one: 1 },
     next_cursor: null,
     omitted: false,
     omitted_groups: [],
@@ -435,10 +442,8 @@ test("a selected ticket offers Open ticket and Show only its neighbors", async (
   fireEvent.click(
     (await screen.findAllByRole("button", { name: "T-KQ1 · First" })).at(-1)!,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open T-KQ1" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show only its neighbors" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   expect(focus).toHaveBeenCalledWith("one");
 });

@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import {
   useContext,
   useEffect,
@@ -25,7 +26,7 @@ import {
 import { StatusDot } from "@/components/ui/status-dot";
 import { useCopy } from "@/components/ui/use-copy";
 import { fileManagerName } from "@/lib/platform";
-import { PathText } from "@/features/projects/PathText";
+import { PathText } from "@/components/ui/path-text";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import {
   useChatClient,
@@ -86,7 +87,7 @@ function FolderGroup({ chat }: { chat: ChatState }) {
       </div>
       {/* A folder ticketd keeps says so; its scratch path means nothing to
           read, and Copy still gives it (LIVE2-6). */}
-      {!folder.managed && <PathText path={folder.path} />}
+      {!folder.managed && <PathText path={folder.path} layout="folder" />}
       {branch &&
         (branch.name ? (
           <p className="chat-pop-branch">
@@ -94,7 +95,7 @@ function FolderGroup({ chat }: { chat: ChatState }) {
             {branch.kind === "detached" && <span>Detached at</span>}
             {/* Right-to-left puts the ellipsis at the start: the end of a
                 branch name tells branches apart. */}
-            <span className="chat-mono chat-pop-branch-name">
+            <span className="chat-pop-branch-name">
               <bdo dir="ltr">{branch.name}</bdo>
             </span>
           </p>
@@ -318,9 +319,7 @@ function PlacesGroup({ chat }: { chat: ChatState }) {
             void client.openFolder(chat.id).then(
               () => setFailure(""),
               (reason: unknown) =>
-                setFailure(
-                  reason instanceof Error ? reason.message : String(reason),
-                ),
+                setFailure(failureText(reason, "open the folder")),
             )
           }
         >

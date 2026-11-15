@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   CircleCheck,
   Clock,
@@ -79,23 +80,25 @@ function RunRow({
         <span className="chat-row-mark">
           <RunMark run={run} />
         </span>
-        <span
-          className="chat-row-title"
-          title={
+        <Tooltip
+          overflowOnly
+          content={
             run.ticket
               ? `${run.ticket.reference} ${run.ticket.title}`
               : "No ticket"
           }
         >
-          {run.ticket ? (
-            <>
-              <span className="auto-ref">{run.ticket.reference}</span>{" "}
-              {run.ticket.title}
-            </>
-          ) : (
-            "No ticket"
-          )}
-        </span>
+          <span className="chat-row-title">
+            {run.ticket ? (
+              <>
+                <span className="auto-ref">{run.ticket.reference}</span>{" "}
+                {run.ticket.title}
+              </>
+            ) : (
+              "No ticket"
+            )}
+          </span>
+        </Tooltip>
         <time className="chat-row-time" dateTime={run.created_at}>
           {chatTime(run.created_at)}
         </time>
@@ -108,15 +111,21 @@ function RunRow({
             )}
           </span>
           {automationName === undefined ? (
-            run.reason && <span title={run.reason}>{run.reason}</span>
+            run.reason && (
+              <Tooltip overflowOnly content={run.reason}>
+                <span>{run.reason}</span>
+              </Tooltip>
+            )
           ) : (
-            <span
-              className="auto-row-start"
-              title={automationName.trim() || "New Automation"}
+            <Tooltip
+              overflowOnly
+              content={automationName.trim() || "New Automation"}
             >
-              <Workflow size={12} aria-hidden />
-              {automationName.trim() || "New Automation"}
-            </span>
+              <span className="auto-row-start">
+                <Workflow size={12} aria-hidden />
+                {automationName.trim() || "New Automation"}
+              </span>
+            </Tooltip>
           )}
         </span>
       </button>

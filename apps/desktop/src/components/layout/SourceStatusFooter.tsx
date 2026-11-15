@@ -1,11 +1,6 @@
 import { StatusDot } from "@/components/ui/status-dot";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   sourceLine,
   useSourceActivity,
@@ -14,11 +9,23 @@ import { ago, providerName } from "@/features/tickets/ticket-source";
 import { useNow } from "@/lib/use-now";
 import { SyncStatusLine } from "@/features/sync/SyncStatusLine";
 import { useSyncStatus } from "@/features/sync/sync-status";
+import { usePreferences } from "@/lib/preferences";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export function SourceStatusFooter() {
   const now = useNow();
-  const { refreshing, sources, refreshAll, openSettings, intervalSecs } =
-    useSourceActivity();
+  const {
+    refreshing,
+    sources,
+    refreshAll,
+    openSettings,
+    openSourceSettings,
+    intervalSecs,
+  } = useSourceActivity();
+  // Only the folded rail hides the two lines, so only it repeats them.
+  const { sidebarCollapsed } = usePreferences();
+  const isMobile = useIsMobile();
+  const folded = sidebarCollapsed && !isMobile;
   const synced = useSyncStatus().status?.connection === "connected";
   if (sources.length === 0 && !synced) return null;
   return (
@@ -72,36 +79,35 @@ export function SourceStatusFooter() {
         const detailId = `sidebar-source-${status.provider}`;
         return (
           <div className="sidebar-source" key={status.provider}>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="sidebar-source-line"
-                    onClick={openSettings}
-                    aria-describedby={detailId}
-                  >
-                    <span className="sidebar-source-label">
-                      {state !== "refreshing" && (
-                        <StatusDot
-                          tone={
-                            warning
-                              ? "attention"
-                              : state === "synced"
-                                ? "positive"
-                                : "neutral"
-                          }
-                          size={10}
-                        />
-                      )}
-                      {label}
-                    </span>
-                    <small id={detailId}>{detail}</small>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{`${label}. ${detail}.`}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip content={folded ? `${label} · ${detail}` : null}>
+              <button
+                type="button"
+                className="sidebar-source-line"
+                onClick={() =>
+                  openSourceSettings
+                    ? openSourceSettings(status.provider)
+                    : openSettings()
+                }
+                aria-describedby={detailId}
+              >
+                <span className="sidebar-source-label">
+                  {state !== "refreshing" && (
+                    <StatusDot
+                      tone={
+                        warning
+                          ? "attention"
+                          : state === "synced"
+                            ? "positive"
+                            : "neutral"
+                      }
+                      size={10}
+                    />
+                  )}
+                  {label}
+                </span>
+                <small id={detailId}>{detail}</small>
+              </button>
+            </Tooltip>
             {warning && (
               <Button
                 variant="ghost"

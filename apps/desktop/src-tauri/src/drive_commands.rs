@@ -1,14 +1,14 @@
-use super::open_workspace;
+use super::{BridgeFailure, open_workspace};
 #[tauri::command(async)]
 pub fn drive_uploaded_copy_status(
     id: String,
-) -> Result<Option<ticketd_core::drive::DriveCopyInspection>, String> {
+) -> Result<Option<ticketd_core::drive::DriveCopyInspection>, BridgeFailure> {
     let transport = GoogleTransport::default();
     let provider =
         ticketd_core::drive::GoogleDriveCopies::new(&PlatformCredentialStore, &transport);
     open_workspace()
         .and_then(|w| w.inspect_drive_uploaded_copy(&id, &provider))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 use serde::Serialize;
 use std::{
@@ -35,28 +35,28 @@ pub struct SelectedUploadFolder {
 }
 
 #[tauri::command(async)]
-pub fn attachment_upload_destination() -> Result<ticketd_core::AttachmentUploadDestination, String>
-{
+pub fn attachment_upload_destination()
+-> Result<ticketd_core::AttachmentUploadDestination, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.attachment_upload_destination())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command(async)]
 pub fn begin_attachment_upload(
     request_id: String,
     explicit: Option<ticketd_core::AttachmentUploadDestination>,
-) -> Result<ticketd_core::AttachmentUploadDestination, String> {
+) -> Result<ticketd_core::AttachmentUploadDestination, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.begin_attachment_upload(&request_id, explicit))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command(async)]
 pub fn set_attachment_upload_destination(
     destination: Option<DriveUploadDestination>,
-) -> Result<ticketd_core::AttachmentUploadDestination, String> {
-    let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+) -> Result<ticketd_core::AttachmentUploadDestination, BridgeFailure> {
+    let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
     match destination {
         None => workspace.set_local_upload_destination(),
         Some(destination) => {
@@ -69,7 +69,7 @@ pub fn set_attachment_upload_destination(
             workspace.set_drive_upload_destination(&destination, &provider)
         }
     }
-    .map_err(|e| e.to_string())
+    .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -77,7 +77,7 @@ pub async fn select_drive_upload_folder(
     app: tauri::AppHandle,
     operations: tauri::State<'_, DrivePickerOperations>,
     operation_id: String,
-) -> Result<SelectedUploadFolder, String> {
+) -> Result<SelectedUploadFolder, BridgeFailure> {
     if operation_id.trim().is_empty() || operation_id.len() > 128 {
         return Err("invalid Drive selection operation".into());
     }
@@ -94,10 +94,10 @@ pub async fn select_drive_upload_folder(
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
         let session = PickerSession::begin_folder(
-            DesktopOAuthClient::from_environment().map_err(|e| e.to_string())?,
+            DesktopOAuthClient::from_environment().map_err(BridgeFailure::from)?,
             Duration::from_secs(180),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
         app.opener()
             .open_url(session.authorization_url(), None::<&str>)
             .map_err(|_| {
@@ -106,7 +106,7 @@ pub async fn select_drive_upload_folder(
         let transport = GoogleTransport::default();
         let selection = session
             .finish(&transport, &PlatformCredentialStore, &cancelled)
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         let [folder_id] = selection.file_ids.as_slice() else {
             return Err("choose exactly one writable Drive folder".into());
         };
@@ -122,7 +122,7 @@ pub async fn select_drive_upload_folder(
         );
         let folder = open_workspace()
             .and_then(|w| w.validate_drive_upload_destination(&destination, &provider))
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         Ok(SelectedUploadFolder {
             destination,
             folder,
@@ -143,21 +143,21 @@ pub struct UploadStatus {
     attachment: Option<Attachment>,
 }
 #[tauri::command]
-pub fn open_drive_upload(app: tauri::AppHandle, request_id: String) -> Result<(), String> {
+pub fn open_drive_upload(app: tauri::AppHandle, request_id: String) -> Result<(), BridgeFailure> {
     let url = open_workspace()
         .and_then(|w| w.drive_upload_open_url(&request_id))
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|_| "Could not open this upload in Drive".into())
 }
 #[tauri::command]
-pub async fn check_drive_upload(request_id: String) -> Result<UploadStatus, String> {
+pub async fn check_drive_upload(request_id: String) -> Result<UploadStatus, BridgeFailure> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+        let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
         let operation = workspace
             .drive_upload(&request_id)
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         let transport = GoogleTransport::default();
         let provider = GoogleDrive::new(
             &operation.request.destination.connection_id,
@@ -166,12 +166,12 @@ pub async fn check_drive_upload(request_id: String) -> Result<UploadStatus, Stri
         );
         let operation = workspace
             .check_drive_upload(&request_id, &provider)
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         let attachment = if operation.state == DriveUploadState::Completed {
             Some(
                 workspace
                     .attachment(&operation.attachment_id)
-                    .map_err(|e| e.to_string())?,
+                    .map_err(BridgeFailure::from)?,
             )
         } else {
             None
@@ -195,17 +195,21 @@ pub struct DriveConfiguration {
 }
 
 #[tauri::command]
-pub fn drive_reference(id: String) -> Result<ticketd_core::drive::DriveReference, String> {
+pub fn drive_reference(id: String) -> Result<ticketd_core::drive::DriveReference, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.drive_reference(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-pub async fn check_drive_reference(id: String) -> Result<ticketd_core::drive::DriveAccess, String> {
+pub async fn check_drive_reference(
+    id: String,
+) -> Result<ticketd_core::drive::DriveAccess, BridgeFailure> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
-        let reference = workspace.drive_reference(&id).map_err(|e| e.to_string())?;
+        let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
+        let reference = workspace
+            .drive_reference(&id)
+            .map_err(BridgeFailure::from)?;
         let transport = GoogleTransport::default();
         let provider = GoogleDrive::new(
             &reference.connection_id,
@@ -214,7 +218,7 @@ pub async fn check_drive_reference(id: String) -> Result<ticketd_core::drive::Dr
         );
         workspace
             .check_drive_reference(&id, &provider)
-            .map_err(|e| e.to_string())
+            .map_err(BridgeFailure::from)
     })
     .await
     .map_err(|_| "Drive access check could not finish".to_owned())?
@@ -226,7 +230,7 @@ pub async fn recover_drive_reference(
     operations: tauri::State<'_, DrivePickerOperations>,
     id: String,
     operation_id: String,
-) -> Result<ticketd_core::drive::DriveAccess, String> {
+) -> Result<ticketd_core::drive::DriveAccess, BridgeFailure> {
     if operation_id.trim().is_empty() || operation_id.len() > 128 {
         return Err("invalid Drive selection operation".into());
     }
@@ -242,21 +246,21 @@ pub async fn recover_drive_reference(
         active.insert(operation_id.clone(), Arc::clone(&cancelled));
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+        let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
         let session = workspace
             .begin_drive_reference_recovery(
                 &id,
-                DesktopOAuthClient::from_environment().map_err(|e| e.to_string())?,
+                DesktopOAuthClient::from_environment().map_err(BridgeFailure::from)?,
                 Duration::from_secs(180),
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         app.opener()
             .open_url(session.authorization_url(), None::<&str>)
             .map_err(|_| "could not open the system browser for Drive recovery".to_owned())?;
         let transport = GoogleTransport::default();
         let selection = session
             .finish(&transport, &PlatformCredentialStore, &cancelled)
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         let provider = GoogleDrive::new(
             &selection.connection_id,
             &PlatformCredentialStore,
@@ -268,7 +272,7 @@ pub async fn recover_drive_reference(
                 reference,
                 failure: None,
             })
-            .map_err(|e| e.to_string())
+            .map_err(BridgeFailure::from)
     })
     .await
     .map_err(|_| "Drive recovery could not finish".to_owned());
@@ -303,7 +307,7 @@ pub async fn select_drive_files(
     app: tauri::AppHandle,
     operations: tauri::State<'_, DrivePickerOperations>,
     operation_id: String,
-) -> Result<DriveFiles, String> {
+) -> Result<DriveFiles, BridgeFailure> {
     if operation_id.trim().is_empty() || operation_id.len() > 128 {
         return Err("invalid Drive selection operation".into());
     }
@@ -320,10 +324,10 @@ pub async fn select_drive_files(
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
         let session = PickerSession::begin(
-            DesktopOAuthClient::from_environment().map_err(|e| e.to_string())?,
+            DesktopOAuthClient::from_environment().map_err(BridgeFailure::from)?,
             Duration::from_secs(180),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
         // The core generated this pinned Google URL. It never crosses the WebView.
         app.opener()
             .open_url(session.authorization_url(), None::<&str>)
@@ -331,13 +335,13 @@ pub async fn select_drive_files(
         let transport = GoogleTransport::default();
         let selection = session
             .finish(&transport, &PlatformCredentialStore, &cancelled)
-            .map_err(|e| e.to_string())?;
+            .map_err(BridgeFailure::from)?;
         let provider = GoogleDrive::new(
             &selection.connection_id,
             &PlatformCredentialStore,
             &transport,
         );
-        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+        let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
         let mut files = Vec::new();
         let mut failures = Vec::new();
         for id in selection.file_ids {
@@ -371,7 +375,7 @@ pub async fn select_drive_files(
 pub fn cancel_drive_selection(
     operations: tauri::State<'_, DrivePickerOperations>,
     operation_id: String,
-) -> Result<(), String> {
+) -> Result<(), BridgeFailure> {
     if let Some(cancelled) = operations
         .0
         .lock()

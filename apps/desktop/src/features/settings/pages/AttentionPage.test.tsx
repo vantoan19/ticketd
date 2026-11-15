@@ -26,27 +26,30 @@ afterEach(() => {
 const notifySwitch = () =>
   screen.getByRole("switch", { name: "Notify me when a reminder is due" });
 
-test("the page has Following, Reminders and Inbox sections", () => {
+test("the page has one list for following and reminders, then the Inbox", () => {
   render(<AttentionPage onOpenInbox={() => {}} />);
-  for (const name of ["Following", "Reminders", "Inbox"])
+  for (const name of ["Following and reminders", "Inbox"])
     expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
   expect(screen.getByText("Changes apply right away")).toBeTruthy();
 });
 
-test("a due reminder preview shows a generic title and the real body shape", () => {
+test("with notifications off there is no preview and no help line", () => {
   render(<AttentionPage onOpenInbox={() => {}} />);
-  const preview = screen.getByRole("img", {
+  expect(screen.queryByText("What a due reminder looks like")).toBeNull();
+  expect(screen.queryByText(/No notification\?/)).toBeNull();
+});
+
+test("with notifications on, a preview shows the real body shape and where to allow them", async () => {
+  setPreference("notifyReminders", true);
+  render(<AttentionPage onOpenInbox={() => {}} />);
+  const preview = await screen.findByRole("img", {
     name: /Example notification: .*T-12: reminder is due/,
   });
   expect(screen.getByText("What a due reminder looks like")).toBeTruthy();
   expect(preview.textContent).toContain("T-12: reminder is due");
-});
-
-test("the footer tells where to allow notifications", () => {
-  render(<AttentionPage onOpenInbox={() => {}} />);
   expect(
     screen.getByText(
-      "No notification? Allow ticketd in System Settings → Notifications.",
+      "No notification? Allow ticketd in System Settings › Notifications.",
     ),
   ).toBeTruthy();
 });
@@ -89,7 +92,7 @@ test("a failed permission request is reported beside Reminders", async () => {
   render(<AttentionPage onOpenInbox={() => {}} />);
   fireEvent.click(notifySwitch());
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not ask for notification permission: Error: boom",
+    "Couldn't ask for notification permission. Boom.",
   );
 });
 
@@ -111,6 +114,6 @@ test("a follow preference that cannot be saved says so", () => {
     screen.getByRole("switch", { name: "Follow tickets I create" }),
   );
   expect(screen.getByRole("alert").textContent).toBe(
-    "Could not save the follow preference.",
+    "Couldn't save the follow preference.",
   );
 });

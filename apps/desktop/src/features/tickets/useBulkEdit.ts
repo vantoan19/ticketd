@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type BulkChange } from "@/lib/api/client";
-import { toFailure } from "@/lib/api/bridge-failure";
+import { isWorkspaceCode, toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  sentence,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 
 const NOTICE_MS = 4000;
 
@@ -14,6 +19,8 @@ export type BulkFailure = {
   message: string;
   /** False when the core rejected the batch itself; sending it again fails the same way. */
   retryable: boolean;
+  /** What the failure alert says: the ticket that prevented it and that nothing changed. */
+  description: FailureDescription;
 };
 
 /**
@@ -68,7 +75,7 @@ export function useBulkEdit(refresh: () => Promise<void>) {
       setNotice(change.summary);
       await refresh();
     } catch (reason) {
-      setFailure(describeFailure(reason, selection));
+      setFailure(bulkFailure(reason, selection));
     } finally {
       setPending(false);
     }
@@ -109,7 +116,7 @@ export function useBulkEdit(refresh: () => Promise<void>) {
 export type BulkEdit = ReturnType<typeof useBulkEdit>;
 
 /** Names the ticket the core rejected, when it said which operation failed. */
-function describeFailure(reason: unknown, selection: string[]): BulkFailure {
+function bulkFailure(reason: unknown, selection: string[]): BulkFailure {
   const failure = toFailure(reason);
   const reference =
     failure.code === "batch_operation" && failure.index !== null
@@ -119,13 +126,29 @@ function describeFailure(reason: unknown, selection: string[]): BulkFailure {
     .trim()
     .replace(/^invalid batch:\s*/i, "")
     .replace(/\.$/, "");
+  const retryable = failure.code !== "batch_operation";
+  const described = describeFailure(
+    failure,
+    reference
+      ? `change ${reference}`
+      : `change ${selection.length} ${selection.length === 1 ? "ticket" : "tickets"}`,
+  );
   return {
-    retryable: failure.code !== "batch_operation",
+    retryable,
     reference,
     // The reason leads; the reassurance follows.
     message:
       reference && !detail.includes(reference)
         ? `${reference}: ${detail}. Nothing changed.`
         : `${detail}. Nothing changed.`,
+    description: {
+      ...described,
+      // Workspace states have their own plain words; the core's reason for one
+      // ticket is written for people and is said with the reassurance.
+      sentence: isWorkspaceCode(failure.kind)
+        ? described.sentence
+        : `${sentence(detail)} Nothing changed.`,
+      action: retryable ? "retry" : null,
+    },
   };
 }

@@ -12,6 +12,7 @@ import { App } from "@/app/App";
 import type { FindFilter, Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { chooseFilter } from "@/test/filters";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -221,17 +222,13 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
       "Blocked by T-KQ2",
     ),
   ).toBeTruthy();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "In review1",
-  );
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Done0",
-  );
+  // Per-status counts live in the columns; the header keeps the progress.
+  expect(screen.getByText("0 of 2 done")).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "My unsaved title",
   );
-  expect(screen.getByText(/outside the current results/i)).toBeTruthy();
+  expect(screen.getByText(/not in the current results/i)).toBeTruthy();
 });
 
 test("a delayed previous Plan response cannot replace the current Plan's Board or header", async () => {
@@ -262,9 +259,7 @@ test("a delayed previous Plan response cannot replace the current Plan's Board o
   );
   expect(board.getByRole("button", { name: /^T-KQ3\D/ })).toBeTruthy();
   expect(board.queryByRole("button", { name: /^T-KQ1\D/ })).toBeNull();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "In review1",
-  );
+  expect(screen.getByText("0 of 1 done")).toBeTruthy();
 });
 
 test("archiving a Plan on Board preserves ticket editing and restricts Plan membership until reactivation", async () => {
@@ -277,15 +272,17 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
     key: "Enter",
   });
   await settle();
+  // Archiving is reversible, so it acts at once (Undo on the status line).
   fireEvent.click(screen.getByRole("menuitem", { name: /^Archive Plan/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
   await settle();
-  expect(screen.getByText("Archived Plan")).toBeTruthy();
+  expect(
+    screen.getByText("Archived", { selector: '[data-slot="badge"]' }),
+  ).toBeTruthy();
   expect(
     screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
   ).toBe("true");
-  expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Edit purpose" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add to Plan…" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Edit purpose/ })).toBeNull();
   expect(
     screen.queryByRole("button", { name: "Actions for Release specification" }),
   ).toBeNull();
@@ -314,8 +311,10 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   );
   fireEvent.click(screen.getByRole("button", { name: "Reactivate" }));
   await settle();
-  expect(screen.getByText("Active Plan")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
+  expect(
+    screen.queryByText("Archived", { selector: '[data-slot="badge"]' }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Add to Plan…" })).toBeTruthy();
 });
 
 test("Plan ticket details retain their draft and return to the same Board position and card focus after Dependencies", async () => {
@@ -393,11 +392,8 @@ test("Plans remember List and Board independently of Dependencies while preservi
   expect(
     screen.getByRole("button", { name: "Spec: Release specification" }),
   ).toBeTruthy();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Todo1",
-  );
   expect(screen.getByText("1 of 2 done")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add to Plan…" })).toBeTruthy();
   chooseView("Dependencies");
   await settle();
   expect(
@@ -468,20 +464,16 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
     within(board)
       .getAllByRole("heading")
       .map((item) => item.textContent),
-  ).toEqual([
-    "Todo",
-    "In progress",
-    "In review",
-    "Done",
-    "Canceled",
-    "Duplicate",
-  ]);
-  expect(todo.getByText("50 of 55 loaded")).toBeTruthy();
+  ).toEqual(["Todo", "In progress", "In review", "Done"]);
+  // Canceled and Duplicate fold to headers that open them.
+  expect(screen.getByRole("button", { name: /^Show Canceled/ })).toBeTruthy();
+  expect(todo.getByRole("button", { name: "Show 5 more Todo" })).toBeTruthy();
   const parent = todo.getByRole("button", { name: /^T-KQ1\D/ });
   const child = todo.getByRole("button", { name: /^T-KQ2\D/ });
   expect(within(parent).getByText("Alpha")).toBeTruthy();
-  expect(within(child).getByText("Beta")).toBeTruthy();
+  // One context item per card, as on a row (BD-07): the parent first.
   expect(within(child).getByText("Subticket of T-KQ1")).toBeTruthy();
+  expect(within(child).queryByText("Beta")).toBeNull();
   expect(within(parent).queryByText("Launch")).toBeNull();
   expect(
     within(board).queryByRole("button", { name: /^T-KQ201\D/ }),
@@ -495,20 +487,18 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
       { name: /^T-KQ200\D/ },
     ),
   ).toBeTruthy();
-  fireEvent.click(todo.getByRole("button", { name: "Load more Todo" }));
+  fireEvent.click(todo.getByRole("button", { name: /^Show \d+ more Todo$/ }));
   await settle();
   expect(todo.getAllByRole("button", { name: /^T-/ })).toHaveLength(55);
-  expect(todo.queryByRole("button", { name: "Load more Todo" })).toBeNull();
+  expect(
+    todo.queryByRole("button", { name: /^Show \d+ more Todo$/ }),
+  ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "Ticket 2" },
   });
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await settle();
-  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
-  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
-  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
+  await chooseFilter("Status", "Todo");
   await settle();
   expect(todo.getByLabelText("11 matching tickets")).toBeTruthy();
   expect(
@@ -516,19 +506,13 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
       "0 matching tickets",
     ),
   ).toBeTruthy();
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Todo55",
-  );
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Done1",
-  );
   expect(screen.getByText("1 of 56 done")).toBeTruthy();
   chooseView("List");
   await settle();
   chooseView("Board");
   await settle();
   expect(
-    screen.getByRole("button", { name: "Remove Status is Todo" }),
+    screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Remove Search: Ticket 2" }),

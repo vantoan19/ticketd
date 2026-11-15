@@ -1,6 +1,5 @@
-import { invoke as bridge } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { structured } from "@/lib/api/bridge-failure";
+import { invoke as bridge, structured } from "@/lib/api/bridge-failure";
 
 /**
  * The desktop's contract with the core for Workspace sync through Google Drive.

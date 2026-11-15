@@ -26,6 +26,11 @@ import {
   type WaitingOutcome,
 } from "@/lib/api/client";
 import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import { useTicketSearch } from "./useTicketSearch";
 import "./linked-work.css";
@@ -38,6 +43,14 @@ type Unchosen = Choice | "";
  * without losing it; Cancel and a finished review discard it.
  */
 const canonicalDrafts = new Map<string, string>();
+
+/** A typed reference that names no ticket reads "No ticket T-ZZ99."; other failures say what didn't happen. */
+function previewFailure(reason: unknown, typed: string): FailureDescription {
+  const failure = describeFailure(reason, "review this choice");
+  return failure.code === "not_found"
+    ? { ...failure, sentence: `No ticket ${typed.trim().toUpperCase()}.` }
+    : failure;
+}
 
 type Stale = "" | "changed" | "mode";
 
@@ -97,12 +110,12 @@ export function Duplicates({
   const [preview, setPreview] = useState<DuplicatePreview | null>(null);
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   // The core's answer for one set of choices, kept with the key of the choices it answers.
   const [answer, setAnswer] = useState<{
     key: string;
     outcomes: WaitingOutcome[];
-    failure: string;
+    failure: FailureDescription | null;
   } | null>(null);
   const [stale, setStale] = useState<Stale>("");
   const [pending, setPending] = useState(false);
@@ -154,7 +167,7 @@ export function Duplicates({
       .evaluateDuplicate(preview.source, canonicalArg, separate, decisions)
       .then((result) => {
         if (current)
-          setAnswer({ key: answerKey, outcomes: result, failure: "" });
+          setAnswer({ key: answerKey, outcomes: result, failure: null });
       })
       .catch((reason: unknown) => {
         if (!current) return;
@@ -166,7 +179,7 @@ export function Duplicates({
         setAnswer({
           key: answerKey,
           outcomes: [],
-          failure: kind ? "" : failure.message,
+          failure: kind ? null : describeFailure(failure, "check the result"),
         });
       });
     return () => {
@@ -197,7 +210,7 @@ export function Duplicates({
     const picked = chosen ?? target;
     const pickedArg = separate ? ticket.reference : picked;
     setPending(true);
-    setError("");
+    setError(null);
     setStale("");
     try {
       const result = await client.previewDuplicate(
@@ -213,7 +226,7 @@ export function Duplicates({
       setChoices(result.edges.map(() => ""));
     } catch (reason) {
       setPreview(null);
-      setError(String(reason));
+      setError(previewFailure(reason, picked));
     } finally {
       setPending(false);
     }
@@ -223,7 +236,7 @@ export function Duplicates({
     setPreview(null);
     setCanonicalTicket(null);
     setChoices([]);
-    setError("");
+    setError(null);
     setStale("");
     setTimeout(() => canonicalInput.current?.focus());
   }
@@ -235,7 +248,7 @@ export function Duplicates({
     setAttempt({ key, id });
     setPending(true);
     setApplying(true);
-    setError("");
+    setError(null);
     try {
       const decisions: DependencyDecision[] = preview.edges.map(
         (edge, index) => ({ edge, choice: choices[index] as Choice }),
@@ -265,7 +278,15 @@ export function Duplicates({
       const failure = toFailure(reason);
       const kind = staleKind(failure.code);
       if (kind) setStale(kind);
-      else setError(failure.message);
+      else
+        setError(
+          describeFailure(
+            failure,
+            separate
+              ? "apply the review"
+              : `mark ${ticket.reference} as a duplicate`,
+          ),
+        );
       try {
         await onApplyFailure?.();
       } catch {
@@ -277,7 +298,8 @@ export function Duplicates({
     }
   }
 
-  const shownError = error || (answer?.key === answerKey ? answer.failure : "");
+  const shownError =
+    error ?? (answer?.key === answerKey ? answer.failure : null);
   const complete = !!preview && choices.every((choice) => choice);
   const reviewing = !!preview && (!!canonicalTicket || separate);
   const blockedReason = !reviewing
@@ -310,7 +332,7 @@ export function Duplicates({
             : "Mark duplicate"
       }
       blockedReason={blockedReason}
-      width={713}
+      size="md"
       footerNote="Nothing changes until you apply."
       onSubmit={() => void apply()}
       onCancel={() => {
@@ -508,16 +530,12 @@ export function Duplicates({
                 </Button>
               </div>
             )}
-            {shownError && (
-              <p role="alert" className="duplicate-error">
-                {shownError}
-              </p>
-            )}
+            {shownError && <FailureAlert size="compact" failure={shownError} />}
           </>
         ) : (
           <div className="duplicate-form">
             <FieldGroup>
-              <Field data-invalid={!!error}>
+              <Field>
                 <FieldLabel htmlFor={`canonical-${ticket.id}`}>
                   {separate
                     ? "Existing endpoint to replace"
@@ -536,7 +554,7 @@ export function Duplicates({
                     event.preventDefault();
                     if (target && !pending) void loadPreview();
                   }}
-                  placeholder="Search by title or reference"
+                  placeholder="Search tickets by title or reference"
                   autoComplete="off"
                   aria-label={
                     separate
@@ -545,7 +563,12 @@ export function Duplicates({
                   }
                   aria-invalid={!!error}
                 />
-                <FieldError>{error}</FieldError>
+                <FieldError>
+                  {error &&
+                    (error.code === "not_found"
+                      ? error.sentence
+                      : `${error.title}. ${error.sentence}`)}
+                </FieldError>
                 {matches.length > 0 && (
                   <ul className="link-ticket-results" aria-label="Matches">
                     {matches.map((item) => (

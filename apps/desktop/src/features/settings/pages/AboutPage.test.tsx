@@ -16,7 +16,10 @@ import { SettingsStateProvider } from "@/features/settings/settings-state";
 vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: { openLink: vi.fn() },
 }));
-vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
+// Settings reads the CLI for its nav dot at startup; these pages ignore it.
+vi.mock("@/lib/api/cli", () => ({
+  cliClient: { check: vi.fn(() => new Promise(() => {})) },
+}));
 vi.mock("@/lib/api/agent-skills", () => ({
   agentSkillsClient: { list: vi.fn(async () => []) },
 }));
@@ -78,8 +81,8 @@ test("a link that cannot open says so", async () => {
   vi.mocked(workspaceClient.openLink).mockRejectedValue("no browser");
   renderPage();
   fireEvent.click(screen.getByRole("link", { name: /^Documentation/ }));
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Could not open the documentation: no browser",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't open the documentation. No browser.",
   );
 });
 

@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
-import { ZoomControl } from "@/components/ui/zoom-control";
+import { ZoomControls } from "@/components/ui/graph-kit";
 import {
   automaticViewport,
   focusZoom,
@@ -39,6 +39,7 @@ export function FlowView({
   const height = useStore((state) => state.height);
   const zoom = useStore((state) => state.transform[2]);
   const minZoom = useStore((state) => state.minZoom);
+  const maxZoom = useStore((state) => state.maxZoom);
   const canvas = useStore((state) => state.domNode);
   /** Fits the whole flow when it reads whole; says whether it did. */
   const fitReadable = () => {
@@ -147,10 +148,13 @@ export function FlowView({
   }, [canvas, flow]);
   return (
     <div className="flow-zoom">
-      <ZoomControl
+      <ZoomControls
         zoom={zoom}
+        min={minZoom}
+        max={maxZoom}
         onZoomOut={() => void flow.zoomOut()}
         onZoomIn={() => void flow.zoomIn()}
+        onReset={() => void flow.zoomTo(1)}
         onFit={fitWhole}
       />
     </div>

@@ -586,14 +586,7 @@ pub(crate) fn valid_filename(name: &str) -> bool {
 }
 
 fn upload_limit_error(limit: u64) -> Error {
-    let bound = if limit.is_multiple_of(1_048_576) {
-        format!("{} MiB ({limit} bytes)", limit / 1_048_576)
-    } else {
-        format!("{limit} bytes")
-    };
-    Error::Attachment(format!(
-        "file exceeds the workspace upload limit of {bound}; change it in Settings > Attachments or `ticketd attachment limit --bytes <bytes>`"
-    ))
+    Error::UploadLimit { limit }
 }
 
 fn copy_upload(

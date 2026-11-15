@@ -8,12 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { modifierKeyLabel } from "@/lib/platform";
 import type { ComposerControls } from "@/features/chats/model";
 
@@ -62,15 +57,10 @@ export function SendButton({
   return (
     <div className="chat-send">
       {effect ? (
-        <TooltipProvider>
-          <Tooltip>
-            {/* A disabled button gets no pointer events; the span keeps the tooltip. */}
-            <TooltipTrigger asChild>
-              <span className="chat-send-tip">{button}</span>
-            </TooltipTrigger>
-            <TooltipContent>{effect}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        // A disabled button gets no pointer events; the span keeps the tooltip.
+        <Tooltip content={effect}>
+          <span className="chat-send-tip">{button}</span>
+        </Tooltip>
       ) : (
         button
       )}

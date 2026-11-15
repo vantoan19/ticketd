@@ -10,6 +10,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { Projects } from "./Projects";
 
 afterEach(() => {
@@ -29,19 +30,41 @@ const props = {
   onChange: async () => {},
 };
 
-function openMenu(name: string) {
-  fireEvent.pointerDown(screen.getByRole("button", { name }), {
-    button: 0,
-    ctrlKey: false,
-  });
+/** Opens a project row to its checkouts. */
+function expand(name = "Original") {
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}`) }));
+}
+/** Chooses an item from a project's "…" menu. */
+async function chooseAction(item: string, name = "Original") {
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: `Actions for ${name}` }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
 }
 
-test("shows checkouts home-relative on one line with the full path on hover", () => {
+/** Hovers an element and returns the text of the tooltip it opens. */
+async function hoverTooltip(element: HTMLElement) {
+  fireEvent.pointerMove(element);
+  const text = (await screen.findByRole("tooltip")).textContent;
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+  return text;
+}
+
+test("shows checkouts home-relative on one line with the full path on hover", async () => {
   render(<Projects {...props} />);
+  expand();
   const list = screen.getByRole("list", { name: "Checkouts of Original" });
-  const path = within(list).getByTitle("/Users/me/src/old");
-  expect(path.textContent).toBe("~/src/old");
-  expect(within(list).getByTitle("/other/checkout")).toBeTruthy();
+  const [first, second] = Array.from(
+    list.querySelectorAll<HTMLElement>('[data-slot="path-text"]'),
+  );
+  expect(first!.textContent).toBe("~/src/old");
+  expect(second!.textContent).toBe("/other/checkout");
+  // The full path is in a tooltip (P4), not a native title.
+  expect(list.querySelector("[title]")).toBeNull();
+  expect(await hoverTooltip(first!)).toBe("/Users/me/src/old");
+  expect(await hoverTooltip(second!)).toBe("/other/checkout");
 });
 
 test("labels the project's own path as the first checkout, not the alphabetically first", () => {
@@ -51,9 +74,9 @@ test("labels the project's own path as the first checkout, not the alphabeticall
       projects={[{ ...project, path: "/zeta", paths: ["/eta", "/zeta"] }]}
     />,
   );
+  expand();
   const list = screen.getByRole("list", { name: "Checkouts of Original" });
   const [eta, zeta] = within(list).getAllByRole("listitem");
-  expect(eta?.textContent).toContain("Checkout");
   expect(eta?.textContent).not.toContain("First checkout");
   expect(zeta?.textContent).toContain("First checkout");
 });
@@ -64,7 +87,7 @@ test("the New project hint does not promise dropping or name a macOS app", () =>
   expect(screen.queryByText(/Finder|drop it/)).toBeNull();
 });
 
-test("copies a checkout path and the project ID, and shows the folder in the file manager", () => {
+test("copies a checkout path and the project ID, and shows the folder in the file manager", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText },
@@ -72,16 +95,17 @@ test("copies a checkout path and the project ID, and shows the folder in the fil
   });
   const reveal = vi.spyOn(workspaceClient, "reveal").mockResolvedValue();
   render(<Projects {...props} />);
-  expect(screen.getByText(/identity survives moves and renames/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /Copy project ID/ }));
-  expect(writeText).toHaveBeenCalledWith("p1");
+  // The command-line hint is said once, in the lede (plans PR-09).
+  expect(screen.getByText(/picks it from the folder you're in/)).toBeTruthy();
+  await chooseAction("Copy project ID");
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("p1"));
+  expand();
   fireEvent.click(
-    screen.getByRole("button", { name: "Copy checkout path /other/checkout" }),
+    screen.getByRole("button", { name: "Copy path /other/checkout" }),
   );
   expect(writeText).toHaveBeenCalledWith("/other/checkout");
-  fireEvent.click(
-    screen.getByRole("button", { name: /^Show \/other\/checkout in / }),
-  );
+  const row = screen.getByText("/other/checkout").closest("li") as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: /^Show in / }));
   expect(reveal).toHaveBeenCalledWith("/other/checkout");
 });
 
@@ -106,9 +130,7 @@ test("a new project waits for a folder, fills its name from it, then saves", asy
   });
   expect(create_).toHaveProperty("disabled", true);
   expect(within(dialog).getByText("No folder chosen")).toBeTruthy();
-  fireEvent.click(
-    within(dialog).getByRole("button", { name: "Choose folder…" }),
-  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Choose…" }));
   await waitFor(() =>
     expect(
       within(dialog).getByRole("button", { name: "Change…" }),
@@ -136,7 +158,7 @@ test("cancelling the folder picker keeps Create project disabled", async () => {
     .mockResolvedValue(null);
   render(<Projects {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
   await waitFor(() => expect(choose).toHaveBeenCalled());
   expect(screen.getByRole("button", { name: "Create project" })).toHaveProperty(
     "disabled",
@@ -145,13 +167,24 @@ test("cancelling the folder picker keeps Create project disabled", async () => {
 });
 
 test("renames a project from its menu and shows a save failure in the dialog", async () => {
-  vi.spyOn(client, "editProject").mockRejectedValue("Name already used");
+  vi.spyOn(client, "editProject").mockRejectedValue({
+    code: "workspace_read_only",
+    message: "workspace database error: attempt to write a readonly database",
+  });
   render(<Projects {...props} />);
-  openMenu("Actions for Original");
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
+  // One "…" holds Rename, Copy project ID and Register checkout (PR-04).
+  await chooseAction("Rename…");
   const dialog = await screen.findByRole("dialog", { name: "Rename project" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
-  expect(await within(dialog).findByText("Name already used")).toBeTruthy();
+  const alert = await within(dialog).findByRole("alert");
+  expect(alert.textContent).toContain(
+    "Couldn't rename the project. The workspace is read-only, so nothing changed.",
+  );
+  // The raw text stays under Details, and the valid name is not marked invalid (PR-05).
+  expect(alert.textContent).not.toContain("readonly database");
+  expect(
+    within(dialog).getByLabelText("Project name").getAttribute("aria-invalid"),
+  ).toBeNull();
 });
 
 test("registers a checkout by choosing a folder", async () => {
@@ -160,17 +193,15 @@ test("registers a checkout by choosing a folder", async () => {
     .spyOn(client, "registerCheckout")
     .mockResolvedValue(project);
   render(<Projects {...props} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Register checkout for Original" }),
-  );
-  const dialog = screen.getByRole("dialog", { name: "Register checkout" });
+  await chooseAction("Register checkout…");
+  const dialog = await screen.findByRole("dialog", {
+    name: "Register checkout",
+  });
   const submit = within(dialog).getByRole("button", {
     name: "Register checkout",
   });
   expect(submit).toHaveProperty("disabled", true);
-  fireEvent.click(
-    within(dialog).getByRole("button", { name: "Choose folder…" }),
-  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Choose…" }));
   await waitFor(() => expect(submit).toHaveProperty("disabled", false));
   fireEvent.click(submit);
   await waitFor(() =>
@@ -178,31 +209,31 @@ test("registers a checkout by choosing a folder", async () => {
   );
 });
 
-test("removing a checkout asks first and says tickets are unchanged", async () => {
+test("removing a checkout acts at once and Undo registers it again", async () => {
+  // Plans PR-01: no inline confirmation pushing the page down.
   const remove = vi.spyOn(client, "removeCheckout").mockResolvedValue(project);
-  render(<Projects {...props} />);
-  openMenu("Actions for checkout /other/checkout");
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Remove/ }));
-  expect(remove).not.toHaveBeenCalled();
-  const confirm = screen.getByRole("group", {
-    name: "Remove checkout /other/checkout",
-  });
-  expect(within(confirm).getByText(/tickets are unchanged/)).toBeTruthy();
-  fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
-  expect(remove).not.toHaveBeenCalled();
-  openMenu("Actions for checkout /other/checkout");
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Remove/ }));
-  fireEvent.click(
-    within(
-      screen.getByRole("group", { name: "Remove checkout /other/checkout" }),
-    ).getByRole("button", { name: "Remove checkout" }),
+  const register = vi
+    .spyOn(client, "registerCheckout")
+    .mockResolvedValue(project);
+  render(
+    <StatusLineRegion>
+      <Projects {...props} />
+    </StatusLineRegion>,
   );
+  expand();
+  const row = screen.getByText("/other/checkout").closest("li") as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: "Remove checkout" }));
   await waitFor(() =>
     expect(remove).toHaveBeenCalledWith("p1", "/other/checkout"),
   );
+  expect(await screen.findByText("Removed checkout checkout")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() =>
+    expect(register).toHaveBeenCalledWith("p1", "/other/checkout"),
+  );
 });
 
-test("opens the tickets of a project from its card", () => {
+test("opens the tickets of a project from its row", () => {
   const onOpenTickets = vi.fn();
   render(<Projects {...props} onOpenTickets={onOpenTickets} />);
   fireEvent.click(
@@ -232,5 +263,7 @@ test("a long checkout path keeps all its text for the middle to truncate", () =>
   const long =
     "/private/tmp/claude-501/-Users-me-Projects/8b654d0c-8f7d/repo-api";
   render(<Projects {...props} projects={[{ ...project, paths: [long] }]} />);
-  expect(screen.getByTitle(long).textContent).toBe(long);
+  expand();
+  const path = document.querySelector('[data-slot="path-text"]');
+  expect(path?.textContent).toBe(long);
 });

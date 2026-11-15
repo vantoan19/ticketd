@@ -1,10 +1,15 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
-import { RadioGroup } from "radix-ui";
 import { Button } from "@/components/ui/button";
+import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Textarea } from "@/components/ui/textarea";
 import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   syncReview,
   type Conflict,
@@ -15,7 +20,6 @@ import { FieldValue } from "./FieldValue";
 import { conflictLabel, dayTime } from "./labels";
 import { useConflicts } from "./use-conflicts";
 import { useRequestIds } from "./use-request-ids";
-import "@/features/settings/settings.css";
 import "./sync-review.css";
 
 type Choice = Resolution["choice"];
@@ -44,7 +48,8 @@ export function ConflictReview({
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   // One edit draft per field: two texts can be edited in the same review.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
+  // A failure in plain words, or what the review found; shown above the footer.
+  const [error, setError] = useState<FailureDescription | string>("");
   const [busy, setBusy] = useState(false);
   // Set at once, where `busy` waits for a render: a second submit finds it.
   const saving = useRef(false);
@@ -56,7 +61,7 @@ export function ConflictReview({
         if (active) setConflict(loaded);
       },
       (reason: unknown) => {
-        if (active) setError(toFailure(reason).message);
+        if (active) setError(describeFailure(reason, "load both versions"));
       },
     );
     return () => {
@@ -102,7 +107,7 @@ export function ConflictReview({
     } catch (reason) {
       const failure = toFailure(reason);
       if (failure.code === "review_changed") await reload();
-      else setError(failure.message);
+      else setError(describeFailure(failure, "save your choices"));
       saving.current = false;
       setBusy(false);
     }
@@ -148,18 +153,25 @@ export function ConflictReview({
       }
       footerNote="This desktop’s version is used until you save or a newer change arrives."
       onSubmit={() => void save()}
-      width={760}
+      size="lg"
       busy={busy}
       primaryFirst
+      {...(error &&
+        !withdrawn && {
+          error:
+            typeof error === "string" ? (
+              error
+            ) : (
+              <FailureAlert size="compact" failure={error} />
+            ),
+        })}
     >
       {withdrawn ? (
         <p role="status">
           A newer change settled this while it was open, so nothing is left to
           review.
         </p>
-      ) : (
-        error && <p role="alert">{error}</p>
-      )}
+      ) : null}
       {conflict && !withdrawn && (
         <div className="sync-compare" ref={compare}>
           <span />
@@ -197,59 +209,52 @@ export function ConflictReview({
                 <div className="sync-compare-field" id={`${ids}-${field}`}>
                   {label}
                 </div>
-                <RadioGroup.Root
-                  className="sync-compare-choices"
-                  aria-labelledby={`${ids}-${field}`}
-                  value={choice}
-                  disabled={busy}
-                  onValueChange={(value) =>
-                    setChoices({ ...choices, [field]: value as Choice })
-                  }
-                >
-                  <RadioGroup.Item
-                    value="local"
-                    className="upload-destination-choice"
-                    aria-label={`${label} from this desktop${body ? "" : `: ${local}`}`}
+                {/* One ChoiceTiles group per field: this desktop's value
+                    beside the other one (set SR-10). */}
+                <div className="sync-compare-choices">
+                  <ChoiceTiles
+                    aria-labelledby={`${ids}-${field}`}
+                    value={choice}
+                    disabled={busy}
+                    onValueChange={(value) =>
+                      setChoices({ ...choices, [field]: value as Choice })
+                    }
                   >
-                    <span className="layout-choice-dot" aria-hidden="true" />
-                    <span>
-                      <FieldValue
-                        field={field}
-                        value={local}
-                        against={remote}
+                    <ChoiceTile
+                      value="local"
+                      aria-label={`${label} from this desktop${body ? "" : `: ${local}`}`}
+                      title={
+                        <FieldValue
+                          field={field}
+                          value={local}
+                          against={remote}
+                        />
+                      }
+                    />
+                    <ChoiceTile
+                      value="remote"
+                      aria-label={`${label} from ${remote_device}${body ? "" : `: ${remote}`}`}
+                      title={
+                        <FieldValue
+                          field={field}
+                          value={remote}
+                          against={local}
+                        />
+                      }
+                    />
+                    {body && choice === "edited" && (
+                      <ChoiceTile
+                        value="edited"
+                        aria-label={`Your edited ${label.toLowerCase()}`}
+                        title="Your edit"
                       />
-                    </span>
-                  </RadioGroup.Item>
-                  <RadioGroup.Item
-                    value="remote"
-                    className="upload-destination-choice"
-                    aria-label={`${label} from ${remote_device}${body ? "" : `: ${remote}`}`}
-                  >
-                    <span className="layout-choice-dot" aria-hidden="true" />
-                    <span>
-                      <FieldValue
-                        field={field}
-                        value={remote}
-                        against={local}
-                      />
-                    </span>
-                  </RadioGroup.Item>
+                    )}
+                  </ChoiceTiles>
                   {/* An Automation's steps are taken whole from one desktop. */}
                   {body && kind !== "automation" && (
                     <div className="sync-result">
                       {choice === "edited" ? (
                         <>
-                          <RadioGroup.Item
-                            value="edited"
-                            className="upload-destination-choice"
-                            aria-label={`Your edited ${label.toLowerCase()}`}
-                          >
-                            <span
-                              className="layout-choice-dot"
-                              aria-hidden="true"
-                            />
-                            <span>Your edit</span>
-                          </RadioGroup.Item>
                           <Textarea
                             autoFocus
                             aria-label={`Edited ${label.toLowerCase()}`}
@@ -286,7 +291,7 @@ export function ConflictReview({
                       )}
                     </div>
                   )}
-                </RadioGroup.Root>
+                </div>
               </Fragment>
             );
           })}

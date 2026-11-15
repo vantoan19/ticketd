@@ -93,7 +93,7 @@ function renderDetails(item: Ticket = ticket) {
   );
 }
 
-test("the property rail holds Status, Source, Project, Plan, Tags, Relationships, and Attention in order", async () => {
+test("the property rail holds Status, Latest update, Project, Plan, Tags, Attention, Relationships and Files in order", async () => {
   renderDetails({ ...ticket, status: "In progress" });
   const rail = await screen.findByRole("complementary", {
     name: "Ticket properties",
@@ -106,19 +106,17 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
   ).toEqual([
     "Status",
     "Latest update",
-    "Source",
     "Project",
     "Plan",
     "Tags",
-    "Attachments",
-    "Documents",
-    "Relationships",
     "Attention",
+    "Relationships",
+    "Files",
   ]);
-  // A local ticket reads Local, with no GitHub mark, in the rail and the state line.
-  expect(within(rail).getByText("Local")).toBeTruthy();
+  // No source is set up: nothing says "Local", and there is no Source section.
+  expect(within(rail).queryByText("Local")).toBeNull();
   expect(screen.queryByText(/Owned by GitHub/)).toBeNull();
-  expect(screen.getByText("Local ticket")).toBeTruthy();
+  expect(screen.queryByText(/Local ticket/)).toBeNull();
   expect(
     within(rail).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
@@ -140,7 +138,7 @@ test("the reading column runs title, state, description, then subtickets, and ke
   renderDetails();
   const subtickets = await screen.findByRole("heading", { name: "Subtickets" });
   const title = screen.getByRole("textbox", { name: "Title" });
-  const state = screen.getByText("Local ticket");
+  const state = document.querySelector(".ticket-state-line")!;
   const description = screen.getByText("Description");
   const rail = screen.getByRole("complementary", {
     name: "Ticket properties",
@@ -161,16 +159,18 @@ test("Follow, the reminder, and the properties live in the rail, not the header"
   const rail = await screen.findByRole("complementary", {
     name: "Ticket properties",
   });
-  const follow = await within(rail).findByRole("switch", { name: "Follow" });
-  expect(follow.getAttribute("aria-checked")).toBe("false");
+  const follow = await within(rail).findByRole("button", { name: "Follow" });
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(follow);
   await waitFor(() =>
     expect(
       within(rail)
-        .getByRole("switch", { name: "Follow" })
-        .getAttribute("aria-checked"),
+        .getByRole("button", { name: "Follow" })
+        .getAttribute("aria-pressed"),
     ).toBe("true"),
   );
+  // Visible words follow the state; the name stays "Follow".
+  expect(follow.textContent).toBe("Following");
   expect(
     within(rail).getByRole("button", { name: "Manage reminder" }),
   ).toBeTruthy();
@@ -247,7 +247,7 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   const heading = screen.getByRole("heading", { name: "Latest update" });
   fireEvent.click(
     await within(heading.closest("section")!).findByRole("button", {
-      name: "Go to update",
+      name: /^Go to update/,
     }),
   );
   expect(
@@ -269,19 +269,22 @@ test("Edit is a real button with its shortcut, and E starts editing", async () =
   ).toBeTruthy();
 });
 
-test("Subtickets and Evidence own their add actions even when empty", async () => {
+test("an empty ticket folds Subtickets and Evidence into one quiet add row (DB-30)", async () => {
   renderDetails();
-  const subtickets = (
-    await screen.findByRole("heading", { name: "Subtickets" })
-  ).closest("section")!;
+  const row = await screen.findByRole("group", {
+    name: "Add to this ticket",
+  });
   expect(
-    within(subtickets).getByRole("button", { name: "Add subticket" }),
-  ).toBeTruthy();
-  const evidence = screen.getByRole("heading", { name: /^Evidence/ });
+    within(row)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Subticket", "Evidence", "Relationship"]);
+  // No empty sections stand in a stack under the description.
+  expect(screen.queryByRole("heading", { name: "Subtickets" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: /^Evidence/ })).toBeNull();
+  fireEvent.click(within(row).getByRole("button", { name: "Evidence" }));
   expect(
-    within(evidence.closest("section")!).getByRole("button", {
-      name: "Add evidence",
-    }),
+    await screen.findByRole("dialog", { name: "Add evidence" }),
   ).toBeTruthy();
 });
 

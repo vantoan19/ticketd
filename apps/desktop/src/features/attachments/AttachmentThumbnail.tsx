@@ -1,24 +1,57 @@
 import { useEffect, useState } from "react";
-import { AudioLines, File, FileVideo } from "lucide-react";
+import {
+  File,
+  FileArchive,
+  FileAudio,
+  FileImage,
+  FileText,
+  FileVideo,
+} from "lucide-react";
 import { attachments, type Attachment } from "@/lib/api/attachments";
+import { fileType, type FileFamily } from "./file-words";
+import "./attachment-thumbnail.css";
+
+const ICONS: Record<FileFamily, typeof File> = {
+  image: FileImage,
+  audio: FileAudio,
+  video: FileVideo,
+  text: FileText,
+  pdf: FileText,
+  archive: FileArchive,
+  file: File,
+};
+
+/** The glyph of a file's family: image, audio, video, text, archive (AT-24). */
+export function FileIcon({
+  family,
+  className,
+}: {
+  family: FileFamily;
+  className?: string;
+}) {
+  const Icon = ICONS[family];
+  return <Icon aria-hidden="true" {...(className && { className })} />;
+}
 
 /**
  * Decorative only: the file's authored name and actions remain outside the thumbnail.
- * `tile` is the 96×72 image tile a Chat message shows.
+ * `icon` is the 36px tile of the rail and pickers, `row` the 24px tile of a
+ * library row, `tile` the 96×72 image tile a Chat message shows. Images sit
+ * on a checkerboard so a white or transparent one stays visible.
  */
 export function AttachmentThumbnail({
   file,
   size = "icon",
 }: {
   file: Attachment;
-  size?: "icon" | "tile";
+  size?: "icon" | "row" | "tile";
 }) {
   const [image, setImage] = useState<{ id: string; url: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const candidate =
     file.kind === "local_snapshot" &&
     !file.quarantined &&
-    // The native protocol buffers responses; a library must not auto-load many 100 MiB images.
+    // The native protocol buffers responses; a library must not auto-load many 100 MB images.
     // Larger images keep their icon and remain available through the explicit shared preview.
     file.size_bytes !== null &&
     file.size_bytes <= 5 * 1024 * 1024 &&
@@ -43,18 +76,15 @@ export function AttachmentThumbnail({
       current = false;
     };
   }, [candidate, file.id]);
-  const Icon = /\.(mp4|webm|mov|ogv)$/i.test(file.original_filename)
-    ? FileVideo
-    : /\.(mp3|wav|ogg|m4a)$/i.test(file.original_filename)
-      ? AudioLines
-      : File;
+  const shown = candidate && image?.id === file.id && failed !== file.id;
   return (
     <span
-      className="attachment-thumbnail"
-      data-size={size === "tile" ? "tile" : undefined}
+      className="file-thumb"
+      data-size={size === "icon" ? undefined : size}
+      data-image={shown ? "" : undefined}
       aria-hidden="true"
     >
-      {candidate && image?.id === file.id && failed !== file.id ? (
+      {shown ? (
         <img
           src={image.url}
           loading="lazy"
@@ -62,7 +92,7 @@ export function AttachmentThumbnail({
           onError={() => setFailed(file.id)}
         />
       ) : (
-        <Icon />
+        <FileIcon family={fileType(file.original_filename).family} />
       )}
     </span>
   );

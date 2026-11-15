@@ -175,8 +175,8 @@
   background: var(--recessed);
 }
 .auto-starter:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .auto-starter > svg {
   grid-row: 1 / span 2;
@@ -328,8 +328,8 @@
   cursor: pointer;
 }
 .flow-card-main:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 /* The icon tile says what kind of step it is: the trigger blue, Run agent
    solid, If violet, Change ticket teal, Notify me pink. */
@@ -436,8 +436,8 @@
   color: var(--foreground);
 }
 .flow-add:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .flow-gap:hover .flow-add,
 .flow-add:focus-visible,
@@ -790,8 +790,8 @@
   background: var(--accent);
 }
 .ticket-run:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .ticket-run-name {
   overflow: hidden;

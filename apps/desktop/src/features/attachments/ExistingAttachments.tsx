@@ -1,182 +1,168 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { useId, useState } from "react";
+import { SearchX } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FailureState } from "@/components/ui/failure-alert";
+import { Pager } from "@/components/ui/pager";
+import { SearchInput } from "@/components/ui/search-input";
 import type { Attachment } from "@/lib/api/attachments";
-import { useAttachmentSearch } from "./use-attachment-search";
+import { ATTACHMENT_PAGE, useAttachmentSearch } from "./use-attachment-search";
 import { formatSize } from "./format-size";
 import { usageContext } from "./usage-context";
 import { AttachmentThumbnail } from "./AttachmentThumbnail";
+import { fileType, purged } from "./file-words";
 
+/** One chosen file and the request identity its insertion keeps on retry. */
+export type ExistingChoice = { file: Attachment; requestId: string };
+
+/**
+ * The Existing files tab: search first (a pasted ticketd link finds its
+ * file), then the files related to this ticket and the rest of the workspace,
+ * each with its checkbox (a radio when one file replaces a reference) on the
+ * left. The picker owns the selection and inserts it from its footer.
+ */
 export function ExistingAttachments({
   ticketReference,
-  onPick,
-  onDone,
-  onBusyChange,
+  selected,
+  onSelectedChange,
+  busy,
   single = false,
 }: {
   ticketReference: string | null;
-  onPick: (file: Attachment, requestId: string) => Promise<void>;
-  onDone: () => void;
-  onBusyChange: (busy: boolean) => void;
+  selected: ExistingChoice[];
+  onSelectedChange: (next: ExistingChoice[]) => void;
+  busy: boolean;
   single?: boolean;
 }) {
   const choiceName = useId();
   const [search, setSearch] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [selected, setSelected] = useState<
-    { file: Attachment; requestId: string }[]
-  >([]);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
-  const current = useRef(true);
-  useEffect(() => {
-    current.current = true;
-    return () => {
-      current.current = false;
-    };
-  }, []);
-  const { files, loading, error } = useAttachmentSearch(
-    search,
-    "all",
-    ticketReference,
-    offset,
-  );
-  async function insert() {
-    if (single && selected.length !== 1) {
-      setFailure("Choose one file to replace this reference.");
-      return;
-    }
-    setBusy(true);
-    onBusyChange(true);
-    setFailure("");
-    try {
-      for (const item of selected) {
-        if (!current.current) return;
-        await onPick(item.file, item.requestId);
-        if (!current.current) return;
-        setSelected((rows) =>
-          rows.filter((row) => row.file.id !== item.file.id),
-        );
-      }
-      onDone();
-    } catch (reason) {
-      if (current.current) setFailure(String(reason));
-    } finally {
-      if (current.current) setBusy(false);
-      onBusyChange(false);
-    }
-  }
+  const [limit, setLimit] = useState(ATTACHMENT_PAGE);
+  const [refresh, setRefresh] = useState(0);
+  const { files, loading, pending, error, answered, more } =
+    useAttachmentSearch(search, "all", ticketReference, limit, refresh);
+  const query = answered.search.trim();
   return (
     <div className="attachment-existing">
-      <Input
-        type="search"
+      <SearchInput
+        size="default"
         aria-label="Search existing files"
-        placeholder="Search filenames or metadata…"
-        disabled={busy}
+        placeholder="Search files by name, or paste a link…"
+        autoFocus
         value={search}
-        onChange={(event) => {
-          setSearch(event.target.value);
-          setOffset(0);
+        onValueChange={(value) => {
+          setSearch(value);
+          setLimit(ATTACHMENT_PAGE);
         }}
+        fill
       />
-      {loading && <p role="status">Loading files…</p>}
-      <div
-        className="attachment-existing-results"
-        role={single ? "radiogroup" : undefined}
-        aria-label={single ? "Existing file choice" : undefined}
-      >
-        {[true, false].map((related) => {
-          const group = files.filter((row) => row.related === related);
-          return (
-            group.length > 0 && (
-              <section
-                key={String(related)}
-                aria-label={
-                  related ? "Related to this ticket" : "Recent in workspace"
-                }
-              >
-                <p className="attachment-hint">
-                  {related ? "Related to this ticket" : "Recent in workspace"}
-                </p>
-                <ul>
-                  {group.map(({ attachment: file, usage }) => (
-                    <li key={file.id}>
-                      <label className="attachment-row">
-                        <AttachmentThumbnail file={file} />
-                        <span>
-                          {file.display_name}
-                          <small>
-                            {file.size_bytes !== null && (
-                              <>{formatSize(file.size_bytes)} · </>
-                            )}
-                            {usageContext(usage)}
-                            {file.purge_state === "purged"
-                              ? " · Permanently purged · Bytes unavailable"
-                              : file.purge_state === "pending"
-                                ? " · Permanent purge pending · Bytes unavailable"
-                                : ""}
-                          </small>
-                        </span>
-                        <input
-                          type={single ? "radio" : "checkbox"}
-                          name={single ? choiceName : undefined}
-                          aria-label={`Select ${file.display_name}`}
-                          disabled={
-                            busy ||
-                            file.purge_state === "purged" ||
-                            file.purge_state === "pending"
-                          }
-                          checked={selected.some(
-                            (row) => row.file.id === file.id,
-                          )}
-                          onChange={(event) =>
-                            setSelected((rows) =>
-                              event.target.checked
-                                ? [
-                                    ...(single ? [] : rows),
-                                    { file, requestId: crypto.randomUUID() },
+      <div className="attachment-existing-results" aria-busy={pending}>
+        {error ? (
+          <FailureState
+            failure={error}
+            onRetry={() => setRefresh((value) => value + 1)}
+          />
+        ) : loading ? null : !files.length ? (
+          query ? (
+            <EmptyState
+              icon={<SearchX />}
+              title={`No files match “${query}”`}
+            />
+          ) : (
+            <EmptyState
+              title="No files in this workspace yet"
+              description="Upload a file and it can be reused here."
+            />
+          )
+        ) : (
+          <div
+            role={single ? "radiogroup" : undefined}
+            aria-label={single ? "Existing file choice" : undefined}
+          >
+            {[true, false].map((related) => {
+              const group = files.filter((row) => row.related === related);
+              const label = related
+                ? "Related to this ticket"
+                : ticketReference
+                  ? "Elsewhere in the workspace"
+                  : "In this workspace";
+              return (
+                group.length > 0 && (
+                  <section key={String(related)} aria-label={label}>
+                    {/* One group needs no label of its own. */}
+                    {ticketReference && (
+                      <p className="attachment-existing-group">{label}</p>
+                    )}
+                    <ul>
+                      {group.map(({ attachment: file, usage }) => {
+                        const unavailable = purged(file);
+                        const checked = selected.some(
+                          (row) => row.file.id === file.id,
+                        );
+                        return (
+                          <li key={file.id}>
+                            <label
+                              className="attachment-choice"
+                              data-checked={checked || undefined}
+                              data-disabled={unavailable || undefined}
+                            >
+                              <input
+                                type={single ? "radio" : "checkbox"}
+                                name={single ? choiceName : undefined}
+                                aria-label={`Select ${file.display_name}`}
+                                disabled={busy || unavailable}
+                                checked={checked}
+                                onChange={(event) =>
+                                  onSelectedChange(
+                                    event.target.checked
+                                      ? [
+                                          ...(single ? [] : selected),
+                                          {
+                                            file,
+                                            requestId: crypto.randomUUID(),
+                                          },
+                                        ]
+                                      : selected.filter(
+                                          (row) => row.file.id !== file.id,
+                                        ),
+                                  )
+                                }
+                              />
+                              <AttachmentThumbnail file={file} size="row" />
+                              <span className="attachment-choice-text">
+                                <span className="attachment-choice-name">
+                                  {file.display_name}
+                                </span>
+                                <small>
+                                  {[
+                                    fileType(file.original_filename).word,
+                                    file.size_bytes !== null &&
+                                      formatSize(file.size_bytes),
+                                    unavailable
+                                      ? "Deleted permanently"
+                                      : usageContext(usage),
                                   ]
-                                : rows.filter((row) => row.file.id !== file.id),
-                            )
-                          }
-                        />
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )
-          );
-        })}
-      </div>
-      {!loading && !error && !files.length && <p>No matching files</p>}
-      {(error || failure) && <p role="alert">{error || failure}</p>}
-      <div className="attachment-actions">
-        <Button
-          variant="ghost"
-          disabled={busy || offset === 0}
-          onClick={() => setOffset(Math.max(0, offset - 50))}
-        >
-          Previous files
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={busy || files.length < 50}
-          onClick={() => setOffset(offset + 50)}
-        >
-          Next files
-        </Button>
-      </div>
-      <div className="attachment-actions">
-        <span className="attachment-hint">
-          {selected.length} selected · No extra copy is created
-        </span>
-        <Button
-          disabled={busy || !selected.length}
-          onClick={() => void insert()}
-        >
-          Insert selected
-        </Button>
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </small>
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                )
+              );
+            })}
+            {more && (
+              <Pager
+                more={ATTACHMENT_PAGE}
+                noun="files"
+                loading={pending}
+                onMore={() => setLimit((value) => value + ATTACHMENT_PAGE)}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -128,17 +128,18 @@ test("the Unread filter asks the core for unread entries and loads older pages",
   );
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(30));
   expect(screen.queryByRole("button", { name: /^T-KQ99/ })).toBeNull();
-  expect(screen.getByText(/That’s everything unread/)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
 });
 
 test("an empty Inbox explains itself and offers to browse tickets", async () => {
   store = [];
   const onBrowse = vi.fn();
   render(<Inbox revision={0} select={vi.fn()} onBrowse={onBrowse} />);
-  await screen.findByText("Nothing in your Inbox");
-  const mark = screen.getByRole("button", { name: "Mark shown as read" });
-  expect(mark.hasAttribute("disabled")).toBe(true);
+  await screen.findByText("No updates to review");
+  // Nothing unread is shown, so there is nothing to mark (list I-07).
+  expect(
+    screen.queryByRole("button", { name: "Mark shown as read" }),
+  ).toBeNull();
   fireEvent.click(
     screen.getByRole("button", { name: "Browse tickets to follow" }),
   );
@@ -149,9 +150,11 @@ test("loads older entries on request", async () => {
   store = Array.from({ length: 70 }, (_, i) => entry({ id: 200 - i }));
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
-  fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show more Inbox entries" }),
+  );
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(70));
-  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
 });
 
 test("row actions are real buttons reachable by keyboard focus and mark one entry", async () => {
@@ -185,10 +188,12 @@ test("snoozing a due reminder reschedules it without marking the entry read", as
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
   expect(await screen.findByText("Your reminder is due")).toBeTruthy();
   const before = Date.now();
-  fireEvent.click(
+  // Snooze is a menu whose rows say when the reminder returns (list I-03).
+  fireEvent.keyDown(
     screen.getByRole("button", { name: "Snooze reminder for T-KQ7" }),
+    { key: "Enter" },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "In one hour" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^In 1 hour/ }));
   await waitFor(() =>
     expect(calls.some((c) => c.command === "set_reminder")).toBe(true),
   );
@@ -221,4 +226,24 @@ test("a deleted update reads as deleted and opens the ticket with its id", async
   expect(await screen.findByText("Update deleted")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Gone/ }));
   expect(select).toHaveBeenCalledWith("T-KQ9", "note-id");
+});
+
+test("E marks the focused entry read without opening it", async () => {
+  const select = vi.fn();
+  render(<Inbox revision={0} select={select} onBrowse={vi.fn()} />);
+  const row = await screen.findByRole("button", { name: /T-KQ1.*First/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "e" });
+  await waitFor(() => expect(store[0]?.read).toBe(true));
+  expect(select).not.toHaveBeenCalled();
+});
+
+test("an Unread view with nothing unread says so and offers Show all", async () => {
+  store = store.map((e) => ({ ...e, read: true }));
+  render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
+  await screen.findByText("First");
+  fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+  expect(await screen.findByText("You're all caught up")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+  expect(await screen.findByText("First")).toBeTruthy();
 });

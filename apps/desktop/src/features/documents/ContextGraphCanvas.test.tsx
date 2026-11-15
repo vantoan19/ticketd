@@ -27,6 +27,7 @@ vi.mock("@xyflow/react", () => ({
     return <div>Canvas</div>;
   },
   Background: () => null,
+  BackgroundVariant: { Dots: "dots" },
   Handle: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
 }));
@@ -96,39 +97,48 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("the legend has its own row beside the canvas, one zoom and Fit control stays on it, and Fit never clips", () => {
+test("the legend is one row inside the canvas naming only the kinds drawn; zoom steps and Fit stays at 100%", () => {
   const view = render(
     <ContextGraphCanvas
-      edges={[]}
+      edges={[
+        { id: "0", source: "a", target: "b", label: "blocks" },
+        { id: "1", source: "a", target: "c", label: "related" },
+        { id: "2", source: "a", target: "d", label: "attached" },
+      ]}
       selected={null}
       positions={{}}
       onPositions={vi.fn()}
-      viewport={{ x: 0, y: 0, zoom: 0.5 }}
+      viewport={{ x: 0, y: 0, zoom: 0.6 }}
       onViewport={vi.fn()}
       onSelect={vi.fn()}
       onError={vi.fn()}
-      nodes={[]}
+      nodes={[{ id: "a", label: "A" }]}
     />,
   );
   const canvas = view.getByLabelText("Connections canvas");
-  // The legend is not drawn over the canvas, so it can never cover a card.
-  const legend = view.getByRole("list", { name: "Legend" });
-  expect(canvas.contains(legend)).toBe(false);
-  expect(canvas.parentElement?.contains(legend)).toBe(true);
+  // One row inside the canvas, top-right.
+  const legend = within(canvas).getByRole("list", { name: "Legend" });
+  // It lists only the kinds drawn, by the names on their lines, one sample per line style.
+  expect(
+    within(legend)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["blocks", "related", "attached"]);
   const zoom = within(canvas).getByRole("group", { name: "Zoom" });
-  expect(zoom.textContent).toContain("50%");
+  expect(zoom.textContent).toContain("60%");
+  // The readout is not announced on every change.
+  expect(within(zoom).queryByRole("status")).toBeNull();
   fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }));
-  // One press steps the shown 50% by the standard 1.2 factor.
+  // One press steps the shown 60% by the standard 1.2 factor.
   expect(instance.zoomTo).toHaveBeenLastCalledWith(
-    expect.closeTo(0.6, 5),
+    expect.closeTo(0.72, 5),
     expect.anything(),
   );
-  fireEvent.click(within(zoom).getByRole("button", { name: "Fit" }));
-  // Fit keeps cards legible; the user pans for the rest.
+  fireEvent.click(within(zoom).getByRole("button", { name: "Fit to view" }));
+  // Fit never goes below 100%: cards stay legible and the person pans.
   expect(instance.fitView).toHaveBeenCalledWith(
-    expect.objectContaining({ minZoom: 0.5 }),
+    expect.objectContaining({ minZoom: 1 }),
   );
-  expect(screen.getByRole("button", { name: "Fit" })).toBeTruthy();
 });
 
 test("the canvas stays hidden until the first fit, so the map is never seen at the starting zoom", () => {
@@ -184,10 +194,10 @@ test("a resize refits after Fit, even when the viewport syncs back, but not afte
         onViewport={vi.fn()}
         onSelect={vi.fn()}
         onError={vi.fn()}
-        nodes={[]}
+        nodes={[{ id: "a", label: "A" }]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
     // The controlled viewport syncing back starts a move with a marker object.
     flow.onMoveStart?.({ sync: true });
     flow.onMoveStart?.(null);

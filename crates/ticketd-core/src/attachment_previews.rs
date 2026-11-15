@@ -12,6 +12,8 @@ use crate::{Attachment, AttachmentKind, Error, Workspace};
 
 /// Independent of a configurable upload limit: WebViews buffer protocol responses.
 pub const MAX_PREVIEW_BYTES: u64 = 100 * 1024 * 1024;
+/// The most of a plain-text file a preview shows: the start, never the whole file.
+pub const TEXT_EXCERPT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +35,16 @@ pub struct AttachmentPreview {
     pub message: Option<String>,
     pub can_open: bool,
     pub usage: PreviewUsage,
+    /// The start of a plain-text file that is not media, shown as text.
+    pub text_excerpt: Option<TextExcerpt>,
+}
+
+/// The first bytes of a UTF-8 text file, cut on a character boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextExcerpt {
+    pub text: String,
+    /// The file continues past the excerpt.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +128,13 @@ impl Workspace {
             Err(error) => (error.status, None, Some(error.message)),
         };
         let can_open = self.attachment_open_target(id).is_ok();
+        let text_excerpt = if status == PreviewStatus::Unsupported
+            && attachment.kind == AttachmentKind::LocalSnapshot
+        {
+            self.text_excerpt(&attachment)
+        } else {
+            None
+        };
         Ok(AttachmentPreview {
             uploaded_copy: self.drive_uploaded_copy(id)?.is_some(),
             attachment,
@@ -124,7 +143,39 @@ impl Workspace {
             message,
             can_open,
             usage: self.preview_usage(id)?,
+            text_excerpt,
         })
+    }
+
+    /// The start of a stored file when it reads as text; None for anything else,
+    /// including a file that cannot be read now.
+    fn text_excerpt(&self, attachment: &Attachment) -> Option<TextExcerpt> {
+        let (_, file) = open_snapshot(&self.connection, attachment).ok()?;
+        let length = file.metadata().ok()?.len();
+        let mut bytes = Vec::new();
+        file.take(TEXT_EXCERPT_BYTES as u64)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        let truncated = length > bytes.len() as u64;
+        text_of(&bytes, truncated).map(|text| TextExcerpt { text, truncated })
+    }
+
+    /// Whether a kept local file's stored copy is gone or cut short on this
+    /// computer. Quarantined and deleted files, and Drive references, never are.
+    pub(crate) fn snapshot_missing(&self, attachment: &Attachment) -> bool {
+        if attachment.kind != AttachmentKind::LocalSnapshot
+            || attachment.quarantined
+            || attachment.purge_state != crate::AttachmentPurgeState::Retained
+        {
+            return false;
+        }
+        matches!(
+            open_snapshot(&self.connection, attachment),
+            Err(SnapshotFailure {
+                status: PreviewStatus::Missing | PreviewStatus::Incomplete,
+                ..
+            })
+        )
     }
 
     fn preview_usage(&self, id: &str) -> Result<PreviewUsage, Error> {
@@ -233,6 +284,26 @@ impl Workspace {
             length,
         })
     }
+}
+
+/// Text when the bytes are UTF-8 without NUL or control characters other than
+/// tab, line breaks and form feed. A cut at the end of a truncated excerpt may
+/// split one character; that partial character is dropped.
+fn text_of(bytes: &[u8], truncated: bool) -> Option<String> {
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) if truncated && error.error_len().is_none() => {
+            std::str::from_utf8(&bytes[..error.valid_up_to()]).ok()?
+        }
+        Err(_) => return None,
+    };
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{c}'))
+    {
+        return None;
+    }
+    Some(text.to_owned())
 }
 
 // Only passive media containers with header evidence. This is not a codec guarantee.

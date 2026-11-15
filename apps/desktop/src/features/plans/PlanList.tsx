@@ -1,156 +1,196 @@
-import { useState, type FormEvent } from "react";
-import { EmptyState } from "@/components/ui/empty-state";
-import { ArchiveRestore, Layers } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useEffect, useState } from "react";
+import { ArchiveRestore, Layers, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Count } from "@/components/ui/count";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ManagementPage, PageHeader } from "@/components/ui/page-header";
+import { Progress } from "@/components/ui/progress";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Tooltip } from "@/components/ui/tooltip";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { client } from "@/lib/api/client";
+import { describeFailure } from "@/lib/api/describe-failure";
 import { plansClient, type Plan } from "@/lib/api/plans";
+import { emptyCopy } from "@/lib/empty-copy";
+import { NewPlanDialog } from "./NewPlanDialog";
 import "./plan.css";
 
+/** What a Plan's tickets add up to: done of those that can still be done. */
+type Progressed = { done: number; counted: number };
+
+const COUNT_FILTER = {
+  query: "",
+  unlinked: false,
+  status: null,
+  tags: [],
+  availability: null,
+  family: null,
+  limit: 1,
+  offset: 0,
+};
+
 /**
- * Plans to open: the active ones (with a way to create another) or the
- * archived ones, which can be opened or reactivated from here.
+ * The Plans page (DESIGN.md section 10): a management page with "New Plan"
+ * in its header, Active and Archived as one segmented choice, and one row per
+ * Plan with its progress. An archived row reactivates with Undo.
  */
 export function PlanList({
   plans,
   archived,
   onOpen,
-  onBrowsePlans,
+  onArchivedChange,
   refresh,
 }: {
   plans: Plan[];
   archived: boolean;
   onOpen: (id: string) => void;
-  onBrowsePlans?: () => void;
+  /** Switches between the Active and Archived Plans. */
+  onArchivedChange?: (archived: boolean) => void;
   refresh: () => Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [nameError, setNameError] = useState("");
-  const [error, setError] = useState("");
-  const [pending, setPending] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [pending, setPending] = useState("");
+  const [progress, setProgress] = useState<Record<string, Progressed>>({});
+  const statusLine = useStatusLine();
   const shown = plans.filter((item) => item.archived === archived);
+  const empty = emptyCopy(archived ? "plans-archived" : "plans");
 
-  async function act(change: () => Promise<unknown>) {
-    setPending(true);
-    setError("");
+  useEffect(() => {
+    let active = true;
+    for (const item of plans)
+      void client
+        .countTickets({ ...COUNT_FILTER, project: null, plan: item.id })
+        .then((c) => {
+          if (!active) return;
+          const counted = c.total - c.canceled - c.duplicate;
+          setProgress((old) => ({
+            ...old,
+            [item.id]: { done: c.done, counted },
+          }));
+        })
+        .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [plans]);
+
+  async function reactivate(item: Plan) {
+    setPending(item.id);
     try {
-      await change();
+      await plansClient.change(item.id, null, false);
       await refresh();
-      return true;
+      statusLine.show({
+        message: `Reactivated ${item.name}`,
+        undo: async () => {
+          await plansClient.change(item.id, null, true);
+          await refresh();
+        },
+      });
     } catch (reason) {
-      setError(String(reason));
-      return false;
+      const failure = describeFailure(reason, `reactivate ${item.name}`);
+      statusLine.show({
+        tone: "error",
+        message: `${failure.title}. ${failure.sentence}`,
+        ...(failure.action === "retry" && {
+          action: { label: "Retry", run: () => reactivate(item) },
+        }),
+      });
     } finally {
-      setPending(false);
+      setPending("");
     }
   }
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    if (!name.trim()) {
-      setNameError("Enter a name for this Plan.");
-      return;
-    }
-    setNameError("");
-    let id = "";
-    const created = await act(async () => {
-      id = (await plansClient.create(name)).id;
-    });
-    if (created) {
-      setName("");
-      onOpen(id);
-    }
-  }
+
   return (
-    <section className="plan-index" aria-labelledby="plan-index-heading">
-      <h1 id="plan-index-heading">{archived ? "Archived Plans" : "Plans"}</h1>
-      <p className="plan-note">
-        {archived
-          ? "Archived Plans are hidden from the sidebar. Their tickets stay searchable and unchanged."
-          : "Group tickets around a shared objective, across projects."}
-      </p>
-      {!archived && (
-        <form className="plan-create" onSubmit={(event) => void create(event)}>
-          <Field data-invalid={nameError ? true : undefined}>
-            <FieldLabel htmlFor="plan-create-name">New Plan name</FieldLabel>
-            <Input
-              id="plan-create-name"
-              value={name}
-              autoComplete="off"
-              aria-invalid={nameError ? true : undefined}
-              onChange={(event) => {
-                setName(event.target.value);
-                setNameError("");
-              }}
-            />
-            {nameError && <FieldError>{nameError}</FieldError>}
-          </Field>
-          <Button type="submit" size="sm" disabled={pending}>
-            Create Plan
+    <ManagementPage aria-labelledby="plan-index-heading">
+      <PageHeader
+        title="Plans"
+        titleId="plan-index-heading"
+        {...(shown.length > 0 && { count: <Count>{shown.length}</Count> })}
+        lede="A Plan groups the tickets that ship together, across projects."
+        actions={
+          <Button size="sm" onClick={() => setCreating(true)}>
+            <Plus data-icon="inline-start" /> New Plan
           </Button>
-        </form>
-      )}
-      {error && (
-        <Alert tone="error" role="alert">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+        }
+        toolbar={
+          onArchivedChange && (
+            <SegmentedControl
+              aria-label="Which Plans"
+              value={archived ? "archived" : "active"}
+              onValueChange={(value) => onArchivedChange(value === "archived")}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "archived", label: "Archived" },
+              ]}
+            />
+          )
+        }
+      />
       {shown.length === 0 ? (
+        // "New Plan" sits in the header beside it: no second action (P9).
         <EmptyState
           icon={<Layers />}
-          title={archived ? "No archived Plans" : "No Plans yet"}
-          description={
-            archived
-              ? "Plans you archive are kept here, read-only."
-              : "A Plan groups tickets toward one goal. Create one above."
-          }
-          action={
-            archived ? (
-              onBrowsePlans && (
-                <Button variant="outline" size="sm" onClick={onBrowsePlans}>
-                  Back to Plans
-                </Button>
-              )
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  document.getElementById("plan-create-name")?.focus()
-                }
-              >
-                Name a Plan
-              </Button>
-            )
-          }
+          title={empty.title}
+          description={empty.sentence}
         />
       ) : (
         <ul
           className="plan-index-list"
           aria-label={archived ? "Archived Plans" : "Active Plans"}
         >
-          {shown.map((item) => (
-            <li key={item.id}>
-              <button type="button" onClick={() => onOpen(item.id)}>
-                <Layers size={16} aria-hidden="true" /> {item.name}
-              </button>
-              {archived && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={pending}
-                  aria-label={`Reactivate ${item.name}`}
-                  onClick={() =>
-                    void act(() => plansClient.change(item.id, null, false))
-                  }
+          {shown.map((item) => {
+            const counts = progress[item.id];
+            return (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="plan-index-row"
+                  onClick={() => onOpen(item.id)}
                 >
-                  <ArchiveRestore data-icon="inline-start" /> Reactivate
-                </Button>
-              )}
-            </li>
-          ))}
+                  <Layers aria-hidden="true" />
+                  <Tooltip content={item.name} overflowOnly>
+                    <span className="plan-index-name">{item.name}</span>
+                  </Tooltip>
+                  <span className="plan-index-meta">
+                    {counts &&
+                      (counts.counted > 0 ? (
+                        <>
+                          <Progress
+                            aria-label={`${item.name} progress`}
+                            value={counts.done}
+                            max={counts.counted}
+                          />
+                          {counts.done} of {counts.counted} done
+                        </>
+                      ) : (
+                        "No tickets"
+                      ))}
+                  </span>
+                </button>
+                {archived && (
+                  <span className="plan-index-action">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={pending === item.id}
+                      aria-label={`Reactivate ${item.name}`}
+                      onClick={() => void reactivate(item)}
+                    >
+                      <ArchiveRestore data-icon="inline-start" /> Reactivate
+                    </Button>
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
-    </section>
+      <NewPlanDialog
+        open={creating}
+        onOpenChange={setCreating}
+        refresh={refresh}
+        onCreated={onOpen}
+      />
+    </ManagementPage>
   );
 }

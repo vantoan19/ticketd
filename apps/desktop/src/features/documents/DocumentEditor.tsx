@@ -11,14 +11,18 @@ import {
   Network,
   Pin,
   SquarePen,
-  X,
 } from "lucide-react";
 import { client } from "@/lib/api/client";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   DropdownMenu,
@@ -28,11 +32,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
-import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
+import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
+import { Kbd } from "@/components/ui/kbd";
+import { Time } from "@/components/ui/time";
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -54,33 +62,47 @@ import { useConflicts } from "@/features/sync-review/use-conflicts";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useRecordSyncState } from "@/features/sync/record-sync";
 
+/**
+ * A Document reads in the workspace; a new thought is captured in the one
+ * dialog (DialogShell md). Its footer holds the save state in the note slot
+ * and Done; a failed save shows above the footer and never traps the dialog.
+ */
 function DocumentSurface({
   capture,
   onClose,
+  onDismiss,
+  blockedReason,
+  note,
+  error,
   children,
 }: {
   capture: boolean;
+  /** Done: save, then close. */
   onClose: () => void;
+  /** Cancel, the X and Escape: close (after a failed save, at once). */
+  onDismiss: () => void;
+  blockedReason: string | null;
+  note: ReactNode;
+  error: ReactNode;
   children: ReactNode;
 }) {
   if (!capture)
     return <article className="document-workspace">{children}</article>;
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) onDismiss();
       }}
+      title="Capture a thought"
+      primaryLabel="Done"
+      blockedReason={blockedReason}
+      footerNote={note}
+      error={error}
+      onSubmit={onClose}
     >
-      <DialogContent
-        // Centered like every other dialog, not a side sheet.
-        className="document-dialog sm:max-w-xl"
-        showCloseButton={false}
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
-        {children}
-      </DialogContent>
-    </Dialog>
+      {children}
+    </DialogShell>
   );
 }
 function DocumentDate({ value }: { value: string }) {
@@ -88,14 +110,21 @@ function DocumentDate({ value }: { value: string }) {
   return Number.isNaN(date.getTime()) ? (
     value
   ) : (
-    <time dateTime={value} title={value}>
-      {date.toDateString() === new Date().toDateString()
-        ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
-        : date.toLocaleString(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })}
-    </time>
+    <Tooltip
+      content={date.toLocaleString(undefined, {
+        dateStyle: "full",
+        timeStyle: "long",
+      })}
+    >
+      <time dateTime={value} tabIndex={0}>
+        {date.toDateString() === new Date().toDateString()
+          ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
+          : date.toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+      </time>
+    </Tooltip>
   );
 }
 type Snapshot = { title: string; body: string; suggestion: string | null };
@@ -192,6 +221,8 @@ export function DocumentEditor({
     (item) => item.kind === "document" && item.id === initial?.id,
   );
   const [historyOpen, setHistoryOpen] = useState(false);
+  // The session row's middle, where the editor puts its formatting (P16).
+  const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   const recovery = useDraftRecovery();
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
   const [recovered] = useState(() =>
@@ -218,7 +249,7 @@ export function DocumentEditor({
   const [links, setLinks] = useState<
     Awaited<ReturnType<typeof documents.links>>
   >([[], []]);
-  const [linkError, setLinkError] = useState("");
+  const [linkError, setLinkError] = useState<FailureDescription | null>(null);
   const [suggestion, setSuggestion] = useState(
     recovered ? recovered.draft.suggestion : (currentTicket ?? null),
   );
@@ -233,7 +264,9 @@ export function DocumentEditor({
           linksKey.current = key;
           setLinks(next);
         })
-        .catch((error: unknown) => setLinkError(String(error)));
+        .catch((error: unknown) =>
+          setLinkError(describeFailure(error, "load the connections")),
+        );
   };
   const refreshLinksRef = useRef(refreshLinks);
   useEffect(() => {
@@ -258,8 +291,16 @@ export function DocumentEditor({
     null,
   );
   const [failed, setFailed] = useState(false);
-  const [failureDetail, setFailureDetail] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  const [createError, setCreateError] = useState<FailureDescription | null>(
+    null,
+  );
+  // A close or navigation that waited on a save that failed: the person may
+  // still leave, keeping the draft on this device.
+  const [leaveBlocked, setLeaveBlocked] = useState<(() => void) | null>(null);
   const [failedTrash, setFailedTrash] = useState(false);
+  // Where a person tried to go after a failed save, when recovery could not keep the draft.
+  const [draftAtRisk, setDraftAtRisk] = useState<(() => void) | null>(null);
   // Editor state model. A Trash/Restore click is a one-shot intent: it is queued in
   // `transition` until the draft is saved, and dropped (remembered in `failedTransition`
   // for the Retry button only) as soon as anything fails, so autosave never replays it.
@@ -372,7 +413,12 @@ export function DocumentEditor({
       transition.current = null;
       setFailed(true);
       setFailedTrash(true);
-      setFailureDetail(String(error));
+      setFailure(
+        describeFailure(
+          error,
+          failedTransition.current?.trashed ? "move it to Trash" : "restore it",
+        ),
+      );
       setStatus("Not saved");
     } finally {
       setTransitioning(false);
@@ -422,6 +468,8 @@ export function DocumentEditor({
     saving.current = true;
     setStatus("Saving…");
     setFailed(false);
+    setDraftAtRisk(null);
+    setLeaveBlocked(null);
     const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
       // Flush first: an explicit save clears a latched recovery failure, so the
@@ -462,10 +510,13 @@ export function DocumentEditor({
     } catch (error) {
       window.clearTimeout(slow);
       saving.current = false;
+      const leaving = closeRequested.current
+        ? (afterSave.current ?? close.current)
+        : null;
       closeRequested.current = false;
       afterSave.current = null;
       transition.current = null;
-      if (String(error).includes("changed elsewhere") && id.current) {
+      if (toFailure(error).kind === "conflict" && id.current) {
         // The stored Document moved on since it was loaded: keep the draft and let
         // the conflict notice decide. If nothing differs, retry on the new revision.
         try {
@@ -482,7 +533,9 @@ export function DocumentEditor({
       }
       setFailed(true);
       setFailedTrash(false);
-      setFailureDetail(String(error));
+      setFailure(describeFailure(error, "save the Document"));
+      // Closing never waits on a save that keeps failing (DR-08).
+      setLeaveBlocked(() => leaving);
       setStatus("Not saved");
     }
   };
@@ -490,8 +543,18 @@ export function DocumentEditor({
   useEffect(() => {
     saveRef.current = save;
   });
+  const failedRef = useRef(false);
   useEffect(() => {
-    const timer = window.setTimeout(() => void saveRef.current(), 400);
+    failedRef.current = failed;
+  }, [failed]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      // A failed save is retried by Retry, or by the next change; autosave
+      // never repeats the very same request on its own.
+      if (failedRef.current && pending.current?.snapshot === draft.current)
+        return;
+      void saveRef.current();
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [title, body, suggestion]);
   /**
@@ -623,19 +686,36 @@ export function DocumentEditor({
     window.requestAnimationFrame(() => noticeRef.current?.focus());
     return true;
   };
-  const navigate = (action: () => void) => {
+  // After a failed save, waiting for the next save would trap the person in the
+  // editor. Leaving keeps the draft in recovery instead, so it comes back on reopen;
+  // only when that store cannot keep it either does leaving need a decision.
+  const leaveKeepingDraft = async (action: () => void) => {
+    try {
+      if (!recovery.active) throw new Error("Draft recovery is unavailable");
+      await recovery.flush();
+      await persistRecovery();
+      await recovery.flush();
+    } catch {
+      setDraftAtRisk(() => action);
+      return;
+    }
+    closeRequested.current = false;
+    afterSave.current = null;
+    action();
+  };
+  const leave = (action: () => void) => {
     if (blockWhileConflicted()) return;
+    if (failed && !saving.current) {
+      void leaveKeepingDraft(action);
+      return;
+    }
     afterSave.current = action;
     closeRequested.current = true;
     void save();
   };
+  const navigate = (action: () => void) => leave(action);
   const requestCloseRef = useRef(() => {});
-  const requestClose = () => {
-    if (blockWhileConflicted()) return;
-    afterSave.current = null;
-    closeRequested.current = true;
-    void save();
-  };
+  const requestClose = () => leave(() => close.current());
   useEffect(() => {
     requestCloseRef.current = requestClose;
   });
@@ -655,6 +735,7 @@ export function DocumentEditor({
   const toggleTrash = () =>
     startTransition({ trashed: !trashed, requestId: crypto.randomUUID() });
   const retry = () => {
+    setDraftAtRisk(null);
     if (failedTrash && failedTransition.current)
       startTransition(failedTransition.current);
     else void save();
@@ -669,12 +750,48 @@ export function DocumentEditor({
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
+  /** Opens or closes editing; the heading line the title shows stays out of the editor. */
+  const setEditing = (edit: boolean) => {
+    const stripped = withoutDerivedHeading(body, title, savedDocument?.heading);
+    setHiddenHead(
+      edit && initial ? body.slice(0, body.length - stripped.length) : "",
+    );
+    setWriting(edit);
+  };
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const markdownExport = useMarkdownExport(
+    { kind: "markdown", body },
+    actionsTrigger,
+  );
+  // E edits the Document in view, unless typing or another surface has focus.
+  const editTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!initial) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "e" || event.metaKey || event.ctrlKey || event.altKey)
+        return;
+      const button = editTrigger.current;
+      if (!button || !active || button.closest("[hidden]")) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          "input, textarea, select, [contenteditable], [role=dialog], [role=menu], [role=listbox]",
+        )
+      )
+        return;
+      event.preventDefault();
+      button.click();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [initial, active]);
   const titleInput = (
     <Input
       id="document-title"
-      aria-label={capture ? "Optional title" : "Title"}
+      aria-label="Title"
       className={capture ? undefined : "document-title-input"}
-      placeholder={capture ? "Add a title (optional)" : "Title"}
+      placeholder={capture ? "e.g. Retry policy for uploads" : "Title"}
       readOnly={locked}
       value={title || (head ? heading : "")}
       onChange={(event) => {
@@ -686,7 +803,9 @@ export function DocumentEditor({
   const titleField = (
     <FieldGroup>
       <Field>
-        <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
+        <FieldLabel htmlFor="document-title">
+          Title <small>Optional</small>
+        </FieldLabel>
         {titleInput}
       </Field>
     </FieldGroup>
@@ -714,21 +833,54 @@ export function DocumentEditor({
       )}
     </span>
   );
-  const saveError = failed && (
-    <div role="alert" className="document-save-error">
-      <p>
-        {failedTrash
-          ? "We couldn’t update Trash. Nothing was lost."
-          : "We couldn’t save your changes. Your draft is still here."}
-      </p>
-      <Button onClick={retry}>Retry</Button>
-      {failureDetail && (
-        <details>
-          <summary>Details</summary>
-          <pre>{failureDetail}</pre>
-        </details>
-      )}
-    </div>
+  // What happens to the draft: kept by draft recovery if the person leaves,
+  // kept only in the editor, or (when recovery failed too) at risk.
+  const draftNote = failedTrash
+    ? ""
+    : draftAtRisk
+      ? " This device can't keep the draft either. Retry, or discard it to close."
+      : recovery.active
+        ? " Your draft stays on this device if you close."
+        : " Your draft is still here.";
+  const saveError = failed && failure && (
+    <FailureAlert
+      {...(capture && { size: "compact" as const })}
+      failure={{ ...failure, sentence: `${failure.sentence}${draftNote}` }}
+      onRetry={retry}
+      actions={
+        draftAtRisk ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              closeRequested.current = false;
+              afterSave.current = null;
+              void recovery.put(recoveryOwner, null, []).catch(() => {});
+              draftAtRisk();
+            }}
+          >
+            Discard and close
+          </Button>
+        ) : (
+          leaveBlocked &&
+          recovery.active && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const leave = leaveBlocked;
+                setLeaveBlocked(null);
+                void leaveKeepingDraft(leave);
+              }}
+            >
+              {capture ? "Close and keep draft" : "Leave and keep draft"}
+            </Button>
+          )
+        )
+      }
+    />
   );
   const connected = groupConnections(links);
   // A Plan link with no passage is a Plan attachment: the designated spec, or (attached) a supporting
@@ -802,7 +954,18 @@ export function DocumentEditor({
   const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
   const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
   return (
-    <DocumentSurface capture={capture} onClose={requestClose}>
+    <DocumentSurface
+      capture={capture}
+      onClose={requestClose}
+      // Cancel, the X and Escape leave as every way out does: after a failed
+      // save the draft is kept by draft recovery and the dialog closes, or,
+      // when recovery can't keep it, the failure offers Discard and close
+      // (plans DR-08, set ER-05).
+      onDismiss={requestClose}
+      blockedReason={body.trim() ? null : "Write a thought to finish."}
+      note={body.trim() && !failed ? statusLine : null}
+      error={capture && saveError}
+    >
       {initial && (
         <header className="document-bar">
           <Button
@@ -820,35 +983,19 @@ export function DocumentEditor({
           </span>
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
-            {statusLine}
             {!writing && (
-              <ExportMarkdownButton
-                compact
-                source={{ kind: "markdown", body }}
-              />
+              <Button
+                ref={editTrigger}
+                variant="ghost"
+                size="sm"
+                aria-keyshortcuts="E"
+                disabled={transitioning}
+                onClick={() => setEditing(true)}
+              >
+                Edit
+                <Kbd aria-hidden="true">E</Kbd>
+              </Button>
             )}
-            <SegmentedControl
-              aria-label="Document mode"
-              value={writing ? "edit" : "read"}
-              onValueChange={(value) => {
-                const edit = value === "edit";
-                const stripped = withoutDerivedHeading(
-                  body,
-                  title,
-                  savedDocument?.heading,
-                );
-                setHiddenHead(
-                  edit && initial
-                    ? body.slice(0, body.length - stripped.length)
-                    : "",
-                );
-                setWriting(edit);
-              }}
-              options={[
-                { value: "read", label: "Read" },
-                { value: "edit", label: "Edit" },
-              ]}
-            />
             {onTogglePin && (
               <IconButton
                 label={pinned ? "Unpin Document" : "Pin Document"}
@@ -858,24 +1005,38 @@ export function DocumentEditor({
                 <Pin fill={pinned ? "currentColor" : "none"} />
               </IconButton>
             )}
-            {!trashed && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton label="Document actions" disabled={transitioning}>
-                    <MoreHorizontal />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" sideOffset={4}>
-                  <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                    History…
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={toggleTrash}>
-                    Move to Trash
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {/* Kept in Trash too, with Restore, so the header never changes shape (DR-10). */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  ref={actionsTrigger}
+                  label="Document actions"
+                  disabled={transitioning}
+                >
+                  <MoreHorizontal />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                  History…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={markdownExport.busy}
+                  onSelect={() => void markdownExport.run()}
+                >
+                  Export Markdown with files…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  {...(!trashed && { variant: "destructive" as const })}
+                  onSelect={toggleTrash}
+                >
+                  {trashed ? "Restore" : "Move to Trash"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
+          {markdownExport.element}
         </header>
       )}
       {initial && historyOpen && (
@@ -889,27 +1050,12 @@ export function DocumentEditor({
       )}
       <div className="document-main">
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
-        {!initial && (
-          <header>
-            <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
-              Capture a thought
-            </DialogTitle>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="document-close"
-              aria-label="Close and return"
-              onClick={requestClose}
-            >
-              <X aria-hidden="true" />
-            </Button>
-          </header>
-        )}
         {trashed && (
           <Alert role="status" size="compact">
             <AlertDescription>In Trash</AlertDescription>
             <Button
               variant="outline"
+              size="sm"
               disabled={transitioning}
               onClick={toggleTrash}
             >
@@ -919,25 +1065,49 @@ export function DocumentEditor({
         )}
         {initial &&
           (writing ? (
-            <div className="document-title">
-              {titleInput}
-              <p className="document-title-hint">
-                Title · the Document’s heading
-              </p>
-            </div>
+            // The title edits in place at the heading's size, without a box.
+            <div className="document-title">{titleInput}</div>
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
-        {initial && !writing && (
-          <p className="document-subtitle">
-            Updated{" "}
-            <DocumentDate
-              value={savedDocument?.updated_at ?? initial.updated_at}
-            />
-            {planSpec && ` · spec of the Plan ${planSpec.label}`}
-            {planSupport &&
-              ` · supporting Document of the Plan ${planSupport.label}`}
-          </p>
+        {initial && (
+          // One 32px row: "Updated 2 h ago" while reading; the session row
+          // (save state, formatting, Done) while editing. Nothing moves.
+          <div
+            className="document-state-row"
+            data-session={writing || undefined}
+          >
+            {writing ? (
+              <>
+                {statusLine}
+                <span ref={setSessionHost} className="document-session-tools" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Done editing"
+                  onClick={() => setEditing(false)}
+                >
+                  Done
+                  <Kbd aria-hidden="true">Esc</Kbd>
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="document-subtitle">
+                  Updated{" "}
+                  {Number.isNaN(Date.parse(updatedAt)) ? (
+                    updatedAt
+                  ) : (
+                    <Time value={updatedAt} />
+                  )}
+                  {planSpec && ` · spec of the Plan ${planSpec.label}`}
+                  {planSupport &&
+                    ` · supporting Document of the Plan ${planSupport.label}`}
+                </p>
+                {(needsReview || sync === "needs_review") && statusLine}
+              </>
+            )}
+          </div>
         )}
         {suggestion && (
           <p>
@@ -1038,10 +1208,16 @@ export function DocumentEditor({
                 setBody(next);
               }}
               label={capture ? "Your thought" : "Document"}
-              placeholder={capture ? "Write a thought…" : "Type / for blocks"}
+              placeholder={
+                capture ? "Write a thought…" : "Write — type / for blocks"
+              }
               readOnly={locked}
               autoFocus={capture}
-              persistentToolbar={capture}
+              {...(!capture && {
+                chrome: "session" as const,
+                chromeHost: sessionHost,
+                onEscape: () => setEditing(false),
+              })}
               focusRequest={focusRequest}
             />
           ) : (
@@ -1089,39 +1265,20 @@ export function DocumentEditor({
             </DocumentNavigation.Provider>
           )}
         </div>
-        {writing && !capture && !locked && body.trim() && (
-          <p className="document-block-hint" aria-hidden="true">
-            Type / for blocks
-          </p>
-        )}
         {capture && titleField}
-        {!initial && saveError}
-        {capture && (
-          <footer>
-            {body.trim() ? (
-              statusLine
-            ) : (
-              <span
-                role="status"
-                id="capture-blocked"
-                className="document-status"
-              >
-                Write a thought to finish
-              </span>
-            )}
-            <Button
-              disabled={!body.trim()}
-              {...(!body.trim() && { "aria-describedby": "capture-blocked" })}
-              onClick={requestClose}
-            >
-              Done
-            </Button>
-          </footer>
-        )}
       </div>
       {initial && (
         <aside className="document-rail" aria-label="Document details">
-          {linkError && <p role="alert">{linkError}</p>}
+          {linkError && (
+            <FailureAlert
+              size="compact"
+              failure={linkError}
+              onRetry={() => {
+                setLinkError(null);
+                refreshLinks();
+              }}
+            />
+          )}
           {mentions.length > 0 && (
             <section aria-label="Mentions">
               <h2>Mentions</h2>
@@ -1212,7 +1369,7 @@ export function DocumentEditor({
                       : link;
                     draft.current = { ...draft.current, body: next };
                     setBody(next);
-                    setLinkError("");
+                    setLinkError(null);
                     setPickerOpen(false);
                   }}
                 />
@@ -1238,7 +1395,7 @@ export function DocumentEditor({
                 onClick={() => navigate(() => onOpenGraph(initial.id))}
               >
                 <Network aria-hidden="true" />
-                Open context graph
+                Open graph
               </Button>
             )}
           </div>
@@ -1269,6 +1426,7 @@ export function DocumentEditor({
                     id: crypto.randomUUID(),
                   };
                 creatingTicket.current = true;
+                setCreateError(null);
                 void documents
                   .createTicket(
                     initial.id,
@@ -1278,7 +1436,9 @@ export function DocumentEditor({
                   .then((ticket) =>
                     navigate(() => onOpenTicket?.(ticket.reference)),
                   )
-                  .catch((error: unknown) => setLinkError(String(error)))
+                  .catch((error: unknown) =>
+                    setCreateError(describeFailure(error, "create the ticket")),
+                  )
                   .finally(() => {
                     creatingTicket.current = false;
                   });
@@ -1286,6 +1446,9 @@ export function DocumentEditor({
             >
               Create ticket
             </Button>
+            {createError && (
+              <FailureAlert size="compact" failure={createError} />
+            )}
           </div>
         </aside>
       )}
@@ -1396,9 +1559,9 @@ function ConnectedLabel({ item }: { item: Connection }) {
       ) : (
         <FileText aria-hidden="true" />
       )}
-      <span className="connected-label" title={shown}>
-        {shown}
-      </span>
+      <Tooltip content={shown} overflowOnly>
+        <span className="connected-label">{shown}</span>
+      </Tooltip>
       {loading && <Skeleton aria-hidden="true" className="h-3 w-24 shrink-0" />}
     </>
   );

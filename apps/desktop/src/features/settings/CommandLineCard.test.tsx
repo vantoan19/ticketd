@@ -4,9 +4,11 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import {
   SettingsStateContext,
@@ -15,6 +17,10 @@ import {
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn(),
+  revealItemInDir: vi.fn(),
+}));
 
 afterEach(() => {
   cleanup();
@@ -38,7 +44,11 @@ test("shows Installed with version and path when everything matches", async () =
   invoke.mockResolvedValue(base);
   render(<CommandLineCard />);
   expect(await screen.findByText("Installed")).toBeTruthy();
-  expect(screen.getByText("/Users/a/.local/bin/ticketd")).toBeTruthy();
+  // The path once, as PathText (never split mid-word), not again in prose.
+  expect(
+    document.querySelector('[data-slot="path-text"]')?.textContent,
+  ).toContain(".local/bin/ticketd");
+  expect(screen.queryByText(/Found at/)).toBeNull();
   expect(screen.getByText(/Uses this workspace/)).toBeTruthy();
 });
 
@@ -83,6 +93,24 @@ test("a missing CLI shows guidance, and Check again finds a later install", asyn
   invoke.mockResolvedValueOnce(base);
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(await screen.findByText("Installed")).toBeTruthy();
+});
+
+test("an installation guide that cannot open says so", async () => {
+  invoke.mockResolvedValue({ ...base, on_path: false });
+  vi.mocked(openUrl).mockRejectedValueOnce(new Error("No browser"));
+  render(<CommandLineCard />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Installation guide" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain(
+    "Couldn't open the installation guide. No browser.",
+  );
+  expect(alert.textContent).not.toContain("Error:");
+  // Retry opens the guide again and clears the failure when it succeeds.
+  vi.mocked(openUrl).mockResolvedValueOnce(undefined);
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
 
 test("copies a quick-reference command", async () => {

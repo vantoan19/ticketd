@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/api/bridge-failure";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** Set once the app decided to close, so the close guard lets the next request through. */

@@ -12,6 +12,8 @@ import { EditorView } from "@codemirror/view";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import { WorkspaceBand } from "@/app/WorkspaceBand";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import { Activity } from "@/features/tickets/Activity";
@@ -130,7 +132,7 @@ test("unpublished new-ticket content is core-retained and recovers after a faile
     });
   });
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  await screen.findByText(/Could not confirm whether the ticket was created/);
+  await screen.findByText(/Retry safely: it never creates a second ticket/);
   expect(create).toHaveBeenCalledWith(
     "Recover me",
     "[Trace](ticketd://attachment/workspace/file)",
@@ -262,7 +264,7 @@ test("Document Reload preserves the independently recoverable discarded draft un
           body: string | null;
         };
         if (request.expectedUpdatedAt !== initial.updated_at)
-          throw new Error("document changed elsewhere");
+          throw { code: "conflict", message: "document changed elsewhere" };
         return {
           ...initial,
           body: request.body ?? initial.body,
@@ -488,7 +490,7 @@ test("source Undo and rich/source transitions keep independent history protectio
   function Editor() {
     const [value, setValue] = useState(body);
     return (
-      <MarkdownEditor persistentToolbar value={value} onChange={setValue} />
+      <MarkdownEditor chrome="session" value={value} onChange={setValue} />
     );
   }
   const host = render(
@@ -599,6 +601,11 @@ test("distinct legacy profile drafts survive a primary recovery tombstone", asyn
   expect(localStorage.getItem("ticketd:activity-draft:T-KQ1")).toBeNull();
 });
 
+function Band() {
+  const recovery = useDraftRecovery();
+  return <WorkspaceBand onRetry={() => recovery.retry()} />;
+}
+
 test("failed draft protection is visible and blocks publication until explicit retry succeeds", async () => {
   let fail = true;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
@@ -614,6 +621,7 @@ test("failed draft protection is visible and blocks publication until explicit r
   const create = vi.fn().mockResolvedValue("T-KQ1");
   render(
     <DraftRecoveryProvider>
+      <Band />
       <CreateTicketDialog
         open
         onOpenChange={vi.fn()}
@@ -628,20 +636,18 @@ test("failed draft protection is visible and blocks publication until explicit r
   fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
     target: { value: "Keep my draft" },
   });
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not protect recoverable drafts",
-  );
+  // The workspace band says it once; the editor adds no second notice.
+  await screen.findByText(/Unsaved drafts aren't protected right now/);
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  await screen.findByText(
-    /Could not save the submission for a safe retry; no ticket was created/,
-  );
+  await screen.findByText(/Your draft is kept on this device/);
   expect(create).not.toHaveBeenCalled();
   fail = false;
-  fireEvent.click(screen.getByRole("button", { name: "Retry draft recovery" }));
+  // The open dialog hides the rest of the window from assistive technology.
+  fireEvent.click(screen.getByRole("button", { name: "Retry", hidden: true }));
   await waitFor(() =>
     expect(
-      screen.queryAllByText(/Could not protect recoverable drafts/),
-    ).toHaveLength(0),
+      screen.queryByText(/Unsaved drafts aren't protected right now/),
+    ).toBeNull(),
   );
   fireEvent.click(screen.getByRole("button", { name: "Retry safely" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));

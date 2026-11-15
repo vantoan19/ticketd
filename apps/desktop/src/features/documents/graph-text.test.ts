@@ -66,6 +66,20 @@ test("edges state direction in plain language and rows are one per relationship"
   expect(rows[0]?.text).toBe("T-KQ1 mentions T-KQ2: “one” (+1 more)");
 });
 
+test("a connection row names the relationship from the listed item's side", () => {
+  const graph = {
+    nodes,
+    edges: [
+      { source: "a", target: "b", kind: "blocks" as const, explanation: null },
+    ],
+  };
+  const [blocked] = connectionRows("b", graph);
+  expect(`${blocked?.label} · ${blocked?.text}`).toBe(
+    "Blocked by · T-KQ1 must be Done before T-KQ2 is Ready",
+  );
+  expect(connectionRows("a", graph)[0]?.label).toBe("Blocks");
+});
+
 test("every relationship kind has a style and styles differ by dash and colour", async () => {
   const { edgeStyle, edgeStyles, edgeLabels } = await import("./graph-text");
   for (const kind of Object.keys(edgeLabels))
@@ -220,6 +234,14 @@ test("every edge is labeled on the line and nodes have no all-caps type prefix",
     "parent of",
     "in Plan",
     "spec of",
+  ]);
+  // Only "blocks" carries an arrowhead, as the legend says ("arrow = waits").
+  expect(edges.map((edge) => Boolean(edge.markerEnd))).toEqual([
+    true,
+    false,
+    false,
+    false,
+    false,
   ]);
   expect(
     cardParts({

@@ -43,6 +43,7 @@ test("each major ticket section opens with its heading row, set apart by space a
         children_progress: { done: 0, total: 0 },
       },
     },
+    ticket: { trashed: false },
   } as unknown as LinkedWorkState;
   render(
     <>

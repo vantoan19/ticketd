@@ -47,10 +47,16 @@ test("while the workspace is read the page shows skeletons, not facts", async ()
 test("the workspace file row names the file in its own line and its folder beneath", async () => {
   render(<LocationPage />);
   expect(await screen.findByText("Tickets")).toBeTruthy();
-  const folder = screen.getByTitle(
+  // The full path is in the PathText tooltip, never a native title.
+  const folder = document.querySelector<HTMLElement>(
+    '[data-slot="path-text"]',
+  )!;
+  expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
+  expect(folder.getAttribute("title")).toBeNull();
+  fireEvent.pointerMove(folder);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
     "/Users/ada/Library/Application Support/ticketd",
   );
-  expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
 });
 
 test("Contents lists the six facts from the workspace", async () => {
@@ -82,7 +88,7 @@ test("the two-ways-in figure is one labelled image", async () => {
   expect(screen.getAllByRole("img")).toHaveLength(1);
 });
 
-test("Copy path copies the full path and confirms in the list footer", async () => {
+test("Copy path copies the full path and confirms on the button", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -91,19 +97,19 @@ test("Copy path copies the full path and confirms in the list footer", async () 
   render(<LocationPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(info.path));
-  expect((await screen.findByRole("status", { name: "" })).textContent).toBe(
-    "Path copied.",
-  );
+  expect((await screen.findByText("Copied")).textContent).toBe("Copied");
 });
 
-test("a failed copy says so in the footer", async () => {
+test("a failed copy says so on the button", async () => {
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
   });
   render(<LocationPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
-  expect(await screen.findByText(/Could not copy the path/)).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: "Copy unavailable" }),
+  ).toBeTruthy();
 });
 
 test("Show in the file manager reveals the file, and a failure lands in the footer", async () => {
@@ -115,19 +121,19 @@ test("Show in the file manager reveals the file, and a failure lands in the foot
   );
   vi.mocked(workspaceClient.reveal).mockRejectedValueOnce(new Error("nope"));
   fireEvent.click(show);
-  expect(
-    await screen.findByText(/Could not show the file: .*nope/),
-  ).toBeTruthy();
+  expect((await screen.findByRole("alert")).textContent).toMatch(
+    /Couldn't show the file in .*\. Nope\./,
+  );
 });
 
-test("a workspace that cannot be read shows an Alert, and Try again reads it again", async () => {
+test("a workspace that cannot be read says so, and Retry reads it again", async () => {
   vi.mocked(workspaceClient.info).mockRejectedValueOnce(new Error("locked"));
   render(<LocationPage />);
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Could not read the workspace");
-  expect(alert.textContent).toContain("locked");
+  expect(alert.textContent).toContain("Couldn't read the workspace");
+  expect(alert.textContent).toContain("Locked.");
   expect(screen.queryByText("Contents")).toBeNull();
-  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("Tickets")).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
 });

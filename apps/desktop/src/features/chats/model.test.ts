@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type {
   ChatSnapshot,
   Step,
@@ -416,7 +416,7 @@ test("a usage limit says when it resets, or says that the provider did not", () 
     resets_at: at,
   }).body;
   expect(told).toContain("You've hit your limit.");
-  expect(told).toContain("It says the limit resets on Nov 12 at 3:00 PM.");
+  expect(told).toContain("It resets on Nov 12 at 3:00 PM.");
   expect(told).not.toContain("didn't say");
 
   const untold = noticeOf({
@@ -424,11 +424,34 @@ test("a usage limit says when it resets, or says that the provider did not", () 
     message: "You've hit your limit.",
   }).body;
   expect(untold).toContain("You've hit your limit.");
-  expect(untold).toContain("It didn't say when the limit resets.");
+  expect(untold).toContain("It didn't say when it resets.");
   expect(noticeOf({ kind: "usage_limit" }).body).toContain(
-    "It didn't say when the limit resets.",
+    "It didn't say when it resets.",
   );
 });
+
+test("CH-34: a reset time reads in the computer's own clock, as message times do", () => {
+  // A computer set to a 24-hour clock: only the default locale says 15:00.
+  const clock = vi
+    .spyOn(Date.prototype, "toLocaleTimeString")
+    .mockImplementation(function (this: Date, locale) {
+      return locale === undefined ? "15:00" : "3:00 PM";
+    });
+  try {
+    const at = new Date(2026, 10, 12, 15, 0).getTime() / 1000;
+    const told = noticeOf({ kind: "usage_limit", resets_at: at }).body;
+    expect(told).toContain(`resets on ${shortDay(at)} at 15:00.`);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+/** The day as the computer's own locale writes it. */
+const shortDay = (seconds: number) =>
+  new Date(seconds * 1000).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 
 test("a refused resend is said first, and the first attempt stays unconfirmed", () => {
   const notice = noticeOf({
@@ -439,7 +462,9 @@ test("a refused resend is said first, and the first attempt stays unconfirmed", 
     /^You asked to send it again and Codex did not accept that: busy\. /,
   );
   expect(notice.body).not.toContain("It hasn't been sent again");
-  expect(notice.body).toContain("no confirmation");
+  expect(notice.body).toContain("may still have received the first attempt");
+  // It needs the person: the attention tone (CH-35).
+  expect(notice.tone).toBe("attention");
   expect(notice.actions).toEqual(["resend", "discard"]);
 });
 
@@ -764,7 +789,7 @@ test("an unseen Chat opened for the first time marks its last ended turn New", (
 
 test("a stop that was not confirmed is one notice, and Stop itself is the retry", () => {
   expect(noticeOf({ kind: "stop_unconfirmed" })).toEqual({
-    tone: "neutral",
+    tone: "attention",
     title: "Stop not confirmed",
     body: "Codex may still be running.",
     actions: [],

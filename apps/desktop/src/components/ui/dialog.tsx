@@ -4,6 +4,7 @@ import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
+import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useFocusReturn } from "@/components/ui/use-focus-return";
 
 function Dialog({
@@ -48,6 +49,7 @@ function DialogContent({
   children,
   showCloseButton = true,
   variant = "default",
+  size,
   returnFocus,
   onOpenAutoFocus,
   onCloseAutoFocus,
@@ -59,6 +61,14 @@ function DialogContent({
    * full-width header, body and footer bands, as the attachment preview does.
    */
   variant?: "default" | "flush";
+  /**
+   * DESIGN.md section 11: `sm` 480 (confirm), `md` 640 (form, picker), `lg`
+   * 920 (review, compare), all anchored at max(48px, 12vh) so they grow
+   * downward and never re-centre; `viewer` (the attachment preview only) is
+   * min(1120px, 100vw − 64) by min(800px, 100vh − 64), centred. Use
+   * DialogShell for every dialog but the viewer.
+   */
+  size?: "sm" | "md" | "lg" | "viewer";
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
@@ -71,15 +81,18 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        data-size={size ?? "default"}
         className={cn(
-          "ui-dialog fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 outline-none sm:max-w-lg",
+          // Position and width come from data-size in styles.css.
+          "ui-dialog fixed z-50 grid outline-none",
           variant === "flush" ? "gap-0 overflow-hidden p-0" : "gap-4 p-6",
           className,
         )}
         {...props}
         {...focus}
       >
-        {children}
+        {/* Overlays inside a dialog are bounded by the window, not the pane below. */}
+        <OverlayBoundary element={null}>{children}</OverlayBoundary>
         {showCloseButton && (
           <DialogPrimitive.Close asChild>
             <Button

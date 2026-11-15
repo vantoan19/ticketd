@@ -16,7 +16,7 @@ export function RoutedEdge({ id, markerEnd, style, data, label }: EdgeProps) {
       {typeof label === "string" && label && (
         <EdgeLabelRenderer>
           <span
-            className="context-graph-edge-label nodrag nopan"
+            className="cgraph-edge-label nodrag nopan"
             style={{
               transform: `translate(-50%, -50%) translate(${route.label.x}px, ${route.label.y}px)`,
             }}

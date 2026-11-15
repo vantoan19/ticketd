@@ -1,6 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { BridgeFailure, structured, toFailure } from "./bridge-failure";
+import { BridgeFailure, invoke, structured, toFailure } from "./bridge-failure";
 import {
   publicationAttemptSchema,
   publicationReviewSchema,

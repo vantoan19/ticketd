@@ -1,38 +1,68 @@
 /* Sync: layout only. Colours, radii and type sizes are tokens from styles.css. */
 
-/* Settings › Google Drive. */
+/* Settings › Google Drive: the setup stages as one row of steps. Numbered,
+   a check once done, the current one in primary; no status colour. */
 .sync-track {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  align-items: center;
   gap: 8px;
   margin: 32px 0 0;
   padding: 0;
   list-style: none;
+  counter-reset: sync-step;
 }
 .sync-track li {
   display: flex;
-  flex-direction: column;
+  flex: 1 1 0;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   color: var(--muted-foreground);
+  counter-increment: sync-step;
 }
 .sync-track li::before {
-  content: "";
-  display: block;
-  height: 3px;
+  content: counter(sync-step);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   border-radius: var(--radius-pill);
-  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+  font-variant-numeric: tabular-nums;
+}
+/* A thin line joins each step to the next. */
+.sync-track li:not(:last-child)::after {
+  content: "";
+  flex: 1 1 8px;
+  min-width: 8px;
+  height: 1px;
+  background: var(--group-hairline);
 }
 .sync-track li[data-state="done"]::before {
-  background: var(--status-ready);
+  content: "✓";
+  background: var(--accent);
+  box-shadow: none;
+  color: var(--foreground);
 }
 .sync-track li[data-state="now"]::before {
   background: var(--primary);
+  box-shadow: none;
+  color: var(--primary-foreground);
 }
 .sync-track li[data-state="now"],
 .sync-track li[data-state="done"] {
   color: var(--foreground);
+}
+.sync-track-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sync-block {
   margin-top: 24px;
@@ -40,17 +70,42 @@
 .sync-footer {
   margin-top: 16px;
 }
-.sync-failure,
 .sync-status-line {
   margin: 12px 0 0;
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.sync-progress {
-  margin-top: 8px;
+.sync-waiting {
+  color: var(--muted-foreground);
 }
-.sync-progress [data-slot="progress"] {
-  width: 100%;
+/* A save-on-blur field: the control, then one reserved 16px caption line. */
+.sync-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.sync-field-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-field-note {
+  min-height: 16px;
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.sync-field-unit {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.sync-safety-path {
+  display: flex;
+  min-width: 0;
+  margin-top: 4px;
 }
 .sync-summary {
   display: grid;
@@ -123,10 +178,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The notice for a replaced Workspace. */
-.sync-block code {
-  display: block;
-  overflow-wrap: anywhere;
 }

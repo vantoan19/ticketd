@@ -12,9 +12,16 @@ describe("canonical Markdown rich-edit boundary", () => {
     expect(readMarkdown(saved).meaning).toEqual(document.meaning);
     expect(saved.match(/ticketd:\/\/attachment\//g)).toHaveLength(4);
     expect(saved).toContain("Trace [final] 日本語");
-    expect(
-      readMarkdown(`![literal image label](${uri})`).reasons.length,
-    ).toBeGreaterThan(0);
+  });
+  it("edits attachment images and mixed checklists richly, keeping their Markdown (R3.4)", () => {
+    const uri = "ticketd://attachment/workspace-id/file-id";
+    // The shape agents write: bullets and checkboxes in one list, then an image.
+    const source = `Steps:\n\n- Reproduce with 10+ cards\n- [ ] Measure layout shift\n- [x] Record a video\n\n![Board icon](${uri} "Before")`;
+    const document = readMarkdown(source);
+    expect(document.reasons).toEqual([]);
+    const written = writeMarkdown(document.value);
+    expect(readMarkdown(written).meaning).toEqual(document.meaning);
+    expect(written).toBe(source);
   });
   it("retains nested lists, checklist state, links, Unicode, table escapes and code languages", () => {
     const source = `# Plan 日本語\n\nA **bold** and *soft* [link](https://example.com "Title") with ~~old~~ and \`code\`.\n\n3. first\n   - nested\n   - second\n4. next\n\n- [x] done\n- [ ] later\n\n| Name | Value |\n| :--- | ---: |\n| a\\|b | café |\n\n\`\`\`rust\nlet value = 1;\n\`\`\`\n`;
@@ -26,16 +33,15 @@ describe("canonical Markdown rich-edit boundary", () => {
     expect(written).toContain("```rust");
     expect(written).toContain("- [x] done");
   });
-  it("routes HTML, comments, references, images and fence metadata to source without losing the string", () => {
-    for (const source of [
-      "<aside>raw</aside>",
-      "<!-- comment -->",
-      "[link][id]\n\n[id]: /path",
-      "![alt](/image.png)",
-      "```rust title=demo\nvalue\n```",
-      "<Widget />",
-    ]) {
-      expect(readMarkdown(source).reasons.length).toBeGreaterThan(0);
+  it("routes HTML, comments, references and fence metadata to source without losing the string", () => {
+    for (const [source, reason] of [
+      ["<aside>raw</aside>", "raw HTML"],
+      ["<!-- comment -->", "raw HTML"],
+      ["[link][id]\n\n[id]: /path", "reference-style links"],
+      ["```rust title=demo\nvalue\n```", "a code fence with metadata"],
+      ["<Widget />", "raw HTML"],
+    ] as const) {
+      expect(readMarkdown(source).reasons).toContain(reason);
     }
     expect(
       readMarkdown("```unknown-language\nraw <input> 日本語\n```\n").reasons,

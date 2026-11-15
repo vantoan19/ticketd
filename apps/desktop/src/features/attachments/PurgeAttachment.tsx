@@ -1,33 +1,38 @@
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { useEffect, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   attachments,
   type Attachment,
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
-import { formatSize } from "./format-size";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { usageContext } from "./usage-context";
 
+/**
+ * Delete a quarantined file permanently (shell AT-15, P7): DialogShell sm
+ * with a question title, one sentence, Cancel first and a destructive
+ * "Delete permanently". When something still protects the file, the reason
+ * shows and there is nothing to confirm. A pending deletion asks to finish.
+ */
 export function PurgeAttachment({
   file,
   onClose,
   onChanged,
+  onPurged,
 }: {
   file: Attachment;
   onClose: () => void;
   onChanged: () => void;
+  onPurged?: () => void;
 }) {
   const [review, setReview] = useState<AttachmentCleanupReview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const cancel = useRef<HTMLButtonElement>(null);
+  const [error, setError] = useState<FailureDescription | null>(null);
   const pending = (review?.attachment ?? file).purge_state === "pending";
   useEffect(() => {
     let current = true;
@@ -37,7 +42,8 @@ export function PurgeAttachment({
         if (current) setReview(value);
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "check what uses the file"));
       });
     return () => {
       current = false;
@@ -45,9 +51,10 @@ export function PurgeAttachment({
   }, [file.id]);
   async function purge() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await attachments.purge(file.id);
+      onPurged?.();
       onClose();
     } catch (reason) {
       try {
@@ -55,91 +62,67 @@ export function PurgeAttachment({
       } catch {
         // Keep the original failure and allow the same explicit action to retry.
       }
-      setError(String(reason));
+      setError(describeFailure(reason, "delete the file"));
     } finally {
       setBusy(false);
       onChanged();
     }
   }
+  const protectedBy =
+    review && !review.purge_eligible
+      ? review.usage.protections.length
+        ? `Still used: ${usageContext(review.usage)}.`
+        : review.reason
+      : null;
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
+      size="sm"
+      title={
+        pending
+          ? `Finish deleting ${file.display_name}?`
+          : `Delete ${file.display_name} permanently?`
+      }
+      description={
+        pending
+          ? "Deleting it didn't finish. This can't be undone."
+          : "Its name stays in ticketd. The file itself can only come back from an older backup. This can't be undone."
+      }
+      primaryLabel={
+        protectedBy ? null : pending ? "Finish deleting" : "Delete permanently"
+      }
+      primaryVariant="destructive"
+      cancelLabel={protectedBy ? "Close" : "Cancel"}
+      blockedReason={
+        busy ? "Deleting…" : review ? null : error ? null : "Checking…"
+      }
+      busy={busy}
+      error={
+        error && (
+          <FailureAlert
+            size="compact"
+            failure={
+              pending
+                ? {
+                    ...error,
+                    sentence:
+                      "Deleting is still pending. Finish deleting to complete it.",
+                  }
+                : error
+            }
+          />
+        )
+      }
+      onSubmit={() => void purge()}
     >
-      <DialogContent
-        className="sm:max-w-170 max-h-dvh overflow-y-auto"
-        showCloseButton={!busy}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          cancel.current?.focus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle className="mr-6">
-            Permanently purge this file?
-          </DialogTitle>
-          <DialogDescription>
-            {pending
-              ? "This permanent purge is pending. Retry to finish deletion and confirm completion; it cannot be undone."
-              : "This removes quarantined local bytes and cannot be undone. Quarantine can be restored until you confirm permanent purge."}
-          </DialogDescription>
-        </DialogHeader>
-        <p>
-          <strong>{file.display_name}</strong>
-          {file.size_bytes != null ? ` · ${formatSize(file.size_bytes)}` : ""}
-        </p>
-        <p className="attachment-hint">
-          Its name and identity remain, but links and Undo cannot recover purged
-          bytes. Existing backups are unchanged; recovery requires deliberately
-          restoring an older complete backup. Remote files are never deleted.
-        </p>
-        {!review && !error && <p role="status">Checking protections…</p>}
-        {review && !review.purge_eligible && (
-          <p role="alert">
-            {review.usage.protections.length
-              ? `Protected · ${usageContext(review.usage)}`
-              : review.reason}
-          </p>
-        )}
-        {error &&
-          (pending ? (
-            <>
-              <p role="alert">
-                Permanent purge is pending. Retry to finish or confirm
-                completion.
-              </p>
-              <details>
-                <summary>Details</summary>
-                <p className="attachment-hint">{error}</p>
-              </details>
-            </>
-          ) : (
-            <p role="alert">{error}</p>
-          ))}
-        <div className="attachment-actions attachment-cleanup-footer">
-          <Button
-            ref={cancel}
-            variant="ghost"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={busy || !review?.purge_eligible}
-            onClick={() => void purge()}
-          >
-            {busy
-              ? "Purging file…"
-              : pending
-                ? "Retry permanent purge"
-                : "Permanently purge file"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+      {protectedBy && (
+        <Alert tone="attention" size="compact">
+          <AlertDescription>{protectedBy}</AlertDescription>
+        </Alert>
+      )}
+    </DialogShell>
   );
 }

@@ -1,19 +1,26 @@
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { useEffect, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import {
   attachments,
   type Attachment,
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  failureText,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { usageContext } from "./usage-context";
 
+/**
+ * Remove a Google Drive file's record from ticketd (shell ATT-14): DialogShell
+ * sm. The file itself stays in Drive. Once removed the dialog closes and the
+ * status line says so, with "Open in Drive"; a lost answer retries the same
+ * request.
+ */
 export function RemoveRemoteAttachment({
   file,
   onClose,
@@ -25,14 +32,11 @@ export function RemoveRemoteAttachment({
   onChanged: () => void;
   onRemovedFocus?: () => void;
 }) {
+  const statusLine = useStatusLine();
   const [review, setReview] = useState<AttachmentCleanupReview | null>(null);
-  const [result, setResult] = useState<Awaited<
-    ReturnType<typeof attachments.removeRemote>
-  > | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [requestId] = useState(() => crypto.randomUUID());
-  const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let current = true;
     void attachments
@@ -41,7 +45,8 @@ export function RemoveRemoteAttachment({
         if (current) setReview(value);
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "check where the file is used"));
       });
     return () => {
       current = false;
@@ -49,116 +54,74 @@ export function RemoveRemoteAttachment({
   }, [file.id]);
   async function remove() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
-      setResult(await attachments.removeRemote(file.id, requestId));
+      const result = await attachments.removeRemote(file.id, requestId);
       onChanged();
+      onClose();
+      onRemovedFocus?.();
+      statusLine.show({
+        message: `Removed ${file.display_name} from ticketd`,
+        action: {
+          label: "Open in Drive",
+          run: () =>
+            attachments
+              .openRemovedRemote(result.open_url)
+              .catch((reason: unknown) => {
+                statusLine.show({
+                  tone: "error",
+                  message: failureText(reason, "open the file in Drive"),
+                });
+              }),
+        },
+      });
     } catch (reason) {
-      setError(String(reason));
+      const failure = describeFailure(reason, "remove the file from ticketd");
+      setError({
+        ...failure,
+        sentence: `${failure.sentence} The file stays in Drive.`,
+      });
     } finally {
       setBusy(false);
     }
   }
+  const blocked =
+    review && !review.remove_eligible
+      ? review.usage.protections.length
+        ? `Still used: ${usageContext(review.usage)}.`
+        : review.usage.legacy_drafts_pending
+          ? "Older unsaved drafts may still use it. Review them in every profile first."
+          : review.reason
+      : null;
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
+      size="sm"
+      title={`Remove ${file.display_name} from ticketd?`}
+      description="The file stays in Google Drive, with its sharing unchanged. Only ticketd's record of it goes, including for copies ticketd uploaded."
+      primaryLabel="Remove from ticketd"
+      initialFocus="cancel"
+      blockedReason={
+        busy
+          ? "Removing…"
+          : blocked
+            ? "Something still uses it."
+            : review || error
+              ? null
+              : "Checking…"
+      }
+      busy={busy}
+      error={error && <FailureAlert size="compact" failure={error} />}
+      onSubmit={() => void remove()}
     >
-      <DialogContent
-        className="sm:max-w-170 max-h-dvh overflow-y-auto"
-        showCloseButton={!busy}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          cancel.current?.focus();
-        }}
-        onCloseAutoFocus={(event) => {
-          if (result && onRemovedFocus) {
-            event.preventDefault();
-            onRemovedFocus();
-          }
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle className="mr-6">
-            {result ? "Removed from ticketd" : "Remove from ticketd?"}
-          </DialogTitle>
-          <DialogDescription>
-            The original file will stay in Google Drive.
-          </DialogDescription>
-        </DialogHeader>
-        <p>
-          <strong>{file.display_name}</strong>
-        </p>
-        <p className="attachment-hint">
-          Only the record is removed from ticketd. Drive files are never
-          deleted, including copies uploaded by ticketd. No provider storage is
-          reclaimed.
-        </p>
-        {result ? (
-          <>
-            <p role="status">
-              The file remains in Drive. Choose it again in the Google Drive
-              picker to re-add it.
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => {
-                void attachments
-                  .openRemovedRemote(result.open_url)
-                  .catch((reason: unknown) => setError(String(reason)));
-              }}
-            >
-              Open in Drive
-            </Button>
-          </>
-        ) : (
-          <>
-            {!review && !error && <p role="status">Checking protections…</p>}
-            {review && !review.remove_eligible && (
-              <p role="alert">
-                {review.usage.protections.length
-                  ? `Protected · ${usageContext(review.usage)}`
-                  : review.usage.legacy_drafts_pending
-                    ? "Review recoverable drafts in all profiles first."
-                    : review.reason}
-              </p>
-            )}
-          </>
-        )}
-        {error && (
-          <>
-            <p role="alert">
-              {result
-                ? "Could not open the Drive file. Its ticketd record was removed; use the retained link or find it in Drive."
-                : "Removal was not confirmed. Retry the same action or review usage again; the Drive file remains."}
-            </p>
-            <details>
-              <summary>Details</summary>
-              <p className="attachment-hint">{error}</p>
-            </details>
-          </>
-        )}
-        <div className="attachment-actions attachment-cleanup-footer">
-          <Button
-            ref={cancel}
-            variant="ghost"
-            disabled={busy}
-            onClick={onClose}
-          >
-            {result ? "Done" : "Cancel"}
-          </Button>
-          {!result && (
-            <Button
-              disabled={busy || !review?.remove_eligible}
-              onClick={() => void remove()}
-            >
-              {busy ? "Removing record…" : "Remove from ticketd"}
-            </Button>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+      {blocked && (
+        <Alert tone="attention" size="compact">
+          <AlertDescription>{blocked}</AlertDescription>
+        </Alert>
+      )}
+    </DialogShell>
   );
 }

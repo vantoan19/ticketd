@@ -157,7 +157,7 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   expect(screen.getByRole("heading", { name: "Xin chào" })).toBeTruthy();
   expect(screen.getByRole("alert").textContent).toContain("Disk full");
-  expect(screen.getByRole("checkbox")).toHaveProperty("checked", true);
+  expect(screen.getByRole("img", { name: "Done" })).toBeTruthy();
   rerender(
     <TicketEditor
       ticket={{ ...ticket, title: "External title" }}
@@ -500,12 +500,33 @@ test("an empty description has one add affordance and keeps focus when editing e
   );
 });
 
+test("an empty title is never sent: the field says why and the saved title stays", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockResolvedValue(initial);
+  render(<Harness />);
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "   " },
+  });
+  await autosave();
+  expect(bridge.invoke).not.toHaveBeenCalled();
+  expect(screen.getByText("A ticket needs a title.")).toBeTruthy();
+  expect(screen.getByLabelText("Title").getAttribute("aria-invalid")).toBe(
+    "true",
+  );
+  // No failure, and no Retry that could never succeed.
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("");
+});
+
 test("a save the core refuses as stale keeps the draft and offers the choice", async () => {
   vi.useFakeTimers();
   const agent = { ...initial, title: "Agent title", body: "Agent wrote this" };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "change_ticket")
-      throw "ticket 'T-KQ1' was changed elsewhere since it was loaded";
+      throw {
+        code: "conflict",
+        message: "ticket 'T-KQ1' was changed elsewhere since it was loaded",
+      };
     return agent;
   });
   render(<Harness />);
@@ -606,6 +627,49 @@ test("an empty draft takes the saved text without a confirmation", () => {
   expect(screen.queryByRole("button", { name: "Discard draft" })).toBeNull();
   expect(screen.queryByText("Your unsaved draft")).toBeNull();
   expect(localStorage.getItem("ticketd:ticket-draft:1")).toBeNull();
+});
+
+test("Use saved text replaces only the field in conflict and keeps the other draft", () => {
+  // A title draft against a title changed elsewhere, and a description draft
+  // whose saved text did not change.
+  localStorage.setItem(
+    "ticketd:ticket-draft:1",
+    JSON.stringify({
+      title: "",
+      body: "My description draft",
+      baseTitle: "First",
+      baseBody: "Old",
+    }),
+  );
+  bridge.invoke.mockImplementation(() => new Promise(() => {}));
+  render(
+    <TicketEditor
+      ticket={{ ...initial, title: "Agent title" }}
+      onSaved={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use saved text" }));
+  expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
+    "Agent title",
+  );
+  expect(
+    JSON.parse(localStorage.getItem("ticketd:ticket-draft:1") ?? "{}").body,
+  ).toBe("My description draft");
+  // Nothing was saved, so nothing says it was.
+  expect(screen.getByRole("status").textContent).not.toMatch(/saved$/);
+});
+
+test("E does nothing while the dependency graph covers the ticket", () => {
+  render(
+    <div className="ticket-detail" data-graph="">
+      <TicketEditor ticket={initial} onSaved={vi.fn()} />
+    </div>,
+  );
+  fireEvent.keyDown(window, { key: "e" });
+  expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull();
+  expect(
+    screen.queryByRole("textbox", { name: "Description rich text" }),
+  ).toBeNull();
 });
 
 test("unsaved text survives a reload and is checked against the stored text", async () => {

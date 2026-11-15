@@ -1,31 +1,53 @@
-import { useContext, useState } from "react";
+import { use, useContext, useState } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import { Pager } from "@/components/ui/pager";
+import { RecordLink } from "@/components/ui/record-link";
+import { Reference } from "@/components/ui/reference";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import {
   Popover,
   PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
-import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { DuplicateTarget } from "@/lib/api/client";
-import { linkLabel, type LinkRow } from "@/features/tickets/linked-work";
+import {
+  linkLabel,
+  type AddableKind,
+  type LinkKind,
+  type LinkRow,
+} from "@/features/tickets/linked-work";
 import {
   duplicateTargetParts,
   externalDuplicateTarget,
   externalSource,
 } from "@/features/tickets/ticket-source";
-import { RailSection } from "@/features/tickets/RailSection";
+import { RailRow, RailSection } from "@/features/tickets/RailSection";
+import { RailPlacement } from "@/features/tickets/rail-placement";
+import { ReferenceRow } from "@/features/tickets/ReferenceRow";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
-import { Item } from "@/components/ui/item";
-import { Reference } from "@/components/ui/reference";
 
 const isDuplicateKind = (kind: LinkRow["kind"]) =>
   kind === "duplicate_of" || kind === "duplicates";
+
+/** The "+" a relationship group offers, by kind; Parent and duplicates have none. */
+const addLabels: Partial<Record<LinkKind, string>> = {
+  blocked_by: "Add a blocker",
+  blocks: "Add a ticket this blocks",
+  related: "Add a related ticket",
+  discovered_while: "Add where this was discovered",
+  discoveries: "Add a discovery",
+};
 
 /** The dialogs the relationship actions open; one instance serves the rail and Subtickets. */
 export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
@@ -68,8 +90,8 @@ export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
           }}
           open
           onOpenChange={work.setReviewing}
-          title="Review dependency changes"
-          description={`Move dependencies between ${ticket.reference} and another ticket after a duplicate link was removed.`}
+          title="Review dependencies"
+          description={`Move dependencies between ${ticket.reference} and another ticket.`}
         />
       )}
     </>
@@ -78,7 +100,9 @@ export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
 
 /**
  * Every link except subtickets as the rail's Relationships section, grouped by
- * meaning. Subtickets read under the description instead.
+ * meaning, each group with its own "+". Rows are two-line ReferenceRows; in a
+ * narrow pane's reading column they are one-line rows under a section header.
+ * Subtickets read under the description instead.
  */
 export function LinkedWork({
   work,
@@ -89,7 +113,9 @@ export function LinkedWork({
   select: (reference: string) => void;
   onOpenGraph: () => void;
 }) {
-  const { reference, current, pending, error } = work;
+  const { reference, current, pending } = work;
+  const error = work.error?.kind === "subticket" ? null : work.error;
+  const density = use(RailPlacement) === "column" ? "list" : "rail";
   // A trashed ticket keeps its relationships visible (an unresolved blocker still
   // matters) but they cannot be changed.
   const readOnly = work.ticket.trashed;
@@ -106,195 +132,167 @@ export function LinkedWork({
   // A duplicate closed by its source names a canonical issue that may not be a
   // local ticket; it is information and has no remove action.
   const external = externalDuplicateTarget(work.ticket);
-  const externalAt = rows.findIndex((row) => row.kind === "duplicates");
-  const linkAction = readOnly ? null : (
-    <Button variant="ghost" size="sm" onClick={() => work.openLink()}>
-      <Plus aria-hidden="true" />
-      Add relationship
-    </Button>
+  const graph = (
+    <RailRow
+      icon={<Network aria-hidden="true" />}
+      muted
+      onClick={() =>
+        openContextGraph
+          ? openContextGraph(reference, { dependencies: true })
+          : onOpenGraph()
+      }
+    >
+      Open graph
+    </RailRow>
   );
-  // Collapse to the bare action only after a successful read found nothing;
-  // loading and failed look different from "no links".
   if (!current?.links || (rows.length === 0 && !external)) {
     if (readOnly && current?.links) return null;
     return (
       <RailSection label="Relationships">
-        <div id={`linked-work-${reference}`} className="linked-work" data-empty>
-          {linkAction}
-          {current?.links && openContextGraph && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => openContextGraph(reference)}
-            >
-              <Network aria-hidden="true" />
-              Open context graph
-            </Button>
-          )}
-          {!current && (
-            <span className="linked-work-state" role="status">
-              Loading relationships…
-            </span>
-          )}
-          {current && !current.links && (
-            <span className="linked-work-state" role="alert">
-              Could not load relationships: {current.failure}{" "}
-              <Button variant="link" size="xs" onClick={work.retry}>
-                Try again
-              </Button>
-            </span>
-          )}
-          {error && <p role="alert">{error}</p>}
-          {work.removed && (
-            <p role="status" className="linked-work-note">
-              Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
-              <Button
-                variant="link"
-                size="xs"
-                disabled={pending}
-                onClick={() => void work.undoRemove()}
-              >
-                Undo
-              </Button>
-            </p>
-          )}
-        </div>
+        {!current && (
+          <Skeleton
+            className="h-8"
+            role="status"
+            aria-label="Loading relationships"
+          />
+        )}
+        {current && !current.links && current.failure && (
+          <FailureState
+            size="inline"
+            failure={current.failure}
+            onRetry={work.retry}
+          />
+        )}
+        {current?.links && !readOnly && (
+          <RailRow
+            icon={<Plus aria-hidden="true" />}
+            muted
+            onClick={() => work.openLink()}
+          >
+            Add relationship
+          </RailRow>
+        )}
+        {current?.links && openContextGraph && graph}
+        {error && <FailureAlert size="compact" failure={error.failure} />}
       </RailSection>
     );
   }
-  const split = externalAt < 0 ? rows.length : externalAt;
-  const renderRow = (row: LinkRow, index: number) => (
-    <Item asChild key={`${row.kind}-${row.reference}`}>
-      <li data-kind={row.kind}>
-        {/* Rows of one kind read as a group: only the first shows its
-                  label, and screen readers still hear it on every row. */}
-        <span
-          className="linked-work-label"
-          data-repeat={rows[index - 1]?.kind === row.kind || undefined}
-        >
-          {linkLabel(row.kind)}
-        </span>
-        <span
-          className="linked-work-icon"
-          role="img"
-          aria-label={statusText(row)}
-        >
-          <StatusIcon status={row.status} size={16} decorative />
-        </span>
-        <Reference>{row.reference}</Reference>
-        <Button
-          variant="link"
-          className="linked-work-title"
-          title={row.title}
-          onClick={() => select(row.reference)}
-        >
-          <span className="truncate">{row.title}</span>
-        </Button>
-        <span
-          className="linked-work-status"
-          aria-hidden="true"
-          data-qualified={
-            (row.kind === "blocked_by" && row.unresolved) ||
-            row.trashed ||
-            undefined
-          }
-        >
-          {statusText(row)}
-        </span>
-        {readOnly ? null : isDuplicateKind(row.kind) &&
-          !externalSource(work.ticket)?.status_locked ? (
-          <RemoveDuplicate
-            row={row}
-            ticket={reference}
-            disabled={pending}
-            onRemove={() => void work.remove(row)}
-            onReview={() => work.setReviewing(true)}
-          />
+  const groups: { kind: LinkKind; rows: LinkRow[] }[] = [];
+  for (const row of rows) {
+    const last = groups.at(-1);
+    if (last?.kind === row.kind) last.rows.push(row);
+    else groups.push({ kind: row.kind, rows: [row] });
+  }
+  const renderRow = (row: LinkRow) => (
+    <ReferenceRow
+      key={`${row.kind}-${row.reference}`}
+      kind={row.kind}
+      density={density}
+      reference={row.reference}
+      title={row.title}
+      status={row.status}
+      statusLabel={statusText(row)}
+      caption={statusText(row)}
+      onOpen={() => select(row.reference)}
+      action={
+        readOnly ? undefined : isDuplicateKind(row.kind) ? (
+          externalSource(work.ticket)?.status_locked ? undefined : (
+            <RemoveDuplicate
+              row={row}
+              ticket={reference}
+              disabled={pending}
+              onRemove={() => void work.remove(row)}
+            />
+          )
         ) : (
-          <Button
-            variant="ghost"
+          <IconButton
+            label={`Remove ${row.reference} from ${linkLabel(row.kind)}`}
             size="icon-xs"
-            className="linked-work-remove"
-            title="Remove relationship"
-            aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+            tooltipSide="top"
             disabled={pending}
             onClick={() => void work.remove(row)}
           >
             <X aria-hidden="true" />
-          </Button>
-        )}
-      </li>
-    </Item>
+          </IconButton>
+        )
+      }
+    />
   );
+  const addFor = (kind: LinkKind) => {
+    const label = addLabels[kind];
+    if (readOnly || !label) return null;
+    return (
+      <IconButton
+        label={label}
+        size="icon-xs"
+        tooltipSide="top"
+        onClick={() => work.openLink(kind as AddableKind)}
+      >
+        <Plus aria-hidden="true" />
+      </IconButton>
+    );
+  };
   return (
-    <RailSection label="Relationships">
-      <div id={`linked-work-${reference}`} className="linked-work">
-        {error && <p role="alert">{error}</p>}
-        {current.failure && (
-          <p role="alert">
-            Relationships could not be refreshed: {current.failure}
-          </p>
-        )}
-        {work.removed && (
-          <p role="status" className="linked-work-note">
-            Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
-            <Button
-              variant="link"
-              size="xs"
-              disabled={pending}
-              onClick={() => void work.undoRemove()}
-            >
-              Undo
-            </Button>
-          </p>
-        )}
-        <ul className="linked-work-rows">
-          {rows.slice(0, split).map((row, index) => renderRow(row, index))}
-          {external && <ExternalTargetRow target={external} select={select} />}
-          {rows.slice(split).map((row, index) => renderRow(row, split + index))}
-        </ul>
-        {work.ticket.duplicate_redirect && (
-          <p className="linked-work-note">
-            {work.ticket.duplicate_of} is itself a duplicate of{" "}
-            {work.ticket.duplicate_redirect}.{" "}
-            <Button
-              variant="link"
-              size="xs"
-              onClick={() => work.setRedirecting(true)}
-            >
-              Point this at {work.ticket.duplicate_redirect}
-            </Button>
-          </p>
-        )}
-        {work.more !== null && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void work.showMore()}
+    <RailSection
+      label="Relationships"
+      {...(!readOnly && {
+        actions: (
+          <IconButton
+            label="Add relationship"
+            tooltipSide="top"
+            onClick={() => work.openLink()}
           >
-            Show more links
-          </Button>
-        )}
-        <div className="linked-work-actions">
-          {linkAction}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() =>
-              openContextGraph ? openContextGraph(reference) : onOpenGraph()
-            }
+            <Plus aria-hidden="true" />
+          </IconButton>
+        ),
+      })}
+    >
+      {current.failure && (
+        <FailureState
+          size="inline"
+          failure={current.failure}
+          onRetry={work.retry}
+        />
+      )}
+      <div className="linked-work" id={`linked-work-${reference}`}>
+        {groups.map((group, index) => (
+          <section
+            key={`${group.kind}-${index}`}
+            aria-label={linkLabel(group.kind)}
           >
-            <Network aria-hidden="true" />
-            {openContextGraph ? "Open context graph" : "Dependencies"}
-          </Button>
-        </div>
+            <div className="linked-work-group">
+              <span>{linkLabel(group.kind)}</span>
+              {addFor(group.kind)}
+            </div>
+            <ul className="reference-rows">{group.rows.map(renderRow)}</ul>
+          </section>
+        ))}
+        {external && <ExternalTarget target={external} select={select} />}
       </div>
+      {work.ticket.duplicate_redirect && (
+        <p className="linked-work-note">
+          {work.ticket.duplicate_of} is itself a duplicate of{" "}
+          {work.ticket.duplicate_redirect}.{" "}
+          <Button
+            variant="link"
+            size="inline"
+            onClick={() => work.setRedirecting(true)}
+          >
+            Point this at {work.ticket.duplicate_redirect}
+          </Button>
+        </p>
+      )}
+      {work.more !== null && (
+        <Pager noun="relationships" onMore={() => void work.showMore()} />
+      )}
+      {error && <FailureAlert size="compact" failure={error.failure} />}
+      {graph}
     </RailSection>
   );
 }
 
 /** The canonical issue a source named for a duplicate, without pretending it is a local ticket. */
-function ExternalTargetRow({
+function ExternalTarget({
   target,
   select,
 }: {
@@ -303,50 +301,42 @@ function ExternalTargetRow({
 }) {
   const { label, ticket, note, url } = duplicateTargetParts(target);
   return (
-    <Item asChild>
-      <li data-kind="duplicate_of" data-external>
-        <span className="linked-work-label">{linkLabel("duplicate_of")}</span>
-        <span className="linked-work-external">
-          {ticket ? (
-            <Button
-              variant="link"
-              className="linked-work-title"
-              onClick={() => select(ticket)}
-            >
-              {label}
-            </Button>
-          ) : url ? (
-            <SourceLink url={url}>{label}</SourceLink>
-          ) : // A reference is monospace; "Unknown" is a word.
-          target.kind === "unknown" ? (
-            <span>{label}</span>
-          ) : (
-            <Reference>{label}</Reference>
-          )}{" "}
-          <span className="linked-work-note">{note}</span>
-        </span>
-      </li>
-    </Item>
+    <section aria-label={linkLabel("duplicate_of")}>
+      <div className="linked-work-group">
+        <span>{linkLabel("duplicate_of")}</span>
+      </div>
+      <p className="linked-work-external">
+        {ticket ? (
+          <RecordLink onClick={() => select(ticket)}>{label}</RecordLink>
+        ) : url ? (
+          <SourceLink url={url}>{label}</SourceLink>
+        ) : // A reference is monospace; "Unknown" is a word.
+        target.kind === "unknown" ? (
+          <span>{label}</span>
+        ) : (
+          <Reference>{label}</Reference>
+        )}{" "}
+        <span className="linked-work-note">{note}</span>
+      </p>
+    </section>
   );
 }
 
 /**
  * Removing a duplicate link is not a plain delete: it restores the duplicate's
- * earlier status and leaves moved dependencies where they are. The person sees
- * that before confirming.
+ * earlier status and leaves moved dependencies where they are. A small confirm
+ * says so; after it, the status line offers Review dependencies.
  */
 function RemoveDuplicate({
   row,
   ticket,
   disabled,
   onRemove,
-  onReview,
 }: {
   row: LinkRow;
   ticket: string;
   disabled: boolean;
   onRemove: () => void;
-  onReview: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const duplicate = row.kind === "duplicate_of" ? ticket : row.reference;
@@ -354,39 +344,38 @@ function RemoveDuplicate({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
+        <IconButton
+          label={`Remove ${row.reference} from ${linkLabel(row.kind)}`}
           size="icon-xs"
-          className="linked-work-remove"
-          title="Remove relationship"
-          aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+          tooltipSide="top"
           disabled={disabled}
         >
           <X aria-hidden="true" />
-        </Button>
+        </IconButton>
       </PopoverTrigger>
       <PopoverContent
         align="end"
         aria-label="Remove duplicate link"
         className="linked-work-confirm"
       >
-        <p>
-          {duplicate} stops being a duplicate of {canonical} and returns to the
-          status it had before. Dependencies that were moved to {canonical} stay
-          where they are; review them separately.
-        </p>
+        <PopoverHeader>
+          <PopoverTitle>Remove the duplicate link?</PopoverTitle>
+          <PopoverDescription>
+            {duplicate} returns to the status it had before. Dependencies moved
+            to {canonical} stay there.
+          </PopoverDescription>
+        </PopoverHeader>
         <div className="linked-work-confirm-actions">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() => {
-              setOpen(false);
-              onReview();
-            }}
+            autoFocus
+            onClick={() => setOpen(false)}
           >
-            Review separate dependency changes
+            Cancel
           </Button>
           <Button
+            variant="destructive"
             size="sm"
             onClick={() => {
               setOpen(false);
@@ -404,6 +393,6 @@ function RemoveDuplicate({
 function statusText(row: LinkRow) {
   const parts = [row.status];
   if (row.kind === "blocked_by" && row.unresolved) parts.push("not done");
-  if (row.trashed) parts.push("in trash");
+  if (row.trashed) parts.push("in Trash");
   return parts.join(" · ");
 }

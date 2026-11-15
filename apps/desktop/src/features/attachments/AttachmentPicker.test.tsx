@@ -71,7 +71,7 @@ test("new captures use the current workspace preference while recovered retries 
   const view = render(
     <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
   );
-  await screen.findByText("Destination: Google Drive · Team uploads");
+  await screen.findByText("Uploads go to Google Drive · Team uploads");
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
   await within(row).findByText(/Offline/);
@@ -83,7 +83,7 @@ test("new captures use the current workspace preference while recovered retries 
   render(
     <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
   );
-  await screen.findByText("Destination: Local workspace");
+  await screen.findByText("Uploads stay on this computer");
   const recovered = await screen.findByRole("listitem", { name: "trace.log" });
   fireEvent.click(within(recovered).getByRole("button", { name: "Retry" }));
   await within(recovered).findByText(/Offline/);
@@ -151,7 +151,7 @@ test("a late initial preference read cannot overwrite the destination captured f
     finishOldRead({ kind: "local" });
   });
   expect(
-    screen.getByText("Destination: Google Drive · Team files"),
+    screen.getByText("Uploads go to Google Drive · Team files"),
   ).toBeTruthy();
 });
 
@@ -280,7 +280,7 @@ test("a purged upload replay stays unavailable instead of reporting stored or at
   const row = await screen.findByRole("listitem", { name: "trace.log" });
   expect(await within(row).findByRole("alert")).toHaveProperty(
     "textContent",
-    expect.stringContaining("purged"),
+    expect.stringContaining("deleted permanently"),
   );
   expect(picked).not.toHaveBeenCalled();
   expect(within(row).queryByText("Stored")).toBeNull();
@@ -309,11 +309,13 @@ test("retry refreshes a cached completed upload after permanent purge", async ()
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  await within(row).findByText("Insertion failed");
+  await within(row).findByText(/Insertion failed/);
   purged = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() =>
-    expect(within(row).getByRole("alert").textContent).toContain("purged"),
+    expect(within(row).getByRole("alert").textContent).toContain(
+      "deleted permanently",
+    ),
   );
   expect(picked).toHaveBeenCalledTimes(1);
   expect(
@@ -359,10 +361,10 @@ test("a cached Drive upload receipt cannot promise library availability after re
   const picked = vi.fn().mockRejectedValue(new Error("Insertion failed"));
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
-  await screen.findByText(/Destination: Google Drive/);
+  await screen.findByText(/Uploads go to Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  await within(row).findByText("Insertion failed");
+  await within(row).findByText(/Insertion failed/);
   removed = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() =>
@@ -422,7 +424,7 @@ test("Drive failures retain their folder and operation; status checks precede re
   const picked = vi.fn().mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
-  await screen.findByText(/Destination: Google Drive/);
+  await screen.findByText(/Uploads go to Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
   await within(row).findByText(/Completion uncertain/);
@@ -436,7 +438,7 @@ test("Drive failures retain their folder and operation; status checks precede re
     .mocked(invoke)
     .mock.calls.find(([command]) => command === "upload_drive_file")?.[1];
   fireEvent.click(within(row).getByRole("button", { name: "Check status" }));
-  await within(row).findByText(/Not confirmed complete/);
+  await within(row).findByText(/Not confirmed yet/);
   fail = false;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
@@ -524,9 +526,9 @@ test("explicit local fallback uses a new operation and retains the original Driv
     <AttachmentPicker open onOpenChange={() => {}} onPick={picked} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
-  await screen.findByText(/Destination: Google Drive/);
+  await screen.findByText(/Uploads go to Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText("Drive offline");
+  await screen.findByText(/Drive offline/);
   await waitFor(() =>
     expect(
       screen.getByRole("button", { name: "Upload locally instead" }),
@@ -548,13 +550,11 @@ test("explicit local fallback uses a new operation and retains the original Driv
   };
   expect(remote.requestId).not.toBe(local.requestId);
   expect(
-    screen.getByText(
-      /Any completed remote file remains in Drive; this Drive operation is retained/,
-    ),
+    screen.getByText(/Anything already in Drive stays there/),
   ).toBeTruthy();
   first.unmount();
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
-  await screen.findByText(/Google Drive · Uploads · Uploaded copy/);
+  await screen.findByText(/Google Drive · Uploads\./);
   expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
   expect(
     vi
@@ -598,7 +598,7 @@ test("explicit local fallback inserts at its original selection position", async
   const picked = vi.fn().mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
-  await screen.findByText("Destination: Google Drive · Uploads");
+  await screen.findByText("Uploads go to Google Drive · Uploads");
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
 
   const alpha = await screen.findByRole("listitem", { name: "alpha.txt" });
@@ -680,9 +680,7 @@ test("existing files search keeps related usage distinct and inserts selected id
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   await screen.findByText("Related to this ticket");
-  expect(
-    screen.getByText(/Document · not a direct ticket attachment · in Trash/),
-  ).toBeTruthy();
+  expect(screen.getByText(/In a Document · in Trash/)).toBeTruthy();
   fireEvent.change(
     screen.getByRole("searchbox", { name: "Search existing files" }),
     { target: { value: "log" } },
@@ -719,7 +717,18 @@ test("a completed reuse cannot close a newer insertion session", async () => {
       return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
-    if (command === "search_attachments") return [];
+    if (command === "search_attachments")
+      return [
+        {
+          attachment: file("file.txt"),
+          related: false,
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        },
+      ];
     return file("file.txt");
   });
   let finish: (() => void) | undefined;
@@ -734,10 +743,10 @@ test("a completed reuse cannot close a newer insertion session", async () => {
     <AttachmentPicker open onOpenChange={closed} onPick={picked} />,
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Attachment ID" }), {
-    target: { value: "file.txt" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Reuse ID" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Select file.txt" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() => expect(picked).toHaveBeenCalled());
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   view.rerender(
@@ -750,7 +759,9 @@ test("a completed reuse cannot close a newer insertion session", async () => {
   finish?.();
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Reuse ID" }).hasAttribute("disabled"),
+      screen
+        .getByRole("checkbox", { name: "Select file.txt" })
+        .hasAttribute("disabled"),
     ).toBe(false),
   );
   expect(closed).not.toHaveBeenCalled();
@@ -862,12 +873,16 @@ test("legacy-shaped local capture queues keep their destination under a new Driv
 test("unavailable recovery storage blocks new uploads instead of losing retry identity", async () => {
   vi.stubGlobal("indexedDB", undefined);
   vi.mocked(open).mockResolvedValue(["C:/unsafe.txt"]);
-  vi.mocked(invoke).mockResolvedValue(104857600);
+  // Only recovery is missing; a destination that reads fine cannot hide it.
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_upload_destination" ? { kind: "local" } : 104857600,
+  );
   render(
     <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
   );
+  await screen.findByText(/Uploads /);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText(/No new uploads were started/);
+  await screen.findByText(/No uploads were started/);
   expect(
     vi
       .mocked(invoke)
@@ -899,7 +914,7 @@ test("mixed batches insert successes in selection order and retry the original f
     .mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText("Disk full");
+  await screen.findByText(/Disk full/);
   await waitFor(() => expect(picked.mock.calls).toHaveLength(2));
   expect(picked.mock.calls.map((call) => call[0])).toEqual([
     file("first.txt"),
@@ -968,7 +983,10 @@ test("canceling one file suppresses late insertion, preserves its completed snap
   const progress = await screen.findByRole("progressbar", {
     name: "Upload first.txt",
   });
-  await waitFor(() => expect(progress.getAttribute("value")).toBe("3"));
+  // 3 of 7 bytes.
+  await waitFor(() =>
+    expect(progress.getAttribute("aria-valuenow")).toBe("43"),
+  );
   fireEvent.click(
     within(screen.getByRole("listitem", { name: "first.txt" })).getByRole(
       "button",
@@ -978,7 +996,9 @@ test("canceling one file suppresses late insertion, preserves its completed snap
   complete?.(file("first.txt"));
   await waitFor(() => expect(picked.mock.calls).toHaveLength(1));
   expect(picked.mock.calls[0]?.[0]).toEqual(file("last.txt"));
-  await screen.findByText(/Stored as first.txt/);
+  await within(screen.getByRole("listitem", { name: "first.txt" })).findByText(
+    "Canceled",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(picked.mock.calls).toHaveLength(2));
   expect(picked).toHaveBeenLastCalledWith(
@@ -991,4 +1011,25 @@ test("canceling one file suppresses late insertion, preserves its completed snap
       .mocked(invoke)
       .mock.calls.filter(([command]) => command === "import_attachment"),
   ).toHaveLength(2);
+});
+
+test("Existing files says the workspace has none, then names an unmatched search, with no paging", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "search_attachments") return [];
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={vi.fn()} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  expect(
+    await screen.findByText("No files in this workspace yet"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Previous files" })).toBeNull();
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search existing files" }),
+    { target: { value: "notes" } },
+  );
+  expect(await screen.findByText("No files match “notes”")).toBeTruthy();
 });

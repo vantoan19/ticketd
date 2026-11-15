@@ -3,11 +3,17 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { PathText } from "@/components/ui/path-text";
+import type { StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { Step, Steps } from "@/components/ui/steps";
 import { workspaceClient } from "@/lib/api/workspace";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { cliClient, type CliStatus } from "@/lib/api/cli";
 import {
   SettingsList,
@@ -44,16 +50,25 @@ type Check =
 
 const mono = "font-mono";
 
-function InstallGuideLink() {
+type Failure = { failure: FailureDescription; retry: () => void };
+
+/** Opens the guide; `onFailure` says why it did not open, and null clears it. */
+function InstallGuideLink({
+  onFailure,
+}: {
+  onFailure: (failure: Failure | null) => void;
+}) {
+  const open = () => {
+    onFailure(null);
+    workspaceClient.openLink(INSTALL_GUIDE_URL).catch((reason: unknown) =>
+      onFailure({
+        failure: describeFailure(reason, "open the installation guide"),
+        retry: open,
+      }),
+    );
+  };
   return (
-    <Button
-      type="button"
-      variant="secondary"
-      size="sm"
-      onClick={() =>
-        void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
-      }
-    >
+    <Button type="button" variant="secondary" size="sm" onClick={open}>
       Installation guide
       <ExternalLink aria-hidden="true" />
     </Button>
@@ -66,12 +81,11 @@ function problems(status: CliStatus): ReactNode[] {
   if (!status.on_path && status.path !== null)
     found.push(
       <>
-        Found at <code className={mono}>{status.path}</code>, but that folder
-        isn&apos;t on your PATH, so agents and terminals can&apos;t run{" "}
-        <code className={mono}>ticketd</code> by name. Move it to a folder on
-        your PATH, such as{" "}
-        <code className={mono}>{status.suggested_directory}</code> after adding
-        that folder to PATH, then check again.
+        It was found, but that folder isn&apos;t on your PATH, so agents and
+        terminals can&apos;t run <code className={mono}>ticketd</code> by name.
+        Move it to a folder on your PATH, such as{" "}
+        <code className={mono}>{status.suggested_directory}</code>, then check
+        again.
       </>,
     );
   if (status.version === null)
@@ -91,21 +105,22 @@ function problems(status: CliStatus): ReactNode[] {
   return found;
 }
 
-/** The terminal tile; the dot says "needs attention" or "ready" beside the words. */
-function StatusTile({ tone }: { tone: StatusDotTone }) {
+/** The terminal tile: plain; the status is the StatusLabel beside it. */
+function StatusTile() {
   return (
     <SettingsRowTile>
-      <span className="relative flex">
-        <Terminal size={20} />
-        <span className="absolute -top-0.5 -right-0.5 flex rounded-full ring-2 ring-(--surface)">
-          <StatusDot tone={tone} size={10} />
-        </span>
-      </span>
+      <Terminal />
     </SettingsRowTile>
   );
 }
 
-function StatusRows({ check }: { check: Check }) {
+function StatusRows({
+  check,
+  onGuideFailure,
+}: {
+  check: Check;
+  onGuideFailure: (failure: Failure | null) => void;
+}) {
   if (check.phase === "checking")
     return (
       <div
@@ -123,9 +138,9 @@ function StatusRows({ check }: { check: Check }) {
   if (check.phase === "failed")
     return (
       <SettingsRow
-        leading={<StatusTile tone="neutral" />}
-        title="Could not check"
-        description="ticketd could not look for the command-line tool. Choose Check again to retry."
+        leading={<StatusTile />}
+        title={<StatusLabel tone="neutral">Couldn't check</StatusLabel>}
+        description="ticketd couldn't look for the command-line tool. Choose Check again to retry."
       />
     );
   const { status } = check;
@@ -133,8 +148,8 @@ function StatusRows({ check }: { check: Check }) {
     return (
       <>
         <SettingsRow
-          leading={<StatusTile tone="attention" />}
-          title="Not found"
+          leading={<StatusTile />}
+          title={<StatusLabel tone="attention">Not found</StatusLabel>}
           description="ticketd is not on your PATH or in the usual install folders."
         />
         <SettingsRow variant="stacked">
@@ -142,7 +157,7 @@ function StatusRows({ check }: { check: Check }) {
             <Step
               title="Get the ticketd executable"
               description="It comes with this app's download."
-              action={<InstallGuideLink />}
+              action={<InstallGuideLink onFailure={onGuideFailure} />}
             />
             <Step
               title="Copy it into a folder on your PATH"
@@ -169,13 +184,15 @@ function StatusRows({ check }: { check: Check }) {
   return (
     <>
       <SettingsRow
-        leading={<StatusTile tone={tone} />}
+        leading={<StatusTile />}
         title={
-          issues.length === 0
-            ? "Installed"
-            : status.on_path
-              ? "Installed, needs attention"
-              : "Found, but not on your PATH"
+          <StatusLabel tone={tone}>
+            {issues.length === 0
+              ? "Installed"
+              : status.on_path
+                ? "Installed, needs attention"
+                : "Found, but not on your PATH"}
+          </StatusLabel>
         }
         description={
           issues.length === 0 ? (
@@ -193,13 +210,15 @@ function StatusRows({ check }: { check: Check }) {
           )
         }
         trailing={
-          versionTrouble || !status.on_path ? <InstallGuideLink /> : null
+          versionTrouble || !status.on_path ? (
+            <InstallGuideLink onFailure={onGuideFailure} />
+          ) : null
         }
       />
       <dl className="cli-details">
         <dt>Version</dt>
         <dd>
-          <span className={mono}>{status.version ?? "Unknown"}</span>
+          <span className="cli-code">{status.version ?? "Unknown"}</span>
           {status.version_matches && (
             <span className="text-xs leading-4 text-muted-foreground">
               matches this app
@@ -213,9 +232,13 @@ function StatusRows({ check }: { check: Check }) {
         </dd>
         <dt>Path</dt>
         <dd>
-          <span className={`${mono} break-all`}>
-            {status.path ?? "Unknown"}
-          </span>
+          {status.path ? (
+            <span className="cli-path">
+              <PathText path={status.path} layout="inline" />
+            </span>
+          ) : (
+            "Unknown"
+          )}
         </dd>
         <dt>Workspace</dt>
         <dd>
@@ -242,6 +265,7 @@ export function CommandLineCard({
 }) {
   const { openPage } = useSettingsState();
   const [check, setCheck] = useState<Check>({ phase: "checking" });
+  const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
   const load = useCallback(() => {
     void cliClient.check().then(
       (status) => {
@@ -275,8 +299,16 @@ export function CommandLineCard({
         }
       >
         <SettingsList aria-live="polite">
-          <StatusRows check={check} />
+          <StatusRows check={check} onGuideFailure={setGuideFailure} />
         </SettingsList>
+        {guideFailure && (
+          <FailureAlert
+            size="compact"
+            className="mt-3"
+            failure={guideFailure.failure}
+            onRetry={guideFailure.retry}
+          />
+        )}
       </SettingsSection>
       <SettingsSection
         title="Quick reference for agents"

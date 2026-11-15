@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { chooseFilter } from "@/test/filters";
+import { setPreference } from "@/lib/preferences";
 import {
   act,
   cleanup,
@@ -93,7 +95,9 @@ test("Attachments opens from the existing Context navigation without replacing t
   expect(
     await screen.findByRole("heading", { name: "Attachments" }),
   ).toBeTruthy();
-  expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
+  // An empty library says so, with no search over nothing (P9).
+  expect(await screen.findByText("No attachments yet")).toBeTruthy();
+  expect(screen.queryByRole("searchbox", { name: "Search files" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
 });
@@ -102,8 +106,12 @@ test("Storage settings in the Attachments library opens Settings at Attachments"
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "More library actions" }),
+    { key: "Enter" },
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Storage settings" }),
+    await screen.findByRole("menuitem", { name: "Storage settings" }),
   );
   const nav = await screen.findByRole("navigation", {
     name: "Settings sections",
@@ -123,14 +131,27 @@ async function openManageMenu(label: string, item: string) {
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
 }
 
-async function openNewTicket(
-  trigger = screen.getByRole("button", { name: "New ticket" }),
-) {
-  fireEvent.keyDown(trigger, { key: "Enter" });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  fireEvent.click(screen.getByRole("menuitem", { name: "New ticket" }));
+/** One ticket for an unfiltered read, none once a search or filter narrows it. */
+function unfilteredOnly(args: unknown) {
+  const filter = (
+    args as {
+      filter?: { query?: string; tags?: string[]; status?: string | null };
+    }
+  )?.filter;
+  const narrowed =
+    Boolean(filter?.query) ||
+    (filter?.tags?.length ?? 0) > 0 ||
+    Boolean(filter?.status);
+  return narrowed ? [] : [bulkTicket(1)];
+}
+
+/** The sidebar's New ticket button; an empty list may offer its own New ticket too. */
+const sidebarNewTicket = () =>
+  screen.getAllByRole("button", { name: "New ticket" })[0]!;
+
+/** One click opens New ticket (shell SH-11: it was a two-click menu). */
+async function openNewTicket(trigger = sidebarNewTicket()) {
+  fireEvent.click(trigger);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -326,9 +347,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished title",
   );
-  expect(
-    screen.getByText("This ticket is outside the current results."),
-  ).toBeTruthy();
+  expect(screen.getByText("Not in the current results")).toBeTruthy();
   listVisible = true;
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {
@@ -366,7 +385,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans")
         return [{ id: "e1", name: "Old plan", archived: true }];
-      if (command === "list_projects" || command === "find_tickets") return [];
+      // One unfiltered ticket: an empty workspace offers no Filters (P9).
+      if (command === "find_tickets") return unfilteredOnly(args);
+      if (command === "list_projects") return [];
       return bridgeDefault(command, args);
     },
   );
@@ -375,7 +396,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  await openManageMenu("Manage projects", "All projects");
+  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
@@ -389,7 +410,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   expect(
     screen.getByRole("navigation", { name: "Settings sections" }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to Projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
     "value",
@@ -401,14 +422,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
       screen.getByRole("navigation", { name: "Workspace views" }),
     ).getByRole("button", { name: "All tickets" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  expect(screen.getByRole("dialog", { name: "Ticket filters" })).toBeTruthy();
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
-      "button",
-      { name: "Todo" },
-    ),
-  );
+  await chooseFilter("Status", "Todo");
   expect(
     screen.getByRole("button", { name: "Filters, 1 active" }),
   ).toBeTruthy();
@@ -518,9 +532,7 @@ test("changing the scope drops an open ticket that is outside it", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
-  expect(
-    screen.queryByText("This ticket is outside the current results."),
-  ).toBeNull();
+  expect(screen.queryByText("Not in the current results")).toBeNull();
 });
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
@@ -532,12 +544,13 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  for (const name of ["New ticket", "Create your first ticket"]) {
-    const trigger = screen.getByRole("button", {
-      name,
-    });
+  // The sidebar's menu, then the first-run empty state's own New ticket.
+  for (const index of [0, 1]) {
+    const trigger = screen.getAllByRole("button", { name: "New ticket" })[
+      index
+    ]!;
     trigger.focus();
-    if (name === "New ticket") await openNewTicket(trigger);
+    if (index === 0) await openNewTicket(trigger);
     else fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
     expect(document.activeElement).toBe(
@@ -561,7 +574,8 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  const trigger = screen.getByRole("button", { name: "New ticket" });
+  const trigger = sidebarNewTicket();
+  fireEvent.keyDown(document.body, { key: "Tab" });
   trigger.focus();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -570,6 +584,129 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
   await openNewTicket(trigger);
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(screen.queryAllByRole("tooltip")).toHaveLength(0);
+});
+
+test("first run shows the title and one New ticket action, no tools over nothing", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  // The ticket list's header; hidden views (Documents) keep theirs mounted.
+  const header = document
+    .getElementById("tickets-heading")!
+    .closest<HTMLElement>('[data-slot="pane-header"]')!;
+  expect(within(header).getByRole("heading").textContent).toBe("All tickets");
+  // S20: no count, Refresh, Filters or Display act on an empty workspace.
+  expect(within(header).queryAllByRole("button")).toHaveLength(0);
+  expect(header.querySelector('[data-slot="count"]')).toBeNull();
+  const action = screen.getAllByRole("button", { name: "New ticket" })[1]!;
+  expect(action.getAttribute("aria-keyshortcuts")).toBe("C");
+});
+
+test("Settings' way back names the view it returns to", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  // Shell SH-21: it said "Back to tickets" whatever the origin.
+  fireEvent.click(screen.getByRole("button", { name: "Back to Attachments" }));
+  expect(screen.getByRole("heading", { name: "Attachments" })).toBeTruthy();
+});
+
+test("C opens New ticket from anywhere, but not while typing", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  const search = document.createElement("input");
+  document.body.append(search);
+  fireEvent.keyDown(search, { key: "c" });
+  expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+  search.remove();
+  fireEvent.keyDown(document.body, { key: "c" });
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Attachments", hidden: true }),
+  ).toBeTruthy();
+});
+
+test("the Projects and Plans headings open their pages and mark them current", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const projects = screen.getByRole("button", { name: "Projects" });
+  const plans = screen.getByRole("button", { name: "Plans" });
+  fireEvent.click(projects);
+  expect(projects.getAttribute("aria-current")).toBe("page");
+  expect(plans.getAttribute("aria-current")).toBeNull();
+  fireEvent.click(plans);
+  expect(plans.getAttribute("aria-current")).toBe("page");
+  expect(projects.getAttribute("aria-current")).toBeNull();
+});
+
+test("New ticket opens over the current view instead of switching to Tickets", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await openNewTicket();
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  // Behind the dialog, which hides the rest of the window from the tree.
+  expect(
+    screen.getByRole("heading", { name: "Attachments", hidden: true }),
+  ).toBeTruthy();
+});
+
+test("a sidebar choice that could not be saved stays reported after the list loads again", async () => {
+  vi.useFakeTimers();
+  // One ticket: an empty workspace has no Refresh (S20).
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string; reference?: string }) =>
+      command === "find_tickets"
+        ? unfilteredOnly(args)
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  setItem.mockRestore();
+  const notice = /Couldn't save the sidebar state/;
+  expect(screen.getByRole("alert").textContent).toMatch(notice);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText(notice)).toBeTruthy();
+  // A save that works clears it.
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  expect(screen.queryByText(notice)).toBeNull();
 });
 
 test("moves focus between ticket rows without opening them until Enter, and retains selection on refresh", async () => {
@@ -661,6 +798,10 @@ test("clears additional filters while preserving the selected Plan", async () =>
       if (command === "list_plans")
         return [{ id: "e1", name: "Launch", archived: false }];
       if (command === "list_projects" || command === "find_tickets") return [];
+      if (command === "show_plan") {
+        const view = bridgeDefault(command, args) as { plan: object };
+        return { ...view, plan: { ...view.plan, name: "Launch" } };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -669,15 +810,9 @@ test("clears additional filters while preserving the selected Plan", async () =>
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Launch" }));
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
-      "button",
-      { name: "Todo" },
-    ),
-  );
+  await chooseFilter("Status", "Todo");
   expect(
-    screen.getByRole("button", { name: "Remove Status is Todo" }),
+    screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
   fireEvent.click(
     within(screen.getByLabelText("Active filters")).getByRole("button", {
@@ -686,7 +821,7 @@ test("clears additional filters while preserving the selected Plan", async () =>
   );
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
   expect(
-    screen.queryByRole("button", { name: "Remove Status is Todo" }),
+    screen.queryByRole("button", { name: "Remove Status filter" }),
   ).toBeNull();
 });
 
@@ -695,7 +830,8 @@ test("removes one filter chip and shows the query when nothing matches", async (
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans" || command === "list_projects") return [];
-      if (command === "find_tickets") return [];
+      // One unfiltered ticket: an empty workspace offers no Search (P9).
+      if (command === "find_tickets") return unfilteredOnly(args);
       if (command === "search_tags") return ["bug", "ui"];
       return bridgeDefault(command, args);
     },
@@ -705,18 +841,11 @@ test("removes one filter chip and shows the query when nothing matches", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "zebra" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  const filters = within(
-    screen.getByRole("dialog", { name: "Ticket filters" }),
-  );
-  fireEvent.click(filters.getByRole("button", { name: "bug" }));
-  fireEvent.click(filters.getByRole("button", { name: "ui" }));
+  await chooseFilter("Tags", "bug");
+  await chooseFilter("Tags", "ui");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
@@ -726,20 +855,22 @@ test("removes one filter chip and shows the query when nothing matches", async (
       /Searched titles, descriptions and updates in All tickets, with 2 filters on/,
     ),
   ).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove Tag is bug" }));
-  expect(
-    screen.queryByRole("button", { name: "Remove Tag is bug" }),
-  ).toBeNull();
-  expect(screen.getByRole("button", { name: "Remove Tag is ui" })).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: "Clear search" })).toBeTruthy();
+  // Every tag is one chip for the dimension (list F-08).
+  expect(screen.getByLabelText("Active filters").textContent).toContain(
+    "Tagsbug, ui",
+  );
   fireEvent.click(
     screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
   );
-  expect(screen.queryByText(/Searched titles/)).toBeNull();
-  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  // Clear filters clears filters only; the search stays (list F-09).
+  expect(screen.queryByText(/with 2 filters on/)).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Remove Search: zebra" }),
+  ).toBeTruthy();
 });
 
-test("a filter applies live, counts N of M, and Done closes the panel", async () => {
+test("a filter applies live and counts N of M beside the title", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { filter?: { status: string | null } }) => {
@@ -755,9 +886,7 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
-  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
+  await chooseFilter("Status", "Todo");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
@@ -769,16 +898,8 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
     screen.getByRole("heading", { name: "All tickets" }).parentElement!
       .textContent,
   ).toContain("3 of 7");
-  expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
-  // Clear all sits in the header (board C); the footer has the count and Done.
-  expect(
-    within(
-      panel.getByRole("heading", { name: "Filters" }).parentElement!,
-    ).getByRole("button", { name: "Clear all" }),
-  ).toBeTruthy();
-  // The Done status chip shares the name; the footer button comes last.
-  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
-  expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();
+  // Choosing a value closes the menu; nothing docks over the detail pane.
+  expect(screen.queryByRole("menu")).toBeNull();
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
@@ -874,13 +995,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   });
   const row = screen.getByRole("button", { name: /First/ });
   fireEvent.click(row);
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
-      "button",
-      { name: "Todo" },
-    ),
-  );
+  await chooseFilter("Status", "Todo");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1110,8 +1225,10 @@ test("a failed refresh keeps saved tickets and shows its actionable cause until 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.getByRole("alert").textContent).toContain(cause);
+  // The line keeps its place; the cause waits under Details.
   expect(screen.getByText(/Can’t refresh/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
+  expect(screen.getByText(cause)).toBeTruthy();
   expect(screen.getByRole("button", { name: /First/ })).toBe(row);
 
   missing = false;
@@ -1153,11 +1270,12 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   ).toBe("true");
   expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
   expect(screen.queryByText("2 selected")).toBeNull();
+  // The outcome is the pane's status line, where the bar was (P6).
   expect(
-    within(screen.getByRole("region", { name: "Bulk edit" })).getByRole(
-      "status",
-    ).textContent,
-  ).toContain("Set 2 tickets to Done");
+    screen
+      .getAllByRole("status")
+      .some((line) => line.textContent?.includes("Set 2 tickets to Done")),
+  ).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
   expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
@@ -1184,7 +1302,7 @@ test("keeps the selection and retries a failed bulk change with the same request
     screen.getByRole("button", { name: "Retry" }),
   );
   expect(alert).toContain("Nothing changed");
-  expect(alert).toContain("storage is busy");
+  expect(alert).toContain("Storage is busy");
   expect(screen.getByText("2 selected")).toBeTruthy();
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -1193,10 +1311,8 @@ test("keeps the selection and retries a failed bulk change with the same request
   expect(requests[1]).toBe(requests[0]);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByText("2 selected")).toBeNull();
-  // The menu that started the change is gone; focus lands on the list heading.
-  expect(document.activeElement).toBe(
-    document.getElementById("tickets-heading"),
-  );
+  // The menu that started the change is gone; focus goes back to the list.
+  expect(document.activeElement?.classList.contains("ticket-row")).toBe(true);
 });
 
 test("names the ticket the core rejected and offers no Retry that cannot succeed", async () => {
@@ -1216,11 +1332,11 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert");
-  expect(alert.querySelector(".bulk-error-text")?.textContent).toBe(
-    "T-KQ2 is trashed. Nothing changed.",
-  );
+  expect(alert.getAttribute("data-slot")).toBe("status-line");
+  expect(alert.textContent).toContain("T-KQ2 is trashed");
+  expect(alert.textContent).toContain("Nothing changed.");
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-  expect(document.activeElement).toBe(alert);
+  expect(alert.contains(document.activeElement)).toBe(true);
   expect(screen.getByText("2 selected")).toBeTruthy();
 });
 
@@ -1296,9 +1412,10 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "Remove tag" });
   expect(within(dialog).queryByRole("button", { name: "Add tag" })).toBeNull();
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByLabelText("Search tags"), {
     target: { value: "old" },
   });
+  fireEvent.click(within(dialog).getByRole("option", { name: "old" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
@@ -1321,9 +1438,10 @@ test("Organize has a separate Add tag action", async () => {
   expect(
     within(dialog).queryByRole("button", { name: "Remove tag" }),
   ).toBeNull();
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByLabelText("Search tags"), {
     target: { value: "new" },
   });
+  fireEvent.click(within(dialog).getByRole("option", { name: "Create “new”" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Add tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ add_tags: ["new"] }]);
@@ -1342,7 +1460,8 @@ test("the status menu counts tickets per status and checks the one all share", a
   openMenu("Status of selected tickets");
   expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
   const todo = screen.getByRole("menuitem", { name: /^Todo/ });
-  expect(todo.textContent).toContain("both");
+  // Every selected ticket is Todo: a check, and no "both" or "all" word.
+  expect(todo.textContent).toBe("Todo");
   expect(todo.querySelector("svg.bulk-status-check")).not.toBeNull();
   expect(screen.getByRole("menuitem", { name: "Done" })).toBeTruthy();
   fireEvent.keyDown(document.activeElement ?? document.body, {
@@ -1359,8 +1478,10 @@ test("Escape clears the selection and the bar shows the shortcut", async () => {
   await renderBulk({ find_tickets: () => [bulkTicket(1)] });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(
-    screen.getByRole("button", { name: "Clear selection" }).textContent,
-  ).toContain("Esc");
+    screen
+      .getByRole("button", { name: "Clear selection" })
+      .getAttribute("aria-keyshortcuts"),
+  ).toBe("Escape");
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(screen.queryByText("1 selected")).toBeNull();
 });
@@ -1385,7 +1506,7 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  await openManageMenu("Manage projects", "All projects");
+  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
   unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -1445,7 +1566,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   expect(container.querySelector(".ticket-workspace.expanded")).toBeNull();
 });
 
-test("the narrow navigation trigger shows its label and gets focus back when the sheet closes", async () => {
+test("the narrow navigation trigger sits in the view's header and gets focus back when the sheet closes", async () => {
   vi.useFakeTimers();
   narrowViewport = true;
   bridge.invoke.mockImplementation(async () => []);
@@ -1454,12 +1575,14 @@ test("the narrow navigation trigger shows its label and gets focus back when the
     await vi.advanceTimersByTimeAsync(0);
   });
   const trigger = screen.getByRole("button", { name: "Open navigation" });
-  expect(trigger.textContent).toContain("Navigation");
+  // Shell SH-16: in the header's leading slot, not a 48px bar above it.
+  expect(trigger.closest('[data-slot="pane-header"]')).not.toBeNull();
+  expect(document.querySelector(".shell-row")).toBeNull();
   trigger.focus();
   fireEvent.click(trigger);
   expect(screen.getByRole("dialog", { name: "Navigation" })).toBeTruthy();
-  // Focus lands on a control with a tooltip; the first Escape closes the tooltip.
-  fireEvent.keyDown(document, { key: "Escape" });
+  // Focus lands on a row whose rail tooltip is not mounted in the sheet, so
+  // the first Escape closes the sheet (shell SH-17).
   fireEvent.keyDown(document, { key: "Escape" });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
@@ -1468,7 +1591,7 @@ test("the narrow navigation trigger shows its label and gets focus back when the
   expect(document.activeElement).toBe(trigger);
 });
 
-test("Settings reads fresh data on every visit, checks the CLI only once opened, and moves focus in and out", async () => {
+test("Settings reads fresh data on every visit, checks the CLI at startup and again once opened, and moves focus in and out", async () => {
   vi.useFakeTimers();
   let tickets = 1;
   const calls: string[] = [];
@@ -1496,12 +1619,14 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(calls).not.toContain("check_cli");
+  // Read at startup for the Settings nav dot, so it is there on first paint.
+  const cliChecks = () => calls.filter((call) => call === "check_cli").length;
+  expect(cliChecks()).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(calls).toContain("check_cli");
+  expect(cliChecks()).toBeGreaterThan(1);
   expect(document.activeElement).toBe(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
   );
@@ -1541,7 +1666,7 @@ test("a selection ends when the search or filters change, and the bar can be ski
     screen.getByRole("region", { name: "Bulk edit" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "second" },
   });
   await act(async () => {
@@ -1587,9 +1712,11 @@ test("the list header stays outside the scroller that holds the rows", async () 
     scroller?.contains(screen.getByRole("heading", { name: "All tickets" })),
   ).toBe(false);
   expect(scroller?.contains(document.querySelector(".ticket-rows"))).toBe(true);
-  expect(scroller?.contains(screen.getByRole("button", { name: "Next" }))).toBe(
-    true,
-  );
+  expect(
+    scroller?.contains(
+      screen.getByRole("button", { name: "Show 50 more tickets" }),
+    ),
+  ).toBe(true);
 });
 
 test("totals and group counts describe the whole result, not the loaded page", async () => {
@@ -1601,12 +1728,18 @@ test("totals and group counts describe the whole result, not the loaded page", a
     count_tickets: counted({ in_progress: 1, todo: 119 }),
   });
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
-  expect(screen.getByText("120", { selector: ".list-header p" })).toBeTruthy();
-  // One Todo ticket is on this page of the 119 in the result.
-  expect(screen.getByText("1 of 119")).toBeTruthy();
-  expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
-  const next = screen.getByRole("button", { name: "Next" });
-  expect((next as HTMLButtonElement).disabled).toBe(false);
+  expect(
+    screen.getByText("120", {
+      selector: '.ui-pane-header [data-slot="count"]',
+    }),
+  ).toBeTruthy();
+  // The Todo header counts all 119 in the result, not the one shown.
+  expect(screen.getByText("119")).toBeTruthy();
+  // One paging pattern: "Show 50 more" under the rows (P17).
+  expect(
+    screen.getByRole("button", { name: "Show 50 more tickets" }),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Showing 1–2/)).toBeNull();
   // The list is requested in workflow order and counted with the same filter.
   const asked = bridge.invoke.mock.calls
     .filter(([command]) => command === "find_tickets")
@@ -1862,18 +1995,22 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     count_tickets: counted({ duplicate: 1 }),
     search_tickets: () => [bulkTicket(2)],
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
   });
-  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "second" },
-  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "second" } },
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  fireEvent.click(within(dialog).getByRole("option", { name: /Second/ }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
   await act(async () => {});
   const review = screen.getByRole("dialog", {
     name: "Mark T-KQ2 as a duplicate",
@@ -1910,19 +2047,21 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
     search_tickets: () => [bulkTicket(2)],
     show_ticket: () => bulkTicket(3),
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
   });
-  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "T-KQ3" },
-  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "T-KQ3" } },
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
-  const matches = within(dialog).getByRole("list", { name: "Matches" });
-  expect(within(matches).getAllByRole("button")[0]?.textContent).toContain(
+  expect(within(dialog).getAllByRole("option")[0]?.textContent).toContain(
     "T-KQ3",
   );
 });
@@ -1974,69 +2113,84 @@ test("Next at the end of a page opens the first ticket of the next page", async 
   ).toBe("true");
 });
 
-test("pressing Next on the last page keeps focus in the pagination, on Previous", async () => {
-  const all = Array.from({ length: 50 }, (_, index) => ({
+test("Show more adds the next page under the rows and keeps the selection", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-KQ${index + 1}`,
+    title: `Ticket ${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      all.slice(args.filter.offset, args.filter.offset + 50),
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: 51 }),
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  const more = screen.getByRole("button", { name: "Show 1 more tickets" });
+  more.focus();
+  fireEvent.click(more);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.getByRole("button", { name: /Ticket 51/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Show \d+ more/ })).toBeNull();
+  // Focus moves to the first new row, never to the document root (BD-09).
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Ticket 51/ }),
+  );
+  // Showing more is not a new view: the selection stays.
+  expect(screen.getByText("1 selected")).toBeTruthy();
+});
+
+test("Select all reaches every matching ticket, beyond the listed page (list B-02)", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
     ...bulkTicket(1),
     id: String(index + 1),
     reference: `T-KQ${index + 1}`,
   }));
   await renderBulk({
     find_tickets: (args: { filter: { offset: number } }) =>
-      args.filter.offset === 0
-        ? all
-        : [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }],
-    show_ticket: () => all[0],
+      all.slice(args.filter.offset, args.filter.offset + 50),
     count_tickets: () => counted({ todo: 51 }),
   });
-  const next = screen.getByRole("button", { name: "Next" });
-  next.focus();
-  fireEvent.click(next);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
-  });
-  expect((next as HTMLButtonElement).disabled).toBe(true);
-  // Never the document root: the person can keep paging with the keyboard.
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Previous" }),
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select all 50" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select all 51 matching" }),
   );
+  await act(async () => {});
+  expect(screen.getByText("51 selected")).toBeTruthy();
 });
 
-test("a later page that empties moves back to the last page that exists", async () => {
-  const all = Array.from({ length: 50 }, (_, index) => ({
-    ...bulkTicket(1),
-    id: String(index + 1),
-    reference: `T-KQ${index + 1}`,
-    title: `Ticket ${index + 1}`,
-  }));
-  let total = 51;
-  const offsets: number[] = [];
+test("Shift-click selects the range from the last ticket toggled", async () => {
   await renderBulk({
-    find_tickets: (args: { filter: { offset: number } }) => {
-      offsets.push(args.filter.offset);
-      if (args.filter.offset === 0) return all;
-      return total > 50
-        ? [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }]
-        : [];
-    },
-    show_ticket: () => all[0],
-    count_tickets: () => counted({ todo: total }),
+    find_tickets: () => [bulkTicket(1), bulkTicket(2), bulkTicket(3)],
   });
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ3" }), {
+    shiftKey: true,
   });
-  expect(offsets.at(-1)).toBe(50);
-  // The only ticket on page 2 leaves the result (trashed, or closed by an agent).
-  total = 50;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2500);
+  expect(screen.getByText("3 selected")).toBeTruthy();
+});
+
+test("switching to the board drops a selection the board cannot act on (list B-08)", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  act(() => {
+    setPreference("ticketLayout", "board");
   });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
-  expect(offsets.at(-1)).toBe(0);
-  expect(screen.getByText("50", { selector: ".list-header p" })).toBeTruthy();
-  expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
+  act(() => {
+    setPreference("ticketLayout", "list");
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.queryByText("1 selected")).toBeNull();
 });
 
 test.each(["ticket", "document", "plan"] as const)(
@@ -2080,11 +2234,16 @@ test.each(["ticket", "document", "plan"] as const)(
       screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /^Open (ticket|item)$/ }),
+      screen.getByRole("button", { name: /^Open (T-KQ1|Document|Plan)$/ }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Back to workspace graph" }),
-    );
+    const back = screen.getByRole("button", {
+      name: "Back to workspace graph",
+    });
+    // Shell SH-14: a ReturnCrumb in the leading slot, not a strip over both panes.
+    expect(
+      back.closest('[data-slot="pane-header"], .shell-row'),
+    ).not.toBeNull();
+    fireEvent.click(back);
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
       "First",
     );
@@ -2153,7 +2312,7 @@ test("a failed save of the sidebar state says so and leaves the sidebar as it wa
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   setItem.mockRestore();
   expect(screen.getByRole("alert").textContent).toContain(
-    "Could not save the sidebar state",
+    "Couldn't save the sidebar state",
   );
   expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
 });
@@ -2179,7 +2338,7 @@ test("opening the workspace graph from Plans does not stack the Plans list", asy
       omitted_groups: [],
     }),
   });
-  await openManageMenu("Manage Plans", "All Plans");
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {
@@ -2208,6 +2367,7 @@ test("returns to local graph state after opening an item", async () => {
       total: 1,
       nodes: [node],
       edges: [],
+      connection_counts: { "1": 1 },
       next_cursor: null,
       omitted: false,
       omitted_groups: [],
@@ -2232,9 +2392,7 @@ test("returns to local graph state after opening an item", async () => {
   fireEvent.click(
     screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show only its neighbors" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -2244,10 +2402,8 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open item" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Back to context graph" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Open T-KQ1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to graph" }));
   expect(
     screen
       .getByRole("switch", { name: "Include update details" })
@@ -2315,9 +2471,30 @@ test("the folded sidebar opens Projects and Plans as one menu each", async () =>
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   // The rail holds one entry per group, not a row per project or Plan.
-  expect(screen.queryByRole("button", { name: "Manage projects" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "All projects" })).toBeNull();
   await openManageMenu("Projects", "All projects");
   expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
   await openManageMenu("Plans", "All Plans");
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
+});
+
+test("every icon on the folded rail names itself in a tooltip", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  const rail = document.querySelector<HTMLElement>(".sidebar")!;
+  const unnamed = within(rail)
+    .getAllByRole("button")
+    .filter((button) => {
+      // Shell SH-07: Attachments had no tooltip on the folded rail.
+      fireEvent.keyDown(document.body, { key: "Tab" });
+      act(() => button.focus());
+      const shown = screen
+        .queryAllByRole("tooltip")
+        .some((tip) => tip.textContent?.trim());
+      act(() => button.blur());
+      return !shown;
+    })
+    .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  expect(unnamed).toEqual([]);
 });

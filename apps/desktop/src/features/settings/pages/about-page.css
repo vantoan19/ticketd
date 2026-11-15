@@ -1,8 +1,9 @@
-/* About page: promise tiles and link rows, from tokens. */
+/* About page: the promises as one unboxed caption list (icon, title,
+   sentence), then the link rows. Cards would outweigh the useful links. */
 .about-promises {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 24px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -11,14 +12,10 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 16px;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
 }
 .about-promise svg {
-  margin-bottom: 8px;
-  color: var(--foreground);
+  margin-bottom: 6px;
+  color: var(--muted-foreground);
 }
 .about-link-title {
   font-size: var(--text-ui);
@@ -58,15 +55,15 @@
   box-shadow: inset 0 1px 0 var(--group-hairline);
 }
 .about-link-row:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .about-link-row > svg {
   flex: none;
   color: var(--disabled-foreground);
 }
 .about-link-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 @media (max-width: 639px) {

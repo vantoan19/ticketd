@@ -250,7 +250,8 @@ test("a full commit hash is shown short, with the whole value on hover", async (
     />,
   );
   const value = await screen.findByText("0123456789");
-  expect(value.getAttribute("title")).toBe(full);
+  fireEvent.pointerMove(value);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(full);
 });
 
 test("Add evidence stays disabled with its reason until name and evidence are filled", () => {
@@ -265,9 +266,9 @@ test("Add evidence stays disabled with its reason until name and evidence are fi
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   const primary = screen.getByRole("button", { name: "Add evidence" });
   expect(primary).toHaveProperty("disabled", true);
-  expect(screen.getByText("Add a name to continue")).toBeTruthy();
+  expect(screen.getByText("Add a name to continue.")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
-  expect(screen.getByText("Add the evidence to continue")).toBeTruthy();
+  expect(screen.getByText("Add the evidence to continue.")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
     target: { value: "https://example.com/pr" },
   });

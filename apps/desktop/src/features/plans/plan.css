@@ -1,12 +1,9 @@
+/* A Plan: its header spans both panes. One 48px PaneHeader, then one 32px
+   context line; neither changes height with state (DESIGN.md section 10). */
 .plan-header {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px 16px 16px 24px;
-  /* A border, not a shadow: the panes below paint over a shadow, which left
-     the rule over the list column only. */
-  border-bottom: 1px solid var(--header-boundary);
 }
 .plan-workspace {
   container: plan-workspace / inline-size;
@@ -18,484 +15,215 @@
 .plan-workspace[hidden] {
   display: none;
 }
-.plan-rename-hint {
-  margin: 0;
-  white-space: nowrap;
+
+/* Context line: purpose · progress · spec chip, one row that never wraps. */
+.plan-context {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 32px;
+  min-width: 0;
+  padding: 0 8px 0 16px;
+  overflow: hidden;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
-  line-height: 16px;
-}
-.plan-list-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 8px 0 16px;
+  line-height: var(--text-caption-line);
   box-shadow: 0 1px 0 0 var(--header-boundary);
 }
-.plan-list-spacer {
-  flex: 1 0 0;
+.plan-context-note {
+  white-space: nowrap;
 }
-.ui-button-outline[aria-expanded="true"] {
-  box-shadow: var(--shadow-small);
+.plan-context-note[data-invalid] {
+  color: var(--error-foreground);
 }
-/* One full-width row: name and state, then the actions. The rename input
-   takes the title's place at the same size, so nothing below moves. */
-.plan-title-row {
-  display: flex;
-  flex-wrap: wrap;
+.plan-purpose {
+  display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
-  gap: 4px 12px;
-  min-height: 32px;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  margin-inline-start: -6px;
+  padding: 0 6px;
+  border-radius: var(--radius-segment);
+  color: var(--foreground);
+  white-space: nowrap;
 }
-.plan-title-row[data-renaming="true"] {
-  flex-wrap: nowrap;
-}
-.plan-list-summary {
+.plan-purpose[data-empty] {
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
+}
+button.plan-purpose:hover {
+  background: var(--accent);
+}
+button.plan-purpose:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.plan-purpose-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.plan-title-spacer {
-  flex: 1;
+/* The pencil says the purpose is editable, on hover and focus only. */
+.plan-purpose > svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  visibility: hidden;
 }
-.plan-name-input {
-  flex: 1 1 240px;
-  max-width: 480px;
-  height: 36px;
-  margin: -2px 0 -2px -8px;
-  padding: 0 8px;
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
+.plan-purpose:is(:hover, :focus-visible) > svg {
+  visibility: visible;
 }
-.plan-name-error {
-  color: var(--destructive);
-  font-size: var(--text-caption);
-  line-height: 16px;
+/* In-place fields keep the text where it was read: the inline Input's 6px
+   inset is taken back with a negative margin. */
+.plan-name-field {
+  width: 360px;
+  max-width: 100%;
+  margin-inline-start: -6px;
+  font-weight: 500;
 }
-.plan-purpose-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-.plan-purpose-edit {
-  margin-left: -8px;
-  color: var(--muted-foreground);
-}
-.plan-purpose-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-/* Keep the wide header on one row; let each group wrap before its contents overlap. */
-.plan-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
+.plan-purpose-field {
+  flex: 0 1 480px;
+  min-width: 160px;
+  margin-inline-start: -6px;
 }
 .plan-progress {
   display: inline-flex;
   flex: none;
+  align-items: center;
+  gap: 8px;
   white-space: nowrap;
-  align-items: center;
-  gap: 8px;
-  color: var(--foreground);
 }
-.plan-summary-rule {
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-}
-.plan-header h1,
-.plan-index h1 {
-  margin: 0;
-  color: var(--foreground);
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
-  overflow-wrap: anywhere;
-}
-.plan-state {
+.plan-documents {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.plan-actions {
-  display: flex;
-  flex-wrap: wrap;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 8px;
-}
-.plan-counts {
-  display: flex;
   flex: 0 1 auto;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 0;
-}
-.plan-counts > div[data-zero="true"] {
-  opacity: 0.6;
-}
-.plan-counts > div {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.plan-counts dt {
-  display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.plan-counts dd {
-  margin: 0;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.plan-note {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.plan-create {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-}
-.plan-create [data-slot="field"] {
-  flex: 1 1 200px;
-  max-width: 360px;
-}
-/* Matches the other management pages: one centered column. */
-.plan-index {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 768px;
-  padding: 32px var(--page-gutter) 48px;
-  overflow-y: auto;
-}
-.plan-index > h1 + .plan-note {
-  margin-top: -12px;
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.plan-index-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.plan-index-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-left: 0;
-  border-radius: var(--radius);
-}
-.plan-index-list li:hover {
-  background: var(--recessed);
-}
-.plan-index-list li > button:first-child {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
-  min-height: 32px;
-  padding: 0 8px;
-  text-align: left;
-  border-radius: var(--radius);
-  background: transparent;
 }
-.plan-index-list li > button:first-child:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+.plan-doc-label {
+  flex: none;
 }
-.plan-add-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.plan-documents [data-slot="badge"] {
+  min-width: 0;
+  height: 24px;
+  padding-inline: 8px 6px;
+}
+.plan-documents [data-slot="badge"] svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
   color: var(--muted-foreground);
 }
-.plan-add-results {
-  display: flex;
-  flex-direction: column;
-  max-height: 320px;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-.plan-add-results li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 4px 0;
-}
-.plan-add-title {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
+.plan-doc-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.plan-add-title small {
+.plan-doc-state {
+  flex: none;
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
-.plan-add-error {
-  margin: 0;
-  color: var(--destructive);
+.plan-documents-more {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
-.plan-documents {
-  position: relative;
-  display: flex;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 4px 8px;
-  margin-left: auto;
-  text-align: left;
+.plan-context-action {
+  flex: none;
+  color: var(--muted-foreground);
 }
 .plan-document-picker,
 .plan-documents-popover {
   width: 320px;
   max-width: calc(100vw - 32px);
-  padding: 8px;
 }
-.plan-documents-more {
-  flex: none;
-  padding-inline: 6px;
-  font-variant-numeric: tabular-nums;
-}
-.plan-spec-label {
-  color: var(--muted-foreground);
-}
-.plan-spec-title {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.plan-documents ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.plan-documents > ul {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-.plan-documents > ul > [data-slot="item"] {
-  min-height: 0;
-  padding: 0;
-}
-:is(.plan-documents, .plan-documents-popover)
-  [data-slot="item"]
-  > button:first-child {
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.plan-dependencies {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  padding: 12px 24px 24px;
-  overflow-y: auto;
-}
-.plan-graph-canvas {
-  flex-shrink: 0;
-  height: 440px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-border-base);
-  overflow: hidden;
-}
-.plan-dependency-rows,
-.plan-blockers ul {
-  display: flex;
-  flex-direction: column;
+.plan-documents-popover ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.plan-blocker-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-}
-.plan-dependency-title,
-.plan-blocker-main > button {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.plan-blockers {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 0 8px 22px;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-}
-.plan-blocker-form {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-.plan-blocker-form [data-slot="field"] {
-  width: 100%;
-}
-:is(.plan-documents, .plan-documents-popover)
-  [data-slot="item"]
-  > button:first-of-type {
-  flex: 1 1 160px;
-  min-width: 0;
-}
-:is(.plan-documents, .plan-documents-popover)
-  [data-slot="item"]
-  > button
-  + button {
-  flex: none;
-}
-.plan-document-choices li {
-  min-width: 0;
-}
-.plan-document-choices li > button {
-  max-width: 100%;
-  justify-content: flex-start;
-}
-.plan-document-choices li > button > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.plan-purpose {
-  margin: 0;
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.plan-blocker-form {
-  margin-top: 4px;
-}
-.plan-undo {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 20px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.plan-add-done {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-
-/* A Document row reads title (left, truncating) then its actions on one line. */
-:is(.plan-documents, .plan-documents-popover)
-  [data-slot="item"]
-  > button:first-of-type {
+.plan-documents-popover [data-slot="item"] > button:first-of-type {
   flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  overflow-wrap: normal;
 }
 
-.plan-dependencies-key {
+/* Plans index: management rows (P12), 48px, full-row hover. */
+.plan-index-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+.plan-index-list > li {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin: 0;
+  border-radius: var(--radius);
+}
+.plan-index-list > li:hover {
+  background: var(--hover);
+}
+.plan-index-row {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+  text-align: left;
+}
+.plan-index-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.plan-index-row > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.plan-index-name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-index-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
-  line-height: 16px;
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
 }
-.plan-dependencies-key > span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Reactivate sits in a reserved trailing slot, shown on hover and focus. */
+.plan-index-action {
+  flex: none;
+  padding-inline-end: 8px;
+  visibility: hidden;
 }
-.plan-dependencies-key svg {
-  color: var(--foreground);
+.plan-index-list > li:is(:hover, :focus-within) .plan-index-action {
+  visibility: visible;
 }
-.plan-dependencies-key-box {
-  width: 28px;
-  height: 14px;
-  border-radius: var(--radius-segment);
-  outline: 1px dashed var(--muted-foreground);
-  outline-offset: -1px;
+@media (hover: none) {
+  .plan-index-action {
+    visibility: visible;
+  }
 }
 
 .plan-workspace[data-plan] .ticket-detail[data-empty] .detail-header {
   display: none;
-}
-
-/* The Plan actions menu is 237px wide, rows 30px (board E). */
-.plan-actions-menu {
-  box-sizing: border-box;
-  width: 235.5px;
-  padding: 6px;
-  font-size: var(--text-code);
-}
-/* Frame E: 30px rows with 8px inset, 14px icons, and a hairline that runs edge to edge. */
-.plan-actions-menu [data-slot="dropdown-menu-item"] {
-  height: 30px;
-  min-height: 30px;
-  padding: 0 8px;
-  font-size: var(--text-code);
-  line-height: 20px;
-}
-.plan-actions-menu [data-slot="dropdown-menu-item"] svg:not([class*="size-"]) {
-  width: 14px;
-  height: 14px;
-}
-.plan-actions-menu [data-slot="dropdown-menu-separator"] {
-  height: 1px;
-  margin: 6px -6px;
-}
-.plan-actions [aria-expanded="true"] {
-  background: var(--accent);
 }
 /* Nothing is selected: the hint sits at the centre of the whole pane. */
 .ticket-detail[data-empty] .detail-scroll {
@@ -505,64 +233,4 @@
   flex: 1;
   min-height: 0;
   padding: 48px 24px;
-}
-
-/* Nothing to draw: legend strip over a centred empty state, in a 760 x 420
-   card (board E-2). */
-.plan-dependencies-card {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  width: min(100%, 760px);
-  height: 420px;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-}
-.plan-dependencies-card .plan-dependencies-key {
-  flex: none;
-  height: 44px;
-  padding: 0 16px;
-  box-shadow: 0 1px 0 0 var(--border);
-}
-.plan-dependencies-card [data-slot="empty-state"] {
-  flex: 1;
-  min-height: 0;
-  max-width: none;
-}
-.plan-dependencies-card [data-slot="empty-header"] {
-  max-width: 420px;
-}
-.plan-dependencies-card [data-slot="empty-description"] {
-  max-width: 420px;
-}
-.plan-dependencies-key-box {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--control-boundary);
-}
-
-/* Header controls match board E's 28px purpose and spec chip. */
-.plan-purpose-edit {
-  height: 28px;
-}
-.plan-summary {
-  min-height: 28px;
-  gap: 8px 16px;
-}
-.plan-documents {
-  gap: 0;
-}
-:is(.plan-documents, .plan-documents-popover)
-  [data-slot="item"]
-  [aria-haspopup="menu"],
-.plan-documents .plan-add-context {
-  width: 28px;
-  height: 28px;
-}
-.plan-counts {
-  gap: 4px 16px;
-}
-/* The summary gives way; the controls keep their words. */
-.plan-list-toolbar > :not(.plan-list-summary, .plan-list-spacer) {
-  flex: none;
 }

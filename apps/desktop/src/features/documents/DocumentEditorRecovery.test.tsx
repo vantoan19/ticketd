@@ -99,3 +99,64 @@ it("Retry saves as soon as write access returns, without Retry draft recovery", 
     expect(screen.queryAllByText(/readonly database/)).toHaveLength(0),
   );
 });
+it("closes a capture after a failed save and keeps the draft for next time", async () => {
+  const kept: unknown[] = [];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      const draft = (args as { draft: { revision: number; payload: unknown } })
+        .draft;
+      kept.push(draft.payload);
+      return { ...draft, revision: draft.revision + 1 };
+    }
+    return [];
+  });
+  vi.mocked(documents.links).mockResolvedValue([[], []]);
+  vi.mocked(documents.save).mockRejectedValue("disk full");
+  const close = vi.fn();
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
+  fireEvent.change(await screen.findByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  fireEvent.click(screen.getByText("Done"));
+  await screen.findByText(/Your draft stays on this device if you close/);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(documents.save).toHaveBeenCalledOnce();
+  expect(JSON.stringify(kept.at(-1))).toContain("A thought");
+});
+it("offers Close and keep draft when a close waited on a save that failed", async () => {
+  const kept: unknown[] = [];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      const draft = (args as { draft: { revision: number; payload: unknown } })
+        .draft;
+      kept.push(draft.payload);
+      return { ...draft, revision: draft.revision + 1 };
+    }
+    return [];
+  });
+  vi.mocked(documents.links).mockResolvedValue([[], []]);
+  vi.mocked(documents.save).mockRejectedValue({
+    code: "workspace_read_only",
+    message: "workspace database error: attempt to write a readonly database",
+  });
+  const close = vi.fn();
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
+  fireEvent.change(await screen.findByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  fireEvent.click(screen.getByText("Done"));
+  expect(
+    await screen.findByText(
+      "The workspace is read-only, so nothing changed. Your draft stays on this device if you close.",
+    ),
+  ).toBeTruthy();
+  expect(close).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Close and keep draft" }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(JSON.stringify(kept.at(-1))).toContain("A thought");
+});

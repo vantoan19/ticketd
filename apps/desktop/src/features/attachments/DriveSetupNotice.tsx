@@ -1,18 +1,37 @@
+import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
 import type { DriveConfiguration } from "@/lib/api/attachments";
 
+/**
+ * Google Drive isn't set up: one plain line and the way to Settings › Google
+ * Drive (shell AT-20). The technical setup text stays folded under "Setup
+ * instructions" for whoever builds ticketd.
+ */
 export function DriveSetupNotice({
   configuration,
+  onOpenSettings,
 }: {
   configuration: DriveConfiguration;
+  onOpenSettings?: (() => void) | undefined;
 }) {
   if (configuration.configured) return null;
   return (
-    <>
-      <p role="status">Google Drive setup is required before connecting.</p>
-      <details className="attachment-hint">
-        <summary className="cursor-pointer">Setup instructions</summary>
-        <p className="mt-2 wrap-anywhere">{configuration.message}</p>
-      </details>
-    </>
+    <div className="attachment-drive-setup">
+      <p role="status">Google Drive isn't set up on this computer.</p>
+      {onOpenSettings && (
+        <Button
+          type="button"
+          variant="link"
+          size="inline"
+          className="self-start"
+          onClick={onOpenSettings}
+        >
+          Open Google Drive settings
+        </Button>
+      )}
+      <Disclosure label="Setup instructions">
+        <p className="attachment-hint wrap-anywhere">{configuration.message}</p>
+      </Disclosure>
+    </div>
   );
 }

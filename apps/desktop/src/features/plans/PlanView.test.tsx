@@ -17,6 +17,7 @@ class ResizeObserverStub {
   disconnect() {}
 }
 window.ResizeObserver = ResizeObserverStub;
+Element.prototype.scrollIntoView = () => {};
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
     matches: false,
@@ -89,6 +90,14 @@ beforeEach(() => {
           },
         };
       }
+      case "search_tickets":
+        return tickets
+          .filter((item) =>
+            `${item.reference} Title of ${item.reference}`
+              .toLowerCase()
+              .includes(String(input?.query ?? "").toLowerCase()),
+          )
+          .map(ticket);
       case "find_tickets": {
         const plan = (input?.filter as unknown as { plan: string | null }).plan;
         return tickets
@@ -143,26 +152,27 @@ async function openLaunch() {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
   const heading = await screen.findByRole("heading", { name: "Launch" });
-  await screen.findByLabelText("Tickets by status");
+  await screen.findByRole("progressbar", { name: "Plan progress" });
   return heading;
 }
-test("shows status counts and members for the Plan, and updates both when a member is removed", async () => {
+const context = () => screen.getByRole("group", { name: "Plan context" });
+
+test("the header counts the Plan's tickets and its progress, and Remove from Plan offers Undo", async () => {
   tickets.push({
     id: "4",
     reference: "T-KQ4",
     status: "Duplicate",
     plan: "e1",
   });
-  await openLaunch();
-  const group = await screen.findByLabelText("Tickets by status");
-  await waitFor(() => expect(group.textContent).toContain("Done1"));
-  expect(group.textContent).toContain("Todo1");
-  expect(group.textContent).toContain("Duplicate1");
-  expect(screen.getByText("1 of 2 done")).toBeTruthy();
+  const heading = await openLaunch();
+  // The count sits beside the name; per-status counts live in the groups.
+  expect(heading.parentElement!.textContent).toContain("3");
+  expect(within(context()).getByText("1 of 2 done")).toBeTruthy();
   const progress = screen.getByRole("progressbar", { name: "Plan progress" });
   expect(progress.getAttribute("aria-valuenow")).toBe("1");
   expect(progress.getAttribute("aria-valuemax")).toBe("2");
-  expect(screen.getByText("Active Plan")).toBeTruthy();
+  // An active Plan shows no state chip (plans PL-05).
+  expect(screen.queryByText("Active Plan")).toBeNull();
 
   fireEvent.click(
     screen.getByRole("button", { name: "Remove T-KQ1 from Launch" }),
@@ -175,8 +185,13 @@ test("shows status counts and members for the Plan, and updates both when a memb
     "set_plan",
     { reference: "T-KQ1", plan: null },
   ]);
-  expect(screen.getByLabelText("Tickets by status").textContent).toContain(
-    "Todo0",
+  expect(await screen.findByText("Removed T-KQ1 from Launch")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() =>
+    expect(calls).toContainEqual([
+      "set_plan",
+      { reference: "T-KQ1", plan: "e1" },
+    ]),
   );
 });
 
@@ -190,15 +205,14 @@ test("progress leaves out Canceled and Duplicate tickets", async () => {
   expect(await screen.findByText("1 of 1 done")).toBeTruthy();
 });
 
-test("an empty name shows an inline error and changes nothing", async () => {
+test("an empty name says so in the context line and changes nothing", async () => {
   await openLaunch();
   await chooseAction("Rename");
   const field = screen.getByRole("textbox", { name: "Plan name" });
   fireEvent.change(field, { target: { value: "   " } });
   fireEvent.keyDown(field, { key: "Enter" });
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Enter a name",
-  );
+  const error = await within(context()).findByRole("alert");
+  expect(error.textContent).toBe("A Plan needs a name.");
   expect(calls.some(([command]) => command === "change_plan")).toBe(false);
   expect((field as HTMLInputElement).value).toBe("   ");
 });
@@ -227,15 +241,31 @@ test("Escape cancels an in-place rename and keeps the name", async () => {
   expect(calls.some(([command]) => command === "change_plan")).toBe(false);
 });
 
-test("archiving moves the Plan to Archived, where it can be reactivated", async () => {
+test("a failed archive says why on the status line and changes nothing", async () => {
+  // Plans PL-12 and PL-13: a plain failure with Retry, never a raw banner.
+  const answer = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "change_plan") throw new Error("The workspace is locked");
+    return answer(command, args);
+  });
   await openLaunch();
-  await chooseAction("Archive Plan…");
-  expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-  await screen.findByText("Archived Plan", { selector: ".plan-state" });
+  await chooseAction("Archive Plan");
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't archive Launch.");
+  expect(plans[0]?.archived).toBe(false);
+  expect(
+    screen.queryByText("Archived", { selector: '[data-slot="badge"]' }),
+  ).toBeNull();
+});
+
+test("archiving acts at once with Undo; an archived Plan reactivates from the Plans page", async () => {
+  await openLaunch();
+  await chooseAction("Archive Plan");
+  await screen.findByText("Archived", { selector: '[data-slot="badge"]' });
+  expect(await screen.findByText("Archived Launch")).toBeTruthy();
   // An archived Plan is read-only; Reactivate is its one action.
   expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add to Plan…" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Add purpose" })).toBeNull();
   // Neither the row removal nor the per-group Add survive in an archived Plan.
   expect(
@@ -252,7 +282,12 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   expect(tickets.map((item) => item.status)).toEqual(["Todo", "Done", "Todo"]);
 
   fireEvent.click(screen.getByRole("button", { name: /^Archived/ }));
-  await screen.findByRole("heading", { name: "Archived Plans" });
+  await screen.findByRole("heading", { name: "Plans" });
+  expect(
+    screen
+      .getByRole("radio", { name: "Archived" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Reactivate Launch" }));
   await waitFor(() =>
     expect(
@@ -264,49 +299,84 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   );
 });
 
-test("adds an existing ticket from search", async () => {
+test("Undo after archiving makes the Plan active again", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Add tickets" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Add T-KQ3 to Launch" }),
+  await chooseAction("Archive Plan");
+  await screen.findByText("Archived Launch");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(plans[0]?.archived).toBe(false));
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Archived", { selector: '[data-slot="badge"]' }),
+    ).toBeNull(),
   );
+});
+
+test("adds an existing ticket from search, with Undo", async () => {
+  await openLaunch();
+  fireEvent.click(screen.getByRole("button", { name: "Add to Plan…" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Add tickets to Launch",
+  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "title" } },
+  );
+  // Members of this Plan are not offered; one pick, then the primary adds it.
+  const row = await within(dialog).findByRole("option", { name: /T-KQ3/ });
+  expect(within(dialog).queryByRole("option", { name: /T-KQ1/ })).toBeNull();
+  fireEvent.click(row);
+  expect(within(dialog).getByText("1 selected.")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add tickets" }));
   await waitFor(() =>
     expect(calls).toContainEqual([
       "set_plan",
       { reference: "T-KQ3", plan: "e1" },
     ]),
   );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(await screen.findByText("Added T-KQ3 to Launch")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  // Undo puts it back where it was: in no Plan.
   await waitFor(() =>
-    expect(
-      screen.queryByRole("button", { name: "Add T-KQ3 to Launch" }),
-    ).toBeNull(),
+    expect(calls).toContainEqual([
+      "set_plan",
+      { reference: "T-KQ3", plan: null },
+    ]),
   );
 });
 
-test("edits a Plan purpose", async () => {
+test("edits the purpose in place in the context line", async () => {
   await openLaunch();
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Add a purpose: the outcome this Plan pursues",
-    }),
+  const line = context();
+  fireEvent.click(within(line).getByRole("button", { name: "Add purpose" }));
+  const field = within(line).getByRole("textbox", { name: "Purpose" });
+  fireEvent.change(field, { target: { value: "Ship safely" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  await waitFor(() =>
+    expect(
+      within(context()).getByRole("button", {
+        name: /^Edit purpose: ?Ship safely$/,
+      }),
+    ).toBeTruthy(),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), {
-    target: { value: "Ship safely" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save purpose" }));
-  await waitFor(() => expect(screen.getByText("Ship safely")).toBeTruthy());
+  expect(calls).toContainEqual([
+    "set_plan_purpose",
+    { id: "e1", purpose: "Ship safely" },
+  ]);
 });
 
 test("an open purpose draft does not carry over to another Plan", async () => {
   plans.push({ id: "e2", name: "Beta", archived: false, purpose: "" });
   await openLaunch();
   fireEvent.click(
-    screen.getByRole("button", {
-      name: "Add a purpose: the outcome this Plan pursues",
-    }),
+    within(context()).getByRole("button", { name: "Add purpose" }),
   );
   fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), {
     target: { value: "Launch draft" },
+  });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Purpose" }), {
+    key: "Escape",
   });
   fireEvent.click(
     within(screen.getByRole("navigation", { name: "Plan scopes" })).getByRole(
@@ -316,35 +386,35 @@ test("an open purpose draft does not carry over to another Plan", async () => {
   );
   await screen.findByRole("heading", { name: "Beta" });
   expect(screen.queryByRole("textbox", { name: "Purpose" })).toBeNull();
+  expect(calls.some(([command]) => command === "set_plan_purpose")).toBe(false);
 });
 
-test("the title row carries the labeled view toggle, and a summary line sits above the list", async () => {
+test("one header across both panes holds the view switch and the list controls", async () => {
   await openLaunch();
   const toggle = screen.getByRole("radiogroup", { name: "Plan view" });
   expect(within(toggle).getByText("Dependencies")).toBeTruthy();
-  // The header spans both panes: the toggle is not inside the list section.
+  // The header spans both panes: the toggle is not inside the list section,
+  // and the list has no second header of its own (list H-06, plans PL-08).
   const list = screen.getByRole("region", { name: "Launch" });
   expect(list.contains(toggle)).toBe(false);
-  // The summary sits in the list header, left of the filters.
-  const summary = await screen.findByText("2 tickets · no project");
-  expect(list.contains(summary)).toBe(true);
-
-  expect(screen.getByRole("button", { name: "Filters" }).textContent).toContain(
-    "Filter",
-  );
+  const header = toggle.closest('[data-slot="pane-header"]')!;
+  expect(
+    within(header as HTMLElement).getByRole("button", { name: "Filters" }),
+  ).toBeTruthy();
+  expect(list.querySelector('[data-slot="pane-header"]')).toBeNull();
 });
 
-test("renaming focuses the title, shows its hint, and F2 starts it", async () => {
+test("renaming focuses the title, shows its hint in the context line, and F2 starts it", async () => {
   await openLaunch();
   await chooseAction("Rename");
   const field = screen.getByRole("textbox", { name: "Plan name" });
   await waitFor(() => expect(document.activeElement).toBe(field));
-  expect(screen.getByText("saves", { exact: false })).toBeTruthy();
-  // The hint sits in the title row and the state stays visible.
-  const row = field.parentElement!;
-  expect(row.contains(screen.getByText("saves", { exact: false }))).toBe(true);
-  expect(within(row).getByText("Active Plan")).toBeTruthy();
+  expect(within(context()).getByText("Enter saves · Esc cancels")).toBeTruthy();
   fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
+  // F2 in the ticket list is about the ticket, not the Plan.
+  const list = screen.getByRole("region", { name: "Launch" });
+  fireEvent.keyDown(within(list).getByText("Title of T-KQ1"), { key: "F2" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "F2" });
   expect(

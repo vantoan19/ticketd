@@ -11,10 +11,10 @@ afterEach(() => {
 });
 const props = { revision: 0, trashed: false, refresh: async () => {} };
 
-test("explains an empty evidence section with one Add evidence action", async () => {
+test("says an unfolded empty evidence section is empty, with one Add evidence action", async () => {
   bridge.invoke.mockResolvedValue([]);
   render(<Evidence reference="T-KQ5" {...props} />);
-  expect(screen.getByText(/Link a pull request/)).toBeTruthy();
+  expect(await screen.findByText("No evidence yet.")).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "Add evidence" })).toHaveLength(
     1,
   );

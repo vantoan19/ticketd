@@ -1,16 +1,20 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useEffect, useRef, useState } from "react";
-import { Check, Cloud, HardDrive } from "lucide-react";
-import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
+import { Cloud, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StatusLabel } from "@/components/ui/status-label";
 import {
   attachments,
   type AttachmentUploadDestination,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { SettingsSection } from "./layout/SettingsSection";
 import { SettingsList, SettingsRow } from "./layout/SettingsList";
 import { useSettingsState } from "./use-settings-state";
@@ -18,6 +22,8 @@ import "./pages/attachments.css";
 
 const MIB = 1048576;
 const DEFAULT_LIMIT_BYTES = 100 * MIB;
+/** How long "Saved" stays beside the field after a save. */
+const SAVED_MS = 2000;
 
 /** The Attachments page's content: where new uploads go, and the largest file. */
 export function AttachmentSettings() {
@@ -33,8 +39,11 @@ function UploadLimitSettings() {
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState<number | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  // A value that cannot be a limit: said under the field, nothing is sent.
+  const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let current = true;
     void attachments
@@ -47,35 +56,46 @@ function UploadLimitSettings() {
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(`Could not read the upload limit: ${String(reason)}`);
+          setFailure(describeFailure(reason, "read the upload limit"));
       });
     return () => {
       current = false;
     };
-  }, []);
+  }, [reload]);
+  // "Saved" confirms the change, then goes; it is not a lasting state.
+  useEffect(() => {
+    if (!confirmed) return;
+    const timer = window.setTimeout(() => setConfirmed(false), SAVED_MS);
+    return () => window.clearTimeout(timer);
+  }, [confirmed]);
   async function save(text: string) {
     const bytes = Number(text) * MIB;
     if (!Number.isSafeInteger(bytes) || bytes <= 0) {
       setConfirmed(false);
-      setFailure("Enter a positive upload limit in MiB.");
+      setFailure(null);
+      setInvalid(true);
       return;
     }
-    if (bytes === saved) return;
+    setInvalid(false);
+    // Back to the saved value: nothing to send, and an earlier failure is moot.
+    if (bytes === saved) {
+      setFailure(null);
+      return;
+    }
     setSaving(true);
     setConfirmed(false);
-    setFailure("");
+    setFailure(null);
     try {
       await attachments.setUploadLimit(bytes);
       setSaved(bytes);
       setConfirmed(true);
     } catch (reason) {
-      setFailure(`Could not save the upload limit: ${String(reason)}`);
+      setFailure(describeFailure(reason, "save the upload limit"));
     } finally {
       setSaving(false);
     }
   }
   const isDefault = Number(value) * MIB === DEFAULT_LIMIT_BYTES;
-  const invalid = failure === "Enter a positive upload limit in MiB.";
   return (
     <SettingsSection title="Upload limit">
       <SettingsList>
@@ -100,7 +120,11 @@ function UploadLimitSettings() {
                   value={value}
                   disabled={saved === null || saving}
                   aria-invalid={invalid || undefined}
-                  aria-describedby="attachment-upload-limit-description"
+                  aria-describedby={
+                    invalid
+                      ? "attachment-upload-limit-description attachment-upload-limit-error"
+                      : "attachment-upload-limit-description"
+                  }
                   onChange={(event) => {
                     setValue(event.target.value);
                     setConfirmed(false);
@@ -132,10 +156,21 @@ function UploadLimitSettings() {
             </div>
           }
         >
+          {invalid && (
+            <FieldError id="attachment-upload-limit-error">
+              Enter a size above 0 MiB.
+            </FieldError>
+          )}
           {failure && (
-            <span role="alert" className="settings-failure attachments-error">
-              {failure}
-            </span>
+            <FailureAlert
+              size="compact"
+              failure={failure}
+              onRetry={() => {
+                setFailure(null);
+                if (saved === null) setReload((count) => count + 1);
+                else void save(value);
+              }}
+            />
           )}
         </SettingsRow>
       </SettingsList>
@@ -147,7 +182,7 @@ function UploadDestinationSettings() {
   const { openPage } = useSettingsState();
   const [destination, setDestination] =
     useState<AttachmentUploadDestination | null>(null);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [busy, setBusy] = useState(false);
   // Unknown (null) until Drive's configuration is read; only a definite "no"
   // disables the Drive tile.
@@ -163,14 +198,12 @@ function UploadDestinationSettings() {
       .then((saved) => {
         if (current) {
           setDestination(saved);
-          setFailure("");
+          setFailure(null);
         }
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(
-            `Could not read the upload destination: ${String(reason)}`,
-          );
+          setFailure(describeFailure(reason, "read the upload destination"));
       });
     return () => {
       current = false;
@@ -194,7 +227,7 @@ function UploadDestinationSettings() {
     };
   }, []);
   async function choose(kind: string) {
-    setFailure("");
+    setFailure(null);
     setBusy(true);
     try {
       let selected = null;
@@ -212,7 +245,7 @@ function UploadDestinationSettings() {
       if (active.current) setDestination(saved);
     } catch (reason) {
       if (active.current)
-        setFailure(`Upload destination unchanged: ${String(reason)}`);
+        setFailure(describeFailure(reason, "change the upload destination"));
     } finally {
       selection.current = null;
       if (active.current) setBusy(false);
@@ -233,32 +266,27 @@ function UploadDestinationSettings() {
       >
         <ChoiceTile
           value="local"
-          title="Local workspace"
-          icon={<HardDrive size={18} />}
-          description="Files are stored beside the workspace on this computer."
+          title="On this computer"
+          icon={<HardDrive />}
+          description="Files are stored beside the workspace."
         >
+          {/* Facts in words; status colour never decorates an icon. */}
           <span className="attachments-facts">
-            <span>
-              <Check size={12} aria-hidden="true" />
-              Available offline
-            </span>
-            <span>
-              <Check size={12} aria-hidden="true" />
-              Included in backups
-            </span>
+            Available offline · Included in backups
           </span>
         </ChoiceTile>
         <ChoiceTile
           value="google_drive"
           title="Google Drive"
-          icon={<Cloud size={18} />}
+          icon={<Cloud />}
           description="Uploads a separate copy to a folder in your Drive."
           disabled={driveUnavailable}
         >
+          {/* The reason in the tile's muted caption, below its own title. */}
           {driveUnavailable && (
-            <StatusLabel tone="neutral" size="caption">
-              Connect Google Drive to choose this
-            </StatusLabel>
+            <span className="attachments-facts">
+              Connect Google Drive to choose this.
+            </span>
           )}
         </ChoiceTile>
       </ChoiceTiles>
@@ -298,34 +326,28 @@ function UploadDestinationSettings() {
           </SettingsList>
         </div>
       )}
-      {busy && (
-        <p role="status" className="attachments-note">
-          Updating upload destination…
-        </p>
-      )}
+      {/* The tiles say it by turning unavailable; nothing pushes the page. */}
+      <p role="status" className="sr-only">
+        {busy ? "Updating upload destination…" : ""}
+      </p>
       {failure && (
         <div className="attachments-folder">
-          <Alert tone="error" size="compact">
-            <AlertDescription>{failure}</AlertDescription>
-            {!destination && (
-              <AlertActions>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setReload((value) => value + 1)}
-                >
-                  Retry destination
-                </Button>
-              </AlertActions>
-            )}
-          </Alert>
+          <FailureAlert
+            size="compact"
+            failure={failure}
+            {...(!destination && {
+              onRetry: () => setReload((value) => value + 1),
+            })}
+          />
         </div>
       )}
-      <p className="attachments-note">
-        Drive failures never switch storage automatically. Sharing stays
-        unchanged; removing an attachment keeps its file in Drive.
-      </p>
+      {/* Only about Drive, so only once Drive is in play. */}
+      {(destination?.kind === "google_drive" || configured === true) && (
+        <p className="attachments-note">
+          Drive failures never switch storage automatically. Sharing stays
+          unchanged; removing an attachment keeps its file in Drive.
+        </p>
+      )}
     </SettingsSection>
   );
 }

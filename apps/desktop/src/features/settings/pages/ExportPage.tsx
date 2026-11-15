@@ -1,13 +1,17 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { useState } from "react";
-import { Braces, FolderOpen } from "lucide-react";
+import { useRef, useState } from "react";
+import { Braces, Check } from "lucide-react";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
-import { fileManagerName } from "@/lib/platform";
-import { revealFile } from "@/lib/reveal";
+import { PathText } from "@/components/ui/path-text";
+import { RevealButton } from "@/components/ui/reveal-button";
 import { localDate } from "@/features/settings/settings-format";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { useSettingsState } from "@/features/settings/use-settings-state";
@@ -23,11 +27,14 @@ import "@/features/settings/pages/export-page.css";
 
 function JsonSection() {
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [savedPath, setSavedPath] = useState("");
+  const choosing = useRef(false);
   async function exportWorkspace() {
-    setBusy(true);
-    setFailure("");
+    // One save sheet at a time; Exporting… only once a path returns.
+    if (choosing.current) return;
+    choosing.current = true;
+    setFailure(null);
     setSavedPath("");
     try {
       const path = await workspaceClient.chooseSavePath({
@@ -37,21 +44,19 @@ function JsonSection() {
         extension: "json",
       });
       if (path === null) return;
+      setBusy(true);
       try {
         await client.exportWorkspace(path);
         setSavedPath(path);
       } catch (reason) {
-        setFailure(`The export was not saved: ${String(reason)}`);
+        setFailure(describeFailure(reason, "save the export"));
       }
     } catch (reason) {
-      setFailure(`Could not open the save dialog: ${String(reason)}`);
+      setFailure(describeFailure(reason, "open the save dialog"));
     } finally {
+      choosing.current = false;
       setBusy(false);
     }
-  }
-  async function reveal(path: string) {
-    const problem = await revealFile(path);
-    if (problem) setFailure(problem);
   }
   return (
     <SettingsSection title="Workspace as JSON">
@@ -67,10 +72,11 @@ function JsonSection() {
           trailing={
             <Button
               type="button"
+              size="sm"
               disabled={busy}
               onClick={() => void exportWorkspace()}
             >
-              Export…
+              {busy ? "Exporting…" : "Export…"}
             </Button>
           }
         />
@@ -83,32 +89,28 @@ function JsonSection() {
             copyLabel="Copy the export command"
           />
         </SettingsRow>
-        {savedPath && (
+        {(savedPath || failure) && (
           <SettingsListFooter
             actions={
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => void reveal(savedPath)}
-              >
-                <FolderOpen aria-hidden="true" />
-                Show in {fileManagerName()}
-              </Button>
+              savedPath && (
+                <RevealButton path={savedPath} onFailure={setFailure} />
+              )
             }
           >
-            <span role="status">
-              Export saved to{" "}
-              <span className="export-saved-path">{savedPath}</span>
-            </span>
+            {savedPath && (
+              <span role="status" className="export-saved">
+                <span className="export-saved-title">
+                  <Check size={14} aria-hidden="true" />
+                  Export saved
+                  <span className="sr-only"> to {savedPath}</span>
+                </span>
+                <PathText path={savedPath} />
+              </span>
+            )}
+            {failure && <FailureAlert size="compact" failure={failure} />}
           </SettingsListFooter>
         )}
       </SettingsList>
-      {failure && (
-        <Alert tone="error" size="compact" className="mt-3">
-          <AlertDescription>{failure}</AlertDescription>
-        </Alert>
-      )}
     </SettingsSection>
   );
 }

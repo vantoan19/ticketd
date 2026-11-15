@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { failureText } from "@/lib/api/describe-failure";
 import { notificationClient } from "@/lib/api/notifications";
 import {
   loadPreferences,
@@ -56,7 +57,7 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
     setFollowFailure(
       setPreference("followCreated", value)
         ? ""
-        : "Could not save the follow preference.",
+        : "Couldn't save the follow preference.",
     );
   }
 
@@ -64,7 +65,7 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
     setFailure("");
     if (!value) {
       if (!setPreference("notifyReminders", false))
-        setFailure("Could not save the notification preference.");
+        setFailure("Couldn't save the notification preference.");
       return;
     }
     setChecking(true);
@@ -75,12 +76,10 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
         return;
       }
       if (!setPreference("notifyReminders", true))
-        setFailure("Could not save the notification preference.");
+        setFailure("Couldn't save the notification preference.");
     } catch (reason) {
       setPreference("notifyReminders", false);
-      setFailure(
-        `Could not ask for notification permission: ${String(reason)}`,
-      );
+      setFailure(failureText(reason, "ask for notification permission"));
     } finally {
       setChecking(false);
     }
@@ -88,7 +87,8 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
 
   return (
     <>
-      <SettingsSection title="Following">
+      {/* One list for the two switches: a card per setting is a stack of boxes. */}
+      <SettingsSection title="Following and reminders">
         <SettingsList>
           <SettingsRow
             variant="top"
@@ -102,18 +102,15 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
                 onCheckedChange={changeFollow}
               />
             }
-          />
-        </SettingsList>
-        {followFailure && (
-          <div className="attention-failure">
-            <Alert tone="error">
-              <AlertDescription>{followFailure}</AlertDescription>
-            </Alert>
-          </div>
-        )}
-      </SettingsSection>
-      <SettingsSection title="Reminders">
-        <SettingsList>
+          >
+            {followFailure && (
+              <div className="attention-failure">
+                <Alert tone="error" size="compact">
+                  <AlertDescription>{followFailure}</AlertDescription>
+                </Alert>
+              </div>
+            )}
+          </SettingsRow>
           <SettingsRow
             variant="top"
             title="Notify me when a reminder is due"
@@ -144,35 +141,43 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
               </div>
             )
           )}
-          <div className="attention-row-extra attention-example">
-            <p className="attention-example-label">
-              What a due reminder looks like
-            </p>
-            <div
-              className="attention-notification"
-              role="img"
-              aria-label={`Example notification: ${EXAMPLE_TITLE}. ${EXAMPLE_BODY}`}
-            >
-              <span className="attention-notification-icon" aria-hidden="true">
-                <Ticket size={16} />
-              </span>
-              <span className="attention-notification-text">
-                <span className="attention-notification-app">
-                  <span>ticketd</span>
-                  <span>now</span>
+          {/* The preview and its help only while notifications are on. */}
+          {notifyReminders && (
+            <div className="attention-row-extra attention-example">
+              <p className="attention-example-label">
+                What a due reminder looks like
+              </p>
+              <div
+                className="attention-notification"
+                role="img"
+                aria-label={`Example notification: ${EXAMPLE_TITLE}. ${EXAMPLE_BODY}`}
+              >
+                <span
+                  className="attention-notification-icon"
+                  aria-hidden="true"
+                >
+                  <Ticket size={16} />
                 </span>
-                <span className="attention-notification-title">
-                  {EXAMPLE_TITLE}
+                <span className="attention-notification-text">
+                  <span className="attention-notification-app">
+                    <span>ticketd</span>
+                    <span>now</span>
+                  </span>
+                  <span className="attention-notification-title">
+                    {EXAMPLE_TITLE}
+                  </span>
+                  <span className="attention-notification-body">
+                    {EXAMPLE_BODY}
+                  </span>
                 </span>
-                <span className="attention-notification-body">
-                  {EXAMPLE_BODY}
-                </span>
-              </span>
+              </div>
             </div>
-          </div>
-          <SettingsListFooter>
-            No notification? Allow ticketd in System Settings → Notifications.
-          </SettingsListFooter>
+          )}
+          {notifyReminders && (
+            <SettingsListFooter>
+              No notification? Allow ticketd in System Settings › Notifications.
+            </SettingsListFooter>
+          )}
         </SettingsList>
       </SettingsSection>
       <SettingsSection title="Inbox">

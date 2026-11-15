@@ -111,11 +111,12 @@ export function ExitDialog() {
             : "They are saved on this computer and upload the next time ticketd is open."
       }
       primaryLabel={finishing ? "Quit now" : "Quit"}
+      primaryVariant="destructive"
       cancelLabel="Keep open"
       showClose={false}
-      focusPrimary
+      initialFocus="primary"
       blockedReason={null}
-      width={480}
+      size="sm"
       onSubmit={() => void windowClient.quit()}
     >
       {exit.phase === "finishing" && (

@@ -27,7 +27,10 @@ Object.defineProperty(window, "matchMedia", {
     removeEventListener: vi.fn(),
   }),
 });
-const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+const bridge = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  convertFileSrc: (path: string, protocol: string) => `${protocol}://${path}`,
+}));
 vi.mock("@tauri-apps/api/core", () => bridge);
 afterEach(cleanup);
 
@@ -40,7 +43,7 @@ test("renders GFM while keeping executable links and raw HTML inert", () => {
     />,
   );
   expect(screen.getByRole("heading", { name: "Plan" })).toBeTruthy();
-  expect(screen.getByRole("checkbox")).toHaveProperty("checked", true);
+  expect(screen.getByRole("img", { name: "Done" })).toBeTruthy();
   expect(screen.getByRole("table")).toBeTruthy();
   expect(screen.getByRole("link", { name: "Docs" }).getAttribute("href")).toBe(
     "https://example.com",
@@ -149,4 +152,55 @@ test("shows a typed <tag> as literal text instead of dropping it", () => {
   expect(container.textContent).toContain("Use the <config> value");
   expect(container.textContent).toContain("<div>block</div>");
   expect(container.querySelector("config, .markdown-document div")).toBeNull();
+});
+
+test("draws an attachment image in the text and opens its preview (MK-02)", async () => {
+  const file = {
+    id: "file-1",
+    display_name: "Board icon",
+    original_filename: "board.png",
+    size_bytes: 2048,
+    kind: "local_snapshot",
+    locator: "board.png",
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "resolve_attachment_uri") return file;
+    if (command === "attachment_workspace_id") return "workspace-1";
+    if (command === "attachment_preview")
+      return {
+        attachment: file,
+        status: "available",
+        media_type: "image/png",
+        message: null,
+        can_open: true,
+        usage: { total: 1, legacy_drafts_pending: false, entries: [] },
+      };
+    return null;
+  });
+  render(
+    <MarkdownDocument source="![Board icon](ticketd://attachment/workspace-1/file-1)" />,
+  );
+  const image = await screen.findByRole("img", { name: "Board icon" });
+  expect(image.getAttribute("src")).toContain("file-1");
+  expect(screen.getByRole("button", { name: "Open Board icon" })).toBeTruthy();
+});
+
+test("keeps a file that is not a picture as its label (MK-02)", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "resolve_attachment_uri"
+      ? {
+          id: "file-2",
+          display_name: "Notes",
+          original_filename: "notes.pdf",
+          size_bytes: 2048,
+          kind: "local_snapshot",
+          locator: "notes.pdf",
+        }
+      : null,
+  );
+  render(
+    <MarkdownDocument source="![Notes](ticketd://attachment/workspace-1/file-2)" />,
+  );
+  expect(await screen.findByRole("button", { name: "Notes" })).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "Notes" })).toBeNull();
 });

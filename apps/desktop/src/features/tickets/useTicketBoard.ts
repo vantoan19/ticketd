@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { client, type FindFilter, type Ticket } from "@/lib/api/client";
+import { failureText } from "@/lib/api/describe-failure";
 import { ticketStatuses, type TicketStatus } from "@/lib/statuses";
 
 const BATCH_SIZE = 50;
@@ -114,7 +115,11 @@ export function useTicketBoard(
           commit(
             saved.current.columns.map((current) =>
               current.status === column.status
-                ? { ...current, loading: false, error: String(reason) }
+                ? {
+                    ...current,
+                    loading: false,
+                    error: failureText(reason, `load ${column.status} tickets`),
+                  }
                 : current,
             ),
           );
@@ -162,7 +167,10 @@ export function useTicketBoard(
       if (request === generation.current) commit({ ...result, loading: false });
     } catch (reason) {
       if (request === generation.current)
-        commit({ loading: false, error: String(reason) });
+        commit({
+          loading: false,
+          error: failureText(reason, `load more ${status} tickets`),
+        });
     } finally {
       if (request === generation.current) loadingMore.current.delete(status);
     }
@@ -204,5 +212,52 @@ export function useTicketBoard(
     saved.current = { key, columns };
     setState(saved.current);
   }
-  return { columns: displayed, refresh, loadMore, matches, confirmTicket, key };
+  /**
+   * Shows a status change at once (P10): the card leaves its column and leads
+   * the target column, before the core confirms it. A later read or
+   * `confirmTicket` puts it where the core says; `at` puts it back at its old
+   * place after a failure. Returns where it was.
+   */
+  function placeTicket(
+    ticket: Ticket,
+    at = 0,
+  ): { status: string; index: number } {
+    let from = { status: "", index: -1 };
+    if (saved.current.key !== key) return from;
+    generation.current++;
+    const columns = saved.current.columns.map((column) => {
+      const index = column.tickets.findIndex((item) => item.id === ticket.id);
+      if (column.status === ticket.status)
+        return {
+          ...column,
+          tickets: (() => {
+            const rest = column.tickets.filter((item) => item.id !== ticket.id);
+            return [...rest.slice(0, at), ticket, ...rest.slice(at)];
+          })(),
+          total:
+            index >= 0 || column.total === null
+              ? column.total
+              : column.total + 1,
+        };
+      if (index < 0) return column;
+      from = { status: column.status, index };
+      return {
+        ...column,
+        tickets: column.tickets.filter((item) => item.id !== ticket.id),
+        total: column.total === null ? null : Math.max(0, column.total - 1),
+      };
+    });
+    saved.current = { key, columns };
+    setState(saved.current);
+    return from;
+  }
+  return {
+    columns: displayed,
+    refresh,
+    loadMore,
+    matches,
+    confirmTicket,
+    placeTicket,
+    key,
+  };
 }

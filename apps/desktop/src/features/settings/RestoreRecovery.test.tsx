@@ -163,10 +163,8 @@ test.each([false, true])(
       </DraftRecoveryProvider>,
     );
     await screen.findByText(/Integrity checked/);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Replace workspace with backup" }),
-    );
-    await screen.findByText("Workspace restored.");
+    fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+    await screen.findByText("Workspace restored");
     expect(
       Boolean(
         screen.queryByRole("button", {
@@ -264,10 +262,8 @@ test("restoring remounts a retained New Ticket draft from the backup", async () 
     </DraftRecoveryProvider>,
   );
   await screen.findByText(/Integrity checked/);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Replace workspace with backup" }),
-  );
-  await screen.findByText("Workspace restored.");
+  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  await screen.findByText("Workspace restored");
   fireEvent.click(
     screen.getByRole("button", { name: "Open New Ticket", hidden: true }),
   );
@@ -353,10 +349,8 @@ test("the replaced store rejects stale undo cleanup and flush without touching t
   );
   await screen.findByText(/Integrity checked/);
   await waitFor(() => expect(staleStore).not.toBeNull());
-  fireEvent.click(
-    screen.getByRole("button", { name: "Replace workspace with backup" }),
-  );
-  await screen.findByText("Workspace restored.");
+  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  await screen.findByText("Workspace restored");
   const retainsBeforeStaleCleanup = retainCalls;
   await expect(
     staleStore!.put("undo:history", null, [], "undo"),
@@ -448,12 +442,8 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
     );
     await screen.findByText(/Integrity checked/);
     await waitFor(() => expect(oldStore).not.toBeNull());
-    fireEvent.click(
-      screen.getByRole("button", { name: "Replace workspace with backup" }),
-    );
-    await screen.findByText(
-      /The restore finished, but open views could not reload/,
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+    await screen.findByText(/The restore finished\. Restart ticketd/);
     const retainsAfterRestore = retainCalls;
     await expect(
       oldStore!.put("undo:history", null, [], "undo"),
@@ -465,8 +455,7 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
     expect(record.revision).toBe(2);
     expect(record.markdown).toEqual(["backup description"]);
     expect(
-      screen.getByText(/The restore finished, but open views could not reload/)
-        .textContent,
+      screen.getByText(/The restore finished\. Restart ticketd/).textContent,
     ).toContain("Restart ticketd to see the restored data.");
     expect(
       screen.queryByText(/Could not protect recoverable drafts/),

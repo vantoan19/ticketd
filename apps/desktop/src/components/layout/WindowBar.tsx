@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Copy, Minus, Square, X } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 
 /**
  * The title bar, drawn by the app where the platform's own bar is turned off
@@ -46,35 +47,38 @@ export function WindowBar() {
   return (
     <div className="window-bar" data-tauri-drag-region>
       <div className="window-controls">
-        <button
-          type="button"
-          aria-label="Minimize"
-          title="Minimize"
-          onClick={() => void win.minimize()}
-        >
-          <Minus aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label={maximized ? "Restore" : "Maximize"}
-          title={maximized ? "Restore" : "Maximize"}
-          onClick={() => void win.toggleMaximize()}
-        >
-          {maximized ? (
-            <Copy aria-hidden="true" />
-          ) : (
-            <Square aria-hidden="true" />
-          )}
-        </button>
-        <button
-          type="button"
-          aria-label="Close"
-          title="Close"
-          data-close=""
-          onClick={() => void win.close()}
-        >
-          <X aria-hidden="true" />
-        </button>
+        <Tooltip content="Minimize" side="bottom">
+          <button
+            type="button"
+            aria-label="Minimize"
+            onClick={() => void win.minimize()}
+          >
+            <Minus aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <Tooltip content={maximized ? "Restore" : "Maximize"} side="bottom">
+          <button
+            type="button"
+            aria-label={maximized ? "Restore" : "Maximize"}
+            onClick={() => void win.toggleMaximize()}
+          >
+            {maximized ? (
+              <Copy aria-hidden="true" />
+            ) : (
+              <Square aria-hidden="true" />
+            )}
+          </button>
+        </Tooltip>
+        <Tooltip content="Close" side="bottom">
+          <button
+            type="button"
+            aria-label="Close"
+            data-close=""
+            onClick={() => void win.close()}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );

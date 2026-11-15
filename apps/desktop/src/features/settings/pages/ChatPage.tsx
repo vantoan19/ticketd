@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExperimentalCard } from "@/features/chats/ExperimentalCard";
 import { NotificationsCard } from "@/features/chats/NotificationsCard";
 import { useChatFeature } from "@/features/chats/use-chats";
+import { ChatHarnesses } from "@/features/settings/ChatHarnesses";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import {
   AppliesRightAway,
@@ -18,6 +19,7 @@ export function ChatPage() {
       endSlot={<AppliesRightAway />}
     >
       <ExperimentalCard />
+      {enabled && <ChatHarnesses />}
       {enabled && <NotificationsCard />}
     </SettingsPage>
   );

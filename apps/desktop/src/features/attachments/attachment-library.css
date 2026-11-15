@@ -1,208 +1,217 @@
+/* The Attachments library: a 380px list pane and the detail pane beside it,
+   like tickets (S17). Below a 760px window one pane shows at a time. */
+.attachment-library-host {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
 .attachment-workspace {
+  container: attachment-workspace / inline-size;
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+.attachment-list-pane {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 380px;
+  min-height: 0;
+  box-shadow: 1px 0 0 var(--border);
+}
+.attachment-workspace[data-empty] .attachment-list-pane {
+  flex: 1 1 auto;
+  width: auto;
+  box-shadow: none;
+}
+.attachment-detail-pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.attachment-detail-hint {
+  flex: 1 1 auto;
+  padding: 24px;
+}
+.attachment-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.attachment-search {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.attachment-add {
+  margin-inline-start: 4px;
+}
+.attachment-chip-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+
+/* Management rows (P12): 48px, two lines, full-row hover with an 8px inset;
+   the "…" sits in a reserved trailing slot, shown on hover, focus and the
+   open row. */
+.attachment-rows {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
-  min-height: 0;
-  min-width: 0;
-}
-.attachment-library-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 48px;
-  padding: 8px var(--page-gutter);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-  font-size: var(--text-caption);
-}
-.attachment-library-bar nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-foreground);
-}
-.attachment-library-bar nav svg {
-  width: 16px;
-  height: 16px;
-}
-.attachment-library {
-  padding: 28px var(--page-gutter);
-  flex: 1 1 0;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  container: attachment-library / inline-size;
-}
-.attachment-library header,
-.attachment-library-tools,
-.attachment-library footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.attachment-library header {
-  margin-bottom: 24px;
-}
-.attachment-library h1 {
-  font-size: 24px;
-  line-height: 32px;
-  letter-spacing: -0.6px;
-  font-weight: 600;
-  margin: 0 0 8px;
-}
-.attachment-library p,
-.attachment-library footer {
-  font-size: var(--text-ui);
-  color: var(--muted-foreground);
-}
-.attachment-library-tools {
-  margin-bottom: 20px;
-}
-.attachment-library-tools input {
-  max-width: 320px;
-}
-.attachment-table-scroll {
-  position: relative;
-  overflow: auto;
-}
-.attachment-library table {
-  width: 100%;
-  min-width: 720px;
-  border-collapse: collapse;
-  text-align: left;
-  font-size: var(--text-ui);
-}
-.attachment-library th {
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
-.attachment-library th,
-.attachment-library td {
-  border-bottom: 1px solid var(--border);
-  padding: 14px 8px;
-}
-.attachment-library td:first-child {
-  width: 40%;
-  min-width: 200px;
-}
-.attachment-library td:not(:first-child),
-.attachment-library th:not(:first-child) {
-  white-space: nowrap;
-}
-.attachment-library td small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  overflow-wrap: anywhere;
-}
-.attachment-usage-link {
-  color: var(--primary);
-  text-align: left;
-}
-.attachment-usage-link:hover {
-  text-decoration: underline;
-}
-.attachment-usage-link:focus-visible {
-  box-shadow: var(--focus-ring);
-  outline: none;
-}
-.attachment-library footer {
-  margin-top: 16px;
-}
-.attachment-cleanup-files {
-  min-height: 0;
-  max-height: 45dvh;
-  overflow: auto;
-  list-style: none;
-  padding: 0;
   margin: 0;
+  padding: 8px;
+  list-style: none;
 }
-.attachment-cleanup-files > li {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
+.attachment-mrow {
+  position: relative;
+  border-radius: var(--radius);
 }
-.attachment-cleanup-files label {
+.attachment-mrow:hover {
+  background: var(--hover);
+}
+.attachment-mrow[data-open] {
+  background: var(--accent);
+}
+.attachment-mrow-main {
   display: flex;
   align-items: center;
   gap: 12px;
-  overflow-wrap: anywhere;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 44px 6px 8px;
+  border-radius: var(--radius);
+  text-align: start;
 }
-.attachment-cleanup-files small,
-.attachment-cleanup-files p,
-.attachment-cleanup-files details {
-  display: block;
+.attachment-mrow-main:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-mrow-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.attachment-mrow-name {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-mrow-caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 16px;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-mrow-caption > * {
+  flex: none;
+}
+.attachment-mrow-caption-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-mrow-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  translate: 0 -50%;
+  visibility: hidden;
+}
+.attachment-mrow:hover .attachment-mrow-actions,
+.attachment-mrow:focus-within .attachment-mrow-actions,
+.attachment-mrow[data-open] .attachment-mrow-actions,
+.attachment-mrow-actions:has([data-state="open"]) {
+  visibility: visible;
+}
+@media (hover: none) {
+  .attachment-mrow-actions {
+    visibility: visible;
+  }
+}
+
+/* Clean up: one list with the choice on the left. */
+.attachment-cleanup-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attachment-cleanup-files > li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+.attachment-cleanup-files label {
+  display: grid;
+  grid-template-columns: 16px 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-cleanup-files label > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.attachment-cleanup-files small,
+.attachment-cleanup-reason {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
-.attachment-cleanup-files p {
-  margin: 8px 0 0 24px;
+.attachment-cleanup-reason,
+.attachment-cleanup-files [data-slot="disclosure"] {
+  margin-inline-start: 52px;
 }
-.attachment-cleanup-files details {
-  margin: 8px 0 0 24px;
+.attachment-cleanup-files input {
+  margin: 0;
+  accent-color: var(--primary);
 }
 .attachment-cleanup-files input:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
-.attachment-cleanup-footer {
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
+.attachment-cleanup-all {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0 8px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
-/* Narrow library (window or sidebar): once the 720px table no longer fits,
-   each file becomes a block, so no column or action hides behind a sideways
-   scroll. */
-@container attachment-library (max-width: 719px) {
-  .attachment-library table,
-  .attachment-library tbody {
-    display: block;
-    min-width: 0;
+
+@container attachment-workspace (max-width: 759px) {
+  .attachment-list-pane {
+    flex: 1 1 auto;
+    width: auto;
+    box-shadow: none;
   }
-  .attachment-library thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  .attachment-library tr {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 16px;
-    padding: 14px 8px;
-    border-bottom: 1px solid var(--border);
-  }
-  .attachment-library td {
-    border-bottom: 0;
-    padding: 0;
-  }
-  .attachment-library td:first-child {
-    width: 100%;
-    min-width: 0;
-  }
-  .attachment-library td[data-label]::before {
-    content: attr(data-label) ": ";
-    color: var(--muted-foreground);
-  }
-  .attachment-library td:last-child {
-    margin-left: auto;
-  }
-}
-@media (max-width: 640px) {
-  .attachment-library {
-    padding: 16px;
-  }
-  .attachment-library-tools {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .attachment-library-tools input {
-    max-width: none;
+  .attachment-workspace[data-open] .attachment-list-pane,
+  .attachment-workspace:not([data-open]) .attachment-detail-pane {
+    display: none;
   }
 }

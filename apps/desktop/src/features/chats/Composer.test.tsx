@@ -20,7 +20,10 @@ function type(box: HTMLTextAreaElement, text: string) {
   });
 }
 
-function setup(commands: { name: string }[] = []) {
+function setup(
+  commands: { name: string }[] = [],
+  found: LinkedRecord[] = [ticket],
+) {
   const onSend = vi.fn(async () => {});
   render(
     <Composer
@@ -28,7 +31,7 @@ function setup(commands: { name: string }[] = []) {
       controls={(text) => ({ send: "send", enabled: text.trim() !== "" })}
       onSend={onSend}
       mentions={{
-        records: async () => [ticket],
+        records: async () => found,
         linked: [],
         folder: {
           name: "api",
@@ -64,10 +67,19 @@ test("a # mention inserts the record without sending, and the message links it w
   ]);
 });
 
+test("Enter never sends while the # menu is open, even with no row to pick (chat CH-46)", async () => {
+  const { box, onSend } = setup();
+  // Still searching: no row is highlighted yet.
+  type(box, "Look at #zzz");
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+  expect(box.value).toBe("Look at #zzz");
+});
+
 test("# with nothing typed offers the linked records, then the recently updated ones", async () => {
   const { box } = setup();
   type(box, "#");
-  expect(await screen.findByText("Recently updated")).toBeTruthy();
+  expect(await screen.findByText("Recent")).toBeTruthy();
   expect(await screen.findByRole("option", { name: /T-KQ12/ })).toBeTruthy();
 });
 
@@ -102,4 +114,17 @@ test("/ at the start of a message offers the harness's commands", async () => {
   expect(await screen.findByText("Claude Code commands")).toBeTruthy();
   fireEvent.keyDown(box, { key: "Enter" });
   expect(box.value).toBe("/review ");
+});
+
+test("CH-46: Enter while the # menu has no row to insert never sends", async () => {
+  const { box, onSend } = setup([], []);
+  type(box, "Look at #zzz");
+  // Still searching: no row is highlighted yet.
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+  // Nothing matches.
+  await screen.findByText(/has that in its name/);
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+  expect(box.value).toBe("Look at #zzz");
 });

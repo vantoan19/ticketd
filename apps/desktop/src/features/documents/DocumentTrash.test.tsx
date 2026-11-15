@@ -82,7 +82,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   expect(await screen.findByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
@@ -120,7 +120,7 @@ it("includes Activity details on request and keeps a selected detail", async () 
       target={null}
     />,
   );
-  fireEvent.click(screen.getByLabelText("Include update details"));
+  fireEvent.click(screen.getByLabelText("Show update details"));
   fireEvent.click(await screen.findByRole("button", { name: "Update" }));
   expect(screen.getByText("Update details · T-KQ1")).toBeTruthy();
   fireEvent.click(
@@ -134,4 +134,45 @@ it("includes Activity details on request and keeps a selected detail", async () 
       screen.queryByRole("button", { name: "Keep in Documents" }),
     ).toBeNull(),
   );
+});
+
+it("says what Restore did and keeps focus in the Trash list", async () => {
+  let trash = [
+    { id: "a", heading: "Alpha" },
+    { id: "b", heading: "Beta" },
+  ];
+  vi.mocked(documents.pins).mockResolvedValue([]);
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.trash).mockImplementation(async () => trash);
+  vi.mocked(documents.setTrashed).mockImplementation(async (id) => {
+    trash = trash.filter((doc) => doc.id !== id);
+    return {
+      id,
+      title: null,
+      body: "",
+      created_at: "now",
+      updated_at: "now",
+      trashed: false,
+    };
+  });
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("radio", { name: "Trash" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Restore Alpha" }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Restore Beta" }),
+    ),
+  );
+  expect(screen.getByText("Restored Alpha.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
 });

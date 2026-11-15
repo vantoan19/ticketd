@@ -15,6 +15,8 @@ vi.mock("@/lib/api/client", () => ({
 }));
 vi.mock("./ContextGraphCanvas", () => ({
   ContextGraphCanvas: ({
+    nodes,
+    onSelect,
     positions,
     viewport,
     fit,
@@ -22,6 +24,8 @@ vi.mock("./ContextGraphCanvas", () => ({
     onPositions,
     onViewport,
   }: {
+    nodes: { id: string; title?: string }[];
+    onSelect: (id: string) => void;
     positions: Record<string, { x: number; y: number }>;
     viewport: { x: number; y: number; zoom: number };
     fit: boolean;
@@ -41,6 +45,11 @@ vi.mock("./ContextGraphCanvas", () => ({
       >
         Move view
       </button>
+      {nodes.map((node) => (
+        <button key={node.id} onClick={() => onSelect(node.id)}>
+          {node.title}
+        </button>
+      ))}
     </>
   ),
 }));
@@ -70,7 +79,9 @@ test("Back restores selection, coordinates, viewport and expansion request", asy
   );
   render(<ContextGraph origin="one" onBack={vi.fn()} onOpen={vi.fn()} />);
   fireEvent.click(await screen.findByRole("button", { name: "two" }));
-  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show its connections here" }),
+  );
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
       "one",
@@ -80,7 +91,7 @@ test("Back restores selection, coordinates, viewport and expansion request", asy
     ),
   );
   fireEvent.click(screen.getByRole("button", { name: "Move view" }));
-  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
       "two",
@@ -173,10 +184,12 @@ test("Back to a centre that opened as a map and grew past the list limit keeps t
   render(<ContextGraph origin="hub" onBack={vi.fn()} onOpen={vi.fn()} />);
   await screen.findByTestId("view");
   fireEvent.click(screen.getByRole("button", { name: "n2" }));
-  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show its connections here" }),
+  );
   await screen.findByRole("radio", { name: "Graph", checked: true });
   fireEvent.click(screen.getByRole("button", { name: "n1" }));
-  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
       "n1",

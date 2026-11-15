@@ -1,7 +1,12 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AlignLeft, CircleDot, Link, RefreshCw } from "lucide-react";
+import { AlignLeft, CircleDot, Link, RefreshCw, UserRound } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
+import { FailureDetails } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
@@ -37,7 +42,31 @@ import {
   type SourceFailure,
 } from "@/lib/api/sources";
 
-type Busy = "checking" | "previewing" | "saving" | null;
+type Busy = "previewing" | "saving" | null;
+
+/** What each command did not do, for its failure title. */
+const STEP = {
+  previewing: "preview matching issues",
+  saving: "save the configuration",
+} as const;
+
+/**
+ * The account check, apart from the saved rules (set SR-01): signed in as
+ * someone, not signed in, or the check itself failed. Read when the page is
+ * first shown and again on Check connection.
+ */
+type Account =
+  | { status: "checking" }
+  | { status: "signed_in"; account: string }
+  | { status: "signed_out"; failure: FailureDescription }
+  | { status: "failed"; failure: FailureDescription };
+
+/** The core says these when the account itself is the problem. */
+const SIGNED_OUT: readonly string[] = [
+  "unauthenticated",
+  "not_signed_in",
+  "forbidden",
+];
 
 function fieldErrors(failure: SourceFailure | null) {
   const grouped: Record<string, string[]> = {};
@@ -204,7 +233,9 @@ export function SourceCard({
   );
   const [busy, setBusy] = useState<Busy>(null);
   const [failure, setFailure] = useState<SourceFailure | null>(null);
-  const [connection, setConnection] = useState("");
+  const [failedStep, setFailedStep] = useState<Exclude<Busy, null>>("saving");
+  const [account, setAccount] = useState<Account | null>(null);
+  const checks = useRef(0);
   const [previewed, setPreviewed] = useState<{
     key: string;
     preview: DiscoveryPreview;
@@ -251,26 +282,55 @@ export function SourceCard({
       const value = await work();
       if (request === latest.current) done(value);
     } catch (reason) {
-      if (request === latest.current) setFailure(toSourceFailure(reason));
+      if (request === latest.current) {
+        setFailedStep(kind);
+        setFailure(toSourceFailure(reason));
+      }
     } finally {
       if (request === latest.current) setBusy(null);
     }
   }
 
-  const checkConnection = () =>
+  async function checkAccount() {
+    const request = ++checks.current;
+    setAccount({ status: "checking" });
+    let next: Account;
+    try {
+      const info = await sourcesClient.checkConnection(
+        connector.provider,
+        config,
+      );
+      next = { status: "signed_in", account: info.account };
+    } catch (reason) {
+      const failure = describeFailure(
+        toSourceFailure(reason),
+        `check your ${connector.name} account`,
+      );
+      next = SIGNED_OUT.includes(failure.code)
+        ? { status: "signed_out", failure }
+        : { status: "failed", failure };
+    }
+    if (request === checks.current) setAccount(next);
+  }
+  // Once, the first time the page is shown; Check connection asks again.
+  const firstCheck = useEffectEvent(() => void checkAccount());
+  const checked = useRef(false);
+  useEffect(() => {
+    if (hidden || checked.current) return;
+    checked.current = true;
+    firstCheck();
+  }, [hidden]);
+  const previewMatches = () =>
     run(
-      "checking",
-      () => sourcesClient.checkConnection(connector.provider, config),
-      (info) => setConnection(`Connected as ${info.account}.`),
-    );
-  const previewMatches = () => {
-    setConnection("");
-    return run(
       "previewing",
       () => sourcesClient.preview(connector.provider, config),
-      (result) => setPreviewed({ key, preview: result }),
+      (result) => {
+        setPreviewed({ key, preview: result });
+        // The preview ran as this account: that answers the check too.
+        checks.current += 1;
+        setAccount({ status: "signed_in", account: result.account });
+      },
     );
-  };
   const save = () =>
     run(
       "saving",
@@ -283,7 +343,7 @@ export function SourceCard({
           preview: outcome.preview,
         });
         setNotice(
-          "Saved. Matching issues are imported on the next refresh, and then kept up to date automatically.",
+          "Saved. Matching issues are imported on the next sync, then kept up to date automatically.",
         );
       },
     );
@@ -293,6 +353,8 @@ export function SourceCard({
   // The saved configuration is only shown as healthy while the source syncs.
   const savedTone: StatusDotTone = saved && syncing ? "positive" : "neutral";
   const ready = preview !== null && status === "unsaved";
+  // The rules' state is said twice only: short in the panel bar, in full in
+  // the save bar (set SR-02).
   const short = ready
     ? { tone: "positive" as const, text: "Ready to save" }
     : status === "unsaved"
@@ -309,13 +371,21 @@ export function SourceCard({
         : stale
           ? "The rules changed. Preview matches again before saving."
           : null;
-  const barText = ready
-    ? "Preview is current. Saving turns discovery on; matching issues are imported on the next refresh."
-    : status === "unsaved"
-      ? "Unsaved changes. Preview the matching issues before saving."
-      : status === "saved"
-        ? "These rules are saved. Matching issues are kept up to date automatically."
-        : "Not configured. Add a repository, then preview the matching issues.";
+  const barText = notice
+    ? notice
+    : ready
+      ? "Preview is current. Saving turns discovery on; matching issues are imported on the next sync."
+      : status === "unsaved"
+        ? "Unsaved changes. Preview the matching issues before saving."
+        : status === "saved"
+          ? "These rules are saved. Matching issues are kept up to date automatically."
+          : "Not configured. Add a repository, then preview the matching issues.";
+  // A failure that is not about one field is said where the next step is: the
+  // save bar. Field problems stay under their fields (set SR-05).
+  const barFailure =
+    failure && failure.fields.length === 0
+      ? describeFailure(failure, STEP[failedStep])
+      : null;
 
   const discard = () => {
     latest.current += 1;
@@ -327,10 +397,20 @@ export function SourceCard({
 
   const saveBar = (
     <div className="source-save-bar" role="region" aria-label="Save changes">
-      <p className="source-save-message" role="status">
-        <StatusDot tone={short.tone} />
-        {barText}
-      </p>
+      {barFailure ? (
+        <div className="source-save-message" role="alert">
+          <StatusLabel tone="attention" size="caption">
+            {barFailure.title}
+          </StatusLabel>
+          <span>{barFailure.sentence}</span>
+          <FailureDetails small details={barFailure.details} />
+        </div>
+      ) : (
+        <p className="source-save-message" role="status">
+          <StatusDot tone={short.tone} />
+          {barText}
+        </p>
+      )}
       <Button
         variant="ghost"
         size="sm"
@@ -355,6 +435,28 @@ export function SourceCard({
     </div>
   );
 
+  const signedIn = account?.status === "signed_in" ? account.account : null;
+  const accountLabel =
+    account === null || account.status === "checking" ? (
+      <span className="source-checking">
+        Checking your {connector.name} account…
+      </span>
+    ) : account.status === "signed_in" ? (
+      <StatusLabel tone="positive">Signed in as {account.account}</StatusLabel>
+    ) : account.status === "signed_out" ? (
+      <StatusLabel tone="attention">
+        Not signed in to {connector.name}
+      </StatusLabel>
+    ) : (
+      <StatusLabel tone="attention">
+        Couldn't check your {connector.name} account
+      </StatusLabel>
+    );
+  const accountFailure =
+    account?.status === "signed_out" || account?.status === "failed"
+      ? account.failure
+      : null;
+
   return (
     <SettingsPage
       group="Connections"
@@ -375,32 +477,53 @@ export function SourceCard({
           <Button
             variant="outline"
             size="sm"
-            disabled={working}
-            onClick={checkConnection}
+            disabled={account?.status === "checking"}
+            onClick={() => void checkAccount()}
           >
-            {busy === "checking" ? "Checking…" : "Check connection"}
+            {account?.status === "checking" ? "Checking…" : "Check connection"}
           </Button>
         }
       >
         <SettingsList>
+          {/* Two facts, two rows: whether this workspace is connected (saved
+              rules, as the ticket menu means it), and whose account the
+              check reached (set SR-01). */}
           <SettingsRow
             leading={
               <SettingsRowTile>
-                <Link size={20} />
+                <Link />
               </SettingsRowTile>
             }
             title={
-              <span role="status">
-                {connection ? (
-                  connection
-                ) : (
-                  <StatusLabel tone={savedTone}>
-                    {saved ? `Connected as ${saved.account}` : "Not connected"}
-                  </StatusLabel>
-                )}
-              </span>
+              <StatusLabel tone={savedTone}>
+                {saved ? `Connected as ${saved.account}` : "Not connected"}
+              </StatusLabel>
             }
-            description={`Uses your own ${connector.name} permissions. Routine sync only reads; ticketd writes to ${connector.name} only when you publish a ticket.`}
+            description={
+              saved
+                ? `Routine sync only reads; ticketd writes to ${connector.name} only when you publish a ticket.`
+                : `Save discovery rules below to connect this workspace. Until then tickets can't be published to ${connector.name}.`
+            }
+          />
+          <SettingsRow
+            leading={
+              <SettingsRowTile>
+                <UserRound />
+              </SettingsRowTile>
+            }
+            title={<span role="status">{accountLabel}</span>}
+            description={
+              accountFailure
+                ? accountFailure.sentence
+                : signedIn
+                  ? `ticketd uses your own ${connector.name} permissions.`
+                  : `ticketd uses your own ${connector.name} sign-in and permissions.`
+            }
+            trailing={
+              accountFailure?.details ? (
+                <FailureDetails small details={accountFailure.details} />
+              ) : undefined
+            }
           />
           {saved && health && !syncing && (
             <SettingsRow
@@ -410,11 +533,15 @@ export function SourceCard({
                     {health.health === "unavailable"
                       ? `${connector.name} is unavailable`
                       : health.health === "delayed"
-                        ? `${connector.name} refresh is delayed`
-                        : `${connector.name} is partly refreshed`}
-                    {health.error ? `: ${health.error.message}` : ""}
+                        ? `${connector.name} sync is delayed`
+                        : `${connector.name} is partly synced`}
                   </span>
                 </StatusLabel>
+              }
+              trailing={
+                health.error && (
+                  <FailureDetails small details={health.error.message} />
+                )
               }
             />
           )}
@@ -422,25 +549,7 @@ export function SourceCard({
       </SettingsSection>
       <SettingsSection
         title="Discovery"
-        caption={`Choose the open issues to discover. Matching issues are imported as tickets on the next refresh. Nothing is changed in ${connector.name}.`}
-        actions={
-          <StatusLabel
-            tone={
-              status === "unsaved"
-                ? "attention"
-                : status === "saved"
-                  ? savedTone
-                  : "neutral"
-            }
-            size="caption"
-          >
-            {status === "saved"
-              ? "Saved configuration"
-              : status === "unsaved"
-                ? "Unsaved changes"
-                : "Not configured"}
-          </StatusLabel>
-        }
+        caption={`Choose the open issues to discover. Matching issues are imported as tickets on the next sync. Nothing is changed in ${connector.name}.`}
       >
         <SettingsList>
           <SettingsRow variant="stacked">
@@ -452,21 +561,9 @@ export function SourceCard({
               loadOptions={loadOptions}
               onChange={edit}
             />
-            {hint && <p className="settings-hint">{hint}</p>}
-            {failure && (
-              <p role="alert" className="settings-failure">
-                {failure.fields.length > 0
-                  ? "Fix the highlighted settings, then try again."
-                  : failure.message}
-              </p>
-            )}
-            {notice && (
-              <p className="settings-hint" role="status">
-                {notice}
-              </p>
-            )}
+            {hint && <p className="source-form-note">{hint}</p>}
             {saved && status === "unsaved" && (
-              <p className="settings-hint">
+              <p className="source-form-note">
                 The saved configuration from {formatDateTime(saved.saved_at)}{" "}
                 still applies until you save.
               </p>
@@ -492,7 +589,7 @@ export function SourceCard({
             onClick={() => void schedule.refreshAll()}
           >
             <RefreshCw aria-hidden="true" />
-            Refresh now
+            Sync now
           </Button>
         }
       >
@@ -501,10 +598,10 @@ export function SourceCard({
             title={
               <span role="status">
                 {schedule.refreshing
-                  ? `Refreshing ${connector.name}…`
+                  ? `Syncing ${connector.name}…`
                   : lastRefreshed
-                    ? `${syncing ? "Last refreshed" : "Last synced"} ${ago(lastRefreshed, now)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}.`
-                    : "Not refreshed yet."}
+                    ? `${syncing ? "Synced" : "Last synced"} ${ago(lastRefreshed, now) ?? formatDateTime(lastRefreshed)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}`
+                    : "Not synced yet"}
               </span>
             }
             description={`Runs when ticketd opens${
@@ -515,11 +612,11 @@ export function SourceCard({
           />
           <SettingsRow
             variant="stacked"
-            description="Agents can refresh without the desktop open"
+            description="Agents can sync without the desktop open"
           >
             <CommandBlock
               command="ticketd source refresh"
-              copyLabel="Copy refresh command"
+              copyLabel="Copy sync command"
             />
           </SettingsRow>
         </SettingsList>

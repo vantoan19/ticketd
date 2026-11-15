@@ -11,7 +11,7 @@ import {
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { TicketAttachments } from "./TicketAttachments";
+import { TicketFiles as TicketAttachments } from "./TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -28,6 +28,15 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
+Element.prototype.scrollIntoView ??= () => {};
+/** Files' Attach menu → File…: the row when empty, the "+" otherwise. */
+async function attachFile() {
+  const trigger = (
+    await screen.findAllByRole("button", { name: /^Attach/ })
+  )[0]!;
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
+}
 
 test.each(["close", "navigate"])(
   "%s during upload retains the completed file without associating it",
@@ -56,7 +65,7 @@ test.each(["close", "navigate"])(
         refresh={async () => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+    await attachFile();
     fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith(
@@ -141,8 +150,8 @@ test("a direct preview replaces only its selected ticket association through the
     <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-  await screen.findByText("The local file could not be found");
-  fireEvent.click(screen.getByRole("button", { name: "Choose a replacement" }));
+  await screen.findByText("This file is missing from this computer");
+  fireEvent.click(screen.getByRole("button", { name: "Replace file…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
     await screen.findByRole("radio", { name: "Select New trace" }),
@@ -181,7 +190,7 @@ test("the rail uploads through the native picker, then associates the stored sna
   render(
     <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+  await attachFile();
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await screen.findByRole("button", { name: "Trace" });
   expect(open).toHaveBeenCalledWith(
@@ -222,10 +231,9 @@ test("a failed association retains the completed upload and retry links the same
   render(
     <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+  await attachFile();
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText(/Stored as f1/);
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
   await screen.findByRole("button", { name: "Trace" });
   expect(
     vi

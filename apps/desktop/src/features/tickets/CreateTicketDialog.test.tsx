@@ -6,7 +6,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { Project } from "@/lib/api/client";
@@ -164,7 +163,6 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   fireEvent.focus(
     screen.getByRole("textbox", { name: "Description rich text" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() =>
@@ -183,7 +181,9 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   );
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   expect(
     screen.getByRole("textbox", { name: "Description source" }),
   ).toHaveProperty("value", "# Draft\n\n- [ ] Keep this");
@@ -295,20 +295,6 @@ test("Ctrl+Enter chooses the highlighted slash menu block instead of creating", 
   expect(create).not.toHaveBeenCalled();
 });
 
-test("Ctrl+Enter in the Link URL field does not create", async () => {
-  const create = vi.fn().mockResolvedValue("T-KQ1");
-  render(<Harness create={create} />);
-  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
-    target: { value: "Link" },
-  });
-  await focusedEditor();
-  fireEvent.click(screen.getByRole("button", { name: "Link" }));
-  const url = await screen.findByLabelText("Link URL");
-  fireEvent.keyDown(url, { key: "Enter", ctrlKey: true });
-  fireEvent.keyDown(url, { key: "Enter", metaKey: true });
-  expect(create).not.toHaveBeenCalled();
-});
-
 test("Create more keeps the dialog open, clears text, keeps properties, refocuses Title, and announces the reference", async () => {
   const create = vi
     .fn()
@@ -328,6 +314,8 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   screen.getByRole("button", { name: "Create ticket" }).focus();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(screen.getByText("Created T-KQ1")).toBeTruthy());
+  // Said where it can be seen too, in the footer's note slot (list C-06).
+  expect(screen.getByText("Created T-KQ1.")).toBeTruthy();
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(title).toHaveProperty("value", "");
   expect(document.activeElement).toBe(title);
@@ -450,7 +438,7 @@ test("a lost-response submission reuses its request ID and follow choice after r
   await waitFor(() => expect(recovery.records.has("new-ticket")).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   expect(
-    await screen.findByText(/Could not confirm whether the ticket was created/),
+    await screen.findByText(/Retry safely: it never creates a second ticket/),
   ).toBeTruthy();
   expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
     title: "Created before restart",
@@ -513,7 +501,9 @@ test.each([false, true])(
     const title = await screen.findByRole("textbox", { name: "Title" });
     fireEvent.change(title, { target: { value: "Preserve my draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-    expect(await screen.findByText(/Could not confirm whether/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Retry safely: it never creates a second ticket/),
+    ).toBeTruthy();
     expect(title).toHaveProperty("disabled", true);
     const originalId = create.mock.calls[0]?.[7];
 
@@ -548,9 +538,7 @@ test.each([false, true])(
     finishSave();
     if (saveFails) {
       expect(
-        await screen.findByText(
-          /original submission is still available to retry/,
-        ),
+        await screen.findByText(/original submission can still be retried/),
       ).toBeTruthy();
       expect(title).toHaveProperty("disabled", true);
       expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
@@ -621,27 +609,25 @@ test("closing an empty recovered submission preserves its request identity", asy
   ).toBeTruthy();
 });
 
-test("tags are chips that can be added and removed", () => {
+test("a new tag is created from the typed words, lower case, and toggled off again", () => {
   render(<Harness create={vi.fn()} />);
-  const input = screen.getByRole("textbox", { name: "Add tag" });
-  fireEvent.change(input, { target: { value: "Bug" } });
-  fireEvent.keyDown(input, { key: "Enter" });
-  expect(screen.getByText("bug")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove bug" }));
-  expect(screen.queryByText("bug")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Tags: none" }));
+  fireEvent.change(screen.getByLabelText("Search tags"), {
+    target: { value: "Bug" },
+  });
+  fireEvent.click(screen.getByRole("option", { name: "Create “Bug”" }));
+  expect(screen.getByRole("button", { name: "Tags: bug" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: "bug" }));
+  expect(screen.getByRole("button", { name: "Tags: none" })).toBeTruthy();
 });
 
-test("suggested tags are options in the field's dropdown, not chips beside it", async () => {
+test("existing tags are offered in the list and stay there with a check", async () => {
   answers.tags = ["alpha", "beta"];
   render(<Harness create={vi.fn()} />);
-  const input = screen.getByRole("textbox", { name: "Add tag" });
-  expect(screen.queryByRole("listbox")).toBeNull();
-  fireEvent.focus(input);
-  const list = await screen.findByRole("listbox", {
-    name: "Add tag suggestions",
-  });
-  fireEvent.click(within(list).getByRole("option", { name: "alpha" }));
-  expect(screen.getByRole("button", { name: "Remove alpha" })).toBeTruthy();
-  expect(screen.queryByRole("option", { name: "alpha" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Tags: none" }));
+  fireEvent.click(await screen.findByRole("option", { name: "alpha" }));
+  expect(screen.getByRole("button", { name: "Tags: alpha" })).toBeTruthy();
+  expect(
+    screen.getByRole("option", { name: "alpha" }).getAttribute("aria-checked"),
+  ).toBe("true");
 });

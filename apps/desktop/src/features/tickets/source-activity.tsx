@@ -24,6 +24,8 @@ export type SourceActivity = {
   intervalSecs: number | null;
   /** Opens the Sources settings, where a source's connection and rules live. */
   openSettings: () => void;
+  /** Opens one source's own settings page, such as GitHub's. */
+  openSourceSettings?: (provider: string) => void;
   /** Refreshes every source now, as the Retry and Refresh actions do. */
   refreshAll: () => Promise<void>;
 };
