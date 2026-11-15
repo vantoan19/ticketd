@@ -136,3 +136,118 @@ it("the utility radii that shadcn parts use resolve to the one --radius", () => 
       name,
     ).toBe("var(--radius)");
 });
+
+function motionFindings(source: string): string[] {
+  const offenders: string[] = [];
+  const css = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const match of css.matchAll(
+    /(?:^|[;{])\s*((?:animation|transition)(?:-[\w-]+)?)\s*:\s*([^;{}]+)/g,
+  )) {
+    const [, property = "", value = ""] = match;
+    if (/\b[\d.]+m?s\b/.test(value)) offenders.push(match[0]);
+    // Every time value must belong to the duration family. Shorthands also
+    // take easing and the Tailwind animation default, which resolve via tokens.
+    const names = [...value.matchAll(/var\((--[\w-]+)/g)].map(
+      (m) => m[1] ?? "",
+    );
+    const allowed = /-(?:duration|delay)$/.test(property)
+      ? /^--dur-/
+      : /^--(?:dur-|ease-|animate-spin$|motion-swift$)/;
+    if (names.some((name) => !allowed.test(name))) offenders.push(match[0]);
+  }
+  return offenders;
+}
+
+it("every stylesheet motion duration and delay comes from a motion token", () => {
+  const offenders: string[] = [];
+  for (const file of filesUnder(srcDir))
+    for (const finding of motionFindings(readFileSync(file, "utf8")))
+      offenders.push(`${relative(srcDir, file)}: ${finding}`);
+  expect(offenders).toEqual([]);
+});
+
+it("rejects raw times and unrelated tokens in motion declarations", () => {
+  expect(motionFindings("a { transition: color 120ms ease-out; }")).not.toEqual(
+    [],
+  );
+  expect(
+    motionFindings("a { animation-delay: var(--unrelated); }"),
+  ).not.toEqual([]);
+  expect(
+    motionFindings("a { transition: color var(--dur-1) var(--ease-out); }"),
+  ).toEqual([]);
+});
+
+function componentMotionFindings(source: string): string[] {
+  const offenders: string[] = [];
+  for (const match of source.matchAll(
+    /(?<![\w-])(?:duration|delay)-(?:\d+|\[[^\]]+\]|\([^)]*\))/g,
+  ))
+    if (!/^(?:duration|delay)-\(--dur-[\w-]+\)$/.test(match[0]))
+      offenders.push(match[0]);
+  for (const match of source.matchAll(
+    /(?:animation|transition)(?:Duration|Delay)\s*:\s*["'`]?[^,}\n]+/g,
+  ))
+    offenders.push(match[0]);
+  // Arbitrary Tailwind values encode CSS whitespace as underscores.
+  for (const match of source.matchAll(
+    /(?:animate|transition)-\[([^\]]+)\]|\[(?:animation|transition):([^\]]+)\]/g,
+  )) {
+    const value = (match[1] ?? match[2] ?? "").replaceAll("_", " ");
+    offenders.push(...motionFindings(`a { animation: ${value}; }`));
+  }
+  for (const match of source.matchAll(
+    /\b(animation|transition)\s*:\s*(["'`])([^"'`]+)\2/g,
+  )) {
+    const declaration = `${match[1]}: ${match[3]};`;
+    offenders.push(...motionFindings(`a { ${declaration} }`));
+  }
+  return offenders;
+}
+
+it("rejects raw times in arbitrary animation utilities and inline shorthands", () => {
+  for (const source of [
+    'className="animate-[spin_2s_linear_infinite]"',
+    'className="[animation:spin_2s_linear_infinite]"',
+    'style={{ animation: "spin 2s linear infinite" }}',
+    'style={{ transition: "opacity 120ms ease-out" }}',
+  ])
+    expect(componentMotionFindings(source), source).not.toEqual([]);
+  expect(
+    componentMotionFindings('className="animate-spin duration-(--dur-2)"'),
+  ).toEqual([]);
+  expect(
+    componentMotionFindings(
+      'style={{ transition: "opacity var(--dur-2) var(--ease-out)" }}',
+    ),
+  ).toEqual([]);
+});
+
+it("component motion utilities use duration tokens", () => {
+  function componentsUnder(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return componentsUnder(path);
+      return path.endsWith(".tsx") && !path.includes(".test.") ? [path] : [];
+    });
+  }
+  const offenders: string[] = [];
+  for (const file of componentsUnder(srcDir))
+    for (const finding of componentMotionFindings(readFileSync(file, "utf8")))
+      offenders.push(`${relative(srcDir, file)}: ${finding}`);
+  expect(offenders).toEqual([]);
+});
+
+it("reduced motion zeroes every duration token, including previews", () => {
+  const css = readFileSync(join(srcDir, "styles.css"), "utf8");
+  const durations = [
+    ...new Set([...css.matchAll(/(--dur-[\w-]+):/g)].map((m) => m[1])),
+  ];
+  expect(durations).toContain("--dur-1");
+  const reduced = css.slice(
+    css.indexOf("@media (prefers-reduced-motion: reduce)"),
+  );
+  expect(reduced).toMatch(/:root,\s*\[data-theme-preview\]/);
+  for (const token of durations) expect(reduced).toContain(`${token}: 0ms;`);
+  expect(reduced).toContain("animation: none !important");
+});
