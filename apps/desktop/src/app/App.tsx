@@ -18,6 +18,7 @@ import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
+import { InboxAttentionProvider } from "@/features/tickets/inbox-attention";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -96,7 +97,9 @@ export function App() {
       <TooltipProvider>
         <SyncStatusProvider>
           <ChatProvider>
-            <AppContent />
+            <InboxAttentionProvider>
+              <AppContent />
+            </InboxAttentionProvider>
           </ChatProvider>
           <ExitDialog />
         </SyncStatusProvider>

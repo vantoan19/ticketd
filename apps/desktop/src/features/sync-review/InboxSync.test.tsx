@@ -149,7 +149,7 @@ test("a replaced file and a record too large to sync are worded as what they are
   ).toBeTruthy();
 });
 
-test("sync entries sit among the others by time and follow the Unread filter", async () => {
+test("sync entries sit among Updates by time and mark only shown unread entries", async () => {
   ordinary = [
     {
       id: 1,
@@ -174,12 +174,8 @@ test("sync entries sit among the others by time and follow the Unread filter", a
     "Rate-limit failed login attempts",
     "A Drive file could not be read",
   ]);
-  fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
-  await waitFor(() =>
-    expect(screen.queryByText("A Drive file could not be read")).toBeNull(),
-  );
   expect(screen.getByText(/^Needs review/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Mark shown as read" }));
+  fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
   await waitFor(() =>
     expect(syncReview.setRead).toHaveBeenCalledWith(
       ["notice-1", "guid-12"],

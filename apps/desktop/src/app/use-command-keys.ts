@@ -65,6 +65,7 @@ export function useCommandKeys(
       if (
         !pending &&
         !target?.closest(typing) &&
+        !target?.closest(".inbox") &&
         !document.querySelector(overlays) &&
         actOnTicket(event)
       ) {
