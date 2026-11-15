@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/resizable";
 import { cn } from "cn";
 import { setPreference, usePreferences } from "@/lib/preferences";
-import { PlanDependencies } from "@/features/plans/PlanDependencies";
+import { PlanFlow } from "@/features/plans/PlanFlow";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { usePlanView } from "@/features/plans/usePlanView";
@@ -267,13 +267,10 @@ export function TicketWorkspaceView({
           />
         )}
         {dependenciesOpen && !inboxMode && (
-          <PlanDependencies
+          <PlanFlow
+            key={`flow:${scopedPlan.id}`}
             id={scopedPlan.id}
             revision={workspace.revision}
-            projects={workspace.projects}
-            refresh={workspace.refresh}
-            onClose={showTickets}
-            archived={scopedPlan.archived}
             onOpen={(reference) => {
               showTickets();
               setSelected(reference);

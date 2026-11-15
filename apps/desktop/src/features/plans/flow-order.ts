@@ -30,6 +30,6 @@ export function flowOrder<
     (a, b) =>
       rank(a) - rank(b) ||
       (unblocks.get(b.reference) ?? 0) - (unblocks.get(a.reference) ?? 0) ||
-      a.reference.localeCompare(b.reference, undefined, { numeric: true }),
+      b.reference.localeCompare(a.reference, undefined, { numeric: true }),
   );
 }

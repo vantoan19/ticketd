@@ -208,6 +208,26 @@ export const SHORTCUTS = [
     note: "While editing; nothing is discarded.",
   },
   {
+    id: "flow-full-graph",
+    keys: [["Shift", "G"]],
+    scope: "Plans",
+    label: "Open the Plan’s full graph",
+    note: "While a Flow card has focus.",
+  },
+  {
+    id: "flow-move",
+    keys: [["J"], ["K"], ["↑"], ["↓"], ["←"], ["→"]],
+    scope: "Plans",
+    label: "Select a Flow ticket",
+    note: "While a Flow card has focus.",
+  },
+  {
+    id: "flow-open",
+    keys: [["Enter"]],
+    scope: "Plans",
+    label: "Open the selected Flow ticket",
+  },
+  {
     id: "new-plan",
     keys: [["N"]],
     scope: "Plans",

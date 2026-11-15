@@ -1,3 +1,4 @@
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useLinkedChats, useChatFeature } from "@/features/chats/use-chats";
 import { statusLabel } from "@/features/chats/model";
 import { ReminderDateTime } from "@/features/tickets/ReminderDateTime";
@@ -22,7 +23,7 @@ import {
 import { matchesShortcut } from "@/lib/shortcuts";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { ConfirmLeaveDuplicate } from "@/features/tickets/ConfirmLeaveDuplicate";
-import { useRef, useState, type RefObject } from "react";
+import { useContext, useRef, useState, type RefObject } from "react";
 import {
   Inbox,
   ListTodo,
@@ -72,6 +73,7 @@ const targets = [
 ] satisfies { id: GoTo; label: string; icon: typeof Inbox; key?: ShortcutId }[];
 
 export function CommandPalette({
+  currentPlan = null,
   create,
   createDisabledReason,
   open,
@@ -87,6 +89,7 @@ export function CommandPalette({
   plans,
   refresh,
 }: {
+  currentPlan?: string | null;
   create: (kind: "ticket" | "capture" | "chat" | "plan") => void;
   createDisabledReason: string | null;
   initialTicket: Ticket | null;
@@ -102,6 +105,7 @@ export function CommandPalette({
   ticket: (reference: string) => void;
   chatsEnabled: boolean;
 }) {
+  const openGraph = useContext(ContextGraphNavigation);
   const [query, setQuery] = useState("");
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
@@ -489,6 +493,29 @@ export function CommandPalette({
                   ))}
                 </CommandGroup>
               )}
+              {!scope &&
+                currentPlan &&
+                openGraph &&
+                "open the full graph".includes(filter.trim().toLowerCase()) && (
+                  <CommandGroup heading="Plan">
+                    <CommandItem
+                      value="plan-full-graph"
+                      onSelect={() =>
+                        run(() =>
+                          openGraph(currentPlan, {
+                            workspacePlan: currentPlan,
+                          }),
+                        )
+                      }
+                    >
+                      <PlanIcon aria-hidden="true" />
+                      <span className="flex-1">Open the full graph</span>
+                      <CommandShortcut>
+                        <KeyChords keys={shortcut("flow-full-graph").keys} />
+                      </CommandShortcut>
+                    </CommandItem>
+                  </CommandGroup>
+                )}
               {!scope && (
                 <CommandGroup heading="Create">
                   {(

@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from "react";
 import { FileText } from "lucide-react";
-import { client, type Project, type Ticket } from "@/lib/api/client";
+import { type Project, type Ticket } from "@/lib/api/client";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { shortcutLabel } from "@/lib/shortcuts";
 import { useWorkspaceChange } from "@/lib/workspace-change";
@@ -12,28 +12,8 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { Time } from "@/components/ui/time";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PlanRing, PlanSplitBar } from "./PlanProgress";
+import { allPlanMembers } from "./plan-members";
 import { flowOrder } from "./flow-order";
-
-const MEMBER_PAGE = 100;
-async function allMembers(plan: string) {
-  const members: Ticket[] = [];
-  for (let offset = 0; ; offset += MEMBER_PAGE) {
-    const page = await client.findTickets({
-      query: "",
-      unlinked: false,
-      project: null,
-      plan,
-      status: null,
-      tags: [],
-      availability: null,
-      family: null,
-      limit: MEMBER_PAGE,
-      offset,
-    });
-    members.push(...page);
-    if (page.length < MEMBER_PAGE) return members;
-  }
-}
 
 /** Counts never come from the member query: show_plan owns full-Plan progress. */
 export function PlanCard({
@@ -58,7 +38,7 @@ export function PlanCard({
     let active = true;
     void Promise.allSettled([
       plansClient.show(plan.id),
-      allMembers(plan.id),
+      allPlanMembers(plan.id),
     ]).then(([summary, tickets]) => {
       if (!active) return;
       if (summary.status === "fulfilled") setView(summary.value);

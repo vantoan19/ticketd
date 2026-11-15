@@ -1,3 +1,4 @@
+import type { Ticket } from "@/lib/api/client";
 import {
   reportWorkspaceFailure,
   clearWorkspaceFailure,
@@ -4101,3 +4102,212 @@ test.each([
     expect(publisherMark(entry)).toBe(viewBox);
   },
 );
+
+test("Plan Flow uses all members, selects only incident edges, opens tickets and enters the scoped Workspace graph", async () => {
+  const plan = { id: "P-flow", name: "Flow example", archived: false };
+  const prerequisite = (reference: string) => ({
+    reference,
+    title: reference,
+    status: "Todo",
+    trashed: false,
+    unresolved: true,
+  });
+  const tickets = [
+    bulkTicket(14, {
+      title: "Draggable ghost",
+      plan_id: plan.id,
+      availability: "Ready",
+    }),
+    bulkTicket(15, {
+      title: "Drop indicator",
+      plan_id: plan.id,
+      availability: "Ready",
+    }),
+    bulkTicket(1, {
+      title: "Stable columns",
+      plan_id: plan.id,
+      status: "In progress",
+      availability: null,
+      prerequisites: [prerequisite("T-KQ14"), prerequisite("T-KQ15")],
+    }),
+    bulkTicket(2, {
+      title: "Keyboard sheet",
+      plan_id: plan.id,
+      availability: "Blocked",
+      prerequisites: [prerequisite("T-KQ1")],
+    }),
+  ];
+  const rect = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Element) {
+      const reference = this.getAttribute("aria-label")?.split(" ")[0];
+      const index = reference === "T-KQ1" ? 1 : reference === "T-KQ2" ? 2 : 0;
+      const x = index * 344;
+      return {
+        x,
+        y: 0,
+        left: x,
+        right: x + 296,
+        top: 0,
+        bottom: 86,
+        width: 296,
+        height: 86,
+        toJSON: () => ({}),
+      };
+    });
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets")
+        return Number(args.offset ?? 0) === 0 ? tickets : [];
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 3, in_progress: 1 }),
+          members: tickets,
+          documents: [],
+        };
+      if (command === "show_ticket")
+        return (
+          tickets.find((ticket) => ticket.reference === args.reference) ??
+          tickets[0]
+        );
+      if (command === "workspace_graph")
+        return {
+          nodes: tickets.map((ticket) => ({
+            id: ticket.id,
+            kind: "ticket",
+            label: ticket.title,
+            state: ticket.status,
+            trashed: false,
+            activity_detail: false,
+            ticket_reference: ticket.reference,
+          })),
+          edges: [],
+          omitted: false,
+          omitted_groups: [],
+          next_cursor: null,
+          total: 4,
+          node_tags: {},
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Flow example/ }));
+  fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+  const flow = await screen.findByRole("region", { name: "Plan Flow" });
+  const now = within(flow).getByRole("region", { name: "Now" });
+  expect(
+    (await within(now).findAllByRole("button")).map((button) =>
+      button.getAttribute("aria-label"),
+    ),
+  ).toEqual(["T-KQ15 Drop indicator", "T-KQ14 Draggable ghost"]);
+  const next = within(flow).getByRole("region", { name: "Next" });
+  const selected = within(next).getByRole("button", {
+    name: /T-KQ1 Stable columns/,
+  });
+  fireEvent.click(selected);
+  expect(flow.querySelectorAll("[data-hot]")).toHaveLength(3);
+  const ready = within(now).getByRole("button", { name: /T-KQ15/ });
+  fireEvent.click(ready);
+  expect(flow.querySelectorAll("[data-hot]")).toHaveLength(1);
+  fireEvent.keyDown(ready, { key: "j" });
+  expect(document.activeElement?.getAttribute("aria-label")).toContain(
+    "T-KQ14",
+  );
+  fireEvent.keyDown(document.activeElement!, { key: "Enter" });
+  expect(await screen.findByRole("heading", { name: "T-KQ14" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+  const cardBeforeNavigation = await screen.findByRole("button", {
+    name: "T-KQ15 Drop indicator",
+  });
+  cardBeforeNavigation.focus();
+  fireEvent.keyDown(cardBeforeNavigation, { key: "g" });
+  fireEvent.keyDown(cardBeforeNavigation, { key: "i" });
+  await vi.waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: /^Inbox/ })
+        .getAttribute("aria-current"),
+    ).toBe("page"),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Flow example/ }));
+  fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+  const graphCard = await screen.findByRole("button", {
+    name: "T-KQ15 Drop indicator",
+  });
+  graphCard.focus();
+  fireEvent.keyDown(graphCard, { key: "G", shiftKey: true });
+  expect(await screen.findByText("Filtered to this Plan")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "workspace_graph",
+    expect.objectContaining({
+      request: expect.objectContaining({
+        hydrate_only: true,
+        visible_ids: expect.arrayContaining([
+          plan.id,
+          ...tickets.map((ticket) => ticket.id),
+        ]),
+      }),
+    }),
+  );
+  rect.mockRestore();
+});
+
+test("Flow loads members beyond the first page before deriving blocking depth", async () => {
+  const plan = { id: "P-large-flow", name: "Large flow", archived: false };
+  const tickets: Ticket[] = Array.from({ length: 52 }, (_, index) => ({
+    ...bulkTicket(index + 1),
+    title: `Flow member ${index + 1}`,
+    plan_id: plan.id,
+    availability: "Ready",
+  }));
+  tickets[0] = {
+    ...tickets[0]!,
+    availability: "Blocked",
+    prerequisites: [
+      {
+        reference: "T-KQ52",
+        title: "Flow member 52",
+        status: "Todo",
+        trashed: false,
+        unresolved: true,
+      },
+    ],
+  };
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets") {
+        const filter = args.filter as { offset: number; limit: number };
+        return tickets.slice(filter.offset, filter.offset + filter.limit);
+      }
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 52 }),
+          members: tickets,
+          documents: [],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Large flow/ }));
+  fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+  const flow = await screen.findByRole("region", { name: "Plan Flow" });
+  expect(
+    await within(within(flow).getByRole("region", { name: "Now" })).findByRole(
+      "button",
+      { name: "T-KQ52 Flow member 52" },
+    ),
+  ).toBeTruthy();
+  expect(
+    within(within(flow).getByRole("region", { name: "Next" })).getByRole(
+      "button",
+      { name: "T-KQ1 Flow member 1" },
+    ),
+  ).toBeTruthy();
+  expect(within(flow).getByText("Waits on T-KQ52")).toBeTruthy();
+});
