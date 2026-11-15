@@ -40,6 +40,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { StatusLineRegion } from "@/components/ui/status-line";
+import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import {
@@ -165,6 +166,7 @@ function AppContent() {
     }
   }, [view]);
   const [documentListRequest, setDocumentListRequest] = useState(0);
+  const [creatingPlan, setCreatingPlan] = useState(false);
   const openView = (next: typeof view) => {
     if (next === "documents") {
       // Sidebar "Documents" returns to the list, not to where a reader came from.
@@ -529,6 +531,12 @@ function AppContent() {
                       </a>
                       <WindowBar />
                       <StatusLineRegion host={{ current: contentPanel }}>
+                        <NewPlanDialog
+                          open={creatingPlan}
+                          onOpenChange={setCreatingPlan}
+                          refresh={refresh}
+                          onCreated={(id) => scope("all", "all", id)}
+                        />
                         <CommandPalette
                           createDisabledReason={createDisabledReason}
                           create={(kind) => {
@@ -541,6 +549,8 @@ function AppContent() {
                                   : null;
                               setCreateStatus(undefined);
                               setCreating(true);
+                            } else if (kind === "plan") {
+                              setCreatingPlan(true);
                             } else if (kind === "capture")
                               openCapture(paletteReturn.current);
                             else {
@@ -741,6 +751,11 @@ function AppContent() {
                                   graphOrigin === null && (
                                     <PlanList
                                       plans={plans}
+                                      projects={projects}
+                                      onTicket={(reference) => {
+                                        setSelected(reference);
+                                        setView("tickets");
+                                      }}
                                       archived={view === "archived-plans"}
                                       onOpen={(id) => scope("all", "all", id)}
                                       onArchivedChange={(archived) =>

@@ -3349,3 +3349,151 @@ test("Inbox shares Needs you counts with the sidebar and keeps E/H on the opened
   expect(screen.getByText("Snooze until")).toBeTruthy();
   expect(screen.queryByRole("dialog", { name: /command/i })).toBeNull();
 });
+
+test("Plans cards join full counts, Flow-ordered Ready work, newest update and spec", async () => {
+  const tickets = [
+    bulkTicket(2, {
+      title: "Ready second",
+      availability: "Ready",
+      updated_at: "2026-01-01T00:00:00Z",
+    }),
+    bulkTicket(9, {
+      title: "Ready first",
+      availability: "Ready",
+      updated_at: "2026-02-01T00:00:00Z",
+    }),
+    bulkTicket(3, {
+      title: "Waiting",
+      availability: "Blocked",
+      prerequisites: [
+        {
+          reference: "T-KQ9",
+          title: "Ready first",
+          status: "Todo",
+          trashed: false,
+          unresolved: true,
+        },
+      ],
+    }),
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans")
+        return [
+          {
+            id: "P-1",
+            name: "Launch cards",
+            archived: false,
+            purpose: "Ship together",
+          },
+        ];
+      if (command === "list_projects")
+        return [
+          { id: "project", name: "Desktop app", path: "/app", paths: ["/app"] },
+        ];
+      if (command === "show_plan")
+        return {
+          plan: {
+            id: "P-1",
+            name: "Launch cards",
+            archived: false,
+            spec_document_id: "spec",
+          },
+          counts: {
+            todo: 3,
+            in_progress: 2,
+            in_review: 1,
+            done: 4,
+            canceled: 1,
+            duplicate: 2,
+          },
+          members: tickets.map((t) => ({ ...t, project_id: "project" })),
+          documents: [
+            { id: "spec", heading: "Launch specification", trashed: false },
+          ],
+        };
+      if (
+        command === "find_tickets" &&
+        (args.filter as { plan?: string }).plan === "P-1"
+      )
+        return tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args.reference);
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
+  const cards = await screen.findByRole("list", { name: "Active Plans" });
+  expect(await within(cards).findByText("4 of 10 done")).toBeTruthy();
+  expect(within(cards).getByText("1 canceled, not counted")).toBeTruthy();
+  expect(within(cards).getByText("2 duplicates, not counted")).toBeTruthy();
+  expect(
+    await within(cards).findByRole("button", { name: /T-KQ9 Ready first/ }),
+  ).toBeTruthy();
+  expect(within(cards).queryByText("Ready second")).toBeNull();
+  expect(within(cards).getByText("Desktop app")).toBeTruthy();
+  expect(
+    within(cards).getByText("2 ready, 1 blocked", { exact: false }),
+  ).toBeTruthy();
+  expect(within(cards).getByText("Launch specification")).toBeTruthy();
+  expect(cards.querySelector("time")?.getAttribute("datetime")).toBe(
+    "2026-02-01T00:00:00Z",
+  );
+  fireEvent.click(
+    within(cards).getByRole("button", { name: /T-KQ9 Ready first/ }),
+  );
+  expect(await screen.findByRole("heading", { name: "T-KQ9" })).toBeTruthy();
+});
+
+test("New Plan is reachable from the palette and its registered page key", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search or jump to…" }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /^New Plan/ }));
+  const dialog = await screen.findByRole("dialog", { name: "New Plan" });
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
+  fireEvent.keyDown(document.body, { key: "n" });
+  expect(await screen.findByRole("dialog", { name: "New Plan" })).toBeTruthy();
+});
+
+test("Plans with no Ready work keep canceled-only progress explicit without inventing a time", async () => {
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans")
+        return [{ id: "P-empty", name: "Stopped work", archived: false }];
+      if (command === "show_plan")
+        return {
+          plan: { id: "P-empty", name: "Stopped work", archived: false },
+          counts: {
+            todo: 0,
+            in_progress: 0,
+            in_review: 0,
+            done: 0,
+            canceled: 2,
+            duplicate: 0,
+          },
+          members: [],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
+  const cards = await screen.findByRole("list", { name: "Active Plans" });
+  expect(await within(cards).findByText("0 of 0 done")).toBeTruthy();
+  expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
+  expect(within(cards).getByText("2 canceled, not counted")).toBeTruthy();
+  expect(cards.querySelector("time")).toBeNull();
+  fireEvent.click(
+    within(cards).getByRole("button", { name: "Open Plan Stopped work" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Stopped work" }),
+  ).toBeTruthy();
+});
