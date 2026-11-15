@@ -1252,8 +1252,11 @@ button.chat-file-name:focus-visible {
 .chat-request-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin-top: 12px;
+}
+.chat-request-buttons > .ui-button {
+  padding-inline: 10px;
 }
 /* A request taller than the dock scrolls under its buttons, which stay in
    view. The row keeps 4px of room for the buttons' focus ring (CH-27). */
@@ -1294,6 +1297,25 @@ button.chat-file-name:focus-visible {
 }
 .chat-request-command {
   margin-top: 4px;
+}
+.chat-request-buttons > .chat-request-command,
+.chat-request-buttons > .chat-request-command > [data-slot="disclosure"] {
+  display: contents;
+}
+.chat-request-buttons
+  > .chat-request-command
+  > [data-slot="disclosure"]
+  > .ui-disclosure-trigger {
+  margin-left: auto;
+  min-height: 28px;
+  padding-inline: 6px;
+}
+.chat-request-buttons
+  > .chat-request-command
+  > [data-slot="disclosure"]
+  > .ui-disclosure-body {
+  flex-basis: 100%;
+  min-width: 0;
 }
 .chat-request-command-box {
   display: flex;

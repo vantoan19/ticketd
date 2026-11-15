@@ -4973,8 +4973,8 @@ test.each([
       const box = screen.getByRole("textbox", { name: /Codex/ });
       if (choice === "1") {
         box.focus();
-        await user.keyboard("123");
-        expect(box).toHaveProperty("value", "123");
+        await user.keyboard("1j23");
+        expect(box).toHaveProperty("value", "1j23");
         expect(answer).not.toHaveBeenCalled();
         await user.clear(box);
         screen.getByRole("button", { name: /^Codex, model/ }).focus();
@@ -5004,6 +5004,7 @@ test.each([
       expect(
         await screen.findByRole("button", { name: "Chats, 1 working" }),
       ).toBeTruthy();
+      expect(document.activeElement).toBe(box);
       fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
       await vi.waitFor(() =>
         expect(
@@ -6330,14 +6331,33 @@ test("Inbox triage accepts review with Undo, keeps the reading queue still, and 
   expect(due).toBe("2020-01-01T00:00:00Z");
 });
 
-test.each(["1", "2", "3"])(
-  "Inbox approval %s stays beside the queue and J returns to its next Ticket",
-  async (choice) => {
+test.each([
+  ["1", "title"],
+  ["2", "title"],
+  ["3", "title"],
+  ["1", "choice"],
+  ["1", "retry"],
+  ["1", "multiple"],
+  ["1", "typing"],
+] as const)(
+  "Inbox approval %s from %s keeps keyboard triage through the next review",
+  async (choice, mode) => {
     const user = userEvent.setup();
     const { ChatClientContext } = await import("@/features/chats/client");
     const { createMockChatClient, chatState } =
       await import("@/features/chats/mock-client");
-    const ticket = bulkTicket(1);
+    let ticket = bulkTicket(1, { status: "In review" });
+    const review = {
+      id: 301,
+      reference: "T-KQ1",
+      title: "First",
+      kind: "status",
+      from_value: "In progress",
+      to_value: "In review",
+      timestamp: "2026-11-16T00:00:00Z",
+      editing_agent: "codex",
+      read: true,
+    };
     const chats = createMockChatClient({
       enabled: true,
       chats: [
@@ -6359,31 +6379,24 @@ test.each(["1", "2", "3"])(
         },
       ],
     });
-    const due = "2020-01-01T00:00:00Z";
     let releaseContext = () => {};
     const loadingContext = new Promise<null>((resolve) => {
       releaseContext = () => resolve(null);
     });
     bridge.invoke.mockImplementation(
-      (command: string, args?: { reference?: string }) => {
+      (
+        command: string,
+        args?: { reference?: string; patch?: { status?: string } },
+      ) => {
         if (command === "find_tickets") return [ticket];
         if (command === "show_ticket") return ticket;
         if (command === "latest_update") return loadingContext;
-        if (command === "reminder") return due;
-        if (command === "inbox")
-          return [
-            {
-              id: 301,
-              reference: "T-KQ1",
-              title: "First",
-              kind: "reminder",
-              from_value: "",
-              to_value: due,
-              timestamp: "2026-11-16T00:00:00Z",
-              editing_agent: null,
-              read: true,
-            },
-          ];
+        if (command === "change_ticket") {
+          ticket = { ...ticket, status: args?.patch?.status ?? ticket.status };
+          return ticket;
+        }
+        if (command === "ticket_history") return [review];
+        if (command === "inbox") return [review];
         return bridgeDefault(command, args);
       },
     );
@@ -6432,12 +6445,93 @@ test.each(["1", "2", "3"])(
     act(() => releaseContext());
     expect(document.querySelector(".inbox")).toBe(queue);
     expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
+    const answerChat = chats.answer.bind(chats);
     const answer = vi.spyOn(chats, "answer");
     const requestTitle = await screen.findByRole("heading", {
       name: "wants to run",
     });
     expect(document.activeElement).toBe(requestTitle);
-    await user.keyboard(choice);
+    if (mode === "multiple")
+      act(() =>
+        chats.push("triage-chat", {
+          kind: "request",
+          id: "second-request",
+          at: "2026-11-16T00:00:01Z",
+          request: "approval",
+          title: "wants another command",
+          command: "npm run build",
+          options: [{ id: "build", label: "Allow build" }],
+          state: "pending",
+          free_text: false,
+        }),
+      );
+    if (mode === "retry")
+      answer.mockRejectedValueOnce(new Error("Disconnected"));
+    let releaseAnswer = () => {};
+    if (mode === "typing") {
+      const waiting = new Promise<void>((resolve) => {
+        releaseAnswer = resolve;
+      });
+      answer.mockImplementationOnce(async (...args) => {
+        await waiting;
+        await answerChat(...args);
+      });
+    }
+    if (mode === "choice")
+      await user.click(screen.getByRole("button", { name: "Allow once" }));
+    else await user.keyboard(choice);
+    if (mode === "retry") {
+      expect(await screen.findByText(/Pick again to retry/)).toBeTruthy();
+      expect(document.activeElement).toBe(requestTitle);
+      expect(
+        approval.closest(".inbox-entry")?.getAttribute("aria-current"),
+      ).toBe("true");
+      expect(screen.getByRole("heading", { name: "Triage Chat" })).toBeTruthy();
+      expect((await chats.openChat("triage-chat")).items).toContainEqual(
+        expect.objectContaining({ id: "triage-request", state: "pending" }),
+      );
+      await user.keyboard(choice);
+    }
+    if (mode === "typing") {
+      const composer = screen.getByRole("textbox", { name: /Codex/ });
+      act(() => composer.focus());
+      await user.keyboard("1j");
+      act(() => releaseAnswer());
+      await vi.waitFor(() =>
+        expect(
+          screen.queryByRole("group", { name: "wants to run" }),
+        ).toBeNull(),
+      );
+      expect(document.activeElement).toBe(composer);
+      expect(composer).toHaveProperty("value", "1j");
+      act(() =>
+        chats.push("triage-chat", {
+          kind: "response",
+          id: "external-update",
+          at: "2026-11-16T00:01:00Z",
+          text: "Host update",
+          state: "complete",
+        }),
+      );
+      expect(await screen.findByText("Host update")).toBeTruthy();
+      expect(document.activeElement).toBe(composer);
+      expect(composer).toHaveProperty("value", "1j");
+      expect(document.querySelector(".inbox")).toBe(queue);
+      return;
+    }
+    if (mode === "multiple") {
+      const nextRequest = await screen.findByRole("heading", {
+        name: "wants another command",
+      });
+      await vi.waitFor(() => expect(document.activeElement).toBe(nextRequest));
+      expect(screen.getByRole("heading", { name: "Triage Chat" })).toBeTruthy();
+      await user.keyboard("1");
+      await vi.waitFor(() =>
+        expect(answer).toHaveBeenCalledWith("triage-chat", "second-request", {
+          option_id: "build",
+        }),
+      );
+    }
     await vi.waitFor(() =>
       expect(answer).toHaveBeenCalledWith("triage-chat", "triage-request", {
         option_id:
@@ -6474,16 +6568,20 @@ test.each(["1", "2", "3"])(
       }),
     );
     expect(await screen.findByText("The board checks passed.")).toBeTruthy();
-    approval.focus();
+    expect(document.activeElement).toBe(approval);
     await user.keyboard("j");
     const next = await screen.findByRole("region", { name: "Inbox triage" });
     expect(
-      within(next).getByRole("button", { name: /Clear reminder/ }),
+      within(next).getByRole("button", { name: /Move to Done/ }),
     ).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Triage Chat" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: /Approval needed in.*Triage Chat/ }),
     ).toBeNull();
+    expect(document.querySelector(".inbox")).toBe(queue);
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(await screen.findByText("Moved T-KQ1 to Done")).toBeTruthy();
+    expect(ticket.status).toBe("Done");
     expect(document.querySelector(".inbox")).toBe(queue);
   },
 );

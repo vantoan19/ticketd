@@ -43,6 +43,7 @@ function Request({
   count,
   onAnswer,
   onLeave,
+  onAnswered,
   name,
   focusTitle = false,
 }: {
@@ -54,7 +55,9 @@ function Request({
   /** Take focus on the title when shown: the Chat was opened from its notification. */
   focusTitle?: boolean;
   onAnswer: (optionId: string) => Promise<void>;
-  /** ↓ from the last choice, or an answer: focus goes back to the message box. */
+  /** Successful answers can return to the view that opened the Chat. */
+  onAnswered?: (requestId: string, origin: Element | null) => void;
+  /** ↓ from the last choice, Esc, or an answer: focus goes back to the message box. */
   onLeave: () => void;
 }) {
   const titleId = useId();
@@ -72,12 +75,14 @@ function Request({
     request.command ?? (request.ticketd?.length ? request.subject : undefined);
   const pick = (optionId: string) => {
     if (sending) return;
+    const origin = document.activeElement;
     setSending(optionId);
     setError(null);
     onAnswer(optionId).then(
       () => {
         setSending(null);
-        onLeave();
+        if (onAnswered) onAnswered(request.id, origin);
+        else onLeave();
       },
       (reason: unknown) => {
         setSending(null);
@@ -90,6 +95,22 @@ function Request({
       },
     );
   };
+  const commandDisclosure = exact ? (
+    <div className="chat-request-command">
+      <Disclosure
+        label="Command"
+        open={showCommand}
+        onOpenChange={setShowCommand}
+      >
+        {showCommand && (
+          <div className="chat-request-command-box">
+            <pre className="chat-out">{exact}</pre>
+            <CopyButton text={exact} label="Copy command" />
+          </div>
+        )}
+      </Disclosure>
+    </div>
+  ) : null;
   const Icon = question ? MessageCircleQuestion : ShieldQuestion;
   return (
     <section
@@ -189,23 +210,7 @@ function Request({
             <CodeSpans text={request.reason} />
           </p>
         )}
-        {exact && (
-          // What runs exactly, opened in place with Copy (CH-24).
-          <div className="chat-request-command">
-            <Disclosure
-              label="Command"
-              open={showCommand}
-              onOpenChange={setShowCommand}
-            >
-              {showCommand && (
-                <div className="chat-request-command-box">
-                  <pre className="chat-out">{exact}</pre>
-                  <CopyButton text={exact} label="Copy command" />
-                </div>
-              )}
-            </Disclosure>
-          </div>
-        )}
+        {question && commandDisclosure}
         {question ? (
           <div className="chat-request-options">
             {request.options.map((option, index) => (
@@ -237,7 +242,7 @@ function Request({
                 key={option.id}
                 type="button"
                 variant="outline"
-                size="sm"
+                size="compact"
                 data-choice=""
                 disabled={sending !== null}
                 aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
@@ -249,6 +254,7 @@ function Request({
                 )}
               </Button>
             ))}
+            {commandDisclosure}
           </div>
         )}
         {error && <FailureAlert size="compact" failure={error} />}
@@ -333,6 +339,7 @@ export function ActivityDock({
   dockRef,
   onAnswer,
   onLeave,
+  onAnswered,
   onSendNow,
   onEdit,
   onRemove,
@@ -349,6 +356,7 @@ export function ActivityDock({
   dockRef?: Ref<HTMLDivElement>;
   onAnswer: (requestId: string, optionId: string) => Promise<void>;
   onLeave: () => void;
+  onAnswered?: (requestId: string, origin: Element | null) => void;
   onSendNow: (queuedId: string) => Promise<void>;
   onEdit: (queued: Queued) => void;
   onRemove: (queuedId: string) => void;
@@ -370,6 +378,7 @@ export function ActivityDock({
           count={requests.length}
           onAnswer={(optionId) => onAnswer(request.id, optionId)}
           onLeave={onLeave}
+          {...(onAnswered && { onAnswered })}
           name={recordNamer(chat.links)}
           focusTitle={focusRequest}
         />

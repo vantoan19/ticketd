@@ -3600,6 +3600,9 @@ kbd,
   font-size: var(--text-preview);
   line-height: var(--text-preview-line);
 }
+.ui-card-triage [data-slot="triage-context"] {
+  line-height: var(--text-ui-line);
+}
 .ui-card-triage [data-slot="triage-context"] > span:first-of-type {
   color: var(--foreground);
   font-weight: 500;

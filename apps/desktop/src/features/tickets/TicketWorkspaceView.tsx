@@ -382,6 +382,13 @@ export function TicketWorkspaceView({
                   onReturn={() => triage.openChat(null)}
                   onClose={() => triage.openChat(null)}
                   focusRequest
+                  onRequestsAnswered={() =>
+                    workspaceRef.current
+                      ?.querySelector<HTMLElement>(
+                        '.inbox-entry[aria-current="true"] .inbox-ticket',
+                      )
+                      ?.focus({ preventScroll: true })
+                  }
                 />
               </div>
             ) : null}
