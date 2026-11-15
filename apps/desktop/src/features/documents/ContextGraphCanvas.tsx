@@ -14,7 +14,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { FileText, Layers } from "lucide-react";
-import { GRAPH_ZOOM } from "@/components/ui/graph-zoom";
+import { graphMotionDuration, GRAPH_ZOOM } from "@/components/ui/graph-zoom";
 import {
   GraphCanvas,
   AvailabilityMark,
@@ -62,7 +62,7 @@ function fitOptions(width: number): FitViewOptions {
       bottom: "56px",
       left: `${Math.round(24 * scale)}px`,
     },
-    duration: 200,
+    duration: graphMotionDuration(),
     minZoom: MIN_FIT_ZOOM,
     maxZoom: MAX_FIT_ZOOM,
   };
@@ -304,7 +304,7 @@ export function ContextGraphCanvas({
   useEffect(() => {
     onFittedRef.current = onFitted;
   }, [onFitted]);
-  const placed = nodes.some((node) => positions[node.id]);
+  const placed = nodes.some((node) => positions[node.id]) || !!islands?.length;
   const [ready, setReady] = useState(false);
   // The canvas stays hidden until its first fit is applied, so the map is never
   // seen at the starting zoom and then moved.
@@ -345,7 +345,10 @@ export function ContextGraphCanvas({
         void instance.current.setCenter(
           target.x + CARD_WIDTH / 2,
           target.y + CARD_HEIGHT / 2,
-          { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
+          {
+            zoom: centerZoom(instance.current.getZoom()),
+            duration: graphMotionDuration(),
+          },
         );
         setFitting(false);
         setShown(true);
@@ -372,10 +375,10 @@ export function ContextGraphCanvas({
         // The pane can still be settling (toolbar, side panel) on open; fit once
         // more so a card is never left cut at the edge.
         window.clearTimeout(settleTimer.current);
-        settleTimer.current = window.setTimeout(
-          () => void instance.current?.fitView({ ...options, duration: 0 }),
-          400,
-        );
+        settleTimer.current = window.setTimeout(() => {
+          if (autoFitted.current)
+            void instance.current?.fitView({ ...options, duration: 0 });
+        }, 400);
       }
       onFittedRef.current?.();
     };
@@ -456,7 +459,9 @@ export function ContextGraphCanvas({
       next.y !== viewportRef.current.y ||
       next.zoom !== viewportRef.current.zoom
     )
-      void instance.current.setViewport(next, { duration: 200 });
+      void instance.current.setViewport(next, {
+        duration: graphMotionDuration(),
+      });
   }, [positions, nodes, fit, centerOn, ready]);
   const [size, setSize] = useState({ width: 0, height: 0 });
   // Fit again when the panel is resized, so the map never stays clipped.
@@ -650,11 +655,13 @@ export function ContextGraphCanvas({
       // `visibility: visible`, which would show cards through a hidden
       // canvas while the edges, grid and zoom control are still waiting.
       data-pending={
-        shown || restored || (!nodes.length && !loading) ? undefined : ""
+        shown || restored || (!nodes.length && !islands?.length && !loading)
+          ? undefined
+          : ""
       }
       legend={<GraphLegend items={legend} />}
       zoom={
-        nodes.length > 0 && (
+        (nodes.length > 0 || !!islands?.length) && (
           <ZoomControls
             zoom={viewport.zoom}
             onZoomOut={() => stepZoom(1 / ZOOM_STEP)}

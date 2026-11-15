@@ -168,11 +168,11 @@ export function WorkspaceGraph({
       tag: tag || null,
       relationship: relationship || null,
       include_details: includeDetails,
-      adjacency_limit: adjacencyLimit,
+      adjacency_limit: 3,
       visible_ids: [],
       hydrate_only: false,
     }),
-    [search, kind, tag, relationship, includeDetails, adjacencyLimit],
+    [search, kind, tag, relationship, includeDetails],
   );
   const setPositions = () => {};
   const currentRequest = useRef(request);
@@ -218,7 +218,10 @@ export function WorkspaceGraph({
     if (planId) {
       observedRevision.current = revision;
       let current = true;
-      void planWorkspaceGraph(planId, request).then(
+      void planWorkspaceGraph(planId, {
+        ...request,
+        adjacency_limit: adjacencyLimit,
+      }).then(
         (value) => {
           if (current) setGraph(value);
         },
@@ -658,12 +661,10 @@ export function WorkspaceGraph({
           <GraphPanelActions
             openLabel={openLabel(preview)}
             onOpen={() => onOpen(preview)}
-            {...(linked(preview.id) && {
-              onCenter: () => {
-                setMapChoice(true);
-                setCenterOn(preview.id);
-              },
-            })}
+            onCenter={() => {
+              setMapChoice(true);
+              setCenterOn(preview.id);
+            }}
           />
         )
       }

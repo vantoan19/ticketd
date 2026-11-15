@@ -4667,7 +4667,17 @@ test("Workspace graph opens Graph, groups Plan members and keeps identical items
     }),
   ).toBeTruthy();
   expect(within(graph).getByText("3 items · 1 connection")).toBeTruthy();
+  fireEvent.click(
+    within(graph).getByRole("button", { name: "T-KQ2 · Unplanned ticket" }),
+  );
+  fireEvent.click(within(graph).getByRole("button", { name: "Center here" }));
+  expect(
+    within(graph)
+      .getByRole("radio", { name: "Graph" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
   const listChoice = within(graph).getByRole("radio", { name: "List" });
+  fireEvent.click(listChoice);
   listChoice.focus();
   fireEvent.keyDown(listChoice, { key: "V", shiftKey: true });
   expect(
