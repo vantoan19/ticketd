@@ -1,5 +1,5 @@
 {"note":"A Codex that does not know windowsSandbox/readiness answers with JSON-RPC method-not-found; the run goes on. Synthetic."}
-{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"},"capabilities":{"experimentalApi":true}}}}
 {"server":{"id":1,"result":{"userAgent":"ticketd/0.0.1 (Windows 10.0.26200; x86_64)","codexHome":"/home/example/.codex","platformFamily":"windows","platformOs":"windows"}}}
 {"client":{"method":"initialized"}}
 {"client":{"id":2,"method":"windowsSandbox/readiness","params":null}}

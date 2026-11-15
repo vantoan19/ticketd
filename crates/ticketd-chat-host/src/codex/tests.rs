@@ -988,6 +988,71 @@ async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
     tokio::join!(open_over(io, &request, options()), peer.play()).0
 }
 
+/// An unattended thread with the ticketd CLI opts into the experimental API, declares
+/// ticketd's own tool and tells the agent to use it. The tool refuses what could leave
+/// the run's Workspace or the step, and any other tool or thread.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_thread_declares_ticketds_own_tool_and_answers_only_it() {
+    let script = fixture!("unattended_ticket_tool")
+        .replace("$CONFIG", &super::personal_tools_off(None).to_string())
+        .replace("$SPEC", &super::ticket_tool::spec().to_string())
+        .replace(
+            "$INSTRUCTIONS",
+            &json!(super::ticket_tool::INSTRUCTIONS).to_string(),
+        );
+    let (mut peer, io) = pipes();
+    peer.load(&script);
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(unattended(true, false)),
+        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let _opened = opened.expect("the thread opens");
+
+    // Every call in the rest of the script is answered as it is written.
+    peer.play().await;
+    peer.assert_nothing_written().await;
+}
+
+/// The agent's ticketd tool call shows as the command it asked for, with its output.
+#[test]
+fn a_ticketd_tool_call_shows_as_the_command_with_its_output() {
+    let mut session = Session::default();
+    let item = json!({"type": "dynamicToolCall", "id": "item_3", "tool": "ticketd", "namespace": null,
+        "arguments": {"arguments": ["show", "T-1"]}, "status": "completed", "success": true,
+        "contentItems": [{"type": "inputText", "text": "T-1 Fix it"}]});
+    let params = json!({"turnId": "turn_1", "item": item});
+    match session.notification("item/completed", &params).as_slice() {
+        [
+            EventKind::ToolUpdated {
+                title,
+                output,
+                status,
+                ..
+            },
+        ] => {
+            assert_eq!(title, "ticketd show T-1");
+            assert_eq!(output.as_deref(), Some("T-1 Fix it"));
+            assert_eq!(*status, crate::ToolStatus::Succeeded);
+        }
+        other => panic!("one tool update, got {other:?}"),
+    }
+}
+
+/// A person's Chat, taken over or not, declares no tool and opts into nothing.
+#[tokio::test(start_paused = true)]
+async fn a_persons_chat_declares_no_tool_and_stays_off_the_experimental_api() {
+    let (_peer, opened) = open_with(fixture!("handshake"), SessionStart::New).await;
+    // The handshake fixture asks for no capabilities, so it fails if any were sent.
+    assert!(opened.is_ok());
+}
+
 /// On Windows an unattended run asks Codex whether its sandbox can start, and a
 /// Codex that says it cannot fails the run before any thread starts.
 #[tokio::test(start_paused = true)]

@@ -226,7 +226,8 @@ pub(crate) fn spawn(executable: &Path, arguments: &[&str], serving: Serving) -> 
     })
 }
 
-fn command(executable: &Path, arguments: &[&str], serving: Serving) -> Command {
+/// The command `spawn` starts, for a caller that also needs its working directory.
+pub(crate) fn command(executable: &Path, arguments: &[&str], serving: Serving) -> Command {
     let mut command = Command::new(executable);
     command
         .args(arguments)

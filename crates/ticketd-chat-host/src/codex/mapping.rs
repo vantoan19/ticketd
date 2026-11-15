@@ -676,6 +676,8 @@ impl Session {
         };
         let output = text(item, &["aggregatedOutput"])
             .or_else(|| text(item, &["error", "message"]))
+            // What a dynamic tool (ticketd's own) returned.
+            .or_else(|| item["contentItems"][0]["text"].as_str())
             .map(str::to_owned);
         // The output travels in `output`; keep it out of the bounded detail.
         let mut rest = item.clone();
@@ -966,6 +968,17 @@ fn tool_title(kind: &str, item: &Value) -> Option<String> {
             format!("Edit {}", paths.join(", "))
         }
         "mcpToolCall" => format!("{}.{}", field("server"), field("tool")),
+        // ticketd's own tool is shown as the command the agent asked for.
+        "dynamicToolCall" if field("tool") == super::ticket_tool::NAME => {
+            let arguments = item["arguments"]["arguments"]
+                .as_array()
+                .into_iter()
+                .flatten();
+            let words: Vec<&str> = arguments.filter_map(Value::as_str).collect();
+            format!("{} {}", super::ticket_tool::NAME, words.join(" "))
+                .trim_end()
+                .to_owned()
+        }
         "dynamicToolCall" | "collabAgentToolCall" => field("tool").to_owned(),
         "webSearch" => format!("Web search: {}", field("query")),
         "imageView" => format!("View image {}", field("path")),

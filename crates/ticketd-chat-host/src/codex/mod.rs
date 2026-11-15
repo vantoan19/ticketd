@@ -17,6 +17,7 @@ mod rpc;
 mod runtime;
 #[cfg(test)]
 mod tests;
+mod ticket_tool;
 
 use std::path::{Path, PathBuf};
 
