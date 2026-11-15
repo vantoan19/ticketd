@@ -185,11 +185,8 @@ test("Move to Trash says so in the status line with Undo, never in the header", 
 
 test("a trashed ticket offers Restore without graph or duplicate actions", async () => {
   header({ ticket: { ...ticket, trashed: true } });
-  expect(
-    screen
-      .getByRole("button", { name: "Restore" })
-      .getAttribute("data-variant"),
-  ).toBe("default");
+  // The header keeps its shape: Restore is in the menu and the Trash notice.
+  expect(screen.queryByRole("button", { name: "Restore" })).toBeNull();
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Ticket actions" }),
     {
@@ -218,6 +215,53 @@ test("shows the position in the list and moves to the neighboring ticket", () =>
   ).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
   expect(onAdjacent).toHaveBeenCalledWith(1);
+});
+
+test("a ticket outside the list keeps the position slot, so the icons never move", () => {
+  header({ position: null, onAdjacent: vi.fn() });
+  expect(screen.getByText("–")).toBeTruthy();
+  for (const name of ["Previous ticket", "Next ticket"])
+    expect(screen.getByRole("button", { name })).toHaveProperty(
+      "disabled",
+      true,
+    );
+});
+
+test("Next onto the last ticket hands focus to Previous, not to nowhere", () => {
+  const onAdjacent = vi.fn();
+  const props = {
+    selected: "T-KQ1",
+    ticket,
+    expanded: false,
+    onExpand: vi.fn(),
+    onReturn: vi.fn(),
+    onClose: vi.fn(),
+    onOpenGraph: vi.fn(),
+    refresh: vi.fn(async () => {}),
+    updateTicket: vi.fn(),
+    onAdjacent,
+  };
+  const view = render(
+    <StatusLineRegion>
+      <TicketHeader {...props} position={{ index: 1, total: 2 }} />
+    </StatusLineRegion>,
+  );
+  const next = screen.getByRole("button", { name: "Next ticket" });
+  next.focus();
+  fireEvent.click(next);
+  view.rerender(
+    <StatusLineRegion>
+      <TicketHeader
+        {...props}
+        selected="T-KQ2"
+        ticket={{ ...ticket, id: "2", reference: "T-KQ2" }}
+        position={{ index: 2, total: 2 }}
+      />
+    </StatusLineRegion>,
+  );
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Previous ticket" }),
+  );
 });
 
 test("expanded view offers Show beside the list instead of Expand", () => {

@@ -344,9 +344,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished title",
   );
-  expect(
-    screen.getByText("This ticket is outside the current results."),
-  ).toBeTruthy();
+  expect(screen.getByText("Not in the current results")).toBeTruthy();
   listVisible = true;
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {
@@ -538,9 +536,7 @@ test("changing the scope drops an open ticket that is outside it", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
-  expect(
-    screen.queryByText("This ticket is outside the current results."),
-  ).toBeNull();
+  expect(screen.queryByText("Not in the current results")).toBeNull();
 });
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {

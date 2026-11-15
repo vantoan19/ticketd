@@ -231,7 +231,7 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
     "value",
     "My unsaved title",
   );
-  expect(screen.getByText(/outside the current results/i)).toBeTruthy();
+  expect(screen.getByText(/not in the current results/i)).toBeTruthy();
 });
 
 test("a delayed previous Plan response cannot replace the current Plan's Board or header", async () => {

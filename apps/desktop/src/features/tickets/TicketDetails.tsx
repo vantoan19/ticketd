@@ -150,11 +150,6 @@ export function TicketDetails({
         {...(onAdjacent && { onAdjacent })}
       />
       <div className="detail-scroll">
-        {outsideResults && (
-          <p className="selection-context" role="status">
-            This ticket is outside the current results.
-          </p>
-        )}
         {selected === null && (
           <EmptyState
             size="hint"
@@ -175,6 +170,7 @@ export function TicketDetails({
             key={item.id}
             ticket={item}
             active={item.reference === selected}
+            outsideResults={outsideResults && item.reference === selected}
             narrow={narrow}
             projects={projects}
             plans={plans}

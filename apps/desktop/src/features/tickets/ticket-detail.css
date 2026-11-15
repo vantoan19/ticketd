@@ -1,49 +1,34 @@
 .detail-title-group {
   display: flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  min-height: 48px;
-}
-.detail-header-message {
-  flex-basis: 100%;
-  padding-bottom: 8px;
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.detail-header-message[role="alert"] {
-  color: var(--destructive);
+  height: 48px;
 }
 .ticket-personal-actions {
-  flex-wrap: wrap;
+  flex: none;
 }
 .ticket-detail {
   container: ticket-detail / inline-size;
-}
-/* A narrow detail keeps the header on one line: the reference copy is also in
-   Ticket actions, and the reminder keeps its bell and accessible name. */
-.copy-reference {
-  display: inline-flex;
-}
-@container ticket-detail (max-width: 460px) {
-  .detail-header .copy-reference,
-  .detail-header .reminder-label {
-    display: none;
-  }
 }
 /* The dependency graph replaces the ticket; its drafts stay mounted. */
 .ticket-detail[data-graph] > :not(.dependency-graph-view, .graph-loading) {
   display: none;
 }
-/* Expanded: the document column is 800px (32px inset) and the rail takes the
-   rest, at least 232px. Beside the list the rail is a flat 232px. */
-@container ticket-detail (min-width: 652px) {
+/* Expanded: a fixed 280px rail beside the document, whose text column is
+   centred at no more than 800px including its 32px gutters. The document
+   stays the scroller, so its scrollbar sits at the rail's rule. */
+@container ticket-detail (min-width: 760px) {
   .ticket-detail[data-expanded] .detail-content {
-    grid-template-columns: minmax(420px, 800px) minmax(232px, 1fr);
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+  .ticket-detail[data-expanded] .detail-document {
+    padding-inline: max(32px, calc((100% - 736px) / 2));
   }
 }
 .ticket-detail[data-expanded] .detail-document {
-  padding: 32px 32px 40px;
+  padding-block: 32px 40px;
 }
 .ticket-detail[data-expanded]
   .description-document
@@ -57,12 +42,15 @@
   font-size: var(--text-reading);
   line-height: 24px;
 }
+/* One 32px row under the title: "Updated 5 h ago", the source state, or
+   save state. Its height is fixed so nothing moves when its words change. */
 .ticket-state-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
-  margin: 8px 0 0;
+  min-height: 32px;
+  margin: 4px 0 0;
   color: var(--secondary-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
@@ -82,17 +70,24 @@
   gap: 4px;
 }
 .list-position-text {
+  min-width: 3ch;
   padding-inline: 0 4px;
+  text-align: end;
   font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
 
+/* Clamped at 240px: the place gives way with an ellipsis, the number stays. */
 .header-source-link {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.header-source-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .source-link {
   padding: 0;
@@ -220,4 +215,11 @@
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
+}
+
+/* A trashed ticket with no description says so, muted, at the text edge. */
+.ticket-no-description {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
