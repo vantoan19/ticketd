@@ -17,7 +17,7 @@ export function ManagementPage({
   "aria-label": label,
 }: {
   className?: string;
-  layout?: "default" | "centered";
+  layout?: "default" | "centered" | "guide";
   children: ReactNode;
   "aria-labelledby"?: string;
   "aria-label"?: string;
@@ -30,6 +30,7 @@ export function ManagementPage({
       className={cn(
         "ui-management-page",
         layout === "centered" && "ui-management-page-centered",
+        layout === "guide" && "ui-management-page-guide",
         className,
       )}
     >

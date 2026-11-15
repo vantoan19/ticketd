@@ -681,3 +681,89 @@
   flex: 1;
   min-width: 0;
 }
+
+/* First-run page typography and setting-row variant of the shared Steps. */
+.ui-guide-title {
+  font-size: var(--text-section);
+  line-height: var(--text-section-line);
+  letter-spacing: var(--text-section-tracking);
+  font-weight: 600;
+}
+.ui-guide-lede {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  color: var(--muted-foreground);
+}
+.ui-guide-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.ui-guide-optional {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+[data-slot="steps"][data-variant="settings"] > [data-slot="step"] {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 14px 0;
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+[data-slot="steps"][data-variant="settings"] [data-slot="step-number"] {
+  width: 22px;
+  height: 22px;
+  background: var(--recessed);
+  color: var(--muted-foreground);
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-state="current"]
+  [data-slot="step-number"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-slot="step-number"] svg {
+  width: 14px;
+  height: 14px;
+}
+[data-slot="steps"][data-variant="settings"] [data-state="done"] {
+  color: var(--muted-foreground);
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  > span:last-child {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  > span:last-child
+  > span:first-child {
+  display: contents;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  > span:last-child
+  > span:last-child {
+  grid-column: 1;
+}
+[data-slot="steps"][data-variant="settings"] [data-slot="step"] button {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  justify-self: end;
+}
+@media (max-width: 640px) {
+  [data-slot="steps"][data-variant="settings"] [data-slot="step"] button {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: start;
+    margin-top: 8px;
+  }
+}

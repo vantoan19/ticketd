@@ -54,6 +54,7 @@ export function bridgeDefault(
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
     case "attachment_availability":
+    case "list_trash":
     case "list_sources": // no built-in connector unless a test supplies one
       return [];
     case "count_tickets":

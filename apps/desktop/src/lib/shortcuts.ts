@@ -37,6 +37,18 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
 };
 
 export const SHORTCUTS = [
+  ...(
+    [
+      ["go-agent-skills", "Open Agent skills"],
+      ["go-sync", "Open Google Drive sync"],
+    ] as const
+  ).map(([id, label]) => ({
+    id,
+    label,
+    keys: [["Enter"]],
+    scope: "Dialogs and menus" as const,
+    note: "While the first-run button is focused.",
+  })),
   {
     id: "command-palette",
     keys: [["Mod", "K"]],
