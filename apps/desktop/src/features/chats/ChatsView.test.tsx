@@ -1408,10 +1408,14 @@ test("a response is saved as a Document only when asked", async () => {
   );
   expect(client.savedDocuments).toEqual([]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-  expect(
-    await screen.findByText("Saved “Login rate limiter” to Documents."),
-  ).toBeTruthy();
+  expect(await screen.findByText("Saved to Documents.")).toBeTruthy();
   expect(client.savedDocuments).toEqual(["Login rate limiter"]);
+  // CH-33: the confirmation does not stay above the composer; sending clears it.
+  type("Next step");
+  fireEvent.click(button("Send"));
+  await waitFor(() =>
+    expect(screen.queryByText("Saved to Documents.")).toBeNull(),
+  );
 });
 
 /** With no links there is no chip row: the Chat actions menu links one. */

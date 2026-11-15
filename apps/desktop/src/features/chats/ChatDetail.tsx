@@ -301,6 +301,8 @@ const LAYER =
   '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
 /** An Esc this soon after one that closed a layer never stops the turn. */
 const ESC_AFTER_LAYER_MS = 1000;
+/** How long "Saved to Documents." stays, as the Documents Undo note does. */
+const SAVED_NOTE_MS = 10_000;
 
 function Conversation({
   snapshot,
@@ -323,7 +325,16 @@ function Conversation({
     text: string;
     plan?: boolean;
   } | null>(null);
-  const [saved, setSaved] = useState("");
+  /**
+   * Counts saves as a Document; nonzero while the confirmation shows. It clears
+   * on the next send or after a while, so it never goes stale (CH-33).
+   */
+  const [saved, setSaved] = useState(0);
+  useEffect(() => {
+    if (!saved) return;
+    const timer = window.setTimeout(() => setSaved(0), SAVED_NOTE_MS);
+    return () => window.clearTimeout(timer);
+  }, [saved]);
   /** A model, effort or permission change asked for here, until the next send. */
   const [asked, setAsked] = useState<AskedChange | null>(null);
   const changeLine = settingLine(reported, asked);
@@ -494,6 +505,7 @@ function Conversation({
     follow();
     setNewFrom(undefined);
     setAsked(null);
+    setSaved(0);
     return action;
   };
   const messageCount = items.filter(isMessage).length;
@@ -575,9 +587,9 @@ function Conversation({
             {failure}
           </p>
         )}
-        {saved && (
+        {saved > 0 && (
           <p className="chat-fine" role="status">
-            Saved “{saved}” to Documents.
+            Saved to Documents.
           </p>
         )}
         {picked ? (
@@ -745,7 +757,7 @@ function Conversation({
           onClose={() => setSaving(null)}
           onSave={async (responseId, title) => {
             await client.saveAsDocument(id, responseId, title);
-            setSaved(title);
+            setSaved((count) => count + 1);
           }}
         />
       )}
