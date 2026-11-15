@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::conditions::ChatProblemKind;
-use crate::{ChatLive, InteractionKind, STOPPED_BY_TICKETD, problem_kind};
+use crate::{ChatLive, InteractionKind, TicketdStop, problem_kind};
 use serde::Serialize;
 use ticketd_core::{Chat, ChatAgentChange, ChatTurn, ChatTurnState};
 
@@ -199,25 +199,28 @@ pub fn status(facts: &Facts<'_>) -> Status {
             .map(change_line)
             .or_else(|| facts.last_response.and_then(plain_start))
     };
-    let outcome = ended.map(|turn| match turn.state {
-        ChatTurnState::Completed => (Rank::Done, "Done".to_owned(), done()),
-        ChatTurnState::Failed => (
-            Rank::Failed,
-            "Failed".to_owned(),
-            Some(failure_detail(turn, facts.harness)),
-        ),
-        ChatTurnState::Unknown if turn.detail.as_deref() == Some(STOPPED_BY_TICKETD) => {
-            (Rank::Idle, "Stopped when ticketd quit".to_owned(), None)
-        }
-        ChatTurnState::Unknown => (
-            Rank::Failed,
-            "Interrupted".to_owned(),
-            Some(format!("{} stopped mid-turn", facts.harness)),
-        ),
-        ChatTurnState::Interrupted | ChatTurnState::Active => {
-            (Rank::Idle, "You stopped it".to_owned(), None)
-        }
-    });
+    let outcome = ended.map(
+        |turn| match (turn.state, TicketdStop::of(turn.detail.as_deref())) {
+            (ChatTurnState::Completed, _) => (Rank::Done, "Done".to_owned(), done()),
+            (ChatTurnState::Failed, _) => (
+                Rank::Failed,
+                "Failed".to_owned(),
+                Some(failure_detail(turn, facts.harness)),
+            ),
+            // ticketd stopped it, whether or not the harness reported the turn.
+            (ChatTurnState::Unknown | ChatTurnState::Interrupted, Some(stop)) => {
+                (Rank::Idle, stop.words().to_owned(), None)
+            }
+            (ChatTurnState::Unknown, None) => (
+                Rank::Failed,
+                "Interrupted".to_owned(),
+                Some(format!("{} stopped mid-turn", facts.harness)),
+            ),
+            (ChatTurnState::Interrupted | ChatTurnState::Active, _) => {
+                (Rank::Idle, "You stopped it".to_owned(), None)
+            }
+        },
+    );
     if let Some((rank, word, detail)) = outcome.clone().filter(|_| unseen) {
         return make(rank, &word, detail);
     }

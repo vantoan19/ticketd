@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { ChatFeatureContext } from "@/features/chats/use-chats";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
@@ -155,6 +156,47 @@ test("the nav lists the groups and sections in order; Experimental is said on Ch
   ]);
   expect(navItem(/^Chat/).textContent).not.toContain("Experimental");
   expect(navItem("Appearance").getAttribute("aria-current")).toBe("page");
+});
+
+test("Automations is listed under Agents, after Chat, only while Chat is on", async () => {
+  const agents = () =>
+    within(screen.getByRole("group", { name: "Agents" }))
+      .getAllByRole("button")
+      .map((button) => (button.textContent ?? "").replace("Experimental", ""));
+  const { unmount } = render(<Settings />);
+  await act(async () => {});
+  expect(agents()).toEqual(["Command line", "Agent skills", "Chat"]);
+  unmount();
+
+  render(
+    <ChatFeatureContext
+      value={{
+        enabled: true,
+        setEnabled: async () => {},
+        overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
+        revision: 0,
+        openRequest: null,
+        chatRequest: null,
+        requestChat: () => {},
+      }}
+    >
+      <Settings />
+    </ChatFeatureContext>,
+  );
+  await act(async () => {});
+  expect(agents()).toEqual([
+    "Command line",
+    "Agent skills",
+    "Chat",
+    "Automations",
+  ]);
+  fireEvent.click(navItem("Automations"));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Automations" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("navigation", { name: "Breadcrumb" }).textContent,
+  ).toBe("AgentsAutomations");
 });
 
 test("choosing a section opens only its page and moves focus to its title", async () => {

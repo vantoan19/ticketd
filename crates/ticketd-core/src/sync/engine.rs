@@ -171,6 +171,8 @@ fn remote_kind(kind: SyncKind) -> RemoteKind {
         SyncKind::Document => RemoteKind::Document,
         SyncKind::Plan => RemoteKind::Plan,
         SyncKind::Ticket => RemoteKind::Ticket,
+        SyncKind::AutomationAgent => RemoteKind::AutomationAgent,
+        SyncKind::Automation => RemoteKind::Automation,
     }
 }
 
@@ -180,6 +182,8 @@ pub(super) fn dirty_kind(kind: SyncKind) -> RecordKind {
         SyncKind::Document => RecordKind::Document,
         SyncKind::Plan => RecordKind::Plan,
         SyncKind::Ticket => RecordKind::Ticket,
+        SyncKind::AutomationAgent => RecordKind::AutomationAgent,
+        SyncKind::Automation => RecordKind::Automation,
     }
 }
 

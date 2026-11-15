@@ -51,6 +51,8 @@ pub(super) struct Session {
     streams: VecDeque<(i64, NativeItemId)>,
     /// When the limit Claude Code last reported as exhausted resets, if it said.
     limit_resets_at: Option<i64>,
+    /// Nobody approves for this session: a tool Claude Code denied fails the turn.
+    unattended: bool,
     reports: Reports,
 }
 
@@ -90,6 +92,12 @@ impl Session {
         if let Some(turn) = &mut self.turn {
             turn.interrupt_written = true;
         }
+    }
+
+    /// The session runs an Automation's agent, with nobody there to approve.
+    pub fn mark_unattended(&mut self) {
+        self.unattended = true;
+        self.reports.unattended();
     }
 
     /// The runtime is gone: nothing is live any more.
@@ -361,12 +369,19 @@ impl Session {
             event["truncated"] == true,
         );
         let detail = with_line_counts(detail, &event["outcome"]);
+        // Claude Code answers the tool a Stop cuts off with an error result; it is
+        // left unfinished, and the turn shows it as not finished (#387 3B3).
+        let cut_off = self
+            .turn
+            .as_ref()
+            .is_some_and(|turn| turn.interrupt_written);
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
             title: title.clone(),
             status: match (failed, declined) {
                 (true, true) => ToolStatus::Declined,
+                (true, false) if cut_off => ToolStatus::Running,
                 (true, false) => ToolStatus::Failed,
                 (false, _) => ToolStatus::Succeeded,
             },
@@ -588,9 +603,30 @@ impl Session {
         self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
+        let denied = denials(event);
+        let ended_by = |kind, message: String| {
+            TurnOutcome::Failed(Problem {
+                kind,
+                message,
+                detail: None,
+                resets_at: None,
+            })
+        };
         // ponytail: how Claude Code reports an interrupted turn is unverified; any
         // unsuccessful result after an interrupt was written counts as interrupted.
-        let outcome = if !failed {
+        let outcome = if subtype == "error_max_turns" {
+            ended_by(
+                ProblemKind::TurnLimitReached,
+                "Claude Code reached the turn limit before finishing.".to_owned(),
+            )
+        } else if self.unattended && !denied.is_empty() {
+            // The agent went on after the denial and may have ended its turn normally,
+            // but it did not do what it set out to do with that tool.
+            ended_by(
+                ProblemKind::ToolDenied,
+                format!("Claude Code was denied: {}.", denied.join("; ")),
+            )
+        } else if !failed {
             TurnOutcome::Completed
         } else if turn.as_ref().is_some_and(|turn| turn.interrupt_written) {
             TurnOutcome::Interrupted
@@ -601,7 +637,7 @@ impl Session {
                 "errors": errors,
                 "stop_reason": event.get("stop_reason"),
                 "terminal_reason": event.get("terminal_reason"),
-                "denied_tool_names": event.get("denied_tool_names"),
+                "denials": event.get("denials"),
             });
             let kind = match turn.and_then(|turn| turn.error).as_deref() {
                 Some("authentication_failed") => ProblemKind::LoginRequired,
@@ -630,6 +666,42 @@ impl Session {
                 .collect(),
         });
     }
+}
+
+/// Each distinct thing Claude Code denied in a turn, once: the tool, and for a shell
+/// its command on one line ("PowerShell `node test.js`").
+pub(super) fn denials(event: &Value) -> Vec<String> {
+    const MAX_COMMAND_CHARS: usize = 120;
+    let mut said: Vec<String> = Vec::new();
+    for denial in event["denials"].as_array().into_iter().flatten() {
+        let Some(tool) = denial["tool_name"].as_str() else {
+            continue;
+        };
+        // A shell's command, or the path a file tool was refused (#387 3B1).
+        let line = match denial["command"].as_str().or(denial["path"].as_str()) {
+            Some(command) => {
+                // Control characters (a backspace from a `\b` in a JSON-written
+                // path) print as nothing useful: each becomes a space (#387 M19).
+                let command: String = command
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect();
+                let command = command.split_whitespace().collect::<Vec<_>>().join(" ");
+                let short: String = command.chars().take(MAX_COMMAND_CHARS).collect();
+                let more = if short.len() < command.len() {
+                    "…"
+                } else {
+                    ""
+                };
+                format!("{tool} `{short}{more}`")
+            }
+            None => tool.to_owned(),
+        };
+        if !said.contains(&line) {
+            said.push(line);
+        }
+    }
+    said
 }
 
 /// The tool's input with the lines its result said it added and removed, kept as

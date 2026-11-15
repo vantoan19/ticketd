@@ -1,0 +1,17 @@
+{"note":"Hand-built from the codex-cli 0.162.1 and 0.169.0 JSON schemas (generate-json-schema --experimental: ThreadStartParams.dynamicTools, DynamicToolCallParams, DynamicToolCallResponse). Not captured from a live session. The test fills in the config, tool and instructions ticketd declares."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"},"capabilities":{"experimentalApi":true}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.163.0 (Linux; x86_64)","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"linux"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"config/read","params":{"cwd":"/work/chat-1"}}}
+{"server":{"id":2,"result":{"config":{"model":"gpt-test","approval_policy":null,"sandbox_mode":null},"origins":{},"layers":null}}}
+{"client":{"id":3,"method":"thread/start","params":{"cwd":"/work/chat-1","approvalPolicy":"on-request","sandbox":"workspace-write","model":"gpt-test","config":$CONFIG,"dynamicTools":[$SPEC],"developerInstructions":$INSTRUCTIONS}}}
+{"server":{"id":3,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.163.0","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"},"cwd":"/work/chat-1","instructionSources":[]}}}
+{"mark":"the thread is open"}
+{"server":{"id":"call-1","method":"item/tool/call","params":{"threadId":"thr_1","turnId":"turn_1","callId":"c1","namespace":null,"tool":"ticketd","arguments":{"arguments":["restore-workspace","backup.db"]}}}}
+{"client":{"id":"call-1","result":{"success":false,"contentItems":[{"type":"inputText","text":"ticketd tool: `restore-workspace` replaces the Workspace and is not available to an agent"}]}}}
+{"server":{"id":"call-2","method":"item/tool/call","params":{"threadId":"thr_1","turnId":"turn_1","callId":"c2","namespace":null,"tool":"ticketd","arguments":{"arguments":["show","T-1"],"cwd":"/"}}}}
+{"client":{"id":"call-2","result":{"success":false,"contentItems":[{"type":"inputText","text":"ticketd tool: unknown field `cwd`"}]}}}
+{"server":{"id":"call-3","method":"item/tool/call","params":{"threadId":"thr_1","turnId":"turn_1","callId":"c3","namespace":null,"tool":"shell","arguments":{}}}}
+{"client":{"id":"call-3","error":{"code":-32601,"message":"ticketd offers only its own `ticketd` tool on this thread"}}}
+{"server":{"id":"call-4","method":"item/tool/call","params":{"threadId":"thr_other","turnId":"turn_1","callId":"c4","namespace":null,"tool":"ticketd","arguments":{"arguments":["list"]}}}}
+{"client":{"id":"call-4","error":{"code":-32601,"message":"ticketd offers only its own `ticketd` tool on this thread"}}}

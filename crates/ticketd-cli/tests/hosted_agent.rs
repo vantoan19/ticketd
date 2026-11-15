@@ -360,3 +360,51 @@ fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
     assert_eq!(credited(&chats[0], "turn-a"), 1);
     assert_eq!(credited(&chats[1], "turn-b"), 0);
 }
+
+/// An Automation run's harness runs this CLI with the run's ID in
+/// `TICKETD_AUTOMATION_RUN_ID`; what it writes is logged as made by an Automation, so it
+/// cannot trigger Automations. Without the variable the same write is a person's.
+#[test]
+fn writes_made_inside_an_automation_run_are_logged_with_actor_automation() {
+    use ticketd_core::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEventType};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    let workspace = {
+        let mut workspace = Workspace::open(workspace_path(path)).unwrap();
+        workspace.create_ticket("Fix the cache").unwrap();
+        workspace
+    };
+    let head = workspace.workspace_event_head().unwrap();
+    let add = |brief: &str, run: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ticketd"));
+        command
+            .args(["activity", "add", "T-KQ1", "--brief", brief])
+            .current_dir(path)
+            .env("TICKETD_TEST_WORKSPACE", workspace_path(path))
+            .env_remove(AUTOMATION_RUN_ID_VARIABLE);
+        if let Some(run) = run {
+            command.env(AUTOMATION_RUN_ID_VARIABLE, run);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
+    add("From the run", Some("run-1"));
+    add("From a blank variable", Some(" "));
+    add("From a terminal", None);
+
+    let actors: Vec<_> = workspace
+        .workspace_events_after(head, 10)
+        .unwrap()
+        .into_iter()
+        .map(|event| (event.kind, event.actor))
+        .collect();
+    let posted = WorkspaceEventType::ActivityCreated;
+    assert_eq!(
+        actors,
+        [
+            (posted, WorkspaceActor::Automation),
+            (posted, WorkspaceActor::Person),
+            (posted, WorkspaceActor::Person),
+        ]
+    );
+}

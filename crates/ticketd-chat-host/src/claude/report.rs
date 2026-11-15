@@ -25,6 +25,16 @@ pub(super) const PLAN_TOOLS: &[&str] = &[
 /// Tools that change one file, named by `file_path` (`notebook_path` for notebooks).
 const FILE_TOOLS: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];
 
+/// The model row the SDK lists for Claude Code's own default, which New Chat marks
+/// as its default.
+pub(super) const DEFAULT_MODEL: &str = "default";
+/// The permission mode New Chat marks as its default: "Ask before edits".
+pub(super) const DEFAULT_PERMISSION_MODE: &str = "default";
+
+/// Why a run's agent's settings cannot be changed in its Chat.
+const AUTOMATION_RUNNING: &str =
+    "An Automation is running this Chat. Reply or stop it to take it over first.";
+
 /// Permission modes ticketd can offer: never `bypassPermissions`.
 const PERMISSION_MODES: &[(&str, &str, PermissionKind)] = &[
     ("default", "Ask before edits", PermissionKind::Ask),
@@ -72,6 +82,8 @@ pub(super) struct Reports {
     permission_mode: Option<String>,
     effort: Option<String>,
     models: Option<Vec<Value>>,
+    /// An Automation run's agent: its settings are the agent's and are not changed.
+    unattended: bool,
 }
 
 fn status(name: &str) -> Option<PlanStepStatus> {
@@ -421,6 +433,11 @@ impl Reports {
         }
     }
 
+    /// The session runs an Automation's agent: its settings are reported unchangeable.
+    pub fn unattended(&mut self) {
+        self.unattended = true;
+    }
+
     /// `session_info`: what Claude Code says is in effect.
     pub fn session_info(&mut self, event: &Value) -> Option<EventKind> {
         let before = (
@@ -460,6 +477,9 @@ impl Reports {
     }
 
     pub fn settings(&self) -> EventKind {
+        // A run's agent keeps the agent's settings until the person takes it over
+        // (#387 M15): the controls show them read-only instead of choices refused.
+        let locked = self.unattended.then(|| AUTOMATION_RUNNING.to_owned());
         let entry = self.current_model();
         let model = self.model.as_ref().map(|model| Setting {
             current: entry
@@ -472,7 +492,7 @@ impl Reports {
                 .flatten()
                 .filter_map(model_option)
                 .collect(),
-            unchangeable: None,
+            unchangeable: locked.clone(),
             applies_from: AppliesFrom::NextRequest,
             answered_by: None,
         });
@@ -481,7 +501,7 @@ impl Reports {
             (!options.is_empty()).then(|| Setting {
                 current: self.effort.clone(),
                 options,
-                unchangeable: None,
+                unchangeable: locked.clone(),
                 applies_from: AppliesFrom::NextRequest,
                 answered_by: None,
             })
@@ -493,11 +513,14 @@ impl Reports {
                 // A mode ticketd does not offer is shown as what is in effect.
                 options.push(SettingOption {
                     id: mode.clone(),
-                    label: if bypass {
-                        "Full access".to_owned()
-                    } else {
-                        mode.clone()
-                    },
+                    // Named as the SDK's `PermissionMode` describes each (#387 M15).
+                    label: match mode.as_str() {
+                        "bypassPermissions" => "Full access",
+                        "dontAsk" => "Never asks",
+                        "auto" => "Auto",
+                        other => other,
+                    }
+                    .to_owned(),
                     description: None,
                     is_default: false,
                     permission: bypass.then_some(PermissionKind::FullAccess),
@@ -508,7 +531,11 @@ impl Reports {
                 current: Some(mode.clone()),
                 options,
                 // ticketd never moves a session out of, or into, skipped permissions.
-                unchangeable: bypass.then(|| "Set in Claude Code's settings".to_owned()),
+                unchangeable: if bypass {
+                    Some("Set in Claude Code's settings".to_owned())
+                } else {
+                    locked
+                },
                 applies_from: AppliesFrom::NextRequest,
                 answered_by: None,
             }
@@ -530,7 +557,7 @@ fn model_option(entry: &Value) -> Option<SettingOption> {
             .filter(|text| !text.is_empty())
             .map(str::to_owned),
         // The SDK lists Claude Code's default as the `default` row.
-        is_default: id == "default",
+        is_default: id == DEFAULT_MODEL,
         permission: None,
         allowed: true,
         id,
@@ -562,7 +589,7 @@ fn permission_options() -> Vec<SettingOption> {
             id: (*id).to_owned(),
             label: (*label).to_owned(),
             description: None,
-            is_default: *id == "default",
+            is_default: *id == DEFAULT_PERMISSION_MODE,
             permission: Some(*kind),
             allowed: true,
         })

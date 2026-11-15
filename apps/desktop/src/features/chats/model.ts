@@ -1058,7 +1058,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
+        body: `${past ? "The last turn stopped here. " : ""}${sentence(problem.message ?? "Its sandbox failed to start on this computer.")} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
       };
@@ -1112,7 +1112,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${problem.message ?? "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
+        body: `${sentence(problem.message ?? "It gave no reason.")} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };
   }
@@ -1157,6 +1157,23 @@ export function binarySize(bytes: number): string {
 
 /** "1 Chat", "2 Chats". */
 export const chatCount = (n: number) => count(n, "Chat");
+
+/** A harness's or the host's message as a sentence, so another can follow it (L16). */
+export const sentence = (text: string) =>
+  /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`;
+
+/**
+ * What turning Chat off or quitting stops, as the subject of a sentence:
+ * "1 Chat and 2 runs are", "1 run is". `one` is whether "it" or "them" follows.
+ */
+export function stoppingText(chats: number, runs: number) {
+  const parts = [
+    chats > 0 ? chatCount(chats) : "",
+    runs > 0 ? count(runs, "run") : "",
+  ].filter(Boolean);
+  const one = chats + runs === 1;
+  return { subject: `${parts.join(" and ")} ${one ? "is" : "are"}`, one };
+}
 
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);

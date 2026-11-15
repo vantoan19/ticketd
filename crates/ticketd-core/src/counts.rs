@@ -8,6 +8,9 @@ pub struct SidebarCounts {
     pub total: u32,
     pub ready: u32,
     pub in_progress: u32,
+    /// Automation runs that ended as Needs attention and the person has not yet run
+    /// again, taken over or dismissed.
+    pub runs_needing_you: u32,
 }
 
 impl Workspace {
@@ -27,7 +30,8 @@ impl Workspace {
                   AND NOT {held} \
                   AND NOT EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id \
                                   WHERE d.dependent_id = t.id AND {unresolved})), \
-               (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress'), (SELECT COUNT(*) FROM tickets WHERE trashed = 0)"
+               (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress'), (SELECT COUNT(*) FROM tickets WHERE trashed = 0), \
+               (SELECT COUNT(*) FROM automation_runs WHERE status = 'needs_attention' AND attention_cleared = 0)"
             ),
             [crate::inbox::LOCAL_PERSON],
             |row| {
@@ -36,6 +40,7 @@ impl Workspace {
                     ready: row.get(1)?,
                     in_progress: row.get(2)?,
                     total: row.get(3)?,
+                    runs_needing_you: row.get(4)?,
                 })
             },
         )?;

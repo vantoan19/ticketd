@@ -4,6 +4,7 @@ import {
   CirclePlay,
   ListTodo,
   MessagesSquare,
+  Workflow,
   Trash2,
   Settings,
   Ellipsis,
@@ -144,7 +145,7 @@ function GroupMenu({
   );
 }
 
-type View =
+export type View =
   | "tickets"
   | "projects"
   | "plans"
@@ -153,7 +154,8 @@ type View =
   | "inbox"
   | "documents"
   | "attachments"
-  | "chats";
+  | "chats"
+  | "automations";
 export function WorkspaceSidebar({
   view: viewName,
   workspaceGraphOpen = false,
@@ -218,6 +220,12 @@ export function WorkspaceSidebar({
   ].filter((part): part is string => Boolean(part));
   const chatsLabel = ["Chats", ...chatCounts].join(" · ");
   const chatsName = ["Chats", ...chatCounts].join(", ");
+  // Ended as Needs attention, and not yet run again, taken over or dismissed.
+  const runsWaiting = counts?.runs_needing_you ?? 0;
+  const automationsLabel =
+    runsWaiting > 0
+      ? `Automations, ${runsWaiting} ${runsWaiting === 1 ? "run needs" : "runs need"} you`
+      : "Automations";
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar
@@ -374,6 +382,24 @@ export function WorkspaceSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
+            {chat.enabled && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={view === "automations"}
+                  tooltip={automationsLabel}
+                  aria-label={automationsLabel}
+                  onClick={() => setView("automations")}
+                >
+                  <Workflow size={16} /> Automations
+                  {runsWaiting > 0 && (
+                    <span className="sidebar-count" aria-hidden="true">
+                      <StatusDot tone="attention" />
+                      {runsWaiting}
+                    </span>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </nav>
         <span role="status" className="sr-only">
@@ -383,6 +409,9 @@ export function WorkspaceSidebar({
           {waiting > 0
             ? `${waiting} ${waiting === 1 ? "Chat" : "Chats"} waiting`
             : ""}
+        </span>
+        <span role="status" className="sr-only">
+          {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">

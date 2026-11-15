@@ -353,6 +353,75 @@ describe("open", () => {
     expect(h.queries).toHaveLength(0);
   });
 
+  it("runs an unattended session without asking and denies what is not allowed", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      unattended: {
+        model: "claude-test",
+        allowed_tools: ["Read", "Bash(ticketd:*)"],
+        disallowed_tools: ["Edit", "Write"],
+        max_turns: 40,
+      },
+    });
+    expect(fake.options).toMatchObject({
+      permissionMode: "dontAsk",
+      allowedTools: ["Read", "Bash(ticketd:*)"],
+      disallowedTools: ["Edit", "Write"],
+      maxTurns: 40,
+      model: "claude-test",
+    });
+    expect(fake.options).not.toHaveProperty("allowDangerouslySkipPermissions");
+    // None of the person's user, project or local settings are loaded, so an allow
+    // rule there cannot widen what the agent may do.
+    expect(fake.options.settingSources).toEqual([]);
+    // L32: no MCP server, claude.ai connector or skill of the person's either.
+    expect(fake.options).toMatchObject({
+      mcpServers: {},
+      strictMcpConfig: true,
+      skills: [],
+    });
+    // L1: the environment is the bridge's own, with the ticketd CLI on PATH, since
+    // the SDK replaces the environment when `env` is given.
+    expect(fake.options.env).toEqual({
+      ...process.env,
+      ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+    });
+
+    // A request that still reaches the bridge is denied here, never sent to the host.
+    const asked = fake.askPermission("Bash", { command: "rm -rf build" });
+    await expect(asked.result).resolves.toMatchObject({ behavior: "deny" });
+    expect(h.named("permission_request")).toHaveLength(0);
+  });
+
+  it("keeps an unattended agent's file tools inside its folder (#387 3B1)", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      unattended: { allowed_tools: [], disallowed_tools: [], max_turns: 5 },
+    });
+    // Claude Code then refuses file-tool reads and writes outside the working
+    // directory in every mode, whatever an allow rule says, and adds none.
+    expect(fake.options.settings).toEqual({
+      permissions: {
+        blockReadsOutsideWorkingDirectories: true,
+        blockWritesOutsideWorkingDirectories: true,
+      },
+    });
+    expect(fake.options).not.toHaveProperty("additionalDirectories");
+
+    // A person's Chat keeps their own settings.
+    const person = await harness().open(1);
+    expect(person.options).not.toHaveProperty("settings");
+  });
+
+  it("leaves the model to Claude Code when an unattended session names none", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      unattended: { allowed_tools: [], disallowed_tools: [], max_turns: 5 },
+    });
+    expect(fake.options).not.toHaveProperty("model");
+    expect(fake.options.permissionMode).toBe("dontAsk");
+  });
+
   it("requires the host to name the Claude Code executable", async () => {
     const h = harness();
     await h.send({ cmd: "open", generation: 1, cwd: CWD });
@@ -541,6 +610,53 @@ describe("input lifecycle", () => {
         is_error: true,
         errors: ["boom"],
       },
+    ]);
+  });
+
+  it("names the command or path of each tool Claude Code denied", async () => {
+    const h = harness();
+    const fake = await h.open();
+    await h.send(submit("s1"));
+    const written = await fake.readInput();
+    fake.push(
+      result([written.uuid as string], {
+        permission_denials: [
+          {
+            tool_name: "PowerShell",
+            tool_use_id: "toolu_1",
+            tool_input: { command: "node test.js" },
+          },
+          {
+            tool_name: "Write",
+            tool_use_id: "toolu_2",
+            tool_input: { file_path: "a.txt" },
+          },
+          {
+            tool_name: "Grep",
+            tool_use_id: "toolu_3",
+            tool_input: { pattern: "x", path: "C:\\outside" },
+          },
+          {
+            tool_name: "NotebookEdit",
+            tool_use_id: "toolu_4",
+            tool_input: { notebook_path: "n.ipynb" },
+          },
+          { tool_name: "WebSearch", tool_use_id: "toolu_5", tool_input: {} },
+        ],
+      }),
+    );
+    await settle();
+    // #387 3B1: a file tool refused outside the step's folder names the path.
+    expect(h.named("turn_result")).toEqual([
+      expect.objectContaining({
+        denials: [
+          { tool_name: "PowerShell", command: "node test.js", path: null },
+          { tool_name: "Write", command: null, path: "a.txt" },
+          { tool_name: "Grep", command: null, path: "C:\\outside" },
+          { tool_name: "NotebookEdit", command: null, path: "n.ipynb" },
+          { tool_name: "WebSearch", command: null, path: null },
+        ],
+      }),
     ]);
   });
 });

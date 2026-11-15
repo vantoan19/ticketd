@@ -65,6 +65,10 @@ const failureSchema = z.object({
   code: z.enum(["stale", "gone", "failed"]),
   message: z.string(),
 });
+const stoppingSchema = z.object({
+  chats: z.number().int().nonnegative(),
+  runs: z.number().int().nonnegative(),
+});
 const openedSchema = z.object({
   subscription: z.number().int(),
   snapshot: chatSnapshotSchema,
@@ -317,12 +321,9 @@ export function createHostChatClient(
     setNotify: (enabled) => run("chat_set_notify", { enabled }),
     onOpenRequested: (listener) =>
       subscribeTo("chat-open-requested", openRequestSchema, listener),
+    stopping: async () => stoppingSchema.parse(await call("chat_stopping")),
     onQuitRequested: (listener) =>
-      subscribeTo(
-        "chat-quit-requested",
-        z.number().int().nonnegative(),
-        listener,
-      ),
+      subscribeTo("chat-quit-requested", stoppingSchema, listener),
     answerQuit: (quit) => run("chat_answer_quit", { quit }),
   };
 }

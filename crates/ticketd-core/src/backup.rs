@@ -52,7 +52,15 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 74] = [
+const TABLES: [(&str, i64); 82] = [
+    ("automation_settings", 78),
+    ("automation_run_steps", 77),
+    ("automation_runs", 77),
+    ("automation_arrivals", 76),
+    ("automation_device_state", 75),
+    ("automations", 75),
+    ("automation_agents", 74),
+    ("workspace_events", 73),
     ("chat_record_writes", 66),
     ("chat_notices", 66),
     ("chats", 66),
@@ -198,6 +206,12 @@ pub(crate) fn missing_tables(
         ("write_drive_request_namespace", 52),
         ("record_version_ticket", 57),
         ("record_version_document", 57),
+        ("workspace_event_ticket_created", 73),
+        ("workspace_event_ticket_updated", 73),
+        ("workspace_event_ticket_status_changed", 73),
+        ("workspace_event_ticket_tag_added", 73),
+        ("workspace_event_ticket_tag_removed", 73),
+        ("workspace_event_activity_created", 73),
     ] {
         let exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
@@ -210,9 +224,11 @@ pub(crate) fn missing_tables(
     }
     // Without its capture triggers a restored Workspace would silently stop uploading edits.
     if version >= 58 {
-        let triggers = crate::sync::captured_tables().flat_map(|table| {
-            crate::sync::TRIGGER_EVENTS.map(|event| format!("sync_capture_{table}_{event}"))
-        });
+        let triggers = crate::sync::captured_tables()
+            .filter(|(_, since)| version >= *since)
+            .flat_map(|(table, _)| {
+                crate::sync::TRIGGER_EVENTS.map(|event| format!("sync_capture_{table}_{event}"))
+            });
         for trigger in triggers {
             let exists: bool = connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",

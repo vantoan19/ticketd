@@ -96,11 +96,36 @@ pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
     DEFAULT_ATTACHMENT_LIMIT,
 };
+mod automation_agents;
+mod automation_background;
+pub use automation_background::{DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE};
+mod automation_examples;
+mod automation_matching;
+mod automation_run_machine;
+mod automation_runs;
+mod automation_schedule;
+mod automation_steps;
+mod automations;
 mod change_token;
 mod chat_suggestions;
 mod chats;
+mod events;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
+};
+pub use automation_agents::{
+    AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
+};
+pub use automation_examples::AutomationExample;
+pub use automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
+pub use automation_runs::{
+    AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
+    AutomationStepStatus, RunAnswer,
+};
+pub use automation_steps::AutomationNotification;
+pub use automations::{
+    AUTOMATION_TRIGGER_ID, Automation, AutomationDefinition, AutomationProblem, Check, Condition,
+    NotifyTarget, Schedule, Step, StepAction, StepChange, Trigger, Weekday,
 };
 pub use chat_suggestions::{ChatSuggestion, SuggestedTicket};
 pub use chats::{
@@ -113,12 +138,13 @@ pub use chats::{
     ChatSubmissionAttempt, ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
     NewChat,
 };
+pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 72;
+pub const FORMAT_VERSION: i64 = 82;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -208,6 +234,24 @@ pub enum Error {
     EmptyProject,
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("agent '{0}' was not found")]
+    AutomationAgentNotFound(String),
+    #[error("invalid agent: {0}")]
+    InvalidAutomationAgent(String),
+    #[error("This agent is used by {0}. Change that step first.")]
+    AutomationAgentInUse(String),
+    #[error("Automation '{0}' was not found")]
+    AutomationNotFound(String),
+    #[error("Automation run '{0}' was not found")]
+    AutomationRunNotFound(String),
+    #[error("Automation run: {0}")]
+    AutomationRun(String),
+    #[error("Its Automation was deleted, so it cannot be run again.")]
+    AutomationRunAutomationDeleted,
+    #[error("invalid Automation: {0}")]
+    InvalidAutomation(String),
+    #[error("This Automation cannot run yet. {0}.")]
+    AutomationUnfinished(String),
     #[error("duplicate would create a cycle or self-link")]
     DuplicateCycle,
     #[error(
@@ -380,7 +424,7 @@ pub struct TicketPatch {
     pub plan_id: Option<Option<String>>,
 }
 
-fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
@@ -936,6 +980,38 @@ impl Workspace {
         }
         if version < 72 {
             chats::migrate_request_times(&transaction)?;
+        }
+        if version < 73 {
+            events::migrate(&transaction)?;
+        }
+        if version < 74 {
+            automation_agents::migrate(&transaction)?;
+        }
+        if version < 75 {
+            automations::migrate(&transaction)?;
+        }
+        if version < 76 {
+            automations::migrate_sync(&transaction)?;
+        }
+        if version < 77 {
+            automation_runs::migrate(&transaction)?;
+        }
+        if version < 78 {
+            automation_background::migrate(&transaction)?;
+        }
+        if version < 79 {
+            automation_runs::migrate_attention(&transaction)?;
+        }
+        if version < 80 {
+            automations::migrate_schedule(&transaction)?;
+        }
+        if version < 81 {
+            automation_agents::migrate_any_command(&transaction)?;
+            events::migrate_workspace_sync_actor(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 81;")?;
+        }
+        if version < 82 {
+            source::migrate_read_partitions(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

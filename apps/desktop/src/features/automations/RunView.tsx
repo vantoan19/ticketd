@@ -1,0 +1,494 @@
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  Maximize2,
+  MessageSquareText,
+  Minimize2,
+  RotateCcw,
+  Square,
+  X,
+} from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { conditionsLine } from "@/features/automations/automation-text";
+import { TRIGGER_ID } from "@/features/automations/canvas-layout";
+import {
+  automationsClient,
+  reported,
+  type ReportRead,
+  stepPaths,
+  type AutomationAgent,
+  type AutomationRunDetail,
+} from "@/features/automations/client";
+import {
+  CARD_ICONS,
+  cardName,
+  focusCard,
+  stepCard,
+  triggerCard,
+} from "@/features/automations/flow-cards";
+import { RunCanvas, StepMark } from "@/features/automations/RunCanvas";
+import { RunMark } from "@/features/automations/RunsList";
+import {
+  everyStep,
+  runStatusText,
+  STEP_STATE_LABELS,
+  stepStates,
+} from "@/features/automations/runs-model";
+import { StepPanel } from "@/features/automations/StepPanel";
+import { TakenOverLine } from "@/features/automations/TakenOver";
+import { ChatDetail } from "@/features/chats/ChatDetail";
+import { useChatClient } from "@/features/chats/client";
+import { duration } from "@/features/chats/model";
+import { client, type Project } from "@/lib/api/client";
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
+
+const when = (timestamp: string) =>
+  new Date(timestamp).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+/**
+ * What to say of the steps that were running in `before` and have ended in
+ * `after`: "Run agent: Triage finished". Nothing when none has.
+ */
+/**
+ * What a run's Chat is allowed once the person takes it over, before they reply
+ * (#387 3B4): Claude Code resumes as a new Chat does, Codex with the person's
+ * own approval policy and sandbox (`supervisor.rs`, D11 and D3).
+ */
+const TAKEN_OVER_ASKS: Record<string, string> = {
+  "claude-code": " and Claude Code asks before edits",
+  codex: " and Codex uses your own approval settings",
+};
+
+/** The harness of the agent whose step ran in `chat`. */
+function chatHarness(
+  run: AutomationRunDetail,
+  chat: string,
+  agents: AutomationAgent[],
+) {
+  const record = run.steps.find((step) => step.chat_id === chat);
+  const step = everyStep(run.definition.steps).find(
+    (item) => item.id === record?.step_id,
+  );
+  return step?.kind === "run_agent"
+    ? agents.find((agent) => agent.id === step.agent_id)?.harness
+    : undefined;
+}
+
+function stepsEnded(
+  before: AutomationRunDetail,
+  after: AutomationRunDetail,
+  agents: AutomationAgent[],
+): string {
+  const running = new Set(
+    before.steps
+      .filter((step) => step.status === "running")
+      .map((step) => step.step_id),
+  );
+  const steps = everyStep(after.definition.steps);
+  return after.steps
+    .flatMap((record) => {
+      const step = steps.find((item) => item.id === record.step_id);
+      if (!step || !running.has(record.step_id) || record.status === "running")
+        return [];
+      const ended = record.status === "failed" ? "failed" : "finished";
+      return `${cardName(stepCard(step, agents))} ${ended}`;
+    })
+    .join(". ");
+}
+
+/** What the panel says about the selected card: the step's outcome, then the run. */
+function RunPanel({
+  run,
+  agents,
+  selected,
+  onOpenChat,
+  onClose,
+}: {
+  run: AutomationRunDetail;
+  agents: AutomationAgent[];
+  selected: string;
+  onOpenChat: (chatId: string) => void;
+  onClose: () => void;
+}) {
+  const step = everyStep(run.definition.steps).find(
+    (item) => item.id === selected,
+  );
+  const card =
+    selected === TRIGGER_ID
+      ? triggerCard(run.definition.trigger)
+      : step && stepCard(step, agents);
+  if (!card) return null;
+  const Icon = CARD_ICONS[card.icon];
+  const reached = (id: string | undefined) =>
+    run.steps.find((item) => item.step_id === id);
+  const record = reached(selected);
+  const state = stepStates(run).get(selected);
+  const label = state && STEP_STATE_LABELS[state];
+  const failurePath = step && stepPaths(step).on_failure;
+  // A failure path with no steps on it leaves only the run's end to tell by.
+  const handled =
+    record?.status === "failed" &&
+    failurePath &&
+    (failurePath[0] ? reached(failurePath[0].id) : run.status === "completed");
+  return (
+    <StepPanel
+      key={selected}
+      title={card.kind}
+      icon={<Icon size={16} aria-hidden />}
+      onClose={onClose}
+    >
+      {state && (
+        <div className="flow-panel-section">
+          <p className="flow-card-status">
+            <StepMark state={state} />
+            {state === "failed" ? <strong>{label}</strong> : label}
+          </p>
+          {record?.reason && <p className="run-reason">{record.reason}</p>}
+          {handled && (
+            <p className="flow-panel-note">
+              The run went on down this step’s failure path.
+            </p>
+          )}
+          {record?.chat_id && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => onOpenChat(record.chat_id ?? "")}
+            >
+              <MessageSquareText aria-hidden />
+              Open Chat
+            </Button>
+          )}
+        </div>
+      )}
+      <div className="flow-panel-section">
+        <h4>This run</h4>
+        <dl className="flow-panel-facts">
+          <dt>Ticket</dt>
+          <dd>
+            {run.ticket ? (
+              <>
+                <span className="auto-ref">{run.ticket.reference}</span>{" "}
+                {run.ticket.title}
+              </>
+            ) : (
+              "No ticket"
+            )}
+          </dd>
+          <dt>Started</dt>
+          <dd>
+            {run.started_at ? when(run.started_at) : "Not yet"}
+            {run.definition.trigger?.kind === "tag_added" &&
+              `, when ${run.definition.trigger.tag} was added`}
+            {run.definition.trigger?.kind === "schedule" && ", on its schedule"}
+            {run.definition.trigger?.kind === "by_hand" && ", by hand"}
+          </dd>
+          {run.started_at && run.ended_at && (
+            <>
+              <dt>Took</dt>
+              <dd>
+                {duration(
+                  new Date(run.ended_at).getTime() -
+                    new Date(run.started_at).getTime(),
+                )}
+              </dd>
+            </>
+          )}
+        </dl>
+      </div>
+    </StepPanel>
+  );
+}
+
+/**
+ * One run on the read-only canvas. It follows the Workspace, so each step's
+ * status changes as the run goes. A run in progress can be stopped; a finished
+ * one can be run again, which makes a new run and opens it.
+ */
+export function RunView({
+  id,
+  automationName,
+  agents,
+  expanded,
+  single,
+  onExpand,
+  onReturn,
+  onClose,
+  onBack,
+  onOpenRun,
+  onRead,
+}: {
+  id: string;
+  automationName: string;
+  agents: AutomationAgent[];
+  expanded: boolean;
+  single: boolean;
+  onExpand: () => void;
+  onReturn: () => void;
+  onClose: () => void;
+  /** Back to the Automation's runs. */
+  onBack: () => void;
+  onOpenRun: (id: string) => void;
+  /** How the reads this view makes by itself went. */
+  onRead: ReportRead;
+}) {
+  const headingId = useId();
+  const [run, setRun] = useState<AutomationRunDetail | null>(null);
+  /** The card whose panel is open; undefined until the run first loads. */
+  const [selected, setSelected] = useState<string | null>();
+  /** The Chat of an agent step, open in place of the run. */
+  const [chat, setChat] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** What Stop or Run again last failed with, shown here until one works. */
+  const [failure, setFailure] = useState("");
+  /** The step that last finished or failed while this was open, for a screen reader. */
+  const [ended, setEnded] = useState("");
+  const last = useRef<AutomationRunDetail | null>(null);
+  const load = useCallback(
+    () =>
+      reported("run", automationsClient.run(id), onRead, (loaded) => {
+        // Said once: it changes only when a step that was running has ended.
+        const said = last.current && stepsEnded(last.current, loaded, agents);
+        if (said) setEnded(said);
+        last.current = loaded;
+        setRun(loaded);
+        // A run that failed opens on why. Later changes leave the panel alone.
+        setSelected((current) =>
+          current === undefined
+            ? (loaded.steps.find((step) => step.status === "failed")?.step_id ??
+              null)
+            : current,
+        );
+      }),
+    [id, agents, onRead],
+  );
+  useEffect(() => void load(), [load]);
+  useOnWorkspaceChange(() => void load());
+  /** The projects, read only when a condition names one, to say which. */
+  const [projects, setProjects] = useState<Project[]>([]);
+  const namesProject =
+    run?.definition.conditions.some((item) => item.kind === "project") ?? false;
+  useEffect(() => {
+    if (namesProject)
+      void reported("projects", client.listProjects(), onRead, setProjects);
+  }, [namesProject, onRead]);
+  /**
+   * The open Chat when it belongs to a step that has ended with nothing said in
+   * it: the agent never started. Nothing arrives in it later, so one read does.
+   */
+  const chats = useChatClient();
+  const [emptyChat, setEmptyChat] = useState<string | null>(null);
+  const chatEnded =
+    run?.steps.some(
+      (step) => step.chat_id === chat && step.status !== "running",
+    ) ?? false;
+  useEffect(() => {
+    if (!chat || !chatEnded) return;
+    let current = true;
+    chats.openChat(chat).then(
+      (opened) => current && opened.items.length === 0 && setEmptyChat(chat),
+      // ChatDetail reads the same Chat and says why it could not.
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [chats, chat, chatEnded]);
+
+  if (chat)
+    return (
+      <ChatDetail
+        key={chat}
+        id={chat}
+        // The title the runner gives a run's Chat (`run_agent`), until it is read.
+        title={
+          run?.ticket
+            ? `${run.definition.name}: ${run.ticket.reference} ${run.ticket.title}`
+            : run?.definition.name
+        }
+        notice={
+          run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
+            ? emptyChat === chat
+              ? "The agent never started, so this Chat is empty."
+              : `A run of ${automationName}. Reply to take it over; it moves to your Chats${TAKEN_OVER_ASKS[chatHarness(run, chat, agents) ?? ""] ?? ""}.`
+            : run?.status === "taken_over" && (
+                <TakenOverLine
+                  automationName={automationName}
+                  onViewRun={() => setChat(null)}
+                />
+              )
+        }
+        expanded={expanded}
+        single={single}
+        onExpand={onExpand}
+        onReturn={() => setChat(null)}
+        onClose={() => setChat(null)}
+      />
+    );
+
+  const act = <T,>(
+    what: string,
+    action: Promise<T>,
+    done: (result: T) => void,
+  ) => {
+    setBusy(true);
+    void action
+      .then(
+        (result) => {
+          setFailure("");
+          done(result);
+        },
+        (reason: unknown) =>
+          setFailure(
+            `${what} ${reason instanceof Error ? reason.message : String(reason)}`,
+          ),
+      )
+      .finally(() => setBusy(false));
+  };
+  const closePanel = () => {
+    const card = selected;
+    setSelected(null);
+    // Back to the card the panel was opened from.
+    if (card) focusCard(card);
+  };
+  const active = run?.status === "queued" || run?.status === "running";
+  const panel = run && selected && (
+    <RunPanel
+      run={run}
+      agents={agents}
+      selected={selected}
+      onOpenChat={setChat}
+      onClose={closePanel}
+    />
+  );
+  return (
+    <section className="ticket-detail chat-pane" aria-labelledby={headingId}>
+      <div className="detail-header">
+        <div className="detail-title-group">
+          <IconButton label="Back to runs" onClick={onBack}>
+            <ArrowLeft aria-hidden />
+          </IconButton>
+          <h2
+            id={headingId}
+            className="chat-head-title run-title"
+            tabIndex={-1}
+          >
+            <span className="run-crumb">{automationName}</span>
+            <span className="run-own-title">
+              <span className="run-crumb-separator"> › </span>
+              {run?.ticket ? `Run on ${run.ticket.reference}` : "Run"}
+            </span>
+          </h2>
+        </div>
+        <div className="detail-actions">
+          {run && (
+            <>
+              <span className="run-status" role="status">
+                <RunMark run={run} />
+                {runStatusText(run)}
+              </span>
+              {/* Answered here too, not only from its ticket's notice. */}
+              {run.needs_you && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() =>
+                    act(
+                      "It could not be dismissed.",
+                      automationsClient.dismissRun(id),
+                      () => void load(),
+                    )
+                  }
+                >
+                  Dismiss
+                </Button>
+              )}
+              {active ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() =>
+                    act(
+                      "The run could not be stopped.",
+                      automationsClient.stopRun(id),
+                      setRun,
+                    )
+                  }
+                >
+                  <Square aria-hidden />
+                  Stop
+                </Button>
+              ) : run.automation_deleted ? null : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() =>
+                    act(
+                      "It could not be run again.",
+                      automationsClient.runAgain(id),
+                      (again) => onOpenRun(again.id),
+                    )
+                  }
+                >
+                  <RotateCcw aria-hidden />
+                  Run again
+                </Button>
+              )}
+            </>
+          )}
+          {expanded ? (
+            <IconButton label="Show beside the list" onClick={onReturn}>
+              <Minimize2 aria-hidden />
+            </IconButton>
+          ) : (
+            !single && (
+              <IconButton label="Expand run" onClick={onExpand}>
+                <Maximize2 aria-hidden />
+              </IconButton>
+            )
+          )}
+          <IconButton label="Close run" onClick={onClose}>
+            <X aria-hidden />
+          </IconButton>
+        </div>
+      </div>
+      {run?.automation_deleted && !active && (
+        <p className="run-note">Its Automation was deleted.</p>
+      )}
+      {failure && (
+        <div className="run-failure">
+          <Alert size="compact" tone="error">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        </div>
+      )}
+      {/* A live region and no more: focus stays where the person left it. */}
+      <p className="sr-only" aria-live="polite">
+        {ended}
+      </p>
+      {run && (
+        <div className="flow-body" data-panel={panel ? undefined : "none"}>
+          <RunCanvas
+            run={run}
+            agents={agents}
+            only={conditionsLine(run.definition.conditions, projects)}
+            selected={(panel && selected) || null}
+            onSelect={setSelected}
+          />
+          {panel}
+        </div>
+      )}
+    </section>
+  );
+}

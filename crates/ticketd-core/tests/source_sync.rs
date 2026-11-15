@@ -18,7 +18,8 @@ use ticketd_core::{
         DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
         ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
         FailureScope, FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport,
-        SchemaField, SourceError, SourceFilter, SourceHealth, TargetProblem, ValueFormat,
+        SchemaField, SkippedPartition, SourceError, SourceFilter, SourceHealth, TargetProblem,
+        ValueFormat,
     },
 };
 
@@ -28,6 +29,8 @@ struct Remote {
     /// Ids the discovery rules match (only open ones are listed, like GitHub).
     matching: Vec<u64>,
     matching_by_repository: BTreeMap<String, Vec<u64>>,
+    /// Repositories the account cannot read: discovery skips them and says so.
+    inaccessible: Vec<String>,
     pause_next_discovery: Option<DiscoveryPause>,
     page_size: usize,
     outage: Option<String>,
@@ -71,19 +74,34 @@ impl Connector for Fake {
                 Capability::Comments,
             ],
             schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: true,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 1,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
+                fields: vec![
+                    SchemaField {
+                        key: "repositories".into(),
+                        label: "Repositories".into(),
+                        help: None,
+                        required: true,
+                        kind: FieldKind::MultiSelect {
+                            options: OptionSource::Dynamic { depends_on: vec![] },
+                            allow_custom: true,
+                            min_items: 1,
+                            max_items: 3,
+                            format: Some(ValueFormat::OwnerName),
+                        },
                     },
-                }],
+                    SchemaField {
+                        key: "labels".into(),
+                        label: "Labels".into(),
+                        help: None,
+                        required: false,
+                        kind: FieldKind::MultiSelect {
+                            options: OptionSource::Dynamic { depends_on: vec![] },
+                            allow_custom: true,
+                            min_items: 0,
+                            max_items: 3,
+                            format: None,
+                        },
+                    },
+                ],
             },
         }
     }
@@ -115,12 +133,33 @@ impl Connector for Fake {
             .and_then(|repository| repository.as_str())
             .and_then(|repository| remote.matching_by_repository.get(repository))
             .unwrap_or(&remote.matching);
+        let wanted = labels_of(request.config);
         let listed: Vec<ExternalIssue> = matching
             .iter()
             .filter_map(|id| remote.issues.get(id))
             .filter(|issue| issue.state == ExternalState::Open)
+            .filter(|issue| wanted.iter().all(|label| issue.labels.contains(label)))
+            .filter(|issue| {
+                !remote
+                    .inaccessible
+                    .contains(&repository_of(&issue.reference))
+            })
             .cloned()
             .collect();
+        // Said with the first page only: a connector reports a skipped part once.
+        let skipped = if request.cursor.is_none() {
+            remote.inaccessible.clone()
+        } else {
+            Vec::new()
+        }
+        .into_iter()
+        .map(|repository| SkippedPartition {
+            code: "not_found".into(),
+            message: format!("{repository} was not found"),
+            field: None,
+            partition: repository,
+        })
+        .collect();
         let size = remote.page_size.max(1);
         let pause = remote.pause_next_discovery.take();
         drop(remote);
@@ -132,8 +171,25 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues: listed[start..end].to_vec(),
             next_cursor: (end < listed.len()).then(|| end.to_string()),
-            skipped: Vec::new(),
+            skipped,
         })
+    }
+
+    fn partition(&self, reference: &ExternalRef) -> String {
+        repository_of(reference)
+    }
+
+    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
+        config["repositories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|repository| repository.as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    fn discovery_scope(&self, config: &ConfigValues) -> String {
+        labels_of(config).join(",")
     }
 
     fn fetch(
@@ -167,6 +223,30 @@ impl Connector for Fake {
         }
         Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
     }
+}
+
+/// The labels an issue must all have to be discovered; none means any issue.
+fn labels_of(config: &ConfigValues) -> Vec<String> {
+    config
+        .get("labels")
+        .and_then(|labels| labels.as_array())
+        .into_iter()
+        .flatten()
+        .map(|label| label.as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// The repository of an issue the fake holds, read from its `owner/name#id` locator.
+fn repository_of(reference: &ExternalRef) -> String {
+    reference.locator.split('#').next().unwrap().to_owned()
+}
+
+/// An issue of `repository` instead of `o/r`.
+fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
+    let mut issue = issue(id, title);
+    issue.reference.locator = format!("{repository}#{id}");
+    issue.display = issue.reference.locator.clone();
+    issue
 }
 
 fn issue(id: u64, title: &str) -> ExternalIssue {
@@ -1929,4 +2009,389 @@ fn lifecycle_events_compare_instants_not_timestamp_text() {
         Some("2026-01-01T23:00:00-02:00")
     );
     assert!(f.conversation(1).iter().any(|entry| matches!(entry, ConversationEntry::Event { id, event, .. } if id == "close" && event == "closed_completed")));
+}
+
+#[test]
+fn the_first_import_logs_no_workspace_events_and_later_inbound_changes_log_as_sync() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    assert_eq!(f.workspace.workspace_events_after(0, 100).unwrap(), []);
+
+    f.publish(issue(1, "Retitled"), true);
+    f.set_state(1, closed(ClosureReason::Completed));
+    f.publish(issue(2, "Arrived later"), true);
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    let events = f.workspace.workspace_events_after(0, 100).unwrap();
+    assert!(
+        events
+            .iter()
+            .all(|event| event.actor == WorkspaceActor::Sync),
+        "{events:?}"
+    );
+    let of = |number: u32| {
+        let id = f.ticket(number).id;
+        events
+            .iter()
+            .filter(|event| event.ticket_id == id)
+            .map(|event| (event.kind, event.previous.clone(), event.current.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        of(1),
+        [
+            (
+                WorkspaceEventType::TicketUpdated,
+                Some(json!({"title": "Original", "body": "Body of Original"})),
+                Some(json!({"title": "Retitled", "body": "Body of Retitled"}))
+            ),
+            (
+                WorkspaceEventType::TicketStatusChanged,
+                Some(json!({"status": "Todo"})),
+                Some(json!({"status": "Done"}))
+            ),
+        ]
+    );
+    assert_eq!(
+        of(2),
+        [(
+            WorkspaceEventType::TicketCreated,
+            None,
+            Some(json!({
+                "title": "Arrived later", "body": "Body of Arrived later", "status": "Todo",
+                "project_id": null, "plan_id": null,
+            }))
+        )]
+    );
+
+    // The refresh's actor does not outlive it: the same connection writes as a person again.
+    let head = f.workspace.workspace_event_head().unwrap();
+    f.workspace.add_tag("T-KQ2", "backend").unwrap();
+    let after = f.workspace.workspace_events_after(head, 100).unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].actor, WorkspaceActor::Person);
+}
+
+/// A repository added to a source that has been read before brings in its backlog.
+/// That is a first import too: nothing is logged for it, so no Automation starts a
+/// run for every issue it held. What changes or arrives afterwards is news.
+#[test]
+fn a_backlog_a_widened_source_brings_in_logs_nothing_and_what_follows_logs_as_sync() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    let widened = json!({"repositories": ["o/r", "o/more"]});
+    f.workspace
+        .save_source(&f.engine, "fake", widened.as_object().unwrap())
+        .unwrap();
+    f.publish(issue_in("o/more", 2, "Backlog"), true);
+    f.publish(issue(1, "Retitled"), true);
+
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    let kinds = |f: &Fixture, number: u32| {
+        let id = f.ticket(number).id;
+        f.workspace
+            .workspace_events_after(0, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.ticket_id == id)
+            .map(|event| (event.kind, event.actor))
+            .collect::<Vec<_>>()
+    };
+    // The backlog is silent; the ticket already here still logs its change.
+    assert_eq!(kinds(&f, 2), []);
+    assert_eq!(
+        kinds(&f, 1),
+        [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
+    );
+
+    // The added repository has now been read: a later change and a later arrival log.
+    f.publish(issue_in("o/more", 2, "Backlog, retitled"), true);
+    f.publish(issue_in("o/more", 3, "Arrived later"), true);
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(
+        kinds(&f, 2),
+        [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
+    );
+    assert_eq!(
+        kinds(&f, 3),
+        [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
+    );
+}
+
+/// The events logged for the ticket numbered `number`, as (type, actor).
+fn logged(
+    f: &Fixture,
+    number: u32,
+) -> Vec<(
+    ticketd_core::WorkspaceEventType,
+    ticketd_core::WorkspaceActor,
+)> {
+    let id = f.ticket(number).id;
+    f.workspace
+        .workspace_events_after(0, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.ticket_id == id)
+        .map(|event| (event.kind, event.actor))
+        .collect()
+}
+
+/// "First import" is per repository. A read that skips a repository has not read
+/// it: its backlog is still silent when it can be read at last. Meanwhile the
+/// repository read before goes on logging what arrives in it.
+#[test]
+fn a_repository_skipped_when_added_is_silent_when_first_read_and_the_rest_keep_logging() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let created = [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)];
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    // A repository is added before the account can read it.
+    let widened = json!({"repositories": ["o/r", "o/more"]});
+    f.workspace
+        .save_source(&f.engine, "fake", widened.as_object().unwrap())
+        .unwrap();
+    f.remote(|remote| remote.inaccessible = vec!["o/more".into()]);
+    f.publish(issue_in("o/more", 2, "Backlog"), true);
+    f.publish(issue(3, "Arrived where it was read before"), true);
+
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    // Issue 3 is the second ticket: the skipped repository brought nothing in.
+    assert_eq!(f.ticket(2).title, "Arrived where it was read before");
+    assert_eq!(logged(&f, 2), created);
+
+    // Access is granted: this is the first time the repository is read.
+    f.remote(|remote| remote.inaccessible.clear());
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(f.ticket(3).title, "Backlog");
+    assert_eq!(logged(&f, 3), []);
+
+    // From then on what arrives in it is news, and a later skip does not undo that.
+    f.remote(|remote| remote.inaccessible = vec!["o/more".into()]);
+    f.refresh_at("2026-02-04T00:00:00Z");
+    f.remote(|remote| remote.inaccessible.clear());
+    f.publish(issue_in("o/more", 4, "Arrived later"), true);
+    f.refresh_at("2026-02-05T00:00:00Z");
+    assert_eq!(logged(&f, 4), created);
+}
+
+fn save_labels(f: &mut Fixture, labels: &[&str]) {
+    let config = json!({"repositories": ["o/r"], "labels": labels});
+    f.workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap();
+}
+
+fn labelled(id: u64, title: &str, labels: &[&str]) -> ExternalIssue {
+    let mut issue = issue(id, title);
+    issue.labels = labels.iter().map(|label| (*label).to_owned()).collect();
+    issue
+}
+
+/// A repository is read under its discovery rules. Loosening a filter shows a
+/// backlog that was always there, so its issues come in silently, as on a first
+/// read; changes to tickets already here, and what arrives once the loosened rules
+/// have been read, log as `sync` and start Automations.
+#[test]
+fn loosening_a_filter_brings_its_backlog_in_silently_and_what_follows_logs() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let created = [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)];
+    let mut f = Fixture::new();
+    save_labels(&mut f, &["triage"]);
+    f.publish(labelled(1, "Bug", &["bug"]), true);
+    f.publish(labelled(2, "Triage", &["triage"]), true);
+    f.refresh();
+    assert_eq!(f.ticket(1).title, "Triage");
+    assert_eq!(logged(&f, 1), []);
+
+    // With the rules unchanged, an old issue that gains the label is news.
+    f.publish(labelled(1, "Bug", &["bug", "triage"]), true);
+    f.refresh_at("2026-02-02T00:00:00Z");
+    assert_eq!(f.ticket(2).title, "Bug");
+    assert_eq!(logged(&f, 2), created);
+
+    // Loosened: the backlog it shows is silent, the ticket already here still logs.
+    f.publish(labelled(3, "Enhancement", &["enhancement"]), true);
+    f.publish(labelled(2, "Triage, retitled", &["triage"]), true);
+    save_labels(&mut f, &[]);
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(f.ticket(3).title, "Enhancement");
+    assert_eq!(logged(&f, 3), []);
+    assert_eq!(
+        logged(&f, 1),
+        [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
+    );
+
+    // Read under the loosened rules, what arrives next is news.
+    f.publish(labelled(4, "Arrived later", &["question"]), true);
+    f.refresh_at("2026-02-04T00:00:00Z");
+    assert_eq!(logged(&f, 4), created);
+}
+
+/// Tightened, then loosened again: the loosened rules were forgotten when they
+/// stopped being asked for, so what reappears is a backlog again and is silent.
+/// An issue that arrives in the same refresh as a change of rules cannot be told
+/// from that backlog, and is silent too: the safer side.
+#[test]
+fn a_filter_tightened_then_loosened_and_an_arrival_with_the_change_stay_silent() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(labelled(1, "Triage", &["triage"]), true);
+    f.refresh();
+    save_labels(&mut f, &["triage"]);
+    f.refresh_at("2026-02-02T00:00:00Z");
+    // Hidden while the rules were tight, arriving with the change back.
+    f.publish(labelled(2, "Hidden while tight", &["bug"]), true);
+    f.refresh_at("2026-02-03T00:00:00Z");
+    f.publish(labelled(3, "Arrived with the change", &["bug"]), true);
+    save_labels(&mut f, &[]);
+    f.refresh_at("2026-02-04T00:00:00Z");
+    assert_eq!(f.ticket(2).title, "Hidden while tight");
+    assert_eq!(logged(&f, 2), []);
+    assert_eq!(f.ticket(3).title, "Arrived with the change");
+    assert_eq!(logged(&f, 3), []);
+
+    // A new issue the tightened rules match still logs while they apply.
+    save_labels(&mut f, &["triage"]);
+    f.refresh_at("2026-02-05T00:00:00Z");
+    f.publish(labelled(4, "Triage arrival", &["triage"]), true);
+    f.refresh_at("2026-02-06T00:00:00Z");
+    assert_eq!(
+        logged(&f, 4),
+        [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
+    );
+}
+
+/// A Workspace from before the repositories read were kept: one with tickets
+/// already imported counts as read, one without does not.
+#[test]
+fn before_the_repositories_read_were_kept_one_with_imported_tickets_counts_as_read() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    let widened = json!({"repositories": ["o/r", "o/more"]});
+    f.workspace
+        .save_source(&f.engine, "fake", widened.as_object().unwrap())
+        .unwrap();
+    let db = rusqlite::Connection::open(f.path()).unwrap();
+    db.execute("UPDATE source_status SET read_partitions = NULL", [])
+        .unwrap();
+    drop(db);
+    f.publish(issue(2, "Arrived where tickets were imported"), true);
+    f.publish(issue_in("o/more", 3, "Backlog"), true);
+
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    assert_eq!(
+        logged(&f, 2),
+        [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
+    );
+    assert_eq!(logged(&f, 3), []);
+}
+
+/// Format 82 replaces the configuration unreleased builds kept with the repositories read.
+#[test]
+fn a_format_81_workspace_gains_the_repositories_read_and_loses_the_configuration() {
+    let f = Fixture::new();
+    let path = f.path();
+    drop(f.workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE source_status DROP COLUMN read_partitions; \
+         ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT; \
+         PRAGMA user_version = 81;",
+    )
+    .unwrap();
+    drop(db);
+
+    drop(Workspace::open(&path).unwrap());
+
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let columns: Vec<String> = db
+        .prepare("SELECT name FROM pragma_table_info('source_status')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(columns.contains(&"read_partitions".to_owned()));
+    assert!(!columns.contains(&"refreshed_configuration".to_owned()));
+}
+
+#[test]
+fn a_change_a_refresh_brings_in_starts_an_automation_narrowed_to_that_source() {
+    use ticketd_core::{
+        AutomationAgentSettings, AutomationDefinition, Condition, Step, StepAction, Trigger,
+    };
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "From the tracker"), true);
+    f.refresh();
+    let local = f.workspace.create_ticket("Local").unwrap();
+    let agent = f
+        .workspace
+        .create_automation_agent(AutomationAgentSettings::default())
+        .unwrap();
+    let mut done_from = |source: &str| {
+        let automation = f
+            .workspace
+            .create_automation(AutomationDefinition {
+                name: "Closed".into(),
+                trigger: Some(Trigger::StatusChanged {
+                    to: Some(Status::Done),
+                    from: None,
+                }),
+                conditions: vec![Condition::Source {
+                    any_of: vec![source.into()],
+                }],
+                steps: vec![Step {
+                    id: "review".into(),
+                    action: StepAction::RunAgent {
+                        agent_id: Some(agent.id.clone()),
+                        execution_folder: Some("/work/app".into()),
+                        on_failure: None,
+                    },
+                }],
+            })
+            .unwrap();
+        f.workspace
+            .set_automation_enabled(&automation.id, true)
+            .unwrap();
+        automation.id
+    };
+    let [from_fake, from_local] = ["fake", "local"].map(&mut done_from);
+
+    // The tracker closes its issue; a person closes the local ticket.
+    f.set_state(1, closed(ClosureReason::Completed));
+    f.refresh_at("2026-02-02T00:00:00Z");
+    let done = TicketPatch {
+        status: Some(Status::Done),
+        ..Default::default()
+    };
+    f.workspace.change_ticket(&local.reference, done).unwrap();
+
+    f.workspace.queue_automation_runs().unwrap();
+    let started = |automation: &str| {
+        f.workspace
+            .automation_runs(automation)
+            .unwrap()
+            .into_iter()
+            .map(|run| run.ticket.unwrap().id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(started(&from_fake), [f.ticket(1).id]);
+    assert_eq!(started(&from_local), [local.id]);
 }

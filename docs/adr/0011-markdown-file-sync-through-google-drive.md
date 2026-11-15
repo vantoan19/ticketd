@@ -52,7 +52,7 @@ Each device keeps a copy of every file as it was last synced. When a record chan
 
 No duplicate ticket or conflict-copy file is ever created. A file that cannot be read is skipped with a Needs attention notice and changes nothing locally.
 
-Files and the two shared JSON files carry a format number. A file from a newer ticketd (a higher number) is skipped the same way and is never replaced by a device that cannot read it; that record's local changes wait until the device is updated. The number is the only mark of a newer ticketd, so a version that adds a field or a section raises it: a field this version does not know in a format it reads is a mistake made by hand, and the next local change replaces the file. A device whose own last-synced copy of a file cannot be read treats the record as never synced, so a differing value goes to review instead of being taken or sent silently.
+Files and the two shared JSON files carry a format number. A file from a newer ticketd (a higher number) is skipped the same way and is never replaced by a device that cannot read it; that record's local changes wait until the device is updated. The number is the only mark of a newer ticketd, so a version that adds a field or a section raises it (unless no released ticketd has written that kind of file): a field this version does not know in a format it reads is a mistake made by hand, and the next local change replaces the file. A device whose own last-synced copy of a file cannot be read treats the record as never synced, so a differing value goes to review instead of being taken or sent silently.
 
 ## Trash and deletion
 

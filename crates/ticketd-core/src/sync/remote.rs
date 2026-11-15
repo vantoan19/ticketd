@@ -17,6 +17,8 @@ pub enum RemoteKind {
     Document,
     Plan,
     Project,
+    Automation,
+    AutomationAgent,
     /// Raw managed Attachment bytes, stored under `attachments/`.
     Attachment,
     /// The small device-registry file.
@@ -24,11 +26,13 @@ pub enum RemoteKind {
 }
 
 impl RemoteKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Ticket,
         Self::Document,
         Self::Plan,
         Self::Project,
+        Self::Automation,
+        Self::AutomationAgent,
         Self::Attachment,
         Self::Devices,
     ];
@@ -39,6 +43,8 @@ impl RemoteKind {
             Self::Document => "document",
             Self::Plan => "plan",
             Self::Project => "project",
+            Self::Automation => "automation",
+            Self::AutomationAgent => "automation_agent",
             Self::Attachment => "attachment",
             Self::Devices => "devices",
         }

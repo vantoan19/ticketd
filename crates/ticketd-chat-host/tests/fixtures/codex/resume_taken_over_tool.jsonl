@@ -1,0 +1,10 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema: ConfigReadParams, ConfigReadResponse, ThreadResumeParams); the config/read reply's shape was seen live on 0.162.1. A Chat taken over from a run: the person's configuration is read, then the thread resumes with their approval policy and sandbox (none set here, so Codex's defaults). Every value is synthetic."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.162.1 (Windows 10.0.26200; x86_64)","codexHome":"/home/example/.codex","platformFamily":"windows","platformOs":"windows"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"config/read","params":{"cwd":"/work/chat-1"}}}
+{"server":{"id":2,"result":{"config":{"model":"gpt-test","approval_policy":null,"sandbox_mode":"workspace-write","mcp_servers":{}},"origins":{},"layers":null}}}
+{"client":{"id":3,"method":"thread/resume","params":{"threadId":"thr_1","cwd":"/work/chat-1","excludeTurns":true,"approvalPolicy":"on-request","sandbox":"workspace-write"}}}
+{"server":{"id":3,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.163.0","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"},"cwd":"/work/chat-1","instructionSources":["/work/chat-1/AGENTS.md"]}}}
+{"server":{"id":"call-1","method":"item/tool/call","params":{"threadId":"thr_1","turnId":"turn_1","callId":"c1","namespace":null,"tool":"ticketd","arguments":{"arguments":["restore-workspace","backup.db"]}}}}
+{"client":{"id":"call-1","result":{"success":false,"contentItems":[{"type":"inputText","text":"ticketd tool: `restore-workspace` replaces the Workspace and is not available to an agent"}]}}}

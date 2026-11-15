@@ -32,7 +32,7 @@ The core is a shared library, not a shared running process. A background daemon,
 
 ## Source layout
 
-The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
+The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crates/ticketd-chat-host`, `crates/ticketd-automation-runner`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
 
 ## Module responsibilities
 
@@ -206,6 +206,177 @@ turn running at that moment; otherwise it is shown for no Chat rather than the
 wrong one. Save as Document is the ordinary Document-creation workflow applied to a
 stored response.
 
+A harness process started for an Automation run also gets the run's ID in
+`TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
+change it makes as a Workspace event with actor `automation`, and such events never
+trigger Automations. The value itself is not stored.
+
+### Automation runs
+
+`crates/ticketd-automation-runner` owns the loop and depends only on the core and
+the Chat host, so it is tested without the desktop. The desktop calls one pass at
+start and every five seconds while Chat is on. A pass asks the core to queue a run
+for each Workspace event after a switched-on Automation's cursor that matches its
+trigger and conditions, and to start queued runs, oldest event first, until as
+many are running as the device's "Runs at once" setting allows (2 unless changed,
+at most 10; read on every pass, so a change counts from the next run). A run that
+ends also starts the next queued one, but nothing starts while the Chat host is not
+serving (Chat off, Quit, a restore): queued runs wait for it. The core
+holds the rules: an event with actor `automation` matches
+nothing, a ticket has one active run per Automation (a partial unique index), and a
+run keeps the Automation definition it was created with. Each of the six event types
+is a trigger. An event with actor `sync`, which a refresh of an external ticket
+source logs, matches like one with actor `person`. An event with actor
+`workspace_sync`, which Workspace sync logs for a change made on another desktop,
+matches nothing: each desktop reacts only to changes made on it and to its ticket
+sources (provisional, ADR 0012).
+Conditions are tested against the ticket as it is when the event is matched, not as
+it was when the event was logged: its project, its tags, and its source, which is
+the provider that owns it now (`github`) or `local`, the same rule as the ticket
+list's source filter. Matching and the run state
+machine are functions with no SQL: the state machine takes the run's steps and how
+the step it was on ended, and answers with the next step or how the run ends.
+Runs are local to the device, kept 90 days, and a run left Running by a process
+that is gone ends as Needs attention when the next one starts; nothing retries.
+
+A schedule and Run now start a run without going through the event log. Such a run
+has no ticket and no event, and an Automation has at most one of them Queued or
+Running. A schedule is every N hours, or a time of day on chosen weekdays, in the
+computer's local time. The same pass asks the core which schedules have come due:
+each Automation that is on keeps, on this device, the local time its schedule counts
+from (`automation_device_state.schedule_from`), set when the schedule is first seen
+on, when it fires, and cleared when the trigger changes. A schedule is due when it
+had a time to run after that and up to now, so however many times were missed while
+ticketd was not running, the first pass after the start fires it once. One that
+comes due while its last run is still going is skipped. Whether a schedule is due is
+a function of the schedule and two local times, with no SQL and no clock. An
+Automation run by hand is never on, so it never keeps ticketd in the tray; Run now
+queues its run, which the next pass starts. Change ticket and If steps need a
+ticket: an Automation that starts on a schedule or by hand and holds one is
+unfinished, so it cannot be switched on or run. An agent in a run without a ticket
+is told so in its first message, and a Notify me step there opens the run.
+
+The person can stop a Queued or Running run, which ends it as Needs attention: the
+core marks the step it was on Failed and refuses the outcome its executor reports
+later, so not even the step's failure path runs, and the desktop interrupts the
+agent's Chat. Run again on a finished run queues a new run for the same Workspace
+event, from the first step of the Automation as it is now; the finished run stays
+as history. The run view draws a run from the definition the run keeps, so it shows
+the steps as they were even after the Automation is edited.
+
+A run that ends as Needs attention needs the person until they act on it: the core
+counts it for the sidebar and adds an Attention inbox entry (kind `automation_run`)
+on its ticket, whether or not the ticket is followed. A run without a ticket is
+counted and listed under Needs you the same way, with no inbox entry: an entry
+belongs to a ticket. Run again, Dismiss and taking
+the run over clear that and mark the entry read; opening the run or reading the
+entry does not. Dismiss leaves the run as it ended.
+
+The person takes a run over in the Chat of one of its agent steps.
+`ChatHost::send` and `ChatHost::stop` are the person's actions, so both ask the
+core first: a message makes the Chat an ordinary one in the Chat list, and a run
+that was Running or needed attention ends as Taken over, with the step it was on
+ended there and nothing after it run. Stop takes over only a Running run, since
+nothing is going in the Chat of one that ended; that is also why stopping a run
+from the run view, which ends the run before it interrupts the Chat, stays Needs
+attention; its Stop then ends the Chat's unattended session as well, which closes
+an agent still opening. A Completed run stays Completed when the person replies in its Chat.
+Taking over a run that is going also ends its agents' unattended sessions at once:
+a harness cannot change how it runs in place, so the host interrupts the turn and
+closes the harness process of every Chat the run had working, and the wait in
+`run_unattended` ends without reporting a step. The Chat the person acted in then
+opens a new process that resumes the same conversation as an ordinary Chat, with
+their own settings and approvals, no run marker on what it writes, and no time
+limit; the Chat of a later step that was working stays closed and out of the list.
+It opens as a new ordinary Chat would: Claude Code with New Chat's default model
+and "Ask before edits", whatever its own `defaultMode` says. The message that took
+the run over is that session's first turn, even when it was sent to wait behind the
+agent's turn, and the turn the take-over ended does not pause the Chat's queue.
+The run's own first message goes through a path that takes nothing over, and it
+starts an agent only while the run is still going and the Chat is still the
+agent's: a run taken over or stopped just after a step's Chat was created starts
+no agent in it. Retention
+deletes a run with the Chats it still owns, so a Chat the person took over is kept.
+
+A Run agent step is an ordinary Chat, created in the step's folder, linked to the
+ticket and owned by the run (`chats.automation_run_id`), which keeps it out of the
+Chat list. The host opens its harness with an `Unattended` request: the agent's
+model, allowed tools and turn limit. An adapter given one never asks for approval
+and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
+permission mode with the allowed tools as its allowlist and the tools of each
+switch that is off disallowed; "Edit files" also allows `Read`, since Claude Code
+edits only a file it has read. File tools are kept to the step's folder, Claude
+Code's only working directory: the bridge turns on
+`permissions.blockReadsOutsideWorkingDirectories` and
+`blockWritesOutsideWorkingDirectories`, no file tool is allowed by its bare name,
+and edits are allowed by `Edit(./**)` alone. Commands the agent may run are not
+kept to the folder. It loads none of the person's user, project or
+local Claude Code settings, so an allow rule there cannot widen the allowlist;
+that also leaves out their hooks, `CLAUDE.md` and anything else those files set,
+and it loads none of their MCP servers, claude.ai connectors or skills.
+The ticketd CLI is allowed in both of Claude Code's shells, Bash and PowerShell,
+by name only: every Chat's harness process has the CLI's folder first on its
+`PATH`, and the Chat's context tells the agent to run `ticketd` by that name.
+Codex runs with approval policy `on-request`, and ticketd declines every approval
+request at once (with `never`, Codex reports a patch its policy rejects as no item at all, so
+the step could not fail), with no network unless the web is allowed, and with
+the person's MCP servers, plugins and apps turned off. The same overrides also switch off
+their hooks, notify program, project `AGENTS.md`, memories, sub-agents, computer and browser
+use, and Codex's bundled skills (the agent editor does not list these). The switches map as follows. "Edit
+files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
+is the step's folder. "Run commands" off sets `features.shell_tool=false` (and turns the image
+viewer off), which also ends the agent's reading, because Codex has no read tool and reads
+through its shell; with it on the agent runs any command inside the sandbox, as Codex has no
+list of allowed commands. With both off, the thread starts with `environments: []`, so
+`apply_patch` goes too. "Read files" is not a Codex setting, and no read limit is applied: it
+can read any file the person can when Run commands is on. The agent reaches its tickets through
+ticketd's own tool: the thread declares one dynamic tool, `ticketd`, over the experimental app-server API,
+and ticketd answers its `item/tool/call` requests by running the bundled CLI in its own process
+with the arguments as an array, the step's folder as working directory and the run's identity, so
+the Codex sandbox does not apply to it and a read-only agent can still record its result. `restore-workspace`
+and `skills install` are refused. Codex still reads the
+person's own global `AGENTS.md` and lists their skills in `~/.agents/skills`, and their "always
+allow" rules apply when Run commands is on: its app-server has no
+setting that leaves them out, and the agent editor says so. Codex 0.163.0 or newer is required:
+0.162.x cannot start its Windows sandbox while another Codex process holds a runtime file. A command Codex could not
+start fails the step: the agent could not do its work. So does a tool Codex declined and a
+file change it declined or failed to write, with a reason naming the file. A Chat taken over from a
+run resumes its Codex thread with the person's own approval policy and sandbox
+from their Codex configuration (`on-request` and `read-only` when it sets none). Codex
+has no turn limit to set, so the agent editor hides the Turns field for Codex. `ChatHost::run_unattended` sends the first
+message, stops a turn still going at the agent's time limit, reports how the turn
+ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
+and closes the harness process. An unattended harness that asks for approval
+anyway is stopped and counted as denied.
+
+A Change ticket step is one core call, `apply_automation_change`: it logs its
+write with actor `automation`, so the change starts no Automation, and signs a
+status change or a posted update with the Automation's name. Text in a posted
+update or a notification holds field references (`{{ticket.reference}}`,
+`{{ticket.title}}`, `{{ticket.status}}`, `{{event.tag}}`) that the core fills in
+when the step runs, from the ticket as it is then. A write the core refuses fails
+the step. A Notify me step asks the core for the notification and hands it to the
+runner's host. The desktop shows it from the Rust side, not from the page, because
+a run goes on while the window is hidden to the tray; a click brings the window
+back and the page opens the ticket or the Automation's runs.
+
+An If step is one core read, `automation_if_passes`: it tests the step's checks
+(tags, status, project) against the run's ticket as it is at that moment, so it
+sees what the steps before it and their agents recorded. The run goes down the
+Yes path when every check passes and down the No path otherwise. Paths never
+rejoin: the end of a path is the end of the run, and the editor places no step
+after an If.
+
+A Run agent, Change ticket or Notify me step may carry a failure path, a list of
+steps like any other (`on_failure`); null means it has none. When such a step
+fails, the run marks it Failed with its reason and goes down that path to its end,
+and the run ends Completed: the failure was handled, so nothing asks for the
+person. A path with no steps handles the failure by ending the run. A step that
+fails with no failure path ends the run as Needs attention with the step's reason.
+Only a step's own failure takes the path: a run the person stops, switches off
+with "Stop it and turn off" or takes over has left Running, so the outcome its
+executor reports later is refused and the path does not run.
+
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process
 recovery. Only a live request registry can answer approvals. Native resume failure
@@ -237,14 +408,29 @@ not from the workspace poll. The Experimental switch is a per-computer
 preference kept by the interface; the backend starts with Chat off and is told
 the choice at startup.
 
-Closing the window while Chat is on and a Chat is working hides the window and
-shows a tray icon; the process, the host and the page stay, so showing the
-window again attaches to the same work. Starting ticketd a second time shows the
+Closing the window while Chat is on and either a Chat is working or an
+Automation is switched on for this device hides the window and shows a tray
+icon; the process, the host, the Automation runner and the page stay, so showing
+the window again attaches to the same work. An Automation that is on counts even
+when nothing is running, because it may start a run at any time and runs only in
+this process. Starting ticketd a second time shows the
 running window instead of starting a second host
 (`tauri-plugin-single-instance`). Quit from the tray or the system asks in the
 window first, then stops app-owned execution with bounded cleanup before the
-process exits. With Chat off or no Chat working, closing the window exits as
-before.
+process exits; a run whose agent was stopped that way ends as Needs attention
+when ticketd next starts. With Chat off, or with no Chat working and no
+Automation on, closing the window exits as before.
+
+Switching an Automation off stops matching and leaves its active runs to finish.
+"Stop it and turn off" also ends its Queued and Running runs as Needs attention in
+the same transaction, and the runner then interrupts the agents they were
+running; what those turns report afterwards is refused.
+
+"Start ticketd when you sign in" registers the app with the system through
+`tauri-plugin-autostart` (the Run registry key on Windows, a launch agent on
+macOS, an autostart entry on Linux). The page reaches it through two ticketd
+commands; the plugin's own commands are granted to no window. There is no
+service: with ticketd quit, nothing runs.
 
 The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#20-native-agent-chats).
 Provider support clarification and live compatibility checks remain requirements
@@ -915,6 +1101,7 @@ the core; the desktop only schedules it and shows its state.
 | Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests. |
 | Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                         |
 | Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.   |
+| Workspace event log      | `events.rs` logs each committed ticket change through database triggers, with its previous and current values and actor kind; device-local, read by cursor, kept 90 days (ADR 0012).       |
 
 A captured mark names a record, not a change. The file is produced from current
 state at upload time and compared with the last-synced copy, so a mark for a

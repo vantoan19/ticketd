@@ -31,6 +31,11 @@ pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Er
     engine::migrate(connection)
 }
 
+/// Capture for the tables added since capture last ran.
+pub(crate) fn migrate_capture(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    capture::migrate(connection)
+}
+
 /// The sync destination and Attachment transfer state (format version 59).
 pub(crate) fn migrate_setup(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate(connection)
