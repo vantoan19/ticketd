@@ -2,6 +2,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState } from "react";
+import { Plus } from "lucide-react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { FollowToggle } from "@/features/tickets/Attention";
@@ -73,6 +74,53 @@ export function TicketPage({
   const work = useLinkedWork(ticket, revision, refresh, active);
   const sourcesConfigured = useSourcesConfigured();
   const trash = useTicketTrash(updateTicket, refresh);
+  // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
+  // row of adds under the description, and appear once they have content.
+  const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
+  const [evidenceRequest, setEvidenceRequest] = useState(0);
+  const noSubtickets = work.current?.links?.children_progress.total === 0;
+  const noRelationships =
+    Boolean(work.current?.links) && work.rows.length === 0;
+  const addRow = active &&
+    !ticket.trashed &&
+    (noSubtickets || evidenceCount === 0 || noRelationships) && (
+      <div
+        className="ticket-add-row"
+        role="group"
+        aria-label="Add to this ticket"
+      >
+        {noSubtickets && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => work.openLink("subticket")}
+          >
+            <Plus aria-hidden="true" />
+            Subticket
+          </Button>
+        )}
+        {evidenceCount === 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setEvidenceRequest((count) => count + 1)}
+          >
+            <Plus aria-hidden="true" />
+            Evidence
+          </Button>
+        )}
+        {noRelationships && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => work.openLink("related")}
+          >
+            <Plus aria-hidden="true" />
+            Relationship
+          </Button>
+        )}
+      </div>
+    );
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts it at the top: document, rail, detail.
   const page = useRef<HTMLDivElement>(null);
@@ -207,27 +255,23 @@ export function TicketPage({
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
-  // Folded, the rail's values sit under the title as one strip, in rail order.
-  const stateAndStrip = (
-    <>
-      {stateLine}
-      {narrow && (
-        <TicketProperties
-          layout="strip"
-          chats={chats}
-          attention={attentionFor("strip")}
-          ticket={ticket}
-          active={active}
-          revision={revision}
-          projects={projects}
-          plans={plans}
-          onSaved={updateTicket}
-          refresh={refresh}
-          onOpenTicket={select}
-          onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-        />
-      )}
-    </>
+  // Folded, the rail's values sit under the title as one strip, in rail
+  // order; the state line is the editor's own row above it.
+  const strip = narrow && (
+    <TicketProperties
+      layout="strip"
+      chats={chats}
+      attention={attentionFor("strip")}
+      ticket={ticket}
+      active={active}
+      revision={revision}
+      projects={projects}
+      plans={plans}
+      onSaved={updateTicket}
+      refresh={refresh}
+      onOpenTicket={select}
+      onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
+    />
   );
   return (
     <div
@@ -272,7 +316,8 @@ export function TicketPage({
             ) : (
               <h3 className="detail-title">{ticket.title}</h3>
             )}
-            {stateAndStrip}
+            {stateLine}
+            {strip}
             <div className="editor-body">
               {source && contentLocked ? (
                 <SourceDescription
@@ -306,11 +351,13 @@ export function TicketPage({
             select={select}
             revision={revision}
             mention={mention}
+            stateLine={stateLine}
           >
-            {stateAndStrip}
+            {strip}
           </TicketEditor>
         )}
-        {active && (
+        {addRow}
+        {active && !ticket.trashed && !noSubtickets && (
           <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
         {active && (
@@ -319,6 +366,9 @@ export function TicketPage({
             revision={revision}
             trashed={ticket.trashed}
             refresh={refresh}
+            folded
+            addRequest={evidenceRequest}
+            onCount={setEvidenceCount}
           />
         )}
         {narrow && (

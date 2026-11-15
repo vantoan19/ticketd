@@ -23,7 +23,6 @@ import {
 } from "@/lib/api/describe-failure";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   DropdownMenu,
@@ -38,7 +37,10 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
-import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
+import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
+import { Kbd } from "@/components/ui/kbd";
+import { Time } from "@/components/ui/time";
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -219,6 +221,8 @@ export function DocumentEditor({
     (item) => item.kind === "document" && item.id === initial?.id,
   );
   const [historyOpen, setHistoryOpen] = useState(false);
+  // The session row's middle, where the editor puts its formatting (P16).
+  const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   const recovery = useDraftRecovery();
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
   const [recovered] = useState(() =>
@@ -539,8 +543,18 @@ export function DocumentEditor({
   useEffect(() => {
     saveRef.current = save;
   });
+  const failedRef = useRef(false);
   useEffect(() => {
-    const timer = window.setTimeout(() => void saveRef.current(), 400);
+    failedRef.current = failed;
+  }, [failed]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      // A failed save is retried by Retry, or by the next change; autosave
+      // never repeats the very same request on its own.
+      if (failedRef.current && pending.current?.snapshot === draft.current)
+        return;
+      void saveRef.current();
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [title, body, suggestion]);
   /**
@@ -736,6 +750,42 @@ export function DocumentEditor({
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
+  /** Opens or closes editing; the heading line the title shows stays out of the editor. */
+  const setEditing = (edit: boolean) => {
+    const stripped = withoutDerivedHeading(body, title, savedDocument?.heading);
+    setHiddenHead(
+      edit && initial ? body.slice(0, body.length - stripped.length) : "",
+    );
+    setWriting(edit);
+  };
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const markdownExport = useMarkdownExport(
+    { kind: "markdown", body },
+    actionsTrigger,
+  );
+  // E edits the Document in view, unless typing or another surface has focus.
+  const editTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!initial) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "e" || event.metaKey || event.ctrlKey || event.altKey)
+        return;
+      const button = editTrigger.current;
+      if (!button || !active || button.closest("[hidden]")) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          "input, textarea, select, [contenteditable], [role=dialog], [role=menu], [role=listbox]",
+        )
+      )
+        return;
+      event.preventDefault();
+      button.click();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [initial, active]);
   const titleInput = (
     <Input
       id="document-title"
@@ -933,35 +983,19 @@ export function DocumentEditor({
           </span>
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
-            {statusLine}
             {!writing && (
-              <ExportMarkdownButton
-                compact
-                source={{ kind: "markdown", body }}
-              />
+              <Button
+                ref={editTrigger}
+                variant="ghost"
+                size="sm"
+                aria-keyshortcuts="E"
+                disabled={transitioning}
+                onClick={() => setEditing(true)}
+              >
+                Edit
+                <Kbd aria-hidden="true">E</Kbd>
+              </Button>
             )}
-            <SegmentedControl
-              aria-label="Document mode"
-              value={writing ? "edit" : "read"}
-              onValueChange={(value) => {
-                const edit = value === "edit";
-                const stripped = withoutDerivedHeading(
-                  body,
-                  title,
-                  savedDocument?.heading,
-                );
-                setHiddenHead(
-                  edit && initial
-                    ? body.slice(0, body.length - stripped.length)
-                    : "",
-                );
-                setWriting(edit);
-              }}
-              options={[
-                { value: "read", label: "Read" },
-                { value: "edit", label: "Edit" },
-              ]}
-            />
             {onTogglePin && (
               <IconButton
                 label={pinned ? "Unpin Document" : "Pin Document"}
@@ -971,24 +1005,38 @@ export function DocumentEditor({
                 <Pin fill={pinned ? "currentColor" : "none"} />
               </IconButton>
             )}
-            {!trashed && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton label="Document actions" disabled={transitioning}>
-                    <MoreHorizontal />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" sideOffset={4}>
-                  <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                    History…
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={toggleTrash}>
-                    Move to Trash
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {/* Kept in Trash too, with Restore, so the header never changes shape (DR-10). */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  ref={actionsTrigger}
+                  label="Document actions"
+                  disabled={transitioning}
+                >
+                  <MoreHorizontal />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                  History…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={markdownExport.busy}
+                  onSelect={() => void markdownExport.run()}
+                >
+                  Export Markdown with files…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  {...(!trashed && { variant: "destructive" as const })}
+                  onSelect={toggleTrash}
+                >
+                  {trashed ? "Restore" : "Move to Trash"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
+          {markdownExport.element}
         </header>
       )}
       {initial && historyOpen && (
@@ -1007,6 +1055,7 @@ export function DocumentEditor({
             <AlertDescription>In Trash</AlertDescription>
             <Button
               variant="outline"
+              size="sm"
               disabled={transitioning}
               onClick={toggleTrash}
             >
@@ -1016,25 +1065,49 @@ export function DocumentEditor({
         )}
         {initial &&
           (writing ? (
-            <div className="document-title">
-              {titleInput}
-              <p className="document-title-hint">
-                Title · the Document’s heading
-              </p>
-            </div>
+            // The title edits in place at the heading's size, without a box.
+            <div className="document-title">{titleInput}</div>
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
-        {initial && !writing && (
-          <p className="document-subtitle">
-            Updated{" "}
-            <DocumentDate
-              value={savedDocument?.updated_at ?? initial.updated_at}
-            />
-            {planSpec && ` · spec of the Plan ${planSpec.label}`}
-            {planSupport &&
-              ` · supporting Document of the Plan ${planSupport.label}`}
-          </p>
+        {initial && (
+          // One 32px row: "Updated 2 h ago" while reading; the session row
+          // (save state, formatting, Done) while editing. Nothing moves.
+          <div
+            className="document-state-row"
+            data-session={writing || undefined}
+          >
+            {writing ? (
+              <>
+                {statusLine}
+                <span ref={setSessionHost} className="document-session-tools" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Done editing"
+                  onClick={() => setEditing(false)}
+                >
+                  Done
+                  <Kbd aria-hidden="true">Esc</Kbd>
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="document-subtitle">
+                  Updated{" "}
+                  {Number.isNaN(Date.parse(updatedAt)) ? (
+                    updatedAt
+                  ) : (
+                    <Time value={updatedAt} />
+                  )}
+                  {planSpec && ` · spec of the Plan ${planSpec.label}`}
+                  {planSupport &&
+                    ` · supporting Document of the Plan ${planSupport.label}`}
+                </p>
+                {(needsReview || sync === "needs_review") && statusLine}
+              </>
+            )}
+          </div>
         )}
         {suggestion && (
           <p>
@@ -1135,10 +1208,16 @@ export function DocumentEditor({
                 setBody(next);
               }}
               label={capture ? "Your thought" : "Document"}
-              placeholder={capture ? "Write a thought…" : "Type / for blocks"}
+              placeholder={
+                capture ? "Write a thought…" : "Write — type / for blocks"
+              }
               readOnly={locked}
               autoFocus={capture}
-              persistentToolbar={capture}
+              {...(!capture && {
+                chrome: "session" as const,
+                chromeHost: sessionHost,
+                onEscape: () => setEditing(false),
+              })}
               focusRequest={focusRequest}
             />
           ) : (
@@ -1186,11 +1265,6 @@ export function DocumentEditor({
             </DocumentNavigation.Provider>
           )}
         </div>
-        {writing && !capture && !locked && body.trim() && (
-          <p className="document-block-hint" aria-hidden="true">
-            Type / for blocks
-          </p>
-        )}
         {capture && titleField}
       </div>
       {initial && (

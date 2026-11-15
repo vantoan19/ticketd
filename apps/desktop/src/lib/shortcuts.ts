@@ -141,6 +141,20 @@ export const SHORTCUTS = [
     note: "In the New ticket dialog.",
   },
   {
+    id: "update-post",
+    keys: [["Mod", "Enter"]],
+    scope: "Ticket",
+    label: "Post the update, or save the one being edited",
+    note: "In the update composer.",
+  },
+  {
+    id: "editing-done",
+    keys: [["Esc"]],
+    scope: "Ticket",
+    label: "Finish editing the description or a Document",
+    note: "While editing; nothing is discarded.",
+  },
+  {
     id: "plan-rename",
     keys: [["F2"]],
     scope: "Plans",

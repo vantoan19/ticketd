@@ -12,6 +12,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { CopySourceButton } from "./CopySourceButton";
+import { CopyButton } from "@/components/ui/copy-button";
+import { IconButton } from "@/components/ui/icon-button";
+import { BlockHeader } from "./BlockHeader";
 import { renderDiagram } from "./mermaid-renderer";
 import { useDarkTheme } from "@/lib/preferences";
 
@@ -128,33 +131,25 @@ export function MermaidDiagram({ source }: { source: string }) {
       onDoubleClick={(event) => event.stopPropagation()}
     >
       <Dialog open={expanded} onOpenChange={setExpanded}>
-        <div className="markdown-block-toolbar">
-          <span>Mermaid diagram</span>
-          <Button
+        <BlockHeader label="Mermaid">
+          <IconButton
             type="button"
-            variant="ghost"
-            size="sm"
+            label="Source"
+            aria-pressed={sourceVisible}
             aria-expanded={sourceVisible}
             aria-controls={sourceId}
             disabled={Boolean(current?.error)}
             onClick={() => setShowSource((value) => !value)}
           >
             <Code aria-hidden="true" />
-            Source
-          </Button>
-          <CopySourceButton label="Copy" icon source={source} />
+          </IconButton>
+          <CopyButton label="Copy" text={source} />
           <DialogTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={!current?.svg}
-            >
+            <IconButton type="button" label="Expand" disabled={!current?.svg}>
               <Maximize2 aria-hidden="true" />
-              Expand
-            </Button>
+            </IconButton>
           </DialogTrigger>
-        </div>
+        </BlockHeader>
         {current?.error ? (
           <Alert tone="error" data-reason={current.detail}>
             <AlertDescription>{current.error}</AlertDescription>

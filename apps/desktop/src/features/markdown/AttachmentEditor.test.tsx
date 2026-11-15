@@ -120,7 +120,7 @@ test("portable export captures only the selected source Markdown without editing
   const changed = vi.fn();
   render(
     <MarkdownEditor
-      persistentToolbar
+      chrome="session"
       value="Before **selected** after"
       onChange={changed}
     />,
@@ -130,8 +130,14 @@ test("portable export captures only the selected source Markdown without editing
     screen.getByRole("textbox", { name: "Markdown document source" }),
   )!;
   act(() => view.dispatch({ selection: { anchor: 7, head: 19 } }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "More formatting" }),
+    { button: 0, ctrlKey: false },
+  );
   fireEvent.click(
-    screen.getByRole("button", { name: "Export Markdown with files" }),
+    await screen.findByRole("menuitem", {
+      name: "Export Markdown with files…",
+    }),
   );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("export_markdown_with_files", {
@@ -165,7 +171,7 @@ test("portable export captures a rich selection before Slate's deferred selectio
   const changed = vi.fn();
   render(
     <MarkdownEditor
-      persistentToolbar
+      chrome="session"
       value="Before **selected** after"
       onChange={changed}
     />,
@@ -176,8 +182,14 @@ test("portable export captures a rich selection before Slate's deferred selectio
   const selection = window.getSelection()!;
   selection.removeAllRanges();
   selection.addRange(range);
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "More formatting" }),
+    { button: 0, ctrlKey: false },
+  );
   fireEvent.click(
-    screen.getByRole("button", { name: "Export Markdown with files" }),
+    await screen.findByRole("menuitem", {
+      name: "Export Markdown with files…",
+    }),
   );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("export_markdown_with_files", {
@@ -213,7 +225,7 @@ test("native file drops use physical coordinates and ignore other surfaces", asy
     const [value, setValue] = useState("Draft");
     return (
       <MarkdownEditor
-        persistentToolbar
+        chrome="session"
         value={value}
         onChange={(next) => {
           setValue(next);
@@ -309,7 +321,7 @@ test.each(["rich", "source"])(
       const [value, setValue] = useState("Before after");
       return (
         <MarkdownEditor
-          persistentToolbar
+          chrome="session"
           value={value}
           onChange={(next) => {
             setValue(next);
@@ -384,7 +396,7 @@ test.each(["rich", "source"])(
       const [value, setValue] = useState("Before after");
       return (
         <MarkdownEditor
-          persistentToolbar
+          chrome="session"
           value={value}
           onChange={(next) => {
             setValue(next);
@@ -462,7 +474,7 @@ test.each(["paste", "drop"])(
       const [value, setValue] = useState("Before after");
       return (
         <MarkdownEditor
-          persistentToolbar
+          chrome="session"
           value={value}
           onChange={(next) => {
             setValue(next);
@@ -585,7 +597,7 @@ test("inserts a stored file at the rich caret without rewriting on focus or mode
     const [value, setValue] = useState("Before after");
     return (
       <MarkdownEditor
-        persistentToolbar
+        chrome="session"
         value={value}
         onChange={(next) => {
           setValue(next);
@@ -664,7 +676,7 @@ test.each([
       const [value, setValue] = useState(original);
       return (
         <MarkdownEditor
-          persistentToolbar
+          chrome="session"
           value={value}
           onChange={(next) => {
             setValue(next);
@@ -733,7 +745,7 @@ test("a failed upload cannot insert a valid link and retry keeps the upload iden
     const [value, setValue] = useState("Draft");
     return (
       <MarkdownEditor
-        persistentToolbar
+        chrome="session"
         value={value}
         onChange={(next) => {
           setValue(next);
@@ -855,7 +867,7 @@ test("source insertion inside a table escapes filename pipes without adding a co
     const [value, setValue] = useState(original);
     return (
       <MarkdownEditor
-        persistentToolbar
+        chrome="session"
         value={value}
         onChange={(next) => {
           setValue(next);

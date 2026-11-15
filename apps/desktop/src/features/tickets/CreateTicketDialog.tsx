@@ -431,9 +431,8 @@ export function CreateTicketDialog({
                 label="Description"
                 placeholder="Steps, acceptance criteria, or a checklist"
                 readOnly={fieldsLocked}
-                // Shown from the start, so focusing the field never inserts
-                // a toolbar and moves the form (list C-04).
-                persistentToolbar
+                // The quick-composer chrome: its controls are always in
+                // place, so focusing the field never moves the form (C-04).
                 value={draft.body}
                 onChange={(body) => update({ body })}
               />

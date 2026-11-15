@@ -595,9 +595,10 @@ test("first run shows the title and one New ticket action, no tools over nothing
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  const header = document.querySelector<HTMLElement>(
-    '[data-slot="pane-header"]',
-  )!;
+  // The ticket list's header; hidden views (Documents) keep theirs mounted.
+  const header = document
+    .getElementById("tickets-heading")!
+    .closest<HTMLElement>('[data-slot="pane-header"]')!;
   expect(within(header).getByRole("heading").textContent).toBe("All tickets");
   // S20: no count, Refresh, Filters or Display act on an empty workspace.
   expect(within(header).queryAllByRole("button")).toHaveLength(0);

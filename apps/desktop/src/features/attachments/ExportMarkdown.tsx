@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FailureAlert } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import type { MarkdownExportSource } from "@/lib/api/portable-export";
 import { useMarkdownExport } from "./use-markdown-export";
@@ -16,7 +15,7 @@ export function ExportMarkdownButton({
   label?: string;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
-  const { run, busy, error, ui } = useMarkdownExport(source, trigger);
+  const { run, busy, element } = useMarkdownExport(source, trigger);
   return (
     <>
       {compact ? (
@@ -45,14 +44,7 @@ export function ExportMarkdownButton({
           {busy ? "Exporting…" : label}
         </Button>
       )}
-      {error && (
-        <FailureAlert
-          size="compact"
-          failure={error}
-          onRetry={() => void run()}
-        />
-      )}
-      {ui}
+      {element}
     </>
   );
 }

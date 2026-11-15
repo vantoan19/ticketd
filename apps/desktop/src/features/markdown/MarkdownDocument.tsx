@@ -25,10 +25,13 @@ import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { CopyButton } from "@/components/ui/copy-button";
+import { Check } from "lucide-react";
+import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
+import { BlockHeader } from "./BlockHeader";
 import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
-import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
 import { references } from "@/features/tickets/ticket-references";
 import {
@@ -255,10 +258,9 @@ function CodeBlock({ node }: ExtraProps) {
     return <MermaidDiagram source={content} />;
   return (
     <div className="markdown-code-block">
-      <div className="markdown-block-toolbar">
-        <span>{language || "Code"}</span>
-        <CopySourceButton compact label="Copy code" source={content} />
-      </div>
+      <BlockHeader label={language || "Code"}>
+        <CopyButton label="Copy code" text={content} />
+      </BlockHeader>
       <pre tabIndex={0}>
         <SyntaxCode source={content} language={language} />
       </pre>
@@ -297,6 +299,7 @@ function mentionBlock(tag: string) {
 const components: Components = {
   a: DocumentLink,
   img: AttachmentImage,
+  input: CheckGlyph,
   table: ({ children }) => (
     <div
       className="markdown-table-scroll"
@@ -320,11 +323,34 @@ function AttachmentImage({
 }: { src?: string | undefined; alt?: string | undefined } & ExtraProps) {
   const replacement = useContext(AttachmentReplacement);
   return src?.startsWith("ticketd://attachment/") ? (
-    <AttachmentLink uri={src} onReplace={replacement(node, src)}>
-      {alt || "Attachment"}
-    </AttachmentLink>
+    <InlineAttachmentImage
+      uri={src}
+      alt={alt ?? ""}
+      onReplace={replacement(node, src)}
+    />
   ) : (
     <img src={src} alt={alt ?? ""} />
+  );
+}
+
+/**
+ * A read-only checklist box: a drawn glyph, a tick on the recessed fill when
+ * done and a ring when not, never a disabled-looking control (detA DS-08).
+ */
+function CheckGlyph({
+  type,
+  checked,
+}: { type?: string | undefined; checked?: boolean | undefined } & ExtraProps) {
+  if (type !== "checkbox") return null;
+  return (
+    <span
+      className="markdown-check"
+      data-checked={checked ? "" : undefined}
+      role="img"
+      aria-label={checked ? "Done" : "Not done"}
+    >
+      {checked && <Check aria-hidden="true" />}
+    </span>
   );
 }
 

@@ -701,6 +701,12 @@ body:has([data-slot="dialog-overlay"])
   width: max(var(--radix-popover-trigger-width), 280px);
   padding: 4px;
 }
+/* A row of icon buttons over content (the editor's selection bubble). */
+.ui-popover[data-variant="bar"] {
+  display: flex;
+  padding: 4px;
+  box-shadow: var(--shadow-menu);
+}
 /* Menus and select lists stop at 320px and scroll inside (P3). */
 [data-slot="select-content"] {
   max-height: min(320px, var(--radix-select-content-available-height));
@@ -1041,7 +1047,7 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-event-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   min-height: 28px;
   color: var(--muted-foreground);
@@ -1071,8 +1077,20 @@ body:has([data-slot="dialog-overlay"])
   color: var(--foreground);
   font-weight: 500;
 }
+/* The sentence starts on the badge's midline; a second line hangs under it. */
 .ui-event-row-text {
+  flex: 1 1 auto;
   min-width: 0;
+  padding-top: 4px;
+}
+/* The time column: right-aligned, never wrapped (detB DB-13). */
+.ui-event-row-time {
+  flex: none;
+  padding-top: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
 }
 .ui-event-row-meta {
   margin-inline-start: 6px;
@@ -1093,10 +1111,11 @@ body:has([data-slot="dialog-overlay"])
   gap: 4px;
   min-width: 0;
 }
+/* One line at any width: the meta truncates, the actions keep their slot (DB-12). */
 .ui-comment-row-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: space-between;
   gap: 4px 8px;
   min-height: 28px;
@@ -1715,16 +1734,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   box-shadow: 0 0 0 2px var(--surface);
   pointer-events: none;
 }
-/* For a view whose header has no leading slot yet (ShellRow in App.tsx). */
-.shell-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 48px;
-  flex: none;
-  padding-inline: 8px;
-  box-shadow: 0 1px 0 0 var(--header-boundary);
-}
 .icon-button {
   display: inline-flex;
   align-items: center;
@@ -2144,6 +2153,52 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .markdown-block-toolbar > :first-child {
   margin-right: auto;
 }
+/* BlockHeader: the label at the left, icon buttons at the right (P16). */
+.markdown-block-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* A read-only checklist box: drawn, never a disabled control (detA DS-08). */
+.markdown-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  border-radius: var(--radius-segment);
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+  color: var(--foreground);
+}
+.markdown-check[data-checked] {
+  background: var(--recessed);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.markdown-check svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 3;
+}
+/* An attachment picture in the text: up to the column's width; opens the preview. */
+.markdown-image {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  vertical-align: top;
+  cursor: zoom-in;
+}
+.markdown-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-border-base);
+}
 .markdown-table-scroll {
   overflow-x: auto;
   max-width: 100%;
@@ -2176,19 +2231,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   gap: 2px;
 }
 .mermaid-block > .markdown-block-toolbar {
-  min-height: 36px;
-  padding: 0 4px 0 12px;
   background: var(--recessed);
   box-shadow: 0 1px 0 0 var(--border);
-}
-.mermaid-block > .markdown-block-toolbar button {
-  height: 28px;
-  gap: 6px;
-  padding: 0 8px;
-}
-.mermaid-block > .markdown-block-toolbar button svg {
-  width: 14px;
-  height: 14px;
 }
 .mermaid-canvas {
   width: 100%;

@@ -82,7 +82,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   expect(await screen.findByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
@@ -120,7 +120,7 @@ it("includes Activity details on request and keeps a selected detail", async () 
       target={null}
     />,
   );
-  fireEvent.click(screen.getByLabelText("Include update details"));
+  fireEvent.click(screen.getByLabelText("Show update details"));
   fireEvent.click(await screen.findByRole("button", { name: "Update" }));
   expect(screen.getByText("Update details · T-KQ1")).toBeTruthy();
   fireEvent.click(
@@ -166,7 +166,7 @@ it("says what Restore did and keeps focus in the Trash list", async () => {
       target={null}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Trash" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Trash" }));
   fireEvent.click(await screen.findByRole("button", { name: "Restore Alpha" }));
   await waitFor(() =>
     expect(document.activeElement).toBe(

@@ -81,7 +81,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   expect(await screen.findByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
@@ -141,9 +141,7 @@ it("offers a clear way back from an empty Document search", async () => {
     target: { value: "missing" },
   });
   await screen.findByText(/No Documents match .missing./);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Clear search and filters" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
   expect(
     (screen.getByLabelText("Search Documents") as HTMLInputElement).value,
   ).toBe("");
@@ -174,16 +172,15 @@ it("shows snippet, tags and date per row, highlights matches and refocuses searc
       target={null}
     />,
   );
-  expect(await screen.findByText("First plan text")).toBeTruthy();
-  expect(screen.getByText("Today")).toBeTruthy();
+  // A row is the title and one meta line; the snippet shows in search results.
+  expect(await screen.findByText("Today")).toBeTruthy();
+  expect(screen.queryByText("First plan text")).toBeNull();
   fireEvent.change(screen.getByLabelText("Search Documents"), {
     target: { value: "plan" },
   });
   await screen.findByText("1 result");
   expect(document.querySelector("mark")?.textContent).toBe("plan");
-  fireEvent.click(
-    screen.getByRole("button", { name: "Clear search and filters" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
   expect(document.activeElement).toBe(
     screen.getByLabelText("Search Documents"),
   );
@@ -241,18 +238,16 @@ it("offers Browse Documents from an empty Trash", async () => {
       target={null}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Browse Documents" }),
   );
   expect(
-    screen
-      .getByRole("button", { name: "All documents" })
-      .getAttribute("aria-pressed"),
+    screen.getByRole("radio", { name: "All" }).getAttribute("aria-checked"),
   ).toBe("true");
 });
 
-it("an empty Documents list offers Capture inside the empty state", async () => {
+it("an empty Documents list offers New Document once, in its header", async () => {
   vi.mocked(documents.recent).mockResolvedValue([]);
   vi.mocked(documents.trash).mockResolvedValue([]);
   const onCapture = vi.fn();
@@ -269,8 +264,9 @@ it("an empty Documents list offers Capture inside the empty state", async () => 
     />,
   );
   await screen.findByText("No recently opened Documents");
-  const captures = screen.getAllByRole("button", { name: "Capture" });
-  expect(captures).toHaveLength(2);
-  fireEvent.click(captures[1]!);
+  // The header holds New Document, so the empty state adds no second button (P9).
+  const create = screen.getAllByRole("button", { name: "New Document" });
+  expect(create).toHaveLength(1);
+  fireEvent.click(create[0]!);
   expect(onCapture).toHaveBeenCalled();
 });

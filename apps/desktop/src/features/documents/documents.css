@@ -95,14 +95,23 @@
   width: 14px;
   height: 14px;
 }
+/* A Document reads at 16/24, and edits at the same size (P16). */
 .document-main > .document-body {
+  --text-editor: var(--text-reading);
+  --text-editor-line: 24px;
   min-width: 0;
   font-size: var(--text-reading);
-  line-height: 1.6;
+  line-height: 24px;
 }
 .document-main > .document-body .markdown-document {
   font-size: var(--text-reading);
-  line-height: 1.6;
+  line-height: 24px;
+}
+/* Headings are never smaller than the text around them (plans DR-14). */
+.document-main > .document-body .markdown-document :is(h2, h3, h4, h5, h6) {
+  font-size: var(--text-reading);
+  font-weight: 600;
+  line-height: 24px;
 }
 .document-main > footer {
   display: flex;
@@ -378,10 +387,12 @@
   letter-spacing: -1.28px;
   overflow-wrap: anywhere;
 }
+/* The title edits in place: the heading's size and position, no box. */
 .document-title .document-title-input {
-  height: 44px;
-  margin-left: -8px;
-  padding: 0 8px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  line-height: 40px;
   font-size: var(--text-section);
   font-weight: 600;
   letter-spacing: -1.28px;
@@ -435,11 +446,38 @@
     padding: 20px 16px;
   }
 }
+/* The row under the title: "Updated 2 h ago" while reading, the session
+   row while editing. 32px either way, so the body never moves (DR-01). */
+.document-state-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: -16px 0 0;
+  min-width: 0;
+}
 .document-subtitle {
-  margin: -12px 0 8px;
+  margin: 0;
+  overflow: hidden;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-state-row .document-status {
+  flex: none;
+  margin: 0;
+}
+.document-session-tools {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+}
+.document-state-row > .ui-button:last-child {
+  flex: none;
+  margin-right: -8px;
 }
 .document-title .document-title-input {
   background: transparent;
@@ -518,16 +556,19 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.document-title .document-title-input {
-  box-shadow: inset 0 0 0 1px var(--border);
-}
 /* The Document's body is plain text, not a bordered card. */
-.document-workspace .document-body .markdown-editor {
-  margin-top: 6px;
+/* Edit and read put every line in the same place: no frame, no inset. */
+.document-workspace .document-body .markdown-editor,
+.document-workspace .document-body .markdown-editor[data-chrome="session"] {
+  margin: 0;
   background: transparent;
   box-shadow: none;
 }
-.document-workspace .document-body .rich-document {
+.document-workspace .document-body .rich-document,
+.document-workspace
+  .document-body
+  .markdown-editor[data-chrome="session"]
+  .rich-document {
   min-height: 0;
   padding: 0;
 }
@@ -536,57 +577,11 @@
   .markdown-editor:has(.rich-document:focus-visible) {
   outline: none;
 }
-/* In Edit a diagram is one line of source; the diagram itself is for Read. */
-.document-workspace .document-body .diagram-editor > .mermaid-block {
-  display: none;
-}
-.document-workspace .document-body .diagram-editor summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 12px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  list-style: none;
-}
-.document-workspace
-  .document-body
-  .diagram-editor
-  summary::-webkit-details-marker {
-  display: none;
-}
-.document-workspace .document-body .diagram-editor summary svg {
-  width: 14px;
-  height: 14px;
-}
-.diagram-summary-action {
-  margin-left: auto;
-  color: var(--foreground);
-}
 /* Read mode: a grey header bar, no outer border, white boxes. */
 .document-workspace .document-body .mermaid-block {
   box-shadow: none;
 }
 
-/* Edit: the title field's caption and the trailing block prompt. */
-.document-title-hint {
-  margin: 6px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-  font-weight: 400;
-  letter-spacing: 0;
-}
-/* .document-main's 20px flex gap is frame F-2's 20px; the 2px lowers the glyph
-   to the frame's ink position (25.5px under the diagram row). */
-.document-block-hint {
-  margin: 0;
-  padding-top: 2px;
-  color: var(--muted-foreground);
-  pointer-events: none;
-  user-select: none;
-}
 .document-rail .document-tags:empty {
   display: none;
 }
@@ -609,13 +604,167 @@
 .document-workspace .document-rail li:last-child {
   margin-bottom: 0;
 }
-/* Frame F-2: a bordered 36px row, 8px radius, 10px between glyph and label. */
-.document-workspace .document-body .diagram-editor {
-  margin-top: 25px;
+
+/* The list (S14): a pane header, one fixed toolbar, rows at ticket density. */
+.documents-list-view > [data-slot="pane-header"] {
+  margin: 0 -8px;
 }
-.document-workspace .document-body .diagram-editor summary {
-  gap: 10px;
+.documents-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  min-width: 0;
+}
+.documents-toolbar [data-slot="search-input"] {
+  flex: 0 1 240px;
+  min-width: 140px;
+}
+.documents-include {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  white-space: nowrap;
+}
+/* In Trash the switch keeps its place, so nothing in the toolbar moves. */
+.documents-include[data-hidden] {
+  visibility: hidden;
+}
+.documents-filters {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.documents-restored {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.documents-list-view h2.documents-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 16px;
+}
+.documents-group svg {
+  width: 14px;
+  height: 14px;
+}
+.documents-list-view .document-list li {
+  align-items: center;
+  gap: 8px;
+  margin: 0 -8px;
+  padding: 4px 4px 4px 8px;
   border-radius: var(--radius);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+.documents-list-view .document-list li:hover {
+  background: var(--hover);
+}
+.documents-list-view .document-list li[data-open] {
+  background: var(--accent);
+}
+.documents-list-view .document-list-kind {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+.documents-page .documents-list-view .document-list-open {
+  display: flex;
+  max-width: 100%;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.documents-page .documents-list-view .document-list-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.document-list-meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.documents-list-view .document-list-content .document-list-meta {
+  margin: 2px 0 0;
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.document-list-meta .document-list-date {
+  margin: 0;
+}
+.document-list-meta .ui-badge {
+  cursor: pointer;
+}
+/* The pin waits in its slot unless the Document is pinned (DL-06). */
+.document-list li:not([data-pinned]) .document-list-pin {
+  visibility: hidden;
+}
+.document-list li:hover .document-list-pin,
+.document-list li:focus-within .document-list-pin {
+  visibility: visible;
+}
+@media (hover: none) {
+  .document-list li .document-list-pin {
+    visibility: visible;
+  }
+}
+
+/* A Document opens beside the list, like a ticket (R3.9); a pane too narrow
+   for both shows the reader alone, with Back to Documents. */
+.context-view-wrapper {
+  container-type: inline-size;
+}
+.documents-page[data-reading] {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;
+}
+.documents-page[data-reading] > .documents-list-view {
+  min-height: 0;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+  box-shadow: inset -1px 0 0 0 var(--border);
+}
+.documents-page[data-reading] > .documents-list-view .documents-include {
+  display: none;
+}
+.documents-page[data-reading] > .document-workspace {
+  min-width: 0;
+}
+@container (max-width: 1040px) {
+  .documents-page[data-reading] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .documents-page[data-reading] > .documents-list-view {
+    display: none;
+  }
 }

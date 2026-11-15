@@ -1,6 +1,7 @@
 import { useState, type RefObject } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { ExportResult } from "./ExportResult";
 import {
   exportMarkdown,
@@ -16,7 +17,8 @@ import {
  * Exports `source` as Markdown with its files into a folder the person picks,
  * then shows what was written. For a trigger that is not a button of its own
  * (a menu item): call `run`, render `ui` where the result dialog may mount,
- * and show `error` where that trigger's outcomes go. Focus returns to
+ * and show `error` where that trigger's outcomes go, or render `element`,
+ * which is `ui` with the failure in place and Retry. Focus returns to
  * `returnFocus` when the result dialog closes.
  */
 export function useMarkdownExport(
@@ -70,6 +72,19 @@ export function useMarkdownExport(
       )}
     </>
   );
+  const shownError = result ? null : error;
+  const element = (
+    <>
+      {ui}
+      {shownError && (
+        <FailureAlert
+          size="compact"
+          failure={shownError}
+          onRetry={() => void run()}
+        />
+      )}
+    </>
+  );
   /** `error` is the failure to show beside the trigger; a result shows its own. */
-  return { run, busy, error: result ? null : error, ui };
+  return { run, busy, error: shownError, ui, element };
 }

@@ -24,13 +24,8 @@ import { useReminderNotifications } from "@/features/tickets/useReminderNotifica
 import { usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider } from "@/components/ui/sidebar";
-import {
-  ReturnCrumb,
-  ShellLeading,
-  ShellSlotProvider,
-} from "@/components/ui/list-header";
+import { ReturnCrumb, ShellSlotProvider } from "@/components/ui/list-header";
 import { NarrowNav } from "@/components/layout/NarrowNav";
-import { useShellLeading } from "@/components/ui/shell-slot";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { WindowBar } from "@/components/layout/WindowBar";
@@ -530,13 +525,6 @@ function AppContent() {
                                 )
                               }
                             >
-                              {/* Until Documents takes a PaneHeader, its leading
-                                controls sit in one 48px row of their own (P14).
-                                The Plan header is a PaneHeader and carries
-                                them itself, so they never show twice. */}
-                              {view === "documents" && graphOrigin === null && (
-                                <ShellRow />
-                              )}
                               {error && (
                                 // A local preference could not be saved: a failure
                                 // on the status line, until dismissed or a later
@@ -773,19 +761,6 @@ function AppContent() {
         </PlanNavigation.Provider>
       </TicketNavigation.Provider>
     </ShellNavigation>
-  );
-}
-
-/**
- * The shell's leading controls on a row of their own, for a view whose header
- * has no leading slot yet. Nothing when the shell has nothing to place.
- */
-function ShellRow() {
-  if (!useShellLeading()) return null;
-  return (
-    <div className="shell-row">
-      <ShellLeading />
-    </div>
   );
 }
 
