@@ -47,6 +47,13 @@ export function StatusLineRegion({
     setShown({ ...message, id: counter.current });
   }, []);
   const dismiss = useCallback(() => setShown(null), []);
+  // A line closes only itself: an action that posts its own outcome (Retry
+  // that succeeds with "… · Undo") must not be closed by the line it replaced.
+  const dismissLine = useCallback(
+    (id: number) =>
+      setShown((current) => (current?.id === id ? null : current)),
+    [],
+  );
   const region = useMemo(() => ({ show, dismiss, setInset }), [show, dismiss]);
   return (
     <StatusLineContext value={region}>
@@ -60,7 +67,7 @@ export function StatusLineRegion({
           host={host}
           inset={inset}
           show={show}
-          dismiss={dismiss}
+          dismiss={dismissLine}
         />
       )}
     </StatusLineContext>
@@ -89,8 +96,10 @@ function FloatingLine({
   host: React.RefObject<HTMLElement | null> | undefined;
   inset: number;
   show: (message: StatusLineMessage) => void;
-  dismiss: () => void;
+  dismiss: (id: number) => void;
 }) {
+  const { id } = shown;
+  const dismissSelf = useCallback(() => dismiss(id), [dismiss, id]);
   const error = shown.tone === "error";
   const action: StatusLineAction | undefined = shown.undo
     ? { label: "Undo", run: shown.undo }
@@ -126,7 +135,7 @@ function FloatingLine({
       active === document.body ||
       Boolean(lineRef.current?.contains(active));
     shown.onDismiss?.();
-    dismiss();
+    dismissSelf();
     if (!lost) return;
     // Back to what had focus, if it is still in this pane; else the pane.
     const host = hostRef?.current ?? hostOf(anchor.current);
@@ -135,14 +144,14 @@ function FloatingLine({
         ? returnTo.current
         : host?.closest<HTMLElement>("[tabindex]");
     target?.focus({ preventScroll: true });
-  }, [dismiss, anchor, hostRef, shown]);
+  }, [dismissSelf, anchor, hostRef, shown]);
 
   // Remaining time survives pauses: hovering at 3s of 4s leaves 1s after.
   const remaining = useRef<number | null>(lifetime);
   useEffect(() => {
     if (paused || remaining.current === null) return;
     const started = Date.now();
-    const timer = window.setTimeout(dismiss, remaining.current);
+    const timer = window.setTimeout(dismissSelf, remaining.current);
     return () => {
       window.clearTimeout(timer);
       if (remaining.current !== null)
@@ -151,7 +160,7 @@ function FloatingLine({
           remaining.current - (Date.now() - started),
         );
     };
-  }, [paused, dismiss]);
+  }, [paused, dismissSelf]);
 
   useLayoutEffect(() => {
     const host = hostRef?.current ?? hostOf(anchor.current);

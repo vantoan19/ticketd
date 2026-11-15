@@ -89,6 +89,26 @@ test("Undo runs the undo; a failed undo turns into the failure with Retry", asyn
   expect(line()).toBeNull();
 });
 
+test("an action that posts its own outcome keeps that outcome on screen", async () => {
+  // Retry that succeeds says what happened ("Archived Launch · Undo"); closing
+  // the failed line must not close the line that replaced it.
+  region();
+  act(() =>
+    post({
+      tone: "error",
+      message: "Couldn't archive Launch",
+      action: {
+        label: "Retry",
+        run: () => post({ message: "Archived Launch", undo: () => {} }),
+      },
+    }),
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  });
+  expect(screen.getByRole("status").textContent).toContain("Archived Launch");
+});
+
 test("outside a region posting does nothing", () => {
   render(<Poster targetRef={postRef} />);
   act(() => post({ message: "Nowhere" }));
