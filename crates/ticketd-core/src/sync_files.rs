@@ -77,8 +77,7 @@ const MAX_HEADER_INDENT: usize = 64;
 
 /// The format of sync files this version writes. A file that says a higher
 /// number is left alone until this desktop runs a ticketd that reads it.
-/// Format 2 added `any_command` to Automation agents.
-pub(crate) const FILE_FORMAT: i64 = 2;
+pub(crate) const FILE_FORMAT: i64 = 1;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1849,12 +1848,10 @@ pub(crate) fn find_record(
 mod tests {
     use super::*;
 
-    /// What a file of format 2 holds after `kind`, `format` and `id`. Automations
-    /// and their agents joined format 1 without a new number: a ticketd from
-    /// before them does not look in their folders, so it never meets a kind it
-    /// does not know. Format 2 added `any_command` to an agent: a field in a kind
-    /// that already had files.
-    const FORMAT_2: &str = "\
+    /// What a file of format 1 holds after `kind`, `format` and `id`. Automations
+    /// and their agents joined without a new number: a ticketd from before them
+    /// does not look in their folders, so it never meets a kind it does not know.
+    const FORMAT_1: &str = "\
 project: name
 document: title created_at tags origin_activity trashed kept pinned
 plan: name archived spec documents
@@ -1893,7 +1890,7 @@ automation: name trashed
         }
         assert_eq!(
             (FILE_FORMAT, written.as_str()),
-            (2, FORMAT_2),
+            (1, FORMAT_1),
             "The header fields or section markers of sync files changed. A ticketd that does not know a field rejects the whole file, and only a higher `format` tells it the file is from a newer ticketd: raise FILE_FORMAT in the same change, then pin the new list here under the new number."
         );
     }
