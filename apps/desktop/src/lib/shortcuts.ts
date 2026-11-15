@@ -44,6 +44,26 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
 };
 
 export const SHORTCUTS = [
+  ...(
+    [
+      [
+        "inbox-primary",
+        ["Mod", "Enter"],
+        "Run the Inbox entry’s suggested action",
+      ],
+      ["inbox-open", ["Enter"], "Open the approval in Chat"],
+      ["inbox-read", ["E"], "Mark the Inbox entry read or unread"],
+      ["inbox-reply", ["R"], "Reply to the Inbox entry on its Ticket"],
+      ["inbox-remind", ["H"], "Snooze or remind me about the Inbox Ticket"],
+      ["inbox-next", ["J"], "Read the next Inbox entry"],
+      ["inbox-previous", ["K"], "Read the previous Inbox entry"],
+    ] as const
+  ).map(([id, keys, label]) => ({
+    id,
+    keys: [[...keys]],
+    scope: "Lists" as const,
+    label,
+  })),
   {
     id: "go-automations",
     keys: [],

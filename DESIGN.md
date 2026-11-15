@@ -520,6 +520,12 @@ Rows have an 8px horizontal inset, 8px radius, 10px vertical padding, a 10px unr
 
 The desktop's own unattributed changes do not notify the person. Opening a ticket entry marks it read; an entry for a deleted update says “Update deleted”. Read rows remain legible. Row actions overlay the time on hover or focus. Older updates load with “Show 50 more”. Navigation to an update reveals and focuses the relevant content without silently changing ticket status. Follow and reminder settings remain personal to the local person. Inbox remembers its split independently from the ticket List and Board.
 
+The selected entry has a triage Card above its Ticket: the trigger and attributed harness, Ticket reference and title, the existing latest update brief, and actual pull request or verification evidence when available. Move to Done accepts an agent review; Clear reminder clears the current due reminder; Review in Chat opens the existing Chat detail and request dock inside the same split. Reply quotes the entry into the Ticket’s existing Activity composer, including when empty Activity is folded. An unlinked Chat explains why Ticket actions are disabled while keeping review available.
+
+J/K and the detail header walk Inbox entries. Selection holds the queue, grouping and order through read changes, resolutions, reminder changes and incoming updates. Moving on or leaving the reading interaction releases that snapshot. The Ticket’s editors stay mounted while the approval Chat occupies its detail pane. The document cross-fades using the shared 140ms token, and reduced motion removes the fade.
+
+Inbox mutations share one status line, with a 10-second Undo, persistent failure and explicit Retry using the original write request IDs. Undo restores captured status, reminder and read values. Explicit review Undo also retains a validated, device-local restoration projection scoped to the Workspace: it names the original entry and the exact observed Undo status transition, survives reload, and expires when the host reports another transition. It never changes attribution or treats a later local review as the old agent review. Mark all read touches only shown unread entries and sends Chat identities through Chat read actions. Read-only controls explain why changes are unavailable.
+
 ### Reminders
 
 A reminder editor contains a heading, date/time input, short local-time hint, and one primary schedule/reschedule action. Show the current scheduled time when one exists, with Snooze and Dismiss as secondary actions. Ambiguous daylight-saving times require an explicit choice; invalid times show an inline error.
@@ -619,6 +625,10 @@ The list lives in `settings-sections.ts`; a section is added there with its page
 - **Chat:** the Show Chat switch, then, while Chat is on, a Harnesses list: one row per harness with its official mark, its status in words, the version or the reason, Copy command where a terminal step helps, and Check again in the section header.
 - **Search:** a labelled input, a status line, and results grouped by section as link rows with the match highlighted (semibold with an underline, not color alone). With no query it shows only the input and its status line; a query with no match shows an unboxed empty state that offers shortcuts to common sections, and the status line is then spoken only. Results come from one registry beside the section list, with one entry per setting; a test keeps every entry pointing at a real section.
 - **Restore, replace and disconnect:** restoring a workspace backup always goes through a review on DialogShell lg titled "Replace this workspace?": first an attention notice that it replaces everything including follows, reminders and inbox state, then this workspace beside the backup at 14/20 (differing values at 500), the chosen file, and attachment details behind one disclosure. The footer note says a safety backup comes first; the only destructive control is "Replace workspace" ("Replacing…" while it runs). A file that cannot be restored shows why at the top, hides the destructive button and makes "Choose another file…" the primary. Google Drive's download replaces the workspace too and uses the same grammar with a destructive primary. Replacing an agent skill, disconnecting Google Drive, switching its account and turning Chat off ask first in a dialog that names what changes. Never use a browser confirmation.
+
+Agent skills and Command line check when their page opens and when Check again is
+chosen; skill installation also reads the resulting state. These checks refresh
+the nav's setup dot, whose update never starts another page check.
 
 ## 11. Design system and shared components
 

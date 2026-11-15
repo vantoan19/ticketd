@@ -1,5 +1,5 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Bot, FileCheck, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,25 +125,24 @@ export function AgentSkillsCard({
   // An action just finished; its button may be gone, so focus moves to the status.
   const focusAfterLoad = useRef(false);
 
-  const refresh = useCallback(
-    () =>
-      agentSkillsClient.list().then(
-        (agents) => {
-          setLoad({ phase: "done", agents });
-          onChanged?.();
-        },
-        (error: unknown) =>
-          setLoad({
-            phase: "failed",
-            failure: describeFailure(error, "check agent skills"),
-          }),
-      ),
-    [onChanged],
-  );
+  const refresh = () =>
+    agentSkillsClient.list().then(
+      (agents) => {
+        setLoad({ phase: "done", agents });
+        onChanged?.();
+      },
+      (error: unknown) =>
+        setLoad({
+          phase: "failed",
+          failure: describeFailure(error, "check agent skills"),
+        }),
+    );
   // Read the folders on first show; each action and Check again reads them again.
+  // Reporting the result to the nav is not a reason to start another reading.
+  const firstRead = useEffectEvent(() => void refresh());
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    firstRead();
+  }, []);
   useEffect(() => {
     if (load.phase !== "done" || !focusAfterLoad.current) return;
     focusAfterLoad.current = false;

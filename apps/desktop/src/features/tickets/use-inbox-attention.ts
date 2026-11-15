@@ -12,6 +12,8 @@ export type Attention = AttentionContext & {
   loading: boolean;
   error: FailureDescription | null;
   reload: () => void;
+  readLatest?: () => Promise<Attention>;
+  restoreReview?: (entry: Entry) => Promise<void>;
 };
 export const InboxAttentionContext = createContext<Attention | null>(null);
 export const useInboxAttention = () => useContext(InboxAttentionContext);

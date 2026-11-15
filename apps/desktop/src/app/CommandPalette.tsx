@@ -99,6 +99,7 @@ export function CommandPalette({
   automationCount = null,
   documentCommands = null,
   attachmentCommands = null,
+  inboxCommands = null,
   currentPlan = null,
   workspaceGraphActive = false,
   create,
@@ -120,6 +121,14 @@ export function CommandPalette({
   memoryTickets?: Ticket[];
   readyCount?: number | null;
   automationCount?: number | null;
+  inboxCommands?:
+    | {
+        id: ShortcutId;
+        label: string;
+        disabledReason: string | null;
+        run: () => void;
+      }[]
+    | null;
   attachmentCommands?: Record<
     "search" | "add" | "open" | "more" | "back",
     (() => void) | null
@@ -698,6 +707,33 @@ export function CommandPalette({
                       </CommandShortcut>
                     </CommandItem>
                   )}
+                </CommandGroup>
+              )}
+              {!scope && inboxCommands && (
+                <CommandGroup heading="Inbox actions">
+                  {inboxCommands
+                    .filter((command) => matches(command.label))
+                    .map((command) => (
+                      <CommandItem
+                        key={command.id}
+                        value={command.id}
+                        disabled={!!command.disabledReason}
+                        onSelect={() =>
+                          run(() => requestAnimationFrame(command.run))
+                        }
+                      >
+                        <Inbox aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={command.label} query={filter} />
+                          {command.disabledReason && (
+                            <span> · {command.disabledReason}</span>
+                          )}
+                        </span>
+                        <CommandShortcut>
+                          <KeyChords keys={shortcut(command.id).keys} />
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
                 </CommandGroup>
               )}
               {!scope && attachmentCommands && (
