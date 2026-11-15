@@ -1,3 +1,4 @@
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { Pager } from "@/components/ui/pager";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -11,7 +12,15 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Picker } from "@/components/ui/picker";
 import { Time } from "@/components/ui/time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { MoreHorizontal, Plus } from "lucide-react";
+import {
+  CheckCheck,
+  FolderGit2,
+  GitBranch,
+  GitCommitHorizontal,
+  GitPullRequest,
+  MoreHorizontal,
+  Plus,
+} from "lucide-react";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   Popover,
@@ -40,6 +49,14 @@ import {
   type Evidence as EvidenceRecord,
   type EvidenceInput,
 } from "@/lib/api/client";
+
+const evidenceIcons = {
+  pull_request: GitPullRequest,
+  commit: GitCommitHorizontal,
+  branch: GitBranch,
+  worktree: FolderGit2,
+  verification: CheckCheck,
+};
 
 const blank: EvidenceInput = {
   kind: "pull_request",
@@ -114,6 +131,7 @@ export function Evidence({
   onCount?: (count: number) => void;
 }) {
   const formId = useId();
+  const statusLine = useStatusLine();
   const [loaded, setLoaded] = useState(false);
   const [composing, setComposing] = useState(false);
   const [items, setItems] = useState<EvidenceRecord[]>([]);
@@ -189,10 +207,33 @@ export function Evidence({
     setPending(true);
     const writeId = requestId(JSON.stringify(["delete", reference, id]));
     try {
+      const removed = items.find((item) => item.id === id);
       await client.deleteEvidence(reference, id, writeId);
       request.current = null;
       setConfirmDelete(null);
       setError(null);
+      // Retry the same restoration intent if the write succeeded but its
+      // reply or the subsequent reread was lost. A new ID could duplicate it.
+      const restoreId = crypto.randomUUID();
+      if (removed)
+        statusLine.show({
+          message: `Removed evidence ${removed.name}`,
+          undo: async () => {
+            await client.addEvidence(
+              reference,
+              {
+                kind: removed.kind,
+                name: removed.name,
+                value: removed.value,
+                editing_agent: removed.editing_agent,
+              },
+              restoreId,
+            );
+            setError(null);
+            await load();
+            await refresh();
+          },
+        });
       await load();
       await refresh();
     } catch (reason) {
@@ -269,7 +310,12 @@ export function Evidence({
             className="evidence-item"
             data-open={confirmDelete?.id === item.id || undefined}
           >
-            {/* A record row (P12): name and actions, a caption, the value. */}
+            <span className="evidence-kind-icon" aria-hidden="true">
+              {(() => {
+                const Icon = evidenceIcons[item.kind];
+                return <Icon />;
+              })()}
+            </span>
             <div className="evidence-item-heading">
               <strong className="evidence-item-name">{item.name}</strong>
               <span className="evidence-item-actions">
@@ -353,7 +399,8 @@ export function Evidence({
                           Delete this evidence?
                         </p>
                         <p className="evidence-confirm-text">
-                          “{item.name}” leaves this ticket for good.
+                          “{item.name}” is removed from this ticket. You can
+                          undo this.
                         </p>
                         <div className="evidence-confirm-actions">
                           <Button

@@ -1357,7 +1357,7 @@ body:has([data-slot="dialog-overlay"])
   height: 4px;
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--control-boundary);
+  background: var(--track);
 }
 .ui-progress-indicator {
   height: 100%;
@@ -3114,4 +3114,53 @@ kbd,
 }
 .ui-agent-state {
   animation: palette-scrim var(--dur-2) var(--ease-in-out);
+}
+
+/* Document relationship groups share the section typography and neutral rows. */
+.linked-work-document .linked-work-group {
+  color: var(--muted-foreground);
+}
+.linked-work-document .reference-row:hover {
+  background: var(--hover);
+}
+.linked-work-confirm [data-slot="popover-description"] {
+  max-width: none;
+  text-wrap: wrap;
+}
+.ui-comment-row-meta time:focus-visible {
+  outline-offset: -2px;
+}
+.rail-section-column .rail-file-open {
+  min-height: 44px;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-border-base);
+}
+
+.ticket-header-title {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+.evidence-kind-icon {
+  color: var(--muted-foreground);
+}
+.evidence-kind-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.evidence-item {
+  border-bottom: 1px solid var(--group-hairline);
+  border-radius: 0;
+}
+.ui-comment-row-meta time {
+  display: inline-block;
+}
+
+.rail-section-column .rail-file-open > svg {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: var(--recessed);
 }

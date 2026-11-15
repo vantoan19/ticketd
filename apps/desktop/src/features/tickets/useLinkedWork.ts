@@ -50,12 +50,19 @@ export function useLinkedWork(
   const attempts = useRef(new Map<string, string>());
   const reference = ticket.reference;
 
+  // Rows removed but not yet re-read: they collapse at once, in place.
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     if (!enabled) return;
     let active = true;
     client.contextualRelationships(reference, 0).then(
       (links) => {
-        if (active) setLoaded({ reference, links, failure: null });
+        if (active) {
+          setLoaded({ reference, links, failure: null });
+          // Optimistic hiding lasts only until this authoritative reread.
+          // Persistent tombstones would hide a link added again later.
+          setHidden(new Set());
+        }
       },
       (reason: unknown) => {
         if (active)
@@ -79,8 +86,6 @@ export function useLinkedWork(
     };
   }, [enabled, reference, revision, reload]);
 
-  // Rows removed but not yet re-read: they collapse at once, in place.
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   // A removal hides a row and the next one slides under the pointer with its
   // × already showing, so clicks on that slot wait out 400ms: a double-click
   // never removes a second relationship.
@@ -107,6 +112,7 @@ export function useLinkedWork(
     window.setTimeout(() => {
       settling.current = false;
     }, 400);
+    statusLine.dismiss();
     const key = rowKey(row);
     const id = attempts.current.get(key) ?? crypto.randomUUID();
     attempts.current.set(key, id);

@@ -203,3 +203,41 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.linked-work-document > section {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+}
+.linked-work-document .linked-work-group {
+  min-height: 34px;
+  margin: 0;
+}
+.linked-work-document .linked-work-group > :last-child:not(:first-child) {
+  margin: 0 0 0 auto;
+}
+.linked-work-document .reference-row {
+  min-height: 34px;
+}
+@container ticket-detail (max-width: 460px) {
+  .linked-work-document > section {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.linked-work-subtickets > .source-caption,
+.linked-work-subtickets > .reference-rows {
+  grid-column: 2;
+}
+@container ticket-detail (max-width: 460px) {
+  .linked-work-subtickets > .source-caption,
+  .linked-work-subtickets > .reference-rows {
+    grid-column: 1;
+  }
+}
+
+.linked-work-confirm [data-slot="popover-header"],
+.linked-work-confirm [data-slot="popover-description"] {
+  width: 100%;
+}
