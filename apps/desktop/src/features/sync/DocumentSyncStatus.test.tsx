@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import { syncApi, type SyncStatus } from "@/lib/sync-api";
@@ -39,6 +45,8 @@ async function bar(status: SyncStatus) {
     </SyncStatusProvider>,
   );
   await waitFor(() => expect(syncApi.status).toHaveBeenCalled());
+  // The save state shows while editing, in the session row (plans DR-09).
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
   return screen.findByRole("status");
 }
 

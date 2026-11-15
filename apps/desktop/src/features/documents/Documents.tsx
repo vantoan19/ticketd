@@ -1,10 +1,17 @@
 import { emptyCopy } from "@/lib/empty-copy";
-import { SectionHeader } from "@/components/ui/section-header";
+import { PaneHeader } from "@/components/ui/list-header";
+import { Count } from "@/components/ui/count";
+import { SearchInput } from "@/components/ui/search-input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Switch } from "@/components/ui/switch";
+import { Pager } from "@/components/ui/pager";
+import { IconButton } from "@/components/ui/icon-button";
+import { Badge, FilterChip } from "@/components/ui/badge";
 import { ContextGraphNavigation } from "./navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileText, Pin, Plus, Search, Tag, Trash2 } from "lucide-react";
+import { Clock, FileText, Pin, Plus, SearchX, Tag, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import {
@@ -38,6 +45,14 @@ function relativeDate(value: string | undefined) {
     day: "numeric",
     ...(sameYear ? {} : { year: "numeric" }),
   });
+}
+/**
+ * Every page from the first up to `offset`, in order: "Show 50 more" appends
+ * a page instead of replacing the list (P17).
+ */
+async function upTo<T>(offset: number, page: (at: number) => Promise<T[]>) {
+  const offsets = Array.from({ length: offset / 50 + 1 }, (_, i) => i * 50);
+  return (await Promise.all(offsets.map(page))).flat();
 }
 /** A one-line thought is its own heading and snippet; show it once. */
 function sameText(a: string, b: string) {
@@ -148,11 +163,10 @@ export function Documents({
   const restoredOpen = useRef<HTMLButtonElement>(null);
   // Only mention hidden Activity details when including them would actually find something.
   const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
-  const searchInput = useRef<HTMLInputElement>(null);
   const refresh = useCallback(() => {
     void Promise.all([
-      documents.recent(recentOffset, includeSupport),
-      documents.pins(pinOffset),
+      upTo(recentOffset, (at) => documents.recent(at, includeSupport)),
+      upTo(pinOffset, (at) => documents.pins(at)),
     ])
       .then(([r, p]) => {
         setRecent(r);
@@ -164,8 +178,7 @@ export function Documents({
   }, [recentOffset, pinOffset, includeSupport, failLoad]);
   const loadTrash = useCallback(
     () =>
-      void documents
-        .trash(trashOffset)
+      void upTo(trashOffset, (at) => documents.trash(at))
         .then((items) => {
           setTrash(items);
           setTrashLoaded(true);
@@ -196,8 +209,7 @@ export function Documents({
   useEffect(() => {
     if (!active || view !== "all") return;
     const load = () =>
-      void documents
-        .all(allOffset, includeSupport)
+      void upTo(allOffset, (at) => documents.all(at, includeSupport))
         .then((items) => {
           setAll(items);
           setAllLoaded(true);
@@ -234,8 +246,9 @@ export function Documents({
     let current = true;
     if (!active || (!query.trim() && !filter.trim())) return;
     const search = () => {
-      void documents
-        .search(query, filter.trim() || null, offset, includeSupport)
+      void upTo(offset, (at) =>
+        documents.search(query, filter.trim() || null, at, includeSupport),
+      )
         .then((r) => {
           if (current) {
             setResults(r);
@@ -337,32 +350,37 @@ export function Documents({
       {items.map((doc, index) => {
         const pinned = pins.some((p) => p.id === doc.id);
         const date = relativeDate(doc.updated_at);
+        const snippet =
+          mark && doc.snippet && !sameText(doc.snippet, doc.heading)
+            ? doc.snippet
+            : "";
         return (
-          <li key={doc.id}>
+          // A row at ticket density (DL-06): the title, then one meta line
+          // (origin, tags, date); the snippet only in search results.
+          <li
+            key={doc.id}
+            data-open={selected?.id === doc.id || undefined}
+            data-pinned={pinned || undefined}
+          >
             <FileText aria-hidden="true" className="document-list-kind" />
             <div className="document-list-content">
-              <Button
-                variant="ghost"
+              <button
+                type="button"
                 className="document-list-open"
+                aria-current={selected?.id === doc.id || undefined}
                 onClick={() => open(doc.id)}
               >
-                {doc.heading}
-              </Button>
-              {doc.origin_ticket && (
-                <p className="document-origin">
-                  Update details · {doc.origin_ticket}
-                </p>
-              )}
-              {doc.snippet && !sameText(doc.snippet, doc.heading) && (
-                <p className="document-snippet">
-                  {highlight(doc.snippet, mark)}
-                </p>
-              )}
-              {doc.tags && doc.tags.length > 0 && (
-                <p className="document-list-tags">
-                  {doc.tags.map((tag) => (
+                <span className="truncate">{doc.heading}</span>
+              </button>
+              <p className="document-list-meta">
+                {doc.origin_ticket && (
+                  <span className="document-origin">
+                    Update details · {doc.origin_ticket}
+                  </span>
+                )}
+                {doc.tags?.map((tag) => (
+                  <Badge key={tag} size="sm" asChild>
                     <button
-                      key={tag}
                       type="button"
                       aria-label={`Show Documents tagged ${tag}`}
                       onClick={() => {
@@ -372,15 +390,21 @@ export function Documents({
                     >
                       {tag}
                     </button>
-                  ))}
-                </p>
+                  </Badge>
+                ))}
+                {date && (
+                  <time
+                    className="document-list-date"
+                    dateTime={doc.updated_at}
+                  >
+                    {date}
+                  </time>
+                )}
+              </p>
+              {snippet && (
+                <p className="document-snippet">{highlight(snippet, mark)}</p>
               )}
             </div>
-            {date && (
-              <time className="document-list-date" dateTime={doc.updated_at}>
-                {date}
-              </time>
-            )}
             {inTrash ? (
               <Button
                 variant="outline"
@@ -392,18 +416,20 @@ export function Documents({
                 Restore
               </Button>
             ) : (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
-                onClick={() =>
-                  listAction(`${pinned ? "unpin" : "pin"} ${doc.heading}`, () =>
-                    documents.pin(doc.id, !pinned).then(refresh),
-                  )
-                }
-              >
-                <Pin fill={pinned ? "currentColor" : "none"} />
-              </Button>
+              <span className="document-list-pin">
+                <IconButton
+                  label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
+                  aria-pressed={pinned}
+                  onClick={() =>
+                    listAction(
+                      `${pinned ? "unpin" : "pin"} ${doc.heading}`,
+                      () => documents.pin(doc.id, !pinned).then(refresh),
+                    )
+                  }
+                >
+                  <Pin fill={pinned ? "currentColor" : "none"} />
+                </IconButton>
+              </span>
             )}
           </li>
         );
@@ -411,25 +437,104 @@ export function Documents({
     </ul>
   );
   const searching = Boolean(query.trim() || filter.trim());
-  const captureAction = onCapture && (
-    <Button variant="outline" size="sm" onClick={onCapture}>
-      <Plus aria-hidden="true" /> Capture
-    </Button>
-  );
+  const shownCount = showTrash
+    ? trash.length
+    : searching
+      ? results.length
+      : view === "all"
+        ? all.length
+        : recent.length;
   return (
-    <div className="documents-page">
-      <div className="documents-list-view" hidden={selected !== null}>
-        <SectionHeader
-          level={1}
+    <div
+      className="documents-page"
+      data-reading={selected !== null || undefined}
+    >
+      <div className="documents-list-view">
+        <PaneHeader
           title="Documents"
+          count={<Count>{shownCount}</Count>}
           actions={
             onCapture && (
-              <Button variant="outline" onClick={onCapture}>
-                <Plus aria-hidden="true" /> Capture
+              <Button size="sm" onClick={onCapture}>
+                <Plus aria-hidden="true" />
+                New Document
               </Button>
             )
           }
         />
+        {/* One toolbar in every view: it never collapses or moves (DL-01, DL-02). */}
+        <div className="documents-toolbar">
+          <SegmentedControl
+            aria-label="Documents view"
+            value={searching && !showTrash ? ("" as typeof view) : view}
+            onValueChange={(value) => {
+              setView(value);
+              setRestored(null);
+              if (value === "trash") {
+                setQuery("");
+                setFilter("");
+              }
+            }}
+            options={[
+              { value: "recent", label: "Recent" },
+              { value: "all", label: "All" },
+              { value: "trash", label: "Trash" },
+            ]}
+          />
+          <SearchInput
+            aria-label="Search Documents"
+            placeholder="Search Documents…"
+            disabled={showTrash}
+            value={query}
+            onValueChange={(value) => {
+              setQuery(value);
+              setOffset(0);
+            }}
+          />
+          <label
+            className="documents-include"
+            data-hidden={showTrash || undefined}
+          >
+            <Switch
+              aria-label="Show update details"
+              checked={includeSupport}
+              disabled={showTrash}
+              onCheckedChange={(checked) => {
+                setIncludeSupport(checked);
+                setOffset(0);
+                setRecentOffset(0);
+                setAllOffset(0);
+              }}
+            />
+            Show update details
+          </label>
+        </div>
+        {filter.trim() && (
+          <div className="documents-filters">
+            <FilterChip
+              dimension="Tag"
+              value={filter}
+              removeLabel={`Remove tag filter ${filter}`}
+              onRemove={() => {
+                setFilter("");
+                setOffset(0);
+              }}
+            />
+          </div>
+        )}
+        {showTrash && restored && (
+          <p role="status" className="documents-restored">
+            Restored {restored.heading}.
+            <Button
+              ref={restoredOpen}
+              variant="link"
+              size="inline"
+              onClick={() => open(restored.id)}
+            >
+              Open
+            </Button>
+          </p>
+        )}
         {listError?.kind === "action" && (
           <FailureAlert
             size="compact"
@@ -437,114 +542,10 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        <div className="documents-toolbar">
-          <div className="documents-tabs">
-            {(
-              [
-                ["recent", "Recently opened"],
-                ["all", "All documents"],
-                ["trash", "Trash"],
-              ] as const
-            ).map(([value, label]) => (
-              <Button
-                key={value}
-                variant={view === value ? "secondary" : "ghost"}
-                aria-pressed={view === value}
-                onClick={() => {
-                  setView(value);
-                  setRestored(null);
-                }}
-              >
-                {label}
-              </Button>
-            ))}
-            {!showTrash && (
-              <label className="documents-include">
-                <input
-                  type="checkbox"
-                  checked={includeSupport}
-                  onChange={(e) => {
-                    setIncludeSupport(e.target.checked);
-                    setOffset(0);
-                    setRecentOffset(0);
-                    setAllOffset(0);
-                  }}
-                />{" "}
-                Include update details
-              </label>
-            )}
-            {showTrash && (
-              <p role="status" className="documents-include">
-                {restored && (
-                  <>
-                    Restored {restored.heading}.
-                    <Button
-                      ref={restoredOpen}
-                      variant="link"
-                      size="sm"
-                      onClick={() => open(restored.id)}
-                    >
-                      Open
-                    </Button>
-                  </>
-                )}
-              </p>
-            )}
-          </div>
-          {!showTrash && (
-            <div className="documents-search">
-              <label htmlFor="document-search" className="sr-only">
-                Search Documents
-              </label>
-              <div className="documents-search-field">
-                <Search aria-hidden="true" />
-                <Input
-                  id="document-search"
-                  ref={searchInput}
-                  placeholder="Search titles and content…"
-                  value={query}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                    setOffset(0);
-                  }}
-                />
-              </div>
-              {filter.trim() && (
-                <span className="documents-tag-filter">
-                  Tag: {filter}
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Remove tag filter ${filter}`}
-                    onClick={() => {
-                      setFilter("");
-                      setOffset(0);
-                    }}
-                  >
-                    ×
-                  </Button>
-                </span>
-              )}
-              {searching && (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setQuery("");
-                    setFilter("");
-                    setOffset(0);
-                    searchInput.current?.focus();
-                  }}
-                >
-                  Clear search and filters
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
         {listError?.kind === "load" ? (
           <FailureState failure={listError.failure} onRetry={listError.retry} />
         ) : showTrash ? (
-          <section ref={trashList}>
+          <section ref={trashList} aria-label="Trash">
             {!trashLoaded ? (
               <EmptyState
                 size="inline"
@@ -570,91 +571,64 @@ export function Documents({
               )
             )}
             {list(trash, "", true)}
-            {(trashOffset > 0 || trash.length >= 50) && (
-              <div className="document-pagination">
-                <Button
-                  disabled={trashOffset === 0}
-                  onClick={() => setTrashOffset(Math.max(0, trashOffset - 50))}
-                >
-                  Previous trash
-                </Button>
-                <Button
-                  disabled={trash.length < 50}
-                  onClick={() => setTrashOffset(trashOffset + 50)}
-                >
-                  Next trash
-                </Button>
-              </div>
+            {trash.length >= trashOffset + 50 && (
+              <Pager
+                noun="Documents in Trash"
+                onMore={() => setTrashOffset(trashOffset + 50)}
+              />
             )}
           </section>
         ) : searching ? (
-          <section>
-            <h2>Search results</h2>
+          <section aria-label="Search results">
             {searchKey !==
             JSON.stringify([query, filter, offset, includeSupport]) ? (
-              <p role="status">Searching Documents…</p>
-            ) : results.length === 0 ? (
-              <p>
-                No Documents match{" "}
-                {query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}.
-                {!includeSupport &&
-                  hiddenMatches &&
-                  " Update details are hidden; turn on Include update details to search them."}
+              <p role="status" className="documents-count">
+                Searching Documents…
               </p>
+            ) : results.length === 0 ? (
+              <EmptyState
+                icon={<SearchX />}
+                title={`No Documents match ${query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}`}
+                description={
+                  !includeSupport && hiddenMatches
+                    ? "Update details are hidden; turn on Show update details to search them."
+                    : "Try another word, or clear the search."
+                }
+              />
             ) : (
               <>
-                <p role="status" className="documents-count">
-                  {results.length >= 50 || offset > 0
-                    ? `Showing ${offset + 1}–${offset + results.length}`
-                    : `${results.length} ${results.length === 1 ? "result" : "results"}`}
+                <p role="status" className="sr-only">
+                  {results.length === 1
+                    ? "1 result"
+                    : `${results.length} results`}
                 </p>
                 {list(results, query)}
               </>
             )}
-            {(offset > 0 || results.length >= 50) && (
-              <div className="document-pagination">
-                <Button
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - 50))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  disabled={results.length < 50}
-                  onClick={() => setOffset(offset + 50)}
-                >
-                  Next
-                </Button>
-              </div>
+            {results.length >= offset + 50 && (
+              <Pager noun="results" onMore={() => setOffset(offset + 50)} />
             )}
           </section>
         ) : (
           <>
-            {view === "recent" && (pins.length > 0 || pinOffset > 0) && (
-              <section>
-                <h2>Pinned</h2>
+            {view === "recent" && pins.length > 0 && (
+              <section aria-label="Pinned">
+                <h2 className="documents-group">
+                  <Pin aria-hidden="true" />
+                  Pinned
+                  <Count>{pins.length}</Count>
+                </h2>
                 {list(pins)}
-                {(pinOffset > 0 || pins.length >= 50) && (
-                  <div className="document-pagination">
-                    <Button
-                      disabled={pinOffset === 0}
-                      onClick={() => setPinOffset(Math.max(0, pinOffset - 50))}
-                    >
-                      Previous pins
-                    </Button>
-                    <Button
-                      disabled={pins.length < 50}
-                      onClick={() => setPinOffset(pinOffset + 50)}
-                    >
-                      Next pins
-                    </Button>
-                  </div>
+                {pins.length >= pinOffset + 50 && (
+                  <Pager
+                    noun="pinned Documents"
+                    onMore={() => setPinOffset(pinOffset + 50)}
+                  />
                 )}
               </section>
             )}
             {view === "all" ? (
-              <section>
-                <h2>All documents</h2>
+              <section aria-label="All Documents">
                 {!allLoaded ? (
                   <EmptyState
                     size="inline"
@@ -662,37 +636,30 @@ export function Documents({
                     description="Loading Documents…"
                   />
                 ) : (
-                  all.length === 0 &&
-                  allOffset === 0 && (
+                  all.length === 0 && (
                     <EmptyState
                       icon={<FileText />}
                       title={emptyCopy("documents-all").title}
                       description={emptyCopy("documents-all").sentence}
-                      action={captureAction}
                     />
                   )
                 )}
                 {list(all)}
-                {(allOffset > 0 || all.length >= 50) && (
-                  <div className="document-pagination">
-                    <Button
-                      disabled={allOffset === 0}
-                      onClick={() => setAllOffset(Math.max(0, allOffset - 50))}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      disabled={all.length < 50}
-                      onClick={() => setAllOffset(allOffset + 50)}
-                    >
-                      Next
-                    </Button>
-                  </div>
+                {all.length >= allOffset + 50 && (
+                  <Pager
+                    noun="Documents"
+                    onMore={() => setAllOffset(allOffset + 50)}
+                  />
                 )}
               </section>
             ) : (
-              <section>
-                <h2>Recently opened</h2>
+              <section aria-label="Recently opened">
+                {pins.length > 0 && (
+                  <h2 className="documents-group">
+                    <Clock aria-hidden="true" />
+                    Recent
+                  </h2>
+                )}
                 {!browseLoaded ? (
                   <EmptyState
                     size="inline"
@@ -700,36 +667,22 @@ export function Documents({
                     description="Loading Documents…"
                   />
                 ) : (
-                  recent.length === 0 &&
-                  recentOffset === 0 && (
+                  recent.length === 0 && (
                     <EmptyState
                       icon={<FileText />}
                       title={emptyCopy("documents-recent").title}
                       description={emptyCopy("documents-recent").sentence}
-                      action={captureAction}
                     />
                   )
                 )}
                 {list(
                   recent.filter((doc) => !pins.some((p) => p.id === doc.id)),
                 )}
-                {(recentOffset > 0 || recent.length >= 50) && (
-                  <div className="document-pagination">
-                    <Button
-                      disabled={recentOffset === 0}
-                      onClick={() =>
-                        setRecentOffset(Math.max(0, recentOffset - 50))
-                      }
-                    >
-                      Previous recent
-                    </Button>
-                    <Button
-                      disabled={recent.length < 50}
-                      onClick={() => setRecentOffset(recentOffset + 50)}
-                    >
-                      Next recent
-                    </Button>
-                  </div>
+                {recent.length >= recentOffset + 50 && (
+                  <Pager
+                    noun="recent Documents"
+                    onMore={() => setRecentOffset(recentOffset + 50)}
+                  />
                 )}
               </section>
             )}
