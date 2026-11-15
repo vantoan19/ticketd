@@ -29,10 +29,6 @@
   line-height: 16px;
   color: var(--muted-foreground);
 }
-.attachments-error {
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .attachments-limit {
   display: flex;
   flex-direction: column;

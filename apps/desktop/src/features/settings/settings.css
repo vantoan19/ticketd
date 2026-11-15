@@ -133,13 +133,6 @@
   line-height: 16px;
   color: var(--muted-foreground);
 }
-.settings-failure {
-  margin: 0;
-  color: var(--error-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-
 /* Destination choice, still used by the sync conflict review. */
 .upload-destination-choice {
   display: flex;

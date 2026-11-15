@@ -364,7 +364,7 @@ test("reference replacement refuses multiple Drive choices before changing the s
   fireEvent.click(screen.getByRole("button", { name: "Add selected" }));
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
-    "Choose exactly one file to replace this reference.",
+    "Choose one file. Only one file can replace this reference.",
   );
   expect(picked).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("checkbox", { name: "Second plan" }));

@@ -89,7 +89,7 @@ test("a failed permission request is reported beside Reminders", async () => {
   render(<AttentionPage onOpenInbox={() => {}} />);
   fireEvent.click(notifySwitch());
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not ask for notification permission: Error: boom",
+    "Couldn't ask for notification permission. Boom.",
   );
 });
 
@@ -111,6 +111,6 @@ test("a follow preference that cannot be saved says so", () => {
     screen.getByRole("switch", { name: "Follow tickets I create" }),
   );
   expect(screen.getByRole("alert").textContent).toBe(
-    "Could not save the follow preference.",
+    "Couldn't save the follow preference.",
   );
 });

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +19,10 @@ import {
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { client } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   workspaceClient,
   type BackupInspection,
@@ -34,7 +39,7 @@ import "@/features/settings/restore-review.css";
 type Phase =
   | { name: "checking" }
   | { name: "review"; inspection: BackupInspection }
-  | { name: "unreadable"; reason: string }
+  | { name: "unreadable"; failure: FailureDescription }
   | { name: "restoring"; inspection: BackupInspection }
   | {
       name: "done";
@@ -42,7 +47,7 @@ type Phase =
       safetyPath: string;
       /** What could not be confirmed around a restore that did happen. */
       warning: string;
-      reloadFailure: string;
+      reloadFailure: FailureDescription | null;
     };
 
 const UNCHANGED = "Your workspace hasn't changed.";
@@ -178,7 +183,7 @@ export function RestoreDialog({
 }) {
   const [file, setFile] = useState(path);
   const [phase, setPhase] = useState<Phase>({ name: "checking" });
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [copied, setCopied] = useState("");
   const latest = useRef(0);
   const recovery = useDraftRecovery();
@@ -192,13 +197,16 @@ export function RestoreDialog({
         inspection: await workspaceClient.inspectBackup(next),
       };
     } catch (reason) {
-      result = { name: "unreadable", reason: String(reason) };
+      result = {
+        name: "unreadable",
+        failure: describeFailure(reason, "read this backup"),
+      };
     }
     if (request === latest.current) setPhase(result);
   }, []);
   function inspect(next: string) {
     setFile(next);
-    setFailure("");
+    setFailure(null);
     setPhase({ name: "checking" });
     return check(next);
   }
@@ -214,12 +222,12 @@ export function RestoreDialog({
       });
       if (next !== null) await inspect(next);
     } catch (reason) {
-      setFailure(`Could not open the file dialog: ${String(reason)}`);
+      setFailure(describeFailure(reason, "open the file dialog"));
     }
   }
 
   async function replace(inspection: BackupInspection) {
-    setFailure("");
+    setFailure(null);
     setPhase({ name: "restoring", inspection });
     let safetyPath: string;
     let warning: string;
@@ -230,15 +238,21 @@ export function RestoreDialog({
       warning = restored.warning ?? "";
     } catch (reason) {
       setPhase({ name: "review", inspection });
-      setFailure(`Restore failed: ${String(reason)}`);
+      const failed = describeFailure(reason, "restore the backup");
+      setFailure({ ...failed, sentence: `${failed.sentence} ${UNCHANGED}` });
       return;
     }
-    let reloadFailure = "";
+    let reloadFailure: FailureDescription | null = null;
     try {
       await recovery.reloadAfterRestore();
       await onRestored();
     } catch (reason) {
-      reloadFailure = `The restore finished, but open views could not reload: ${String(reason)}. Restart ticketd to see the restored data.`;
+      reloadFailure = {
+        ...describeFailure(reason, "reload open views"),
+        action: null,
+        sentence:
+          "The restore finished. Restart ticketd to see the restored data.",
+      };
     }
     setPhase({ name: "done", inspection, safetyPath, warning, reloadFailure });
   }
@@ -246,7 +260,7 @@ export function RestoreDialog({
   async function copy(text: string) {
     const failure = await writeClipboard(text);
     setCopied(
-      failure === null ? "Path copied." : `Could not copy the path: ${failure}`,
+      failure === null ? "Path copied." : `Couldn't copy the path: ${failure}.`,
     );
   }
   async function reveal(target: string) {
@@ -338,12 +352,12 @@ export function RestoreDialog({
           )}
 
           {phase.name === "unreadable" && (
-            <Alert tone="error">
-              <AlertTitle>This file could not be read.</AlertTitle>
-              <AlertDescription>
-                {phase.reason} {UNCHANGED}
-              </AlertDescription>
-            </Alert>
+            <FailureAlert
+              failure={{
+                ...phase.failure,
+                sentence: `${phase.failure.sentence} ${UNCHANGED}`,
+              }}
+            />
           )}
 
           {issue && (
@@ -453,9 +467,7 @@ export function RestoreDialog({
                   </Alert>
                 )}
                 {phase.reloadFailure ? (
-                  <Alert tone="error" size="compact">
-                    <AlertDescription>{phase.reloadFailure}</AlertDescription>
-                  </Alert>
+                  <FailureAlert size="compact" failure={phase.reloadFailure} />
                 ) : (
                   <p className="restore-muted">
                     Open tickets and views were reloaded from the restored
@@ -468,11 +480,7 @@ export function RestoreDialog({
               </div>
             )}
 
-          {failure && (
-            <Alert tone="error" size="compact">
-              <AlertDescription>{failure}</AlertDescription>
-            </Alert>
-          )}
+          {failure && <FailureAlert size="compact" failure={failure} />}
         </div>
 
         {valid && (

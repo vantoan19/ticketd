@@ -4,6 +4,10 @@ import {
   type AttachmentState,
   type AttachmentSearchResult,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 
 export function useAttachmentSearch(
@@ -25,16 +29,21 @@ export function useAttachmentSearch(
   const [result, setResult] = useState<{
     files: AttachmentSearchResult[];
     key: string | null;
-    error: string;
-  }>({ files: [], key: null, error: "" });
+    error: FailureDescription | null;
+  }>({ files: [], key: null, error: null });
   useEffect(() => {
     let current = true;
     void attachments.search({ search, state, ticket, offset, limit: 50 }).then(
       (files) => {
-        if (current) setResult({ files, key, error: "" });
+        if (current) setResult({ files, key, error: null });
       },
       (reason: unknown) => {
-        if (current) setResult({ files: [], key, error: String(reason) });
+        if (current)
+          setResult({
+            files: [],
+            key,
+            error: describeFailure(reason, "load files"),
+          });
       },
     );
     return () => {
@@ -43,5 +52,5 @@ export function useAttachmentSearch(
   }, [search, state, ticket, offset, key]);
   return result.key === key
     ? { ...result, loading: false }
-    : { files: [], error: "", loading: true };
+    : { files: [], error: null, loading: true };
 }

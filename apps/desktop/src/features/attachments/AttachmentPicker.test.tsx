@@ -309,7 +309,7 @@ test("retry refreshes a cached completed upload after permanent purge", async ()
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  await within(row).findByText("Insertion failed");
+  await within(row).findByText(/Insertion failed/);
   purged = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() =>
@@ -362,7 +362,7 @@ test("a cached Drive upload receipt cannot promise library availability after re
   await screen.findByText(/Destination: Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  await within(row).findByText("Insertion failed");
+  await within(row).findByText(/Insertion failed/);
   removed = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() =>
@@ -526,7 +526,7 @@ test("explicit local fallback uses a new operation and retains the original Driv
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
   await screen.findByText(/Destination: Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText("Drive offline");
+  await screen.findByText(/Drive offline/);
   await waitFor(() =>
     expect(
       screen.getByRole("button", { name: "Upload locally instead" }),
@@ -899,7 +899,7 @@ test("mixed batches insert successes in selection order and retry the original f
     .mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText("Disk full");
+  await screen.findByText(/Disk full/);
   await waitFor(() => expect(picked.mock.calls).toHaveLength(2));
   expect(picked.mock.calls.map((call) => call[0])).toEqual([
     file("first.txt"),

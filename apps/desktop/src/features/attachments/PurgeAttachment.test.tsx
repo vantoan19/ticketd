@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -74,11 +75,13 @@ test("pending purge keeps technical diagnostics collapsed and retries without cl
   expect(alert.textContent).not.toContain(id);
   expect(alert.textContent).not.toContain("attachment:");
   expect(alert.textContent).not.toContain("repairing managed storage");
-  const details = screen.getByText("Details").closest("details");
-  expect(details).toHaveProperty("open", false);
-  expect(details?.textContent).toContain(diagnostic);
-  fireEvent.click(screen.getByText("Details"));
-  expect(details).toHaveProperty("open", true);
+  // The raw diagnostic stays under Details until asked for.
+  const toggle = within(alert).getByRole("button", { name: "Details" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(alert.textContent).not.toContain(diagnostic);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(alert.textContent).toContain(diagnostic);
   fireEvent.click(
     screen.getByRole("button", { name: "Retry permanent purge" }),
   );

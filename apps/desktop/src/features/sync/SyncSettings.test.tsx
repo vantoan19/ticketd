@@ -121,8 +121,8 @@ test("a failed sign-in is reported and leaves the card as it was", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Connect Google Drive" }),
   );
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Could not connect Google Drive: sign-in was cancelled",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't connect Google Drive. Sign-in was cancelled.",
   );
   expect(
     screen.getByRole("button", { name: "Connect Google Drive" }),
@@ -456,8 +456,8 @@ test("the setup choice has a way back, also when Drive cannot be read", async ()
   api.setupOptions.mockRejectedValue(new Error("Drive did not answer"));
   api.disconnect.mockResolvedValue(notConnected());
   show();
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Could not read your Drive: Drive did not answer",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't read your Drive. Drive did not answer.",
   );
   fireEvent.click(screen.getByRole("button", { name: "Use another account…" }));
   // Nothing is disconnected until the person confirms.

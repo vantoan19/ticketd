@@ -8,6 +8,11 @@ import {
 } from "react";
 import { Download, ExternalLink, File, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   Dialog,
   DialogContent,
@@ -129,7 +134,7 @@ export function AttachmentPreview({
   const [attempt, setAttempt] = useState(0);
   const refreshDrive = useCallback(() => setAttempt((value) => value + 1), []);
   const [failed, setFailed] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -166,7 +171,9 @@ export function AttachmentPreview({
           ? download(absent)
           : undefined,
       )
-      .catch((reason: unknown) => setError(String(reason)));
+      .catch((reason: unknown) =>
+        setError(describeFailure(reason, "download the file")),
+      );
   }, [absent, download]);
   useEffect(() => {
     const current = ++generation.current;
@@ -186,20 +193,22 @@ export function AttachmentPreview({
         if (generation.current === current) setCopy(inspection);
       }
     })().catch((reason: unknown) => {
-      if (generation.current === current) setError(String(reason));
+      if (generation.current === current)
+        setError(describeFailure(reason, "load the preview"));
     });
     return () => {
       generation.current += 1;
     };
   }, [id, uri, attempt, awaited]);
-  async function action(run: () => Promise<void>) {
+  async function action(verb: string, run: () => Promise<void>) {
     const current = generation.current;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await run();
     } catch (reason) {
-      if (generation.current === current) setError(String(reason));
+      if (generation.current === current)
+        setError(describeFailure(reason, verb));
     } finally {
       if (generation.current === current) setBusy(false);
     }
@@ -258,7 +267,11 @@ export function AttachmentPreview({
                   <Button
                     variant="outline"
                     disabled={busy || awaited || info?.can_open === false}
-                    onClick={() => void action(() => attachments.open(file.id))}
+                    onClick={() =>
+                      void action("open the file", () =>
+                        attachments.open(file.id),
+                      )
+                    }
                   >
                     <ExternalLink aria-hidden="true" />
                     {external ? "Open in Drive" : "Open file"}
@@ -277,7 +290,9 @@ export function AttachmentPreview({
                       variant="ghost"
                       disabled={busy || purgeUnavailable}
                       onClick={() =>
-                        void action(() => attachments.export(file))
+                        void action("export the file", () =>
+                          attachments.export(file),
+                        )
                       }
                     >
                       <Download aria-hidden="true" />
@@ -314,14 +329,16 @@ export function AttachmentPreview({
                     <Button
                       disabled={busy}
                       onClick={() =>
-                        void action(() => availability.download(file.id))
+                        void action("download the file", () =>
+                          availability.download(file.id),
+                        )
                       }
                     >
                       <Download aria-hidden="true" />
                       Download
                     </Button>
                   )}
-                  {error && <p role="alert">{error}</p>}
+                  {error && <FailureAlert size="compact" failure={error} />}
                 </div>
               ) : (
                 <div className="attachment-preview-fallback">
@@ -352,7 +369,7 @@ export function AttachmentPreview({
                       onClick={() => {
                         setInfo(null);
                         setFailed(false);
-                        setError("");
+                        setError(null);
                         setAttempt((value) => value + 1);
                       }}
                     >
@@ -372,7 +389,7 @@ export function AttachmentPreview({
                     variant="outline"
                     disabled={busy}
                     onClick={() =>
-                      void action(async () => {
+                      void action("restore the file", async () => {
                         await attachments.restore(file.id, crypto.randomUUID());
                         setAttempt((value) => value + 1);
                       })
@@ -520,7 +537,10 @@ export function AttachmentPreview({
                   </details>
                 </>
               )}
-              {error && <p role="alert">{error}</p>}
+              {/* While the file waits in Drive, the preview pane shows the failure. */}
+              {error && !awaited && (
+                <FailureAlert size="compact" failure={error} />
+              )}
               {!external && info?.can_open === false && (
                 <small className="attachment-hint">
                   Open is unavailable for this file. Export preserves its bytes
@@ -570,7 +590,7 @@ export function AttachmentPreview({
             onPick={async (replacement, requestId) => {
               if (replacement.id === file?.id)
                 throw new Error(
-                  "Choose a different attachment identity for this reference.",
+                  "That file is already attached here. Choose a different file.",
                 );
               const signal = replacementRequest.current?.signal;
               if (!signal)

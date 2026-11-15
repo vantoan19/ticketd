@@ -3,11 +3,16 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
+import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { Step, Steps } from "@/components/ui/steps";
 import { workspaceClient } from "@/lib/api/workspace";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { cliClient, type CliStatus } from "@/lib/api/cli";
 import {
   SettingsList,
@@ -44,19 +49,27 @@ type Check =
 
 const mono = "font-mono";
 
+/** Opens the guide in the browser; a link that will not open says so beside it. */
 function InstallGuideLink() {
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  const open = () => {
+    setFailure(null);
+    void workspaceClient
+      .openLink(INSTALL_GUIDE_URL)
+      .catch((reason: unknown) =>
+        setFailure(describeFailure(reason, "open the installation guide")),
+      );
+  };
   return (
-    <Button
-      type="button"
-      variant="secondary"
-      size="sm"
-      onClick={() =>
-        void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
-      }
-    >
-      Installation guide
-      <ExternalLink aria-hidden="true" />
-    </Button>
+    <span className="flex flex-col items-start gap-1">
+      <Button type="button" variant="secondary" size="sm" onClick={open}>
+        Installation guide
+        <ExternalLink aria-hidden="true" />
+      </Button>
+      {failure && (
+        <FailureState size="inline" failure={failure} onRetry={open} />
+      )}
+    </span>
   );
 }
 

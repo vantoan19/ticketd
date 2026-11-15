@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,10 @@ import {
   type Attachment,
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { usageContext } from "./usage-context";
 
 export function RemoveRemoteAttachment({
@@ -30,7 +35,7 @@ export function RemoveRemoteAttachment({
     ReturnType<typeof attachments.removeRemote>
   > | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [requestId] = useState(() => crypto.randomUUID());
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -41,7 +46,8 @@ export function RemoveRemoteAttachment({
         if (current) setReview(value);
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "check where the file is used"));
       });
     return () => {
       current = false;
@@ -49,12 +55,16 @@ export function RemoveRemoteAttachment({
   }, [file.id]);
   async function remove() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       setResult(await attachments.removeRemote(file.id, requestId));
       onChanged();
     } catch (reason) {
-      setError(String(reason));
+      const failure = describeFailure(reason, "remove the file from ticketd");
+      setError({
+        ...failure,
+        sentence: `${failure.sentence} The Drive file stays in Drive.`,
+      });
     } finally {
       setBusy(false);
     }
@@ -107,7 +117,17 @@ export function RemoveRemoteAttachment({
               onClick={() => {
                 void attachments
                   .openRemovedRemote(result.open_url)
-                  .catch((reason: unknown) => setError(String(reason)));
+                  .catch((reason: unknown) => {
+                    const failure = describeFailure(
+                      reason,
+                      "open the file in Drive",
+                    );
+                    setError({
+                      ...failure,
+                      sentence:
+                        "Its ticketd record was removed. Find the file in Drive.",
+                    });
+                  });
               }}
             >
               Open in Drive
@@ -127,19 +147,7 @@ export function RemoveRemoteAttachment({
             )}
           </>
         )}
-        {error && (
-          <>
-            <p role="alert">
-              {result
-                ? "Could not open the Drive file. Its ticketd record was removed; use the retained link or find it in Drive."
-                : "Removal was not confirmed. Retry the same action or review usage again; the Drive file remains."}
-            </p>
-            <details>
-              <summary>Details</summary>
-              <p className="attachment-hint">{error}</p>
-            </details>
-          </>
-        )}
+        {error && <FailureAlert size="compact" failure={error} />}
         <div className="attachment-actions attachment-cleanup-footer">
           <Button
             ref={cancel}

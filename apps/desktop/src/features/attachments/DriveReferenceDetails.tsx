@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
+import { FailureState } from "@/components/ui/failure-alert";
 import { attachments, type DriveReference } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { formatSize } from "./format-size";
 
 const nativeTypes: Record<string, string> = {
@@ -19,7 +24,7 @@ export function DriveReferenceDetails({
   revision?: number;
 }) {
   const [reference, setReference] = useState<DriveReference | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   useEffect(() => {
     let current = true;
     void attachments
@@ -28,7 +33,8 @@ export function DriveReferenceDetails({
         if (current) setReference(value);
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "load the Drive details"));
       });
     return () => {
       current = false;
@@ -38,7 +44,13 @@ export function DriveReferenceDetails({
     return (
       <>
         <dt>Drive details</dt>
-        <dd>{error || "Loading last-known details…"}</dd>
+        <dd>
+          {error ? (
+            <FailureState size="inline" failure={error} />
+          ) : (
+            "Loading last-known details…"
+          )}
+        </dd>
       </>
     );
   return (

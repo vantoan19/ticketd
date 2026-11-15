@@ -33,9 +33,7 @@ test("rename preserves the draft and request identity after a lost response and 
   render(
     <RenameAttachment file={file} onClose={() => {}} onRenamed={changed} />,
   );
-  expect(
-    screen.getByText(/Existing link text stays exactly as authored/),
-  ).toBeTruthy();
+  expect(screen.getByText(/Links keep their text/)).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
     target: { value: "Readable trace" },
   });

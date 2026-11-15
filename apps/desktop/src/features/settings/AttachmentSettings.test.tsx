@@ -115,7 +115,7 @@ test("a limit that is not positive is refused beside the field and nothing is sa
   await waitFor(() => expect(input.value).toBe("100"));
   typeLimit(input, "0");
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toBe("Enter a positive upload limit in MiB.");
+  expect(alert.textContent).toBe("Enter a size above 0 MiB.");
   expect(input.getAttribute("aria-invalid")).toBe("true");
   expect(invoke).not.toHaveBeenCalledWith(
     "set_attachment_upload_limit",
@@ -131,7 +131,7 @@ test("a failed save keeps what was typed and shows the reason without Saved", as
   await waitFor(() => expect(input.value).toBe("100"));
   typeLimit(input, "30");
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not save the upload limit",
+    "Couldn't save the upload limit",
   );
   expect(screen.getByRole("alert").textContent).toContain(
     "Workspace is read-only",
@@ -201,7 +201,7 @@ test("choosing Drive picks a writable folder, shows the folder row, and a failed
   });
   fireEvent.click(screen.getByRole("button", { name: "Change folder…" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Upload destination unchanged",
+    "Couldn't change the upload destination",
   );
   expect(screen.getByText("Team files")).toBeTruthy();
   expect(
@@ -211,14 +211,14 @@ test("choosing Drive picks a writable folder, shows the folder row, and a failed
   ).toBe("checked");
 });
 
-test("an unreadable destination offers Retry destination and the footnote stays", async () => {
+test("an unreadable destination offers Retry and the footnote stays", async () => {
   answer({ attachment_upload_destination: new Error("offline") });
   render(<AttachmentSettings />);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not read the upload destination",
+    "Couldn't read the upload destination",
   );
   answer();
-  fireEvent.click(screen.getByRole("button", { name: "Retry destination" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   const local = await screen.findByRole("radio", { name: /Local workspace/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
   expect(screen.queryByRole("alert")).toBeNull();

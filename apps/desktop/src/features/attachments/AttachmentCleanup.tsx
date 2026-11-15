@@ -11,6 +11,11 @@ import {
   attachments,
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { formatSize } from "./format-size";
 import { usageContext } from "./usage-context";
 
@@ -25,7 +30,8 @@ export function AttachmentCleanup({
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<{ id: string; requestId: string }[]>(
     [],
   );
@@ -41,17 +47,17 @@ export function AttachmentCleanup({
       })
       .catch((reason: unknown) => {
         if (current) {
-          setError(String(reason));
+          setError(describeFailure(reason, "review unused files"));
           setLoading(false);
         }
       });
     return () => {
       current = false;
     };
-  }, [offset]);
+  }, [offset, attempt]);
   async function quarantine() {
     setBusy(true);
-    setError("");
+    setError(null);
     let completed = 0;
     try {
       for (const item of selected) {
@@ -61,9 +67,11 @@ export function AttachmentCleanup({
       }
       onClose();
     } catch (reason) {
-      setError(
-        `${completed ? `${completed} moved to quarantine. ` : ""}${String(reason)}. Remaining files were not confirmed; retry or review them again.`,
-      );
+      const failure = describeFailure(reason, "move the remaining files");
+      setError({
+        ...failure,
+        sentence: `${completed ? `${completed} moved to quarantine. ` : ""}${failure.sentence} The rest stay where they are.`,
+      });
     } finally {
       setBusy(false);
       onChanged();
@@ -73,7 +81,7 @@ export function AttachmentCleanup({
     setSelected([]);
     setRows([]);
     setLoading(true);
-    setError("");
+    setError(null);
     setOffset(next);
   }
   function fileRow(row: AttachmentCleanupReview) {
@@ -160,7 +168,19 @@ export function AttachmentCleanup({
           backups and continue to occupy disk space until explicitly purged.
           Remote files are never deleted.
         </p>
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => {
+              setError(null);
+              if (rows.length === 0) {
+                setLoading(true);
+                setAttempt((value) => value + 1);
+              } else void quarantine();
+            }}
+          />
+        )}
         {loading ? (
           <p role="status">Reviewing files…</p>
         ) : (

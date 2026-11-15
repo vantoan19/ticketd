@@ -329,7 +329,7 @@ test("a failed restore keeps the review open and says so", async () => {
   await within(dialog).findByText(/Integrity checked/);
   fireEvent.click(replaceButton(dialog));
   expect((await within(dialog).findByRole("alert")).textContent).toContain(
-    "workspace is in use",
+    "Workspace is in use.",
   );
   expect(reload).not.toHaveBeenCalled();
 });
@@ -372,7 +372,7 @@ test("an unreadable file is an error with the unchanged reassurance and no way t
   );
   const dialog = await openReview();
   const alert = await within(dialog).findByRole("alert");
-  expect(alert.textContent).toContain("This file could not be read.");
+  expect(alert.textContent).toContain("Couldn't read this backup");
   expect(alert.textContent).toContain("Your workspace hasn't changed.");
   expect(replaceButton(dialog).disabled).toBe(true);
 });

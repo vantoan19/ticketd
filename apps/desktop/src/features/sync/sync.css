@@ -40,7 +40,6 @@
 .sync-footer {
   margin-top: 16px;
 }
-.sync-failure,
 .sync-status-line {
   margin: 12px 0 0;
   font-size: var(--text-ui);

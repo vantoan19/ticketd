@@ -78,8 +78,8 @@ test("a link that cannot open says so", async () => {
   vi.mocked(workspaceClient.openLink).mockRejectedValue("no browser");
   renderPage();
   fireEvent.click(screen.getByRole("link", { name: /^Documentation/ }));
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Could not open the documentation: no browser",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't open the documentation. No browser.",
   );
 });
 

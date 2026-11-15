@@ -1,15 +1,19 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, FileCheck, RefreshCw } from "lucide-react";
-import { Alert, AlertActions, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { agentSkillsClient, type AgentSkill } from "@/lib/api/agent-skills";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   SettingsList,
   SettingsListFooter,
@@ -104,12 +108,8 @@ function names(agents: AgentSkill[]) {
 
 type Load =
   | { phase: "loading" }
-  | { phase: "failed"; message: string }
+  | { phase: "failed"; failure: FailureDescription }
   | { phase: "done"; agents: AgentSkill[] };
-
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 const STATUS_ID = "agent-skill-status";
 
@@ -122,7 +122,9 @@ export function AgentSkillsCard({
   const { openPage } = useSettingsState();
   const [load, setLoad] = useState<Load>({ phase: "loading" });
   const [busy, setBusy] = useState(false);
-  const [failures, setFailures] = useState<Record<string, string>>({});
+  const [failures, setFailures] = useState<Record<string, FailureDescription>>(
+    {},
+  );
   const [result, setResult] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<AgentSkill | null>(null);
   // An action just finished; its button may be gone, so focus moves to the status.
@@ -136,7 +138,10 @@ export function AgentSkillsCard({
           onChanged?.();
         },
         (error: unknown) =>
-          setLoad({ phase: "failed", message: message(error) }),
+          setLoad({
+            phase: "failed",
+            failure: describeFailure(error, "check agent skills"),
+          }),
       ),
     [onChanged],
   );
@@ -155,7 +160,7 @@ export function AgentSkillsCard({
     setBusy(true);
     setFailures({});
     setResult(null);
-    const failed: Record<string, string> = {};
+    const failed: Record<string, FailureDescription> = {};
     const done: AgentSkill[] = [];
     let backup: string | null = null;
     for (const agent of agents) {
@@ -163,7 +168,10 @@ export function AgentSkillsCard({
         backup = (await agentSkillsClient.install(agent.id, replace)).backup;
         done.push(agent);
       } catch (error) {
-        failed[agent.id] = message(error);
+        failed[agent.id] = describeFailure(
+          error,
+          `${replace ? "replace" : "install"} the skill for ${agent.name}`,
+        );
       }
     }
     setFailures(failed);
@@ -202,21 +210,11 @@ export function AgentSkillsCard({
     <>
       <SettingsSection title="ticketd skill">
         {load.phase === "failed" ? (
-          <Alert tone="error">
-            <AlertTitle>
-              Could not check agent skills: {load.message}
-            </AlertTitle>
-            <AlertActions>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={checkAgain}
-              >
-                Try again
-              </Button>
-            </AlertActions>
-          </Alert>
+          <FailureState
+            size="inline"
+            failure={load.failure}
+            onRetry={checkAgain}
+          />
         ) : (
           <SettingsList>
             {load.phase === "loading" ? (
@@ -322,7 +320,14 @@ export function AgentSkillsCard({
                   : undefined;
                 const replaceable =
                   agent.state === "edited" || agent.state === "other";
-                const failure = failures[agent.id] ?? agent.error;
+                const failure =
+                  failures[agent.id] ??
+                  (agent.error
+                    ? describeFailure(
+                        agent.error,
+                        `read the skill for ${agent.name}`,
+                      )
+                    : null);
                 return (
                   <SettingsRow
                     key={agent.id}
@@ -370,12 +375,7 @@ export function AgentSkillsCard({
                       </p>
                     )}
                     {failure && (
-                      <p
-                        role="alert"
-                        className="text-xs leading-4 text-destructive"
-                      >
-                        {failure}
-                      </p>
+                      <FailureState size="inline" failure={failure} />
                     )}
                   </SettingsRow>
                 );

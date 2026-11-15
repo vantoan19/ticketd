@@ -4,6 +4,7 @@ import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -23,6 +24,10 @@ import {
   type DriveConfiguration,
   type AttachmentUploadDestination,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import "@/features/tickets/ticket-attachments.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
 import { UploadRecovery, type UploadRecord } from "./upload-recovery";
@@ -32,8 +37,38 @@ type UploadAttempt = UploadRecord & {
   state:
     "queued" | "uploading" | "attaching" | "inserted" | "failed" | "canceled";
   progress: UploadProgress;
-  error?: string;
+  /** What happened to this upload, in plain words, when nothing failed. */
+  note?: string;
+  /** Why this upload failed; its Retry shows only when retrying can succeed. */
+  failure?: FailureDescription;
 };
+
+/** A failure ticketd found itself, before anything was sent: no Details. */
+function plainFailure(
+  title: string,
+  sentence: string,
+  action: FailureDescription["action"] = null,
+  code: FailureDescription["code"] = "failed",
+): FailureDescription {
+  return { code, title, sentence, action, details: "" };
+}
+
+/** A file over the workspace limit: the sizes, and the limit as the fix. */
+function tooLarge(size: number | null, limit: number | null) {
+  return plainFailure(
+    "Too large",
+    [
+      size === null
+        ? "The file is larger than the upload limit."
+        : `The file is ${formatSize(size)}.`,
+      limit === null ? "" : `The limit is ${formatSize(limit)}.`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    "change_limit",
+    "too_large",
+  );
+}
 function isCanceled(row: UploadAttempt) {
   return row.state === "canceled";
 }
@@ -64,7 +99,7 @@ export function AttachmentPicker({
   const [rows, setRows] = useState<UploadAttempt[]>([]);
   const attempts = useRef<UploadAttempt[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [limit, setLimit] = useState<number | null>(null);
   const [workspaceDestination, setWorkspaceDestination] =
     useState<AttachmentUploadDestination | null>(null);
@@ -123,7 +158,7 @@ export function AttachmentPicker({
           ...record,
           state: "canceled",
           progress: { copied: 0, total: 0 },
-          error: "Recovered upload. Retry to insert at the current caret.",
+          note: "Recovered upload. Retry to insert at the current caret.",
         })),
       );
       update();
@@ -133,11 +168,13 @@ export function AttachmentPicker({
   }, []);
   useEffect(() => {
     if (open)
-      void loadRecovery().catch((reason: unknown) =>
-        setError(
-          `Upload recovery is unavailable: ${String(reason)}. No new files will be uploaded until recovery is available.`,
-        ),
-      );
+      void loadRecovery().catch((reason: unknown) => {
+        const failure = describeFailure(reason, "open upload recovery");
+        setError({
+          ...failure,
+          sentence: `${failure.sentence} No new files are uploaded until it opens.`,
+        });
+      });
   }, [open, loadRecovery]);
   function changeOpen(next: boolean) {
     if (!next) {
@@ -162,9 +199,7 @@ export function AttachmentPicker({
       })
       .catch((reason: unknown) => {
         if (current && readRevision === destinationRead.current)
-          setError(
-            `Could not read the upload destination: ${String(reason)}. New uploads must resolve their destination before starting.`,
-          );
+          setError(describeFailure(reason, "read the upload destination"));
       });
     void attachments
       .uploadLimit()
@@ -172,7 +207,7 @@ export function AttachmentPicker({
         if (current) setLimit(value);
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current) setError(describeFailure(reason, "read the upload limit"));
       });
     return () => {
       current = false;
@@ -188,7 +223,8 @@ export function AttachmentPicker({
       for (const next of attempts.current) {
         if (next.state !== "queued") continue;
         // Closing abandons insertion, but never erases an already completed upload.
-        delete next.error;
+        delete next.note;
+        delete next.failure;
         next.state = next.stored ? "attaching" : "uploading";
         update();
         try {
@@ -196,10 +232,12 @@ export function AttachmentPicker({
           await bindDestination(next);
           if (!next.stored && typeof next.source !== "string") {
             const bound = await attachments.uploadLimit();
-            if (next.source.size > bound)
-              throw new Error(
-                `File exceeds the ${formatSize(bound)} workspace limit. Change it in Settings > Attachments.`,
-              );
+            if (next.source.size > bound) {
+              next.state = "failed";
+              next.failure = tooLarge(next.source.size, bound);
+              update();
+              continue;
+            }
           }
           // Persist the original identity and clipboard bytes before starting any effect.
           await journal?.put(next);
@@ -249,12 +287,18 @@ export function AttachmentPicker({
           await journal?.remove(next.requestId);
         } catch (reason) {
           if (next.state === "inserted") {
-            setError(
-              `File attached, but its upload recovery entry could not be cleared: ${String(reason)}. Reuse the completed snapshot rather than uploading again.`,
+            const failure = describeFailure(
+              reason,
+              "clear the upload recovery entry",
             );
+            setError({
+              ...failure,
+              sentence:
+                "The file is attached. Reuse it from Existing files rather than uploading again.",
+            });
           } else if (next.state !== "canceled") {
             next.state = "failed";
-            next.error = String(reason).replace(/^Error: /, "");
+            next.failure = rowFailure(reason, next);
           }
         }
         update();
@@ -275,7 +319,10 @@ export function AttachmentPicker({
     const currentInsertion = insertion.current;
     if (single && sources.length > 1) {
       setError(
-        "Choose one file to replace this reference. No files were uploaded.",
+        plainFailure(
+          "Choose one file",
+          "Only one file can replace this reference. Nothing was uploaded.",
+        ),
       );
       return;
     }
@@ -291,9 +338,11 @@ export function AttachmentPicker({
       if (!explicitDestination && readRevision === destinationRead.current)
         setWorkspaceDestination(intent);
     } catch (reason) {
-      setError(
-        `Could not prepare upload destination and recovery: ${String(reason)}. No new uploads were started.`,
-      );
+      const failure = describeFailure(reason, "prepare the upload");
+      setError({
+        ...failure,
+        sentence: `${failure.sentence} No uploads were started.`,
+      });
       return;
     }
     const started =
@@ -327,15 +376,16 @@ export function AttachmentPicker({
         await bindDestination(row);
         if (typeof row.source !== "string") {
           const bound = await attachments.uploadLimit();
-          if (row.source.size > bound)
-            throw new Error(
-              `File exceeds the ${formatSize(bound)} workspace limit. Change it in Settings > Attachments.`,
-            );
+          if (row.source.size > bound) {
+            row.state = "failed";
+            row.failure = tooLarge(row.source.size, bound);
+            continue;
+          }
         }
         await journal?.put(row);
       } catch (reason) {
         row.state = "failed";
-        row.error = String(reason).replace(/^Error: /, "");
+        row.failure = rowFailure(reason, row);
       }
     }
     if (insertion.current !== currentInsertion) {
@@ -346,6 +396,15 @@ export function AttachmentPicker({
     }
     update();
     void run();
+  }
+  function rowFailure(reason: unknown, row: UploadAttempt) {
+    const failure = describeFailure(reason, "upload this file");
+    if (failure.code !== "too_large") return failure;
+    const size =
+      typeof row.source === "string"
+        ? row.progress.total || null
+        : row.source.size;
+    return { ...tooLarge(size, limit), details: failure.details };
   }
   async function bindDestination(row: UploadAttempt) {
     if (row.intent === undefined) return;
@@ -370,18 +429,18 @@ export function AttachmentPicker({
   });
   async function choose() {
     const currentInsertion = insertion.current;
-    setError("");
+    setError(null);
     try {
       const sources = await attachments.chooseFile(!single);
       if (insertion.current === currentInsertion) enqueue(sources);
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "choose files"));
     }
   }
   async function chooseFolder() {
     const currentInsertion = insertion.current;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       const configuration = await attachments.driveConfiguration();
       if (insertion.current !== currentInsertion) return;
@@ -398,7 +457,7 @@ export function AttachmentPicker({
         });
       }
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "choose a Drive folder"));
     } finally {
       folderSelection.current = null;
       setBusy(false);
@@ -406,7 +465,7 @@ export function AttachmentPicker({
   }
   function uploadLocally(row: UploadAttempt) {
     row.state = "canceled";
-    row.error =
+    row.note =
       "Local upload chosen explicitly. Any completed remote file remains in Drive; this Drive operation is retained for status checks.";
     const local: UploadAttempt = {
       source: row.source,
@@ -423,7 +482,7 @@ export function AttachmentPicker({
   }
   async function reuse(attachmentId: string) {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       const currentInsertion = insertion.current;
       const file = await attachments.inspect(attachmentId.trim());
@@ -435,7 +494,7 @@ export function AttachmentPicker({
       reuseRequests.current.delete(file.id);
       if (insertion.current === currentInsertion) changeOpen(false);
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "reuse the file"));
     } finally {
       setBusy(false);
     }
@@ -562,7 +621,12 @@ export function AttachmentPicker({
                           max={row.progress.total || 1}
                         />
                       )}
-                      {row.error && <p role="alert">{row.error}</p>}
+                      {row.note && (
+                        <p className="attachment-hint">{row.note}</p>
+                      )}
+                      {row.failure && (
+                        <FailureAlert size="compact" failure={row.failure} />
+                      )}
                       {row.stored && row.state !== "inserted" && (
                         <p className="attachment-hint">
                           Stored as {row.stored.id}.{" "}
@@ -589,6 +653,8 @@ export function AttachmentPicker({
                           {row.destination && !row.stored && (
                             <>
                               <Button
+                                variant="outline"
+                                size="sm"
                                 disabled={busy}
                                 onClick={() => {
                                   setBusy(true);
@@ -598,15 +664,19 @@ export function AttachmentPicker({
                                       if (result.attachment) {
                                         row.stored = result.attachment;
                                         await (await loadRecovery())?.put(row);
-                                        row.error =
+                                        delete row.failure;
+                                        row.note =
                                           "Upload complete. Retry to insert the existing uploaded copy.";
                                       } else
-                                        row.error =
+                                        row.note =
                                           "Not confirmed complete. Retry reconciles the same remote ID before sending bytes.";
                                       update();
                                     })
                                     .catch((reason: unknown) => {
-                                      row.error = String(reason);
+                                      row.failure = describeFailure(
+                                        reason,
+                                        "check the upload",
+                                      );
                                       update();
                                     })
                                     .finally(() => setBusy(false));
@@ -630,23 +700,34 @@ export function AttachmentPicker({
                                 void attachments
                                   .openDriveUpload(row.requestId)
                                   .catch((reason: unknown) =>
-                                    setError(String(reason)),
+                                    setError(
+                                      describeFailure(
+                                        reason,
+                                        "open the file in Drive",
+                                      ),
+                                    ),
                                   )
                               }
                             >
                               Open in Drive
                             </Button>
                           )}
-                          <Button
-                            disabled={busy}
-                            onClick={() => {
-                              row.state = "queued";
-                              update();
-                              void run();
-                            }}
-                          >
-                            Retry
-                          </Button>
+                          {(row.state === "canceled" ||
+                            !row.failure ||
+                            row.failure.action === "retry") && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => {
+                                row.state = "queued";
+                                update();
+                                void run();
+                              }}
+                            >
+                              Retry
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             disabled={busy}
@@ -661,7 +742,10 @@ export function AttachmentPicker({
                                 })
                                 .catch((reason: unknown) =>
                                   setError(
-                                    `Could not dismiss upload recovery: ${String(reason)}`,
+                                    describeFailure(
+                                      reason,
+                                      "dismiss the upload",
+                                    ),
                                   ),
                                 );
                             }}
@@ -681,7 +765,15 @@ export function AttachmentPicker({
                             void attachments
                               .cancel(row.requestId)
                               .catch((reason: unknown) => {
-                                row.error = `Cancellation could not be confirmed: ${String(reason)}. Any completed snapshot remains available.`;
+                                const failure = describeFailure(
+                                  reason,
+                                  "confirm the cancellation",
+                                );
+                                row.failure = {
+                                  ...failure,
+                                  action: null,
+                                  sentence: `${failure.sentence} Any completed file stays available.`,
+                                };
                                 update();
                               });
                           }}
@@ -746,8 +838,12 @@ export function AttachmentPicker({
             />
           </div>
         )}
-        {error && <p role="alert">{error}</p>}
-        {dropFailure && <p role="alert">{dropFailure}</p>}
+        {error && <FailureAlert size="compact" failure={error} />}
+        {dropFailure && (
+          <p role="alert" className="attachment-hint">
+            {dropFailure}
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   );

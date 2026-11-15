@@ -86,21 +86,21 @@ test("the last backup shows its file, folder and Checked, and can be revealed", 
   );
 });
 
-test("a failed read is its own state with Try again, not No backups yet", async () => {
+test("a failed read is its own state with Retry, not No backups yet", async () => {
   vi.mocked(workspaceClient.lastBackup).mockRejectedValueOnce(
     new Error("locked"),
   );
   renderPage();
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Could not read the last backup");
+  expect(alert.textContent).toContain("Couldn't read the last backup");
   expect(alert.textContent).toContain(
-    "This does not affect the backups themselves. Try again, or back up now.",
+    "The backups themselves are fine. Retry, or back up now.",
   );
   expect(screen.queryByText("No backups yet")).toBeNull();
   // Backing up still works without the status.
   expect((backUpButton() as HTMLButtonElement).disabled).toBe(false);
   vi.mocked(workspaceClient.lastBackup).mockResolvedValue(last);
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(
     await screen.findByText("ticketd-backup-2026-11-01.sqlite3"),
   ).toBeTruthy();
@@ -150,9 +150,8 @@ test("a refused backup is explained in the footer and keeps the previous status"
   renderPage();
   await screen.findByText("ticketd-backup-2026-11-01.sqlite3");
   fireEvent.click(backUpButton());
-  const failure = await screen.findByText(
-    "The backup was not saved: a file already exists",
-  );
+  const failure = await screen.findByText("A file already exists.");
+  expect(failure.textContent).toContain("Couldn't save the backup.");
   expect(failure.closest(".settings-list-footer")).toBeTruthy();
   expect(screen.getByText("ticketd-backup-2026-11-01.sqlite3")).toBeTruthy();
 });
@@ -226,11 +225,11 @@ test("a failed safety backup read is a message, never a count of 0", async () =>
   renderPage();
   const section = screen.getByRole("region", { name: "Safety backups" });
   const alert = await within(section).findByRole("alert");
-  expect(alert.textContent).toContain("Could not list safety backups");
-  expect(alert.textContent).toContain("no access");
+  expect(alert.textContent).toContain("Couldn't list safety backups");
+  expect(alert.textContent).toContain("No access.");
   expect(within(section).queryByText("No safety backups yet")).toBeNull();
   vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
-  fireEvent.click(within(section).getByRole("button", { name: "Try again" }));
+  fireEvent.click(within(section).getByRole("button", { name: "Retry" }));
   expect(
     await within(section).findByText("No safety backups yet"),
   ).toBeTruthy();

@@ -1,7 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import type { Attachment } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useAttachmentSearch } from "./use-attachment-search";
 import { formatSize } from "./format-size";
 import { usageContext } from "./usage-context";
@@ -27,7 +32,9 @@ export function ExistingAttachments({
     { file: Attachment; requestId: string }[]
   >([]);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  // A choice that cannot be inserted, said before anything is sent.
+  const [hint, setHint] = useState("");
   const current = useRef(true);
   useEffect(() => {
     current.current = true;
@@ -41,14 +48,16 @@ export function ExistingAttachments({
     ticketReference,
     offset,
   );
+  const shownFailure = error ?? failure;
   async function insert() {
     if (single && selected.length !== 1) {
-      setFailure("Choose one file to replace this reference.");
+      setHint("Choose one file to replace this reference.");
       return;
     }
     setBusy(true);
     onBusyChange(true);
-    setFailure("");
+    setHint("");
+    setFailure(null);
     try {
       for (const item of selected) {
         if (!current.current) return;
@@ -60,7 +69,13 @@ export function ExistingAttachments({
       }
       onDone();
     } catch (reason) {
-      if (current.current) setFailure(String(reason));
+      if (current.current)
+        setFailure(
+          describeFailure(
+            reason,
+            selected.length === 1 ? "insert the file" : "insert the files",
+          ),
+        );
     } finally {
       if (current.current) setBusy(false);
       onBusyChange(false);
@@ -150,7 +165,18 @@ export function ExistingAttachments({
         })}
       </div>
       {!loading && !error && !files.length && <p>No matching files</p>}
-      {(error || failure) && <p role="alert">{error || failure}</p>}
+      {hint && (
+        <p role="alert" className="attachment-hint">
+          {hint}
+        </p>
+      )}
+      {shownFailure && (
+        <FailureAlert
+          size="compact"
+          failure={shownFailure}
+          {...(error ? {} : { onRetry: () => void insert() })}
+        />
+      )}
       <div className="attachment-actions">
         <Button
           variant="ghost"

@@ -108,6 +108,3 @@
   height: 7px;
   background: var(--disabled-foreground);
 }
-.appearance-failure {
-  margin-top: 12px;
-}

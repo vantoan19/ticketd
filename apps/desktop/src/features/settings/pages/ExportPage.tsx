@@ -3,12 +3,16 @@ import { useState } from "react";
 import { Braces, FolderOpen } from "lucide-react";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
 import { fileManagerName } from "@/lib/platform";
 import { revealFile } from "@/lib/reveal";
-import { localDate } from "@/features/settings/settings-format";
+import { lineFailure, localDate } from "@/features/settings/settings-format";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
@@ -23,11 +27,11 @@ import "@/features/settings/pages/export-page.css";
 
 function JsonSection() {
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [savedPath, setSavedPath] = useState("");
   async function exportWorkspace() {
     setBusy(true);
-    setFailure("");
+    setFailure(null);
     setSavedPath("");
     try {
       const path = await workspaceClient.chooseSavePath({
@@ -41,17 +45,17 @@ function JsonSection() {
         await client.exportWorkspace(path);
         setSavedPath(path);
       } catch (reason) {
-        setFailure(`The export was not saved: ${String(reason)}`);
+        setFailure(describeFailure(reason, "save the export"));
       }
     } catch (reason) {
-      setFailure(`Could not open the save dialog: ${String(reason)}`);
+      setFailure(describeFailure(reason, "open the save dialog"));
     } finally {
       setBusy(false);
     }
   }
   async function reveal(path: string) {
     const problem = await revealFile(path);
-    if (problem) setFailure(problem);
+    if (problem) setFailure(lineFailure(problem));
   }
   return (
     <SettingsSection title="Workspace as JSON">
@@ -105,9 +109,7 @@ function JsonSection() {
         )}
       </SettingsList>
       {failure && (
-        <Alert tone="error" size="compact" className="mt-3">
-          <AlertDescription>{failure}</AlertDescription>
-        </Alert>
+        <FailureAlert size="compact" failure={failure} className="mt-3" />
       )}
     </SettingsSection>
   );
