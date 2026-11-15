@@ -19,7 +19,8 @@ import {
 } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
+import { Count } from "@/components/ui/count";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
@@ -444,7 +445,7 @@ export function WorkspaceGraph({
   );
   return (
     <section className="context-graph-page" aria-label="Workspace graph">
-      <ListHeader
+      <PaneHeader
         title="Workspace graph"
         actions={
           <>
@@ -463,13 +464,13 @@ export function WorkspaceGraph({
         }
       >
         {graph && (
-          <p>
+          <Count>
             {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
             {relationshipCount}{" "}
             {relationshipCount === 1 ? "relationship" : "relationships"}
-          </p>
+          </Count>
         )}
-      </ListHeader>
+      </PaneHeader>
       <div className="context-graph-toolbar">
         <span className="context-graph-search-field">
           <Search aria-hidden="true" />

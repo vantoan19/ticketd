@@ -6,29 +6,15 @@
 .context-graph-body {
   padding: 16px 20px 48px;
 }
-.context-graph-page .list-header {
+.context-graph-page .ui-pane-header {
   position: sticky;
   top: 0;
   z-index: 6;
   background: var(--background);
 }
-.context-graph-page .list-header {
-  flex-wrap: nowrap;
-  min-width: 0;
-}
-.context-graph-page .list-header > * {
-  flex: none;
-  white-space: nowrap;
-}
-/* The title is the one item that gives way, so the row stays one line. */
-.context-graph-page .list-header > .context-graph-subject {
+/* The subject is the one item that gives way, so the row stays one line. */
+.ui-pane-header-title > .context-graph-subject {
   flex: 0 1 auto;
-}
-.context-graph-page .list-header > p {
-  margin: 0;
-}
-.context-graph-page .list-header > .flex-1 {
-  flex: 1 1 0;
   min-width: 0;
 }
 .context-graph-page {
@@ -819,17 +805,11 @@
 /* At the minimum width the header and toolbar controls wrap onto more rows
    instead of running past the window edge. */
 @media (max-width: 700px) {
-  .context-graph-page .list-header {
+  .context-graph-page .ui-pane-header {
     flex-wrap: wrap;
     height: auto;
     min-height: 48px;
     padding-block: 8px;
-  }
-  .context-graph-page .list-header > h1 {
-    flex: none;
-  }
-  .context-graph-page .list-header > .context-graph-subject {
-    flex: 1 1 120px;
   }
   .context-graph-page .context-graph-toolbar {
     flex-wrap: wrap;

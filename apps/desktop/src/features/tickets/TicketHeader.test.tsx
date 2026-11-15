@@ -5,8 +5,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { TicketHeader } from "./TicketHeader";
 import { reminderSummary } from "./reminder-summary";
 import type { Ticket } from "@/lib/api/client";
@@ -76,7 +78,11 @@ function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
     updateTicket: vi.fn(),
     ...overrides,
   };
-  render(<TicketHeader {...props} />);
+  render(
+    <StatusLineRegion>
+      <TicketHeader {...props} />
+    </StatusLineRegion>,
+  );
   return props;
 }
 async function chooseAction(name: string) {
@@ -147,12 +153,34 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Ticket actions" }),
   );
-  await chooseAction("Trash ticket");
+  await chooseAction("Move to Trash");
   await waitFor(() => expect(props.updateTicket).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {
     reference: "T-KQ1",
     trashed: true,
   });
+});
+
+test("Move to Trash says so in the status line with Undo, never in the header", async () => {
+  const props = header();
+  const heading = screen.getByRole("heading", { name: "T-KQ1" });
+  const headerRow = heading.closest(".detail-header")!;
+  const childrenBefore = headerRow.childElementCount;
+  await chooseAction("Move to Trash");
+  const line = await screen.findByRole("status", {
+    name: (_, element) =>
+      element.textContent?.includes("Moved T-KQ1 to Trash") ?? false,
+  });
+  // R1.8: the header no longer grows a message row.
+  expect(headerRow.childElementCount).toBe(childrenBefore);
+  fireEvent.click(within(line).getByRole("button", { name: "Undo" }));
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {
+      reference: "T-KQ1",
+      trashed: false,
+    }),
+  );
+  await waitFor(() => expect(props.refresh).toHaveBeenCalledTimes(2));
 });
 
 test("a trashed ticket offers Restore without graph or duplicate actions", async () => {
@@ -170,7 +198,7 @@ test("a trashed ticket offers Restore without graph or duplicate actions", async
     },
   );
   expect(await screen.findByRole("menuitem", { name: "Restore" })).toBeTruthy();
-  expect(screen.queryByRole("menuitem", { name: "Trash ticket" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Move to Trash" })).toBeNull();
   expect(
     screen.queryByRole("menuitem", { name: "Show in dependency graph" }),
   ).toBeNull();

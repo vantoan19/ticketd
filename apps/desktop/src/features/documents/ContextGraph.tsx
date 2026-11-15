@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
+import { Count } from "@/components/ui/count";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
@@ -307,7 +308,7 @@ export function ContextGraph({
   );
   return (
     <section className="context-graph-page" aria-label="Context graph">
-      <ListHeader
+      <PaneHeader
         title="Context graph"
         actions={
           <>
@@ -344,13 +345,13 @@ export function ContextGraph({
           <span className="context-graph-subject">{centerLabel}</span>
         )}
         {graph && (
-          <p>
+          <Count>
             {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
             {relationships}{" "}
             {relationships === 1 ? "relationship" : "relationships"}
-          </p>
+          </Count>
         )}
-      </ListHeader>
+      </PaneHeader>
       <div className="context-graph-body">
         {error && <p role="alert">{error}</p>}
         {layoutError && <p role="alert">{layoutError}</p>}

@@ -145,19 +145,6 @@ export function LinkedWork({
             </span>
           )}
           {error && <p role="alert">{error}</p>}
-          {work.removed && (
-            <p role="status" className="linked-work-note">
-              Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
-              <Button
-                variant="link"
-                size="xs"
-                disabled={pending}
-                onClick={() => void work.undoRemove()}
-              >
-                Undo
-              </Button>
-            </p>
-          )}
         </div>
       </RailSection>
     );
@@ -233,19 +220,6 @@ export function LinkedWork({
         {current.failure && (
           <p role="alert">
             Relationships could not be refreshed: {current.failure}
-          </p>
-        )}
-        {work.removed && (
-          <p role="status" className="linked-work-note">
-            Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
-            <Button
-              variant="link"
-              size="xs"
-              disabled={pending}
-              onClick={() => void work.undoRemove()}
-            >
-              Undo
-            </Button>
           </p>
         )}
         <ul className="linked-work-rows">

@@ -18,13 +18,21 @@ import { directStatuses } from "@/lib/statuses";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
+import {
+  useStatusLine,
+  useStatusLineInset,
+} from "@/components/ui/use-status-line";
+
+/** The bar's height, kept free under the status line. */
+const BAR_HEIGHT = 48;
 
 const tickets = (count: number) =>
   `${count} ${count === 1 ? "ticket" : "tickets"}`;
 
 /**
- * The floating bulk action bar. Nothing shows at zero selected unless a
- * confirmation or a failure still needs to be read.
+ * The bulk action bar, docked at the bottom of the list. Its outcome goes to
+ * the pane's status line, which floats just above it: "Set 3 tickets to
+ * Done", or the failure with Retry. Nothing shows at zero selected.
  */
 export function BulkControls({
   bulk,
@@ -39,21 +47,34 @@ export function BulkControls({
   plans: TicketWorkspace["plans"];
 }) {
   const [tagMode, setTagMode] = useState<"add" | "remove" | null>(null);
-  const [detailsFor, setDetailsFor] = useState<unknown>(null);
-  const retry = useRef<HTMLButtonElement>(null);
-  const failureNote = useRef<HTMLDivElement>(null);
   const { pending, failure, notice, selection } = bulk;
-  const showDetails = failure !== null && detailsFor === failure;
+  const statusLine = useStatusLine();
+  const count = selection.length;
+  // The status line floats above the bar while the bar shows.
+  useStatusLineInset(count > 0 || pending ? BAR_HEIGHT : 0);
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
-  // success (its confirmation is already in the live region below).
+  // success (the status line announces the outcome).
+  const retry = useRef(bulk.retry);
   useEffect(() => {
-    if (failure) (retry.current ?? failureNote.current)?.focus();
-  }, [failure]);
+    retry.current = bulk.retry;
+  });
   useEffect(() => {
-    if (notice) document.getElementById("tickets-heading")?.focus();
-  }, [notice]);
-  const count = selection.length;
+    if (!failure) return;
+    statusLine.show({
+      tone: "error",
+      message: failure.message,
+      focusAction: true,
+      ...(failure.retryable && {
+        action: { label: "Retry", run: () => retry.current() },
+      }),
+    });
+  }, [failure, statusLine]);
+  useEffect(() => {
+    if (!notice) return;
+    statusLine.show({ message: notice });
+    document.getElementById("tickets-heading")?.focus();
+  }, [notice, statusLine]);
   // Esc clears the selection, unless a menu, dialog or text field has it.
   useEffect(() => {
     if (count === 0 || pending) return;
@@ -96,11 +117,13 @@ export function BulkControls({
       className="bulk-controls"
       role="region"
       aria-label="Bulk edit"
+      // Mounted while an outcome is still being posted; drawn only with a selection.
+      hidden={count === 0 && !pending}
     >
       {count > 0 && (
         <div className="bulk-bar">
           <span className="bulk-count" aria-live="polite">
-            {count} selected
+            {pending ? "Applying…" : `${count} selected`}
           </span>
           {canSelectMore && (
             <Button
@@ -271,48 +294,8 @@ export function BulkControls({
         </div>
       )}
       {pending && (
-        <p className="bulk-message" role="status">
+        <p className="sr-only" role="status">
           Applying…
-        </p>
-      )}
-      {failure && (
-        <div
-          ref={failureNote}
-          tabIndex={-1}
-          className="bulk-message bulk-error"
-          role="alert"
-        >
-          <span
-            className="bulk-error-text"
-            data-open={showDetails || undefined}
-            title={showDetails ? undefined : failure.message}
-          >
-            {failure.message}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-expanded={showDetails}
-            onClick={() => setDetailsFor(showDetails ? null : failure)}
-          >
-            Details
-          </Button>
-          {failure.retryable && (
-            <Button
-              ref={retry}
-              variant="outline"
-              size="sm"
-              disabled={pending}
-              onClick={() => void bulk.retry()}
-            >
-              Retry
-            </Button>
-          )}
-        </div>
-      )}
-      {notice && (
-        <p className="bulk-message" role="status">
-          {notice}.
         </p>
       )}
       <BulkTagDialog

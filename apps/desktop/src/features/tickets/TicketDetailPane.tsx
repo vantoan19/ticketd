@@ -1,8 +1,12 @@
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
-/** The selected ticket's detail, with a note when it is outside the results. */
+/**
+ * The selected ticket's detail, with a note when it is outside the results,
+ * and the detail pane's own status line.
+ */
 export function TicketDetailPane({
   workspace,
   expanded,
@@ -42,7 +46,7 @@ export function TicketDetailPane({
       ? workspace.board.columns.some((column) => column.loading)
       : loading;
   return (
-    <>
+    <StatusLineRegion>
       <TicketDetails
         outsideResults={Boolean(
           selected &&
@@ -66,6 +70,6 @@ export function TicketDetailPane({
         position={workspace.layout === "board" ? null : position}
         onAdjacent={openAdjacent}
       />
-    </>
+    </StatusLineRegion>
   );
 }

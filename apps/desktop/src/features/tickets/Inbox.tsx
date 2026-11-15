@@ -19,7 +19,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
 import { inboxClient } from "@/lib/api/inbox";
@@ -260,7 +260,7 @@ export function Inbox({
   const groups = groupEntries(mergeByTime(entries, syncShown), new Date());
   return (
     <div className="inbox">
-      <ListHeader
+      <PaneHeader
         title="Inbox"
         actions={
           <Button
@@ -290,7 +290,7 @@ export function Inbox({
             { value: "unread", label: "Unread" },
           ]}
         />
-      </ListHeader>
+      </PaneHeader>
       <div className="inbox-body">
         {error && <p role="alert">{error}</p>}
         {groups.map(({ group, entries: items }) => (

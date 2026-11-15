@@ -1,15 +1,9 @@
 import { EmptyState } from "@/components/ui/empty-state";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useEffect } from "react";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  CornerDownRight,
-  Folder,
-  Layers,
-  MoreHorizontal,
-  X,
-} from "lucide-react";
+import { CornerDownRight, Folder, Layers, MoreHorizontal } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,33 +45,21 @@ export function TicketBoard({
     workspace.availability,
   );
   const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
+  // A confirmed move is said in the pane's status line, never inserted above
+  // the columns (it pushed the board down; list B-04).
+  const statusLine = useStatusLine();
+  const { notice, dismissNotice } = statusAction;
+  useEffect(() => {
+    if (!notice) return;
+    statusLine.show({ message: notice });
+    dismissNotice();
+  }, [notice, dismissNotice, statusLine]);
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
   );
   return (
     <>
-      <div
-        className={statusAction.notice ? undefined : "sr-only"}
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {statusAction.notice && (
-          <Alert role="none" size="compact">
-            <AlertDescription>{statusAction.notice}</AlertDescription>
-            <IconButton
-              label="Dismiss status update"
-              onClick={() => {
-                statusAction.dismissNotice();
-                boardRef.current?.focus({ preventScroll: true });
-              }}
-            >
-              <X />
-            </IconButton>
-          </Alert>
-        )}
-      </div>
       {Object.entries(statusAction.failures)
         .filter(([, message]) => message)
         .map(([reference, message]) => (

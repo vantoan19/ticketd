@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { useChatClient, type Retention } from "@/features/chats/client";
 
 /** What the menu needs to know about the Chat it acts on. */
@@ -23,6 +24,8 @@ export type ActionTarget = {
  * The one Chat actions menu, for a list row's ⋯ and the Chat header: Mark as
  * unread or read, Mute or Unmute, then Archive and Move to Trash. A refused
  * action keeps the old state; `onResult` hears why, or "" once one succeeds.
+ * Archive and Move to Trash act at once and say so in the status line with
+ * Undo (DESIGN.md section 12).
  */
 export function ChatActionsMenu({
   chat,
@@ -44,9 +47,13 @@ export function ChatActionsMenu({
   onResult: (failure: string) => void;
 }) {
   const client = useChatClient();
-  const act = (action: Promise<void>) =>
+  const statusLine = useStatusLine();
+  const act = (action: Promise<void>, done?: () => void) =>
     void action.then(
-      () => onResult(""),
+      () => {
+        onResult("");
+        done?.();
+      },
       (reason: unknown) =>
         onResult(reason instanceof Error ? reason.message : String(reason)),
     );
@@ -99,12 +106,30 @@ export function ChatActionsMenu({
         )}
         {!trashed && <DropdownMenuSeparator />}
         {chat.retention === "active" && (
-          <DropdownMenuItem onSelect={() => act(client.archive(chat.id))}>
+          <DropdownMenuItem
+            onSelect={() =>
+              act(client.archive(chat.id), () =>
+                statusLine.show({
+                  message: "Archived the Chat",
+                  undo: () => client.unarchive(chat.id),
+                }),
+              )
+            }
+          >
             Archive
           </DropdownMenuItem>
         )}
         {!trashed && (
-          <DropdownMenuItem onSelect={() => act(client.trash(chat.id))}>
+          <DropdownMenuItem
+            onSelect={() =>
+              act(client.trash(chat.id), () =>
+                statusLine.show({
+                  message: "Moved the Chat to Trash",
+                  undo: () => client.restore(chat.id),
+                }),
+              )
+            }
+          >
             Move to Trash
           </DropdownMenuItem>
         )}

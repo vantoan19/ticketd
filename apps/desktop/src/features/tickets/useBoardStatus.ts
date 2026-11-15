@@ -73,7 +73,7 @@ export function useBoardStatus(workspace: {
       if (board.key !== latest.current.board.key) continue;
       setNotice({
         scope: board.key,
-        message: `${reference} is now ${current.status}.${matches ? "" : " It no longer matches the current filters."}`,
+        message: `Moved ${reference} to ${current.status}${matches ? "" : ". It no longer matches the filters"}`,
       });
       return;
     }

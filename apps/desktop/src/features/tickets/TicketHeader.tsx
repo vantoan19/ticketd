@@ -3,8 +3,6 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
-  Check,
-  Copy,
   Maximize2,
   Minimize2,
   MoreHorizontal,
@@ -12,6 +10,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { CopyButton } from "@/components/ui/copy-button";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { useCopy } from "@/components/ui/use-copy";
 import {
   DropdownMenu,
@@ -79,7 +79,7 @@ export function TicketHeader({
   const target = usePublishTarget();
   const preview = usePublicationPreview(ticket, target);
   const [publishing, setPublishing] = useState(false);
-  const { copied, error: copyError, copy } = useCopy();
+  const { copy } = useCopy();
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
@@ -100,27 +100,49 @@ export function TicketHeader({
       ?.focus();
   }, [selected, ticket, position]);
   const [pending, setPending] = useState(false);
-  const [actionError, setActionError] = useState("");
-  /** The ticket just moved to Trash, so the move can be undone from here. */
-  const [justTrashed, setJustTrashed] = useState<string | null>(null);
-  async function setTrashed(value: boolean) {
-    if (!ticket) return;
+  const statusLine = useStatusLine();
+  /** Moves the ticket to Trash (with Undo) or restores it; outcomes go to the status line. */
+  async function setTrashed(value: boolean, reference = ticket?.reference) {
+    if (!reference) return;
     setPending(true);
-    setActionError("");
     try {
-      updateTicket(await client.setTrashed(ticket.reference, value));
-      setJustTrashed(value ? ticket.reference : null);
+      updateTicket(await client.setTrashed(reference, value));
       await refresh();
-    } catch (reason) {
-      setActionError(
-        `Could not ${value ? "move to trash" : "restore"}: ${String(reason)}`,
+      statusLine.show(
+        value
+          ? {
+              message: `Moved ${reference} to Trash`,
+              undo: () => restore(reference),
+            }
+          : { message: `Restored ${reference}` },
       );
+    } catch (reason) {
+      statusLine.show({
+        tone: "error",
+        message: `Couldn't ${value ? "move" : "restore"} ${reference}${value ? " to Trash" : ""}. ${String(reason)}`,
+        action: { label: "Retry", run: () => setTrashed(value, reference) },
+      });
     } finally {
       setPending(false);
     }
   }
+  async function restore(reference: string) {
+    updateTicket(await client.setTrashed(reference, false));
+    await refresh();
+  }
+  /** A menu copy: the menu closes, so the status line says what happened. */
+  async function copyFromMenu(label: string, text: string) {
+    const done = await copy(label, text);
+    statusLine.show(
+      done
+        ? { message: `Copied ${label.toLowerCase()}` }
+        : {
+            tone: "error",
+            message: `Couldn't copy the ${label.toLowerCase()}. Select it and copy it instead.`,
+          },
+    );
+  }
   const owner = ticket ? externalSource(ticket) : null;
-  const message = actionError || copyError;
   return (
     <div className="detail-header">
       <div className="detail-title-group">
@@ -157,12 +179,7 @@ export function TicketHeader({
         </h2>
         {selected && (
           <span className="copy-reference">
-            <IconButton
-              label="Copy reference"
-              onClick={() => void copy("Reference", selected)}
-            >
-              {copied === "Reference" ? <Check /> : <Copy />}
-            </IconButton>
+            <CopyButton label="Copy reference" text={selected} />
           </span>
         )}
         {owner && (
@@ -243,13 +260,15 @@ export function TicketHeader({
             >
               <DropdownMenuGroup>
                 <DropdownMenuItem
-                  onSelect={() => void copy("Reference", ticket.reference)}
+                  onSelect={() =>
+                    void copyFromMenu("Reference", ticket.reference)
+                  }
                 >
                   Copy reference
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() =>
-                    void copy(
+                    void copyFromMenu(
                       "Context command",
                       contextCommand(ticket.reference),
                     )
@@ -303,7 +322,7 @@ export function TicketHeader({
                     variant="destructive"
                     onSelect={() => void setTrashed(true)}
                   >
-                    Trash ticket
+                    Move to Trash
                   </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
@@ -328,30 +347,6 @@ export function TicketHeader({
             <X />
           </IconButton>
         </div>
-      )}
-      {justTrashed &&
-        ticket?.reference === justTrashed &&
-        ticket.trashed &&
-        !message && (
-          <p className="detail-header-message" role="status">
-            {justTrashed} moved to Trash.{" "}
-            <Button
-              variant="link"
-              size="xs"
-              disabled={pending}
-              onClick={() => void setTrashed(false)}
-            >
-              Undo
-            </Button>
-          </p>
-        )}
-      {(message || copied) && (
-        <p
-          className="detail-header-message"
-          role={message ? "alert" : "status"}
-        >
-          {message || `${copied} copied`}
-        </p>
       )}
       {ticket && publishing && target && (
         <PublishDialog

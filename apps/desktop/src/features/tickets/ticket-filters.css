@@ -161,17 +161,13 @@
   white-space: nowrap;
   font-size: var(--text-caption);
 }
-.list-header:has(.header-search) > :not(.list-controls) {
-  display: none;
-}
-.list-header:has(.header-search) .list-controls {
+.list-controls:has(.header-search) {
   flex: 1;
+  min-width: 0;
 }
 /* Narrow list: the result count stays for screen readers only and the Esc
-   hint goes, so the Filter trigger always keeps its place. */
-.list-header {
-  container-type: inline-size;
-}
+   hint goes, so the Filter trigger always keeps its place. The pane header
+   is the container. */
 @container (max-width: 420px) {
   .header-search-count {
     position: absolute;

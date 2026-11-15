@@ -19,6 +19,8 @@ import {
 } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
+import { writeClipboard } from "@/lib/clipboard";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
@@ -171,6 +173,15 @@ function DocumentLink({
   );
 }
 
+/** The host a link points at, for "Couldn't open example.com". */
+function linkHost(href: string): string {
+  try {
+    return new URL(href).host || href;
+  } catch {
+    return href;
+  }
+}
+
 /**
  * A link in Markdown, including text written at a source such as GitHub. The app
  * window never navigates: an https link opens in the default browser, and any
@@ -183,26 +194,33 @@ function ExternalLink({
   href: string;
   children?: React.ReactNode;
 }) {
-  const [error, setError] = useState("");
+  // A failure is an outcome, not part of the text: it goes to the pane's
+  // status line instead of being inserted after the link (detA MK, P8).
+  const statusLine = useStatusLine();
   return (
-    <>
-      <a
-        href={href}
-        rel="noreferrer"
-        onClick={(event) => {
-          event.preventDefault();
-          if (!href.startsWith("https://")) return;
-          workspaceClient.openLink(href).then(
-            () => setError(""),
-            (reason: unknown) =>
-              setError(`Could not open the link: ${String(reason)}`),
-          );
-        }}
-      >
-        {children}
-      </a>
-      {error && <small role="alert">{error}</small>}
-    </>
+    <a
+      href={href}
+      rel="noreferrer"
+      onClick={(event) => {
+        event.preventDefault();
+        if (!href.startsWith("https://")) return;
+        workspaceClient.openLink(href).catch(() =>
+          statusLine.show({
+            tone: "error",
+            message: `Couldn't open ${linkHost(href)}`,
+            action: {
+              label: "Copy link",
+              run: async () => {
+                const failure = await writeClipboard(href);
+                if (failure !== null) throw new Error(failure);
+              },
+            },
+          }),
+        );
+      }}
+    >
+      {children}
+    </a>
   );
 }
 

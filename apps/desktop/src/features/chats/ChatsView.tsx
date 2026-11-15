@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -318,7 +318,7 @@ export function ChatsView({
 
   const listPane = (
     <section className="ticket-list chat-pane" aria-label="Chat list">
-      <ListHeader
+      <PaneHeader
         title={current?.title ?? "Chats"}
         actions={
           <>
@@ -364,7 +364,7 @@ export function ChatsView({
             <span className="sr-only"> chats</span>
           </Count>
         )}
-      </ListHeader>
+      </PaneHeader>
       {failure && (
         <div className="chat-list-alert">
           <Alert tone="error">

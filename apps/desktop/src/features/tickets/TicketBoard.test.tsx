@@ -313,22 +313,26 @@ test("Board and List resizing retain independent pane widths without replacing t
   expect(size()).toBeCloseTo(listSize);
 });
 
-test("saved-status feedback can be dismissed and does not return after leaving its filtered scope", async () => {
+test("saved-status feedback is the pane's status line, can be dismissed and does not return", async () => {
   saved = [ticket(1), ticket(3)];
   render(<App />);
   await settle();
   fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
   await settle();
   await showBoard();
+  const board = screen.getByRole("region", { name: "Ticket status board" });
+  const top = board.getBoundingClientRect().top;
   await chooseStatus("T-KQ1", "In progress");
   const message =
-    "T-KQ1 is now In progress. It no longer matches the current filters.";
+    "Moved T-KQ1 to In progress. It no longer matches the filters";
   const notice = screen.getByText(message).closest('[role="status"]')!;
-  expect(
-    within(notice as HTMLElement).getByRole("button", {
-      name: "Dismiss status update",
-    }),
-  ).toBeTruthy();
+  // Nothing is inserted above the columns (list B-04): the line floats.
+  expect(notice.getAttribute("data-slot")).toBe("status-line");
+  expect(board.getBoundingClientRect().top).toBe(top);
+  fireEvent.click(
+    within(notice as HTMLElement).getByRole("button", { name: "Dismiss" }),
+  );
+  expect(screen.queryByText(message)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
   await settle();
   expect(screen.queryByText(message)).toBeNull();
@@ -338,20 +342,17 @@ test("saved-status feedback can be dismissed and does not return after leaving i
   await chooseStatus("T-KQ3", "In review");
   expect(
     screen.getByText(
-      "T-KQ3 is now In review. It no longer matches the current filters.",
+      "Moved T-KQ3 to In review. It no longer matches the filters",
     ),
   ).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Dismiss status update" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(
     screen.queryByText(
-      "T-KQ3 is now In review. It no longer matches the current filters.",
+      "Moved T-KQ3 to In review. It no longer matches the filters",
     ),
   ).toBeNull();
-  expect(document.activeElement).toBe(
-    screen.getByRole("region", { name: "Ticket status board" }),
-  );
+  // Closing the line keeps focus in the pane, never on the page.
+  expect(document.activeElement?.closest(".ticket-list")).toBeTruthy();
 });
 
 function boardGeometry() {
@@ -426,7 +427,7 @@ test("pointer dragging into an empty column saves through the card status action
       screen.getByRole("region", { name: "In progress column" }),
     ).getByText("Ticket 1"),
   ).toBeTruthy();
-  expect(screen.getByText("T-KQ1 is now In progress.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In progress")).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Close ticket details" }),
   ).toBeNull();
@@ -598,7 +599,7 @@ test("a column empty because of Ready filtering accepts a drag and explains the 
   await settle();
   expect(
     screen.getByText(
-      "T-KQ1 is now In progress. It no longer matches the current filters.",
+      "Moved T-KQ1 to In progress. It no longer matches the filters",
     ),
   ).toBeTruthy();
   expect(
@@ -667,7 +668,7 @@ test("a failed save keeps its saved column and retries with the same request ide
       { name: /T-KQ1.*Ticket 1/ },
     ),
   ).toBeTruthy();
-  expect(screen.queryByText("T-KQ1 is now Canceled.")).toBeNull();
+  expect(screen.queryByText("Moved T-KQ1 to Canceled")).toBeNull();
   fail = false;
   fireEvent.click(
     screen.getByRole("button", { name: "Retry status change for T-KQ1" }),
@@ -678,7 +679,7 @@ test("a failed save keeps its saved column and retries with the same request ide
   );
   expect(writes).toHaveLength(2);
   expect(writes[1]?.[1]).toEqual(writes[0]?.[1]);
-  expect(screen.getByText("T-KQ1 is now Canceled.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Canceled")).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Canceled column" })).getByRole(
       "button",
@@ -715,7 +716,7 @@ test("a lost response reconciles applied state and a historical replay never rep
     screen.getByRole("button", { name: "Retry status change for T-KQ1" }),
   );
   await settle();
-  expect(screen.getByText("T-KQ1 is now In review.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In review")).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "In review column" })).getByRole(
       "button",
@@ -788,9 +789,9 @@ test("card menus honor core status choices, source closure exceptions and retain
   fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   await settle();
   await chooseStatus("T-KQ2", "Canceled");
-  expect(screen.getByText("T-KQ2 is now Canceled.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ2 to Canceled")).toBeTruthy();
   await chooseStatus("T-KQ3", "Done");
-  expect(screen.getByText("T-KQ3 is now Done.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ3 to Done")).toBeTruthy();
 });
 
 test("ownership changes during a card save reconcile the saved state and permitted choices", async () => {
@@ -850,7 +851,7 @@ test("a failed pre-save read offers a working retry without writing stale card d
     screen.getByRole("button", { name: "Retry status change for T-KQ1" }),
   );
   await settle();
-  expect(screen.getByText("T-KQ1 is now Done.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Done")).toBeTruthy();
 });
 
 test("Duplicate uses the existing review and canceling either duplicate flow preserves saved relationships", async () => {
@@ -882,7 +883,7 @@ test("Duplicate uses the existing review and canceling either duplicate flow pre
   fireEvent.click(screen.getByRole("button", { name: "Change status" }));
   await settle();
   expect(saved[0]?.duplicate_of).toBeNull();
-  expect(screen.getByText("T-KQ1 is now Todo.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Todo")).toBeTruthy();
 });
 
 test("a lost duplicate review response reconciles its saved placement before retry", async () => {
@@ -997,7 +998,7 @@ test("a duplicate save stays protected until its reviewed request finishes", asy
   });
   await settle(20);
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByText("T-KQ1 is now Duplicate.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Duplicate")).toBeTruthy();
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   );
@@ -1025,7 +1026,7 @@ test("switching layouts preserves a pending card request and its protection", as
     finish?.([saved[0]]);
   });
   await settle();
-  expect(screen.getByText("T-KQ1 is now Done.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Done")).toBeTruthy();
 });
 
 test("a membership response for an old scope cannot announce the wrong filtered outcome", async () => {
@@ -1053,9 +1054,7 @@ test("a membership response for an old scope cannot announce the wrong filtered 
   });
   await settle();
   expect(
-    screen.getByText(
-      "T-KQ1 is now Done. It no longer matches the current filters.",
-    ),
+    screen.getByText("Moved T-KQ1 to Done. It no longer matches the filters"),
   ).toBeTruthy();
 });
 
@@ -1069,7 +1068,7 @@ test("a move out of Ready keeps its filters, announces departure and focuses the
   expect(screen.queryByRole("button", { name: /T-KQ1.*Ticket 1/ })).toBeNull();
   expect(
     screen.getByText(
-      "T-KQ1 is now In progress. It no longer matches the current filters.",
+      "Moved T-KQ1 to In progress. It no longer matches the filters",
     ),
   ).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Ready", level: 1 })).toBeTruthy();
@@ -1119,7 +1118,7 @@ test("a card status action changes only that ticket and leaves the selected deta
     "value",
     "Keep my draft",
   );
-  expect(screen.getByText("T-KQ1 is now In progress.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In progress")).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
     reference: "T-KQ1",
     patch: { status: "In progress" },

@@ -188,37 +188,6 @@
 .ticket-workspace.board-layout.board-unselected .split-handle {
   display: none !important;
 }
-.list-header:has(.list-refresh) {
-  /* The controls drop to a second line before the title loses its text. */
-  flex-wrap: wrap;
-  height: auto;
-  min-height: 48px;
-  padding-block: 8px;
-  row-gap: 4px;
-}
-.list-header:has(.list-refresh) h1 {
-  /* Basis is the full title, so the line wraps only when it would truncate. */
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.list-header:has(.list-refresh) > p {
-  white-space: nowrap;
-}
-@container (max-width: 480px) {
-  .list-header:has(.list-refresh):has(.header-search) {
-    flex-wrap: wrap;
-    height: auto;
-    min-height: 48px;
-    padding-block: 8px;
-  }
-  .list-header:has(.list-refresh):has(.header-search) .list-controls {
-    flex-basis: 100%;
-    min-width: 0;
-  }
-}
 @container plan-workspace (max-width: 839px) {
   /* !important: beats the panel library's inline flex. */
   .ticket-workspace.board-layout #list {

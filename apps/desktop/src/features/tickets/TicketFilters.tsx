@@ -13,7 +13,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Layers, Search, SlidersHorizontal, X } from "lucide-react";
+import { Layers, ListFilter, Search, X } from "lucide-react";
+import { PaneHeaderButton } from "@/components/ui/list-header";
+import { plural } from "@/lib/format";
 import { client, type Ticket } from "@/lib/api/client";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -23,8 +25,6 @@ import "./ticket-filters.css";
 
 type Props = {
   part?: "controls" | "chips";
-  /** Show the Filter control with its word, as a Plan's toolbar does. */
-  labeledFilter?: boolean;
   query: string;
   setQuery: (value: string) => void;
   plan: string;
@@ -105,11 +105,15 @@ export function TicketFilters(p: Props) {
       {p.part !== "chips" && (
         <div className="list-controls">
           {searching ? (
-            <div className="header-search" role="search">
+            <div
+              className="header-search"
+              role="search"
+              data-slot="pane-search"
+            >
               <Search size={16} aria-hidden="true" />
               <Input
                 aria-label="Search tickets"
-                placeholder="Search tickets…"
+                placeholder={`Search ${p.scopeName}…`}
                 autoFocus
                 value={p.query}
                 onChange={(event) => update(p.setQuery, event.target.value)}
@@ -122,7 +126,7 @@ export function TicketFilters(p: Props) {
               />
               {p.query.trim() && (
                 <span role="status" className="header-search-count">
-                  {p.total} {p.total === 1 ? "result" : "results"}
+                  {plural(p.total, "result")}
                   <span className="sr-only"> in {p.scopeName}</span>
                 </span>
               )}
@@ -145,37 +149,19 @@ export function TicketFilters(p: Props) {
           <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
             {dock?.anchor && <PopoverAnchor virtualRef={dock.anchor} />}
             <PopoverTrigger asChild>
-              {p.labeledFilter ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="filter-trigger"
-                  data-active={filtersOpen || filterCount > 0 ? "" : undefined}
-                  aria-label={
-                    filterCount ? `Filters, ${filterCount} active` : "Filters"
-                  }
-                >
-                  <SlidersHorizontal data-icon="inline-start" />
-                  Filter
-                  {filterCount > 0 && (
-                    <span className="filter-count">{filterCount}</span>
-                  )}
-                </Button>
-              ) : (
-                <IconButton
-                  label={
-                    filterCount ? `Filters, ${filterCount} active` : "Filters"
-                  }
-                  aria-label={
-                    filterCount ? `Filters, ${filterCount} active` : "Filters"
-                  }
-                >
-                  <SlidersHorizontal />
-                  {filterCount > 0 && (
-                    <span className="filter-count">{filterCount}</span>
-                  )}
-                </IconButton>
-              )}
+              <PaneHeaderButton
+                className="filter-trigger"
+                data-active={filtersOpen || filterCount > 0 ? "" : undefined}
+                icon={<ListFilter />}
+                label="Filters"
+                aria-label={
+                  filterCount ? `Filters, ${filterCount} active` : "Filters"
+                }
+              >
+                {filterCount > 0 && (
+                  <span className="filter-count">{filterCount}</span>
+                )}
+              </PaneHeaderButton>
             </PopoverTrigger>
             <PopoverContent
               className="filters-content"
