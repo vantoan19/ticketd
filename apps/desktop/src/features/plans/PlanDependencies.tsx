@@ -215,7 +215,7 @@ function Blockers({
                 <Input
                   id="plan-blocker"
                   value={query}
-                  placeholder="Search by title, text or reference"
+                  placeholder="Search tickets by title or reference"
                   autoComplete="off"
                   onChange={(event) => {
                     setQuery(event.target.value);

@@ -16,14 +16,7 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
+import { Tooltip } from "@/components/ui/tooltip";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import { statusCountKey, ticketStatuses } from "@/lib/statuses";
@@ -201,7 +195,17 @@ export function PlanHeader({
               <Plus data-icon="inline-start" /> Add tickets
             </Button>
           )}
-          {(canArchive || openGraph) && (
+          {/* An archived Plan has one action left: a direct button, not a
+              one-item menu (plans PL-11). */}
+          {!canArchive && openGraph && (
+            <IconButton
+              label="Open context graph"
+              onClick={() => openGraph(plan.id)}
+            >
+              <Network />
+            </IconButton>
+          )}
+          {canArchive && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton label="Plan actions">
@@ -210,8 +214,6 @@ export function PlanHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                sideOffset={12}
-                className="plan-actions-menu"
                 onCloseAutoFocus={(event) => {
                   // Rename puts the cursor in the title, not back on the menu.
                   if (!focusRename.current) return;
@@ -223,28 +225,22 @@ export function PlanHeader({
                   }, 0);
                 }}
               >
-                {canArchive && (
-                  <DropdownMenuItem disabled={pending} onSelect={startRename}>
-                    <Pencil /> Rename
-                    <DropdownMenuShortcut>F2</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem disabled={pending} onSelect={startRename}>
+                  <Pencil /> Rename
+                  <DropdownMenuShortcut>F2</DropdownMenuShortcut>
+                </DropdownMenuItem>
                 {openGraph && (
                   <DropdownMenuItem onSelect={() => openGraph(plan.id)}>
                     <Network /> Open context graph
                   </DropdownMenuItem>
                 )}
-                {canArchive && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled={pending}
-                      onSelect={() => setArchiving(true)}
-                    >
-                      <Archive /> Archive Plan…
-                    </DropdownMenuItem>
-                  </>
-                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={pending}
+                  onSelect={() => setArchiving(true)}
+                >
+                  <Archive /> Archive Plan…
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -322,51 +318,47 @@ export function PlanHeader({
           <dl
             className="plan-counts"
             aria-label="Tickets by status"
-            title="Counts include parents and subtickets equally."
+            aria-description="Counts include parents and subtickets equally."
           >
             {ticketStatuses.map((status) => (
-              <div
+              // The name is hidden in a narrow header; the tooltip keeps it,
+              // with what the count includes.
+              <Tooltip
                 key={status}
-                title={status}
-                data-zero={view.counts[statusCountKey[status]] === 0}
+                content={`${status}, counting parents and subtickets equally`}
               >
-                <dt>
-                  <StatusIcon status={status} size={14} decorative />
-                  <span className="plan-count-name">{status}</span>
-                </dt>
-                <dd>{view.counts[statusCountKey[status]]}</dd>
-              </div>
+                <div data-zero={view.counts[statusCountKey[status]] === 0}>
+                  <dt>
+                    <StatusIcon status={status} size={14} decorative />
+                    <span className="plan-count-name">{status}</span>
+                  </dt>
+                  <dd>{view.counts[statusCountKey[status]]}</dd>
+                </div>
+              </Tooltip>
             ))}
           </dl>
           <PlanDocuments view={view} state={state} />
         </div>
       )}
-      <Dialog open={archiving} onOpenChange={setArchiving}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Archive {current.name}?</DialogTitle>
-            <DialogDescription>
-              Archiving hides this Plan from the sidebar. Its tickets stay
-              searchable and unchanged, and you can reactivate it later.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setArchiving(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={pending}
-              onClick={() =>
-                void run(() => plansClient.change(plan.id, null, true)).then(
-                  () => setArchiving(false),
-                )
-              }
-            >
-              Archive
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DialogShell
+        open={archiving}
+        onOpenChange={setArchiving}
+        size="sm"
+        title={`Archive ${current.name}?`}
+        description="Archiving hides this Plan from the sidebar. Its tickets stay searchable and unchanged, and you can reactivate it later."
+        primaryLabel={pending ? "Archiving…" : "Archive Plan"}
+        blockedReason={pending ? "Archiving…" : null}
+        busy={pending}
+        // A failed archive keeps the dialog open with its cause (plans PL-12).
+        error={archiving && actionError}
+        onSubmit={() =>
+          void run(() => plansClient.change(plan.id, null, true)).then(
+            (archived) => {
+              if (archived) setArchiving(false);
+            },
+          )
+        }
+      />
       <AddTicketsDialog
         plan={current}
         plans={plans}

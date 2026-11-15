@@ -4,7 +4,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -38,6 +37,8 @@ export function AttemptReview({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Its decisions live in the review itself, so the header's close is
+          the only way out (no X plus a second Close). */}
       <DialogContent className="publication-dialog" showCloseButton={false}>
         <DialogHeader showCloseButton>
           <DialogTitle>Publication unresolved</DialogTitle>
@@ -53,7 +54,6 @@ export function AttemptReview({
             refresh={refresh}
           />
         )}
-        <DialogFooter showCloseButton />
       </DialogContent>
     </Dialog>
   );

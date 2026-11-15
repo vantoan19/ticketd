@@ -872,7 +872,7 @@ test("Duplicate uses the existing review and canceling either duplicate flow pre
   await settle(2000);
   await chooseStatus("T-KQ1", "Todo");
   expect(
-    screen.getByRole("heading", { name: "Remove the duplicate link?" }),
+    screen.getByRole("heading", { name: "Change the status to Todo?" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Keep duplicate" }));
   await settle(20);

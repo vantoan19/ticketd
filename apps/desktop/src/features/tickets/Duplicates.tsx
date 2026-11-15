@@ -536,7 +536,7 @@ export function Duplicates({
                     event.preventDefault();
                     if (target && !pending) void loadPreview();
                   }}
-                  placeholder="Search by title or reference"
+                  placeholder="Search tickets by title or reference"
                   autoComplete="off"
                   aria-label={
                     separate

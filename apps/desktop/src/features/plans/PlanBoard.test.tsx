@@ -278,7 +278,7 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   });
   await settle();
   fireEvent.click(screen.getByRole("menuitem", { name: /^Archive Plan/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive Plan" }));
   await settle();
   expect(screen.getByText("Archived Plan")).toBeTruthy();
   expect(

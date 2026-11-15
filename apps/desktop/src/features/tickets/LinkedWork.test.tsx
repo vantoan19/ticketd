@@ -17,6 +17,13 @@ import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import type { Ticket } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+// The ticket picker (cmdk) needs these, which jsdom lacks.
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+Element.prototype.scrollIntoView = () => {};
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -316,12 +323,13 @@ test("removing a duplicate link explains the result before anything changes", as
 
 async function chooseTarget() {
   fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
-  fireEvent.change(await screen.findByLabelText("Ticket"), {
-    target: { value: "target" },
-  });
-  const matches = await screen.findByRole("list", { name: "Matches" });
-  expect(within(matches).queryByText("Itself")).toBeNull();
-  fireEvent.click(within(matches).getByRole("button", { name: /T-KQ5/ }));
+  fireEvent.change(
+    await screen.findByLabelText("Search tickets by title or reference"),
+    { target: { value: "target" } },
+  );
+  const target = await screen.findByRole("option", { name: /T-KQ5/ });
+  expect(screen.queryByRole("option", { name: /Itself/ })).toBeNull();
+  fireEvent.click(target);
 }
 
 async function chooseRelationship(kind: string) {

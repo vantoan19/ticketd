@@ -1297,9 +1297,10 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "Remove tag" });
   expect(within(dialog).queryByRole("button", { name: "Add tag" })).toBeNull();
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByLabelText("Search tags"), {
     target: { value: "old" },
   });
+  fireEvent.click(within(dialog).getByRole("option", { name: "old" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
@@ -1322,9 +1323,10 @@ test("Organize has a separate Add tag action", async () => {
   expect(
     within(dialog).queryByRole("button", { name: "Remove tag" }),
   ).toBeNull();
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByLabelText("Search tags"), {
     target: { value: "new" },
   });
+  fireEvent.click(within(dialog).getByRole("option", { name: "Create “new”" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Add tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ add_tags: ["new"] }]);
@@ -1868,13 +1870,15 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
   });
-  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "second" },
-  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "second" } },
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  fireEvent.click(within(dialog).getByRole("option", { name: /Second/ }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
   await act(async () => {});
   const review = screen.getByRole("dialog", {
     name: "Mark T-KQ2 as a duplicate",
@@ -1916,14 +1920,14 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
   });
-  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "T-KQ3" },
-  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "T-KQ3" } },
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
-  const matches = within(dialog).getByRole("list", { name: "Matches" });
-  expect(within(matches).getAllByRole("button")[0]?.textContent).toContain(
+  expect(within(dialog).getAllByRole("option")[0]?.textContent).toContain(
     "T-KQ3",
   );
 });

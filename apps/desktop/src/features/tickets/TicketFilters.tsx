@@ -14,11 +14,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Layers, Search, SlidersHorizontal, X } from "lucide-react";
-import { client, type Ticket } from "@/lib/api/client";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { StatusDot } from "@/components/ui/status-dot";
 import { ticketStatuses } from "@/lib/statuses";
+import { client } from "@/lib/api/client";
 import { useFilterDock } from "./filter-dock";
+import { useTicketSearch } from "./useTicketSearch";
+import { Reference } from "@/components/ui/reference";
 import "./ticket-filters.css";
 
 type Props = {
@@ -251,7 +253,11 @@ export function TicketFilters(p: Props) {
                       }
                       options={[
                         { value: "__any", label: "Any Plan" },
-                        ...p.plans.map((item) => ({
+                        // Archived Plans come last (list F-06).
+                        ...[
+                          ...p.plans.filter((item) => !item.archived),
+                          ...p.plans.filter((item) => item.archived),
+                        ].map((item) => ({
                           value: item.id,
                           label: `${item.name}${item.archived ? " (archived)" : ""}`,
                         })),
@@ -414,35 +420,9 @@ function ParentSearch({
   onChange: (reference: string) => void;
 }) {
   const [text, setText] = useState("");
-  const [found, setFound] = useState<Ticket[]>([]);
-  useEffect(() => {
-    const query = text.trim();
-    if (!query) return;
-    let active = true;
-    void client
-      .findTickets({
-        query,
-        project: null,
-        unlinked: false,
-        plan: null,
-        status: null,
-        tags: [],
-        availability: null,
-        family: null,
-        order: "Newest",
-        limit: 5,
-        offset: 0,
-      })
-      .then(
-        (tickets) => {
-          if (active) setFound(tickets);
-        },
-        () => {},
-      );
-    return () => {
-      active = false;
-    };
-  }, [text]);
+  // The shared ticket search: an exact reference such as T-KQ12 leads (list F-07).
+  const search = useTicketSearch(text, !value, () => true);
+  const found = search.results.slice(0, 5);
   if (value)
     return (
       <Button
@@ -461,7 +441,7 @@ function ParentSearch({
       <Search aria-hidden="true" className="parent-search-icon" />
       <Input
         aria-label="Find a parent ticket"
-        placeholder="Find a parent by title or reference"
+        placeholder="Search tickets by title or reference"
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
@@ -477,10 +457,9 @@ function ParentSearch({
                   setText("");
                 }}
               >
-                <span className="text-muted-foreground">
-                  {ticket.reference}
-                </span>{" "}
-                {ticket.title}
+                <StatusIcon status={ticket.status} decorative />
+                <Reference>{ticket.reference}</Reference>
+                <span className="truncate">{ticket.title}</span>
               </Button>
             </li>
           ))}

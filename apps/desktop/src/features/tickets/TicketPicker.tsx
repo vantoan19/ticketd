@@ -24,6 +24,8 @@ export function TicketPicker({
   caption,
   autoFocus = true,
   label = "Tickets",
+  query: controlledQuery,
+  onQueryChange,
 }: {
   onPick: (ticket: Ticket) => void;
   /** Which tickets may be offered at all (not the ticket itself, say). */
@@ -35,8 +37,16 @@ export function TicketPicker({
   autoFocus?: boolean;
   /** Names the list for assistive technology. */
   label?: string;
+  /** The typed search, when the caller keeps it (a draft kept on Escape). */
+  query?: string;
+  onQueryChange?: (query: string) => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [ownQuery, setOwnQuery] = useState("");
+  const query = controlledQuery ?? ownQuery;
+  const setQuery = (next: string) => {
+    setOwnQuery(next);
+    onQueryChange?.(next);
+  };
   const search = useTicketSearch(query, true, accept);
   const typed = query.trim();
   const results = typed ? search.results : [];

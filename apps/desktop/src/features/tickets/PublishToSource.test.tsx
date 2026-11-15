@@ -142,12 +142,11 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   expect(
     within(dialog).getByLabelText("Description as it will be sent").textContent,
   ).toBe("Cache entries never expire.");
-  expect(within(dialog).getByText("acme/api")).toBeTruthy();
-  expect(
-    within(dialog)
-      .getByRole("combobox", { name: "Repository" })
-      .getAttribute("data-readonly"),
-  ).toBe("true");
+  const repository = within(dialog).getByRole("combobox", {
+    name: "Repository",
+  });
+  expect(repository.textContent).toContain("acme/api");
+  expect(repository.getAttribute("data-readonly")).toBe("true");
   expect(
     within(dialog).getByText(/No ticketd labels, fields or comments are added/),
   ).toBeTruthy();
@@ -342,7 +341,7 @@ test("an attachment added after preview refreshes the dialog to the blocked pref
   expect(screen.queryByRole("button", { name: "Publish issue" })).toBeNull();
 });
 
-test("the scrollable publication header keeps its own Close action and closes without sending", async () => {
+test("the publication dialog keeps a Close action and closes without sending", async () => {
   bridgeAnswers(eligible);
   rail(ticket());
   fireEvent.click(
@@ -352,7 +351,6 @@ test("the scrollable publication header keeps its own Close action and closes wi
     name: /Publish T-KQ1 to GitHub/,
   });
   const close = within(dialog).getByRole("button", { name: "Close" });
-  expect(close.closest('[data-slot="dialog-header"]')).toBeTruthy();
   fireEvent.click(close);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(

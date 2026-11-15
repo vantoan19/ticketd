@@ -271,33 +271,11 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
-.bulk-tag-form {
-  display: grid;
-  gap: 16px;
-}
-.bulk-tag-combobox {
-  height: auto;
+/* The tag choice list sits in the dialog body inside a control outline. */
+.bulk-tag-choices {
   border-radius: var(--radius);
-  box-shadow: var(--shadow-border);
-}
-.bulk-tag-combobox [cmdk-list][hidden] {
-  display: none;
-}
-.bulk-tag-combobox [data-slot="command-input-wrapper"] {
-  border-bottom: 0;
-}
-.bulk-tag-combobox [data-slot="command-input-wrapper"] {
-  height: 40px;
-}
-/* Same focus treatment as .ui-input. */
-.bulk-tag-combobox:has([cmdk-input]:focus-visible) {
-  outline: 1px solid var(--input-focus);
-  outline-offset: 2px;
-}
-.bulk-tag-note {
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
+  box-shadow: var(--shadow-border-base);
+  overflow: hidden;
 }
 
 .ticket-row-action {

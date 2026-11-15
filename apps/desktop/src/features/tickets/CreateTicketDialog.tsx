@@ -9,7 +9,7 @@ import { Folder, Layers } from "lucide-react";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { Picker } from "@/components/ui/picker";
 import { Switch } from "@/components/ui/switch";
-import { TokenField } from "@/components/ui/token-field";
+import { TagPicker } from "@/components/ui/tag-picker";
 import { client, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
@@ -276,9 +276,6 @@ export function CreateTicketDialog({
       setPending(false);
     }
   }
-  const suggestions = vocabulary
-    .filter((tag) => !draft.tags.includes(tag))
-    .slice(0, 6);
   const hasSubmission = !!draft.requestId;
   const fieldsLocked = pending || hasSubmission || !!completedCreation;
   const primaryLabel = completedCreation
@@ -417,6 +414,7 @@ export function CreateTicketDialog({
               options={directStatuses.map((status) => ({
                 value: status,
                 label: status,
+                icon: <StatusIcon status={status} size={16} decorative />,
               }))}
             />
             <Picker
@@ -429,8 +427,17 @@ export function CreateTicketDialog({
                 update({ project: project === NONE ? "" : project })
               }
               options={[
-                { value: NONE, label: "No project" },
-                ...projects.map((p) => ({ value: p.id, label: p.name })),
+                ...projects.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                  icon: <Folder aria-hidden="true" />,
+                })),
+                {
+                  value: NONE,
+                  label: "No project",
+                  icon: <Folder aria-hidden="true" />,
+                  clear: true,
+                },
               ]}
             />
             <Picker
@@ -443,21 +450,30 @@ export function CreateTicketDialog({
                 update({ plan: plan === NONE ? "" : plan })
               }
               options={[
-                { value: NONE, label: "No Plan" },
                 ...plans
                   .filter((e) => !e.archived)
-                  .map((e) => ({ value: e.id, label: e.name })),
+                  .map((e) => ({
+                    value: e.id,
+                    label: e.name,
+                    icon: <Layers aria-hidden="true" />,
+                  })),
+                {
+                  value: NONE,
+                  label: "No Plan",
+                  icon: <Layers aria-hidden="true" />,
+                  clear: true,
+                },
               ]}
             />
           </div>
           <div className="flex flex-col gap-2">
             <span aria-hidden="true">Tags</span>
-            <TokenField
-              label="Add tag"
-              chevron
-              placeholder="Add a tag"
-              suggestions={suggestions}
+            <TagPicker
+              label="Tags"
+              placeholder="Add tags"
+              suggestions={vocabulary}
               values={draft.tags}
+              disabled={fieldsLocked}
               onChange={(tags) =>
                 update({ tags: tags.map((tag) => tag.toLowerCase()) })
               }

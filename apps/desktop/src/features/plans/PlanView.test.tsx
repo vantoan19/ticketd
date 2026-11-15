@@ -17,6 +17,7 @@ class ResizeObserverStub {
   disconnect() {}
 }
 window.ResizeObserver = ResizeObserverStub;
+Element.prototype.scrollIntoView = () => {};
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
     matches: false,
@@ -89,6 +90,14 @@ beforeEach(() => {
           },
         };
       }
+      case "search_tickets":
+        return tickets
+          .filter((item) =>
+            `${item.reference} Title of ${item.reference}`
+              .toLowerCase()
+              .includes(String(input?.query ?? "").toLowerCase()),
+          )
+          .map(ticket);
       case "find_tickets": {
         const plan = (input?.filter as unknown as { plan: string | null }).plan;
         return tickets
@@ -227,11 +236,30 @@ test("Escape cancels an in-place rename and keeps the name", async () => {
   expect(calls.some(([command]) => command === "change_plan")).toBe(false);
 });
 
+test("a failed archive keeps the dialog open with its cause", async () => {
+  // Plans PL-12: the dialog used to close even when archiving failed.
+  const answer = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "change_plan") throw new Error("The workspace is locked");
+    return answer(command, args);
+  });
+  await openLaunch();
+  await chooseAction("Archive Plan…");
+  fireEvent.click(screen.getByRole("button", { name: "Archive Plan" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Archive Launch?",
+  });
+  expect((await within(dialog).findByRole("alert")).textContent).toContain(
+    "The workspace is locked",
+  );
+  expect(plans[0]?.archived).toBe(false);
+});
+
 test("archiving moves the Plan to Archived, where it can be reactivated", async () => {
   await openLaunch();
   await chooseAction("Archive Plan…");
   expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive Plan" }));
   await screen.findByText("Archived Plan", { selector: ".plan-state" });
   // An archived Plan is read-only; Reactivate is its one action.
   expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
@@ -267,20 +295,26 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
 test("adds an existing ticket from search", async () => {
   await openLaunch();
   fireEvent.click(screen.getByRole("button", { name: "Add tickets" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Add T-KQ3 to Launch" }),
+  const dialog = await screen.findByRole("dialog", {
+    name: "Add tickets to Launch",
+  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "title" } },
   );
+  // Members of this Plan are not offered; one pick, then the primary adds it.
+  const row = await within(dialog).findByRole("option", { name: /T-KQ3/ });
+  expect(within(dialog).queryByRole("option", { name: /T-KQ1/ })).toBeNull();
+  fireEvent.click(row);
+  expect(within(dialog).getByText("1 selected.")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add tickets" }));
   await waitFor(() =>
     expect(calls).toContainEqual([
       "set_plan",
       { reference: "T-KQ3", plan: "e1" },
     ]),
   );
-  await waitFor(() =>
-    expect(
-      screen.queryByRole("button", { name: "Add T-KQ3 to Launch" }),
-    ).toBeNull(),
-  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
 test("edits a Plan purpose", async () => {

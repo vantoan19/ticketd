@@ -1,12 +1,9 @@
 import { useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Picker } from "@/components/ui/picker";
-import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
-import { useTicketSearch } from "./useTicketSearch";
+import { TicketPicker } from "./TicketPicker";
 import {
   addableKinds,
   addLink,
@@ -48,18 +45,10 @@ export function LinkTicketDialog({
         ? chosen?.parent?.reference
         : undefined;
 
-  const search = useTicketSearch(
-    query,
-    open,
-    (item) => item.reference !== ticket.reference,
-  );
-  const { results } = search;
-
   // Escape and clicking outside only close the dialog: what was typed or chosen
   // is still there when it reopens. Cancel and a finished link discard it.
   function discard() {
     setQuery("");
-    search.reset();
     setChosen(null);
     setError("");
     attempt.current = null;
@@ -93,7 +82,6 @@ export function LinkTicketDialog({
       setPending(false);
     }
   }
-  const visible = query.trim() ? results : [];
   // The title names the button that opened the dialog.
   const title =
     initialKind === "subticket" ? "Add subticket" : "Add relationship";
@@ -107,6 +95,8 @@ export function LinkTicketDialog({
       blockedReason={
         pending ? "Linking…" : chosen ? null : "Choose a ticket to link"
       }
+      footerNote={chosen && `${chosen.reference} ${chosen.title}`}
+      error={error}
       onSubmit={() => void submit()}
       onCancel={discard}
     >
@@ -134,60 +124,21 @@ export function LinkTicketDialog({
             />
           </div>
         </Field>
-        <Field data-invalid={!!(error || search.error)}>
-          <FieldLabel htmlFor={`link-search-${ticket.id}`}>Ticket</FieldLabel>
-          {chosen ? (
-            <div className="link-ticket-chosen">
-              <StatusIcon status={chosen.status} size={14} decorative />
-              <span>
-                {chosen.reference} {chosen.title}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setChosen(null);
-                  setError("");
-                }}
-              >
-                Change ticket
-              </Button>
-            </div>
-          ) : (
-            <>
-              <Input
-                id={`link-search-${ticket.id}`}
-                value={query}
-                placeholder="Search by title, text or reference"
-                autoComplete="off"
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              {visible.length > 0 && (
-                <ul className="link-ticket-results" aria-label="Matches">
-                  {visible.map((item) => (
-                    <li key={item.reference}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setChosen(item);
-                          setError("");
-                        }}
-                      >
-                        <StatusIcon status={item.status} size={14} decorative />
-                        <span className="link-ticket-reference">
-                          {item.reference}
-                        </span>
-                        <span>{item.title}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-          <FieldError>{error || search.error}</FieldError>
-        </Field>
+        <div className="flex flex-col gap-2">
+          <span aria-hidden="true">Ticket</span>
+          <TicketPicker
+            label="Ticket"
+            query={query}
+            onQueryChange={setQuery}
+            autoFocus={false}
+            accept={(item) => item.reference !== ticket.reference}
+            selected={chosen ? [chosen.reference] : []}
+            onPick={(item) => {
+              setChosen(item);
+              setError("");
+            }}
+          />
+        </div>
         {replacedParent && (
           <p role="status" className="link-ticket-note">
             This replaces the current parent {replacedParent}.
