@@ -35,3 +35,7 @@
 .plan-split-bar [data-segment="progress"] {
   background: var(--seg-progress);
 }
+
+.plan-split-bar[data-variant="summary"] {
+  background: var(--accent);
+}

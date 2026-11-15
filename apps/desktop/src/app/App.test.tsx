@@ -3855,6 +3855,76 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
   ).toBeTruthy();
 });
 
+test("Plan page keeps its view switch in the header and summarizes all members", async () => {
+  const plan = {
+    id: "P-page",
+    name: "Board polish",
+    archived: false,
+    purpose: "Make the board feel stable and fast.",
+  };
+  const ticket = bulkTicket(1, { plan_id: plan.id, project_id: "desktop" });
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "list_projects")
+        return [
+          { id: "desktop", name: "Desktop app", path: "/app", paths: ["/app"] },
+        ];
+      if (command === "find_tickets") return [ticket];
+      if (command === "plan_dependency_graph")
+        return {
+          nodes: [],
+          edges: [],
+          truncated: false,
+          max_nodes: 100,
+          max_depth: 10,
+          max_edges: 100,
+          max_work: 1000,
+          omitted_neighbors: false,
+          omitted_edges: false,
+        };
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 3, in_progress: 2, done: 1 }),
+          members: [
+            ticket,
+            { ...ticket, reference: "T-KQ2", availability: "Ready" },
+          ],
+          documents: [],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Board polish/ }));
+  expect(await screen.findByText("1 of 6 done")).toBeTruthy();
+  const summary = screen.getByRole("group", { name: "Plan context" });
+  expect(
+    within(summary).getByText("2 in progress · 3 to do, 2 ready"),
+  ).toBeTruthy();
+  expect(
+    within(summary).getByRole("img", {
+      name: "Board polish, 1 of 6 done, 2 moving",
+    }),
+  ).toBeTruthy();
+  const switcher = screen.getByRole("radiogroup", { name: "Plan view" });
+  const header = switcher.closest("header");
+  expect(
+    within(header!).getByRole("button", { name: "Add tickets" }),
+  ).toBeTruthy();
+  for (const name of ["Board", "Flow", "List"]) {
+    fireEvent.click(within(switcher).getByRole("radio", { name }));
+    expect(screen.getByRole("radiogroup", { name: "Plan view" })).toBe(
+      switcher,
+    );
+    expect(switcher.closest("header")).toBe(header);
+  }
+  const row = screen.getByRole("button", { name: /First/ });
+  expect(row.closest("li")?.textContent).toContain("Desktop app");
+  expect(row.closest("li")?.textContent).not.toContain("Board polish");
+});
+
 test("ticket state lanes join ranked linked Chats without changing unrelated rows", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient } = await import("@/features/chats/mock-client");
@@ -3936,23 +4006,27 @@ test("ticket state lanes join ranked linked Chats without changing unrelated row
   );
   const first = await screen.findByRole("button", { name: /First/ });
   await vi.waitFor(() =>
-    expect(within(first).getByText("Approval needed")).toBeTruthy(),
+    expect(within(first).getByLabelText("Approval needed")).toBeTruthy(),
   );
   const second = screen.getByRole("button", { name: /Second/ });
-  expect(within(second).getByText("Working")).toBeTruthy();
-  expect(within(second).getByRole("img", { name: "codex" })).toBeTruthy();
+  expect(within(second).getByLabelText("Working")).toBeTruthy();
+  expect(
+    within(within(second).getByLabelText("Working")).getByRole("img", {
+      name: "codex",
+    }),
+  ).toBeTruthy();
   const unrelated = screen.getByRole("button", { name: /Unrelated/ });
   expect(within(unrelated).queryByText(/Working|Approval needed/)).toBeNull();
-  expect(within(unrelated).getByText("Reminder due")).toBeTruthy();
+  expect(within(unrelated).getByLabelText("Reminder due")).toBeTruthy();
   expect(
-    within(screen.getByRole("button", { name: /Duplicate ticket/ })).getByText(
-      "Duplicate of T-KQ9",
-    ),
+    within(
+      screen.getByRole("button", { name: /Duplicate ticket/ }),
+    ).getByLabelText("Duplicate of T-KQ9"),
   ).toBeTruthy();
   list.mockResolvedValue([]);
   act(() => notify());
   await vi.waitFor(() =>
-    expect(within(first).getByText("Blocked by T-KQ9")).toBeTruthy(),
+    expect(within(first).getByLabelText("Blocked by T-KQ9")).toBeTruthy(),
   );
   expect(within(second).queryByText("Working")).toBeNull();
 });
@@ -4009,7 +4083,7 @@ test.each([
       null;
     render(<App />);
     const row = await screen.findByRole("button", { name: /First/ });
-    expect(within(row).getByText("Ready for review")).toBeTruthy();
+    expect(within(row).getByLabelText("Ready for review")).toBeTruthy();
     expect(publisherMark(row)).toBe(viewBox);
     fireEvent.click(row);
     const update = await screen.findByRole("article", {

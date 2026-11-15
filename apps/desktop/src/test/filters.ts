@@ -7,6 +7,16 @@ import { act, fireEvent, screen } from "@testing-library/react";
  */
 export async function chooseFilter(dimension: string, value: string) {
   const flush = () => act(async () => {});
+  if (!screen.queryByRole("button", { name: /^Filters/ })) {
+    fireEvent.keyDown(screen.getByRole("button", { name: "Plan actions" }), {
+      key: "Enter",
+    });
+    await flush();
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Filter and display…" }),
+    );
+    await flush();
+  }
   fireEvent.keyDown(screen.getByRole("button", { name: /^Filters/ }), {
     key: "Enter",
   });
