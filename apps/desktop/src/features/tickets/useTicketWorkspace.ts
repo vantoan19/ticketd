@@ -469,14 +469,17 @@ export function useTicketWorkspace(
               : navigation.kind === "progress"
                 ? "In progress"
                 : "All tickets";
+  /**
+   * Clears the filter dimensions back to the view's own scope. The search and
+   * the source tabs are not filters: each clears with its own control (list
+   * F-09).
+   */
   function clearFilters() {
-    setQuery("");
     setPlan(navigation.plan);
     setStatus(navigation.kind === "progress" ? "In progress" : "");
     setAvailability(navigation.kind === "ready" ? "Ready" : "");
     setTags("");
     setFamily("");
-    setSourceFilter("all");
     setOffset(0);
   }
   function scope(

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   useDefaultLayout,
   useGroupRef,
@@ -17,7 +17,6 @@ import { PlanHeader } from "@/features/plans/PlanHeader";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
-import { FilterDockContext } from "@/features/tickets/filter-dock";
 import { TicketListPane } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -61,29 +60,6 @@ export function TicketWorkspaceView({
   const workspaceRef = useRef<HTMLDivElement>(null);
   // The content panel’s width, not the window’s: collapsing the sidebar gives it back.
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
-  // The Filters panel docks beside the list, so the detail pane makes room.
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const filterDock = useMemo(
-    () => ({
-      open: filtersOpen,
-      setOpen: setFiltersOpen,
-      anchor:
-        // Stacked, the list fills the window: no room beside it, so use collision handling.
-        workspace.layout === "board" || narrow
-          ? null
-          : {
-              // Always a measurable: the panel measures the list pane when it opens.
-              current: {
-                getBoundingClientRect: () =>
-                  (
-                    listRef.current?.closest<HTMLElement>("#list") ??
-                    document.getElementById("list")
-                  )?.getBoundingClientRect() ?? new DOMRect(),
-              } as HTMLElement,
-            },
-    }),
-    [filtersOpen, workspace.layout, narrow],
-  );
   // Dependencies are temporary; ticket layouts share the remembered preference.
   const [showDependencies, setShowDependencies] = useState(false);
   const planScope = workspace.trash ? "" : workspace.navigation.plan;
@@ -195,7 +171,7 @@ export function TicketWorkspaceView({
     setNarrowDetail(false);
   }
   return (
-    <FilterDockContext.Provider value={filterDock}>
+    <>
       <div
         ref={workspaceRef}
         className="plan-workspace"
@@ -241,7 +217,6 @@ export function TicketWorkspaceView({
             workspace.layout === "board" && "board-layout",
             !selected && "board-unselected",
           )}
-          data-filters-open={filtersOpen ? "" : undefined}
           groupRef={groupRef}
           defaultLayout={
             workspace.layout === "board"
@@ -324,6 +299,6 @@ export function TicketWorkspaceView({
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-    </FilterDockContext.Provider>
+    </>
   );
 }

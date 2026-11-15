@@ -147,11 +147,6 @@
       "count": 1
     }
   },
-  "src/features/tickets/TicketFilters.tsx": {
-    "shadcn/no-restyle": {
-      "count": 2
-    }
-  },
   "src/features/tickets/TicketList.tsx": {
     "shadcn/no-restyle": {
       "count": 1

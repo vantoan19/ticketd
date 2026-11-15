@@ -24,6 +24,7 @@ import { planSummary } from "@/features/plans/plan-summary";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import { useFiltersMenu } from "@/features/tickets/filters-menu";
 import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketBoard } from "./TicketBoard";
@@ -111,6 +112,8 @@ function TicketListBody({
   // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const statusLine = useStatusLine();
+  // The header's Filters menu and the chip row under it share one menu.
+  const filtersMenu = useFiltersMenu();
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   // An archived Plan is read-only: no new tickets into it, no removing from it.
@@ -218,6 +221,8 @@ function TicketListBody({
     scopeName,
     total,
     scopeTotal,
+    counts,
+    menu: filtersMenu,
   };
   return (
     <section

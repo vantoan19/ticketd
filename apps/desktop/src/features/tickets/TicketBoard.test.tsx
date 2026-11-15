@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { chooseFilter } from "@/test/filters";
 import {
   act,
   cleanup,
@@ -1366,23 +1367,16 @@ test("layout preference survives navigation and restart while search and status 
   saved = [ticket(1), ticket(2, "Done")];
   const first = render(<App />);
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await settle();
-  fireEvent.click(screen.getAllByRole("button", { name: "Done" })[0]!);
-  // The panel's Done button closes it; the status chip is also named Done.
-  const panel = screen.getByRole("dialog", { name: "Ticket filters" });
-  fireEvent.click(
-    within(panel).getAllByRole("button", { name: "Done" }).at(-1)!,
-  );
+  await chooseFilter("Status", "Done");
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "Ticket 2" },
   });
   await settle();
   await showBoard();
   expect(
-    screen.getByRole("button", { name: "Remove Status is Done" }),
+    screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Remove Search: Ticket 2" }),
