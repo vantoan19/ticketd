@@ -2992,6 +2992,272 @@ test("property keys leave typing and existing dialogs alone", async () => {
   ).toBeNull();
 });
 
+test("workspace Retry keeps the band and Details until a writable check succeeds", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: /^All tickets/ });
+  act(() => reportWorkspaceFailure("workspace_read_only", "raw readonly"));
+  const message = "This workspace is read-only. Changes can't be saved.";
+  const band = screen.getByText(message).closest("[data-slot=workspace-band]")!;
+  fireEvent.click(
+    within(band as HTMLElement).getByRole("button", { name: "Details" }),
+  );
+  const details = await screen.findByRole("dialog", {
+    name: "Failure details",
+  });
+  expect(details.textContent).toContain("raw readonly");
+  expect(band.contains(details)).toBe(false);
+  expect(
+    within(details).getByRole("button", { name: "Copy details" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(details, { key: "Escape" });
+  let finish: ((value: unknown) => void) | undefined;
+  bridge.invoke.mockImplementation((command: string) =>
+    command === "sidebar_counts"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : bridgeDefault(command),
+  );
+  fireEvent.click(
+    within(band as HTMLElement).getByRole("button", { name: "Retry" }),
+  );
+  expect(screen.getByText(message)).toBeTruthy();
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  await act(async () => finish?.(bridgeDefault("sidebar_counts")));
+  await vi.waitFor(() => expect(screen.queryByText(message)).toBeNull());
+});
+
+test("failed workspace Retry keeps its band and a later success cannot clear a newer failure", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: /^All tickets/ });
+  act(() => reportWorkspaceFailure("workspace_read_only", "raw readonly"));
+  const message = "This workspace is read-only. Changes can't be saved.";
+  let rejectCheck: ((reason: unknown) => void) | undefined;
+  bridge.invoke.mockImplementation((command: string) =>
+    command === "sidebar_counts"
+      ? new Promise((_, reject) => {
+          rejectCheck = reject;
+        })
+      : bridgeDefault(command),
+  );
+  const band = screen
+    .getByText(message)
+    .closest("[data-slot=workspace-band]") as HTMLElement;
+  fireEvent.click(within(band).getByRole("button", { name: "Retry" }));
+  expect(screen.getByText(message)).toBeTruthy();
+  await vi.waitFor(() => expect(rejectCheck).toBeTypeOf("function"));
+  await act(async () =>
+    rejectCheck?.({ code: "workspace_read_only", message: "raw readonly" }),
+  );
+  expect(screen.getByText(message)).toBeTruthy();
+  let finish: ((value: unknown) => void) | undefined;
+  bridge.invoke.mockImplementation((command: string) =>
+    command === "sidebar_counts"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : bridgeDefault(command),
+  );
+  fireEvent.click(within(band).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  // Even another failure with the same words belongs to a newer attempt.
+  act(() => reportWorkspaceFailure("workspace_read_only", "raw readonly"));
+  await act(async () => finish?.(bridgeDefault("sidebar_counts")));
+  expect(screen.getByText(message)).toBeTruthy();
+});
+
+test("workspace Retry protects queued Capture edits before clearing the band", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  let writable = false;
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { draft?: { revision: number }; body?: string },
+    ) => {
+      if (command === "draft_retentions") return [];
+      if (command === "draft_cutover_pending") return false;
+      if (command === "retain_draft") {
+        if (!writable)
+          throw { code: "workspace_read_only", message: "raw readonly" };
+        await gate;
+        return { ...args?.draft, revision: (args?.draft?.revision ?? 0) + 1 };
+      }
+      if (command === "save_document")
+        return {
+          id: "queued-capture",
+          title: null,
+          body: args?.body ?? "",
+          created_at: "2030-01-01",
+          updated_at: "2030-01-01",
+          trashed: false,
+        };
+      return bridgeDefault(command);
+    },
+  );
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const editor = screen.getByRole("textbox", { name: "Your thought source" });
+  fireEvent.change(editor, { target: { value: "First draft" } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  fireEvent.change(editor, { target: { value: "Keep the newer draft too" } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const message = "This workspace is read-only. Changes can't be saved.";
+  const band = screen
+    .getByText(message)
+    .closest("[data-slot=workspace-band]") as HTMLElement;
+  writable = true;
+  bridge.invoke.mockClear();
+  fireEvent.click(within(band).getByRole("button", { name: "Retry" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText(message)).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "sidebar_counts"),
+  ).toBe(false);
+  expect(editor).toHaveProperty("value", "Keep the newer draft too");
+  await act(async () => {
+    release?.();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByText(message)).toBeNull();
+  expect(editor).toHaveProperty("value", "Keep the newer draft too");
+});
+
+test("reading another view cannot dismiss a workspace lock while Retry is still pending", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: /^All tickets/ });
+  act(() => reportWorkspaceFailure("workspace_locked", "raw locked"));
+  let reject: ((reason: unknown) => void) | undefined;
+  bridge.invoke.mockImplementation((command: string, args) =>
+    command === "sidebar_counts"
+      ? new Promise((_, fail) => {
+          reject = fail;
+        })
+      : bridgeDefault(command, args),
+  );
+  const message =
+    "Another ticketd operation is using this workspace. Changes can't be saved right now.";
+  const band = screen
+    .getByText(message)
+    .closest("[data-slot=workspace-band]") as HTMLElement;
+  fireEvent.click(within(band).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
+  fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+  await screen.findByRole("heading", { name: "Documents" });
+  expect(screen.getByText(message)).toBeTruthy();
+  await act(async () =>
+    reject?.({ code: "workspace_locked", message: "raw locked" }),
+  );
+  expect(screen.getByText(message)).toBeTruthy();
+});
+
+test("startup permission recovery opens the App without a stale workspace band", async () => {
+  let readable = false;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "draft_retentions") {
+      if (!readable)
+        throw {
+          code: "workspace_unreadable",
+          message: "raw permission denied",
+        };
+      return [];
+    }
+    if (command === "draft_cutover_pending") return false;
+    return bridgeDefault(command, args);
+  });
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await screen.findByRole("heading", {
+    name: "ticketd can't open this workspace",
+  });
+  readable = true;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByRole("button", { name: /^All tickets/ });
+  expect(
+    screen.queryByText(
+      "ticketd can't read this workspace file. Changes can't be saved.",
+    ),
+  ).toBeNull();
+});
+
+test.each(["palette", "chip"])(
+  "%s custom reminder refuses past times and rechecks an expired draft before saving",
+  async (route) => {
+    paletteTickets();
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(new Date(2030, 0, 1, 10).getTime());
+    try {
+      render(<App />);
+      const row = await screen.findByRole("button", { name: /Focused Ticket/ });
+      if (route === "palette") {
+        row.focus();
+        fireEvent.keyDown(row, { key: "h" });
+      } else {
+        fireEvent.click(row);
+        fireEvent.keyDown(
+          await screen.findByRole("button", { name: "Add ticket property" }),
+          { key: "Enter" },
+        );
+        fireEvent.click(
+          await screen.findByRole("menuitem", { name: "Reminder" }),
+        );
+      }
+      fireEvent.click(await screen.findByRole("option", { name: "Custom…" }));
+      const field = await screen.findByLabelText("Date and time");
+      fireEvent.change(field, { target: { value: "2030-01-01T09:00" } });
+      expect(
+        screen.getByText("This time has passed. Choose a future time."),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Set reminder" }),
+      ).toHaveProperty("disabled", true);
+      fireEvent.change(field, { target: { value: "2030-01-01T11:00" } });
+      const submit = screen.getByRole("button", { name: "Set reminder" });
+      expect(submit).toHaveProperty("disabled", false);
+      now.mockReturnValue(new Date(2030, 0, 1, 12).getTime());
+      fireEvent.click(submit);
+      expect(
+        screen.getByText("This time has passed. Choose a future time."),
+      ).toBeTruthy();
+      expect(
+        bridge.invoke.mock.calls.some(
+          ([command]) => command === "set_reminder",
+        ),
+      ).toBe(false);
+    } finally {
+      now.mockRestore();
+    }
+  },
+);
+
 test("reminder drill-in shares custom local-time scheduling with the existing reminder picker", async () => {
   paletteTickets();
   const original = bridge.invoke.getMockImplementation()!;
@@ -7698,4 +7964,65 @@ test("Inbox palette actions share selected-entry read, reminder and Activity han
   expect(
     screen.getByRole("textbox", { name: "New update rich text" }).textContent,
   ).toContain("Your reminder is due");
+});
+
+test("Inbox loading announces its read without guessing urgency, then retains entries if refreshing fails", async () => {
+  let finish: ((value: unknown) => void) | undefined;
+  const pending = new Promise((resolve) => {
+    finish = resolve;
+  });
+  let failRefresh = false;
+  const due = "2020-01-01T00:00:00Z";
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "inbox") {
+      if (failRefresh) throw new Error("temporary inbox read failure");
+      return pending;
+    }
+    if (command === "reminder") return due;
+    return bridgeDefault(command, args);
+  });
+  vi.useFakeTimers();
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  expect(screen.getByRole("status", { name: "Loading Inbox" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: /Needs you/ })).toBeNull();
+  expect(screen.queryByText("You're all caught up")).toBeNull();
+  await act(async () =>
+    finish?.([
+      {
+        id: 1,
+        reference: "T-KQ1",
+        title: "Retained reminder",
+        kind: "reminder",
+        from_value: "",
+        to_value: due,
+        timestamp: due,
+        read: false,
+        editing_agent: null,
+      },
+    ]),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", {
+    name: /T-KQ1.*Retained reminder.*Your reminder/,
+  });
+  expect(screen.getByRole("heading", { name: /Needs you/ })).toBeTruthy();
+  expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
+  failRefresh = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByText(/Couldn't load the Inbox/)).toBeTruthy();
+  expect(
+    screen.getByRole("button", {
+      name: /T-KQ1.*Retained reminder.*Your reminder/,
+    }),
+  ).toBe(row);
+  expect(screen.queryByText("You're all caught up")).toBeNull();
+  expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
 });

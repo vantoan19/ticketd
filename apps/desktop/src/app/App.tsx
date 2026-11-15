@@ -82,7 +82,12 @@ import {
 } from "@/lib/draft-recovery-context";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { WorkspaceBand } from "./WorkspaceBand";
-import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
+import {
+  clearWorkspaceFailure,
+  getWorkspaceFailure,
+  editingBlockedReason,
+  useWorkspaceState,
+} from "@/lib/workspace-state";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { AutomationsView } from "@/features/automations/AutomationsView";
 import { RunNavigation } from "@/features/automations/navigation";
@@ -834,9 +839,15 @@ function AppContent() {
                         >
                           <OverlayBoundary element={contentPanel}>
                             <WorkspaceBand
-                              onRetry={() => {
-                                recovery.retry();
-                                void refresh({ reportFailure: true });
+                              onRetry={async () => {
+                                const failed = getWorkspaceFailure();
+                                await recovery.flush();
+                                // sidebar_counts delivers due reminders in a write
+                                // transaction, so success proves access even with
+                                // no queued drafts. Pure reads cannot prove this.
+                                setCounts(await countsClient.sidebar());
+                                clearWorkspaceFailure(failed);
+                                await refresh({ reportFailure: true });
                               }}
                             />
                             {/* At most one band: a workspace failure outranks

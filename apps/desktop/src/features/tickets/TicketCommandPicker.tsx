@@ -1,3 +1,4 @@
+import { useReminderTime } from "./use-reminder-time";
 import "./properties.css";
 import { useRef, useState, type ReactNode } from "react";
 import { ChoiceList, type Choice } from "@/components/ui/choice-list";
@@ -16,7 +17,7 @@ import { StatusIcon } from "./StatusIcon";
 import { Duplicates } from "./Duplicates";
 import { ConfirmLeaveDuplicate } from "./ConfirmLeaveDuplicate";
 import { ReminderDateTime } from "./ReminderDateTime";
-import { localInstants, localValue } from "./reminder-time";
+import { localValue } from "./reminder-time";
 import { reminderPresets } from "./reminder-presets";
 
 /** Chip and palette share the same options, mutation, safeguards and Undo controller. */
@@ -67,7 +68,8 @@ export function TicketCommandPicker({
     close: () => setOpen(false),
     refresh,
   });
-  const instants = localInstants(draft);
+  const time = useReminderTime(draft, occurrence);
+  const instants = time.instants;
   function choose(value: string) {
     if (scope === "Reminder" && value === "custom") {
       setCustom(true);
@@ -143,6 +145,7 @@ export function TicketCommandPicker({
                 draft={draft}
                 occurrence={occurrence}
                 pending={actions.pending || actions.blocked}
+                past={time.past}
                 onDraft={(value) => {
                   setDraft(value);
                   setOccurrence("");
@@ -154,16 +157,14 @@ export function TicketCommandPicker({
                 disabled={
                   actions.pending ||
                   actions.blocked ||
+                  time.past ||
                   instants.length === 0 ||
                   (instants.length > 1 && !occurrence)
                 }
-                onClick={() =>
-                  void actions.apply(
-                    "custom",
-                    false,
-                    occurrence || instants[0]!.toISOString(),
-                  )
-                }
+                onClick={() => {
+                  const selected = time.selectForSubmit();
+                  if (selected) void actions.apply("custom", false, selected);
+                }}
               >
                 Set reminder
               </Button>

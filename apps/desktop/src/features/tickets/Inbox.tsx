@@ -201,6 +201,46 @@ export function Snooze({
   );
 }
 
+/** Neutral placeholders reserve the same group and two-line row geometry. */
+function InboxRowsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading Inbox" className="inbox-loading">
+      <span className="sr-only">Loading Inbox…</span>
+      <section aria-hidden="true">
+        <h2>
+          <Skeleton shape="circle" className="size-1.5" />
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-4" />
+        </h2>
+        <ul className="inbox-entries">
+          {[0, 1, 2].map((row) => (
+            <li key={row} className="inbox-entry">
+              <span className="inbox-dot">
+                <Skeleton shape="circle" className="size-1.5" />
+              </span>
+              <div className="inbox-ticket">
+                <div className="inbox-title-line">
+                  <span className="inbox-icon">
+                    <Skeleton shape="circle" className="size-4" />
+                  </span>
+                  <Skeleton className="h-3 w-11" />
+                  <Skeleton className="h-3 flex-1" />
+                </div>
+                <div className="inbox-summary inbox-loading-summary">
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              </div>
+              <span className="inbox-trailing">
+                <Skeleton className="h-3 w-6" />
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 /**
  * One Inbox row, in the triage row anatomy (S08): unread dot, kind icon,
  * mono Reference and title; the summary on line two; the relative time at
@@ -757,17 +797,7 @@ function InboxContent({
           }
         }}
       >
-        {loading && !entries.length && !error && (
-          <div
-            role="status"
-            aria-label="Loading Inbox"
-            className="inbox-loading"
-          >
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        )}
+        {loading && !entries.length && !error && <InboxRowsSkeleton />}
         {error && (
           <FailureAlert size="compact" failure={error} onRetry={reload} />
         )}

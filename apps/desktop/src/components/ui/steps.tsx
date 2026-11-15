@@ -73,7 +73,10 @@ export function Step({
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5 text-sm">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{title}</span>
+          <span className="font-medium">
+            {state === "done" && <span className="sr-only">Completed: </span>}
+            {title}
+          </span>
           {action}
         </span>
         {description && (

@@ -20,6 +20,7 @@ export function ReminderDateTime({
   draft,
   occurrence,
   pending,
+  past,
   onDraft,
   onOccurrence,
 }: {
@@ -27,13 +28,18 @@ export function ReminderDateTime({
   draft: string;
   occurrence: string;
   pending: boolean;
+  past: boolean;
   onDraft: (value: string) => void;
   onOccurrence: (value: string) => void;
 }) {
   const options = localInstants(draft);
   const skipped = complete(draft) && options.length === 0;
+  const invalid = skipped || past;
   return (
-    <Field>
+    <Field
+      data-invalid={invalid || undefined}
+      data-disabled={pending || undefined}
+    >
       <FieldLabel htmlFor={`reminder-time-${reference}`}>
         Date and time
       </FieldLabel>
@@ -42,17 +48,19 @@ export function ReminderDateTime({
         type="datetime-local"
         disabled={pending}
         value={draft}
-        aria-invalid={skipped || undefined}
+        aria-invalid={invalid || undefined}
         aria-describedby={
-          skipped
+          invalid
             ? `reminder-time-error-${reference}`
             : `reminder-zone-${reference}`
         }
         onChange={(event) => onDraft(event.target.value)}
       />
-      {skipped ? (
+      {invalid ? (
         <FieldError id={`reminder-time-error-${reference}`}>
-          The clock skips this time here. Choose another time.
+          {skipped
+            ? "The clock skips this time here. Choose another time."
+            : "This time has passed. Choose a future time."}
         </FieldError>
       ) : (
         <FieldDescription id={`reminder-zone-${reference}`}>

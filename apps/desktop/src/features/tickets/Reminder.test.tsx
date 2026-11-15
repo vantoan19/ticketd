@@ -189,3 +189,40 @@ test("prevents a second reminder change while a write is pending", async () => {
   await waitFor(() => expect(snooze).toHaveProperty("disabled", false));
   view.unmount();
 });
+
+test("legacy custom reminder refuses a past time and rechecks expiry before saving", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const now = vi
+    .spyOn(Date, "now")
+    .mockReturnValue(new Date(2030, 0, 1, 10).getTime());
+  const view = render(<Reminder reference="T-KQ9" revision={0} />);
+  try {
+    const field = await openCustom();
+    fireEvent.change(field, { target: { value: "2030-01-01T09:00" } });
+    expect(
+      screen.getByText("This time has passed. Choose a future time."),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Set reminder|Reschedule/ }),
+    ).toHaveProperty("disabled", true);
+    fireEvent.change(field, { target: { value: "2030-01-01T11:00" } });
+    const submit = screen.getByRole("button", {
+      name: /Set reminder|Reschedule/,
+    });
+    expect(submit).toHaveProperty("disabled", false);
+    vi.mocked(invoke).mockClear();
+    now.mockReturnValue(new Date(2030, 0, 1, 12).getTime());
+    fireEvent.click(submit);
+    expect(
+      screen.getByText("This time has passed. Choose a future time."),
+    ).toBeTruthy();
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(([command]) => command === "set_reminder"),
+    ).toBe(false);
+  } finally {
+    now.mockRestore();
+    view.unmount();
+  }
+});

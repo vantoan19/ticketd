@@ -18,6 +18,8 @@ export function bridgeDefault(
       return { kind: "local" };
     case "attachment_upload_limit":
       return 104857600;
+    case "workspace_location":
+      return "/tmp/ticketd-test/workspace.sqlite3";
     case "attachment_workspace_id":
       return "workspace-test";
     // Attachments settings reads it on open to gate the Google Drive tile.
