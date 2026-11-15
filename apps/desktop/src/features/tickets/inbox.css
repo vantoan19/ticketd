@@ -17,24 +17,26 @@
   padding-bottom: 24px;
   overflow-y: auto;
 }
-/* Day groups: the list's 32px recessed band, sticky like status groups. */
+/* Attention groups use quiet headings above inset rows (S08). */
 .inbox section h2 {
   position: sticky;
   top: 0;
   z-index: 1;
   display: flex;
   align-items: center;
-  height: 32px;
-  padding: 0 16px;
-  background: var(--recessed);
-  box-shadow:
-    0 1px 0 0 var(--group-hairline),
-    0 -1px 0 0 var(--group-hairline);
+  height: 36px;
+  gap: 8px;
+  margin: 6px 8px 0;
+  padding: 0 10px 0 12px;
+  border-radius: var(--radius-card);
+  background: var(--background);
   color: var(--foreground);
   font-size: var(--text-ui);
   font-weight: 500;
   line-height: var(--text-ui-line);
-  letter-spacing: -0.28px;
+}
+.inbox section:first-of-type h2 {
+  margin-top: 0;
 }
 .inbox-entries {
   margin: 0;
@@ -46,7 +48,10 @@
   display: flex;
   align-items: flex-start;
   min-width: 0;
-  padding: 0 8px 0 0;
+  margin: 0 8px;
+  gap: 8px;
+  padding: 10px 10px 10px 8px;
+  border-radius: var(--radius-card);
 }
 .inbox-entry:hover {
   background: var(--hover);
@@ -63,17 +68,15 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 36px;
+  width: 10px;
+  height: 20px;
 }
 .inbox-ticket {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
-  min-height: 52px;
-  padding: 8px 0 6px;
+  padding: 0;
   text-align: left;
   color: var(--foreground);
 }
@@ -83,12 +86,16 @@
 .inbox-title-line {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .inbox-icon {
   display: flex;
   flex: none;
+  width: 22px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
   color: var(--muted-foreground);
 }
 .inbox-icon svg {
@@ -107,11 +114,11 @@
 }
 .inbox-summary {
   display: block;
-  padding-left: 22px;
+  padding-left: 30px;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -123,18 +130,18 @@
   align-items: center;
   justify-content: flex-end;
   min-width: 40px;
-  height: 36px;
+  height: 20px;
   padding-left: 8px;
 }
 .inbox-trailing time {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
+  line-height: var(--text-ui-line);
   white-space: nowrap;
 }
 .inbox-actions {
   position: absolute;
-  top: 2px;
+  top: -6px;
   right: 0;
   display: flex;
   gap: 2px;
@@ -160,4 +167,12 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+
+.inbox-agent-name {
+  color: var(--foreground);
+}
+.inbox-command {
+  color: var(--foreground);
+  font-size: var(--text-caption);
 }

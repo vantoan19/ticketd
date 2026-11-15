@@ -1,3 +1,4 @@
+import { useInboxAttention } from "@/features/tickets/use-inbox-attention";
 import {
   Inbox,
   CirclePlay,
@@ -265,7 +266,14 @@ export function WorkspaceSidebar({
       live = false;
     };
   }, [plans, change]);
+  const attention = useInboxAttention();
+  const needsCount = attention?.needsCount ?? 0;
   const unread = (counts?.unread_inbox ?? 0) > 0;
+  const inboxLabel = needsCount
+    ? `Inbox, ${needsCount} ${needsCount === 1 ? "entry needs" : "entries need"} you`
+    : unread
+      ? `Inbox, ${counts?.unread_inbox} unread`
+      : "Inbox";
   const chat = useChatFeature();
   // Waiting for the person (a request, uncertain delivery, an unseen failure),
   // then finished turns not yet seen. Working never counts.
@@ -391,18 +399,18 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}
-                tooltip={
-                  unread ? `Inbox · ${counts?.unread_inbox} unread` : "Inbox"
-                }
-                aria-label={
-                  unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
-                }
+                tooltip={inboxLabel}
+                aria-label={inboxLabel}
                 onClick={() => setView("inbox")}
               >
                 <Inbox size={16} /> Inbox
-                {unread && (
+                {(needsCount > 0 || unread) && (
                   <span className="sidebar-count" aria-hidden="true">
-                    <StatusDot tone="unread" size={6} />
+                    <StatusDot
+                      tone={needsCount ? "attention" : "unread"}
+                      size={6}
+                    />
+                    {needsCount > 0 && needsCount}
                   </span>
                 )}
               </SidebarMenuButton>

@@ -8,5 +8,7 @@ const source = readFileSync(
 
 test("the saved pane layout is versioned so old 468px layouts are ignored", () => {
   expect(source).toMatch(/id: "ticketd\.workspace\.v2"/);
-  expect(source).toMatch(/id="list"[\s\S]*?defaultSize=\{384\}/);
+  expect(source).toMatch(
+    /id="list"[\s\S]*?defaultSize=\{inboxMode \? 392 : 384\}/,
+  );
 });

@@ -30,6 +30,12 @@ export const inboxClient = {
       requestId: crypto.randomUUID(),
     });
   },
+  async reminder(reference: string) {
+    return z
+      .string()
+      .nullable()
+      .parse(await invoke("reminder", { reference }));
+  },
   async snooze(reference: string, dueAt: string) {
     await invoke("set_reminder", {
       reference,

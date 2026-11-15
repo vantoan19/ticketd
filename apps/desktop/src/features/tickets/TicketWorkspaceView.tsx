@@ -134,21 +134,28 @@ export function TicketWorkspaceView({
     id: "ticketd.workspace.v2",
   });
   const boardSplit = useDefaultLayout({ id: "ticketd.workspace.board.v1" });
+  const inboxSplit = useDefaultLayout({ id: "ticketd.workspace.inbox.v1" });
+  const splitMode = inboxMode ? "inbox" : workspace.layout;
   const groupRef = useGroupRef();
   const listPanelRef = usePanelRef();
-  const activeSplit = useRef(workspace.layout);
-  const splitLayouts = useRef<{ list: Layout | undefined; board: Layout }>({
+  const activeSplit = useRef<"inbox" | "list" | "board">(splitMode);
+  const splitLayouts = useRef<{
+    list: Layout | undefined;
+    inbox: Layout | undefined;
+    board: Layout;
+  }>({
     list: listSplit.defaultLayout,
+    inbox: inboxSplit.defaultLayout,
     board: boardSplit.defaultLayout ?? BOARD_SPLIT,
   });
   useLayoutEffect(() => {
-    if (activeSplit.current === workspace.layout) return;
-    activeSplit.current = workspace.layout;
-    const layout = splitLayouts.current[workspace.layout];
+    if (activeSplit.current === splitMode) return;
+    activeSplit.current = splitMode;
+    const layout = splitLayouts.current[splitMode];
     // Change the library's layout without remounting the detail editor or board scrollers.
     if (layout) groupRef.current?.setLayout(layout);
-    else listPanelRef.current?.resize(384);
-  }, [workspace.layout, groupRef, listPanelRef]);
+    else listPanelRef.current?.resize(splitMode === "inbox" ? 392 : 384);
+  }, [splitMode, groupRef, listPanelRef]);
   const focusPane = useRef<"detail" | { reference: string | null } | null>(
     null,
   );
@@ -281,9 +288,11 @@ export function TicketWorkspaceView({
           data-peek={peek || undefined}
           groupRef={groupRef}
           defaultLayout={
-            workspace.layout === "board"
-              ? (boardSplit.defaultLayout ?? BOARD_SPLIT)
-              : listSplit.defaultLayout
+            splitMode === "inbox"
+              ? inboxSplit.defaultLayout
+              : splitMode === "board"
+                ? (boardSplit.defaultLayout ?? BOARD_SPLIT)
+                : listSplit.defaultLayout
           }
           onLayoutChanged={(layout, meta) => {
             const mode = activeSplit.current;
@@ -291,10 +300,12 @@ export function TicketWorkspaceView({
               splitLayouts.current[mode] = meta.requestedLayout ?? layout;
             // Full-width modes and window constraints must not overwrite the preferred split.
             if (meta.isUserInteraction)
-              (mode === "board" ? boardSplit : listSplit).onLayoutChanged(
-                layout,
-                meta,
-              );
+              (mode === "inbox"
+                ? inboxSplit
+                : mode === "board"
+                  ? boardSplit
+                  : listSplit
+              ).onLayoutChanged(layout, meta);
           }}
           hidden={hidden || Boolean(dependenciesOpen && !inboxMode)}
         >
@@ -302,7 +313,7 @@ export function TicketWorkspaceView({
             id="list"
             panelRef={listPanelRef}
             minSize={360}
-            defaultSize={384}
+            defaultSize={inboxMode ? 392 : 384}
           >
             {inbox ?? (
               <TicketListPane
