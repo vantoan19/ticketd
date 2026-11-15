@@ -27,6 +27,7 @@ class ResizeObserverStub {
   disconnect() {}
 }
 window.ResizeObserver = ResizeObserverStub;
+Element.prototype.scrollIntoView = () => {};
 
 let narrowViewport = false;
 Object.defineProperty(window, "matchMedia", {
@@ -2497,4 +2498,246 @@ test("every icon on the folded rail names itself in a tooltip", async () => {
     })
     .map((button) => button.getAttribute("aria-label") ?? button.textContent);
   expect(unnamed).toEqual([]);
+});
+
+test("command palette opens with navigation and returns focus on Escape", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  const opener = await screen.findByRole("button", { name: "Attachments" });
+  opener.focus();
+  fireEvent.keyDown(opener, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole(
+    "combobox",
+    {
+      name: "Search tickets and destinations",
+    },
+    { timeout: 3000 },
+  );
+  expect(document.activeElement).toBe(input);
+  expect(screen.getByRole("option", { name: /Inbox/ })).toBeTruthy();
+  await vi.waitFor(() =>
+    expect(input.getAttribute("aria-activedescendant")).toBeTruthy(),
+  );
+  const firstActive = input.getAttribute("aria-activedescendant");
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  await vi.waitFor(() =>
+    expect(input.getAttribute("aria-activedescendant")).not.toBe(firstActive),
+  );
+  expect(
+    document
+      .getElementById(input.getAttribute("aria-activedescendant") ?? "")
+      ?.getAttribute("role"),
+  ).toBe("option");
+  fireEvent.keyDown(input, { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+});
+
+test.each([
+  ["i", "Inbox"],
+  ["a", "All tickets"],
+  ["r", "Ready"],
+  ["d", "Documents"],
+])("G then %s navigates to %s", async (key, label) => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: "Attachments" });
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key });
+  await vi.waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: new RegExp(`^${label}`) })
+        .getAttribute("aria-current"),
+    ).toBe("page"),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("G then C cannot create a ticket while Chat is off", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: "Attachments" });
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key: "c" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test.each(["fv1", "T-FV11", "Unloaded title"])(
+  "palette searches globally for %s and opens the selected Ticket",
+  async (query) => {
+    const found = bulkTicket(1, {
+      reference: "T-FV11",
+      title: "Unloaded title",
+    });
+    bridge.invoke.mockImplementation(
+      (
+        command: string,
+        args?: { query?: string; id?: string; reference?: string },
+      ) => {
+        if (command === "search_tickets") {
+          expect(args?.query).toBe(query);
+          return [found];
+        }
+        if (command === "show_ticket") return found;
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    await screen.findByRole("button", { name: "Attachments" });
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.change(input, { target: { value: query } });
+    const result = await screen.findByRole("option", { name: /T-FV11/ });
+    expect(result.textContent).toContain("Unloaded title");
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "search_tickets",
+      expect.objectContaining({ project: null, query }),
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(
+      await screen.findByRole("textbox", { name: "Title" }, { timeout: 3000 }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+test.each(["Inbox", "Documents", "Plans", "Settings", "Attachments"])(
+  "palette opens over %s and Enter goes to Ready",
+  async (view) => {
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: new RegExp(`^${view}$`) }),
+    );
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole(
+      "combobox",
+      { name: "Search tickets and destinations" },
+      { timeout: 3000 },
+    );
+    fireEvent.change(input, { target: { value: "Ready" } });
+    await vi.waitFor(() =>
+      expect(
+        screen
+          .getByRole("option", { name: /Ready/ })
+          .getAttribute("aria-selected"),
+      ).toBe("true"),
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: /^Ready/ })
+          .getAttribute("aria-current"),
+      ).toBe("page"),
+    );
+    await vi.waitFor(() =>
+      expect(document.activeElement?.id).toBe("main-content"),
+    );
+  },
+);
+
+test("typing and overlays keep G keys; Mod K leaves a rich editor's link shortcut alone", async () => {
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets")
+      return [bulkTicket(1, { body: "A description" })];
+    if (command === "show_ticket")
+      return bulkTicket(1, { body: "A description" });
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  const title = await screen.findByRole("textbox", { name: "Title" });
+  title.focus();
+  fireEvent.keyDown(title, { key: "g" });
+  fireEvent.keyDown(title, { key: "i" });
+  expect(
+    screen
+      .getByRole("button", { name: /^All tickets/ })
+      .getAttribute("aria-current"),
+  ).toBe("page");
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit description" }),
+  );
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  editor.focus();
+  expect(fireEvent.keyDown(editor, { key: "k", ctrlKey: true })).toBe(true);
+  expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole(
+    "combobox",
+    { name: "Search tickets and destinations" },
+    { timeout: 3000 },
+  );
+  fireEvent.keyDown(input, { key: "g" });
+  fireEvent.keyDown(input, { key: "i" });
+  expect(screen.getByRole("dialog", { name: "Go anywhere" })).toBeTruthy();
+});
+
+test("G then C opens Chats when the feature is enabled", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient } = await import("@/features/chats/mock-client");
+  render(
+    <ChatClientContext.Provider value={createMockChatClient({ enabled: true })}>
+      <App />
+    </ChatClientContext.Provider>,
+  );
+  const chatsEntry = await screen.findByRole("button", { name: "Chats" });
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key: "c" });
+  await vi.waitFor(() =>
+    expect(chatsEntry.getAttribute("aria-current")).toBe("page"),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  expect(
+    await screen.findByRole(
+      "combobox",
+      { name: "Search tickets and destinations" },
+      { timeout: 3000 },
+    ),
+  ).toBeTruthy();
+});
+
+test.each([
+  { key: "x" },
+  { key: "Shift", shiftKey: true },
+  { key: "g", repeat: true },
+  { key: "g", isComposing: true },
+])(
+  "an interrupted G sequence does not navigate ($key)",
+  async (interruption) => {
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(<App />);
+    await screen.findByRole("button", { name: "Attachments" });
+    fireEvent.keyDown(document.body, { key: "g" });
+    fireEvent.keyDown(document.body, interruption);
+    fireEvent.keyDown(document.body, { key: "i" });
+    expect(
+      screen
+        .getByRole("button", { name: /^All tickets/ })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+  },
+);
+
+test("a G sequence expires after one second", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: "Attachments" });
+  vi.useFakeTimers();
+  fireEvent.keyDown(document.body, { key: "g" });
+  await act(async () => vi.advanceTimersByTimeAsync(1001));
+  fireEvent.keyDown(document.body, { key: "i" });
+  expect(
+    screen
+      .getByRole("button", { name: /^All tickets/ })
+      .getAttribute("aria-current"),
+  ).toBe("page");
 });

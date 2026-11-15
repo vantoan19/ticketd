@@ -59,3 +59,20 @@ test("an exact reference leads the results and a pick returns the ticket", async
     expect.objectContaining({ reference: "T-KQ12" }),
   );
 });
+
+test("partial reference without a prefix uses the same global search as the palette", async () => {
+  vi.mocked(invoke).mockResolvedValue([ticket("T-FV11", "Older ticket")]);
+  render(<TicketPicker onPick={() => {}} />);
+  fireEvent.change(
+    screen.getByLabelText("Search tickets by title or reference"),
+    { target: { value: "fv1" } },
+  );
+  expect(await screen.findByRole("option", { name: /T-FV11/ })).toBeTruthy();
+  expect(invoke).toHaveBeenCalledWith("search_tickets", {
+    query: "fv1",
+    project: null,
+    unlinked: false,
+    limit: 50,
+    offset: 0,
+  });
+});

@@ -68,7 +68,7 @@ function DialogContent({
    * min(1120px, 100vw − 64) by min(800px, 100vh − 64), centred. Use
    * DialogShell for every dialog but the viewer.
    */
-  size?: "sm" | "md" | "lg" | "viewer";
+  size?: "sm" | "md" | "lg" | "viewer" | "palette";
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
 }) {

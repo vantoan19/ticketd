@@ -17,6 +17,7 @@ export function useTicketSearch(
   accept: (ticket: Ticket) => boolean,
 ) {
   const [results, setResults] = useState<Ticket[]>([]);
+  const [resolvedQuery, setResolvedQuery] = useState("");
   const [error, setError] = useState("");
   const keep = useEffectEvent(accept);
   useEffect(() => {
@@ -39,6 +40,7 @@ export function useTicketSearch(
         (lists) => {
           if (!active) return;
           const seen = new Set<string>();
+          setResolvedQuery(text);
           setError("");
           setResults(
             lists
@@ -53,7 +55,11 @@ export function useTicketSearch(
           );
         },
         (reason: unknown) => {
-          if (active) setError(failureText(reason, "search tickets"));
+          if (active) {
+            setResolvedQuery(text);
+            setResults([]);
+            setError(failureText(reason, "search tickets"));
+          }
         },
       );
     }, DELAY_MS);
@@ -63,8 +69,8 @@ export function useTicketSearch(
     };
   }, [query, open]);
   return {
-    results,
-    error,
+    results: resolvedQuery === query.trim() ? results : [],
+    error: resolvedQuery === query.trim() ? error : "",
     reset() {
       setResults([]);
       setError("");

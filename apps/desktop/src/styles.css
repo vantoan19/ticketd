@@ -125,6 +125,7 @@
      --surface (they sit over a scrim); in dark, floating overlays lift one
      step above the panel so they never share its fill. */
   --popover: var(--surface);
+  --scrim-soft: #17171714;
   --popover-foreground: var(--foreground);
   /* Hover on selectable rows and cards: quieter than the --accent selection. */
   --hover: #f7f7f7;
@@ -224,6 +225,7 @@
     0 0 0 1px #ffffff24, 0 16px 32px -8px #000000b3, 0 4px 10px -4px #00000080;
   --surface: #171717;
   --popover: #1f1f1f;
+  --scrim-soft: #00000066;
   --hover: #1f1f1f;
   --tooltip: #2e2e2e;
   --tooltip-foreground: #ededed;
@@ -2685,4 +2687,106 @@ kbd,
     min-width: 44px;
     min-height: 44px;
   }
+}
+
+/* Command palette: the shared command/dialog recipe (DESIGN section 4). */
+.ui-dialog[data-size="palette"] {
+  --dialog-top: 96px;
+  width: min(640px, calc(100vw - 32px));
+  background: var(--popover);
+  overflow: hidden;
+}
+.ui-overlay:has(+ .ui-dialog[data-size="palette"]) {
+  background: var(--scrim-soft);
+  animation: palette-scrim var(--dur-2) var(--ease-out);
+}
+.ui-dialog[data-size="palette"][data-state="open"] {
+  animation: palette-enter var(--dur-3) var(--ease-out);
+}
+.ui-dialog[data-size="palette"][data-state="closed"] {
+  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+}
+@keyframes palette-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes palette-scrim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+[data-slot="command"][data-variant="palette"] {
+  min-height: 0;
+}
+[data-variant="palette"] [data-slot="command-input-wrapper"] {
+  height: 56px;
+  padding: 0 16px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+[data-variant="palette"] [data-slot="command-input"] {
+  height: 56px;
+  font-size: var(--text-reading);
+  line-height: 24px;
+}
+[data-variant="palette"] [data-slot="command-list"] {
+  max-height: min(440px, calc(100dvh - 220px));
+  padding: 6px;
+}
+[data-variant="palette"] [data-slot="command-group"] {
+  padding: 0;
+}
+[data-variant="palette"] [cmdk-group-heading] {
+  height: 28px;
+  padding: 6px 10px;
+}
+[data-variant="palette"] [data-slot="command-item"] {
+  min-height: 38px;
+  padding: 0 10px;
+  gap: 12px;
+  border-radius: var(--radius-card);
+}
+.ui-command-match {
+  color: inherit;
+  background: transparent;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 3px;
+}
+.ui-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+  padding: 0 16px;
+  background: var(--recessed);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.ui-palette-footer > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (pointer: coarse) {
+  [data-variant="palette"] [data-slot="command-item"] {
+    min-height: 44px;
+  }
+}
+.ui-overlay:has(+ .ui-dialog[data-size="palette"][data-state="closed"]) {
+  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+}
+
+[data-variant="palette"] [data-slot="command-shortcut"] {
+  letter-spacing: normal;
 }
