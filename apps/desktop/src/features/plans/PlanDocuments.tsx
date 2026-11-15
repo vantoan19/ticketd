@@ -98,7 +98,10 @@ export function PlanDocuments({
   };
   const title = (doc: PlanDocument) => (
     <>
-      <span className="plan-doc-title">{doc.heading}</span>
+      <span className="plan-doc-title">
+        {doc.id === specId && "Spec · "}
+        {doc.heading}
+      </span>
       {doc.trashed && <span className="plan-doc-state">In Trash</span>}
     </>
   );
@@ -128,11 +131,6 @@ export function PlanDocuments({
     <Popover open={linking} onOpenChange={onLinkingChange}>
       <PopoverAnchor asChild>
         <span className="plan-documents">
-          {featured && featured.id === specId && (
-            <span className="plan-doc-label" aria-hidden="true">
-              Spec
-            </span>
-          )}
           {featured &&
             (readOnly ? (
               // Nothing to change in an archived Plan: the chip just opens it.

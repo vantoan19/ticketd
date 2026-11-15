@@ -15,6 +15,7 @@ const buttonVariants = cva(
         ghost: "ui-button-ghost",
         link: "ui-button-link",
         jump: "ui-button-jump",
+        card: "ui-button-card",
       },
       size: {
         default: "h-10 px-4",
@@ -23,6 +24,8 @@ const buttonVariants = cva(
         lg: "h-12 px-6",
         icon: "size-10",
         "icon-xs": "size-8",
+        "icon-card": "size-6 [&_svg]:size-3.5",
+        card: "h-auto p-0",
         "icon-sm": "size-8",
         "icon-lg": "size-12",
         // An action link inside a sentence or caption: no padding, the text's height.
