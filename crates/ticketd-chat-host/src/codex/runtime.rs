@@ -174,7 +174,8 @@ impl Connection {
     }
 
     /// `initialize`, then the `initialized` notification the protocol requires.
-    async fn initialize(&self) -> Result<(), Problem> {
+    /// Returns the platform Codex reports it runs on.
+    async fn initialize(&self) -> Result<Option<String>, Problem> {
         let client = json!({
             "name": "ticketd",
             "title": "ticketd",
@@ -184,16 +185,44 @@ impl Connection {
             .request("initialize", json!({"clientInfo": client}))
             .await
         {
-            CallOutcome::Reply(_) => {}
-            failure => return Err(self.startup_problem("initialize", failure)),
+            CallOutcome::Reply(reply) => {
+                let platform = reply["platformOs"].as_str().map(str::to_owned);
+                self.write_checked(|_| Ok((json!({"method": "initialized"}), ())))
+                    .await
+                    .map_err(|_| self.startup_problem("initialized", CallOutcome::Lost))?;
+                Ok(platform)
+            }
+            failure => Err(self.startup_problem("initialize", failure)),
         }
-        self.write_checked(|_| Ok((json!({"method": "initialized"}), ())))
-            .await
-            .map_err(|_| self.startup_problem("initialized", CallOutcome::Lost))
+    }
+
+    /// Whether Codex's Windows sandbox can start, asked before an unattended run's
+    /// first turn so the run fails at once instead of on its first command. A Codex
+    /// that does not know the question, or cannot answer it, is not blocked: the
+    /// run goes on as it would have.
+    async fn windows_sandbox_problem(&self) -> Option<Problem> {
+        let CallOutcome::Reply(reply) = self.request("windowsSandbox/readiness", json!(null)).await
+        else {
+            return None;
+        };
+        let status = reply["status"].as_str().filter(|status| *status != "ready")?;
+        Some(Problem {
+            kind: ProblemKind::Other,
+            message: "Codex could not start its sandbox on this computer. Update Codex \
+                      (`codex update`) and try again."
+                .to_owned(),
+            detail: Some(ProviderDetail::new("windowsSandbox/readiness", status)),
+            resets_at: None,
+        })
     }
 
     async fn open_thread(&self, request: &OpenRequest) -> Result<Capabilities, Problem> {
-        self.initialize().await?;
+        let platform = self.initialize().await?;
+        if request.unattended.is_some() && platform.as_deref() == Some("windows") {
+            if let Some(problem) = self.windows_sandbox_problem().await {
+                return Err(problem);
+            }
+        }
         // For a person's Chat only the working directory is passed: model, approval
         // policy, sandbox and instructions stay whatever their Codex configuration
         // says. An unattended session is told what it may do, again with every turn.
@@ -479,7 +508,7 @@ pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
     let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
     let read = async {
         match connection.initialize().await {
-            Ok(()) => match connection
+            Ok(_) => match connection
                 .request("account/read", json!({"refreshToken": false}))
                 .await
             {

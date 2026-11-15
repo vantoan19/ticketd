@@ -972,6 +972,46 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
     }
 }
 
+async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
+    let (mut peer, io) = pipes();
+    peer.load(fixture);
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(unattended(false, false)),
+        ticketd_cli: None,
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    tokio::join!(open_over(io, &request, options()), peer.play()).0
+}
+
+/// On Windows an unattended run asks Codex whether its sandbox can start, and a
+/// Codex that says it cannot fails the run before any thread starts.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_run_fails_at_once_when_the_windows_sandbox_is_not_ready() {
+    let problem = open_unattended(fixture!("unattended_sandbox_not_ready"))
+        .await
+        .err()
+        .expect("the run fails");
+    assert_eq!(
+        problem.message,
+        "Codex could not start its sandbox on this computer. Update Codex (`codex update`) and try again."
+    );
+}
+
+/// A Codex that does not know the readiness method is carried on with as before.
+#[tokio::test(start_paused = true)]
+async fn a_codex_without_the_readiness_method_is_not_blocked() {
+    assert!(
+        open_unattended(fixture!("unattended_readiness_unknown"))
+            .await
+            .is_ok()
+    );
+}
+
 /// Codex reports a command the person declined as `declined`: it never ran, so it is
 /// not a failure.
 #[test]
