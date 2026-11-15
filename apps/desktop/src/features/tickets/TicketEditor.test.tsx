@@ -157,7 +157,7 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   expect(screen.getByRole("heading", { name: "Xin chào" })).toBeTruthy();
   expect(screen.getByRole("alert").textContent).toContain("Disk full");
-  expect(screen.getByRole("checkbox")).toHaveProperty("checked", true);
+  expect(screen.getByRole("img", { name: "Done" })).toBeTruthy();
   rerender(
     <TicketEditor
       ticket={{ ...ticket, title: "External title" }}

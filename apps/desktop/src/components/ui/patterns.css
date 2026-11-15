@@ -548,3 +548,26 @@
   width: 16px;
   height: 16px;
 }
+
+/* Arrived: the row or passage a link opened. An --accent fill that fades out
+   over 1.2s, never a ring (P2). Focus moves there without a visible ring. */
+@keyframes arrival-flash {
+  from {
+    background-color: var(--accent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.ui-arrived {
+  border-radius: var(--radius);
+  animation: arrival-flash 1.2s ease-out 0.2s both;
+}
+.ui-arrived:focus {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-arrived {
+    animation: none;
+  }
+}

@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
@@ -10,7 +11,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
@@ -112,6 +112,7 @@ function restore(
 export function TicketEditor({
   ticket,
   onSaved,
+  stateLine,
   children,
   select,
   revision,
@@ -119,6 +120,13 @@ export function TicketEditor({
 }: {
   ticket: Ticket;
   onSaved: (ticket: Ticket) => void;
+  /**
+   * The ticket's state line ("Updated 5 h ago"). It shares one 32px row with
+   * the save state and Edit · E; while the description is edited that row is
+   * the session row (save state, formatting, Done), so nothing moves (P16).
+   */
+  stateLine?: ReactNode;
+  /** Under the state row: the folded property strip. */
   children?: ReactNode;
   select?: (reference: string) => void;
   revision?: number;
@@ -199,6 +207,14 @@ export function TicketEditor({
   );
   const [error, setError] = useState<FailureDescription | null>(null);
   const [retry, setRetry] = useState(0);
+  // "Saved" says so for 3s, then the state line's time is enough (P6).
+  useEffect(() => {
+    if (state !== "saved") return;
+    const timer = window.setTimeout(() => setState("idle"), 3000);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+  // The session row's middle, where the editor puts its formatting.
+  const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   // "Keep my draft" saves at once instead of waiting out the typing delay.
   const immediate = useRef(false);
   const [bodyFocus, setBodyFocus] = useState(0);
@@ -230,7 +246,7 @@ export function TicketEditor({
       if (event.key !== "e" || event.metaKey || event.ctrlKey || event.altKey)
         return;
       const button = editButton.current;
-      if (!button || button.closest("[hidden]")) return;
+      if (!button || button.closest("[hidden], [data-graph]")) return;
       const target = event.target;
       if (
         target instanceof Element &&
@@ -434,9 +450,16 @@ export function TicketEditor({
     recovery,
   ]);
 
+  /** Takes the saved text for the field in conflict only; the other keeps its draft (detA CO-04). */
   function adoptSaved() {
-    setDraft({ title: ticket.title, body: ticket.body });
-    setSaved({ title: ticket.title, body: ticket.body });
+    setDraft((current) => ({
+      title: titleConflict ? ticket.title : current.title,
+      body: bodyConflict ? ticket.body : current.body,
+    }));
+    setSaved((current) => ({
+      title: titleConflict ? ticket.title : current.title,
+      body: bodyConflict ? ticket.body : current.body,
+    }));
     setConfirmSaved(false);
     setState("saved");
     focusEditor();
@@ -457,58 +480,55 @@ export function TicketEditor({
     ? ` by ${ticket.source.provider_name}`
     : "";
   const notice = conflict && (
-    <div role="status" className="editor-conflict">
-      <p>
+    <Alert
+      tone="attention"
+      size="compact"
+      role="status"
+      className="editor-conflict"
+    >
+      <AlertDescription>
         {titleConflict && bodyConflict
           ? "The saved title and description"
           : titleConflict
             ? "The saved title"
             : "The saved description"}{" "}
-        changed elsewhere{changedBy} while you were editing. Your unsaved draft
-        is kept until you choose.
-      </p>
-      {titleConflict && (
-        <p>
-          Saved title: <strong>{ticket.title}</strong>
-        </p>
-      )}
-      {confirmSaved ? (
-        <div className="editor-conflict-actions">
-          <span>Discard your unsaved draft?</span>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => adoptSaved()}
-            autoFocus
-          >
-            Discard draft
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            onClick={() => {
-              setConfirmSaved(false);
-              focusEditor();
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <>
-          <div className="editor-conflict-actions">
+        changed elsewhere{changedBy} while you were editing.
+        {titleConflict && (
+          <>
+            {" "}
+            Saved: <strong>{ticket.title}</strong>
+          </>
+        )}
+      </AlertDescription>
+      <AlertActions>
+        {confirmSaved ? (
+          <>
+            <span className="editor-conflict-question">
+              Discard your draft?
+            </span>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               type="button"
-              onClick={() =>
-                draftHasText ? setConfirmSaved(true) : adoptSaved()
-              }
+              onClick={() => {
+                setConfirmSaved(false);
+                focusEditor();
+              }}
             >
-              Use saved text
+              Cancel
             </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              onClick={() => adoptSaved()}
+              autoFocus
+            >
+              Discard draft
+            </Button>
+          </>
+        ) : (
+          <>
             <Button
               variant="outline"
               size="sm"
@@ -522,22 +542,42 @@ export function TicketEditor({
             >
               Keep my draft
             </Button>
-          </div>
-          <p className="editor-conflict-help">
-            Use saved text discards your draft. Keep my draft replaces the saved
-            text with it.
-          </p>
-        </>
-      )}
-    </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() =>
+                draftHasText ? setConfirmSaved(true) : adoptSaved()
+              }
+            >
+              Use saved text
+            </Button>
+          </>
+        )}
+      </AlertActions>
+    </Alert>
   );
   function edit(next: Content) {
     setDraft(next);
     setState("pending");
   }
+  function finishEditing() {
+    setBodyMode("reading");
+    window.requestAnimationFrame(() => editButton.current?.focus());
+  }
+  const saveState = saving
+    ? "Saving…"
+    : conflict
+      ? "Unsaved — choose a version"
+      : unsent && state !== "failed"
+        ? "Pending save"
+        : state === "failed"
+          ? `${savedField} not saved`
+          : state === "saved"
+            ? `${savedField} saved`
+            : "";
   return (
     <div className="ticket-editor">
-      {titleConflict && !bodyConflict && notice}
       <label className="editor-title">
         <span className="sr-only">Title</span>
         <textarea
@@ -559,6 +599,46 @@ export function TicketEditor({
           </FieldError>
         </div>
       )}
+      {titleConflict && !bodyConflict && notice}
+      {/* One 32px row: the state line and Edit · E, or, while editing, the
+          session row. Its height never changes, so the text never moves. */}
+      <div className="ticket-state-row" data-session={editingBody || undefined}>
+        {editingBody ? (
+          <span ref={setSessionHost} className="ticket-session-tools" />
+        ) : (
+          <span className="ticket-state-text">{stateLine}</span>
+        )}
+        <span role="status" className="editor-save-state">
+          {saveState}
+        </span>
+        {editingBody ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            aria-label="Done editing"
+            onClick={finishEditing}
+          >
+            Done
+            <Kbd aria-hidden="true">Esc</Kbd>
+          </Button>
+        ) : (
+          draft.body && (
+            <Button
+              ref={editButton}
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label="Edit description"
+              aria-keyshortcuts="E"
+              onClick={() => setBodyMode("editing")}
+            >
+              Edit
+              <Kbd aria-hidden="true">E</Kbd>
+            </Button>
+          )
+        )}
+      </div>
       {children}
       <div
         className="editor-body"
@@ -576,22 +656,9 @@ export function TicketEditor({
           className="sr-only"
         />
         {bodyConflict && notice}
-        <div className="description-heading">
-          <span id={`body-${ticket.id}`}>Description</span>
-          {editingBody ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={() => {
-                setBodyMode("reading");
-                window.requestAnimationFrame(() => editButton.current?.focus());
-              }}
-            >
-              Done editing
-            </Button>
-          ) : null}
-        </div>
+        <span id={`body-${ticket.id}`} className="sr-only">
+          Description
+        </span>
         {bodyConflict && (
           <div className="conflict-block">
             <p className="conflict-block-label">Saved text</p>
@@ -621,6 +688,10 @@ export function TicketEditor({
               attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
               label="Description"
+              placeholder="Add a description — type / for blocks"
+              chrome="session"
+              chromeHost={editingBody ? sessionHost : null}
+              onEscape={finishEditing}
               autoFocus={editingBody}
               focusRequest={bodyFocus}
               {...(bodyCaret ? { focusLink: bodyCaret } : {})}
@@ -630,20 +701,6 @@ export function TicketEditor({
         {!editingBody &&
           (draft.body ? (
             <div className="description-reading">
-              <Button
-                ref={editButton}
-                variant="outline"
-                size="sm"
-                type="button"
-                className="description-edit"
-                aria-label="Edit description"
-                aria-keyshortcuts="E"
-                onClick={() => setBodyMode("editing")}
-              >
-                <Pencil data-icon="inline-start" aria-hidden="true" />
-                Edit
-                <Kbd aria-hidden="true">E</Kbd>
-              </Button>
               <div
                 ref={documentRef}
                 className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
@@ -669,37 +726,18 @@ export function TicketEditor({
               </div>
             </div>
           ) : (
-            <EmptyState
-              size="inline"
-              plain
-              description="No description yet."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  ref={editButton}
-                  onClick={() => setBodyMode("editing")}
-                >
-                  Add a description…
-                </Button>
-              }
-            />
+            // One quiet line that becomes the editor in place (detA DS-06).
+            <button
+              type="button"
+              ref={editButton}
+              className="description-add"
+              aria-keyshortcuts="E"
+              onClick={() => setBodyMode("editing")}
+            >
+              Add a description…
+            </button>
           ))}
       </div>
-      <p role="status" className="editor-save-state">
-        {saving
-          ? "Saving…"
-          : conflict
-            ? "Unsaved — choose a version"
-            : unsent && state !== "failed"
-              ? "Pending save"
-              : state === "failed"
-                ? `${savedField} not saved`
-                : state === "saved"
-                  ? `${savedField} saved`
-                  : ""}
-      </p>
       {state === "failed" && error && (
         <div className="ticket-save-error">
           <FailureAlert

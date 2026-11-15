@@ -83,7 +83,8 @@ test("trashed ticket descriptions remain readable without editing controls", () 
     screen.getByRole("heading", { name: "Archived context" }),
   ).toBeTruthy();
   expect(screen.getByRole("link", { name: "Reference" })).toBeTruthy();
-  expect(screen.getByRole("checkbox")).toHaveProperty("disabled", true);
+  // A read-only checklist box is a drawn glyph, not a disabled control.
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
   expect(
     screen.queryByRole("textbox", { name: "Description rich text" }),
