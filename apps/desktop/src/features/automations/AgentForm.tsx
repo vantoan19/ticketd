@@ -103,9 +103,9 @@ const TOOLS: {
 const CODEX_DESCRIPTIONS: Partial<
   Record<(typeof TOOLS)[number]["key"], string>
 > = {
-  read_files: "Codex reads by running commands: needs Run commands",
+  read_files: "Needs Run commands",
   edit_files: "Only in the step’s folder",
-  run_commands: "Any command; Codex cannot keep it to a list",
+  run_commands: "Any command",
 };
 
 /** The largest limits the core accepts (`automation_agents.rs`), offered as each field's range. */
@@ -407,8 +407,8 @@ export function AgentForm({
             </ChoiceTiles>
             {missing.map(({ id, name }) => (
               <p key={id} className="agent-hint">
-                {name} cannot run on this computer. Install or update it, then
-                open this again.
+                {statusOf.reason(id) ??
+                  `${name} cannot run on this computer. Install or update it, then open this again.`}
               </p>
             ))}
           </div>
@@ -506,17 +506,9 @@ export function AgentForm({
             </SettingsList>
             {codex ? (
               <p className="agent-hint">
-                Codex reads files by running commands. With Run commands off it
-                cannot read files, even with Read files on, and it cannot change
-                a file unless Edit files is on. With Run commands on it runs any
-                command, because Codex has no list of allowed commands, and it
-                can read any file you can read on this computer. Edit files lets
-                it write only in the step’s folder. For a run, ticketd switches
-                off your Codex hooks, notify program, project AGENTS.md,
-                memories, sub-agents, computer and browser use, and bundled
-                skills. Your own Codex setup still applies: your global
-                AGENTS.md, the skills in ~/.agents/skills and, with Run commands
-                on, your “always allow” rules.
+                With Run commands on, Codex can read any file you can. Your
+                global AGENTS.md, personal skills and “always allow” rules still
+                apply.
               </p>
             ) : (
               <p className="agent-hint">
@@ -533,18 +525,16 @@ export function AgentForm({
               <small>A step that reaches one fails</small>
             </span>
             <SettingsList>
-              <LimitRow
-                title="Turns"
-                description={
-                  codex
-                    ? "Not applied with Codex"
-                    : "How many turns one step may take"
-                }
-                most={MOST_TURNS}
-                disabled={codex}
-                value={draft.turn_limit}
-                onSave={(turn_limit) => change({ turn_limit })}
-              />
+              {/* Codex has no turn limit to set, so it is not shown. */}
+              {!codex && (
+                <LimitRow
+                  title="Turns"
+                  description="How many turns one step may take"
+                  most={MOST_TURNS}
+                  value={draft.turn_limit}
+                  onSave={(turn_limit) => change({ turn_limit })}
+                />
+              )}
               <LimitRow
                 title="Minutes"
                 description="How long one step may run"

@@ -271,6 +271,24 @@ test("a harness that is not installed says so and cannot be chosen", async () =>
   expect(stored[0]?.harness).toBe("claude-code");
 });
 
+test("an incompatible harness gives the host's reason in the agent editor, the one the Chat picker shows", async () => {
+  const reason =
+    "Found Codex 0.162.1 at `codex.exe`. ticketd needs Codex 0.163.0 or newer (run `codex update`).";
+  const client = createMockChatClient({
+    harnesses: [
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      { id: "codex", name: "Codex", status: "incompatible", message: reason },
+    ],
+  });
+  await open(client, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+
+  expect(await screen.findByText(reason)).toBeTruthy();
+  expect(screen.queryByText(/cannot run on this computer/)).toBeNull();
+});
+
 test("an edit is saved as it is made and shows in the list", async () => {
   await open(undefined, [
     { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
@@ -450,7 +468,7 @@ test("cancelling or dismissing the agent delete dialog returns focus to Agent ac
   expect(stored).toHaveLength(1);
 });
 
-test("with Codex chosen, the switches are live, say what Codex does with them, and the turn limit is not applied; Claude Code brings the command list back", async () => {
+test("with Codex chosen, the switches are live, say briefly what Codex does with them, and the turn limit is hidden; Claude Code brings the command list back", async () => {
   await open(undefined, [
     {
       id: "a1",
@@ -476,11 +494,8 @@ test("with Codex chosen, the switches are live, say what Codex does with them, a
     expect(control("switch", name).disabled).toBe(false);
   }
   expect(within(form).queryByText("Always on with Codex")).toBeNull();
-  expect(
-    within(form).getByText(
-      "Codex reads by running commands: needs Run commands",
-    ),
-  ).toBeTruthy();
+  expect(within(form).getByText("Needs Run commands")).toBeTruthy();
+  expect(within(form).getByText("Any command")).toBeTruthy();
   // Turning Run commands on offers no list: Codex has none.
   fireEvent.click(control("switch", "Run commands"));
   await waitFor(() => expect(stored[0]?.tools.run_commands).toBe(true));
@@ -490,21 +505,12 @@ test("with Codex chosen, the switches are live, say what Codex does with them, a
   // The note says what Codex does with the switches and what stays the person's.
   expect(
     within(form).getByText(
-      /Codex reads files by running commands. With Run commands off it cannot read files, even with Read files on/,
+      "With Run commands on, Codex can read any file you can. Your global AGENTS.md, personal skills and “always allow” rules still apply.",
     ),
   ).toBeTruthy();
-  expect(
-    within(form).getByText(
-      /With Run commands on it runs any command, because Codex has no list of allowed commands, and it can read any file you can read on this computer/,
-    ),
-  ).toBeTruthy();
-  expect(
-    within(form).getByText(
-      /Your own Codex setup still applies: your global AGENTS.md, the skills in ~\/\.agents\/skills and, with Run commands on, your “always allow” rules/,
-    ),
-  ).toBeTruthy();
-  expect(control("spinbutton", "Turns").disabled).toBe(true);
-  expect(within(form).getByText("Not applied with Codex")).toBeTruthy();
+  // Turns has no effect with Codex, so the field is not shown.
+  expect(within(form).queryByRole("spinbutton", { name: "Turns" })).toBeNull();
+  expect(within(form).queryByText("Not applied with Codex")).toBeNull();
   expect(control("spinbutton", "Minutes").disabled).toBe(false);
 
   fireEvent.click(within(form).getByRole("radio", { name: /Claude Code/ }));
@@ -515,7 +521,7 @@ test("with Codex chosen, the switches are live, say what Codex does with them, a
   expect(
     within(form).getByRole("textbox", { name: "Allowed commands" }),
   ).toBeTruthy();
-  expect(within(form).queryByText(/Codex reads files by running/)).toBeNull();
+  expect(within(form).queryByText(/Codex can read any file/)).toBeNull();
   expect(control("spinbutton", "Turns").disabled).toBe(false);
   await waitFor(() => expect(stored[0]?.harness).toBe("claude-code"));
 });

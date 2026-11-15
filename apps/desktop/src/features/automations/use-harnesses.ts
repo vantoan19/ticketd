@@ -15,7 +15,10 @@ let lastFound: Found | null = null;
  * check answers, "unknown" when the check itself failed, "not_installed" for
  * one the check did not list.
  */
-export function useHarnessStatus(): (id: string) => Status | undefined {
+export function useHarnessStatus(): ((id: string) => Status | undefined) & {
+  /** The host's reason a harness stands as it does (the Chat picker's text), if it gave one. */
+  reason: (id: string) => string | undefined;
+} {
   const client = useChatClient();
   const [found, setFound] = useState(lastFound);
   useEffect(() => {
@@ -30,12 +33,17 @@ export function useHarnessStatus(): (id: string) => Status | undefined {
       current = false;
     };
   }, [client]);
-  return (id) =>
+  const statusOf = (id: string) =>
     found === null
       ? undefined
       : found === "failed"
         ? "unknown"
         : (found.find((item) => item.id === id)?.status ?? "not_installed");
+  const reason = (id: string) =>
+    Array.isArray(found)
+      ? (found.find((item) => item.id === id)?.message ?? undefined)
+      : undefined;
+  return Object.assign(statusOf, { reason });
 }
 
 /** What a harness tile says about this computer, and whether it can be chosen. */

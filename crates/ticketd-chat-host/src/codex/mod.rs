@@ -177,6 +177,18 @@ pub(super) fn own_approvals(config: Option<&Value>) -> Value {
     })
 }
 
+/// The refusal for a Codex older than the floor, worded as the Chat picker words it.
+fn too_old(reported: &str) -> Option<Problem> {
+    discovery::parse_version(reported)
+        .is_some_and(|found| found < discovery::MINIMUM_VERSION)
+        .then(|| Problem {
+            kind: ProblemKind::IncompatibleVersion,
+            message: format!("ticketd needs {}.", discovery::version_requirement()),
+            detail: None,
+            resets_at: None,
+        })
+}
+
 #[async_trait]
 impl HarnessAdapter for CodexAdapter {
     fn harness(&self) -> Harness {
@@ -232,6 +244,18 @@ impl HarnessAdapter for CodexAdapter {
             detail: None,
             resets_at: None,
         })?;
+        // The version floor holds for every open, attended or not (8A4).
+        let reported = version_output(&executable)
+            .await
+            .map_err(|reason| Problem {
+                kind: ProblemKind::Other,
+                message: format!("Could not run {}: {reason}", executable.display()),
+                detail: None,
+                resets_at: None,
+            })?;
+        if let Some(problem) = too_old(&reported) {
+            return Err(problem);
+        }
         let io = spawn(&executable, ARGUMENTS, Serving::of(&request)).map_err(|error| Problem {
             kind: ProblemKind::Other,
             message: format!("Could not start {}: {error}", executable.display()),

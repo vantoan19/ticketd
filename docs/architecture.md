@@ -320,7 +320,9 @@ by name only: every Chat's harness process has the CLI's folder first on its
 Codex runs with approval policy `on-request`, and ticketd declines every approval
 request at once (with `never`, Codex reports a patch its policy rejects as no item at all, so
 the step could not fail), with no network unless the web is allowed, and with
-the person's MCP servers, plugins and apps turned off. The switches map as follows. "Edit
+the person's MCP servers, plugins and apps turned off. The same overrides also switch off
+their hooks, notify program, project `AGENTS.md`, memories, sub-agents, computer and browser
+use, and Codex's bundled skills (the agent editor does not list these). The switches map as follows. "Edit
 files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
 is the step's folder. "Run commands" off sets `features.shell_tool=false` (and turns the image
 viewer off), which also ends the agent's reading, because Codex has no read tool and reads
@@ -341,7 +343,7 @@ start fails the step: the agent could not do its work. So does a tool Codex decl
 file change it declined or failed to write, with a reason naming the file. A Chat taken over from a
 run resumes its Codex thread with the person's own approval policy and sandbox
 from their Codex configuration (`on-request` and `read-only` when it sets none). Codex
-has no turn limit to set, so the agent editor shows it as not applied for Codex. `ChatHost::run_unattended` sends the first
+has no turn limit to set, so the agent editor hides the Turns field for Codex. `ChatHost::run_unattended` sends the first
 message, stops a turn still going at the agent's time limit, reports how the turn
 ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
 and closes the harness process. An unattended harness that asks for approval
