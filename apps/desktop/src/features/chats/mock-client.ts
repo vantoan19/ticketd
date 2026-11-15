@@ -920,9 +920,17 @@ export function createMockChatClient(
     restore: async (id) => patch(id, { retention: "active" }),
     async searchRecords(query) {
       const needle = query.trim().toLowerCase();
-      return (seed.records ?? []).filter((record) =>
-        record.title.toLowerCase().includes(needle),
-      );
+      // As the desktop client does: an exact reference leads, then names.
+      const exact = (record: LinkedRecord) =>
+        record.kind === "ticket" && record.reference.toLowerCase() === needle;
+      const records = seed.records ?? [];
+      return [
+        ...records.filter(exact),
+        ...records.filter(
+          (record) =>
+            !exact(record) && record.title.toLowerCase().includes(needle),
+        ),
+      ];
     },
     async addLink(id, link) {
       const record = (seed.records ?? []).find(
