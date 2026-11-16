@@ -111,6 +111,7 @@ afterEach(() => {
   vi.useRealTimers();
   bridge.invoke.mockReset();
   localStorage.clear();
+  sessionStorage.clear();
   narrowViewport = false;
   ticketListWidth = null;
   clearWorkspaceFailure();
@@ -10477,37 +10478,44 @@ test("page zoom palette actions share keyboard operations, current values and re
   }
 });
 
-test("page zoom serializes rapid keys and a pending reset wins over stale targets", async () => {
-  let finish: (() => void) | undefined;
-  bridge.invoke.mockImplementation((command: string, args: unknown) => {
-    if (command === "plugin:webview|set_webview_zoom" && !finish)
-      return new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
-  });
-  render(<App />);
-  await screen.findByRole("button", { name: "Settings" });
-  const uninstall = installNativeZoomBridge();
-  try {
-    for (let step = 0; step < 5; step += 1)
-      fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
-    fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
-    expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
-      { label: "main", value: 1.1 },
-    ]);
-    expect(screen.queryByText("Zoom 110%")).toBeNull();
-    expect(screen.queryByText("Zoom 200%")).toBeNull();
-    await act(async () => finish?.());
-    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
-    expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
-      { label: "main", value: 1.1 },
-      { label: "main", value: 1 },
-    ]);
-  } finally {
-    uninstall();
-  }
-});
+test.each([false, true])(
+  "page zoom serializes rapid keys and a pending reset wins over stale targets (first fails: %s)",
+  async (firstFails) => {
+    let finish: (() => void) | undefined;
+    bridge.invoke.mockImplementation((command: string, args: unknown) => {
+      if (command === "plugin:webview|set_webview_zoom" && !finish)
+        return new Promise<void>((resolve, reject) => {
+          finish = () =>
+            firstFails ? reject(new Error("First zoom rejected")) : resolve();
+        });
+      return bridgeDefault(
+        command,
+        args as Parameters<typeof bridgeDefault>[1],
+      );
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+    const uninstall = installNativeZoomBridge();
+    try {
+      for (let step = 0; step < 5; step += 1)
+        fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
+      fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
+      expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+        { label: "main", value: 1.1 },
+      ]);
+      expect(screen.queryByText("Zoom 110%")).toBeNull();
+      expect(screen.queryByText("Zoom 200%")).toBeNull();
+      await act(async () => finish?.());
+      expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+      expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+        { label: "main", value: 1.1 },
+        { label: "main", value: 1 },
+      ]);
+    } finally {
+      uninstall();
+    }
+  },
+);
 
 test("page zoom keeps the applied value on native failure, exposes raw Details and retries the failed action", async () => {
   const user = userEvent.setup();
@@ -11023,4 +11031,308 @@ test("a responsive navigation sheet hands focus to the visible sidebar when its 
       screen.getByRole("button", { name: "All tickets" }),
     ),
   );
+});
+
+test("Settings navigation keeps visible focus through narrow and wide replacements", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  const nav = await screen.findByRole("navigation", {
+    name: "Settings sections",
+  });
+  fireEvent.click(within(nav).getByRole("button", { name: "Location" }));
+  within(nav).getByRole("button", { name: "Appearance" }).focus();
+  act(() => resizeViewport(true));
+  const trigger = screen.getByRole("button", {
+    name: /^Location, Settings sections/,
+  });
+  expect(document.activeElement).toBe(trigger);
+  fireEvent.click(trigger);
+  const sheet = await screen.findByRole("dialog", { name: "Settings" });
+  within(sheet).getByRole("button", { name: "Appearance" }).focus();
+  act(() => resizeViewport(false));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Appearance" }),
+    ),
+  );
+  expect(screen.getByRole("heading", { name: "Location" })).toBeTruthy();
+  act(() => resizeViewport(true));
+  expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /^Location, Settings sections/ }),
+  );
+});
+
+test("a retained native 200% reload initializes the palette and Reset recovers even after an unobserved change", async () => {
+  let actualZoom = 2;
+  const dpr = vi
+    .spyOn(window, "devicePixelRatio", "get")
+    .mockImplementation(() => actualZoom * 2);
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "plugin:window|scale_factor") return 2;
+    if (command === "plugin:window|is_decorated") return true;
+    if (command === "plugin:window|set_theme") return;
+    if (command === "plugin:webview|set_webview_zoom") {
+      actualZoom = (args as { value: number }).value;
+      return;
+    }
+    if (
+      command === "plugin:window|set_background_color" ||
+      command === "plugin:webview|set_webview_background_color"
+    )
+      return;
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  const uninstall = installNativeZoomBridge();
+  try {
+    const first = render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    let filter = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.change(filter, { target: { value: "> Zoom out" } });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: /Zoom out/ }).textContent,
+      ).toContain("200%"),
+    );
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(await screen.findByText("Zoom 175%")).toBeTruthy();
+    expect(actualZoom).toBe(1.75);
+    first.unmount();
+    render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    filter = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.change(filter, { target: { value: "> Reset zoom" } });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: /Reset zoom/ }).textContent,
+      ).toContain("175%"),
+    );
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+    expect(actualZoom).toBe(1);
+    // A real Reset must issue native recovery even if the last confirmed value was 100%.
+    actualZoom = 2;
+    fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
+    await waitFor(() => expect(actualZoom).toBe(1));
+  } finally {
+    uninstall();
+    dpr.mockRestore();
+    sessionStorage.clear();
+  }
+});
+
+test("a failed native Reset at confirmed 100% retries recovery instead of becoming a no-op", async () => {
+  let reject = true;
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "plugin:webview|set_webview_zoom" && reject)
+      return Promise.reject(new Error("Native Reset rejected"));
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: "Settings" });
+  const uninstall = installNativeZoomBridge();
+  try {
+    fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent).toContain("Couldn't change zoom");
+    reject = false;
+    fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+    expect(nativeZoomCalls()).toHaveLength(2);
+  } finally {
+    uninstall();
+  }
+});
+
+test.each(["MacIntel", "Win32"])(
+  "%s preserves intentional 200% on focus and repairs a genuine display-scale loss",
+  async (platform) => {
+    const platformStub = vi
+      .spyOn(navigator, "platform", "get")
+      .mockReturnValue(platform);
+    let pageDpr = 4;
+    const dpr = vi
+      .spyOn(window, "devicePixelRatio", "get")
+      .mockImplementation(() => pageDpr);
+    const width = vi.spyOn(window, "innerWidth", "get").mockReturnValue(640);
+    const height = vi.spyOn(window, "innerHeight", "get").mockReturnValue(400);
+    bridge.invoke.mockImplementation((command: string, args: unknown) => {
+      if (command === "plugin:window|scale_factor") return 2;
+      if (command === "plugin:window|inner_size")
+        return { width: 2560, height: 1600 };
+      if (command === "plugin:window|is_maximized") return false;
+      if (command === "plugin:window|is_decorated") return true;
+      if (
+        [
+          "plugin:window|set_theme",
+          "plugin:window|set_background_color",
+          "plugin:webview|set_webview_background_color",
+          "plugin:window|set_size",
+        ].includes(command)
+      )
+        return;
+      return bridgeDefault(
+        command,
+        args as Parameters<typeof bridgeDefault>[1],
+      );
+    });
+    const uninstall = installNativeZoomBridge();
+    try {
+      render(<App />);
+      await screen.findByRole("button", { name: "Settings" });
+      // The shell owns the real startup/focus repair lifecycle. Its native
+      // measurements are the independently observed Retina 100%/200% values.
+      vi.useFakeTimers();
+      fireEvent.focus(window);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(
+        bridge.invoke.mock.calls.filter(
+          ([command]) => command === "plugin:window|set_size",
+        ),
+      ).toEqual([]);
+      pageDpr = 2; // WebView2 lost display scale while the intentional zoom remains 200%.
+      width.mockReturnValue(1280);
+      height.mockReturnValue(800);
+      fireEvent.focus(window);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(
+        bridge.invoke.mock.calls
+          .filter(([command]) => command === "plugin:window|set_size")
+          .map(([, args]) => JSON.parse(JSON.stringify(args)) as unknown),
+      ).toEqual([
+        { label: "main", value: { Physical: { width: 2561, height: 1600 } } },
+        { label: "main", value: { Physical: { width: 2560, height: 1600 } } },
+      ]);
+    } finally {
+      uninstall();
+      platformStub.mockRestore();
+      dpr.mockRestore();
+      width.mockRestore();
+      height.mockRestore();
+    }
+  },
+);
+
+test("Settings Escape and palette Reset return to visible section navigation without taking newer search focus", async () => {
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (
+      command === "plugin:window|set_background_color" ||
+      command === "plugin:webview|set_webview_background_color"
+    )
+      return;
+    if (command === "plugin:webview|set_webview_zoom") {
+      resizeViewport((args as { value: number }).value >= 1.75);
+      return;
+    }
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  const nav = await screen.findByRole("navigation", {
+    name: "Settings sections",
+  });
+  within(nav).getByRole("button", { name: "Appearance" }).focus();
+  const uninstall = installNativeZoomBridge();
+  try {
+    for (let step = 0; step < 5; step += 1) {
+      fireEvent.keyDown(document.activeElement!, { key: "=", ctrlKey: true });
+      await act(async () => {});
+    }
+    expect(await screen.findByText("Zoom 200%")).toBeTruthy();
+    const trigger = screen.getByRole("button", {
+      name: /^Appearance, Settings sections/,
+    });
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+    const sheet = await screen.findByRole("dialog", { name: "Settings" });
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    fireEvent.keyDown(trigger, { key: "k", ctrlKey: true });
+    const filter = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.change(filter, { target: { value: "> Reset zoom" } });
+    fireEvent.keyDown(filter, { key: "Enter" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Appearance" }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
+    const search = await screen.findByRole("searchbox", {
+      name: "Search settings",
+    });
+    search.focus();
+    fireEvent.change(search, {
+      target: { value: "retain this settings query" },
+    });
+    act(() => resizeViewport(true));
+    expect(document.activeElement).toBe(search);
+    act(() => resizeViewport(false));
+    expect(document.activeElement).toBe(search);
+    expect(search).toHaveProperty("value", "retain this settings query");
+  } finally {
+    uninstall();
+  }
+});
+
+test("zoom keys wait for retained native scale and keep the latest Reset while initialization is pending", async () => {
+  let finishScale: ((scale: number) => void) | undefined;
+  let actualZoom = 2;
+  const dpr = vi
+    .spyOn(window, "devicePixelRatio", "get")
+    .mockImplementation(() => actualZoom * 2);
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "plugin:window|scale_factor")
+      return new Promise<number>((resolve) => {
+        finishScale = resolve;
+      });
+    if (command === "plugin:window|is_decorated") return true;
+    if (
+      [
+        "plugin:window|set_theme",
+        "plugin:window|set_background_color",
+        "plugin:webview|set_webview_background_color",
+      ].includes(command)
+    )
+      return;
+    if (command === "plugin:webview|set_webview_zoom") {
+      actualZoom = (args as { value: number }).value;
+      return;
+    }
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  const uninstall = installNativeZoomBridge();
+  try {
+    render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+    fireEvent.keyDown(document.body, { key: "-", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "-", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
+    expect(nativeZoomCalls()).toHaveLength(0);
+    await act(async () => finishScale?.(2));
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+    expect(actualZoom).toBe(1);
+    expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+      { label: "main", value: 1.75 },
+      { label: "main", value: 1 },
+    ]);
+    // Following the retained 200% read, the next step starts from the confirmed Reset.
+    fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
+    expect(await screen.findByText("Zoom 110%")).toBeTruthy();
+  } finally {
+    uninstall();
+    dpr.mockRestore();
+  }
 });

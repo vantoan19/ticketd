@@ -5,9 +5,7 @@ function available(element: HTMLElement) {
   // Layout effects can precede the closing sheet's inert observer.
   if (
     !element.isConnected ||
-    element.closest(
-      '[hidden], [inert], [data-slot="sheet-content"][data-state="closed"]',
-    )
+    element.closest('[hidden], [inert], .ui-sheet[data-state="closed"]')
   )
     return false;
   for (
@@ -19,6 +17,10 @@ function available(element: HTMLElement) {
     if (style.display === "none" || style.visibility === "hidden") return false;
   }
   return true;
+}
+
+function findAvailable(selector: string) {
+  return [...document.querySelectorAll<HTMLElement>(selector)].find(available);
 }
 
 /** Navigation is replaced, rather than hidden, when the narrow layout takes over. */
@@ -42,6 +44,29 @@ export function useResponsiveNavigationFocus(
     return () => document.removeEventListener("focusin", remember);
   }, []);
 
+  const settingsFocus = useCallback(
+    (action?: string) => {
+      const target = narrow
+        ? findAvailable('[data-responsive-navigation="settings-navigation"]')
+        : ((action
+            ? [
+                ...document.querySelectorAll<HTMLElement>(
+                  "[data-responsive-navigation]",
+                ),
+              ].find(
+                (element) =>
+                  element.dataset.responsiveNavigation === action &&
+                  available(element),
+              )
+            : null) ??
+          findAvailable(
+            '[data-responsive-navigation^="settings-section:"][aria-current="page"]',
+          ));
+      return target ?? document.getElementById("main-content");
+    },
+    [narrow],
+  );
+
   const replacement = useCallback(
     (origin: HTMLElement | null) => {
       if (!origin || available(origin)) return origin;
@@ -49,8 +74,8 @@ export function useResponsiveNavigationFocus(
         navigationActions.current.get(origin) ??
         origin.dataset.responsiveNavigation;
       if (!action) return null;
-      const find = (selector: string) =>
-        [...document.querySelectorAll<HTMLElement>(selector)].find(available);
+      const find = findAvailable;
+      if (action.startsWith("settings-")) return settingsFocus(action);
       const target = narrow
         ? find(
             `[data-responsive-navigation="${action === "search" ? "search" : "navigation"}"]`,
@@ -62,7 +87,7 @@ export function useResponsiveNavigationFocus(
             );
       return target ?? document.getElementById("main-content");
     },
-    [narrow],
+    [narrow, settingsFocus],
   );
 
   useLayoutEffect(() => {
@@ -72,5 +97,8 @@ export function useResponsiveNavigationFocus(
     replacement(origin)?.focus({ preventScroll: true });
   }, [narrow, replacement]);
 
-  return () => replacement(paletteReturnRef.current);
+  return {
+    resolvePaletteFocus: () => replacement(paletteReturnRef.current),
+    resolveSettingsFocus: () => settingsFocus(),
+  };
 }

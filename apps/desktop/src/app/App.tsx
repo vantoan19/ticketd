@@ -9,6 +9,7 @@ import {
   ticketCommandActions,
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
+import { keepWebviewInStep } from "@/lib/webview-scale";
 import { usePageZoom } from "./use-page-zoom";
 import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
 import { PageZoomStatus } from "./PageZoomStatus";
@@ -135,6 +136,7 @@ export function App() {
 
 function AppContent() {
   const pageZoom = usePageZoom();
+  useEffect(keepWebviewInStep, []);
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
   const workspaceProblem = useWorkspaceState();
@@ -527,10 +529,8 @@ function AppContent() {
   };
   useReminderNotifications(openNotifiedTicket);
   const isMobile = useIsMobile();
-  const resolvePaletteFocus = useResponsiveNavigationFocus(
-    isMobile,
-    paletteReturn,
-  );
+  const { resolvePaletteFocus, resolveSettingsFocus } =
+    useResponsiveNavigationFocus(isMobile, paletteReturn);
   /**
    * The run a ticket, the Inbox or a notification asked to see, opened by the
    * Automations page.
@@ -882,6 +882,7 @@ function AppContent() {
                       >
                         {view === "settings" ? (
                           <SettingsNav
+                            resolveReturnFocus={resolveSettingsFocus}
                             selected={settingsSection}
                             onSelect={setSettingsSection}
                             origin={VIEW_NAMES[viewBeforeSettings]}

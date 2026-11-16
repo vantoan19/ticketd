@@ -71,6 +71,7 @@ export function SettingsPage({
             variant="ghost"
             size="sm"
             className="-ml-2 min-w-0"
+            data-responsive-navigation="settings-navigation"
             aria-haspopup="dialog"
             aria-expanded={navOpen}
             aria-label={`${label}, Settings sections${setup ? ", a section needs setup" : ""}`}
