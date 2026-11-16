@@ -266,25 +266,22 @@ fn workspace_transport_recovery_refreshes_only_metadata_and_keeps_secrets_out_of
     let transport = Http {
         requests: Mutex::new(vec![]),
         responses: Mutex::new(vec![
+            // One token exchange serves every metadata read that follows.
             token(),
             response(
                 200,
                 br#"{"id":"file","name":"Original","mimeType":"text/plain","size":"4"}"#,
             ),
-            token(),
             response(
                 403,
                 br#"{"error":{"errors":[{"reason":"appNotAuthorizedToFile"}]}}"#,
             ),
-            token(),
             response(
                 403,
                 br#"{"error":{"errors":[{"reason":"insufficientFilePermissions"}]}}"#,
             ),
-            token(),
             response(404, br#"{"error":{"errors":[{"reason":"notFound"}]}}"#),
             response(503, b"secret-provider-response"),
-            token(),
             response(
                 200,
                 br#"{"id":"file","name":"Renamed in Drive","mimeType":"text/plain","size":"8"}"#,
@@ -352,7 +349,12 @@ fn workspace_transport_recovery_refreshes_only_metadata_and_keeps_secrets_out_of
         );
     }
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 11);
+    let tokens = requests
+        .iter()
+        .filter(|r| r.url == "https://oauth2.googleapis.com/token")
+        .count();
+    assert_eq!(tokens, 1);
+    assert_eq!(requests.len() - tokens, 6, "six metadata reads");
     assert!(
         requests
             .iter()
