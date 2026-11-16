@@ -358,7 +358,9 @@ test("the section list offers a source only when its connector is available", as
   render(<SettingsNav onBack={() => {}} />);
   const group = await screen.findByRole("group", { name: "Connections" });
   expect(group.textContent).toContain("Google Drive");
-  expect(group.textContent).toContain("GitHub");
+  expect(
+    await within(group).findByRole("button", { name: "GitHub" }),
+  ).toBeTruthy();
 });
 
 test("opening a source focuses its page title, named for the source", async () => {
