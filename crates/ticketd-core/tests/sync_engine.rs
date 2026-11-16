@@ -1,5 +1,7 @@
 //! Sync runs of three temporary Workspaces against one fake storage account,
-//! through the shared-core interface.
+//! through the shared-core interface. The desktops are set up and run as the
+//! app does: signed in, bound to a folder by an upload or a download, and run
+//! only through `Workspace::sync_now`.
 #![allow(clippy::unwrap_used)] // Setup and sync runs that fail must fail the test.
 
 use std::io::Cursor;
@@ -7,50 +9,23 @@ use std::io::Cursor;
 use ticketd_core::{
     ActivityFeedEntry, Error, RecordKind, Status, SyncKind, SyncValue, TicketPatch, Workspace,
     sync::{
-        SyncChoice, SyncNoticeKind, SyncResolution, SyncState,
-        remote::{FakeRemote, RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
+        SyncChoice, SyncNoticeKind, SyncRecovery, SyncResolution, SyncState,
+        remote::{RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
     },
 };
 
-const FOLDER: &str = "workspace";
+#[path = "support/sync_desks.rs"]
+mod sync_desks;
+use sync_desks::Devices;
+
 const NAMES: [&str; 3] = ["Desk A", "Desk B", "Desk C"];
 
-struct Devices {
-    _directory: tempfile::TempDir,
-    remote: FakeRemote,
-    workspaces: Vec<Workspace>,
-}
-
-/// Three Workspaces with their own device codes, sharing one storage folder.
+/// Three desktops, as the app runs them.
 fn devices() -> Devices {
-    let directory = tempfile::tempdir().unwrap();
-    let remote = FakeRemote::new();
-    remote.ensure_folder(FOLDER, "Test").unwrap();
-    let mut workspaces: Vec<Workspace> = Vec::new();
-    for name in ["a", "b", "c"] {
-        let mut workspace = Workspace::open(directory.path().join(name)).unwrap();
-        while workspaces
-            .iter()
-            .any(|other| other.device_code().unwrap() == workspace.device_code().unwrap())
-        {
-            workspace.renew_device_code().unwrap();
-        }
-        workspaces.push(workspace);
-    }
-    Devices {
-        _directory: directory,
-        remote,
-        workspaces,
-    }
+    Devices::new(&NAMES)
 }
 
 impl Devices {
-    fn sync(&mut self, device: usize) -> ticketd_core::sync::SyncReport {
-        self.workspaces[device]
-            .sync(&self.remote, FOLDER, NAMES[device])
-            .unwrap()
-    }
-
     /// Sync the devices in this order, then twice more so everything has travelled.
     fn settle(&mut self, order: [usize; 3]) {
         for _ in 0..3 {
@@ -69,20 +44,20 @@ impl Devices {
                 files(&self.workspaces[device]),
                 expected,
                 "{}",
-                NAMES[device]
+                self.names[device]
             );
             let report = self.sync(device);
             assert_eq!(
                 (report.uploaded, report.pending),
                 (0, 0),
                 "{}",
-                NAMES[device]
+                self.names[device]
             );
             assert_eq!(
                 files(&self.workspaces[device]),
                 expected,
                 "{}",
-                NAMES[device]
+                self.names[device]
             );
         }
     }
@@ -98,14 +73,14 @@ impl Devices {
         let key = RemoteKey::new(kind, id);
         let file = self
             .remote
-            .list(FOLDER)
+            .list(&self.folder)
             .unwrap()
             .into_iter()
             .find(|file| file.key == key)
             .unwrap();
         let mut bytes = Vec::new();
         self.remote
-            .download(FOLDER, &key, &file.version, &mut bytes)
+            .download(&self.folder, &key, &file.version, &mut bytes)
             .unwrap();
         (file.name, String::from_utf8(bytes).unwrap())
     }
@@ -115,14 +90,14 @@ impl Devices {
         let key = RemoteKey::new(kind, id);
         let version = self
             .remote
-            .list(FOLDER)
+            .list(&self.folder)
             .unwrap()
             .into_iter()
             .find(|file| file.key == key)
             .map(|file| file.version);
         self.remote
             .write(
-                FOLDER,
+                &self.folder,
                 &key,
                 "edited by hand.md",
                 version.as_deref(),
@@ -209,10 +184,8 @@ fn records_made_on_one_device_arrive_on_the_others_and_are_not_uploaded_again() 
     let before = writes(&devices);
     for device in [1, 2] {
         let report = devices.sync(device);
-        assert_eq!(
-            (report.downloaded, report.uploaded, report.pending),
-            (5, 0, 0)
-        );
+        assert_eq!((report.uploaded, report.pending), (0, 0));
+        assert_eq!(files(&devices.workspaces[device]).len(), 5);
     }
     // What arrived by sync is not a local change: nothing was written back.
     assert_eq!(writes(&devices), before);
@@ -882,39 +855,34 @@ fn an_interrupted_upload_or_download_repeats_without_duplicating_anything() {
 
     // The first write reaches the storage but its answer is lost; the second never arrives.
     devices.remote.drop_write(0, RemoteError::Offline);
-    let failed = devices.workspaces[0].sync(&devices.remote, FOLDER, NAMES[0]);
-    assert!(matches!(failed, Err(Error::Remote(RemoteError::Offline))));
+    let failed = devices.try_sync(0);
+    assert_eq!(failed.status.recovery, Some(SyncRecovery::Offline));
     assert_eq!(devices.workspaces[0].dirty_records().unwrap().len(), 2);
     devices.remote.fail(
         RemoteOp::Write,
         0,
         RemoteError::RateLimited { retry_after: None },
     );
-    assert!(
-        devices.workspaces[0]
-            .sync(&devices.remote, FOLDER, NAMES[0])
-            .is_err()
-    );
+    let failed = devices.try_sync(0);
+    assert_eq!(failed.status.recovery, Some(SyncRecovery::RateLimited));
     let report = devices.sync(0);
     assert_eq!(report.pending, 0);
-    assert_eq!(devices.remote.list(FOLDER).unwrap().len(), 2);
+    assert_eq!(devices.versions().len(), 2);
 
     // A download that fails part-way is simply run again.
     devices
         .remote
         .fail(RemoteOp::Download, 1, RemoteError::Offline);
-    assert!(
-        devices.workspaces[1]
-            .sync(&devices.remote, FOLDER, NAMES[1])
-            .is_err()
-    );
+    let failed = devices.try_sync(1);
+    assert_eq!(failed.status.recovery, Some(SyncRecovery::Offline));
     devices
         .remote
         .fail(RemoteOp::List, 0, RemoteError::Unauthorized);
-    assert!(matches!(
-        devices.workspaces[1].sync(&devices.remote, FOLDER, NAMES[1]),
-        Err(Error::Remote(RemoteError::Unauthorized))
-    ));
+    let failed = devices.try_sync(1);
+    assert_eq!(
+        failed.status.recovery,
+        Some(SyncRecovery::AuthorizationExpired)
+    );
     devices.settle([1, 2, 0]);
 
     devices.assert_converged();
@@ -940,20 +908,21 @@ fn an_interrupted_upload_or_download_repeats_without_duplicating_anything() {
 }
 
 #[test]
-fn a_missing_or_emptied_storage_never_removes_local_content() {
+fn a_file_missing_among_several_is_uploaded_again_by_the_next_run_of_any_desktop_that_had_it() {
     let mut devices = devices();
     let reference = devices.shared_ticket("Login");
+    devices.workspaces[0].create_ticket("Other").unwrap();
+    devices.settle([0, 1, 2]);
     let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
     let before = files(&devices.workspaces[1]);
 
     // The file disappears from the storage: nothing is removed here, and the
     // run that notices puts it back without waiting for a local change.
     let (_, stored) = devices.remote_text(RemoteKind::Ticket, &id);
-    assert!(
-        devices
-            .remote
-            .remove_file(FOLDER, &RemoteKey::new(RemoteKind::Ticket, id.clone()))
-    );
+    assert!(devices.remote.remove_file(
+        &devices.folder,
+        &RemoteKey::new(RemoteKind::Ticket, id.clone())
+    ));
     assert_eq!(devices.sync(1).uploaded, 1);
     assert_eq!(files(&devices.workspaces[1]), before);
     assert_eq!(
@@ -968,7 +937,10 @@ fn a_missing_or_emptied_storage_never_removes_local_content() {
     assert_eq!(
         devices
             .remote
-            .revisions(FOLDER, &RemoteKey::new(RemoteKind::Ticket, id.clone()))
+            .revisions(
+                &devices.folder,
+                &RemoteKey::new(RemoteKind::Ticket, id.clone())
+            )
             .unwrap()
             .len(),
         1
@@ -986,14 +958,41 @@ fn a_missing_or_emptied_storage_never_removes_local_content() {
         devices.workspaces[0].show_ticket(&reference).unwrap().title,
         "Still here"
     );
+}
+
+#[test]
+fn an_emptied_or_missing_folder_is_a_recovery_state_and_never_removes_local_content() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let before = files(&devices.workspaces[1]);
+
+    // The only record file is gone: a listing without a record where some were
+    // synced is a storage problem, not a deletion and not a reason to write.
+    assert!(devices.remote.remove_file(
+        &devices.folder,
+        &RemoteKey::new(RemoteKind::Ticket, id.clone())
+    ));
+    let run = devices.try_sync(1);
+    assert_eq!(run.status.recovery, Some(SyncRecovery::FolderMissing));
+    assert_eq!(run.uploaded, 0);
+    assert_eq!(files(&devices.workspaces[1]), before);
+
+    // Recovering uploads this desktop's Workspace again, and the others take
+    // the file in as a change made elsewhere.
+    let status = devices.workspaces[1].sync_recover(&devices.remote).unwrap();
+    assert_eq!(status.recovery, None);
+    assert_eq!(devices.versions().len(), 1);
+    devices.settle([0, 2, 1]);
+    devices.assert_converged();
+    assert_eq!(devices.workspaces[0].sync_conflicts().unwrap(), []);
+    assert_eq!(files(&devices.workspaces[0]), before);
 
     // The whole folder is gone: the run reports it and local content stays.
     let before = files(&devices.workspaces[2]);
-    devices.remote.remove_folder(FOLDER);
-    assert!(matches!(
-        devices.workspaces[2].sync(&devices.remote, FOLDER, NAMES[2]),
-        Err(Error::Remote(RemoteError::FolderMissing))
-    ));
+    devices.remote.remove_folder(&devices.folder);
+    let run = devices.try_sync(2);
+    assert_eq!(run.status.recovery, Some(SyncRecovery::FolderMissing));
     assert_eq!(files(&devices.workspaces[2]), before);
 }
 
@@ -1189,7 +1188,10 @@ fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_
             .unwrap();
         let report = devices.sync(1);
 
-        assert_eq!((report.uploaded, report.pending), (0, 1), "{to}");
+        assert_eq!(report.uploaded, 0, "{to}");
+        // Held back, not on its way anywhere: the status leaves it out.
+        assert_eq!(report.pending, 0, "{to}");
+        assert_eq!(devices.workspaces[1].dirty_records().unwrap().len(), 1);
         assert_eq!(devices.remote_text(RemoteKind::Ticket, &id).1, newer);
         let notices = devices.workspaces[1].sync_notices().unwrap();
         assert!(
@@ -1201,8 +1203,8 @@ fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_
         let read = downloads(&devices);
         devices.sync(1);
         assert_eq!(downloads(&devices), read, "{to}");
-        devices.workspaces[1].start_sync_session().unwrap();
-        assert_eq!(devices.sync(1).skipped, 1, "{to}");
+        devices.workspaces[1] = devices.desks.launched_again(NAMES[1]);
+        devices.sync(1);
         assert_eq!(downloads(&devices), read + 1, "{to}");
         assert_eq!(devices.workspaces[1].sync_notices().unwrap().len(), 1);
 
@@ -1224,7 +1226,7 @@ fn a_last_synced_copy_that_cannot_be_read_is_taken_as_never_synced() {
     let reference = devices.shared_ticket("Login");
     let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
     // Desk B's stored copy of the file is damaged.
-    rusqlite::Connection::open(devices._directory.path().join("b"))
+    rusqlite::Connection::open(devices.desks.directory.path().join(NAMES[1]))
         .unwrap()
         .execute(
             "UPDATE sync_files SET content = 'not a sync file' WHERE id = ?1",
@@ -1583,24 +1585,38 @@ fn a_takeover_on_one_device_survives_a_later_refresh_on_another() {
 /// F41: a record's file is removed in the storage and written again, then the
 /// first file comes back. It is another file than the one last synced, so its
 /// older content must not replace newer edits without review.
+/// The storage's identity of the file held for `key`.
+fn stored_file(devices: &Devices, key: &RemoteKey) -> String {
+    devices
+        .remote
+        .list(&devices.folder)
+        .unwrap()
+        .into_iter()
+        .find(|file| file.key == *key)
+        .unwrap()
+        .file_id
+}
+
 #[test]
 fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits() {
     let mut devices = devices();
     let reference = devices.shared_ticket("Login");
+    // A second record, so that losing the first is not an emptied folder.
+    devices.shared_ticket("Other");
     let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
     let key = RemoteKey::new(RemoteKind::Ticket, id.clone());
-    let original = devices.remote.list(FOLDER).unwrap()[0].file_id.clone();
+    let original = stored_file(&devices, &key);
 
-    assert!(devices.remote.remove_file(FOLDER, &key));
+    assert!(devices.remote.remove_file(&devices.folder, &key));
     devices.remote.set_now("2026-01-02T00:00:00Z");
     assert_eq!(devices.sync(0).uploaded, 1);
-    assert_ne!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
+    assert_ne!(stored_file(&devices, &key), original);
     devices.workspaces[0]
         .change_ticket(&reference, title("Newer"))
         .unwrap();
     assert_eq!(devices.sync(0).uploaded, 1);
-    assert!(devices.remote.restore_file(FOLDER, &key));
-    assert_eq!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
+    assert!(devices.remote.restore_file(&devices.folder, &key));
+    assert_eq!(stored_file(&devices, &key), original);
 
     let report = devices.sync(0);
     assert_eq!(report.conflicts, 1);
@@ -1633,18 +1649,20 @@ fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits(
 fn a_restored_older_file_that_is_first_unreadable_still_goes_to_review_once_fixed() {
     let mut devices = devices();
     let reference = devices.shared_ticket("Login");
+    // A second record, so that losing the first is not an emptied folder.
+    devices.shared_ticket("Other");
     let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
     let key = RemoteKey::new(RemoteKind::Ticket, id.clone());
     let (_, old) = devices.remote_text(RemoteKind::Ticket, &id);
 
-    assert!(devices.remote.remove_file(FOLDER, &key));
+    assert!(devices.remote.remove_file(&devices.folder, &key));
     devices.remote.set_now("2026-01-02T00:00:00Z");
     devices.sync(0);
     devices.workspaces[0]
         .change_ticket(&reference, title("Newer"))
         .unwrap();
     devices.sync(0);
-    assert!(devices.remote.restore_file(FOLDER, &key));
+    assert!(devices.remote.restore_file(&devices.folder, &key));
     devices.hand_edit(RemoteKind::Ticket, &id, "---\nkind: ticket\ntitle: [oops\n");
     assert_eq!(devices.sync(0).skipped, 1);
     devices.hand_edit(RemoteKind::Ticket, &id, &format!("{old}\nRestored text.\n"));
