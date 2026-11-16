@@ -51,7 +51,7 @@ impl<'a> WriteScope<'a> {
 
     /// The ticket to change, without its relationships. It must exist and not be in Trash.
     pub(crate) fn editable_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        let ticket = self.existing_ticket(reference)?;
+        let ticket = self.ticket_even_if_trashed(reference)?;
         ensure_editable(self.connection, &ticket.id)?;
         Ok(ticket)
     }
@@ -63,7 +63,9 @@ impl<'a> WriteScope<'a> {
         relationships::id(self.connection, reference)
     }
 
-    fn existing_ticket(&self, reference: &str) -> Result<Ticket, Error> {
+    /// The ticket, without its relationships, whether or not it is in Trash. For a rule that
+    /// must be answered before the ticket is checked for editability.
+    pub(crate) fn ticket_even_if_trashed(&self, reference: &str) -> Result<Ticket, Error> {
         use rusqlite::OptionalExtension;
         self.connection
             .query_row(

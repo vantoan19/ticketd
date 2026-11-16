@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 
-use crate::{Error, Ticket, Workspace};
+use crate::write_scope::WriteScope;
+use crate::{Error, Ticket, Workspace, ticket_change};
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
@@ -45,28 +46,37 @@ impl Workspace {
 
     /// Add a normalized workspace tag without replacing other memberships.
     pub fn add_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
-        let name = normalize(name)?;
-        crate::write_scope::run(&self.connection, |scope| {
-            let ticket_id = scope.editable(reference)?;
-            scope.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
-            scope.execute(
-                "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
-                params![ticket_id, name],
-            )?;
-            crate::read_ticket(scope, reference)
+        ticket_change::commit(&self.connection, reference, |scope| {
+            add(scope, reference, name)
         })
     }
 
     /// Remove one normalized tag without replacing other memberships.
     pub fn remove_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
-        let name = normalize(name)?;
-        crate::write_scope::run(&self.connection, |scope| {
-            let ticket_id = scope.editable(reference)?;
-            scope.execute(
-                "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
-                params![ticket_id, name],
-            )?;
-            crate::read_ticket(scope, reference)
+        ticket_change::commit(&self.connection, reference, |scope| {
+            remove(scope, reference, name)
         })
     }
+}
+
+/// Tag a ticket. The name is checked before the ticket is looked up.
+pub(crate) fn add(scope: &WriteScope<'_>, reference: &str, name: &str) -> Result<(), Error> {
+    let name = normalize(name)?;
+    let ticket_id = scope.editable(reference)?;
+    scope.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
+    scope.execute(
+        "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
+        params![ticket_id, name],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn remove(scope: &WriteScope<'_>, reference: &str, name: &str) -> Result<(), Error> {
+    let name = normalize(name)?;
+    let ticket_id = scope.editable(reference)?;
+    scope.execute(
+        "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
+        params![ticket_id, name],
+    )?;
+    Ok(())
 }
