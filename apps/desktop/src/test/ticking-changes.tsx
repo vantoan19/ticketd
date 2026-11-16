@@ -1,16 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { WorkspaceChangeProvider } from "@/lib/workspace-change";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { TestReads } from "@/lib/workspace-reads/testing";
 
-/** Reports a workspace change every two seconds, as a busy workspace would. */
+/**
+ * Reports a workspace change every two seconds, as a busy workspace would. It
+ * moves both `useWorkspaceChange` and the reads of `lib/workspace-reads`, and
+ * gives them a fresh cache.
+ */
 export function TickingChanges({ children }: { children: ReactNode }) {
-  const [version, setVersion] = useState(0);
+  const [signal] = useState(() => fakeChangeSignal());
   useEffect(() => {
-    const timer = window.setInterval(() => setVersion((v) => v + 1), 2000);
+    const timer = window.setInterval(() => signal.change(), 2000);
     return () => window.clearInterval(timer);
-  }, []);
-  return (
-    <WorkspaceChangeProvider value={version}>
-      {children}
-    </WorkspaceChangeProvider>
-  );
+  }, [signal]);
+  return <TestReads signal={signal}>{children}</TestReads>;
 }

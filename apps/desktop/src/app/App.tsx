@@ -68,10 +68,7 @@ import {
   type ReactNode,
 } from "react";
 import { matchesShortcut } from "@/lib/shortcuts";
-import {
-  useWorkspaceChangePoll,
-  WorkspaceChangeProvider,
-} from "@/lib/workspace-change";
+import { WorkspaceReads } from "@/lib/workspace-reads";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 import { ExitDialog } from "@/features/sync/ExitDialog";
@@ -118,7 +115,7 @@ const VIEW_NAMES = {
 
 export function App() {
   return (
-    <WorkspaceChangeProvider value={useWorkspaceChangePoll()}>
+    <WorkspaceReads>
       {/* One tooltip delay for the whole app (DESIGN.md section 4). */}
       <TooltipProvider>
         <SyncStatusProvider>
@@ -130,7 +127,7 @@ export function App() {
           <ExitDialog />
         </SyncStatusProvider>
       </TooltipProvider>
-    </WorkspaceChangeProvider>
+    </WorkspaceReads>
   );
 }
 
