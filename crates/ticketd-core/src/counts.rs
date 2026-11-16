@@ -22,6 +22,7 @@ impl Workspace {
         self.deliver_due_reminders()?;
         let unresolved = unresolved_blocker_sql("blocker");
         let held = crate::source::held_sql("t.id");
+        let needs_you = crate::automation_runs::NEEDS_YOU;
         let counts = self.connection.query_row(
             &format!(
                 "SELECT \
@@ -31,7 +32,7 @@ impl Workspace {
                   AND NOT EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id \
                                   WHERE d.dependent_id = t.id AND {unresolved})), \
                (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress'), (SELECT COUNT(*) FROM tickets WHERE trashed = 0), \
-               (SELECT COUNT(*) FROM automation_runs WHERE status = 'needs_attention' AND attention_cleared = 0)"
+               (SELECT COUNT(*) FROM automation_runs WHERE {needs_you})"
             ),
             [crate::inbox::LOCAL_PERSON],
             |row| {

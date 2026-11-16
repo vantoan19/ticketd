@@ -102,6 +102,7 @@ pub use attachments::{
 mod automation_agents;
 mod automation_background;
 pub use automation_background::{DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE};
+mod automation_endings;
 mod automation_examples;
 mod automation_matching;
 mod automation_run_machine;

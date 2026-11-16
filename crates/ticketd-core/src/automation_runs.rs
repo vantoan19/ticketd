@@ -6,8 +6,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::automation_endings::{Cause, end, end_each};
 use crate::automation_matching::{LOCAL_SOURCE, TicketFacts, matches};
-use crate::automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
+use crate::automation_run_machine::{RunAction, StepOutcome, next_action};
 use crate::automation_schedule::due;
 use crate::automations::{AutomationDefinition, Step, Trigger};
 use crate::chats::{Chat, NewChat};
@@ -17,17 +18,13 @@ use crate::{Error, Workspace};
 const RETENTION_DAYS: i64 = 90;
 /// Events read from the log per query while matching.
 const EVENT_BATCH: u32 = 500;
-/// Why a run the person stopped needs attention, and why its step did not finish.
-const STOPPED: &str = "You stopped this run.";
-/// Why the step a run was on did not finish when the person took its Chat over.
-const TAKEN_OVER: &str = "You took this run over.";
-const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+pub(crate) const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 /// A run needs the person from when it ends as Needs attention until they run it
 /// again, take it over or dismiss it. Opening it changes nothing.
-const NEEDS_YOU: &str = "status = 'needs_attention' AND attention_cleared = 0";
+pub(crate) const NEEDS_YOU: &str = "status = 'needs_attention' AND attention_cleared = 0";
 /// `attention_cleared` says how the person answered: 1 for anything but running it
 /// again (and for every answer stored before the two were told apart), 2 for that.
-const DISMISSED: i64 = 1;
+pub(crate) const DISMISSED: i64 = 1;
 const RAN_AGAIN: i64 = 2;
 
 /// How the person answered a run that needed attention.
@@ -50,7 +47,7 @@ pub enum AutomationRunStatus {
 }
 
 impl AutomationRunStatus {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
@@ -204,7 +201,7 @@ fn answer(connection: &Connection, run_id: &str, how: i64) -> Result<(), Error> 
     Ok(())
 }
 
-fn named<T: serde::de::DeserializeOwned>(text: String) -> Result<T, Error> {
+pub(crate) fn named<T: serde::de::DeserializeOwned>(text: String) -> Result<T, Error> {
     Ok(serde_json::from_value(serde_json::Value::String(text))?)
 }
 
@@ -631,18 +628,8 @@ impl Workspace {
                     params![run_id, run.steps.len(), step_id],
                 )?;
             }
-            RunAction::End(end) => {
-                let (status, reason) = match end {
-                    RunEnd::Completed => (AutomationRunStatus::Completed, None),
-                    RunEnd::NeedsAttention { reason } => {
-                        (AutomationRunStatus::NeedsAttention, Some(reason))
-                    }
-                };
-                transaction.execute(
-                    &format!("UPDATE automation_runs SET status = ?2, reason = ?3, ended_at = {NOW} WHERE id = ?1"),
-                    params![run_id, status.as_str(), reason],
-                )?;
-                announce(&transaction)?;
+            RunAction::End(run_end) => {
+                end(&transaction, run_id, Cause::Path(run_end))?;
             }
         }
         transaction.commit()?;
@@ -690,18 +677,16 @@ impl Workspace {
     ) -> Result<usize, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
-        let going = serde_json::to_string(going)?;
-        const ABANDONED: &str = "SELECT id FROM automation_runs WHERE status = 'running' AND id NOT IN (SELECT value FROM json_each(?2))";
-        // Steps first: afterwards the runs are no longer Running to find them by.
-        transaction.execute(
-            &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?1, ended_at = {NOW} WHERE status = 'running' AND run_id IN ({ABANDONED})"),
-            params![reason, going],
-        )?;
-        let ended = transaction.execute(
-            &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?1, ended_at = {NOW} WHERE id IN ({ABANDONED})"),
-            params![reason, going],
-        )?;
-        announce(&transaction)?;
+        let ids = {
+            let going = serde_json::to_string(going)?;
+            let mut statement = transaction.prepare(
+                "SELECT id FROM automation_runs WHERE status = 'running' AND id NOT IN (SELECT value FROM json_each(?1))",
+            )?;
+            statement
+                .query_map([going], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let (ended, _) = end_each(&transaction, &ids, Cause::Abandoned(reason))?;
         transaction.commit()?;
         Ok(ended)
     }
@@ -712,19 +697,9 @@ impl Workspace {
     pub fn fail_automation_run(&mut self, run_id: &str, reason: &str) -> Result<bool, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
-        let ended = transaction.execute(
-            &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE id = ?1 AND status = 'running'"),
-            params![run_id, reason],
-        )?;
-        if ended > 0 {
-            transaction.execute(
-                &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
-                params![run_id, reason],
-            )?;
-            announce(&transaction)?;
-        }
+        let ended = end(&transaction, run_id, Cause::Abandoned(reason))?.is_some();
         transaction.commit()?;
-        Ok(ended > 0)
+        Ok(ended)
     }
 
     /// Ends a Queued or Running run as Needs attention because the person stopped
@@ -733,20 +708,9 @@ impl Workspace {
     pub fn stop_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
-        let ended = transaction.execute(
-            &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE id = ?1 AND status IN ('queued', 'running')"),
-            params![run_id, STOPPED],
-        )?;
-        if ended == 0 {
-            // Says so when there is no such run.
-            one(&transaction, run_id)?;
+        if end(&transaction, run_id, Cause::Stopped)?.is_none() {
             return Err(Error::AutomationRun("the run has already ended".into()));
         }
-        transaction.execute(
-            &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
-            params![run_id, STOPPED],
-        )?;
-        announce(&transaction)?;
         let run = one(&transaction, run_id)?;
         transaction.commit()?;
         Ok(run)
@@ -853,17 +817,7 @@ impl Workspace {
             "UPDATE workspace_changes SET token = token + 1 WHERE id = 1",
             [],
         )?;
-        if status != AutomationRunStatus::Completed {
-            answer(&transaction, &run_id, DISMISSED)?;
-            transaction.execute(
-                &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
-                params![run_id, TAKEN_OVER],
-            )?;
-            transaction.execute(
-                &format!("UPDATE automation_runs SET status = 'taken_over', reason = NULL, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
-                [&run_id],
-            )?;
-        }
+        end(&transaction, &run_id, Cause::TakenOver)?;
         let run = one(&transaction, &run_id)?;
         transaction.commit()?;
         Ok(Some(run))
