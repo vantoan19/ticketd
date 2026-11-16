@@ -59,11 +59,12 @@
     both;
 }
 @keyframes skeleton-appear {
+  /* Keep a hidden layout reserve hidden when its skeletons finish loading. */
   from {
-    visibility: hidden;
+    opacity: 0;
   }
   to {
-    visibility: visible;
+    opacity: 1;
   }
 }
 

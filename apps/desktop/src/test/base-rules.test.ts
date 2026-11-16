@@ -32,6 +32,18 @@ const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
   body: match[2] ?? "",
 }));
 
+it("loading skeletons respect the visibility of hidden layout reserves", () => {
+  const patterns = readFileSync(
+    join(__dirname, "..", "components", "ui", "patterns.css"),
+    "utf8",
+  );
+  const animation = patterns.match(
+    /@keyframes skeleton-appear\s*\{([\s\S]*?)\n\}/,
+  );
+  expect(animation).not.toBeNull();
+  expect(animation?.[1]).not.toMatch(/visibility\s*:/);
+});
+
 it("styles a record link wherever it is used, not only inside Markdown", () => {
   // The attachment preview is portalled outside .markdown-document, so its
   // "Used in" links rendered as bare centred buttons (shell AT-11). RecordLink
