@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import {
@@ -74,6 +75,7 @@ test("new captures use the current workspace preference while recovered retries 
   await screen.findByText("Uploads go to Google Drive · Team uploads");
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await revealFailureDetails(row);
   await within(row).findByText(/Offline/);
   const original = vi
     .mocked(invoke)
@@ -86,6 +88,7 @@ test("new captures use the current workspace preference while recovered retries 
   await screen.findByText("Uploads stay on this computer");
   const recovered = await screen.findByRole("listitem", { name: "trace.log" });
   fireEvent.click(within(recovered).getByRole("button", { name: "Retry" }));
+  await revealFailureDetails(recovered);
   await within(recovered).findByText(/Offline/);
   expect(
     vi
@@ -146,6 +149,7 @@ test("a late initial preference read cannot overwrite the destination captured f
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await revealFailureDetails(row);
   await within(row).findByText(/Drive is offline/);
   await act(async () => {
     finishOldRead({ kind: "local" });
@@ -184,14 +188,18 @@ test("failed destination bindings keep the batch choice through a later preferen
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await revealFailureDetails(row);
   await within(row).findByText(/temporarily read-only/);
   const queued = await screen.findByRole("listitem", { name: "queued.log" });
+  await revealFailureDetails(queued);
   await within(queued).findByText(/temporarily read-only/);
   bindingFailed = false;
   preference = { kind: "local" };
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
+  await revealFailureDetails(row);
   await within(row).findByText(/Drive is offline/);
   fireEvent.click(within(queued).getByRole("button", { name: "Retry" }));
+  await revealFailureDetails(queued);
   await within(queued).findByText(/Drive is offline/);
   expect(
     vi
@@ -228,6 +236,7 @@ test("a failed destination binding keeps the original capture available after re
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const failed = await screen.findByRole("listitem", { name: "retry.txt" });
+  await revealFailureDetails(failed);
   await within(failed).findByText(/temporarily read-only/);
   const original = vi
     .mocked(invoke)
@@ -278,10 +287,8 @@ test("a purged upload replay stays unavailable instead of reporting stored or at
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  expect(await within(row).findByRole("alert")).toHaveProperty(
-    "textContent",
-    expect.stringContaining("deleted permanently"),
-  );
+  await revealFailureDetails(row);
+  expect(within(row).getByText(/deleted permanently/)).toBeTruthy();
   expect(picked).not.toHaveBeenCalled();
   expect(within(row).queryByText("Stored")).toBeNull();
   expect(within(row).queryByText(/snapshot remains available/i)).toBeNull();
@@ -309,14 +316,12 @@ test("retry refreshes a cached completed upload after permanent purge", async ()
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await revealFailureDetails(row);
   await within(row).findByText(/Insertion failed/);
   purged = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
-  await waitFor(() =>
-    expect(within(row).getByRole("alert").textContent).toContain(
-      "deleted permanently",
-    ),
-  );
+  await revealFailureDetails(row);
+  expect(within(row).getByText(/deleted permanently/)).toBeTruthy();
   expect(picked).toHaveBeenCalledTimes(1);
   expect(
     vi
@@ -364,14 +369,12 @@ test("a cached Drive upload receipt cannot promise library availability after re
   await screen.findByText(/Uploads go to Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await revealFailureDetails(row);
   await within(row).findByText(/Insertion failed/);
   removed = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
-  await waitFor(() =>
-    expect(within(row).getByRole("alert").textContent).toContain(
-      "No longer registered",
-    ),
-  );
+  await revealFailureDetails(row);
+  expect(within(row).getByText(/No longer registered/)).toBeTruthy();
   expect(picked).toHaveBeenCalledTimes(1);
   expect(
     within(row).queryByText(/remains in Drive and Existing files/i),
@@ -427,6 +430,7 @@ test("Drive failures retain their folder and operation; status checks precede re
   await screen.findByText(/Uploads go to Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await revealFailureDetails(row);
   await within(row).findByText(/Completion uncertain/);
   expect(picked).not.toHaveBeenCalled();
   expect(
@@ -438,6 +442,7 @@ test("Drive failures retain their folder and operation; status checks precede re
     .mocked(invoke)
     .mock.calls.find(([command]) => command === "upload_drive_file")?.[1];
   fireEvent.click(within(row).getByRole("button", { name: "Check status" }));
+  await revealFailureDetails(row);
   await within(row).findByText(/Not confirmed yet/);
   fail = false;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
@@ -528,6 +533,7 @@ test("explicit local fallback uses a new operation and retains the original Driv
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
   await screen.findByText(/Uploads go to Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  await revealFailureDetails();
   await screen.findByText(/Drive offline/);
   await waitFor(() =>
     expect(
@@ -602,6 +608,7 @@ test("explicit local fallback inserts at its original selection position", async
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
 
   const alpha = await screen.findByRole("listitem", { name: "alpha.txt" });
+  await revealFailureDetails(alpha);
   await within(alpha).findByText(/Drive offline for Alpha/);
   await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
   await waitFor(() =>
@@ -914,6 +921,7 @@ test("mixed batches insert successes in selection order and retry the original f
     .mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  await revealFailureDetails();
   await screen.findByText(/Disk full/);
   await waitFor(() => expect(picked.mock.calls).toHaveLength(2));
   expect(picked.mock.calls.map((call) => call[0])).toEqual([

@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -81,9 +82,8 @@ test("a link that cannot open says so", async () => {
   vi.mocked(workspaceClient.openLink).mockRejectedValue("no browser");
   renderPage();
   fireEvent.click(screen.getByRole("link", { name: /^Documentation/ }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't open the documentation. No browser.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("no browser");
 });
 
 test("the issue row asks for the version", () => {

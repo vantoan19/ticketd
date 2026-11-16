@@ -156,7 +156,9 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   await autosave();
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   expect(screen.getByRole("heading", { name: "Xin chào" })).toBeTruthy();
-  expect(screen.getByRole("alert").textContent).toContain("Disk full");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The result couldn't be confirmed",
+  );
   expect(screen.getByRole("img", { name: "Done" })).toBeTruthy();
   rerender(
     <TicketEditor

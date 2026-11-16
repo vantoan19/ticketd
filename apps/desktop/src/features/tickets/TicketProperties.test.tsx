@@ -55,7 +55,7 @@ test("keeps the saved project and reports a failed change", async () => {
   });
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain(
-      "Database busy; retry",
+      "The result couldn't be confirmed",
     ),
   );
   await waitFor(() =>

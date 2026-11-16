@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -152,7 +153,8 @@ test("quarantine separates restore from confirmed purge and keeps failures actio
   });
   await waitFor(() => expect(confirm).toHaveProperty("disabled", false));
   fireEvent.click(confirm);
-  expect(await screen.findByRole("alert")).toHaveProperty(
+  await revealFailureDetails();
+  expect(screen.getByRole("alert")).toHaveProperty(
     "textContent",
     expect.stringContaining("newly retained draft"),
   );

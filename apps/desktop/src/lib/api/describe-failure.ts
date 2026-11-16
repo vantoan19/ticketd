@@ -94,7 +94,10 @@ function plainCause(code: FailureCode, message: string): string {
     case "cycle":
       return `${sentence(message)} Choose another ticket.`;
     default:
-      return sentence(message) || "Something went wrong.";
+      // An unclassified host message can contain paths, diagnostics or secrets.
+      // The write may have committed before its reply failed, so make no
+      // claim that nothing changed; the action-specific title names the request.
+      return "The result couldn't be confirmed. Try again, or open Details for more information.";
   }
 }
 

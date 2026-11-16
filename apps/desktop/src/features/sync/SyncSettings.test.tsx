@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -123,8 +124,9 @@ test("a failed sign-in is reported and leaves the card as it was", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Connect Google Drive" }),
   );
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't connect Google Drive. Sign-in was cancelled.",
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "sign-in was cancelled",
   );
   expect(
     screen.getByRole("button", { name: "Connect Google Drive" }),
@@ -481,8 +483,9 @@ test("the setup choice has a way back, also when Drive cannot be read", async ()
   api.setupOptions.mockRejectedValue(new Error("Drive did not answer"));
   api.disconnect.mockResolvedValue(notConnected());
   show();
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't read your Drive. Drive did not answer.",
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Drive did not answer",
   );
   fireEvent.click(screen.getByRole("button", { name: "Use another account…" }));
   // Nothing is disconnected until the person confirms.

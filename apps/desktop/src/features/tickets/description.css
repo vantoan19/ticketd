@@ -7,6 +7,18 @@
   margin-top: 4px;
   min-width: 0;
 }
+/* A normal local Ticket has no duplicate timestamp row. Save feedback uses
+   the existing description gap, so a save never pushes the prose down. */
+.ticket-state-row[data-floating] {
+  position: relative;
+  height: 0;
+  margin-top: 0;
+}
+.ticket-state-row[data-floating] .editor-save-state {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 0;
+}
 .ticket-state-text {
   display: flex;
   flex: 1 1 auto;
@@ -62,7 +74,7 @@
 .ticket-detail[data-expanded]
   .editor-body
   .markdown-editor[data-chrome="floating"] {
-  margin-top: 8px;
+  margin-top: -4px;
   margin-bottom: 0;
 }
 /* The followed passage flashes once, as any arrival does (detA TT-04). */
@@ -116,7 +128,7 @@
 
 /* The reading card sits 12px outside the text on every side (frame A/B); the
    margins cancel the padding so the text does not move. Beside the list the
-   text sits 24px under the state row; expanded it sits 36px under it. */
+   text sits 24px under the preceding strip or source state row at either width. */
 .description-reading .description-document {
   margin: -4px -12px -12px;
   padding: 12px;
@@ -124,7 +136,7 @@
   border-radius: var(--radius);
 }
 .ticket-detail[data-expanded] .description-reading .description-document {
-  margin-top: 8px;
+  margin-top: -4px;
   margin-bottom: 0;
 }
 .ticket-detail[data-expanded] .subtickets {

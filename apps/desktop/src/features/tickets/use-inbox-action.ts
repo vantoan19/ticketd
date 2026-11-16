@@ -41,6 +41,7 @@ export function useInboxAction(
         line.show({
           tone: "error",
           message: `${failure.title}. ${failure.sentence}`,
+          details: failure.details,
           action: { label: "Retry", run: retry },
         });
       } finally {

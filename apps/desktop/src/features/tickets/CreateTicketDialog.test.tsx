@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { useRef, useState } from "react";
 import {
@@ -165,9 +166,8 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   );
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  await waitFor(() =>
-    expect(screen.getByRole("alert").textContent).toContain("Disk full"),
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("Disk full");
   expect(create).toHaveBeenCalledWith(
     "Draft ticket",
     "# Draft\n\n- [ ] Keep this",

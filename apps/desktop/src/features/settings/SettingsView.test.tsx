@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -214,7 +215,8 @@ test("a workspace that cannot be read shows an error instead of counts", async (
       onOpenInbox={() => {}}
     />,
   );
-  expect((await screen.findByRole("alert")).textContent).toContain("Locked.");
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("locked");
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 

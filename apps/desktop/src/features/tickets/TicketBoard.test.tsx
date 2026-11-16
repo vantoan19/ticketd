@@ -539,7 +539,7 @@ test("drag respects external destinations and revalidates source changes made du
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   expect(screen.getByRole("alert").textContent).toContain(
-    "This status is no longer available",
+    "The result couldn't be confirmed",
   );
 });
 
@@ -684,7 +684,9 @@ test("a failed save keeps its saved column and retries with the same request ide
   movePointer(1200);
   releasePointer(1200);
   await settle();
-  expect(screen.getByRole("alert").textContent).toContain("Database busy");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The result couldn't be confirmed",
+  );
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
       "button",
@@ -865,7 +867,9 @@ test("a failed pre-save read offers a working retry without writing stale card d
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "Done");
-  expect(screen.getByRole("alert").textContent).toContain("Read unavailable");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The result couldn't be confirmed",
+  );
   expect(
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
@@ -941,7 +945,7 @@ test("a lost duplicate review response reconciles its saved placement before ret
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
   await settle();
-  expect(screen.getByText(/Duplicate response lost\./)).toBeTruthy();
+  expect(screen.getByText(/The result couldn't be confirmed/)).toBeTruthy();
   const todo = screen.getByRole("region", {
     name: "Todo column",
     hidden: true,
