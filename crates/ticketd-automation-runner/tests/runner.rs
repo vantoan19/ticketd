@@ -18,7 +18,10 @@ use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
     ChatLinkKind, ChatListFilter, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
-    sync::remote::{FakeRemote, RemoteStorage},
+    sync::{
+        AttachmentDownload,
+        remote::{FakeRemote, RemoteStorage},
+    },
 };
 
 const TAG: &str = "ready-for-triage";
@@ -1498,19 +1501,32 @@ fn interrupted(f: &Fixture) -> bool {
 /// Workspace sync, which ends no run by itself.
 #[allow(clippy::unwrap_used)]
 fn deleted_on_another_desktop(f: &Fixture) {
-    const FOLDER: &str = "workspace";
     let remote = FakeRemote::new();
-    remote.ensure_folder(FOLDER, "Test").unwrap();
-    let mut here = f.core();
-    here.sync(&remote, FOLDER, "Here").unwrap();
-    let mut there = Workspace::open(f._dir.path().join("there.sqlite3")).unwrap();
+    let signed_in = |mut workspace: Workspace, name: &str| {
+        workspace
+            .set_sync_settings(name, 60, AttachmentDownload::Automatic)
+            .unwrap();
+        workspace
+            .sync_connect("connection-1", "person@example.com")
+            .unwrap();
+        workspace
+    };
+    let mut here = signed_in(f.core(), "Here");
+    here.sync_upload_workspace(&remote, "Test").unwrap();
+    let folder = remote.folders().unwrap()[0].id.clone();
+    let there = signed_in(
+        Workspace::open(f._dir.path().join("there.sqlite3")).unwrap(),
+        "There",
+    );
+    let (mut there, _) = there.sync_download_workspace(&remote, &folder).unwrap();
     while there.device_code().unwrap() == here.device_code().unwrap() {
         there.renew_device_code().unwrap();
     }
-    there.sync(&remote, FOLDER, "There").unwrap();
+    here.sync_now(&remote).unwrap();
+    there.sync_now(&remote).unwrap();
     there.delete_automation(&f.automation.id).unwrap();
-    there.sync(&remote, FOLDER, "There").unwrap();
-    here.sync(&remote, FOLDER, "Here").unwrap();
+    there.sync_now(&remote).unwrap();
+    here.sync_now(&remote).unwrap();
     assert_eq!(here.automations().unwrap(), []);
 }
 
