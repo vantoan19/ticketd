@@ -14,9 +14,6 @@ use crate::{Error, Status, Workspace};
 /// converts older records when it reads them.
 const SCHEMA_VERSION: u32 = 1;
 
-/// Why a run ended when its Automation was deleted.
-const DELETED: &str = "You deleted this Automation.";
-
 /// The longest name an Automation may have, in characters. The Rename dialog
 /// (`AutomationEditor.tsx`) stops at the same length.
 pub const AUTOMATION_NAME_LIMIT: usize = 120;
@@ -880,10 +877,10 @@ impl Workspace {
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],
         )?;
-        let chats = crate::automation_background::end_active_runs(&transaction, id, DELETED)?;
-        transaction.execute(
-            "UPDATE automation_runs SET attention_cleared = 1 WHERE automation_id = ?1 AND reason = ?2",
-            params![id, DELETED],
+        let chats = crate::automation_background::end_active_runs(
+            &transaction,
+            id,
+            crate::automation_endings::Cause::Deleted,
         )?;
         transaction.commit()?;
         Ok(chats)

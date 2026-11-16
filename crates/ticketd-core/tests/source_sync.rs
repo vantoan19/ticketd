@@ -2395,3 +2395,201 @@ fn a_change_a_refresh_brings_in_starts_an_automation_narrowed_to_that_source() {
     assert_eq!(started(&from_fake), [f.ticket(1).id]);
     assert_eq!(started(&from_local), [local.id]);
 }
+
+/// Ready and Blocked are one rule, whichever read asks: the ticket detail, the
+/// availability filter, the sidebar count, the dependency graph and the duplicate review.
+#[test]
+fn ready_and_blocked_agree_on_every_read() {
+    use ticketd_core::{Availability, DependencyChoice, DependencyDecision, Readiness, ReviewMode};
+    struct Case {
+        name: &'static str,
+        status: Status,
+        trashed: bool,
+        held: bool,
+        blocker: Option<Status>,
+        expected: Option<&'static str>,
+    }
+    let todo = |name, blocker, expected| Case {
+        name,
+        status: Status::Todo,
+        trashed: false,
+        held: false,
+        blocker,
+        expected,
+    };
+    let cases = [
+        todo("ready", None, Some("Ready")),
+        todo("a Done blocker", Some(Status::Done), Some("Ready")),
+        todo("an open blocker", Some(Status::Todo), Some("Blocked")),
+        todo(
+            "a started blocker",
+            Some(Status::InProgress),
+            Some("Blocked"),
+        ),
+        todo(
+            "an In review blocker",
+            Some(Status::InReview),
+            Some("Blocked"),
+        ),
+        todo(
+            "a Canceled blocker",
+            Some(Status::Canceled),
+            Some("Blocked"),
+        ),
+        todo(
+            "a Duplicate blocker",
+            Some(Status::Duplicate),
+            Some("Blocked"),
+        ),
+        Case {
+            name: "in Trash",
+            trashed: true,
+            ..todo("", Some(Status::Todo), None)
+        },
+        Case {
+            name: "started",
+            status: Status::InProgress,
+            ..todo("", None, None)
+        },
+        Case {
+            name: "held",
+            held: true,
+            ..todo("", None, None)
+        },
+        Case {
+            name: "held with an open blocker",
+            held: true,
+            ..todo("", Some(Status::Todo), None)
+        },
+    ];
+    let label = |readiness: Readiness| match readiness {
+        Readiness::Ready => Some("Ready"),
+        Readiness::Blocked => Some("Blocked"),
+        Readiness::NoReadyState => None,
+    };
+
+    for case in cases {
+        let mut f = Fixture::new();
+        let name = case.name;
+        let set_status = |f: &mut Fixture, reference: &str, status: Status| {
+            let patch = TicketPatch {
+                status: Some(status),
+                ..Default::default()
+            };
+            f.workspace.change_ticket(reference, patch).unwrap();
+        };
+        // The ticket under judgment, then a canonical ticket, a duplicate whose review moves
+        // its dependencies away, and the ticket's blocker.
+        let subject = if case.held {
+            f.publish(issue(1, "Held"), true);
+            f.refresh();
+            f.ticket(1).reference
+        } else {
+            f.workspace.create_ticket("Subject").unwrap().reference
+        };
+        let canonical = f.workspace.create_ticket("Canonical").unwrap().reference;
+        let duplicate = f.workspace.create_ticket("Duplicate").unwrap().reference;
+        f.workspace
+            .add_dependency(&duplicate, &subject, None)
+            .unwrap();
+        if let Some(status) = case.blocker {
+            let blocker = f.workspace.create_ticket("Blocker").unwrap().reference;
+            f.workspace
+                .add_dependency(&blocker, &subject, None)
+                .unwrap();
+            if status == Status::Duplicate {
+                // It already blocks the subject, so retaining that edge is a reviewed choice.
+                let review = f
+                    .workspace
+                    .preview_duplicate_dependencies(&blocker, &canonical)
+                    .unwrap();
+                let retain: Vec<_> = review
+                    .edges
+                    .iter()
+                    .map(|edge| DependencyDecision {
+                        edge: edge.clone(),
+                        choice: DependencyChoice::Retain,
+                    })
+                    .collect();
+                f.workspace
+                    .mark_duplicate_reviewed(&blocker, &canonical, &review.canonical, retain, None)
+                    .unwrap();
+            } else if status != Status::Todo {
+                set_status(&mut f, &blocker, status);
+            }
+        }
+        if case.status != Status::Todo {
+            set_status(&mut f, &subject, case.status);
+        }
+        if case.trashed {
+            f.workspace.set_trashed(&subject, true, None).unwrap();
+        }
+        if case.held {
+            f.set_state(1, closed(ClosureReason::Unknown));
+            f.refresh();
+        }
+
+        // The duplicate review judges the subject as if the duplicate no longer blocked it.
+        let preview = f
+            .workspace
+            .preview_duplicate_dependencies(&duplicate, &canonical)
+            .unwrap();
+        let decisions: Vec<_> = preview
+            .edges
+            .iter()
+            .map(|edge| DependencyDecision {
+                edge: edge.clone(),
+                choice: if edge.dependent == subject {
+                    DependencyChoice::Remove
+                } else {
+                    DependencyChoice::Retain
+                },
+            })
+            .collect();
+        let outcomes = f
+            .workspace
+            .evaluate_dependency_review(&duplicate, &canonical, ReviewMode::Duplicate, &decisions)
+            .unwrap();
+        let outcome = outcomes.iter().find(|o| o.ticket == subject).unwrap();
+        assert_eq!(label(outcome.after), case.expected, "review, {name}");
+
+        // Every other read sees the duplicate still blocking, so settle it first.
+        f.workspace
+            .remove_dependency(&duplicate, &subject, None)
+            .unwrap();
+        let detail = f.workspace.show_ticket(&subject).unwrap();
+        assert_eq!(
+            detail.availability.as_deref(),
+            case.expected,
+            "detail, {name}"
+        );
+
+        let graph = f.workspace.dependency_graph(&subject).unwrap();
+        let node = graph.nodes.iter().find(|n| n.reference == subject).unwrap();
+        assert_eq!(node.availability.as_deref(), case.expected, "graph, {name}");
+
+        let listed = |availability| {
+            let filter = TicketFilter {
+                availability: Some(availability),
+                ..Default::default()
+            };
+            let found = f.workspace.find_tickets(&filter).unwrap();
+            (found.len(), found.iter().any(|t| t.reference == subject))
+        };
+        let (ready_len, ready_listed) = listed(Availability::Ready);
+        let (_, blocked_listed) = listed(Availability::Blocked);
+        assert_eq!(
+            ready_listed,
+            case.expected == Some("Ready"),
+            "Ready list, {name}"
+        );
+        assert_eq!(
+            blocked_listed,
+            case.expected == Some("Blocked"),
+            "Blocked list, {name}"
+        );
+        // The sidebar counts exactly the Ready list: held and trashed tickets stay out.
+        let counts = f.workspace.sidebar_counts().unwrap();
+        assert_eq!(counts.ready as usize, ready_len, "Ready count, {name}");
+    }
+}

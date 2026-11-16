@@ -239,6 +239,12 @@ fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_s
 async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_chats() {
     let f = Fixture::new().await;
     let mut core = f.core();
+    let agent = core
+        .create_automation_agent(ticketd_core::AutomationAgentSettings {
+            harness: ticketd_core::AgentHarness::Codex,
+            ..Default::default()
+        })
+        .unwrap();
     let automation = core
         .create_automation(ticketd_core::AutomationDefinition {
             name: "Tidy".into(),
@@ -246,9 +252,9 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
             conditions: Vec::new(),
             steps: vec![ticketd_core::Step {
                 id: "agent".into(),
-                action: ticketd_core::StepAction::Notify {
-                    text: "Done".into(),
-                    opens: ticketd_core::NotifyTarget::Run,
+                action: ticketd_core::StepAction::RunAgent {
+                    agent_id: Some(agent.id),
+                    execution_folder: Some(f.dir.path().to_string_lossy().into_owned()),
                     on_failure: None,
                 },
             }],
@@ -262,23 +268,14 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
     );
 
     core.start_automation_runs(1).unwrap();
-    core.advance_automation_run(&queued.id, None).unwrap();
-    assert_eq!(f.chats.stopping(), Stopping { chats: 0, runs: 1 });
-
     // The run's agent working in its own Chat is still one run, not a Chat too.
-    let run_chat = core
-        .create_automation_run_chat(
-            &queued.id,
-            "agent",
-            NewChat {
-                title: None,
-                harness: "codex".into(),
-                execution_folder: f.dir.path().to_string_lossy().into_owned(),
-                folder_managed: false,
-                links: Vec::new(),
-            },
-        )
-        .unwrap();
+    let ticketd_core::RunAction::RunAgent(start) =
+        core.advance_automation_run(&queued.id, None).unwrap()
+    else {
+        panic!("the run begins with its agent");
+    };
+    let run_chat_id = start.chat_id;
+    assert_eq!(f.chats.stopping(), Stopping { chats: 0, runs: 1 });
     let host = f.chats.automation_host().unwrap();
     let run_id = queued.id.clone();
     tokio::spawn(async move {
@@ -289,7 +286,7 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
             turn_limit: 5,
         };
         let _ = host
-            .run_unattended(&run_chat.id, "go", unattended, Duration::from_secs(600))
+            .run_unattended(&run_chat_id, "go", unattended, Duration::from_secs(600))
             .await;
     });
     settle().await;
