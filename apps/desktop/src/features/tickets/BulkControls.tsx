@@ -159,6 +159,7 @@ export function BulkControls({
           )}
           <IconButton
             label="Clear selection"
+            size="icon-compact"
             shortcut="Esc"
             autoFocus={!failure.retryable}
             onClick={bulk.clearSelection}
@@ -374,6 +375,30 @@ export function BulkControls({
                     Select all {total} matching
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() =>
+                    organize(
+                      { project_id: null },
+                      `Removed ${tickets(count)} from their project`,
+                    )
+                  }
+                >
+                  <Folder aria-hidden="true" />
+                  No project
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() =>
+                    organize(
+                      { plan_id: null },
+                      `Removed ${tickets(count)} from their Plan`,
+                    )
+                  }
+                >
+                  <Layers aria-hidden="true" />
+                  Remove from Plan
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={bulk.clearSelection}>
                   Clear selection
                 </DropdownMenuItem>
@@ -381,6 +406,7 @@ export function BulkControls({
             </DropdownMenu>
             <IconButton
               label="Clear selection"
+              size="icon-compact"
               shortcut="Esc"
               aria-keyshortcuts="Escape"
               disabled={pending}

@@ -9315,6 +9315,11 @@ test("bulk selection exposes Status, Project, Plan, Tags and More directly", asy
     "Clear selection",
   ])
     expect(within(bar).getByRole("button", { name })).toBeTruthy();
+  openMenu("More selected ticket actions");
+  expect(screen.getByRole("menuitem", { name: "No project" })).toBeTruthy();
+  expect(
+    screen.getByRole("menuitem", { name: "Remove from Plan" }),
+  ).toBeTruthy();
 });
 
 test("workspace failure defers the band while editing, recovers through its header notice and retains a vacated slot until navigation", async () => {

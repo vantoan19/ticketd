@@ -330,7 +330,7 @@
     padding-inline: 0 4px;
   }
   .bulk-bar > button {
-    width: 28px;
+    width: var(--header-control-height);
     padding-inline: 0;
   }
 }
