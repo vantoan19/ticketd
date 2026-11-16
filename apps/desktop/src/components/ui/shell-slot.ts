@@ -7,7 +7,11 @@ import { createContext, use, type ReactNode } from "react";
  * The shell owns both; headers only place them (ShellLeading in
  * list-header.tsx), so nothing is inserted above a pane.
  */
-export type ShellSlot = { nav: ReactNode; crumb: ReactNode };
+export type ShellSlot = {
+  nav: ReactNode;
+  crumb: ReactNode;
+  notice?: ReactNode;
+};
 
 export const ShellSlotContext = createContext<ShellSlot>({
   nav: null,

@@ -81,7 +81,10 @@ import {
   useDraftRecoveryNotices,
 } from "@/lib/draft-recovery-context";
 import { useStatusLine } from "@/components/ui/use-status-line";
+import { WorkspaceNotice } from "./WorkspaceNotice";
+import { useBandContinuity } from "./use-band-continuity";
 import { WorkspaceBand } from "./WorkspaceBand";
+import { workspaceMessages } from "./workspace-messages";
 import {
   clearWorkspaceFailure,
   getWorkspaceFailure,
@@ -525,6 +528,59 @@ function AppContent() {
     setView("automations");
   };
   useAutomationNotifications(chat.enabled, openNotifiedTicket, openRun);
+  const hasWorkspaceBand = Boolean(workspaceProblem || recoveryNotices);
+  const bandReserved = useBandContinuity(
+    hasWorkspaceBand,
+    contentPanel,
+    JSON.stringify([
+      view,
+      workspace.selected,
+      settingsSection,
+      graphOrigin,
+      navigation,
+    ]),
+  );
+  const workspaceRetry = useRef<Promise<void> | null>(null);
+  const retryWorkspace = () => {
+    if (workspaceRetry.current) return workspaceRetry.current;
+    const failed = getWorkspaceFailure();
+    const attempt = (async () => {
+      await recovery.flush();
+      // sidebar_counts delivers due reminders in a write transaction: reads alone cannot prove recovery.
+      setCounts(await countsClient.sidebar());
+      clearWorkspaceFailure(failed);
+      await refresh({ reportFailure: true });
+    })();
+    workspaceRetry.current = attempt;
+    void attempt
+      .finally(() => {
+        if (workspaceRetry.current === attempt) workspaceRetry.current = null;
+      })
+      .catch(() => {});
+    return attempt;
+  };
+  const workspaceBand = workspaceProblem ? (
+    <WorkspaceBand onRetry={retryWorkspace} />
+  ) : (
+    recoveryNotices
+  );
+  const deferredWorkspaceLabel =
+    !bandReserved && hasWorkspaceBand
+      ? workspaceProblem
+        ? workspaceMessages[workspaceProblem.problem]
+        : "Legacy drafts need review. Files stay protected."
+      : null;
+  const showWorkspaceNotice = () => {
+    const triggers = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        "[data-workspace-notice]",
+      ),
+    ];
+    (
+      triggers.find((trigger) => trigger.getClientRects().length > 0) ??
+      triggers.find((trigger) => !trigger.closest("[hidden]"))
+    )?.click();
+  };
   return (
     // Runs open in the Automations page, which is there only while Chat is on.
     // Without it a run's Inbox entry opens its ticket instead.
@@ -784,6 +840,14 @@ function AppContent() {
                           onOpenChange={setPaletteOpen}
                           go={goTo}
                           chatsEnabled={chat.enabled}
+                          workspaceNotice={
+                            deferredWorkspaceLabel
+                              ? {
+                                  label: "Review workspace notice",
+                                  run: showWorkspaceNotice,
+                                }
+                              : null
+                          }
                           ticket={(reference) => {
                             setSelected(reference);
                             setView("tickets");
@@ -842,24 +906,28 @@ function AppContent() {
                           ref={setContentPanel}
                         >
                           <OverlayBoundary element={contentPanel}>
-                            <WorkspaceBand
-                              onRetry={async () => {
-                                const failed = getWorkspaceFailure();
-                                await recovery.flush();
-                                // sidebar_counts delivers due reminders in a write
-                                // transaction, so success proves access even with
-                                // no queued drafts. Pure reads cannot prove this.
-                                setCounts(await countsClient.sidebar());
-                                clearWorkspaceFailure(failed);
-                                await refresh({ reportFailure: true });
-                              }}
-                            />
-                            {/* At most one band: a workspace failure outranks
-                              the legacy-draft review. */}
-                            {!workspaceProblem && recoveryNotices}
+                            {bandReserved && (
+                              <div className="workspace-band-slot">
+                                {workspaceBand}
+                              </div>
+                            )}
+                            {deferredWorkspaceLabel && (
+                              <span role="status" className="sr-only">
+                                {deferredWorkspaceLabel}
+                              </span>
+                            )}
                             {/* Views without a pane of their own post here. */}
                             <StatusLineRegion>
                               <ShellSlotProvider
+                                notice={
+                                  deferredWorkspaceLabel ? (
+                                    <WorkspaceNotice
+                                      label={deferredWorkspaceLabel}
+                                    >
+                                      {workspaceBand}
+                                    </WorkspaceNotice>
+                                  ) : null
+                                }
                                 nav={
                                   isMobile &&
                                   view !== "settings" && (

@@ -238,3 +238,15 @@
 .detail-connected:not(:has(> :not([hidden]))) {
   display: none;
 }
+
+.ticket-agent-header-short {
+  display: none;
+}
+@container ticket-detail (max-width: 600px) {
+  .ticket-agent-header-long {
+    display: none;
+  }
+  .ticket-agent-header-short {
+    display: inline;
+  }
+}

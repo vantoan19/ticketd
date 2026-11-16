@@ -256,10 +256,10 @@
 }
 .bulk-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
-  min-height: 40px;
+  height: 40px;
   padding: 0 4px 0 12px;
   white-space: normal;
 }
@@ -316,15 +316,13 @@
   padding: 24px 20px;
 }
 
-@container (max-width: 480px) {
-  .bulk-bar {
-    justify-content: center;
+@container (max-width: 600px) {
+  .bulk-bar .bulk-control-label,
+  .bulk-bar .bulk-control-chevron {
+    display: none;
   }
-  .bulk-bar > .bulk-count,
-  .bulk-controls [data-slot="alert"] > .bulk-count {
-    width: 100%;
-    text-align: center;
-    padding-block: 4px;
+  .bulk-bar > .bulk-count {
+    padding-inline: 0 4px;
   }
 }
 
