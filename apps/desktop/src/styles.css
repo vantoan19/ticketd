@@ -741,7 +741,7 @@
   animation: palette-scrim var(--dur-2) var(--ease-out);
 }
 .ui-overlay[data-slot="dialog-overlay"][data-state="closed"] {
-  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 /* Design frame D shows nothing of the empty detail behind a modal scrim. */
 body:has([data-slot="dialog-overlay"])
@@ -756,10 +756,29 @@ body:has([data-slot="dialog-overlay"])
   animation: palette-enter var(--dur-4) var(--ease-out);
 }
 .ui-dialog[data-state="closed"] {
-  animation: palette-enter var(--dur-exit) var(--ease-in) reverse;
+  animation: dialog-leave var(--dur-exit) var(--ease-in);
 }
 .ui-sheet[data-state="open"] {
   animation: overlay-enter var(--dur-4) var(--ease-out);
+}
+/* Radix Presence waits for a changed animation name before unmounting. */
+@keyframes overlay-leave {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-leave {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
 }
 @keyframes overlay-enter {
   from {
@@ -2924,7 +2943,7 @@ kbd,
   animation: palette-enter var(--dur-3) var(--ease-out);
 }
 .ui-dialog[data-size="palette"][data-state="closed"] {
-  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 @keyframes palette-enter {
   from {
@@ -3009,7 +3028,7 @@ kbd,
   }
 }
 .ui-overlay:has(+ .ui-dialog[data-size="palette"][data-state="closed"]) {
-  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 
 [data-variant="palette"] [data-slot="command-shortcut"] {
