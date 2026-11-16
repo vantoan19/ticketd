@@ -123,10 +123,37 @@ export function TicketAgentSession({
   );
 }
 
-export function TicketAgentHeader() {
+export function TicketAgentHeader({ reference }: { reference: string }) {
+  const { requestChat } = useChatFeature();
   const agent = useContext(AgentContext);
-  if (!agent || agent.reserved || agent.chat?.status.rank !== "working")
-    return null;
+  if (!agent?.ready || agent.reserved || !agent.chat) return null;
+  const chat = agent.chat;
+  if (chat.status.rank === "approval")
+    return (
+      <Tooltip content="Review the request in Chat">
+        <Button
+          aria-label="Review request"
+          aria-description="Approval needed"
+          variant="ghost"
+          size="compact"
+          onClick={() =>
+            requestChat({
+              kind: "open",
+              chatId: chat.id,
+              retention: chat.retention,
+              from: reference,
+            })
+          }
+        >
+          <StatusDot tone="attention" size={6} />
+          <span className="ticket-agent-header-long">Approval needed</span>
+          <span className="ticket-agent-header-short" aria-hidden="true">
+            Review
+          </span>
+        </Button>
+      </Tooltip>
+    );
+  if (chat.status.rank !== "working") return null;
   return (
     <Badge variant="record">
       <HarnessMark

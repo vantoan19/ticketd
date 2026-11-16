@@ -68,6 +68,13 @@ export const SHORTCUTS = [
     label,
   })),
   {
+    id: "workspace-notice",
+    keys: [],
+    scope: "Everywhere",
+    label: "Review workspace notice",
+    note: "Available in the command palette while a workspace notice waits for a safe layout boundary.",
+  },
+  {
     id: "go-automations",
     keys: [],
     scope: "Everywhere",

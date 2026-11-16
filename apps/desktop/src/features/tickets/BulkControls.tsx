@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Folder, Layers, Tag, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Circle,
+  Folder,
+  Layers,
+  MoreHorizontal,
+  Tag,
+  X,
+} from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { IconButton } from "@/components/ui/icon-button";
@@ -9,9 +19,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BulkTagDialog } from "@/features/tickets/BulkTagDialog";
@@ -29,7 +36,7 @@ const tickets = (count: number) =>
 /**
  * The bulk action bar (S4): it floats 8px above the bottom of the list, on the
  * popover surface with the menu shadow, so the rows never move. "3 selected ·
- * Status · Organize · Select all 59 matching · ×". Its outcome takes the same
+ * Status · Project · Plan · Tags · More · ×". More holds selection actions. Its outcome takes the same
  * place in the pane's status line: "Set 3 tickets to Done", or the failure
  * with Retry; focus goes back to the list. Nothing shows at zero selected.
  */
@@ -165,40 +172,24 @@ export function BulkControls({
             <span className="bulk-count" aria-live="polite">
               {pending ? "Applying…" : `${count} selected`}
             </span>
-            {canSelectMore && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={pending}
-                onClick={() =>
-                  bulk.selectAll(visible.map((ticket) => ticket.reference))
-                }
-              >
-                Select all {visible.length}
-              </Button>
-            )}
-            {canSelectMatching && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={pending || selecting}
-                onClick={() => void selectMatching()}
-              >
-                Select all {total} matching
-              </Button>
-            )}
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={pending}
-                  aria-label="Status of selected tickets"
-                >
-                  Status
-                  <ChevronDown data-icon="inline-end" />
-                </Button>
-              </DropdownMenuTrigger>
+              <Tooltip content="Status of selected tickets">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    disabled={pending}
+                    aria-label="Status of selected tickets"
+                  >
+                    <Circle aria-hidden="true" />
+                    <span className="bulk-control-label">Status</span>
+                    <ChevronDown
+                      data-icon="inline-end"
+                      className="bulk-control-chevron"
+                    />
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
               <DropdownMenuContent align="start" side="top">
                 <DropdownMenuLabel>
                   Set status for {tickets(count)}
@@ -241,86 +232,105 @@ export function BulkControls({
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={pending}
-                  aria-label="Organize selected tickets"
-                >
-                  Organize
-                  <ChevronDown data-icon="inline-end" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top">
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
+              <Tooltip content="Project of selected tickets">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    disabled={pending}
+                    aria-label="Project of selected tickets"
+                  >
                     <Folder aria-hidden="true" />
-                    Move to project
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {projects.map((project) => (
-                      <DropdownMenuItem
-                        key={project.id}
-                        onSelect={() =>
-                          organize(
-                            { project_id: project.id },
-                            `Moved ${tickets(count)} to ${project.name}`,
-                          )
-                        }
-                      >
-                        {project.name}
-                      </DropdownMenuItem>
-                    ))}
-                    {projects.length > 0 && <DropdownMenuSeparator />}
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        organize(
-                          { project_id: null },
-                          `Removed ${tickets(count)} from their project`,
-                        )
-                      }
-                    >
-                      No project
-                    </DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
+                    <span className="bulk-control-label">Project</span>
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent align="start" side="top">
+                {projects.map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    onSelect={() =>
+                      organize(
+                        { project_id: project.id },
+                        `Moved ${tickets(count)} to ${project.name}`,
+                      )
+                    }
+                  >
+                    {project.name}
+                  </DropdownMenuItem>
+                ))}
+                {projects.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  onSelect={() =>
+                    organize(
+                      { project_id: null },
+                      `Removed ${tickets(count)} from their project`,
+                    )
+                  }
+                >
+                  No project
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <Tooltip content="Plan of selected tickets">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    disabled={pending}
+                    aria-label="Plan of selected tickets"
+                  >
                     <Layers aria-hidden="true" />
-                    Set Plan
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {activePlans.map((item) => (
-                      <DropdownMenuItem
-                        key={item.id}
-                        onSelect={() =>
-                          organize(
-                            { plan_id: item.id },
-                            `Added ${tickets(count)} to ${item.name}`,
-                          )
-                        }
-                      >
-                        {item.name}{" "}
-                        <span className="bulk-menu-count">
-                          {inPlan(item.id)} of {count}
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                    {activePlans.length > 0 && <DropdownMenuSeparator />}
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        organize(
-                          { plan_id: null },
-                          `Removed ${tickets(count)} from their Plan`,
-                        )
-                      }
-                    >
-                      Remove from Plan
-                    </DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                <DropdownMenuSeparator />
+                    <span className="bulk-control-label">Plan</span>
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent align="start" side="top">
+                {activePlans.map((item) => (
+                  <DropdownMenuItem
+                    key={item.id}
+                    onSelect={() =>
+                      organize(
+                        { plan_id: item.id },
+                        `Added ${tickets(count)} to ${item.name}`,
+                      )
+                    }
+                  >
+                    {item.name}{" "}
+                    <span className="bulk-menu-count">
+                      {inPlan(item.id)} of {count}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+                {activePlans.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  onSelect={() =>
+                    organize(
+                      { plan_id: null },
+                      `Removed ${tickets(count)} from their Plan`,
+                    )
+                  }
+                >
+                  Remove from Plan
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <Tooltip content="Tags of selected tickets">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    disabled={pending}
+                    aria-label="Tags of selected tickets"
+                  >
+                    <Tag aria-hidden="true" />
+                    <span className="bulk-control-label">Tags</span>
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent align="start" side="top">
                 <DropdownMenuItem onSelect={() => setTagMode("add")}>
                   <Tag aria-hidden="true" />
                   Add tag…
@@ -328,6 +338,44 @@ export function BulkControls({
                 <DropdownMenuItem onSelect={() => setTagMode("remove")}>
                   <X aria-hidden="true" />
                   Remove tag…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <Tooltip content="More selected ticket actions">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    disabled={pending}
+                    aria-label="More selected ticket actions"
+                  >
+                    <MoreHorizontal aria-hidden="true" />
+                    <span className="bulk-control-label">More</span>
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent align="end" side="top">
+                {canSelectMore && (
+                  <DropdownMenuItem
+                    disabled={pending}
+                    onSelect={() =>
+                      bulk.selectAll(visible.map((ticket) => ticket.reference))
+                    }
+                  >
+                    Select all {visible.length}
+                  </DropdownMenuItem>
+                )}
+                {canSelectMatching && (
+                  <DropdownMenuItem
+                    disabled={pending || selecting}
+                    onSelect={() => void selectMatching()}
+                  >
+                    Select all {total} matching
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={bulk.clearSelection}>
+                  Clear selection
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

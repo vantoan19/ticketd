@@ -28,9 +28,14 @@ const Collapsed = createContext(false);
 export function ShellSlotProvider({
   nav,
   crumb,
+  notice,
   children,
 }: ShellSlot & { children: ReactNode }) {
-  return <ShellSlotContext value={{ nav, crumb }}>{children}</ShellSlotContext>;
+  return (
+    <ShellSlotContext value={{ nav, crumb, notice }}>
+      {children}
+    </ShellSlotContext>
+  );
 }
 
 /**
@@ -118,6 +123,7 @@ export function PaneHeader({
   }, []);
   const Heading = titleLevel === 1 ? "h1" : "h2";
   const shell = useShellLeading();
+  const { notice } = useShellSlot();
   return (
     <Collapsed value={collapsed}>
       <header
@@ -167,7 +173,12 @@ export function PaneHeader({
           {count}
           {children}
         </span>
-        {actions && <span className="ui-pane-header-actions">{actions}</span>}
+        {(actions || notice !== undefined) && (
+          <span className="ui-pane-header-actions">
+            <ShellNoticeSlot />
+            {actions}
+          </span>
+        )}
       </header>
       {caption && <p className="ui-pane-header-caption">{caption}</p>}
     </Collapsed>
@@ -229,5 +240,13 @@ export function ReturnCrumb({
       </Button>
       <span aria-hidden="true">/</span>
     </span>
+  );
+}
+
+/** Kept in the header from its first frame, so failure controls cannot displace actions. */
+export function ShellNoticeSlot() {
+  const { notice } = useShellSlot();
+  return notice === undefined ? null : (
+    <span className="ui-shell-notice-slot">{notice}</span>
   );
 }

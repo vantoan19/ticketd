@@ -33,7 +33,8 @@ function PopoverContent({
   variant = "form",
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
-  variant?: "form" | "list" | "compact-list" | "constrained-list" | "bar";
+  variant?:
+    "form" | "workspace" | "list" | "compact-list" | "constrained-list" | "bar";
 }) {
   const boundary = useOverlayBoundary();
   return (
@@ -47,7 +48,7 @@ function PopoverContent({
         collisionBoundary={collisionBoundary ?? boundary}
         className={cn(
           "ui-popover z-50 origin-(--radix-popover-content-transform-origin) outline-hidden",
-          variant === "form" && "w-72 p-4",
+          (variant === "form" || variant === "workspace") && "w-72 p-4",
           className,
         )}
         {...props}

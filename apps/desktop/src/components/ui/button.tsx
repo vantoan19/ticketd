@@ -14,6 +14,7 @@ const buttonVariants = cva(
         property: "ui-button-property",
         secondary: "ui-button-secondary",
         ghost: "ui-button-ghost",
+        attention: "ui-button-ghost ui-button-attention",
         link: "ui-button-link",
         jump: "ui-button-jump",
         card: "ui-button-card",
