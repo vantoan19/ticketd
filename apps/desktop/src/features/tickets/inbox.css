@@ -16,13 +16,14 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding-bottom: 24px;
+  padding: 4px 0 64px;
   overflow-y: auto;
 }
 /* Attention groups use quiet headings above inset rows (S08). */
 .inbox section h2 {
   position: sticky;
-  top: 0;
+  /* Cancel the scroll container’s initial list inset at the sticky edge. */
+  top: -4px;
   z-index: 1;
   display: flex;
   align-items: center;
@@ -30,6 +31,10 @@
   gap: 8px;
   margin: 6px 8px 0;
   padding: 0 10px 0 12px;
+}
+.inbox section h2[data-stuck] {
+  margin-inline: 0;
+  padding-inline: 20px 18px;
 }
 .inbox section:first-of-type h2 {
   margin-top: 0;

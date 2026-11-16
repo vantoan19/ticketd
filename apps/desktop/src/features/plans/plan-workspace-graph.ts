@@ -31,6 +31,7 @@ type Continuation = {
   planOffset: number;
   memberOffset: number;
   workspaceCursor: string | null;
+  workspaceOffset: number;
   filterCursor: string | null;
 };
 const prefix = "plan-window:";
@@ -42,6 +43,7 @@ function continuation(cursor: string | null): Continuation {
       memberOffset: Number(values[1]) || 0,
       workspaceCursor: decodeURIComponent(values[2] ?? "") || null,
       filterCursor: decodeURIComponent(values[3] ?? "") || null,
+      workspaceOffset: Number(values[4]) || 0,
     };
   }
   return {
@@ -49,10 +51,11 @@ function continuation(cursor: string | null): Continuation {
     memberOffset: 0,
     workspaceCursor: cursor,
     filterCursor: null,
+    workspaceOffset: 0,
   };
 }
 function cursor(value: Continuation) {
-  return `${prefix}${value.planOffset}:${value.memberOffset}:${encodeURIComponent(value.workspaceCursor ?? "")}:${encodeURIComponent(value.filterCursor ?? "")}`;
+  return `${prefix}${value.planOffset}:${value.memberOffset}:${encodeURIComponent(value.workspaceCursor ?? "")}:${encodeURIComponent(value.filterCursor ?? "")}:${value.workspaceOffset}`;
 }
 async function planSource(id: string, limit: number, offset: number) {
   // The extra metadata row detects Document pagination without adding a DTO.
@@ -310,10 +313,19 @@ export async function workspacePlanIslands(
     ...page.omitted_groups,
     ...islands.flatMap((island) => island.omitted_groups),
   ]);
-  page.nodes.forEach((node) => {
-    if (nodes.size < NODE_LIMIT || nodes.has(node.id)) nodes.set(node.id, node);
-    else groups.add("Workspace node window");
-  });
+  // The backend cursor advances past a whole candidate page. Keep its raw
+  // position until every candidate fits; duplicates and island members still
+  // consume their page positions, even when they add no drawn identity.
+  let workspaceOffset = request.hydrate_only ? 0 : state.workspaceOffset;
+  while (workspaceOffset < page.nodes.length) {
+    const node = page.nodes[workspaceOffset]!;
+    if (nodes.size >= NODE_LIMIT && !nodes.has(node.id)) break;
+    nodes.set(node.id, node);
+    workspaceOffset++;
+  }
+  const moreCandidates =
+    !request.hydrate_only && workspaceOffset < page.nodes.length;
+  if (moreCandidates) groups.add("Workspace node window");
   const membership: Record<string, string[]> = {};
   const availability: Record<string, string | null> = {};
   for (const island of islands) {
@@ -422,28 +434,33 @@ export async function workspacePlanIslands(
   const next =
     matches?.nextCursor && plans.length
       ? cursor({ ...state, filterCursor: matches.nextCursor })
-      : moreMembers
-        ? cursor({
-            ...state,
-            memberOffset: state.memberOffset + limit,
-            filterCursor: null,
-            workspaceCursor: page.next_cursor,
-          })
-        : morePlans
+      : moreCandidates
+        ? cursor({ ...state, workspaceOffset })
+        : moreMembers
           ? cursor({
-              planOffset: state.planOffset + PLAN_WINDOW,
-              memberOffset: 0,
+              ...state,
+              memberOffset: state.memberOffset + limit,
               filterCursor: null,
               workspaceCursor: page.next_cursor,
+              workspaceOffset: 0,
             })
-          : page.next_cursor
+          : morePlans
             ? cursor({
-                planOffset: state.planOffset + plans.length,
+                planOffset: state.planOffset + PLAN_WINDOW,
                 memberOffset: 0,
                 filterCursor: null,
                 workspaceCursor: page.next_cursor,
+                workspaceOffset: 0,
               })
-            : null;
+            : page.next_cursor
+              ? cursor({
+                  planOffset: state.planOffset + plans.length,
+                  memberOffset: 0,
+                  filterCursor: null,
+                  workspaceCursor: page.next_cursor,
+                  workspaceOffset: 0,
+                })
+              : null;
   return {
     ...page,
     windowCursor: request.cursor,

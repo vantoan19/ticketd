@@ -237,7 +237,9 @@ export function PlanCard({
                 <CardCaption asChild>
                   <span className="plan-card-caption">
                     {complete
-                      ? "No Ready tickets"
+                      ? ready
+                        ? "Ready work has unavailable sources"
+                        : "No Ready tickets"
                       : failed
                         ? "Couldn't load next ticket"
                         : members

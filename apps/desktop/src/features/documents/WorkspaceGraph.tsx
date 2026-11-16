@@ -555,7 +555,10 @@ export function WorkspaceGraph({
         </>
       )}
       {graph.omitted_groups.includes("Workspace node window") && (
-        <> · Some items are outside the 250-item window</>
+        <>
+          {" "}
+          · Some items are outside the 250-item window; Load more shows the rest
+        </>
       )}
       {graph.omitted_groups.some(
         (group) =>
