@@ -82,6 +82,25 @@ export function useTicketWorkspace(
   // A failed refresh after a list was shown keeps that list rather than blanking it.
   const [refreshFailed, setRefreshFailed] = useState(false);
   const listLoaded = useRef(false);
+  const [listKnown, setListKnown] = useState(false);
+  const [plansKnown, setPlansKnown] = useState(false);
+  const [plansFailure, setPlansFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  const plansGeneration = useRef(0);
+  const refreshPlans = useCallback(async () => {
+    const request = ++plansGeneration.current;
+    try {
+      const items = await client.listPlans();
+      if (request !== plansGeneration.current) return;
+      setPlans(items);
+      setPlansKnown(true);
+      setPlansFailure(null);
+    } catch (reason) {
+      if (request === plansGeneration.current)
+        setPlansFailure(describeFailure(reason, "load Plans"));
+    }
+  }, []);
   const lastSnapshot = useRef("");
   const [query, setQuery] = useState("");
   // How many pages of PAGE_SIZE the list shows: "Show 50 more" adds one
@@ -203,6 +222,7 @@ export function useTicketWorkspace(
   const refresh = useCallback(
     async (options?: RefreshOptions) => {
       const request = ++generation.current;
+      void refreshPlans();
       let timeout = 0;
       try {
         // A search lists newest first, like Trash; every other list is grouped by
@@ -225,7 +245,6 @@ export function useTicketWorkspace(
           Promise.all([
             trash ? client.listTrash() : readPages(filterArgs, pages),
             client.listProjects(),
-            client.listPlans(),
             trash ? Promise.resolve(null) : client.countTickets(filterArgs),
             // Source counts only decorate the filter, so they never fail the list.
             trash
@@ -245,6 +264,7 @@ export function useTicketWorkspace(
         ]);
         if (request !== generation.current) return;
         listLoaded.current = true;
+        setListKnown(true);
         setPollTick((value) => value + 1);
         setQueryError(false);
         setRefreshFailed(false);
@@ -254,11 +274,10 @@ export function useTicketWorkspace(
         if (snapshot === lastSnapshot.current) return;
         lastSnapshot.current = snapshot;
         setTickets(result[0]);
-        setCounts(result[3]);
-        setSourceCounts(result[4]);
-        setScopeTotal(result[5]?.total ?? null);
+        setCounts(result[2]);
+        setSourceCounts(result[3]);
+        setScopeTotal(result[4]?.total ?? null);
         setProjects(result[1]);
-        setPlans(result[2]);
         setRevision((value) => value + 1);
       } catch (reason) {
         if (request !== generation.current) return;
@@ -273,7 +292,16 @@ export function useTicketWorkspace(
         if (request === generation.current) setLoading(false);
       }
     },
-    [trash, pages, scopeKind, scopePlan, filterArgs, layout, refreshBoard],
+    [
+      trash,
+      pages,
+      scopeKind,
+      scopePlan,
+      filterArgs,
+      layout,
+      refreshBoard,
+      refreshPlans,
+    ],
   );
   useEffect(() => {
     let active = true;
@@ -547,6 +575,10 @@ export function useTicketWorkspace(
     refreshSources,
     projects,
     plans,
+    plansKnown,
+    plansFailure,
+    refreshPlans,
+    listKnown,
     filter,
     setFilter,
     query,

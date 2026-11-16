@@ -57,10 +57,12 @@ export function useAttachmentSearch(
     files: AttachmentSearchResult[];
     key: string | null;
     answered: { search: string; state: AttachmentState; limit: number };
+    known: boolean;
     error: FailureDescription | null;
   }>({
     files: [],
     key: null,
+    known: false,
     answered: { search, state, limit },
     error: null,
   });
@@ -77,16 +79,16 @@ export function useAttachmentSearch(
       })
       .then(
         (files) => {
-          if (current) setResult({ files, key, answered, error: null });
+          if (current)
+            setResult({ files, key, answered, known: true, error: null });
         },
         (reason: unknown) => {
           if (current)
-            setResult({
-              files: [],
+            setResult((previous) => ({
+              ...previous,
               key,
-              answered,
               error: describeFailure(reason, "load files"),
-            });
+            }));
         },
       );
     return () => {
@@ -95,6 +97,7 @@ export function useAttachmentSearch(
   }, [query, state, ticket, limit, key]);
   return {
     files: result.files,
+    known: result.known,
     error: result.error,
     answered: result.answered,
     loading: result.key === null,
