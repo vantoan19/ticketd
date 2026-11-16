@@ -10885,3 +10885,71 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     restore();
   }
 });
+
+test("Capture saves before its exit, retains the closing editor and reopens empty", async () => {
+  const user = userEvent.setup();
+  const { finishExit, restore } = dialogAnimationSignals();
+  let saved: {
+    id: string;
+    title: string | null;
+    body: string;
+    created_at: string;
+    updated_at: string;
+    trashed: boolean;
+  } | null = null;
+  try {
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "find_tickets") return [bulkTicket(1)];
+      if (command === "recent_documents")
+        return saved
+          ? [{ id: saved.id, heading: saved.title ?? "Captured thought" }]
+          : [];
+      if (command === "save_document") {
+        saved = {
+          id: "capture-presence",
+          title: (args as { title: string | null }).title,
+          body: (args as { body: string }).body,
+          created_at: "2026-11-01T00:00:00Z",
+          updated_at: "2026-11-01T00:00:00Z",
+          trashed: false,
+        };
+        return saved;
+      }
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /First/ });
+    await user.keyboard("{Control>}{Shift>}n{/Shift}{/Control}");
+    const dialog = await screen.findByRole("dialog", { name: "New Document" });
+    await user.click(
+      await within(dialog).findByRole("button", {
+        name: "Edit Markdown source",
+      }),
+    );
+    const source = within(dialog).getByRole("textbox", {
+      name: "Your thought source",
+    });
+    fireEvent.change(source, {
+      target: { value: "Retain this captured thought" },
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await vi.waitFor(() =>
+      expect(dialog.getAttribute("data-state")).toBe("closed"),
+    );
+    expect(dialog.isConnected).toBe(true);
+    expect(source).toHaveProperty("value", "Retain this captured thought");
+    expect(saved?.body).toBe("Retain this captured thought");
+    finishExit(dialog);
+    await vi.waitFor(() => expect(dialog.isConnected).toBe(false));
+    await user.keyboard("{Control>}{Shift>}n{/Shift}{/Control}");
+    const reopened = await screen.findByRole("dialog", {
+      name: "New Document",
+    });
+    const editor = await within(reopened).findByRole("textbox", {
+      name: "Your thought rich text",
+    });
+    expect(editor.textContent?.replaceAll("\ufeff", "")).toBe("");
+  } finally {
+    restore();
+  }
+});

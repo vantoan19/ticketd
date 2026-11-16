@@ -16,6 +16,7 @@ import {
   AlertDescription,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { CopyButton } from "@/components/ui/copy-button";
 import {
   Dialog,
@@ -921,6 +922,7 @@ export function AttachmentPreview({
   actions?: ReactNode;
 }) {
   const preview = usePreview(target);
+  const presence = useDialogPresence(onClose);
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const replacementRequest = useRef<AbortController | null>(null);
@@ -928,7 +930,7 @@ export function AttachmentPreview({
   useEffect(() => () => replacementRequest.current?.abort(), []);
   function close() {
     replacementRequest.current?.abort();
-    onClose();
+    presence.close();
   }
   const replace = onReplace
     ? () => {
@@ -965,12 +967,20 @@ export function AttachmentPreview({
     );
   return (
     <Dialog
-      open
+      open={presence.dialog.open}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
-      <DialogContent variant="flush" size="viewer" showCloseButton={false}>
+      <DialogContent
+        variant="flush"
+        size="viewer"
+        showCloseButton={false}
+        inert={!presence.dialog.open || undefined}
+        onCloseAutoFocus={() => {
+          if (!presence.dialog.open) presence.dialog.onExitComplete();
+        }}
+      >
         <div className="attachment-preview" data-layout="viewer">
           <PreviewHeader
             preview={preview}
