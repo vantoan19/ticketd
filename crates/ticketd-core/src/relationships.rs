@@ -1,7 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Status, Ticket, Workspace, history, write_scope};
+use crate::write_scope::{self, WriteScope};
+use crate::{Error, Status, Ticket, Workspace, history, ticket_change};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prerequisite {
@@ -155,41 +156,8 @@ impl Workspace {
         dependent: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        write_scope::run(&self.connection, |tx| {
-            let blocker_id = tx.even_if_trashed(blocker)?;
-            let dependent_id = tx.even_if_trashed(dependent)?;
-            tx.ensure_editable(&blocker_id)?;
-            tx.ensure_editable(&dependent_id)?;
-            let cycle = reaches(tx, &dependent_id, &blocker_id, None)?;
-            if blocker_id == dependent_id {
-                return Err(Error::DependencySelf(blocker.into()));
-            }
-            if cycle {
-                let path = chain(tx, &dependent_id, &blocker_id)?;
-                let between = path.get(1..path.len().saturating_sub(1)).unwrap_or(&[]);
-                let detail = if between.is_empty() {
-                    format!("{dependent} already blocks {blocker}.")
-                } else {
-                    format!(
-                        "{dependent} already reaches {blocker} through {}.",
-                        between.join(" → ")
-                    )
-                };
-                return Err(Error::DependencyCycle {
-                    blocker: blocker.into(),
-                    dependent: dependent.into(),
-                    detail,
-                });
-            }
-            let changed = tx.execute(
-                "INSERT OR IGNORE INTO dependencies (blocker_id, dependent_id) VALUES (?1, ?2)",
-                params![blocker_id, dependent_id],
-            )?;
-            if changed != 0 {
-                history::record(tx, &dependent_id, "dependency", "", blocker, agent)?;
-                history::record(tx, &blocker_id, "relationship:blocks", "", dependent, agent)?;
-            }
-            crate::read_ticket(tx, dependent)
+        ticket_change::commit(&self.connection, dependent, |tx| {
+            add_dependency(tx, blocker, dependent, agent)
         })
     }
     pub fn remove_dependency(
@@ -198,22 +166,75 @@ impl Workspace {
         dependent: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        write_scope::run(&self.connection, |tx| {
-            let blocker_id = tx.even_if_trashed(blocker)?;
-            let dependent_id = tx.even_if_trashed(dependent)?;
-            // Either visible endpoint may detach an edge to a trashed ticket.
-            tx.ensure_either_editable(&blocker_id, &dependent_id)?;
-            let changed = tx.execute(
-                "DELETE FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2",
-                params![blocker_id, dependent_id],
-            )?;
-            if changed != 0 {
-                history::record(tx, &dependent_id, "dependency", blocker, "", agent)?;
-                history::record(tx, &blocker_id, "relationship:blocks", dependent, "", agent)?;
-            }
-            crate::read_ticket(tx, dependent)
+        ticket_change::commit(&self.connection, dependent, |tx| {
+            remove_dependency(tx, blocker, dependent, agent)
         })
     }
+}
+
+/// Make `blocker` block `dependent`: both must be visible, and the edge must not close a
+/// cycle.
+pub(crate) fn add_dependency(
+    tx: &WriteScope<'_>,
+    blocker: &str,
+    dependent: &str,
+    agent: Option<&str>,
+) -> Result<(), Error> {
+    let blocker_id = tx.even_if_trashed(blocker)?;
+    let dependent_id = tx.even_if_trashed(dependent)?;
+    tx.ensure_editable(&blocker_id)?;
+    tx.ensure_editable(&dependent_id)?;
+    let cycle = reaches(tx, &dependent_id, &blocker_id, None)?;
+    if blocker_id == dependent_id {
+        return Err(Error::DependencySelf(blocker.into()));
+    }
+    if cycle {
+        let path = chain(tx, &dependent_id, &blocker_id)?;
+        let between = path.get(1..path.len().saturating_sub(1)).unwrap_or(&[]);
+        let detail = if between.is_empty() {
+            format!("{dependent} already blocks {blocker}.")
+        } else {
+            format!(
+                "{dependent} already reaches {blocker} through {}.",
+                between.join(" → ")
+            )
+        };
+        return Err(Error::DependencyCycle {
+            blocker: blocker.into(),
+            dependent: dependent.into(),
+            detail,
+        });
+    }
+    let changed = tx.execute(
+        "INSERT OR IGNORE INTO dependencies (blocker_id, dependent_id) VALUES (?1, ?2)",
+        params![blocker_id, dependent_id],
+    )?;
+    if changed != 0 {
+        history::record(tx, &dependent_id, "dependency", "", blocker, agent)?;
+        history::record(tx, &blocker_id, "relationship:blocks", "", dependent, agent)?;
+    }
+    Ok(())
+}
+
+/// Remove the edge. Either visible endpoint may detach an edge to a trashed ticket.
+pub(crate) fn remove_dependency(
+    tx: &WriteScope<'_>,
+    blocker: &str,
+    dependent: &str,
+    agent: Option<&str>,
+) -> Result<(), Error> {
+    let blocker_id = tx.even_if_trashed(blocker)?;
+    let dependent_id = tx.even_if_trashed(dependent)?;
+    tx.ensure_either_editable(&blocker_id, &dependent_id)?;
+    let changed = tx.execute(
+        "DELETE FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2",
+        params![blocker_id, dependent_id],
+    )?;
+    if changed != 0 {
+        history::record(tx, &dependent_id, "dependency", blocker, "", agent)?;
+        history::record(tx, &blocker_id, "relationship:blocks", dependent, "", agent)?;
+    }
+    Ok(())
 }
 
 /// Related is symmetric; Discovered points from the work to the discovered ticket.
