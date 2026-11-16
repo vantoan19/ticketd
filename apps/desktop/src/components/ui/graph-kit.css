@@ -216,6 +216,7 @@
 .ui-graph-node-line .ui-reference {
   color: var(--foreground);
   font-size: var(--text-caption);
+  font-weight: 500;
   line-height: var(--text-caption-line);
 }
 .ui-graph-node-icon {

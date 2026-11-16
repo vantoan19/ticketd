@@ -23,6 +23,7 @@ export function CopyButton({
   className,
   shortcutId,
   size = "icon-sm",
+  onMouseDown,
 }: {
   text: string;
   label: string;
@@ -36,6 +37,7 @@ export function CopyButton({
   /** The registered action, only for a copy that actually owns this key. */
   shortcutId?: ShortcutId;
   size?: ComponentProps<typeof IconButton>["size"];
+  onMouseDown?: ComponentProps<typeof IconButton>["onMouseDown"];
 }) {
   const { copied, error, copy } = useCopy();
   // The tooltip keeps the short label; the name tells rows apart.
@@ -45,6 +47,7 @@ export function CopyButton({
       <IconButton
         type="button"
         size={size}
+        onMouseDown={onMouseDown}
         label={copied ? "Copied" : error ? "Copy unavailable" : label}
         {...(shortcutId && {
           "aria-keyshortcuts": ariaKeyShortcuts(shortcutId),

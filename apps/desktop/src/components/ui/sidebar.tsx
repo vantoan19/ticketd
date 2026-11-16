@@ -60,6 +60,8 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
+  // The sheet is one narrow-screen visit; expanding must not reopen it later.
+  if (!isMobile && openMobile) setOpenMobile(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.

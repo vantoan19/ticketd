@@ -5,6 +5,19 @@ import remarkGfm from "remark-gfm";
 import { TextApi, type Descendant, type TElement, type Value } from "platejs";
 import type { Root, RootContent, PhrasingContent } from "mdast";
 
+/** The current fence source, joining Plate code lines without losing line breaks. */
+export function codeBlockText(node: TElement): string {
+  return node.children
+    .map((child) =>
+      TextApi.isText(child)
+        ? child.text
+        : child.children
+            .map((leaf) => (TextApi.isText(leaf) ? leaf.text : ""))
+            .join(""),
+    )
+    .join("\n");
+}
+
 const stringifyOptions = {
   bullet: "-",
   fences: true,
@@ -359,15 +372,7 @@ function block(node: TElement, diagrams: string[]): RootContent {
       return {
         type: "code",
         lang: String(node.lang ?? "") || null,
-        value: node.children
-          .map((child) =>
-            TextApi.isText(child)
-              ? child.text
-              : child.children
-                  .map((leaf) => (TextApi.isText(leaf) ? leaf.text : ""))
-                  .join(""),
-          )
-          .join("\n"),
+        value: codeBlockText(node),
       };
     case "mermaid": {
       const index = diagrams.push(String(node.source ?? "")) - 1;
