@@ -198,30 +198,7 @@ impl Workspace {
         run_id: &str,
         outcome: Option<StepOutcome>,
     ) -> Result<RunAction, Error> {
-        self.connection
-            .execute_batch("SAVEPOINT advance_automation_run")?;
-        let advanced = crate::transaction_write_lock(&self.connection)
-            .and_then(|()| self.advance_inside(run_id, outcome));
-        match advanced {
-            Ok(action) => {
-                if let Err(error) = self
-                    .connection
-                    .execute_batch("RELEASE advance_automation_run")
-                {
-                    let _ = self.connection.execute_batch(
-                        "ROLLBACK TO advance_automation_run; RELEASE advance_automation_run",
-                    );
-                    return Err(error.into());
-                }
-                Ok(action)
-            }
-            Err(error) => {
-                self.connection.execute_batch(
-                    "ROLLBACK TO advance_automation_run; RELEASE advance_automation_run",
-                )?;
-                Err(error)
-            }
-        }
+        self.in_write_scope(|workspace| workspace.advance_inside(run_id, outcome))
     }
 
     fn advance_inside(

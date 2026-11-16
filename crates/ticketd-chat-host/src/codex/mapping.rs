@@ -11,7 +11,7 @@ use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
     NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnOutcome, reset_time,
+    SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
 };
 
 use super::report::Reports;
@@ -394,27 +394,15 @@ impl Session {
 
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
-        let declined = Self::denied_reason(std::mem::take(&mut self.declined));
-        let not_started = self.not_started.take();
-        let ended_by = |kind, message| {
-            TurnOutcome::Failed(Problem {
-                kind,
-                message,
-                detail: None,
-                resets_at: None,
-            })
+        // What the harness said happened. A declined tool or a command it could not
+        // start in an unattended session is reported as evidence (#387 D2); whether it
+        // changes how the turn reads is the supervisor's to decide.
+        let evidence = TurnEvidence {
+            interrupt_written: false,
+            denied: Self::denied_reason(std::mem::take(&mut self.declined)),
+            not_started: self.not_started.take(),
         };
         let outcome = match text(turn, &["status"])? {
-            // Nobody approves for an unattended session, so a declined tool is one
-            // the agent needed and was denied, even if it then ended its turn.
-            "completed" if let Some(declined) = declined => {
-                ended_by(ProblemKind::ToolDenied, declined)
-            }
-            // Whatever the agent then said, it could not do its work (#387 D2).
-            "completed" if not_started.is_some() => ended_by(
-                ProblemKind::PermissionUnavailable,
-                not_started.unwrap_or_default(),
-            ),
             "completed" => TurnOutcome::Completed,
             "interrupted" => TurnOutcome::Interrupted,
             "failed" => {
@@ -453,6 +441,12 @@ impl Session {
             }
             false
         });
+        if !evidence.is_empty() {
+            events.push(EventKind::TurnEvidence {
+                turn: NativeTurnId::new(id),
+                evidence,
+            });
+        }
         events.push(EventKind::TurnEnded {
             turn: NativeTurnId::new(id),
             outcome,
@@ -665,8 +659,9 @@ impl Session {
             .as_ref()
             .is_some_and(|stopped| stopped.0 == turn);
         let status = match text(item, &["status"]) {
-            // Left unfinished: the turn shows it as not finished (#387 3B3).
-            Some("failed") if cut_off => ToolStatus::Running,
+            // Reported as it came: what a failure after a Stop means is not decided
+            // here (#387 3B3).
+            Some("failed") if cut_off => ToolStatus::FailedAfterInterrupt,
             Some("failed") => ToolStatus::Failed,
             Some("declined") => ToolStatus::Declined,
             Some("inProgress") => ToolStatus::Running,

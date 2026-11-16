@@ -93,7 +93,6 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
         ALTER TABLE attachments_v51 RENAME TO attachments;
         CREATE TABLE IF NOT EXISTS drive_references (attachment_id TEXT PRIMARY KEY REFERENCES attachments(id), connection_id TEXT NOT NULL, file_id TEXT NOT NULL, metadata TEXT NOT NULL, UNIQUE(connection_id, file_id));")?;
     crate::change_token::migrate(tx)?;
-    tx.pragma_update(None, "user_version", 51)?;
     Ok(())
 }
 

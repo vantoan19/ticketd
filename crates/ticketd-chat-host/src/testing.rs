@@ -22,7 +22,9 @@ use crate::{
 /// What the fake harness does with a submission after it was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmitReply {
-    /// Acknowledge it. A new turn becomes active; steering names the steered turn.
+    /// Acknowledge it. A new turn becomes active; steering names the steered turn. A
+    /// [`FakeAdapter::claude`] does not acknowledge a new turn: `submit` returns
+    /// `Written` and the turn is known only once the test emits its events.
     Acknowledge,
     Reject(String),
     /// Never reply: `submit` returns `Written`. Emit evidence later with
@@ -65,6 +67,9 @@ struct State {
     turns_started: u64,
     options: Option<HarnessOptions>,
     options_asked: usize,
+    /// Whether the harness answers a new turn with its identity. Claude Code does not:
+    /// it takes the input and names the turn only when it starts processing it.
+    acknowledges_new_turn: bool,
 }
 
 #[derive(Debug)]
@@ -124,6 +129,7 @@ impl FakeAdapter {
                 turns_started: 0,
                 options: None,
                 options_asked: 0,
+                acknowledges_new_turn: true,
             })),
         }
     }
@@ -142,6 +148,23 @@ impl FakeAdapter {
                 native_resume: supported_resume(),
             },
         )
+    }
+
+    /// Like Claude Code: no steering, and a new turn is never acknowledged. `submit`
+    /// returns `Written`, and the test emits `TurnStarted` and the
+    /// [`crate::DeliveryEvidence::Processing`] that shows the input arrived.
+    pub fn claude() -> Self {
+        let fake = Self::new(
+            Harness::ClaudeCode,
+            Capabilities {
+                steering: Capability::Unknown {
+                    reason: "fake harness that cannot steer".to_owned(),
+                },
+                native_resume: supported_resume(),
+            },
+        );
+        fake.state().acknowledges_new_turn = false;
+        fake
     }
 
     pub fn without_steering() -> Self {
@@ -390,6 +413,9 @@ impl HarnessRuntime for FakeRuntime {
                 SubmissionKind::Steer { expected_turn } => DispatchOutcome::Acknowledged {
                     turn: expected_turn,
                 },
+                SubmissionKind::StartTurn if !state.acknowledges_new_turn => {
+                    DispatchOutcome::Written
+                }
                 SubmissionKind::StartTurn => {
                     state.turns_started += 1;
                     let turn = NativeTurnId(format!("turn-{}", state.turns_started));

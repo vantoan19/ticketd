@@ -57,7 +57,7 @@ impl Workspace {
             ));
         }
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         attachments::read_attachment(&tx, id)?;
         tx.execute(
             "UPDATE attachments SET display_name=?2 WHERE id=?1",

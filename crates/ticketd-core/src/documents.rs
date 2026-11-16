@@ -73,8 +73,7 @@ fn present_title<'de, D: serde::Deserializer<'de>>(
 pub(crate) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
     tx.execute_batch("CREATE TABLE IF NOT EXISTS entities (id TEXT PRIMARY KEY, kind TEXT NOT NULL, UNIQUE(id, kind));
         CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'document' CHECK(kind = 'document'), title TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), FOREIGN KEY(id, kind) REFERENCES entities(id, kind));
-        CREATE TABLE IF NOT EXISTS document_opens (sequence INTEGER PRIMARY KEY AUTOINCREMENT, document_id TEXT NOT NULL UNIQUE REFERENCES documents(id));
-        PRAGMA user_version = 31;")?;
+        CREATE TABLE IF NOT EXISTS document_opens (sequence INTEGER PRIMARY KEY AUTOINCREMENT, document_id TEXT NOT NULL UNIQUE REFERENCES documents(id));")?;
     Ok(())
 }
 
@@ -93,8 +92,7 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
         END;
         CREATE TABLE IF NOT EXISTS document_pins (document_id TEXT PRIMARY KEY REFERENCES documents(id));
         CREATE TABLE IF NOT EXISTS document_tags (document_id TEXT NOT NULL REFERENCES documents(id), tag_name TEXT NOT NULL REFERENCES tags(name), PRIMARY KEY(document_id, tag_name));
-        CREATE INDEX IF NOT EXISTS document_tags_tag ON document_tags(tag_name, document_id);
-        PRAGMA user_version = 36;")?;
+        CREATE INDEX IF NOT EXISTS document_tags_tag ON document_tags(tag_name, document_id);")?;
     Ok(())
 }
 
@@ -472,7 +470,7 @@ impl Workspace {
         }
         self.show_document(id)?;
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         if present {
             tx.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [&tag])?;
             tx.execute(
@@ -506,7 +504,7 @@ impl Workspace {
         self.connection.execute_batch("SAVEPOINT change_document")?;
         let result = (|| {
             // Take the write lock first so a busy database waits instead of failing.
-            crate::transaction_write_lock(&self.connection)?;
+            crate::write_scope::lock(&self.connection)?;
             if let Some(expected) = &patch.expected_updated_at
                 && *expected != self.show_document(id)?.updated_at
             {

@@ -46,31 +46,27 @@ impl Workspace {
     /// Add a normalized workspace tag without replacing other memberships.
     pub fn add_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
         let name = normalize(name)?;
-        let ticket = self.show_ticket(reference)?;
-        let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
-        crate::ensure_editable(&transaction, &ticket.id)?;
-        transaction.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
-        transaction.execute(
-            "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
-            params![ticket.id, name],
-        )?;
-        transaction.commit()?;
-        self.show_ticket(reference)
+        crate::write_scope::run(&self.connection, |scope| {
+            let ticket_id = scope.editable(reference)?;
+            scope.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
+            scope.execute(
+                "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
+                params![ticket_id, name],
+            )?;
+            crate::read_ticket(scope, reference)
+        })
     }
 
     /// Remove one normalized tag without replacing other memberships.
     pub fn remove_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
         let name = normalize(name)?;
-        let ticket = self.show_ticket(reference)?;
-        let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
-        crate::ensure_editable(&transaction, &ticket.id)?;
-        transaction.execute(
-            "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
-            params![ticket.id, name],
-        )?;
-        transaction.commit()?;
-        self.show_ticket(reference)
+        crate::write_scope::run(&self.connection, |scope| {
+            let ticket_id = scope.editable(reference)?;
+            scope.execute(
+                "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
+                params![ticket_id, name],
+            )?;
+            crate::read_ticket(scope, reference)
+        })
     }
 }

@@ -83,6 +83,17 @@ observations. They coordinate with the supervisor around submission and approval
 responses; they do not write workspace storage. The supervisor calls core
 workflows, which own validation, transactions and durable Chat records.
 
+Adapters also do not decide how a turn or its tools read. They report what the
+harness said plus the evidence they saw: that an interrupt was written before a
+failure, that an unattended session's allowed tools denied something, that a command
+could not start. One supervisor-side module (`outcome`) turns outcome and evidence
+into the turn's `TurnEnding` and its tools' states, so every harness is read by the
+same rules. The fake, the Claude transport and the Codex adapter are held to one
+conformance suite for the contract's guarantees: a stale generation is refused, a
+process lost after a write leaves the submission unknown, evidence arriving after a
+timeout settles the written submission, each request takes one answer, and a new
+turn is acknowledged as the adapter declares.
+
 Use an internal adapter interface with installation/capability inspection,
 new-session or explicit native-resume opening, input submission (new turn or
 supported steering), live interaction response, interruption, closure, and an
@@ -547,6 +558,12 @@ Trash, recovery manifests, and retained quarantine are included; incomplete
 upload staging and coordination locks are excluded. Remote records remain
 references and metadata; credentials and implicit remote downloads are excluded.
 
+The format of a Workspace is defined by the migration ladder in
+`crates/ticketd-core/src/format.rs` and nothing else (ADR 0013): a Workspace at
+format version V is what steps 1 through V leave behind. Restore and inspection
+check a backup's tables, columns, triggers and unique indexes against a scratch
+Workspace built at the backup's version.
+
 Restore validates the database and all retained bytes before changing the
 workspace. It stages a live database without archive-only tables and a separate
 attachment root, saves a complete safety copy, then replaces the files and
@@ -691,6 +708,8 @@ Projects, Plans, Activities, tags, and trash/restore also need focused operation
 Desktop `create_ticket` submits initial content, status, project, Plan, tags, following and blocker references through the existing replayable `CreateTicketWithContent` operation. Its create and change use one Core batch/follow transaction. A failing blocker rolls back the complete creation and receipt. `blockers` is an optional mutation input, with default-empty and empty serialization omitted so legacy payload hashes and stored replay outcomes remain compatible; it adds no stored data.
 
 For each write, the core coordinates request-ID replay checks, validation against current data, persistence, history, and the saved request outcome. Changes and their successful request outcome commit together. Batches either commit completely or persist nothing.
+
+Inside the core, every ticket write runs in one write scope (`write_scope.rs`), so the order is kept in one place: a savepoint with the write lock, the Ticket reference resolved and checked for editability, the operation's own rule, history, Workspace events folded so a ticket created by the write logs one `ticket.created` with its final values, then the read back. A ticket in Trash is refused by default; a write that the Workspace allows on a ticket in Trash (restoring it, detaching a link to it from a visible ticket, following it, a reminder) says so explicitly. Scopes nest, so a write made of other writes, such as a batch, runs them inside its own.
 
 Record versions and stale-edit rejection are outside the MVP. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
 
@@ -1199,6 +1218,16 @@ revisions.
 Sync runs only in the desktop process, while the app is open. The CLI stays
 independent: it writes locally, its changes are captured with the write, and they
 upload when the desktop next runs. No background service is involved.
+
+`Workspace::sync_now` is the one way to run sync, and the engine and its tests
+use no other. The first run of a Workspace file in a process begins the app
+session itself (the run token, the downloads cut off when the app last stopped,
+files held back as from a newer ticketd), so the host has nothing to call at
+launch. A run does not overlap another run of the same Workspace file in the
+process: it returns at once with the status marked `run_in_progress` and makes no
+call to the storage. The host keeps two rules of its own: hold runs while
+`sync_download_workspace` replaces the Workspace file, and read `retry_after`
+from the status a run returns, since it is not stored.
 
 [ADR 0003](adr/0003-defer-record-versioning.md) continues to govern local edits.
 The last-synced copy is internal to sync and is not a record version in the

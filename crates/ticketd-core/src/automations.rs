@@ -274,7 +274,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // Views refresh on the change token, so a change made elsewhere shows up.
     crate::change_token::track(connection, "automations")?;
     crate::change_token::track(connection, "automation_device_state")?;
-    connection.execute_batch("PRAGMA user_version = 75;")?;
     Ok(())
 }
 
@@ -289,7 +288,6 @@ pub(crate) fn migrate_sync(connection: &Connection) -> Result<(), Error> {
     crate::change_token::track(connection, "automation_arrivals")?;
     // Automations and agents join the tables whose changes are captured.
     crate::sync::migrate_capture(connection)?;
-    connection.execute_batch("PRAGMA user_version = 76;")?;
     Ok(())
 }
 
@@ -306,7 +304,6 @@ pub(crate) fn migrate_schedule(connection: &Connection) -> Result<(), Error> {
         connection
             .execute_batch("ALTER TABLE automation_device_state ADD COLUMN schedule_from TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 80;")?;
     Ok(())
 }
 
@@ -823,7 +820,7 @@ impl Workspace {
     ) -> Result<Automation, Error> {
         let definition = tidied(definition)?;
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         // A schedule counts again from a change to what starts the Automation, so
         // an old count never fires the new schedule at once. One that could not be
         // read before counts as changed.
@@ -865,7 +862,7 @@ impl Workspace {
     /// Returns the Chats of the agents that were working, for the host to interrupt.
     pub fn delete_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let changed = transaction.execute(
             "UPDATE automations SET trashed = 1 WHERE id = ?1 AND trashed = 0",
             [id],
@@ -900,7 +897,7 @@ impl Workspace {
     /// far: what happened while it was off never starts a run.
     pub fn set_automation_enabled(&mut self, id: &str, enabled: bool) -> Result<Automation, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let mut automation = one(&transaction, id)?;
         if enabled {
             if let Some(problem) = automation.problems.first() {

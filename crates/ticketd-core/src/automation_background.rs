@@ -16,8 +16,7 @@ pub const DEFAULT_AUTOMATION_RUNS_AT_ONCE: usize = 2;
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS automation_settings (id INTEGER PRIMARY KEY CHECK(id = 1), runs_at_once INTEGER NOT NULL CHECK(runs_at_once > 0));
-         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});
-         PRAGMA user_version = 78;",
+         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});",
     ))?;
     Ok(())
 }
@@ -80,7 +79,7 @@ impl Workspace {
     /// working, for the host to interrupt.
     pub fn stop_and_turn_off_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         transaction.execute(
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],
@@ -96,7 +95,7 @@ impl Workspace {
     /// agents that were working, for the host to interrupt.
     pub fn end_runs_of_deleted_automations(&mut self) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let ids = {
             let mut statement = transaction.prepare(
                 "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE a.trashed = 1 AND r.status IN ('queued', 'running')",

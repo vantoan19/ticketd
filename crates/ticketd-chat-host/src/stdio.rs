@@ -16,6 +16,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::timeout;
 
+use crate::{CloseOutcome, EventKind};
+
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -345,7 +347,7 @@ pub(crate) async fn write_bounded(
 /// exit. Returns the exit code, or `None` after killing a process that did not exit.
 /// The bound covers waiting for a write in progress, so a harness that stopped reading
 /// cannot hold this up.
-pub(crate) async fn close_process(
+async fn close_process(
     stdin: &AsyncMutex<Option<Writer>>,
     child: &AsyncMutex<Box<dyn ChildProcess>>,
     bound: Duration,
@@ -360,6 +362,50 @@ pub(crate) async fn close_process(
             child.lock().await.kill().await;
             None
         }
+    }
+}
+
+/// How long a loss waits to learn the exit code before reporting without one.
+const EXIT_OBSERVATION: Duration = Duration::from_secs(2);
+
+/// Closes the process as `close_process` does and says what that proved. `who` names
+/// the process; `may_run` says what could outlive a kill, since only the process
+/// itself is killed. (Owning the whole process tree, with a Windows job object or a
+/// POSIX process group, is #257/#267.)
+pub(crate) async fn close_outcome(
+    stdin: &AsyncMutex<Option<Writer>>,
+    child: &AsyncMutex<Box<dyn ChildProcess>>,
+    bound: Duration,
+    who: &str,
+    may_run: &str,
+) -> CloseOutcome {
+    match close_process(stdin, child, bound).await {
+        Some(exit_code) => CloseOutcome::Confirmed { exit_code },
+        None => CloseOutcome::Unconfirmed {
+            reason: format!(
+                "{who} did not exit within {} seconds of its input closing and was \
+                 killed; {may_run}",
+                bound.as_secs()
+            ),
+        },
+    }
+}
+
+/// The last event of a runtime whose protocol stream ended without being closed:
+/// releases the process's input, waits a moment to learn how it exited, and reports
+/// the loss with the readable end of its stderr.
+pub(crate) async fn runtime_lost(
+    stdin: &AsyncMutex<Option<Writer>>,
+    child: &AsyncMutex<Box<dyn ChildProcess>>,
+    stderr: &StderrTail,
+) -> EventKind {
+    *stdin.lock().await = None;
+    let exit_code = timeout(EXIT_OBSERVATION, async { child.lock().await.wait().await })
+        .await
+        .unwrap_or(None);
+    EventKind::RuntimeLost {
+        exit_code,
+        diagnostics: stderr.readable(),
     }
 }
 

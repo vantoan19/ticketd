@@ -404,7 +404,15 @@ pub enum EventKind {
         request: NativeRequestId,
         resolution: InteractionResolution,
     },
+    /// What the adapter saw that bears on how `turn` ended, sent just before its
+    /// [`EventKind::TurnEnded`] and only when there is something to say. The adapter
+    /// reports; the supervisor decides how the turn reads (see [`TurnEvidence`]).
+    TurnEvidence {
+        turn: NativeTurnId,
+        evidence: TurnEvidence,
+    },
     /// Terminal outcome of a turn, with the submissions the harness correlated to it.
+    /// `outcome` is what the harness itself said happened.
     TurnEnded {
         turn: NativeTurnId,
         outcome: TurnOutcome,
@@ -672,6 +680,10 @@ pub enum ToolStatus {
     Failed,
     /// The person declined it when the harness asked, so it never ran.
     Declined,
+    /// It reported failure after an interrupt had been written for its turn. The
+    /// failure is the interrupt's doing, not the tool's; the supervisor leaves the
+    /// tool unfinished rather than failed.
+    FailedAfterInterrupt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -739,6 +751,35 @@ pub enum InteractionResolution {
     Withdrawn,
 }
 
+/// Observations about the end of a turn that the harness did not put into its own
+/// outcome. An adapter reports them as it saw them and never decides what they mean:
+/// how the turn and its tools read is settled in one place, the supervisor's
+/// `outcome` module, so every harness is read by the same rules.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TurnEvidence {
+    /// The adapter wrote an interrupt for this turn before it ended. Reported by an
+    /// adapter whose harness does not itself say that a turn was interrupted (Claude
+    /// Code ends it with an unsuccessful result); a harness that does (Codex) leaves
+    /// this unset.
+    pub interrupt_written: bool,
+    /// An unattended session's allowed tools denied something during the turn, in the
+    /// adapter's words: the tool, or the file it could not change. Nobody approves
+    /// for such a session, so the agent did not do what it set out to do with it,
+    /// whatever else it then said.
+    pub denied: Option<String>,
+    /// An unattended session's harness could not start a command, and why. Set only
+    /// by a harness that reports that on the command itself.
+    pub not_started: Option<String>,
+}
+
+impl TurnEvidence {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// What the harness itself reported about how a turn ended. The evidence sent with it
+/// can change how the turn reads (see [`TurnEvidence`]); this alone never does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnOutcome {
     Completed,

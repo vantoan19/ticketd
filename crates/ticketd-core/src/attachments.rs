@@ -20,7 +20,6 @@ pub(crate) fn migrate_upload_settings(connection: &Connection) -> Result<(), Err
          INSERT OR IGNORE INTO attachment_upload_settings VALUES (1, 104857600);",
     )?;
     crate::change_token::migrate(connection)?;
-    connection.pragma_update(None, "user_version", 49)?;
     Ok(())
 }
 
@@ -84,7 +83,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS ticket_attachments_by_attachment ON ticket_attachments(attachment_id, ticket_id);",
     )?;
     crate::change_token::migrate(connection)?;
-    connection.pragma_update(None, "user_version", 47)?;
     Ok(())
 }
 
@@ -287,7 +285,7 @@ impl Workspace {
 
     fn record_completed_upload(&self, completed: &CompletedUpload) -> Result<(), Error> {
         let tx = self.connection.unchecked_transaction()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let stored: Option<String> = tx
             .query_row(
                 "SELECT request FROM request_outcomes WHERE id=?1",
@@ -401,32 +399,23 @@ impl Workspace {
         present: bool,
     ) -> Result<Ticket, Error> {
         // Recover before the savepoint; the retryable write adapter recovers before BEGIN.
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let attachment = read_attachment(&tx, id)?;
-        if present {
-            crate::attachment_cleanup::restore_reference(&tx, id)?;
-            validate_attachment_reference(&tx, &attachment)?;
-        }
-        let ticket_id = relationships::id(&tx, reference)?;
-        let trashed: bool = tx.query_row(
-            "SELECT trashed FROM tickets WHERE id=?1",
-            [&ticket_id],
-            |r| r.get(0),
-        )?;
-        if trashed {
-            return Err(Error::Trashed(reference.into()));
-        }
-        if present {
-            tx.execute("INSERT OR IGNORE INTO ticket_attachments(ticket_id, attachment_id) VALUES (?1, ?2)", params![ticket_id, id])?;
-        } else {
-            tx.execute(
-                "DELETE FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2",
-                params![ticket_id, id],
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(reference)
+        crate::write_scope::run(&self.connection, |tx| {
+            let attachment = read_attachment(tx, id)?;
+            if present {
+                crate::attachment_cleanup::restore_reference(tx, id)?;
+                validate_attachment_reference(tx, &attachment)?;
+            }
+            let ticket_id = tx.editable(reference)?;
+            if present {
+                tx.execute("INSERT OR IGNORE INTO ticket_attachments(ticket_id, attachment_id) VALUES (?1, ?2)", params![ticket_id, id])?;
+            } else {
+                tx.execute(
+                    "DELETE FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2",
+                    params![ticket_id, id],
+                )?;
+            }
+            crate::read_ticket(tx, reference)
+        })
     }
 
     fn validate_attachment_bytes(&self, attachment: &Attachment) -> Result<PathBuf, Error> {
@@ -443,36 +432,28 @@ impl Workspace {
         if previous_id == replacement_id {
             return Err(Error::Attachment("choose a new attachment identity".into()));
         }
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let replacement = read_attachment(&tx, replacement_id)?;
-        crate::attachment_cleanup::restore_reference(&tx, replacement_id)?;
-        validate_attachment_reference(&tx, &replacement)?;
-        let ticket_id = relationships::id(&tx, reference)?;
-        let trashed: bool = tx.query_row(
-            "SELECT trashed FROM tickets WHERE id=?1",
-            [&ticket_id],
-            |row| row.get(0),
-        )?;
-        if trashed {
-            return Err(Error::Trashed(reference.into()));
-        }
-        let selected: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2)", params![ticket_id, previous_id], |row| row.get(0))?;
-        if !selected {
-            return Err(Error::Attachment(
-                "this association changed; select the reference again before replacing it".into(),
-            ));
-        }
-        tx.execute(
+        crate::write_scope::run(&self.connection, |tx| {
+            let replacement = read_attachment(tx, replacement_id)?;
+            crate::attachment_cleanup::restore_reference(tx, replacement_id)?;
+            validate_attachment_reference(tx, &replacement)?;
+            let ticket_id = tx.editable(reference)?;
+            let selected: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2)", params![ticket_id, previous_id], |row| row.get(0))?;
+            if !selected {
+                return Err(Error::Attachment(
+                    "this association changed; select the reference again before replacing it"
+                        .into(),
+                ));
+            }
+            tx.execute(
             "INSERT OR IGNORE INTO ticket_attachments(ticket_id, attachment_id) VALUES (?1, ?2)",
             params![ticket_id, replacement_id],
         )?;
-        tx.execute(
-            "DELETE FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2",
-            params![ticket_id, previous_id],
-        )?;
-        tx.commit()?;
-        self.show_ticket(reference)
+            tx.execute(
+                "DELETE FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2",
+                params![ticket_id, previous_id],
+            )?;
+            crate::read_ticket(tx, reference)
+        })
     }
 
     /// Explicit native-open support. Adapters must never open a file automatically.

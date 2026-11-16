@@ -1,3 +1,6 @@
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use std::fs;
 
 use ticketd_core::{BackupCheck, Workspace};
@@ -283,31 +286,23 @@ fn backup_racing_uploads_restores_only_identities_with_complete_bytes() {
 fn attachment_bearing_migration_keeps_a_complete_pre_migration_copy() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let source = dir.path().join("trace.txt");
-    fs::write(&source, b"retained").unwrap();
-    let mut workspace = Workspace::open(&path).unwrap();
-    let file = workspace
-        .import_attachment("migration", &source, None)
-        .unwrap();
-    drop(workspace);
-    // The previous schema has all the same attachment state; force one real
-    // migration step without inventing a private workflow seam.
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .pragma_update(None, "user_version", 46)
-        .unwrap();
+    // Format version 47 is the first with Attachments; opening it runs the steps after it.
+    let id = old_workspace::workspace_with_attachment(&path, 47, "trace.txt", b"retained");
     let workspace = Workspace::open(&path).unwrap();
     let backups = workspace.safety_backups().unwrap();
     assert_eq!(backups.len(), 1);
     assert!(matches!(
         workspace.inspect_backup(&backups[0].path).unwrap().check,
-        BackupCheck::Valid { .. }
+        BackupCheck::Valid {
+            format_version: 47,
+            ..
+        }
     ));
     let restored = dir.path().join("migrated-copy.sqlite3");
     Workspace::restore(&restored, &backups[0].path).unwrap();
     let restored = Workspace::open(restored).unwrap();
     let output = dir.path().join("migrated.txt");
-    restored.export_attachment(&file.id, &output).unwrap();
+    restored.export_attachment(&id, &output).unwrap();
     assert_eq!(fs::read(output).unwrap(), b"retained");
 }
 
