@@ -18,7 +18,7 @@ export type SegmentedOption<T extends string> = {
 const frame =
   "ui-segmented inline-grid h-7 auto-cols-fr grid-flow-col items-center gap-0.5 rounded-md p-0.5";
 const segment =
-  "inline-flex h-6 min-w-0 items-center justify-center gap-1.5 rounded-sm px-2.5 text-secondary-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring) enabled:hover:text-foreground data-[state=checked]:text-foreground aria-selected:text-foreground disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0";
+  "inline-flex h-6 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 text-secondary-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring) enabled:hover:text-foreground data-[state=checked]:text-foreground aria-selected:text-foreground disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0";
 
 /** The same segmented anatomy for tabs whose caller owns their keyboard model. */
 export function SegmentedTabList({
