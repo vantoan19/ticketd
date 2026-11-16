@@ -85,6 +85,12 @@ impl AutomationRunner {
         Ok(runner)
     }
 
+    /// Whether a pass may run: false while Chat is off, a backup is being restored or
+    /// the host could not start, when nothing is matched.
+    fn host_available(&self) -> bool {
+        self.chats.automation_host().is_some()
+    }
+
     /// One pass. A pass that fails (the Workspace is busy or unreadable) is tried
     /// again at the next tick, which also ends any run the failure left Running.
     /// Blocking.
@@ -107,7 +113,7 @@ pub fn start(runner: AutomationRunner, app: AppHandle) {
     open_on_click(&app);
     tauri::async_runtime::spawn(async move {
         loop {
-            if runner.chats.automation_host().is_some() {
+            if runner.host_available() {
                 let runner = runner.clone();
                 // The pass reads SQLite and may run the CLI: off the async threads.
                 // It starts its runs on this runtime, which a blocking thread is in.

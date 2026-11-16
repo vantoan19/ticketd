@@ -122,7 +122,7 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
 
     let lost = turn(
         3,
-        TurnEnding::ContactLost("the harness process ended".to_owned()),
+        TurnEnding::ContactLost(Some("the harness process ended".to_owned())),
     );
     let interrupted = status(&facts(&chat(2), &live, Some(&lost)));
     assert_eq!(interrupted.line(), "Interrupted · Codex stopped mid-turn");

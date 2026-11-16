@@ -1102,7 +1102,7 @@ impl Supervisor {
             // `stop_runtime` settles what was open, with its own reason.
             return;
         }
-        self.runtime_gone(&TurnEnding::ContactLost(detail.clone()));
+        self.runtime_gone(&TurnEnding::ContactLost(Some(detail.clone())));
         if !quiet {
             self.pause(ChatProblem::RuntimeLost { detail });
         }

@@ -370,7 +370,7 @@ impl ChatHost {
         adapters: Vec<Arc<dyn HarnessAdapter>>,
         context: Option<ContextSource>,
     ) -> Result<Self, HostError> {
-        let restarted = TurnEnding::ContactLost("ticketd was restarted".to_owned());
+        let restarted = TurnEnding::ContactLost(Some("ticketd was restarted".to_owned()));
         open_workspace()?.mark_chat_contact_lost(
             None,
             &restarted.detail().unwrap_or_default(),

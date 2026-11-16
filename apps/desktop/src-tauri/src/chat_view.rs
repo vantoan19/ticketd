@@ -1344,11 +1344,7 @@ pub fn item(
                     "note",
                     Some(format!(
                         "Contact with {harness} was lost ({}). Whether this turn finished is unknown.",
-                        if reason.is_empty() {
-                            "no detail"
-                        } else {
-                            &reason
-                        }
+                        reason.as_deref().unwrap_or("no detail")
                     )),
                 ),
             };
@@ -1637,7 +1633,7 @@ fn found_problem(
             if tracker.last_turn.as_ref().is_some_and(|turn| {
                 matches!(
                     TurnEnding::of(turn),
-                    Some(TurnEnding::ContactLost(lost)) if lost == *detail
+                    Some(TurnEnding::ContactLost(Some(lost))) if lost == *detail
                 )
             }) =>
         {
@@ -2589,6 +2585,43 @@ mod tests {
             let record = ended(&TurnEnding::StoppedByTicketd(reason));
             assert_eq!(marker(&record), expected);
             assert_eq!(outcome(&record), ("quit", 1));
+        }
+    }
+
+    /// The marker names are a closed set shared with the frontend, which keeps its own
+    /// copy (`client.ts` validates them, `Transcript.tsx` words each). A reason added on
+    /// one side only would reach the transcript as an unreadable marker.
+    #[test]
+    fn the_frontends_markers_are_the_ones_ticketd_stops_a_turn_with() {
+        let client = include_str!("../../src/features/chats/client.ts");
+        let transcript = include_str!("../../src/features/chats/Transcript.tsx");
+        let list = client
+            .split("reason: z.enum([")
+            .nth(1)
+            .and_then(|rest| rest.split("]),").next())
+            .expect("the marker reasons in client.ts");
+        let frontend: std::collections::BTreeSet<&str> = list
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .flat_map(|line| line.split('"').skip(1).step_by(2))
+            .collect();
+        // Said by the harness or by the turn's ending, not by a reason ticketd stopped it.
+        let others = ["stopped", "stop_unconfirmed", "failed", "note", "warning"];
+        let ticketd: std::collections::BTreeSet<&str> = StopReason::ALL
+            .iter()
+            .map(|reason| reason.marker())
+            .collect();
+        let named: std::collections::BTreeSet<&str> = frontend
+            .iter()
+            .copied()
+            .filter(|marker| !others.contains(marker))
+            .collect();
+        assert_eq!(named, ticketd, "client.ts and StopReason disagree");
+        for marker in &ticketd {
+            assert!(
+                transcript.contains(&format!("case \"{marker}\":")),
+                "Transcript.tsx has no wording for {marker}"
+            );
         }
     }
 
