@@ -12,7 +12,7 @@ use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
     InteractionKind, InteractionRequest, NativeRequestId, NativeSessionId, NativeTurnId, Problem,
     ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey, SettingOutcome,
-    TurnOutcome, WorkspaceOpener,
+    StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -189,6 +189,23 @@ impl Fixture {
             })
             .await;
         settle().await;
+    }
+
+    /// How the agent's first turn ended, as the Chat recorded it.
+    #[allow(clippy::unwrap_used)]
+    fn first_turn_ending(&self) -> Option<TurnEnding> {
+        let first_turn = self
+            .core()
+            .chat_snapshot(&self.chat(), 50)
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|item| match item {
+                ChatItem::Turn(turn) => Some(turn),
+                _ => None,
+            })
+            .unwrap();
+        TurnEnding::of(&first_turn)
     }
 
     /// The Chat of the one run's agent step.
@@ -504,6 +521,10 @@ async fn a_turn_still_going_at_the_time_limit_is_stopped_and_fails_the_step() {
         f.needs_attention(),
         "The agent was still working after its limit of 5 minutes and was stopped."
     );
+    assert_eq!(
+        f.first_turn_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::TimeLimit))
+    );
     // The harness was told to stop, not left running.
     assert!(
         f.fake
@@ -678,6 +699,10 @@ async fn stop_it_and_turn_off_interrupts_the_agent_and_the_run_needs_attention()
     );
     let reason = "You stopped this run when you turned the Automation off.";
     assert_eq!(f.needs_attention(), reason);
+    assert_eq!(
+        f.first_turn_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::RunEnded))
+    );
     // The interrupted turn's end changes nothing: the run has already ended.
     f.end_turn(TurnOutcome::Interrupted).await;
     assert_eq!(f.needs_attention(), reason);
@@ -696,20 +721,9 @@ async fn a_message_from_the_person_takes_a_running_run_over_and_its_chat_becomes
     assert_eq!(run.status, AutomationRunStatus::TakenOver);
     assert_eq!(f.listed_chats(), std::slice::from_ref(&chat));
     // L15: the agent's turn is recorded as stopped for the take-over, not for Quit.
-    let first_turn = f
-        .core()
-        .chat_snapshot(&chat, 50)
-        .unwrap()
-        .items
-        .into_iter()
-        .find_map(|item| match item {
-            ticketd_core::ChatItem::Turn(turn) => Some(turn),
-            _ => None,
-        })
-        .unwrap();
     assert_eq!(
-        ticketd_chat_host::TicketdStop::of(first_turn.detail.as_deref()),
-        Some(ticketd_chat_host::TicketdStop::TakenOver)
+        f.first_turn_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::TakenOver))
     );
     // The turn that was going ends later; the run stays the person's.
     f.end_turn(TurnOutcome::Completed).await;

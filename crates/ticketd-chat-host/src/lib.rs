@@ -22,6 +22,7 @@ pub mod step_kind;
 mod subscription;
 mod supervisor;
 pub mod testing;
+mod turn_ending;
 mod unattended;
 mod wire;
 
@@ -32,4 +33,5 @@ pub use host::*;
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };
-pub use unattended::{StopCause, TurnEnd};
+pub use turn_ending::{StopReason, TurnEnding};
+pub use unattended::TurnEnd;
