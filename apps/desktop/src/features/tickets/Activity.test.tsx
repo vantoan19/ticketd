@@ -91,7 +91,9 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   );
   rejectSave(new Error("Database busy"));
   await waitFor(() =>
-    expect(screen.getByRole("alert").textContent).toContain("Database busy"),
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The result couldn't be confirmed",
+    ),
   );
   expect(composer).toHaveProperty("value", "A **draft**");
   expect(
@@ -514,7 +516,9 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   ).toHaveProperty("value", "My edited **draft**");
   fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await waitFor(() =>
-    expect(screen.getByRole("alert").textContent).toContain("Disk full"),
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The result couldn't be confirmed",
+    ),
   );
   expect(
     screen.getByRole("textbox", { name: "Edit update source" }),

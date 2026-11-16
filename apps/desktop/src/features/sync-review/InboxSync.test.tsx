@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 
 import {
@@ -224,8 +225,6 @@ test("a failed mark as read says what the host reported", async () => {
       name: /Mark .* unread/,
     }),
   );
-  // The host's words, made a sentence; the raw text waits under Details.
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't mark as unread. The Workspace is busy.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByText(/the Workspace is busy/)).toBeTruthy();
 });

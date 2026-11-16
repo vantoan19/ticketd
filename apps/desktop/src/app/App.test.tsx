@@ -951,7 +951,9 @@ test("preserves a creation draft when submission fails and the dialog is reopene
   );
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await act(async () => {});
-  expect(screen.getByRole("alert").textContent).toContain("Creation failed");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Couldn't confirm the new ticket",
+  );
   expect(bridge.invoke).toHaveBeenCalledWith(
     "create_ticket",
     expect.objectContaining({
@@ -4546,7 +4548,7 @@ test("floating save feedback retains a failed description draft and retries it",
   expect(
     screen.getByRole("checkbox", { name: "Checklist item" }),
   ).toHaveProperty("checked", true);
-  expect(screen.getByText(/Disk full/)).toBeTruthy();
+  expect(screen.getByText(/The result couldn't be confirmed/)).toBeTruthy();
   fireEvent.click(within(bar).getByRole("button", { name: "Retry" }));
   expect(await within(bar).findByText("Saved")).toBeTruthy();
   expect(stored.body).toBe("- [x] Keep this draft");
@@ -6480,10 +6482,12 @@ test("a blocker removed and re-added through Linked is visible and can be remove
 });
 
 test("empty Ticket evidence adds, removes, and restores through Undo", async () => {
+  const user = userEvent.setup();
   const current = bulkTicket(1, { title: "Evidence outcome" });
   let items: import("@/lib/api/client").Evidence[] = [];
   const writes = new Map<string, import("@/lib/api/client").Evidence>();
   let replyLost = false;
+  let deleteFailed = false;
   bridge.invoke.mockImplementation(
     (
       command: string,
@@ -6521,6 +6525,10 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
         return item;
       }
       if (command === "delete_evidence") {
+        if (!deleteFailed) {
+          deleteFailed = true;
+          throw new Error("SYNTHETIC_DELETE_FAILURE");
+        }
         items = [];
         return;
       }
@@ -6543,17 +6551,36 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
   const actions = await screen.findByRole("button", {
     name: "Actions for Review",
   });
-  fireEvent.keyDown(actions, { key: "Enter" });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Delete evidence" }),
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Add evidence" })).toBeNull(),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(actions.hasAttribute("disabled")).toBe(false));
+  expect(actions.isConnected).toBe(true);
+  screen.getByRole("button", { name: "Actions for Review" }).focus();
+  await user.keyboard("{Enter}");
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Delete" }, { timeout: 1500 }),
+  );
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't delete the evidence");
+  expect(
+    screen.getByRole("button", { name: "Actions for Review" }),
+  ).toBeTruthy();
+  await user.click(within(failure).getByRole("button", { name: "Retry" }));
+  await user.click(await screen.findByRole("button", { name: "Undo" }));
+  await user.click(await screen.findByRole("button", { name: "Retry" }));
   await screen.findByRole("button", { name: "Actions for Review" });
   expect(
     screen.getAllByRole("button", { name: "Actions for Review" }),
   ).toHaveLength(1);
+  // A keyboard selection reaches the same immediate removal and Undo.
+  screen.getByRole("button", { name: "Actions for Review" }).focus();
+  await user.keyboard("{Enter}");
+  await user.keyboard("{End}{Enter}");
+  await user.click(await screen.findByRole("button", { name: "Undo" }));
+  expect(
+    await screen.findByRole("button", { name: "Actions for Review" }),
+  ).toBeTruthy();
 });
 
 test("empty Ticket Files adds an existing file and detaches with Undo", async () => {
@@ -8496,4 +8523,287 @@ test("Export Retry remembers the failed path and asks the save chooser again bef
     ),
   ).toEqual([["export_workspace", { path: "/synthetic/export.json" }]]);
   choose.mockRestore();
+});
+
+test("unknown relationship failures keep raw text behind Details and structured causes stay actionable", async () => {
+  const user = userEvent.setup();
+  const current = bulkTicket(1, { title: "Failure privacy outcome" });
+  let failure: unknown = new Error("SYNTHETIC_RAW_SECRET");
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "contextual_relationships") throw failure;
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /Failure privacy outcome/ }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't load relationships");
+  expect(alert.textContent).not.toContain("SYNTHETIC_RAW_SECRET");
+  expect(screen.queryByText("SYNTHETIC_RAW_SECRET")).toBeNull();
+  await user.click(within(alert).getByRole("button", { name: "Details" }));
+  expect(within(alert).getByText(/SYNTHETIC_RAW_SECRET/)).toBeTruthy();
+  await user.click(within(alert).getByRole("button", { name: "Details" }));
+  failure = { code: "not_found", message: "SYNTHETIC_MISSING_RECORD" };
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("It was deleted or moved.")).toBeTruthy();
+  expect(screen.queryByText("SYNTHETIC_MISSING_RECORD")).toBeNull();
+  expect(within(alert).queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
+test("pointer Delete removes existing evidence directly and Undo restores its fields", async () => {
+  const user = userEvent.setup();
+  const current = bulkTicket(1, { title: "Pointer evidence outcome" });
+  const original = {
+    id: "branch-evidence",
+    kind: "branch",
+    name: "Branch",
+    value: "feature/retained",
+    editing_agent: "codex",
+    created_at: "2026-11-16T00:00:00Z",
+    updated_at: "2026-11-16T00:00:00Z",
+  };
+  let items = [original];
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { input?: typeof original }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "list_evidence") return items;
+      if (command === "delete_evidence") {
+        items = [];
+        return;
+      }
+      if (command === "add_evidence") {
+        const item = { ...original, ...args?.input, id: "restored-branch" };
+        items = [item];
+        return item;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /Pointer evidence outcome/ }),
+  );
+  // jsdom's zero-sized resize handle sits at (0, 0); use a point outside it.
+  await user.pointer({
+    target: await screen.findByRole("button", { name: "Actions for Branch" }),
+    coords: { clientX: 100, clientY: 100 },
+    keys: "[MouseLeft]",
+  });
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Delete" }, { timeout: 1500 }),
+  );
+  const undo = await screen.findByRole("button", { name: "Undo" });
+  expect(
+    screen.queryByRole("button", { name: "Actions for Branch" }),
+  ).toBeNull();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await user.click(undo);
+  expect(
+    await screen.findByRole("button", { name: "Actions for Branch" }),
+  ).toBeTruthy();
+  expect(screen.getByText("feature/retained")).toBeTruthy();
+  expect(screen.getAllByText(/codex/).length).toBeGreaterThan(0);
+});
+
+test("Activity folds recorded changes between authored updates and expands every record in order", async () => {
+  const user = userEvent.setup();
+  const current = bulkTicket(1, { title: "Folded history outcome" });
+  const automatic = (
+    id: number,
+    kind: string,
+    from_value: string,
+    to_value: string,
+    hour: number,
+  ) => ({
+    type: "automatic",
+    id,
+    event: {
+      kind,
+      from_value,
+      to_value,
+      timestamp: `2026-11-15T${hour}:00:00Z`,
+      editing_agent: "codex",
+    },
+  });
+  const authored = (id: string, brief: string, hour: number) => ({
+    type: "authored",
+    activity: {
+      id,
+      ticket_id: current.id,
+      brief,
+      reported_at: `2026-11-15T${hour}:00:00Z`,
+      updated_at: `2026-11-15T${hour}:00:00Z`,
+      editing_agent: null,
+      supporting_document_id: null,
+    },
+  });
+  const feed = [
+    automatic(8, "status", "Todo", "In progress", 18),
+    automatic(7, "evidence", "", "Review proof", 17),
+    automatic(6, "relationship:related", "", "T-KQ4", 16),
+    authored("newer-update", "Latest authored outcome", 15),
+    automatic(4, "plan", "", "plan-before-update", 14),
+    automatic(3, "dependency", "", "T-KQ3", 13),
+    authored("older-update", "Earlier authored outcome", 12),
+  ];
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "activity_feed") return feed;
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /Folded history outcome/ }),
+  );
+  const timeline = await screen.findByRole("list", {
+    name: "Activity timeline",
+  });
+  const newer = within(timeline).getByRole("button", { name: /^3 changes:/ });
+  const older = within(timeline).getByRole("button", { name: /^2 changes:/ });
+  expect(newer.getAttribute("aria-expanded")).toBe("false");
+  expect(
+    within(timeline).queryByText("Added evidence “Review proof”"),
+  ).toBeNull();
+  const topLevel = within(timeline)
+    .getAllByRole("listitem")
+    .map((row) => row.textContent);
+  expect(topLevel).toHaveLength(4);
+  expect(topLevel[0]).toContain("3 changes:");
+  expect(topLevel[1]).toContain("Latest authored outcome");
+  expect(topLevel[2]).toContain("2 changes:");
+  expect(topLevel[3]).toContain("Earlier authored outcome");
+  expect(
+    within(
+      screen.getAllByRole("article", { name: "Update by you" })[0]!,
+    ).getByText("Latest"),
+  ).toBeTruthy();
+  newer.focus();
+  await user.keyboard("{Enter}");
+  expect(newer.getAttribute("aria-expanded")).toBe("true");
+  expect(within(timeline).getByText("Status Todo → In progress")).toBeTruthy();
+  expect(
+    within(timeline).getByText("Added evidence “Review proof”"),
+  ).toBeTruthy();
+  expect(within(timeline).getByText("Linked as related to T-KQ4")).toBeTruthy();
+  await user.click(older);
+  expect(
+    within(timeline).getByText("Plan set to plan-before-update"),
+  ).toBeTruthy();
+  expect(within(timeline).getByText("Blocked by T-KQ3")).toBeTruthy();
+  await user.click(screen.getByRole("radio", { name: "Updates" }));
+  expect(
+    within(timeline).queryByRole("button", { name: /changes:/ }),
+  ).toBeNull();
+  expect(within(timeline).getByText("Latest authored outcome")).toBeTruthy();
+  expect(within(timeline).getByText("Earlier authored outcome")).toBeTruthy();
+});
+
+test("Evidence announces a pending initial read without claiming empty and retains known records on refresh", async () => {
+  vi.useFakeTimers();
+  const current = bulkTicket(1, { title: "Delayed evidence outcome" });
+  const record = {
+    id: "delayed-evidence",
+    kind: "branch",
+    name: "Known branch",
+    value: "feature/known",
+    editing_agent: null,
+    created_at: "2026-11-16T00:00:00Z",
+    updated_at: "2026-11-16T00:00:00Z",
+  };
+  let resolve: (items: (typeof record)[]) => void = () => {};
+  const firstRead = new Promise<(typeof record)[]>((done) => {
+    resolve = done;
+  });
+  let initial = true;
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "list_evidence") return initial ? firstRead : [record];
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: /Delayed evidence outcome/ }),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const evidence = screen.getByRole("region", { name: "Evidence" });
+  expect(
+    within(evidence).getByRole("status", { name: "Loading evidence" }),
+  ).toBeTruthy();
+  expect(within(evidence).queryByText("No evidence yet.")).toBeNull();
+  await act(async () => {
+    initial = false;
+    resolve([record]);
+  });
+  expect(
+    within(evidence).getByRole("button", {
+      name: "Actions for Known branch",
+    }),
+  ).toBeTruthy();
+  expect(
+    within(evidence).queryByRole("status", { name: "Loading evidence" }),
+  ).toBeNull();
+  // A later read can fail without turning already observed records into loading or empty.
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "list_evidence")
+      throw new Error("SYNTHETIC_REFRESH_FAILURE");
+    return bridgeDefault(command);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  vi.useRealTimers();
+  expect(within(evidence).getByRole("alert")).toBeTruthy();
+  expect(
+    within(evidence).getByRole("button", { name: "Actions for Known branch" }),
+  ).toBeTruthy();
+  expect(
+    within(evidence).queryByRole("status", { name: "Loading evidence" }),
+  ).toBeNull();
+});
+
+test("an unknown Plan archive failure keeps raw diagnostics behind Details on the status line", async () => {
+  const user = userEvent.setup();
+  const plan = {
+    id: "private-archive",
+    name: "Private archive",
+    archived: false,
+  };
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "list_plans") return [plan];
+    if (command === "show_plan") {
+      const view = bridgeDefault(command, args) as { plan: object };
+      return { ...view, plan };
+    }
+    if (command === "change_plan") throw new Error("SYNTHETIC_ARCHIVE_RAW");
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: "Private archive" }),
+  );
+  const actions = await screen.findByRole("button", { name: "Plan actions" });
+  actions.focus();
+  await user.keyboard("{Enter}");
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Archive Plan" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't archive Private archive");
+  expect(alert.textContent).not.toContain("SYNTHETIC_ARCHIVE_RAW");
+  await user.click(within(alert).getByRole("button", { name: "Details" }));
+  expect(await screen.findByText("SYNTHETIC_ARCHIVE_RAW")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });

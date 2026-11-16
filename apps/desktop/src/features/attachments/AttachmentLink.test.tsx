@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -57,9 +58,8 @@ test("foreign or unavailable image references keep the label and actionable erro
     <MarkdownDocument source="![Screenshot](ticketd://attachment/foreign/file)" />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Screenshot" }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "another workspace",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("another workspace");
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.getByRole("button", { name: "Screenshot" })).toBeTruthy();
 });

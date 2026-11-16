@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import { useState } from "react";
@@ -436,6 +437,7 @@ test.each(["rich", "source"])(
     }
     fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+    await revealFailureDetails();
     await screen.findByText(/Disk full/);
     await waitFor(() =>
       expect(changed.mock.lastCall?.[0]).toContain("[last.txt]"),

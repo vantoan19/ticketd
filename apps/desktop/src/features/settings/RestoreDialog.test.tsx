@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -347,8 +348,9 @@ test("a failed restore keeps the review open and says so", async () => {
   const dialog = await openReview(reload);
   await within(dialog).findByText(/Integrity checked/);
   fireEvent.click(replaceButton(dialog));
-  expect((await within(dialog).findByRole("alert")).textContent).toContain(
-    "Workspace is in use.",
+  await revealFailureDetails(dialog);
+  expect(within(dialog).getByRole("alert").textContent).toContain(
+    "workspace is in use",
   );
   expect(reload).not.toHaveBeenCalled();
 });

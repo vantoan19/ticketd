@@ -1,5 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { Pager } from "@/components/ui/pager";
+import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -22,11 +23,6 @@ import {
   Plus,
 } from "lucide-react";
 import { DialogShell } from "@/components/ui/dialog-shell";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -143,9 +139,7 @@ export function Evidence({
   const [dialogError, setDialogError] = useState<FailureDescription | null>(
     null,
   );
-  const [confirmDelete, setConfirmDelete] = useState<EvidenceRecord | null>(
-    null,
-  );
+  const [deleteRetry, setDeleteRetry] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const request = useRef<{ key: string; id: string } | null>(null);
   const pendingRef = useRef(false);
@@ -173,9 +167,10 @@ export function Evidence({
   useEffect(() => {
     void Promise.resolve()
       .then(load)
-      .catch((reason: unknown) =>
-        setError(describeFailure(reason, "load evidence")),
-      );
+      .catch((reason: unknown) => {
+        setDeleteRetry(null);
+        setError(describeFailure(reason, "load evidence"));
+      });
   }, [load, revision]);
   async function save() {
     if (pendingRef.current) return;
@@ -210,7 +205,7 @@ export function Evidence({
       const removed = items.find((item) => item.id === id);
       await client.deleteEvidence(reference, id, writeId);
       request.current = null;
-      setConfirmDelete(null);
+      setDeleteRetry(null);
       setError(null);
       // Retry the same restoration intent if the write succeeded but its
       // reply or the subsequent reread was lost. A new ID could duplicate it.
@@ -237,6 +232,7 @@ export function Evidence({
       await load();
       await refresh();
     } catch (reason) {
+      setDeleteRetry(id);
       setError(describeFailure(reason, "delete the evidence"));
     } finally {
       pendingRef.current = false;
@@ -275,7 +271,7 @@ export function Evidence({
     <section
       aria-label="Evidence"
       className="evidence-section"
-      hidden={empty && folded}
+      hidden={empty && folded && !error}
     >
       <SectionHeader
         title="Evidence"
@@ -288,6 +284,26 @@ export function Evidence({
           )
         }
       />
+      {!loaded && !error && (
+        <div role="status" aria-label="Loading evidence">
+          <ol className="evidence-list" aria-hidden="true">
+            {[0, 1, 2].map((row) => (
+              <li key={row} className="evidence-item">
+                <span className="evidence-kind-icon">
+                  <Skeleton className="h-4 w-4" />
+                </span>
+                <span className="evidence-item-heading">
+                  <Skeleton className="h-4 w-28" />
+                </span>
+                <span className="evidence-item-meta">
+                  <Skeleton className="h-4 w-24" />
+                </span>
+                <Skeleton className="h-4 w-24" />
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       {empty && !folded && (
         <EmptyState size="inline" plain description="No evidence yet." />
       )}
@@ -296,6 +312,10 @@ export function Evidence({
           size="compact"
           failure={error}
           onRetry={() => {
+            if (deleteRetry) {
+              void remove(deleteRetry);
+              return;
+            }
             setError(null);
             void load().catch((reason: unknown) =>
               setError(describeFailure(reason, "load evidence")),
@@ -305,11 +325,7 @@ export function Evidence({
       )}
       <ol className="evidence-list">
         {items.map((item) => (
-          <li
-            key={item.id}
-            className="evidence-item"
-            data-open={confirmDelete?.id === item.id || undefined}
-          >
+          <li key={item.id} className="evidence-item">
             <span className="evidence-kind-icon" aria-hidden="true">
               {(() => {
                 const Icon = evidenceIcons[item.kind];
@@ -328,102 +344,51 @@ export function Evidence({
                 </span>
                 {!trashed && (
                   <span className="evidence-reveal">
-                    <Popover
-                      open={confirmDelete?.id === item.id}
-                      onOpenChange={(open) =>
-                        setConfirmDelete(open ? item : null)
-                      }
-                    >
-                      <DropdownMenu>
-                        <PopoverAnchor asChild>
-                          <DropdownMenuTrigger asChild>
-                            <IconButton
-                              ref={(element) => {
-                                if (element)
-                                  menuTriggers.current.set(item.id, element);
-                                else menuTriggers.current.delete(item.id);
-                              }}
-                              tooltipSide="top"
-                              type="button"
-                              disabled={pending}
-                              label={`Actions for ${item.name}`}
-                            >
-                              <MoreHorizontal />
-                            </IconButton>
-                          </DropdownMenuTrigger>
-                        </PopoverAnchor>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              // The menu closes as the dialog opens, so name the
-                              // control focus should come back to.
-                              returnFocus.current =
-                                menuTriggers.current.get(item.id) ?? null;
-                              setDialogError(null);
-                              setComposing(true);
-                              setEditing(item);
-                              setDraft({
-                                kind: item.kind,
-                                name: item.name,
-                                value: item.value,
-                                editing_agent: item.editing_agent,
-                              });
-                            }}
-                          >
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() =>
-                              window.setTimeout(() => setConfirmDelete(item), 0)
-                            }
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <PopoverContent
-                        align="end"
-                        role="alertdialog"
-                        aria-label="Delete this evidence?"
-                        onOpenAutoFocus={(event) => {
-                          // Cancel takes focus: deleting is never the default.
-                          event.preventDefault();
-                          (event.currentTarget as HTMLElement | null)
-                            ?.querySelector<HTMLButtonElement>("[data-cancel]")
-                            ?.focus();
-                        }}
-                      >
-                        <p className="evidence-confirm-title">
-                          Delete this evidence?
-                        </p>
-                        <p className="evidence-confirm-text">
-                          “{item.name}” is removed from this ticket. You can
-                          undo this.
-                        </p>
-                        <div className="evidence-confirm-actions">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            data-cancel
-                            onClick={() => setConfirmDelete(null)}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="sm"
-                            disabled={pending}
-                            onClick={() => void remove(item.id)}
-                          >
-                            Delete evidence
-                          </Button>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <IconButton
+                          ref={(element) => {
+                            if (element)
+                              menuTriggers.current.set(item.id, element);
+                            else menuTriggers.current.delete(item.id);
+                          }}
+                          tooltipSide="top"
+                          type="button"
+                          disabled={pending}
+                          label={`Actions for ${item.name}`}
+                        >
+                          <MoreHorizontal />
+                        </IconButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            // The menu closes as the dialog opens, so name the
+                            // control focus should come back to.
+                            returnFocus.current =
+                              menuTriggers.current.get(item.id) ?? null;
+                            setDialogError(null);
+                            setComposing(true);
+                            setEditing(item);
+                            setDraft({
+                              kind: item.kind,
+                              name: item.name,
+                              value: item.value,
+                              editing_agent: item.editing_agent,
+                            });
+                          }}
+                        >
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => void remove(item.id)}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </span>
                 )}
               </span>
@@ -434,11 +399,12 @@ export function Evidence({
             </p>
             <EvidenceValue
               item={item}
-              onOpenFailed={() =>
+              onOpenFailed={() => {
+                setDeleteRetry(null);
                 setError(
                   plainFailure("Couldn't open the link", "Copy it instead."),
-                )
-              }
+                );
+              }}
             />
           </li>
         ))}
@@ -448,9 +414,10 @@ export function Evidence({
           noun="evidence"
           onMore={() => {
             pages.current += 1;
-            void load().catch((reason: unknown) =>
-              setError(describeFailure(reason, "load more evidence")),
-            );
+            void load().catch((reason: unknown) => {
+              setDeleteRetry(null);
+              setError(describeFailure(reason, "load more evidence"));
+            });
           }}
         />
       )}

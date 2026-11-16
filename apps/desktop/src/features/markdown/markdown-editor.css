@@ -233,22 +233,6 @@
   font-weight: 500;
   line-height: 20px;
 }
-.rich-document table {
-  display: block;
-  overflow-x: auto;
-  border-collapse: collapse;
-  max-width: 100%;
-}
-.rich-document td,
-.rich-document th {
-  min-width: 100px;
-  border: 1px solid var(--border);
-  padding: 8px 12px;
-}
-.rich-document th {
-  background: var(--recessed);
-  font-weight: 500;
-}
 .editor-rule {
   display: block;
   height: 1px;

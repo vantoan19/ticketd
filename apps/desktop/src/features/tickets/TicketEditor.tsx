@@ -629,7 +629,7 @@ export function TicketEditor({
       )}
       {titleConflict && !bodyConflict && notice}
       {children}
-      <div className="ticket-state-row">
+      <div className="ticket-state-row" data-floating={!stateLine || undefined}>
         <span className="ticket-state-text">{stateLine}</span>
         {!editingBody && state !== "failed" && (
           <span role="status" className="editor-save-state">

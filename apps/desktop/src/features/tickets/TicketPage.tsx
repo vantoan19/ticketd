@@ -165,68 +165,60 @@ export function TicketPage({
     original && source && original.display.startsWith(`${source.place}#`)
       ? original.display.slice(source.place.length)
       : original?.display;
-  const updated = ticket.updated_at && (
-    <Tooltip content={formatDateTime(ticket.updated_at)} side="bottom">
-      <time dateTime={ticket.updated_at} tabIndex={0}>
-        {relativeDateTime(ticket.updated_at, now)}
-      </time>
-    </Tooltip>
-  );
-  // One line under the title. Until a source is set up every ticket is local,
-  // so it says only when it changed (DESIGN.md section 7).
-  const stateLine = (
-    <p className="ticket-state-line">
-      {source && state ? (
-        <>
-          <span className="ticket-source-state">
-            {state.tone && <StatusDot tone={state.tone} size={10} />}
-            <span>
-              {state.text}
-              {original && (
-                <>
-                  {" "}
-                  of{" "}
-                  <Tooltip content={original.display} side="bottom">
-                    <span className="source-number" tabIndex={0}>
-                      {originalLabel}
-                    </span>
+  // The header owns the normal updated time. Only source or exceptional
+  // context needs a line between the property strip and the description.
+  const stateLine =
+    source || sourcesConfigured || ticket.source || outsideResults ? (
+      <p className="ticket-state-line">
+        {source && state ? (
+          <>
+            <span className="ticket-source-state">
+              {state.tone && <StatusDot tone={state.tone} size={10} />}
+              <span>
+                {state.text}
+                {original && (
+                  <>
+                    {" "}
+                    of{" "}
+                    <Tooltip content={original.display} side="bottom">
+                      <span className="source-number" tabIndex={0}>
+                        {originalLabel}
+                      </span>
+                    </Tooltip>
+                    {original.last_known && " (last known)"}
+                  </>
+                )}
+              </span>
+            </span>
+            {source.unavailable ? (
+              <span>
+                Last synced copy from{" "}
+                {source.last_refreshed_at
+                  ? formatDateTime(source.last_refreshed_at)
+                  : "an earlier sync"}
+              </span>
+            ) : (
+              <>
+                {source.state.state === "open" && <span>{source.number}</span>}
+                {source.closed_at && (
+                  <Tooltip
+                    content={formatDateTime(source.closed_at)}
+                    side="bottom"
+                  >
+                    <time dateTime={source.closed_at} tabIndex={0}>
+                      {relativeDateTime(source.closed_at, now)}
+                    </time>
                   </Tooltip>
-                  {original.last_known && " (last known)"}
-                </>
-              )}
-            </span>
-          </span>
-          {source.unavailable ? (
-            <span>
-              Last synced copy from{" "}
-              {source.last_refreshed_at
-                ? formatDateTime(source.last_refreshed_at)
-                : "an earlier sync"}
-            </span>
-          ) : (
-            <>
-              {source.state.state === "open" && <span>{source.number}</span>}
-              {source.closed_at && (
-                <Tooltip
-                  content={formatDateTime(source.closed_at)}
-                  side="bottom"
-                >
-                  <time dateTime={source.closed_at} tabIndex={0}>
-                    {relativeDateTime(source.closed_at, now)}
-                  </time>
-                </Tooltip>
-              )}
-            </>
-          )}
-        </>
-      ) : sourcesConfigured || ticket.source ? (
-        <span>Local ticket{updated && <> · updated {updated}</>}</span>
-      ) : (
-        updated && <span>Updated {updated}</span>
-      )}
-      {outsideResults && <span>Not in the current results</span>}
-    </p>
-  );
+                )}
+              </>
+            )}
+          </>
+        ) : sourcesConfigured || ticket.source ? (
+          <span>Local ticket</span>
+        ) : null}
+        {outsideResults && <span>Not in the current results</span>}
+      </p>
+    ) : null;
   // The source owns the title and description, so they are read, never edited.
   const contentLocked = Boolean(source?.content_locked);
   const attentionFor = (variant: "rail" | "strip") =>

@@ -68,6 +68,7 @@ test("a change that came from a source reads as the source, not as an agent", as
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-KQ20" />);
+  fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   await screen.findByText("Changed on GitHub");
   expect(screen.queryByText(/Agent:/)).toBeNull();
 });
@@ -104,6 +105,7 @@ test("shows an editing agent only when one was recorded and words history as sen
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-KQ20" />);
+  fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   await screen.findByText("Status Todo → In progress");
   expect(screen.queryByText(/Only in ticketd/)).toBeNull();
   // The agent names its update; an agentless one is the person's own.
@@ -243,7 +245,9 @@ test("changes made together share one row, and Updates hides the rows", async ()
       : [],
   );
   render(<Activity {...props} reference="T-KQ21" />);
-  await screen.findByText("Added evidence “PR #482” and “fix branch”");
+  fireEvent.click(await screen.findByRole("button", { name: /^2 changes:/ }));
+  expect(screen.getByText("Added evidence “PR #482”")).toBeTruthy();
+  expect(screen.getByText("Added evidence “fix branch”")).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
   expect(screen.queryByText(/Added evidence/)).toBeNull();
   expect(screen.getByText("Body")).toBeTruthy();
@@ -268,12 +272,15 @@ test("says no updates, not no activity, when the Updates filter hides only histo
       : [],
   );
   render(<Activity {...props} reference="T-KQ60" />);
+  fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   await screen.findByText("Status Todo → In progress");
   fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
   expect(screen.getByText("No updates yet.")).toBeTruthy();
   expect(screen.queryByText(/No updates or recorded changes/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show all activity" }));
-  expect(await screen.findByText("Status Todo → In progress")).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: /^1 change:/ }),
+  ).toBeTruthy();
 });
 
 test("offers only what can be added instead of a disabled button with a hidden reason (DB-07)", async () => {

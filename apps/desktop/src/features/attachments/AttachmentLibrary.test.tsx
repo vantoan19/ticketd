@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -205,7 +206,8 @@ test("a rejected cleanup keeps its review and original request identity for expl
     await screen.findByRole("checkbox", { name: "Select Trace" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Move to quarantine" }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain(
     "A new draft protects this file",
   );
   expect(close).not.toHaveBeenCalled();

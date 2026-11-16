@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -90,7 +91,8 @@ it("Retry saves as soon as write access returns, without Retry draft recovery", 
     target: { value: "A thought" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  await screen.findAllByText(/readonly database/);
+  await revealFailureDetails();
+  expect(screen.getByText(/readonly database/)).toBeTruthy();
   expect(documents.save).not.toHaveBeenCalled();
   writable = true;
   fireEvent.click(screen.getByText("Retry"));

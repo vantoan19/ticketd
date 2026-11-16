@@ -120,6 +120,7 @@ function Dependencies({
       statusLine.show({
         tone: "error",
         message: `${failure.title}. ${failure.sentence}`,
+        details: failure.details,
         ...(failure.action === "retry" && {
           action: {
             label: "Retry",

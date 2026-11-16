@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   act,
@@ -161,6 +162,7 @@ test("a failed save keeps what was typed and shows the reason without Saved", as
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Couldn't save the upload limit",
   );
+  await revealFailureDetails();
   expect(screen.getByRole("alert").textContent).toContain(
     "Workspace is read-only",
   );

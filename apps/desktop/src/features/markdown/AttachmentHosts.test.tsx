@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import { createRef } from "react";
@@ -264,9 +265,10 @@ test.each(["reader", "rich"])(
       await screen.findByRole("radio", { name: "Select Replacement" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
-    await within(
+    await revealFailureDetails(
       screen.getByRole("dialog", { name: "Replace Trace" }),
-    ).findByText(/Retention unavailable/);
+    );
+    expect(screen.getByText(/Retention unavailable/)).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Replace Trace" })).toBeTruthy();
     expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
   },

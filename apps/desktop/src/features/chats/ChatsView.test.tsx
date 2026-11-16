@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   act,
@@ -867,6 +868,7 @@ test("a row's actions mark it unread or read and mute it, and say a refusal", as
   fireEvent.click(
     await screen.findByRole("menuitem", { name: "Mark as unread" }),
   );
+  await revealFailureDetails();
   expect(await screen.findByText("The workspace is read-only.")).toBeTruthy();
 });
 
