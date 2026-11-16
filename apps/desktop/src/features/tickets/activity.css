@@ -162,17 +162,21 @@
    open, so the timeline is not a column of identical icons (DB-16). */
 .activity-row-actions {
   display: inline-flex;
-  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 .activity [data-slot="comment-row"]:hover .activity-row-actions,
 .activity [data-slot="comment-row"]:focus-within .activity-row-actions,
 .activity [data-slot="comment-row"][data-open] .activity-row-actions,
-.activity-row-actions:has([data-state="open"]) {
-  visibility: visible;
+.activity-row-actions:has([data-state="open"]),
+.activity-row-actions[data-retained] {
+  opacity: 1;
+  pointer-events: auto;
 }
 @media (hover: none) {
   .activity-row-actions {
-    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 .activity-confirm-title {

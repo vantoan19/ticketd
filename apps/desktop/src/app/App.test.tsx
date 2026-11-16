@@ -9573,92 +9573,123 @@ test("Plan Add tickets returns focus to its opener after keyboard dismissal", as
 
 test("Activity Delete update transfers menu focus to safe confirmation and retries the same update", async () => {
   const user = userEvent.setup();
-  const ticket = bulkTicket(1);
-  let deleted = false;
-  let fail = true;
-  const activity = {
-    id: "delete-owned",
-    ticket_id: ticket.id,
-    brief: "Authored outcome to remove",
-    reported_at: "2026-11-16T00:00:00Z",
-    updated_at: "2026-11-16T00:00:00Z",
-    editing_agent: null,
-    supporting_document_id: "kept-details",
-  };
-  bridge.invoke.mockImplementation((command: string, args) => {
-    if (command === "find_tickets") return [ticket];
-    if (command === "show_ticket") return ticket;
-    if (command === "activity_feed")
-      return deleted ? [] : [{ type: "authored", activity }];
-    if (command === "show_document")
-      return {
-        id: "kept-details",
-        title: "Kept details",
-        body: "Supporting text",
-        created_at: activity.reported_at,
-        updated_at: activity.updated_at,
-        trashed: false,
-      };
-    if (command === "delete_activity") {
-      if (fail) throw new Error("Temporary write unavailable");
-      deleted = true;
-      return;
-    }
-    return bridgeDefault(command, args);
-  });
-  render(<App />);
-  await user.click(await screen.findByRole("button", { name: /First/ }));
-  const actions = await screen.findByRole("button", {
-    name: /Actions for update from/,
-  });
-  actions.focus();
-  await user.keyboard("{Enter}");
-  await user.click(
-    await screen.findByRole(
-      "menuitem",
-      { name: "Delete update" },
-      { timeout: 1500 },
-    ),
-  );
-  let confirm = await screen.findByRole("alertdialog", {
-    name: "Delete this update?",
-  });
-  expect(
-    within(confirm).getByText("Its details stay in Documents."),
-  ).toBeTruthy();
-  await vi.waitFor(() =>
-    expect(document.activeElement).toBe(
-      within(confirm).getByRole("button", { name: "Cancel" }),
-    ),
-  );
-  await user.keyboard("{Escape}");
-  await vi.waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  actions.focus();
-  await user.keyboard("{Enter}");
-  await user.keyboard("{End}{Enter}");
-  confirm = await screen.findByRole("alertdialog", {
-    name: "Delete this update?",
-  });
-  await user.click(
-    within(confirm).getByRole("button", { name: "Delete update" }),
-  );
-  expect(
-    await within(confirm).findByText(/Couldn't delete the update/),
-  ).toBeTruthy();
-  expect(screen.getByText(activity.brief)).toBeTruthy();
-  fail = false;
-  await user.click(
-    within(confirm).getByRole("button", { name: "Delete update" }),
-  );
-  await vi.waitFor(() => expect(screen.queryByText(activity.brief)).toBeNull());
-  const calls = bridge.invoke.mock.calls.filter(
-    ([command]) => command === "delete_activity",
-  );
-  expect(calls).toHaveLength(2);
-  expect(calls.map(([, args]) => args)).toEqual([
-    { reference: ticket.reference, id: activity.id },
-    { reference: ticket.reference, id: activity.id },
-  ]);
+  const { finishExit, restore } = dialogAnimationSignals(["popover-content"]);
+  try {
+    const ticket = bulkTicket(1);
+    let deleted = false;
+    let fail = true;
+    const activity = {
+      id: "delete-owned",
+      ticket_id: ticket.id,
+      brief: "Authored outcome to remove",
+      reported_at: "2026-11-16T00:00:00Z",
+      updated_at: "2026-11-16T00:00:00Z",
+      editing_agent: null,
+      supporting_document_id: "kept-details",
+    };
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "show_ticket") return ticket;
+      if (command === "activity_feed")
+        return deleted ? [] : [{ type: "authored", activity }];
+      if (command === "show_document")
+        return {
+          id: "kept-details",
+          title: "Kept details",
+          body: "Supporting text",
+          created_at: activity.reported_at,
+          updated_at: activity.updated_at,
+          trashed: false,
+        };
+      if (command === "delete_activity") {
+        if (fail) throw new Error("Temporary write unavailable");
+        deleted = true;
+        return;
+      }
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /First/ }));
+    const actions = await screen.findByRole("button", {
+      name: /Actions for update from/,
+    });
+    actions.focus();
+    await user.keyboard("{Enter}");
+    await user.click(
+      await screen.findByRole(
+        "menuitem",
+        { name: "Delete update" },
+        { timeout: 1500 },
+      ),
+    );
+    let confirm = await screen.findByRole("alertdialog", {
+      name: "Delete this update?",
+    });
+    expect(
+      within(confirm).getByText("Its details stay in Documents."),
+    ).toBeTruthy();
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(confirm).getByRole("button", { name: "Cancel" }),
+      ),
+    );
+    await user.keyboard("{Escape}");
+    expect(confirm.isConnected).toBe(true);
+    finishExit(confirm);
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).toBeNull(),
+    );
+    await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+    actions.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{End}{Enter}");
+    confirm = await screen.findByRole("alertdialog", {
+      name: "Delete this update?",
+    });
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Write an update…" }));
+    await screen.findByRole("textbox", { name: "New update rich text" });
+    await user.click(
+      screen.getByRole("button", { name: "Edit Markdown source" }),
+    );
+    const newer = screen.getByRole("textbox", { name: "New update source" });
+    fireEvent.change(newer, { target: { value: "Newer retained outcome" } });
+    newer.focus();
+    finishExit(confirm);
+    await user.keyboard("{End}!");
+    await vi.waitFor(() => expect(confirm.isConnected).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(newer));
+    expect(newer).toHaveProperty("value", "Newer retained outcome!");
+    actions.focus();
+    await user.keyboard("{Enter}{End}{Enter}");
+    confirm = await screen.findByRole("alertdialog", {
+      name: "Delete this update?",
+    });
+    await user.click(
+      within(confirm).getByRole("button", { name: "Delete update" }),
+    );
+    expect(
+      await within(confirm).findByText(/Couldn't delete the update/),
+    ).toBeTruthy();
+    expect(screen.getByText(activity.brief)).toBeTruthy();
+    fail = false;
+    await user.click(
+      within(confirm).getByRole("button", { name: "Delete update" }),
+    );
+    await vi.waitFor(() =>
+      expect(screen.queryByText(activity.brief)).toBeNull(),
+    );
+    const calls = bridge.invoke.mock.calls.filter(
+      ([command]) => command === "delete_activity",
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls.map(([, args]) => args)).toEqual([
+      { reference: ticket.reference, id: activity.id },
+      { reference: ticket.reference, id: activity.id },
+    ]);
+  } finally {
+    restore();
+  }
 });
 
 test("Plan multi-add is one retryable atomic request and Undo resumes only unfinished original Plans", async () => {

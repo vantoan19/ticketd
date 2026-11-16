@@ -78,7 +78,10 @@ function Surface({ kind }: { kind: "menu" | "popover" | "sheet" }) {
       ) : kind === "popover" ? (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger>Opener</PopoverTrigger>
-          <PopoverContent>{close}</PopoverContent>
+          <PopoverContent>
+            <input aria-label="Overlay draft" />
+            {close}
+          </PopoverContent>
         </Popover>
       ) : (
         <Sheet open={open} onOpenChange={setOpen}>
@@ -161,4 +164,24 @@ test("a closing submenu leaves its parent keyboard action usable", async () => {
   finishExit(content);
   await waitFor(() => expect(content.isConnected).toBe(false));
   expect(document.activeElement).toBe(parent);
+});
+
+test("reopening during a popover exit preserves its draft and restores interaction", async () => {
+  const user = userEvent.setup();
+  render(<Surface kind="popover" />);
+  const draft = await screen.findByRole("textbox", { name: "Overlay draft" });
+  await user.type(draft, "Kept while reopening");
+  const close = screen.getByRole("button", { name: "Close layer" });
+  const content = close.closest('[data-slot="popover-content"]')!;
+  await user.click(close);
+  await waitFor(() => expect(content.hasAttribute("inert")).toBe(true));
+  await user.click(screen.getByRole("button", { name: "Opener" }));
+  await waitFor(() => expect(content.hasAttribute("inert")).toBe(false));
+  expect(content.isConnected).toBe(true);
+  expect(screen.getByRole("textbox", { name: "Overlay draft" })).toBe(draft);
+  expect(draft).toHaveProperty("value", "Kept while reopening");
+  await user.click(screen.getByRole("button", { name: "Close layer" }));
+  expect(content.getAttribute("data-state")).toBe("closed");
+  finishExit(content);
+  await waitFor(() => expect(content.isConnected).toBe(false));
 });

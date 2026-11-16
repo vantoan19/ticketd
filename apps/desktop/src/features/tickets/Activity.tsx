@@ -1,3 +1,4 @@
+import { preserveNewerFocus } from "@/components/ui/use-focus-return";
 import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { onTicketUpdate } from "./activity-composer-request";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -1322,10 +1323,14 @@ function UpdateActions({
   focusComposer: () => void;
 }) {
   const requested = useRef(false);
+  const [retainingTrigger, setRetainingTrigger] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   return (
-    <span className="activity-row-actions">
+    <span
+      className="activity-row-actions"
+      data-retained={retainingTrigger || undefined}
+    >
       <Popover open={confirming} onOpenChange={onConfirm}>
         <DropdownMenu>
           <PopoverAnchor asChild>
@@ -1380,12 +1385,15 @@ function UpdateActions({
           role="alertdialog"
           aria-label="Delete this update?"
           onCloseAutoFocus={(event) => {
-            if (trigger.current?.isConnected) {
+            if (!preserveNewerFocus(event) && trigger.current?.isConnected) {
               event.preventDefault();
-              trigger.current.focus();
+              trigger.current.focus({ preventScroll: true });
             }
+            setRetainingTrigger(false);
           }}
           onOpenAutoFocus={(event) => {
+            // Keep the return target exposed until the portalled exit finishes.
+            setRetainingTrigger(true);
             // Cancel takes focus: a destructive answer is never the default.
             event.preventDefault();
             cancel.current?.focus();

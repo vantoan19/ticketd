@@ -16,8 +16,18 @@ export function useClosingOverlayRef<T extends HTMLElement>(
   ]);
   useLayoutEffect(() => {
     if (!element) return;
+    let pointerBeforeClose: string | null = null;
     const update = () => {
-      element.toggleAttribute("inert", element.dataset.state === "closed");
+      const closed = element.dataset.state === "closed";
+      element.toggleAttribute("inert", closed);
+      // DismissableLayer writes this inline, above the shared CSS fallback.
+      if (closed) {
+        pointerBeforeClose ??= element.style.getPropertyValue("pointer-events");
+        element.style.setProperty("pointer-events", "none");
+      } else if (pointerBeforeClose !== null) {
+        element.style.setProperty("pointer-events", pointerBeforeClose);
+        pointerBeforeClose = null;
+      }
     };
     update();
     const observer = new MutationObserver(update);
