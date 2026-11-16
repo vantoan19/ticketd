@@ -1,3 +1,4 @@
+import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { onTicketUpdate } from "./activity-composer-request";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
@@ -25,6 +26,7 @@ import { chatSource } from "@/features/chats/quotes";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { Card } from "@/components/ui/card";
 import { Kbd } from "@/components/ui/kbd";
 import { Clamp } from "@/components/ui/disclosure";
 import { Time } from "@/components/ui/time";
@@ -76,7 +78,7 @@ import type { Entry } from "@/lib/api/history";
 import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
 import { formatDateTime } from "@/lib/format";
-import { shortcutLabel } from "@/lib/shortcuts";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
@@ -207,6 +209,9 @@ export function Activity({
   const statusLine = useStatusLine();
   const submitHint = shortcutLabel("update-post");
   const [loadError, setLoadError] = useState<FailureDescription | null>(null);
+  const [deleteError, setDeleteError] = useState<FailureDescription | null>(
+    null,
+  );
   const [targetMissing, setTargetMissing] = useState<string | null>(null);
   const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
   const targetRequest = useRef<{ id: string } | null>(null);
@@ -561,7 +566,7 @@ export function Activity({
     if (busy.current) return;
     busy.current = true;
     setPending(true);
-    setError(null);
+    setDeleteError(null);
     try {
       const hadSupport = notes.some(
         (note) => note.id === id && note.supporting_document_id,
@@ -579,7 +584,7 @@ export function Activity({
       await loadNotes();
       await onChanged?.();
     } catch (reason) {
-      setError(describeFailure(reason, "delete the update"));
+      setDeleteError(describeFailure(reason, "delete the update"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -894,7 +899,7 @@ export function Activity({
           </Button>
         </Alert>
       )}
-      {error ? (
+      {!composing && error ? (
         <FailureAlert size="compact" failure={error} />
       ) : (
         loadError && (
@@ -913,143 +918,162 @@ export function Activity({
       {!trashed && (
         // One frame from the first frame (P16): idle it is a one-line field;
         // opened, it holds the editor and grows only downward as you type.
-        <form
-          ref={composerRef}
-          className="activity-composer"
-          data-open={composing || undefined}
-          aria-label="Write an update"
-          onFocusCapture={(event) => {
-            if (!(event.target instanceof HTMLElement)) return;
-            if (event.target.closest(".activity-details"))
-              setControlsOwner("details");
-            else if (event.target.closest(".markdown-editor"))
-              setControlsOwner("brief");
-          }}
-          onSubmit={(event) => void post(event)}
-          onKeyDown={submitKey}
-        >
-          {composing ? (
-            <>
-              <LazyMarkdownEditor
-                attachmentTicketReference={reference}
-                recoveryOwner={recoveryOwner}
-                label="New update"
-                placeholder="Write an update…"
-                value={draft}
-                onChange={setDraft}
-                readOnly={pending}
-                focusRequest={focusUpdate}
-                chromeHost={controlsOwner === "brief" ? controlsHost : null}
-                controlsHidden={controlsOwner !== "brief"}
-                paragraphAfterQuote
-              />
-              {showDetails && (
-                <div className="activity-details">
-                  <span className="activity-details-label">
-                    <span>Details</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={pending}
-                      onClick={() => {
-                        setFocusDetails(false);
-                        setControlsOwner("brief");
-                        updateDraft({ details: null });
-                        try {
-                          localStorage.removeItem(requestKey);
-                        } catch {
-                          /* The retry id is best effort. */
-                        }
-                      }}
-                    >
-                      Remove details
-                    </Button>
-                  </span>
-                  <LazyMarkdownEditor
-                    attachmentTicketReference={reference}
-                    chromeHost={
-                      controlsOwner === "details" ? controlsHost : null
-                    }
-                    controlsHidden={controlsOwner !== "details"}
-                    label="Details"
-                    recoveryOwner={`${recoveryOwner}:details`}
-                    placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
-                    value={details}
-                    onChange={setDetails}
-                    readOnly={pending}
-                    autoFocus={focusDetails}
-                  />
-                </div>
-              )}
-              {support && (
-                <div className="activity-attached">
-                  <Badge variant="record">
-                    <FileText aria-hidden="true" />
-                    <span className="truncate">
-                      {supportTitle || "Document"}
+        <Card asChild variant="composer">
+          <form
+            ref={composerRef}
+            className="activity-composer"
+            data-open={composing || undefined}
+            aria-label="Write an update"
+            onFocusCapture={(event) => {
+              if (!(event.target instanceof HTMLElement)) return;
+              if (event.target.closest(".activity-details"))
+                setControlsOwner("details");
+              else if (event.target.closest(".markdown-editor"))
+                setControlsOwner("brief");
+            }}
+            onSubmit={(event) => void post(event)}
+            onKeyDown={submitKey}
+          >
+            {composing ? (
+              <>
+                <LazyMarkdownEditor
+                  attachmentTicketReference={reference}
+                  recoveryOwner={recoveryOwner}
+                  label="New update"
+                  placeholder="Write an update…"
+                  value={draft}
+                  onChange={setDraft}
+                  readOnly={pending}
+                  focusRequest={focusUpdate}
+                  chromeHost={controlsOwner === "brief" ? controlsHost : null}
+                  controlsHidden={controlsOwner !== "brief"}
+                  paragraphAfterQuote
+                />
+                {showDetails && (
+                  <div className="activity-details">
+                    <span className="activity-details-label">
+                      <span>Details</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => {
+                          setFocusDetails(false);
+                          setControlsOwner("brief");
+                          updateDraft({ details: null });
+                          try {
+                            localStorage.removeItem(requestKey);
+                          } catch {
+                            /* The retry id is best effort. */
+                          }
+                        }}
+                      >
+                        Remove details
+                      </Button>
                     </span>
-                    <button
-                      type="button"
-                      data-slot="badge-remove"
-                      aria-label="Remove attached Document"
-                      onClick={() => setSupport("")}
-                    >
-                      <X aria-hidden="true" />
-                    </button>
-                  </Badge>
-                </div>
-              )}
-              <div className="activity-composer-row">
-                <span className="activity-caption">
-                  {hasDraft(saved) ? "Draft saved" : ""}
+                    <LazyMarkdownEditor
+                      attachmentTicketReference={reference}
+                      chromeHost={
+                        controlsOwner === "details" ? controlsHost : null
+                      }
+                      controlsHidden={controlsOwner !== "details"}
+                      label="Details"
+                      recoveryOwner={`${recoveryOwner}:details`}
+                      placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
+                      value={details}
+                      onChange={setDetails}
+                      readOnly={pending}
+                      autoFocus={focusDetails}
+                    />
+                  </div>
+                )}
+                {support && (
+                  <div className="activity-attached">
+                    <Badge variant="record">
+                      <FileText aria-hidden="true" />
+                      <span className="truncate">
+                        {supportTitle || "Document"}
+                      </span>
+                      <button
+                        type="button"
+                        data-slot="badge-remove"
+                        aria-label="Remove attached Document"
+                        onClick={() => setSupport("")}
+                      >
+                        <X aria-hidden="true" />
+                      </button>
+                    </Badge>
+                  </div>
+                )}
+                <FloatingEditBar
+                  status={hasDraft(saved) ? "Draft saved" : ""}
+                  controlsRef={setControlsHost}
+                  feedback={
+                    error && (
+                      <FailureAlert
+                        size="compact"
+                        failure={error}
+                        onRetry={() => composerRef.current?.requestSubmit()}
+                      />
+                    )
+                  }
+                  actions={
+                    <>
+                      {plus}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => {
+                          if (hasDraft(saved)) clearDraft();
+                          setPicking(false);
+                          setComposing(false);
+                        }}
+                      >
+                        {hasDraft(saved) ? "Discard draft" : "Cancel"}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => composerRef.current?.requestSubmit()}
+                        size="sm"
+                        disabled={pending || !hasText}
+                        aria-describedby={!hasText ? postHintId : undefined}
+                      >
+                        {pending ? "Saving…" : "Post update"}
+                        {!pending && (
+                          <Kbd tone="inverted" aria-hidden="true">
+                            {submitHint}
+                          </Kbd>
+                        )}
+                      </Button>
+                      <span id={postHintId} className="sr-only">
+                        Write an update to post.
+                      </span>
+                    </>
+                  }
+                />
+              </>
+            ) : (
+              <button
+                type="button"
+                className="activity-composer-idle"
+                aria-keyshortcuts={ariaKeyShortcuts("ticket-update")}
+                onClick={() => {
+                  setComposing(true);
+                  setFocusUpdate((count) => count + 1);
+                }}
+              >
+                <span className="activity-composer-prompt">
+                  <MessageSquare aria-hidden="true" />
+                  <span>Write an update…</span>
                 </span>
-                <span ref={setControlsHost} className="activity-controls" />
-                {plus}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => {
-                    if (hasDraft(saved)) clearDraft();
-                    setPicking(false);
-                    setComposing(false);
-                  }}
-                >
-                  {hasDraft(saved) ? "Discard draft" : "Cancel"}
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={pending || !hasText}
-                  aria-describedby={!hasText ? postHintId : undefined}
-                >
-                  {pending ? "Saving…" : "Post update"}
-                  {!pending && (
-                    <Kbd tone="inverted" aria-hidden="true">
-                      {submitHint}
-                    </Kbd>
-                  )}
-                </Button>
-                <span id={postHintId} className="sr-only">
-                  Write an update to post.
-                </span>
-              </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="activity-composer-idle"
-              onClick={() => {
-                setComposing(true);
-                setFocusUpdate((count) => count + 1);
-              }}
-            >
-              Write an update…
-            </button>
-          )}
-        </form>
+                <Kbd aria-hidden="true">{shortcutLabel("ticket-update")}</Kbd>
+              </button>
+            )}
+          </form>
+        </Card>
       )}
       {edit &&
         !displayedNotes.some((note) => note.id === edit.id) &&
@@ -1152,6 +1176,7 @@ export function Activity({
                       editing={Boolean(edit)}
                       confirming={confirmDelete === item.note.id}
                       hasDetails={Boolean(item.note.supporting_document_id)}
+                      failure={deleteError}
                       onReply={() => reply(item.note.brief)}
                       onEdit={() =>
                         setEdit({
@@ -1160,9 +1185,10 @@ export function Activity({
                           content: item.note.brief,
                         })
                       }
-                      onConfirm={(open) =>
-                        setConfirmDelete(open ? item.note.id : null)
-                      }
+                      onConfirm={(open) => {
+                        if (open) setDeleteError(null);
+                        setConfirmDelete(open ? item.note.id : null);
+                      }}
                       onDelete={() => void remove(item.note.id)}
                       repliedRef={replied}
                       focusComposer={() => setFocusUpdate((count) => count + 1)}
@@ -1274,6 +1300,7 @@ function UpdateActions({
   editing,
   confirming,
   hasDetails,
+  failure,
   onReply,
   onEdit,
   onConfirm,
@@ -1286,6 +1313,7 @@ function UpdateActions({
   editing: boolean;
   confirming: boolean;
   hasDetails: boolean;
+  failure: FailureDescription | null;
   onReply: () => void;
   onEdit: () => void;
   onConfirm: (open: boolean) => void;
@@ -1293,6 +1321,9 @@ function UpdateActions({
   repliedRef: React.RefObject<boolean>;
   focusComposer: () => void;
 }) {
+  const requested = useRef(false);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
     <span className="activity-row-actions">
       <Popover open={confirming} onOpenChange={onConfirm}>
@@ -1300,6 +1331,7 @@ function UpdateActions({
           <PopoverAnchor asChild>
             <DropdownMenuTrigger asChild>
               <IconButton
+                ref={trigger}
                 type="button"
                 tooltipSide="top"
                 disabled={disabled}
@@ -1312,6 +1344,12 @@ function UpdateActions({
           <DropdownMenuContent
             align="end"
             onCloseAutoFocus={(event) => {
+              if (requested.current) {
+                requested.current = false;
+                event.preventDefault();
+                onConfirm(true);
+                return;
+              }
               // Focus goes to the composer, not back to the menu button.
               if (repliedRef.current) {
                 event.preventDefault();
@@ -1329,7 +1367,9 @@ function UpdateActions({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => window.setTimeout(() => onConfirm(true), 0)}
+              onSelect={() => {
+                requested.current = true;
+              }}
             >
               Delete update
             </DropdownMenuItem>
@@ -1339,12 +1379,16 @@ function UpdateActions({
           align="end"
           role="alertdialog"
           aria-label="Delete this update?"
+          onCloseAutoFocus={(event) => {
+            if (trigger.current?.isConnected) {
+              event.preventDefault();
+              trigger.current.focus();
+            }
+          }}
           onOpenAutoFocus={(event) => {
             // Cancel takes focus: a destructive answer is never the default.
             event.preventDefault();
-            (event.currentTarget as HTMLElement | null)
-              ?.querySelector<HTMLButtonElement>("[data-cancel]")
-              ?.focus();
+            cancel.current?.focus();
           }}
         >
           <p className="activity-confirm-title">Delete this update?</p>
@@ -1353,11 +1397,15 @@ function UpdateActions({
               ? "Its details stay in Documents."
               : "This can't be undone."}
           </p>
+          {failure && (
+            <FailureAlert size="compact" failure={failure} onRetry={onDelete} />
+          )}
           <div className="activity-confirm-actions">
             <Button
               type="button"
               variant="ghost"
               size="sm"
+              ref={cancel}
               data-cancel
               onClick={() => onConfirm(false)}
             >

@@ -364,6 +364,17 @@ function PreviewHeader({
   const canRestore = Boolean(file?.quarantined) && !preview.gone;
   const notDownloaded = preview.stored?.state === "not_downloaded";
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreTrigger = useRef<HTMLButtonElement>(null);
+  const wasRenaming = useRef(renaming);
+  useLayoutEffect(() => {
+    if (
+      wasRenaming.current &&
+      !renaming &&
+      document.activeElement === document.body
+    )
+      moreTrigger.current?.focus({ preventScroll: true });
+    wasRenaming.current = renaming;
+  }, [renaming]);
   const open = useCallback(() => {
     if (file && !busy && blocked === null)
       void preview.action("open the file", () => attachments.open(file.id));
@@ -483,6 +494,7 @@ function PreviewHeader({
               <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
                 <DropdownMenuTrigger asChild>
                   <IconButton
+                    ref={moreTrigger}
                     label="More actions"
                     shortcut={shortcutLabel("attachments-more")}
                     aria-keyshortcuts={ariaKeyShortcuts("attachments-more")}

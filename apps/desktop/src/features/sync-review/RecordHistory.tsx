@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,7 @@ export function RecordHistory({
   onClose: () => void;
   onRestored?: () => void;
 }) {
+  const presence = useDialogPresence(onClose);
   const connected = useSyncStatus().status?.connection === "connected";
   const [local, setLocal] = useState<Entry[] | null>(null);
   /** `null` until Drive was asked and answered. */
@@ -171,7 +173,7 @@ export function RecordHistory({
         requestId([selected.source, selected.id]),
       );
       onRestored?.();
-      onClose();
+      presence.close();
     } catch (reason) {
       setError(toFailure(reason).message);
       restoring.current = false;
@@ -201,10 +203,7 @@ export function RecordHistory({
         : null;
   return (
     <DialogShell
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
+      {...presence.dialog}
       title="History"
       description={subtitle}
       primaryLabel="Restore"

@@ -84,18 +84,22 @@ export function CreateTicketDialog({
 }) {
   const recovery = useDraftRecovery();
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(() => {
+  const [savedDraft, setDraft] = useState<Draft | null>(() => {
     const saved = recovery.read("new-ticket", draftSchema);
     return saved ? { ...saved, restored: true } : null;
   });
+  const [closingDraft, setClosingDraft] = useState<Draft | null>(null);
   const [editorGeneration, setEditorGeneration] = useState(0);
   useEffect(() => {
     const payload =
-      draft && (draft.requestId || draft.title || draft.body) ? draft : null;
+      savedDraft &&
+      (savedDraft.requestId || savedDraft.title || savedDraft.body)
+        ? savedDraft
+        : null;
     void recovery
-      .put("new-ticket", payload, draft?.body ? [draft.body] : [])
+      .put("new-ticket", payload, savedDraft?.body ? [savedDraft.body] : [])
       .catch(() => {});
-  }, [draft, recovery]);
+  }, [savedDraft, recovery]);
   // One failure for the whole dialog, above the footer. A workspace-level
   // cause is also in the band, so this says only what it means for this ticket.
   const [error, setError] = useState<FailureDescription | null>(null);
@@ -117,7 +121,7 @@ export function CreateTicketDialog({
     }
   }, [pending]);
   const [vocabulary, setVocabulary] = useState<string[]>([]);
-  const [createMore, setCreateMore] = useState(draft?.createMore ?? false);
+  const [createMore, setCreateMore] = useState(savedDraft?.createMore ?? false);
   const [announcement, setAnnouncement] = useState("");
   // "Created T-FV16." stays readable in the footer for a while (list C-06).
   useEffect(() => {
@@ -137,10 +141,11 @@ export function CreateTicketDialog({
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open && draft && initialStatus && !draft.requestId)
-      setDraft({ ...draft, status: initialStatus });
+    if (open) setClosingDraft(null);
+    if (open && savedDraft && initialStatus && !savedDraft.requestId)
+      setDraft({ ...savedDraft, status: initialStatus });
   }
-  if (open && !draft)
+  if (open && !savedDraft)
     setDraft({
       title: "",
       body: "",
@@ -171,6 +176,8 @@ export function CreateTicketDialog({
       window.clearTimeout(timer);
     };
   }, [open]);
+  // Recovery owns savedDraft; this snapshot only keeps the exiting UI alive.
+  const draft = savedDraft ?? (open ? null : closingDraft);
   if (!draft) return null;
   const update = (patch: Partial<Draft>) =>
     setDraft((old) => old && { ...old, ...patch });
@@ -182,7 +189,10 @@ export function CreateTicketDialog({
       draft!.body.trim()
     );
     if (dirty) update({ restored: true });
-    else setDraft(null);
+    else {
+      setClosingDraft(draft);
+      setDraft(null);
+    }
     setConfirmNewTicket(false);
     setAnnouncement("");
     onOpenChange(false);
@@ -243,8 +253,8 @@ export function CreateTicketDialog({
       await recovery.flush();
       await recovery.put("new-ticket", null, []);
       setCompletedCreation(null);
-      setEditorGeneration((value) => value + 1);
       if (submittedCreation.createMore) {
+        setEditorGeneration((value) => value + 1);
         setDraft({
           title: "",
           body: "",
@@ -257,7 +267,10 @@ export function CreateTicketDialog({
         });
         setAnnouncement(`Created ${submittedCreation.reference}`);
         refocusTitle.current = true;
-      } else setDraft(null);
+      } else {
+        setClosingDraft(draft);
+        setDraft(null);
+      }
     } catch (reason) {
       if (submittedCreation) {
         const failure = describeFailure(reason, "clear the draft");
@@ -334,6 +347,7 @@ export function CreateTicketDialog({
     <DialogShell
       open={open}
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+      onExitComplete={() => setClosingDraft(null)}
       title="New ticket"
       variant="create"
       expanded={expanded}

@@ -43,6 +43,7 @@ import { Kbd } from "@/components/ui/kbd";
 export function DialogShell({
   open,
   onOpenChange,
+  onExitComplete,
   title,
   description,
   size = "md",
@@ -53,6 +54,7 @@ export function DialogShell({
   onSubmit,
   onCancel,
   returnFocus,
+  resolveReturnFocus,
   footerLeading,
   footerNote,
   error,
@@ -75,6 +77,8 @@ export function DialogShell({
   onKeyDownCapture?: KeyboardEventHandler<HTMLFormElement>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called after the closing content has left Radix Presence. */
+  onExitComplete?: () => void;
   title: string;
   description?: string;
   size?: "sm" | "md" | "lg";
@@ -94,6 +98,7 @@ export function DialogShell({
   onCancel?: () => void;
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: RefObject<HTMLElement | null>;
+  resolveReturnFocus?: () => HTMLElement | null;
   /** One persistent control at the footer's left edge (the Create more switch). */
   footerLeading?: ReactNode;
   /** The note slot while the primary is available: a count, a result, a consequence. */
@@ -207,12 +212,17 @@ export function DialogShell({
         overlay={variant !== "capture"}
         variant="flush"
         showCloseButton={false}
+        inert={!open || undefined}
+        onCloseAutoFocus={() => {
+          if (!open) onExitComplete?.();
+        }}
         // Escape that confirms an IME candidate belongs to the field, not the dialog.
         onEscapeKeyDown={(event) => {
           if (event.isComposing || event.keyCode === 229)
             event.preventDefault();
         }}
         {...(returnFocus && { returnFocus })}
+        {...(resolveReturnFocus && { resolveReturnFocus })}
         {...(focus !== "first" && {
           onOpenAutoFocus: (event: Event) => {
             event.preventDefault();

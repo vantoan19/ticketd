@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -200,6 +201,7 @@ export function RestoreDialog({
   /** Reloads open views from the restored workspace. */
   onRestored: () => Promise<void>;
 }) {
+  const presence = useDialogPresence(onClose);
   const [file, setFile] = useState(path);
   const [phase, setPhase] = useState<Phase>({ name: "checking" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
@@ -306,10 +308,7 @@ export function RestoreDialog({
   const invalid = phase.name === "unreadable" || issue !== null;
   return (
     <DialogShell
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
+      {...presence.dialog}
       size="lg"
       busy={phase.name === "restoring"}
       title={

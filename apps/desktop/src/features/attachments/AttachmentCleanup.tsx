@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { useEffect, useState } from "react";
 import { Disclosure } from "@/components/ui/disclosure";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -38,6 +39,7 @@ export function AttachmentCleanup({
   /** The files moved to quarantine, for the library's "Moved … · Undo". */
   onMoved?: (files: Attachment[]) => void;
 }) {
+  const presence = useDialogPresence(onClose);
   const [rows, setRows] = useState<AttachmentCleanupReview[]>([]);
   const [offset, setOffset] = useState(0);
   const [more, setMore] = useState(false);
@@ -83,7 +85,7 @@ export function AttachmentCleanup({
         moved.push(item.file);
         setSelected((previous) => previous.filter((row) => row.id !== item.id));
       }
-      onClose();
+      presence.close();
     } catch (reason) {
       const failure = describeFailure(reason, "move the remaining files");
       setError({
@@ -158,10 +160,7 @@ export function AttachmentCleanup({
   const empty = !reviewing && !loadError && eligible.length === 0;
   return (
     <DialogShell
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
+      {...presence.dialog}
       title="Clean up unused files"
       description="Move unused files to quarantine. You can restore them until you delete them permanently."
       primaryLabel={empty || loadError ? null : "Move to quarantine"}

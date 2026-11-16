@@ -298,9 +298,13 @@ function AppContent() {
     setCapture(false);
     const target = captureReturn.current;
     captureReturn.current = null;
-    window.setTimeout(() => {
-      if (target?.isConnected) target.focus();
-    }, 0);
+    const active = document.activeElement;
+    if (
+      (!active || active === document.body) &&
+      target?.isConnected &&
+      !target.closest("[hidden], [inert]")
+    )
+      target.focus({ preventScroll: true });
   };
   // Capture is reachable from anywhere: Mod+Shift+N opens it without leaving the current view.
   useEffect(() => {

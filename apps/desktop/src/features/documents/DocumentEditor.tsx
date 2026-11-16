@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CloudCheck,
@@ -81,6 +82,8 @@ import { useRecordSyncState } from "@/features/sync/record-sync";
  */
 function DocumentSurface({
   capture,
+  open,
+  onExitComplete,
   onClose,
   onDismiss,
   footer,
@@ -90,6 +93,8 @@ function DocumentSurface({
 }: {
   footer: ReactNode;
   capture: boolean;
+  open: boolean;
+  onExitComplete: () => void;
   /** Submit: save, then close. */
   onClose: () => void;
   /** The X and Escape use the same save and draft-protection controller. */
@@ -102,7 +107,8 @@ function DocumentSurface({
     return <article className="document-workspace">{children}</article>;
   return (
     <DialogShell
-      open
+      open={open}
+      onExitComplete={onExitComplete}
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
@@ -452,10 +458,11 @@ export function DocumentEditor({
     closeRequested.current = false;
     action();
   };
-  const close = useRef(onClose);
+  const presence = useDialogPresence(onClose, !initial);
+  const close = useRef(initial ? onClose : presence.close);
   useEffect(() => {
-    close.current = onClose;
-  }, [onClose]);
+    close.current = initial ? onClose : presence.close;
+  }, [initial, onClose, presence.close]);
   const finishTransition = async () => {
     if (!transition.current || !id.current) return;
     setTransitioning(true);
@@ -928,7 +935,7 @@ export function DocumentEditor({
     <FailureAlert
       {...(capture && { size: "compact" as const })}
       failure={{ ...failure, sentence: `${failure.sentence}${draftNote}` }}
-      {...((capture || !writing) && { onRetry: retry })}
+      onRetry={retry}
       actions={
         draftAtRisk ? (
           <>
@@ -1059,9 +1066,81 @@ export function DocumentEditor({
   );
   const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
   const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
+  const readerFeedback = (
+    <>
+      {saveError}
+      {external && (
+        <Alert ref={noticeRef} tabIndex={-1}>
+          <AlertDescription>
+            Saved content changed while you were editing. Choose “Reload saved
+            content” to discard your draft, or “Save my draft” to replace the
+            saved content with it.
+            {blockedLeaving && " Choose Reload or Save my draft first."}
+          </AlertDescription>
+          <AlertActions>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDiscarded(draft.current);
+                saved.current = external;
+                revision.current = externalRevision.current;
+                draft.current = external;
+                pending.current = null;
+                externalRef.current = null;
+                setExternal(null);
+                setBlockedLeaving(false);
+                setTitle(external.title);
+                setBody(external.body);
+                setSuggestion(null);
+                setFailed(false);
+                setStatus("Loaded saved content");
+                refocusEditor();
+              }}
+            >
+              Reload saved content
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                saved.current = external;
+                revision.current = externalRevision.current;
+                pending.current = null;
+                externalRef.current = null;
+                setExternal(null);
+                setBlockedLeaving(false);
+                void save();
+                refocusEditor();
+              }}
+            >
+              Save my draft
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+      {discarded && (
+        <Alert role="status" size="compact">
+          <AlertDescription>Your draft was discarded.</AlertDescription>
+          <Button
+            variant="outline"
+            onClick={() => {
+              draft.current = discarded;
+              setTitle(discarded.title);
+              setBody(discarded.body);
+              setDiscarded(null);
+              refocusEditor();
+            }}
+          >
+            Undo
+          </Button>
+        </Alert>
+      )}
+    </>
+  );
   return (
     <DocumentSurface
       capture={capture}
+      open={presence.dialog.open}
+      onExitComplete={presence.dialog.onExitComplete}
       onClose={requestClose}
       // Cancel, the X and Escape leave as every way out does: after a failed
       // save the draft is kept by draft recovery and the dialog closes, or,
@@ -1226,8 +1305,11 @@ export function DocumentEditor({
             {(isSaved || reviewRequired) && statusLine}
           </div>
         )}
-        {initial && writing && (
+        {initial && (writing || saveError || external || discarded) && (
           <FloatingEditBar
+            feedback={
+              saveError || external || discarded ? readerFeedback : null
+            }
             status={
               failed && !external ? (
                 <span role="status" aria-label="Document save status">
@@ -1250,7 +1332,7 @@ export function DocumentEditor({
               )
             }
             controlsRef={setSessionHost}
-            onDone={() => setEditing(false)}
+            {...(writing && { onDone: () => setEditing(false) })}
           />
         )}
         {!capture && suggestion && (
@@ -1269,72 +1351,6 @@ export function DocumentEditor({
             </Button>
           </p>
         )}
-        {external && (
-          <Alert ref={noticeRef} tabIndex={-1}>
-            <AlertDescription>
-              Saved content changed while you were editing. Choose “Reload saved
-              content” to discard your draft, or “Save my draft” to replace the
-              saved content with it.
-              {blockedLeaving && " Choose Reload or Save my draft first."}
-            </AlertDescription>
-            <AlertActions>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDiscarded(draft.current);
-                  saved.current = external;
-                  revision.current = externalRevision.current;
-                  draft.current = external;
-                  pending.current = null;
-                  externalRef.current = null;
-                  setExternal(null);
-                  setBlockedLeaving(false);
-                  setTitle(external.title);
-                  setBody(external.body);
-                  setSuggestion(null);
-                  setFailed(false);
-                  setStatus("Loaded saved content");
-                  refocusEditor();
-                }}
-              >
-                Reload saved content
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  saved.current = external;
-                  revision.current = externalRevision.current;
-                  pending.current = null;
-                  externalRef.current = null;
-                  setExternal(null);
-                  setBlockedLeaving(false);
-                  void save();
-                  refocusEditor();
-                }}
-              >
-                Save my draft
-              </Button>
-            </AlertActions>
-          </Alert>
-        )}
-        {discarded && (
-          <Alert role="status" size="compact">
-            <AlertDescription>Your draft was discarded.</AlertDescription>
-            <Button
-              variant="outline"
-              onClick={() => {
-                draft.current = discarded;
-                setTitle(discarded.title);
-                setBody(discarded.body);
-                setDiscarded(null);
-                refocusEditor();
-              }}
-            >
-              Undo
-            </Button>
-          </Alert>
-        )}
-        {initial && saveError}
         {capture && titleInput}
         <div
           className="document-body"

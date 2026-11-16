@@ -109,11 +109,7 @@
   min-width: 0;
 }
 .dependency-edge [data-slot="segmented-control"] {
-  height: 30px;
   flex: none;
-}
-.dependency-edge [data-slot="segmented-control"] > * {
-  height: 26px;
 }
 .dependency-reason,
 .dependency-consequence {
