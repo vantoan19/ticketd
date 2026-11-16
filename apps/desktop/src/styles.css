@@ -784,7 +784,8 @@ body:has([data-slot="dialog-overlay"])
   .ui-sheet,
   .ui-overlay
 )[data-state="closed"] {
-  pointer-events: none;
+  /* DismissableLayer supplies inline pointer-events while Presence exits. */
+  pointer-events: none !important;
 }
 .ui-dialog[data-state="open"] {
   animation: palette-enter var(--dur-4) var(--ease-out);
