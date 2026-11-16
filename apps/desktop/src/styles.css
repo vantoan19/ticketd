@@ -3893,7 +3893,7 @@ kbd,
   height: 28px;
 }
 .ui-button-attention svg {
-  color: var(--status-attention);
+  color: var(--status-blocked);
 }
 .workspace-band-slot {
   flex: none;
