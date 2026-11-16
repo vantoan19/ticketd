@@ -1,4 +1,4 @@
-use crate::{Error, Workspace, history::unresolved_blocker_sql};
+use crate::{Error, Workspace, readiness};
 use serde::{Deserialize, Serialize};
 
 /// Counts shown beside the workspace sidebar views.
@@ -16,20 +16,17 @@ pub struct SidebarCounts {
 impl Workspace {
     /// Count unread inbox entries plus Ready and In progress tickets in one read.
     ///
-    /// Ready matches the Ready list: Todo tickets with no unsatisfied prerequisite, where
-    /// only Done satisfies one. Trashed tickets are excluded from both ticket counts.
+    /// Ready matches the Ready list (see `readiness`): Todo tickets with no unsatisfied
+    /// prerequisite, where only Done satisfies one, and not held by their source. Trashed
+    /// tickets are excluded from both ticket counts.
     pub fn sidebar_counts(&self) -> Result<SidebarCounts, Error> {
         self.deliver_due_reminders()?;
-        let unresolved = unresolved_blocker_sql("blocker");
-        let held = crate::source::held_sql("t.id");
+        let ready = readiness::ready_sql("t");
         let counts = self.connection.query_row(
             &format!(
                 "SELECT \
                (SELECT COUNT(*) FROM inbox_entries WHERE person = ?1 AND read = 0), \
-               (SELECT COUNT(*) FROM tickets t WHERE t.trashed = 0 AND t.status = 'Todo' \
-                  AND NOT {held} \
-                  AND NOT EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id \
-                                  WHERE d.dependent_id = t.id AND {unresolved})), \
+               (SELECT COUNT(*) FROM tickets t WHERE {ready}), \
                (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress'), (SELECT COUNT(*) FROM tickets WHERE trashed = 0), \
                (SELECT COUNT(*) FROM automation_runs WHERE status = 'needs_attention' AND attention_cleared = 0)"
             ),

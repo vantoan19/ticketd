@@ -72,6 +72,7 @@ use uuid::Uuid;
 
 mod counts;
 mod history;
+mod readiness;
 pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
@@ -142,8 +143,9 @@ pub use chats::{
     NewChat,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
-pub use history::{HistoryEntry, Readiness, Status};
+pub use history::{HistoryEntry, Status};
 pub use projects::Project;
+pub use readiness::Readiness;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
