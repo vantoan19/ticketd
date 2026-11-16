@@ -16,6 +16,7 @@ import type { TicketStart } from "@/features/chats/ticket-chat";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import type { ChatFailureNotice } from "@/features/chats/failure";
 import { Count } from "@/components/ui/count";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -367,7 +368,7 @@ export function ChatsView({
           </DropdownMenu>
         )}
         count={
-          list && (
+          list?.known && (
             <Count>
               {list.chats.length}
               <span className="sr-only"> chats</span>
@@ -389,7 +390,39 @@ export function ChatsView({
           />
         </div>
       )}
-      {list?.error && (
+      {!list && (
+        <div role="status" aria-label="Loading Chats" aria-busy="true">
+          <ul className="chat-rows" aria-hidden="true">
+            {scope === "active" && (
+              <li className="chat-list-group">
+                <Skeleton className="h-4 w-16" />
+              </li>
+            )}
+            {[0, 1, 2].map((index) => (
+              <li key={index} className="chat-row-item">
+                <div className="chat-row">
+                  <Skeleton className="size-4" shape="circle" />
+                  <Skeleton className="h-5 w-32 max-w-full" />
+                  <Skeleton className="h-4 w-8" />
+                  <span className="chat-row-sub">
+                    <Skeleton className="h-4 w-24" />
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {list?.error && list.known && (
+        <div className="chat-list-alert">
+          <FailureAlert
+            size="compact"
+            failure={list.error}
+            onRetry={list.retry}
+          />
+        </div>
+      )}
+      {list?.error && !list.known && (
         <FailureState failure={list.error} onRetry={list.retry} />
       )}
       {list && !list.error && list.chats.length === 0 && (

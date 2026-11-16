@@ -6060,6 +6060,111 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   ).toBeTruthy();
 });
 
+test("Chats distinguishes an unknown list from empty and keeps known rows after a failed refresh", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient, chatState } =
+    await import("@/features/chats/mock-client");
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [{ chat: chatState({ id: "known", title: "Known Chat" }) }],
+  });
+  const read = client.listChats.bind(client);
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const list = vi
+    .spyOn(client, "listChats")
+    .mockImplementation(async (scope) => {
+      await waiting;
+      throw new Error(`Synthetic initial ${scope} read failure`);
+    });
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  const pane = screen.getByRole("region", { name: "Chat list" });
+  expect(
+    within(pane).getByRole("status", { name: "Loading Chats" }),
+  ).toBeTruthy();
+  expect(within(pane).queryByText("0")).toBeNull();
+  expect(within(pane).queryByText("No Chats yet")).toBeNull();
+  await act(async () => release());
+  expect(
+    await within(pane).findByRole("button", { name: "Retry" }),
+  ).toBeTruthy();
+  expect(within(pane).queryByText("0")).toBeNull();
+  list.mockImplementation(read);
+  fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
+  expect(
+    await within(pane).findByRole("button", { name: /Known Chat,/ }),
+  ).toBeTruthy();
+  expect(within(pane).getByText("1")).toBeTruthy();
+  list.mockRejectedValueOnce(new Error("Synthetic read failure"));
+  await act(async () => client.patch("known", { title: "Known Chat" }));
+  expect(
+    await within(pane).findByRole("button", { name: "Retry" }),
+  ).toBeTruthy();
+  expect(
+    within(pane).getByRole("button", { name: /Known Chat,/ }),
+  ).toBeTruthy();
+  expect(within(pane).getByText("1")).toBeTruthy();
+  fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(within(pane).queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+});
+
+test.each([false, true])(
+  "New Chat Retry keeps the draft and creation identity follows payload edits (%s)",
+  async (edited) => {
+    const { ChatClientContext } = await import("@/features/chats/client");
+    const { createMockChatClient } =
+      await import("@/features/chats/mock-client");
+    const client = createMockChatClient({ enabled: true });
+    const create = vi
+      .spyOn(client, "createChat")
+      .mockRejectedValueOnce(new Error("Synthetic refusal"));
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+    const input = await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    });
+    fireEvent.change(input, { target: { value: "Keep these words" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(input).toHaveProperty("value", "Keep these words");
+    if (edited) {
+      fireEvent.change(input, { target: { value: "Edited words" } });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Claude Code, model Opus 5.5, effort Default",
+        }),
+      );
+      fireEvent.click(screen.getByRole("radio", { name: "High" }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    }
+    fireEvent.click(retry);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    if (edited) {
+      expect(create.mock.calls[1]?.[0].command_id).not.toBe(
+        create.mock.calls[0]?.[0].command_id,
+      );
+      expect(create.mock.calls[1]?.[0].message).toBe("Edited words");
+      expect(create.mock.calls[1]?.[0].effort).toBe("high");
+    } else expect(create.mock.calls[1]?.[0]).toEqual(create.mock.calls[0]?.[0]);
+    expect(client.created).toHaveLength(1);
+  },
+);
+
 test("New Chat exposes its complete current pick before the first message", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient } = await import("@/features/chats/mock-client");
@@ -8220,6 +8325,231 @@ test("Inbox loading announces its read without guessing urgency, then retains en
   ).toBe(row);
   expect(screen.queryByText("You're all caught up")).toBeNull();
   expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
+});
+
+test.each(["Command line", "Agent skills"])(
+  "Settings %s keeps its last known setup state when Check again fails",
+  async (page) => {
+    let fail = false;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>) => {
+        if ((command === "check_cli" || command === "agent_skills") && fail) {
+          await waiting;
+          throw new Error("Synthetic check failure");
+        }
+        if (command === "agent_skills")
+          return [
+            {
+              id: "codex",
+              name: "Codex",
+              path: "/fake/skills",
+              detected: true,
+              state: "not_installed",
+              error: null,
+            },
+          ];
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(
+      within(
+        screen.getByRole("navigation", { name: "Settings sections" }),
+      ).getByRole("button", { name: new RegExp(`^${page}`) }),
+    );
+    const known =
+      page === "Command line"
+        ? "Get the ticketd executable"
+        : "Install for Codex";
+    await screen.findByText(known);
+    fail = true;
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(screen.getByText(known)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Checking…" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    await act(async () => release());
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.getByText(known)).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(
+      within(nav).getAllByRole("img", { name: "Needs setup" }).length,
+    ).toBeGreaterThan(0);
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+    );
+  },
+);
+
+test("Drive save Retry retains the unsaved interval and repeats its assignment", async () => {
+  let settings = syncSettings();
+  let fail = true;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "sync_status") return syncStatus();
+      if (command === "sync_settings") return settings;
+      if (command === "set_sync_settings") {
+        if (fail) throw new Error("Synthetic save failure");
+        settings = { ...settings, ...(args?.settings as object) };
+        return settings;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Google Drive" }),
+  );
+  const interval = await screen.findByRole("textbox", {
+    name: "Check for changes every",
+  });
+  fireEvent.change(interval, { target: { value: "45" } });
+  fireEvent.blur(interval);
+  expect(await screen.findByText("Not saved")).toBeTruthy();
+  expect(interval).toHaveProperty("value", "45");
+  expect(settings.poll_interval_secs).toBe(60);
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(
+    await screen.findByText("Saved", { selector: ".sync-field-note" }),
+  ).toBeTruthy();
+  expect(settings.poll_interval_secs).toBe(45);
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "set_sync_settings",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(writes[0]);
+});
+
+test("Chat Retry repeats a failed steer and removes only the refused queued item", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient, chatState } =
+    await import("@/features/chats/mock-client");
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      {
+        chat: chatState({
+          id: "working-retry",
+          title: "Working recovery",
+          activity: "working",
+          queue: [
+            { id: "first", text: "First queued" },
+            { id: "second", text: "Second queued" },
+          ],
+        }),
+      },
+    ],
+  });
+  const send = vi
+    .spyOn(client, "send")
+    .mockRejectedValueOnce(new Error("Synthetic steer failure"));
+  const remove = vi
+    .spyOn(client, "removeQueued")
+    .mockRejectedValueOnce(new Error("Synthetic remove failure"));
+  const queue = vi
+    .spyOn(client, "queue")
+    .mockRejectedValueOnce(new Error("Synthetic queue failure"));
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Working recovery,/ }),
+  );
+  const input = await screen.findByRole("textbox", { name: "Steer Codex" });
+  fireEvent.change(input, { target: { value: "Keep the steer" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+  await vi.waitFor(() => expect(input).toHaveProperty("value", ""));
+  expect(document.activeElement).toBe(input);
+  fireEvent.change(input, { target: { value: "Retry as Queue" } });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(queue).toHaveBeenCalledTimes(2));
+  expect(queue.mock.calls[1]).toEqual(queue.mock.calls[0]);
+  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  await vi.waitFor(() => expect(input).toHaveProperty("value", ""));
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Remove from queue" })[0]!,
+  );
+  expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.getByText("First queued")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(screen.queryByText("First queued")).toBeNull());
+  expect(screen.getByText("Second queued")).toBeTruthy();
+  expect(document.activeElement).toBe(input);
+  expect(remove.mock.calls).toEqual([
+    ["working-retry", "first"],
+    ["working-retry", "first"],
+  ]);
+  send.mockRejectedValueOnce(new Error("Synthetic uncertain submission"));
+  fireEvent.change(input, { target: { value: "Keep the uncertain draft" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByRole("button", { name: "Retry" });
+  act(() =>
+    client.patch("working-retry", {
+      problem: { kind: "uncertain_delivery", message_id: "unconfirmed" },
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(send).toHaveBeenCalledTimes(3);
+  expect(input).toHaveProperty("value", "Keep the uncertain draft");
+});
+
+test("Export Retry remembers the failed path and asks the save chooser again before writing", async () => {
+  const { workspaceClient } = await import("@/lib/api/workspace");
+  const choose = vi
+    .spyOn(workspaceClient, "chooseSavePath")
+    .mockResolvedValueOnce("/synthetic/export.json")
+    .mockResolvedValueOnce(null);
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "export_workspace")
+        throw new Error("Synthetic export failure");
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Export" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(choose).toHaveBeenCalledTimes(2));
+  expect(choose.mock.calls[1]?.[0].defaultPath).toBe("/synthetic/export.json");
+  expect(
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "export_workspace",
+    ),
+  ).toEqual([["export_workspace", { path: "/synthetic/export.json" }]]);
+  choose.mockRestore();
 });
 
 test("unknown relationship failures keep raw text behind Details and structured causes stay actionable", async () => {

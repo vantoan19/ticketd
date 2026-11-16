@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
-import { modifierKeyLabel } from "@/lib/platform";
+import { shortcutLabel } from "@/lib/shortcuts";
 import type { ComposerControls } from "@/features/chats/model";
 
 const WORD = { send: "Send", steer: "Steer", queue: "Queue" } as const;
@@ -33,8 +33,7 @@ export function SendButton({
 }) {
   const { send, enabled, queues, effect } = controls;
   const Icon = ICON[send];
-  const modifier = modifierKeyLabel();
-  const chord = modifier === "⌘" ? "⌘↵" : "Ctrl+Enter";
+  const chord = shortcutLabel("chat-queue");
   const description = [
     queues !== undefined && `${chord} queues it instead.`,
     effect,
@@ -44,7 +43,7 @@ export function SendButton({
   const button = (
     <Button
       type="submit"
-      size="sm"
+      size="compact"
       // Solid only for Send; Steer and Queue are lighter while a turn runs (LIVE-15).
       variant={send === "send" ? "default" : "secondary"}
       disabled={busy || !enabled}
@@ -56,19 +55,18 @@ export function SendButton({
   );
   return (
     <div className="chat-send">
-      {effect ? (
-        // A disabled button gets no pointer events; the span keeps the tooltip.
-        <Tooltip content={effect}>
-          <span className="chat-send-tip">{button}</span>
-        </Tooltip>
-      ) : (
-        button
-      )}
+      <Tooltip
+        content={effect || WORD[send]}
+        shortcut={shortcutLabel("chat-send")}
+      >
+        <span className="chat-send-tip">{button}</span>
+      </Tooltip>
       {send === "steer" && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <IconButton
               label="More ways to send"
+              size="icon-compact"
               variant="secondary"
               disabled={busy || (!enabled && !queues)}
             >
@@ -82,7 +80,9 @@ export function SendButton({
                 Steer now
                 {effect && <small>{effect}</small>}
               </span>
-              <DropdownMenuShortcut>↵</DropdownMenuShortcut>
+              <DropdownMenuShortcut>
+                {shortcutLabel("chat-send")}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem disabled={busy || !queues} onSelect={onQueue}>
               <ListPlus aria-hidden />

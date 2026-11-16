@@ -51,6 +51,13 @@ type Check =
 const mono = "font-mono";
 
 type Failure = { failure: FailureDescription; retry: () => void };
+const CHECK_FAILURE: FailureDescription = {
+  code: "failed",
+  title: "Couldn't check the command-line tool",
+  sentence: "Choose Retry to check again.",
+  action: "retry",
+  details: " ",
+};
 
 /** Opens the guide; `onFailure` says why it did not open, and null clears it. */
 function InstallGuideLink({
@@ -123,17 +130,27 @@ function StatusRows({
 }) {
   if (check.phase === "checking")
     return (
-      <div
-        role="status"
-        aria-label="Checking for the command-line tool"
-        className="flex items-center gap-6 px-5 py-4"
-      >
-        <Skeleton className="size-10" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-2.5 w-30" />
-          <Skeleton className="h-2 w-75" />
-        </div>
-      </div>
+      <>
+        <SettingsRow
+          leading={<Skeleton className="size-10" />}
+          title={<Skeleton className="h-5 w-30" />}
+          description={<Skeleton className="h-4 w-75 max-w-full" />}
+        />
+        <SettingsRow variant="stacked">
+          <Steps>
+            {[0, 1, 2].map((index) => (
+              <Step
+                key={index}
+                title={<Skeleton className="h-5 w-48 max-w-full" />}
+                description={<Skeleton className="h-4 w-75 max-w-full" />}
+                {...(index === 0 && {
+                  action: <Skeleton className="h-8 w-40" />,
+                })}
+              />
+            ))}
+          </Steps>
+        </SettingsRow>
+      </>
     );
   if (check.phase === "failed")
     return (
@@ -265,14 +282,26 @@ export function CommandLineCard({
 }) {
   const { openPage } = useSettingsState();
   const [check, setCheck] = useState<Check>({ phase: "checking" });
+  const [checking, setChecking] = useState(true);
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
   const load = () => {
     void cliClient.check().then(
       (status) => {
         setCheck({ phase: "done", status });
+        setChecking(false);
         onChecked?.();
       },
-      () => setCheck({ phase: "failed" }),
+      (reason: unknown) => {
+        setCheck((previous) =>
+          previous.phase === "done" ? previous : { phase: "failed" },
+        );
+        setChecking(false);
+        setFailure({
+          ...describeFailure(reason, "check the command-line tool"),
+          sentence: CHECK_FAILURE.sentence,
+        });
+      },
     );
   };
   // Detect on first show; Check again picks up a later installation.
@@ -282,7 +311,8 @@ export function CommandLineCard({
     firstCheck();
   }, []);
   const run = () => {
-    setCheck({ phase: "checking" });
+    setChecking(true);
+    setFailure(null);
     load();
   };
   return (
@@ -294,17 +324,42 @@ export function CommandLineCard({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={check.phase === "checking"}
+            disabled={checking}
             onClick={run}
           >
             <RefreshCw aria-hidden="true" />
-            Check again
+            {checking ? "Checking…" : "Check again"}
           </Button>
         }
       >
-        <SettingsList aria-live="polite">
-          <StatusRows check={check} onGuideFailure={setGuideFailure} />
-        </SettingsList>
+        <div className="cli-status-slot" aria-busy={checking}>
+          <SettingsList className="cli-status-reserve" aria-hidden="true">
+            <StatusRows
+              check={{ phase: "checking" }}
+              onGuideFailure={() => {}}
+            />
+          </SettingsList>
+          <SettingsList className="cli-status-content" aria-live="polite">
+            {check.phase === "checking" && (
+              <span className="sr-only" role="status">
+                Checking for the command-line tool
+              </span>
+            )}
+            <StatusRows check={check} onGuideFailure={setGuideFailure} />
+          </SettingsList>
+        </div>
+        <div className="cli-check-feedback">
+          <div className="cli-check-feedback-reserve" aria-hidden="true">
+            <FailureAlert
+              size="compact"
+              failure={CHECK_FAILURE}
+              onRetry={() => {}}
+            />
+          </div>
+          {failure && (
+            <FailureAlert size="compact" failure={failure} onRetry={run} />
+          )}
+        </div>
         {guideFailure && (
           <FailureAlert
             size="compact"

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureState } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { PathText } from "@/components/ui/path-text";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -108,6 +108,33 @@ type Load =
 
 const STATUS_ID = "agent-skill-status";
 
+function SkillStatusSkeleton() {
+  return (
+    <SettingsRow
+      leading={<Skeleton className="size-10" />}
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          <Badge>
+            <span className="font-mono">SKILL.md</span>
+          </Badge>
+          <span>
+            <StatusLabel tone="neutral">Checking…</StatusLabel>
+          </span>
+        </span>
+      }
+      description={
+        <Skeleton>
+          <span className="invisible">
+            Checking the ticketd skill for supported agents on this computer.
+            This can take a moment.
+          </span>
+        </Skeleton>
+      }
+      trailing={<Skeleton className="h-8 w-32" />}
+    />
+  );
+}
+
 export function AgentSkillsCard({
   onChanged,
 }: {
@@ -116,6 +143,10 @@ export function AgentSkillsCard({
 }) {
   const { openPage } = useSettingsState();
   const [load, setLoad] = useState<Load>({ phase: "loading" });
+  const [checking, setChecking] = useState(true);
+  const [checkFailure, setCheckFailure] = useState<FailureDescription | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<Record<string, FailureDescription>>(
     {},
@@ -125,18 +156,23 @@ export function AgentSkillsCard({
   // An action just finished; its button may be gone, so focus moves to the status.
   const focusAfterLoad = useRef(false);
 
-  const refresh = () =>
-    agentSkillsClient.list().then(
+  const refresh = () => {
+    return agentSkillsClient.list().then(
       (agents) => {
         setLoad({ phase: "done", agents });
+        setChecking(false);
         onChanged?.();
       },
-      (error: unknown) =>
-        setLoad({
-          phase: "failed",
-          failure: describeFailure(error, "check agent skills"),
-        }),
+      (error: unknown) => {
+        const failure = describeFailure(error, "check agent skills");
+        setLoad((previous) =>
+          previous.phase === "done" ? previous : { phase: "failed", failure },
+        );
+        setCheckFailure(failure);
+        setChecking(false);
+      },
     );
+  };
   // Read the folders on first show; each action and Check again reads them again.
   // Reporting the result to the nav is not a reason to start another reading.
   const firstRead = useEffectEvent(() => void refresh());
@@ -151,6 +187,8 @@ export function AgentSkillsCard({
 
   /** Installs for each agent in turn; one failure does not stop the others. */
   const run = async (agents: AgentSkill[], replace: boolean) => {
+    setChecking(true);
+    setCheckFailure(null);
     setBusy(true);
     setFailures({});
     setResult(null);
@@ -184,9 +222,10 @@ export function AgentSkillsCard({
   };
 
   const checkAgain = () => {
+    setChecking(true);
+    setCheckFailure(null);
     setFailures({});
     setResult(null);
-    setLoad({ phase: "loading" });
     void refresh();
   };
 
@@ -210,61 +249,65 @@ export function AgentSkillsCard({
             onRetry={checkAgain}
           />
         ) : (
-          <SettingsList>
-            {load.phase === "loading" ? (
-              <div
-                role="status"
-                aria-label="Checking agent skills"
-                className="flex items-center gap-6 px-5 py-4"
-              >
-                <Skeleton className="size-10" />
-                <div className="flex flex-col gap-2">
-                  <Skeleton className="h-2.5 w-30" />
-                  <Skeleton className="h-2 w-75" />
+          <div className="skill-status-slot">
+            <SettingsList className="skill-status-reserve" aria-hidden="true">
+              <SkillStatusSkeleton />
+            </SettingsList>
+            <SettingsList>
+              {load.phase === "loading" ? (
+                <div role="status" aria-label="Checking agent skills">
+                  <SkillStatusSkeleton />
                 </div>
-              </div>
-            ) : (
-              <SettingsRow
-                leading={
-                  <SettingsRowTile>
-                    <FileCheck size={20} />
-                  </SettingsRowTile>
-                }
-                title={
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Badge>
-                      <span className="font-mono">SKILL.md</span>
-                    </Badge>
-                    <span id={STATUS_ID} tabIndex={-1}>
-                      <StatusLabel tone={status.tone}>
-                        {status.label}
-                      </StatusLabel>
+              ) : (
+                <SettingsRow
+                  leading={
+                    <SettingsRowTile>
+                      <FileCheck size={20} />
+                    </SettingsRowTile>
+                  }
+                  title={
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Badge>
+                        <span className="font-mono">SKILL.md</span>
+                      </Badge>
+                      <span id={STATUS_ID} tabIndex={-1}>
+                        <StatusLabel tone={status.tone}>
+                          {status.label}
+                        </StatusLabel>
+                      </span>
                     </span>
-                  </span>
-                }
-                description={summary(agents, status)}
-                trailing={
-                  todo.length > 0 ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => void run(todo, false)}
-                    >
-                      {busy ? "Installing…" : `${verb} for ${names(todo)}`}
-                    </Button>
-                  ) : null
-                }
-              />
-            )}
-            {result && (
-              <SettingsListFooter>
-                <span role="status">{result}</span>
-              </SettingsListFooter>
-            )}
-          </SettingsList>
+                  }
+                  description={summary(agents, status)}
+                  trailing={
+                    todo.length > 0 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void run(todo, false)}
+                      >
+                        {busy ? "Installing…" : `${verb} for ${names(todo)}`}
+                      </Button>
+                    ) : null
+                  }
+                />
+              )}
+              {result && (
+                <SettingsListFooter>
+                  <span role="status">{result}</span>
+                </SettingsListFooter>
+              )}
+            </SettingsList>
+          </div>
         )}
       </SettingsSection>
+      {load.phase === "done" && checkFailure && (
+        <FailureAlert
+          size="compact"
+          failure={checkFailure}
+          onRetry={checkAgain}
+        />
+      )}
       {load.phase !== "failed" && (
         <SettingsSection
           title="Agents on this computer"
@@ -274,11 +317,11 @@ export function AgentSkillsCard({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={busy || load.phase === "loading"}
+              disabled={busy || checking}
               onClick={checkAgain}
             >
               <RefreshCw aria-hidden="true" />
-              Check again
+              {checking ? "Checking…" : "Check again"}
             </Button>
           }
         >

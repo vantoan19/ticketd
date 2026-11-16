@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type Ref } from "react";
+import { useImperativeHandle, useState, type ReactNode, type Ref } from "react";
 import { Square } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import type { LinkRef } from "@/features/chats/client";
@@ -35,12 +35,15 @@ export function Composer({
   inputRef,
   autoFocus = false,
   framed = true,
+  retryRef,
 }: {
   /**
    * Draws its own ring. In a Chat the composer is the last part of the tray,
    * which draws the one ring for the notice, the dock and the box (CH-22).
    */
   framed?: boolean;
+  /** Repeats the refused action with the current draft, including Queue. */
+  retryRef?: Ref<() => void>;
   placeholder: string;
   /** Computed from the text the composer reports through `onText`. */
   controls: (text: string) => ComposerControls;
@@ -73,6 +76,9 @@ export function Composer({
   const [text, setTextState] = useState(initialText);
   const [tokens, setTokens] = useState(initialTokens);
   const [busy, setBusy] = useState(false);
+  const [failedAction, setFailedAction] = useState<"send" | "queue" | null>(
+    null,
+  );
   const setText = (next: string, nextTokens: Token[] = []) => {
     setTextState(next);
     setTokens(nextTokens);
@@ -88,11 +94,24 @@ export function Composer({
     action(message, linksOf(tokens)).then(
       () => {
         setText("");
+        setFailedAction(null);
         setBusy(false);
       },
-      () => setBusy(false),
+      () => {
+        setFailedAction(action === onQueue ? "queue" : "send");
+        setBusy(false);
+      },
     );
   };
+  useImperativeHandle(retryRef, () => () => {
+    if (
+      failedAction === "queue" &&
+      (state.queues || (state.send === "queue" && state.enabled))
+    )
+      submit(onQueue);
+    else if (failedAction === "send" && state.send !== "queue" && state.enabled)
+      submit(onSend);
+  });
   const primary = state.send === "queue" ? onQueue : onSend;
   const queue = () => {
     if (state.queues) submit(onQueue);
@@ -145,6 +164,7 @@ export function Composer({
             <IconButton
               type="button"
               variant="ghost"
+              size="icon-compact"
               label="Stop"
               shortcut="Esc"
               aria-keyshortcuts="Escape"

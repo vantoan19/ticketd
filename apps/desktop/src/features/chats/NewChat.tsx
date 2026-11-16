@@ -231,6 +231,7 @@ export function NewChat({
    * change to the message, harness, folder or links is a new request.
    */
   const attempt = useRef({ id: crypto.randomUUID(), request: "" });
+  const retrySend = useRef<(() => void) | null>(null);
   useEffect(() => {
     let current = true;
     client.harnesses().then(
@@ -445,11 +446,12 @@ export function NewChat({
                     inputRef={input}
                   />
                 }
+                retryRef={retrySend}
                 onSend={async (typed, mentioned) => {
                   if (!harness) return;
                   const message = quotedMessage(quotes, typed);
                   const chosen = links.map(({ kind, id }) => ({ kind, id }));
-                  const input = {
+                  const requestInput = {
                     harness_id: harness.id,
                     folder,
                     // Mentioned and quoted records link with the first message (21.4).
@@ -470,7 +472,7 @@ export function NewChat({
                     ...(pick.effort && { effort: pick.effort }),
                     ...(pick.permission && { permission: pick.permission }),
                   };
-                  const request = JSON.stringify(input);
+                  const request = JSON.stringify(requestInput);
                   if (attempt.current.request !== request)
                     attempt.current = { id: crypto.randomUUID(), request };
                   // Notifications are asked for with the first Chat message.
@@ -479,7 +481,7 @@ export function NewChat({
                   try {
                     const created = await client.createChat({
                       command_id: attempt.current.id,
-                      ...input,
+                      ...requestInput,
                     });
                     // Answered: whatever is asked for next is a new request.
                     attempt.current = { id: crypto.randomUUID(), request: "" };
@@ -500,7 +502,12 @@ export function NewChat({
                     onCreated(created.chat_id);
                   } catch (reason) {
                     // Sending again repeats this same request safely.
-                    setFailure(chatFailure(reason, "start the Chat"));
+                    setFailure(
+                      chatFailure(reason, "start the Chat", () => {
+                        input.current?.focus();
+                        retrySend.current?.();
+                      }),
+                    );
                     throw reason;
                   }
                 }}

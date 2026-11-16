@@ -103,6 +103,34 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
+.cli-status-slot {
+  display: grid;
+}
+.skill-status-slot {
+  display: grid;
+}
+.skill-status-slot > * {
+  grid-area: 1 / 1;
+}
+.skill-status-reserve {
+  visibility: hidden;
+}
+.cli-status-slot > * {
+  grid-area: 1 / 1;
+}
+.cli-status-reserve {
+  visibility: hidden;
+}
+.cli-check-feedback {
+  display: grid;
+  padding-top: 8px;
+}
+.cli-check-feedback > * {
+  grid-area: 1 / 1;
+}
+.cli-check-feedback-reserve {
+  visibility: hidden;
+}
 .cli-details dt,
 .cli-details dd {
   margin: 0;
