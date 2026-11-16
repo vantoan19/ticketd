@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { Evidence } from "./Evidence";
+import { OpenEvidence } from "./evidence-test-support";
 
 afterEach(cleanup);
 
@@ -34,14 +34,7 @@ vi.mock("@tauri-apps/api/core", () => {
 });
 
 test("a URL evidence item can be opened; other values cannot", async () => {
-  render(
-    <Evidence
-      reference="T-KQ1"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  render(<OpenEvidence reference="T-KQ1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Open PR" }));
   expect(opener.openUrl).toHaveBeenCalledWith("https://example.com/pr/1");
   expect(screen.queryByRole("button", { name: "Open Branch" })).toBeNull();

@@ -53,7 +53,7 @@ const addLabels: Partial<Record<LinkKind, string>> = {
 
 /** The dialogs the relationship actions open; one instance serves the rail and Subtickets. */
 export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
-  const { ticket, refresh, retry } = work;
+  const { ticket, changed } = work;
   return (
     <>
       <LinkTicketDialog
@@ -63,19 +63,13 @@ export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
         onOpenChange={(open) => {
           if (!open) work.closeLink();
         }}
-        onLinked={async () => {
-          retry();
-          await refresh();
-        }}
+        onLinked={() => changed()}
       />
       {ticket.duplicate_redirect && work.redirecting && (
         <Duplicates
           ticket={ticket}
           initialCanonical={ticket.duplicate_redirect}
-          refresh={async () => {
-            retry();
-            await refresh();
-          }}
+          refresh={() => changed()}
           open
           onOpenChange={work.setRedirecting}
           title="Point this duplicate at the original"
@@ -86,10 +80,7 @@ export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
         <Duplicates
           ticket={ticket}
           startSeparate
-          refresh={async () => {
-            retry();
-            await refresh();
-          }}
+          refresh={() => changed()}
           open
           onOpenChange={work.setReviewing}
           title="Review dependencies"
@@ -268,7 +259,7 @@ export function LinkedWork({
     <RailSection
       label={document ? "Linked" : "Relationships"}
       {...(document && {
-        count: `${new Set(work.rows.map((row) => row.reference)).size}${work.more === null ? "" : "+"}`,
+        count: `${new Set(work.rows.map((row) => row.reference)).size}${work.more ? "+" : ""}`,
         summary: current.links.children_progress.total > 0 && (
           <>
             <span className="subtickets-summary">
@@ -343,7 +334,7 @@ export function LinkedWork({
           </Button>
         </p>
       )}
-      {work.more !== null && (
+      {work.more && (
         <Pager noun="relationships" onMore={() => void work.showMore()} />
       )}
       {error && <FailureAlert size="compact" failure={error.failure} />}

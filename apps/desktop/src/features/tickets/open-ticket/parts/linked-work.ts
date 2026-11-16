@@ -1,0 +1,71 @@
+import { useMemo } from "react";
+import { client, type Relationships, type Ticket } from "@/lib/api/client";
+import { mergePage, nextOffset } from "@/features/tickets/linked-work";
+import {
+  pagedRead,
+  skip,
+  usePagedRead,
+  type PagedState,
+} from "@/lib/workspace-reads";
+import { parts, type Part } from "../parts";
+
+/** A Ticket's relationships, one core page at a time. */
+const relationshipsRead = pagedRead({
+  key: "relationships",
+  call: (reference: string, offset) =>
+    client.contextualRelationships(reference, offset),
+  next: (page: Relationships) => nextOffset(page),
+  // Pages overlap when links changed between reads, so a Ticket never repeats.
+  join: (pages: readonly Relationships[]) =>
+    pages.reduce((known, page) => mergePage(known, page)),
+  failure: "load relationships",
+  more: "load more links",
+});
+
+/** The failure a read that already has links shows: they are kept, the refresh failed. */
+const refreshing = "Couldn't refresh relationships";
+const loadingMore = "Couldn't load more links";
+
+export type LinkedWorkRead = Omit<PagedState<Relationships>, "failure"> & {
+  /** Why the links could not be read or refreshed; the links shown stay. */
+  failure: PagedState<Relationships>["failure"];
+  /** Why the next page could not be read, apart from the read itself. */
+  moreFailure: PagedState<Relationships>["failure"];
+};
+
+declare module "../parts" {
+  interface Parts {
+    /** The Ticket's linked work, paged: parent, subtickets, blockers, related, duplicates. */
+    linkedWork: Part<[], LinkedWorkRead>;
+  }
+}
+
+function useLinkedWorkRead(record: Ticket | undefined): LinkedWorkRead {
+  const state = usePagedRead(relationshipsRead, record?.reference ?? skip);
+  const { value, failure: raw } = state;
+  const moreFailed = raw?.title === loadingMore;
+  const failure = useMemo(
+    () =>
+      raw === null || moreFailed
+        ? null
+        : value
+          ? { ...raw, title: refreshing }
+          : raw,
+    [raw, moreFailed, value],
+  );
+  return {
+    value,
+    failure,
+    moreFailure: moreFailed ? raw : null,
+    retry: state.retry,
+    status: state.status,
+    get current() {
+      return state.current;
+    },
+    more: state.more,
+    showMore: state.showMore,
+    loadingMore: state.loadingMore,
+  };
+}
+
+parts.linkedWork = useLinkedWorkRead;

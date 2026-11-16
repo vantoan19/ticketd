@@ -49,13 +49,8 @@ test("each major ticket section opens with its heading row, set apart by space a
   render(
     <>
       <Subtickets work={work} select={() => {}} />
-      <Evidence
-        reference="T-KQ1"
-        revision={0}
-        trashed={false}
-        refresh={async () => {}}
-      />
       <OpenTicketFor reference="T-KQ1">
+        <Evidence trashed={false} />
         <Backlinks select={() => {}} />
         <Activity reference="T-KQ1" projects={[]} active trashed={false} />
       </OpenTicketFor>
