@@ -418,3 +418,65 @@ fn restore_names_a_missing_backup_and_creates_a_missing_workspace() {
             .is_ok()
     );
 }
+
+/// Automations and their agents synchronize from format version 76, so their tables
+/// have no capture triggers in a Workspace saved at 70–75. A backup in one of those
+/// formats, such as the copy saved before such a Workspace is migrated, restores.
+#[test]
+fn backups_from_before_automations_synchronize_are_valid_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = populated(&dir.path().join("workspace.sqlite3"));
+    // The Automation tables with the format version that added each, newest first
+    // so that each goes before the tables it refers to.
+    let tables = [
+        ("automation_settings", 78),
+        ("automation_run_steps", 77),
+        ("automation_runs", 77),
+        ("automation_arrivals", 76),
+        ("automation_device_state", 75),
+        ("automations", 75),
+        ("automation_agents", 74),
+    ];
+    for version in [72, 75] {
+        // Shaped like a real Workspace of that version.
+        let backup = dir.path().join(format!("v{version}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        let mut shape = String::new();
+        for table in ["automations", "automation_agents"] {
+            for event in ["insert", "update", "delete"] {
+                shape.push_str(&format!("DROP TRIGGER sync_capture_{table}_{event};"));
+            }
+        }
+        for (table, since) in tables {
+            if since > version {
+                shape.push_str(&format!("DROP TABLE {table};"));
+            }
+        }
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("{shape} PRAGMA user_version = {version};"))
+            .unwrap();
+
+        let check = workspace.inspect_backup(&backup).unwrap().check;
+        let BackupCheck::Valid { format_version, .. } = check else {
+            panic!("expected a valid backup at format version {version}, got {check:?}");
+        };
+        assert_eq!(i64::from(format_version), version);
+        // It restores as it is, and opening it migrates it to the current format.
+        let restored = dir.path().join(format!("restored-v{version}.sqlite3"));
+        Workspace::restore(&restored, &backup).unwrap();
+        assert_eq!(
+            Workspace::open(&restored)
+                .unwrap()
+                .list_tickets()
+                .unwrap()
+                .len(),
+            2
+        );
+        let migrated: i64 = Connection::open(&restored)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(migrated, FORMAT_VERSION);
+    }
+}

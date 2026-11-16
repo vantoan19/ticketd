@@ -101,7 +101,7 @@ pub(crate) const TRIGGER_EVENTS: [&str; 3] = ["insert", "update", "delete"];
 pub(crate) fn captured_tables() -> impl Iterator<Item = (&'static str, i64)> {
     CAPTURED.iter().map(|(table, kind, _)| {
         let since = match kind {
-            Automation | AutomationAgent => 70,
+            Automation | AutomationAgent => 76,
             Ticket | Document | Plan | Project | Attachment => 58,
         };
         (*table, since)
