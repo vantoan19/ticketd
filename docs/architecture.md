@@ -523,6 +523,12 @@ Trash, recovery manifests, and retained quarantine are included; incomplete
 upload staging and coordination locks are excluded. Remote records remain
 references and metadata; credentials and implicit remote downloads are excluded.
 
+The format of a Workspace is defined by the migration ladder in
+`crates/ticketd-core/src/format.rs` and nothing else (ADR 0013): a Workspace at
+format version V is what steps 1 through V leave behind. Restore and inspection
+check a backup's tables, columns, triggers and unique indexes against a scratch
+Workspace built at the backup's version.
+
 Restore validates the database and all retained bytes before changing the
 workspace. It stages a live database without archive-only tables and a separate
 attachment root, saves a complete safety copy, then replaces the files and
