@@ -76,7 +76,6 @@ function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
     onClose: vi.fn(),
     onOpenGraph: vi.fn(),
     select: vi.fn(),
-    refresh: vi.fn(async () => {}),
     ...overrides,
   };
   const listed = vi.fn();
@@ -186,7 +185,7 @@ test("Move to Trash says so in the status line with Undo, never in the header", 
       trashed: false,
     }),
   );
-  await waitFor(() => expect(props.refresh).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(props.listed).toHaveBeenCalledTimes(2));
 });
 
 test("a trashed ticket offers Restore without graph or duplicate actions", async () => {
@@ -241,7 +240,6 @@ test("Next onto the last ticket hands focus to Previous, not to nowhere", () => 
     onReturn: vi.fn(),
     onClose: vi.fn(),
     onOpenGraph: vi.fn(),
-    refresh: vi.fn(async () => {}),
     onAdjacent,
   };
   const view = render(

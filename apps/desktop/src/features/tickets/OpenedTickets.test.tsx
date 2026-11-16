@@ -68,7 +68,6 @@ test("a ticket opened earlier keeps its page but reads nothing while another is 
     onClearMention: vi.fn(),
     projects: [],
     plans: [],
-    revision: 0,
   };
   const view = (selected: string) => (
     <TestReads signal={signal}>

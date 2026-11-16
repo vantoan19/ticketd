@@ -90,7 +90,6 @@ function renderDetails(item: Ticket = ticket) {
         onClearMention={vi.fn()}
         projects={[]}
         plans={[]}
-        revision={0}
         position={{ index: 2, total: 11 }}
         onAdjacent={vi.fn()}
       />
@@ -298,7 +297,6 @@ test("showing another ticket starts its rail and document at the top", async () 
     onClearMention: vi.fn(),
     projects: [],
     plans: [],
-    revision: 0,
     position: { index: 2, total: 11 },
     onAdjacent: vi.fn(),
   };

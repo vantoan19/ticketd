@@ -2,14 +2,14 @@ import { useInboxTriage } from "./inbox-triage-context";
 import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { useContext, useEffect } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { type Project, type Ticket } from "@/lib/api/client";
-import { OpenTicket, useTicket, useTicketChanged } from "./open-ticket";
+import { OpenTicket, useTicket } from "./open-ticket";
 import { useMentionReadiness } from "./use-mention-readiness";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
@@ -41,7 +41,6 @@ export function TicketDetails({
   preview,
   projects,
   plans,
-  revision,
   position = null,
   onAdjacent,
   returnLabel,
@@ -73,14 +72,7 @@ export function TicketDetails({
   preview?: Ticket | undefined;
   projects: Project[];
   plans: Plan[];
-  revision: number;
 }) {
-  // Sections report their writes here. Reporting a change makes the record and
-  // the reads on screen current and refreshes the list (it follows the change).
-  const changed = useTicketChanged();
-  const refresh = useCallback(async () => {
-    await changed();
-  }, [changed]);
   const triage = useInboxTriage();
   // Relationship links unmount their focused control. Keep keyboard navigation
   // on the selected reference without stealing focus from Previous/Next.
@@ -137,7 +129,6 @@ export function TicketDetails({
                 onReturn={onReturn}
                 onClose={() => open(null)}
                 {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
-                refresh={refresh}
                 position={position}
                 projects={projects}
                 {...(returnLabel && { returnLabel })}
@@ -169,7 +160,7 @@ export function TicketDetails({
                     Loading agent context.
                   </span>
                 )}
-                <InboxTriageCard refresh={refresh} />
+                <InboxTriageCard />
                 {selected === null && !triage?.selection && (
                   <EmptyState
                     size="hint"
@@ -194,8 +185,6 @@ export function TicketDetails({
                       outsideResults={outsideResults && reference === selected}
                       projects={projects}
                       plans={plans}
-                      revision={revision}
-                      refresh={refresh}
                       select={open}
                       onOpenGraph={() => showGraph(reference)}
                       noteTarget={newest(

@@ -38,7 +38,6 @@ export function TicketDetailPane({
     opened,
     projects,
     plans,
-    revision,
     position,
     openAdjacent,
   } = workspace;
@@ -74,7 +73,6 @@ export function TicketDetailPane({
         preview={resultTickets.find((ticket) => ticket.reference === selected)}
         projects={projects}
         plans={plans}
-        revision={revision}
         position={
           context === "inbox"
             ? (triage?.position ?? null)

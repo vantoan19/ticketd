@@ -37,7 +37,7 @@ import { useInboxAttention } from "./use-inbox-attention";
 import { requestTicketUpdate } from "./activity-composer-request";
 import { summarize, snoozeInstant, type SnoozeChoice } from "./inboxModel";
 
-export function InboxTriageCard({ refresh }: { refresh: () => Promise<void> }) {
+export function InboxTriageCard() {
   const triage = useInboxTriage();
   const attention = useInboxAttention();
   const chats = useChatClient();
@@ -133,7 +133,7 @@ export function InboxTriageCard({ refresh }: { refresh: () => Promise<void> }) {
   const isReminder = entry?.kind === "reminder";
   async function reload() {
     attention?.reload();
-    await refresh();
+    await changed();
   }
   const { pending, perform } = useInboxAction(reload, triage?.line);
   function mark(next: boolean) {

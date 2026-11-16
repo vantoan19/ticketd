@@ -66,7 +66,6 @@ export function TicketHeader({
   onReturn,
   onClose,
   onOpenGraph,
-  refresh,
   position = null,
   onAdjacent,
   projects = [],
@@ -90,7 +89,6 @@ export function TicketHeader({
   onClose: () => void;
   /** Opens the ticket's graph; without it the menu leaves the entry out. */
   onOpenGraph?: () => void;
-  refresh: () => Promise<void>;
 }) {
   const now = useNow();
   const chatAbout = useChatAboutTicket(
@@ -141,7 +139,7 @@ export function TicketHeader({
   }, [selected, ticket, position]);
   const statusLine = useStatusLine();
   const changed = useTicketChanged();
-  const trash = useTicketTrash(changed, refresh);
+  const trash = useTicketTrash(changed);
   // An export that fails says so in the status line, like the menu's copies.
   const exportError = exporter.error;
   useEffect(() => {
@@ -427,7 +425,7 @@ export function TicketHeader({
         <PublishDialog
           ticket={ticket}
           provider={target.provider}
-          refresh={refresh}
+          refresh={changed}
           onOpenChange={(open) => {
             setPublishing(open);
             if (!open) returnToActions();
@@ -443,13 +441,13 @@ export function TicketHeader({
             setHistoryOpen(false);
             returnToActions();
           }}
-          onRestored={() => void refresh()}
+          onRestored={() => void changed()}
         />
       )}
       {ticket && duplicateOpen && (
         <Duplicates
           ticket={ticket}
-          refresh={refresh}
+          refresh={changed}
           open
           onOpenChange={setDuplicateOpen}
           title={`Mark ${ticket.reference} as a duplicate`}

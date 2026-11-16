@@ -42,6 +42,7 @@ import { useSourcesConfigured } from "@/features/tickets/use-publication-preview
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
@@ -52,8 +53,6 @@ export function TicketPage({
   outsideResults = false,
   projects,
   plans,
-  revision,
-  refresh,
   select,
   onOpenGraph,
   noteTarget,
@@ -66,8 +65,6 @@ export function TicketPage({
   outsideResults?: boolean;
   projects: Project[];
   plans: Plan[];
-  revision: number;
-  refresh: () => Promise<void>;
   select: (reference: string | null) => void;
   onOpenGraph: () => void;
   noteTarget: NoteTarget | null;
@@ -78,12 +75,15 @@ export function TicketPage({
   // A known saved list copy (`opening`) reserves geometry until the fresh
   // read of the record settles.
   const { record: ticket, opening, changed } = useOpenTicket();
+  // Readers not yet on the Open Ticket (the source's conversation, rendered
+  // Markdown, the editor's conflict check) follow the Workspace's change.
+  const revision = useWorkspaceChange();
   const now = useNow();
   const openCommand = useContext(TicketCommandContext);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork();
   const sourcesConfigured = useSourcesConfigured();
-  const trash = useTicketTrash(changed, refresh);
+  const trash = useTicketTrash(changed);
   // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
   // row of adds under the description, and appear once they have content.
   const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
@@ -263,7 +263,7 @@ export function TicketPage({
       projects={projects}
       plans={plans}
       onSaved={changed}
-      refresh={refresh}
+      refresh={changed}
       onOpenTicket={select}
       onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
     >
@@ -283,7 +283,7 @@ export function TicketPage({
             ticket={ticket}
             projects={projects}
             plans={plans}
-            refresh={refresh}
+            refresh={changed}
             scope="Reminder"
             open={reminderOpen}
             onOpenChange={setReminderOpen}
@@ -360,9 +360,9 @@ export function TicketPage({
           <NeedsReviewNotice kind="ticket" id={ticket.id} className="mb-6" />
         )}
         {active && (
-          <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
+          <SourceUnavailableNotice ticket={ticket} refresh={changed} />
         )}
-        {active && <PublicationNotice ticket={ticket} refresh={refresh} />}
+        {active && <PublicationNotice ticket={ticket} refresh={changed} />}
         {active && <RunNotices {...ticketRuns} />}
         {ticket.trashed || contentLocked ? (
           <>

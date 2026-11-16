@@ -933,7 +933,6 @@ test("the Actions menu offers publish with the core's disabled reason", async ()
         onReturn={vi.fn()}
         onClose={vi.fn()}
         onOpenGraph={vi.fn()}
-        refresh={vi.fn(async () => {})}
       />
     </TestReads>,
   );
@@ -963,7 +962,6 @@ test("publishing from Actions opens the same exact preview before sending", asyn
         onReturn={vi.fn()}
         onClose={vi.fn()}
         onOpenGraph={vi.fn()}
-        refresh={vi.fn(async () => {})}
       />
     </TestReads>,
   );

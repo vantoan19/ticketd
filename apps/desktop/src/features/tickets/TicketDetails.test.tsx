@@ -17,7 +17,6 @@ test("relationship navigation replaces the reference and focuses it outside the 
     setSelected: vi.fn(),
     projects: [],
     plans: [],
-    revision: 0,
     onMentionReady: vi.fn(),
     onClearMention: vi.fn(),
   };
@@ -66,7 +65,6 @@ test("trashed ticket descriptions remain readable without editing controls", () 
         onClearMention={vi.fn()}
         projects={[]}
         plans={[]}
-        revision={0}
       />
     </TestReads>,
   );
@@ -119,7 +117,6 @@ test("the full-width view marks the reading column and drops the repeated headin
         onClearMention={vi.fn()}
         projects={[]}
         plans={[]}
-        revision={0}
       />
     </TestReads>,
   );

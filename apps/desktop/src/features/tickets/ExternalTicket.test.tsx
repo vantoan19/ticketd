@@ -106,7 +106,6 @@ function DetailsFixture({ value }: { value: Ticket }) {
         onClearMention={vi.fn()}
         projects={[]}
         plans={[]}
-        revision={0}
       />
     </TestReads>
   );

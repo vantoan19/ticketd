@@ -96,7 +96,6 @@ function renderDetails() {
         onClearMention={vi.fn()}
         projects={[{ id: "p1", name: "Web portal" } as never]}
         plans={[]}
-        revision={0}
         position={{ index: 2, total: 11 }}
         onAdjacent={vi.fn()}
       />

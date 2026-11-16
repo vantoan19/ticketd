@@ -8,21 +8,16 @@ import { describeFailure } from "@/lib/api/describe-failure";
  * status line: "Moved T-1 to Trash" with Undo, "Restored T-1", or the failure
  * with Retry. Nothing is inserted into the page.
  */
-export function useTicketTrash(
-  changed: (ticket: Ticket) => unknown,
-  refresh: () => Promise<void>,
-) {
+export function useTicketTrash(changed: (ticket: Ticket) => Promise<void>) {
   const [pending, setPending] = useState(false);
   const statusLine = useStatusLine();
   async function restore(reference: string) {
-    void changed(await client.setTrashed(reference, false));
-    await refresh();
+    await changed(await client.setTrashed(reference, false));
   }
   async function setTrashed(reference: string, value: boolean) {
     setPending(true);
     try {
-      void changed(await client.setTrashed(reference, value));
-      await refresh();
+      await changed(await client.setTrashed(reference, value));
       statusLine.show(
         value
           ? {
