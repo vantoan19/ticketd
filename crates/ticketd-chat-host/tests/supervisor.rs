@@ -17,9 +17,9 @@ use ticketd_chat_host::{
     InteractionAnswer, InteractionKind, InteractionRequest, InteractionResolution, NativeItemId,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
     ProviderDetail, ResumeMode, RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode,
-    SessionStart, StopState, Submission, SubmissionId, SubmissionKind, Subscription,
-    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus, TurnOutcome, UnconfirmedCleanup,
-    WorkspaceOpener, problem_kind,
+    SessionStart, StopReason, StopState, Submission, SubmissionId, SubmissionKind, Subscription,
+    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnding, TurnOutcome,
+    UnconfirmedCleanup, WorkspaceOpener, problem_kind,
 };
 use ticketd_chat_host::{
     AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
@@ -102,6 +102,11 @@ impl Fixture {
                 _ => None,
             })
             .collect()
+    }
+
+    /// How the Chat's first turn ended, as the supervisor stored it.
+    fn first_ending(&self) -> Option<TurnEnding> {
+        TurnEnding::of(&self.turns()[0])
     }
 
     fn queued(&self) -> Vec<String> {
@@ -744,6 +749,10 @@ async fn a_storage_failure_stops_admission_and_the_runtime_until_storage_returns
     ));
     f.send("again").await;
     assert_eq!(f.turns()[0].state, ChatTurnState::Unknown);
+    assert_eq!(
+        f.first_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::StorageFailed))
+    );
     assert_eq!(f.submits()[1].text, "again");
     assert_eq!(f.live().await.problem, None);
 }
@@ -978,7 +987,7 @@ async fn live_state_is_readable_without_a_view_and_cleared_when_the_chat_stops()
 
     assert!(changed.has_changed().unwrap());
     assert_eq!(f.host.live()[&f.chat.id].activity, Activity::Working);
-    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
+    f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
     assert!(f.host.live().is_empty());
 }
 
@@ -1115,7 +1124,7 @@ async fn the_feed_of_a_view_ends_when_the_supervisor_of_its_chat_stops() {
     f.send("first").await;
     let (_view, mut subscription) = f.host.attach(&f.chat.id).await.unwrap();
 
-    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
+    f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
 
     let ended = tokio::time::timeout(Duration::from_secs(60), async {
         while subscription.next().await.is_some() {}
@@ -1477,7 +1486,7 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
 
     // A new session says it again, once.
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
+    f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
     f.send("second").await;
     for _ in 0..2 {
         for event in repeated() {
@@ -1540,7 +1549,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     assert_eq!(kept, ["links: none", "links: T-KQ1"]);
 
     // A resumed native session already has what it was given ...
-    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
+    f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
     f.send("fourth").await;
     assert_eq!(texts(&f)[3], "fourth");
     f.emit(turn_ended(
@@ -1549,7 +1558,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     ))
     .await;
     // ... and is told when the links changed while no session was live.
-    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
+    f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
     *context.lock().unwrap() = "links: T-KQ2".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;
@@ -1876,4 +1885,90 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
     );
     assert!(settings.changes.iter().any(|change| change.value == "gpt-b"
         && change.state == SettingChangeState::Done(SettingOutcome::Applied)));
+}
+
+/// How a turn ended is stored as a typed fact, one per reason ticketd has to stop a
+/// Chat's harness (the Automation reasons are in the runner's tests).
+#[tokio::test(start_paused = true)]
+async fn a_turn_ticketd_stops_records_why_for_each_reason() {
+    let stopped = |reason| Some(TurnEnding::StoppedByTicketd(reason));
+
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.stop_all(StopReason::Quit).await;
+    assert_eq!(f.first_ending(), stopped(StopReason::Quit));
+
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.turn_off().await;
+    assert_eq!(f.first_ending(), stopped(StopReason::TurnedOff));
+
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.begin_restore().await;
+    assert_eq!(f.first_ending(), stopped(StopReason::Restore));
+
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.trash(&f.chat.id).await.unwrap();
+    assert_eq!(f.first_ending(), stopped(StopReason::Trashed));
+
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+    assert_eq!(f.first_ending(), stopped(StopReason::ExplicitResume));
+}
+
+/// The other endings a supervisor records: what the harness reported, what the person
+/// did, and contact that was lost.
+#[tokio::test(start_paused = true)]
+async fn a_turn_records_how_the_harness_or_the_person_ended_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.first_ending(), Some(TurnEnding::Completed));
+
+    f.send("second").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Failed(Problem {
+            kind: ProblemKind::QuotaExhausted,
+            message: "Usage limit reached".to_owned(),
+            detail: None,
+            resets_at: Some(1_800_000_000),
+        }),
+    ))
+    .await;
+    assert_eq!(
+        TurnEnding::of(&f.turns()[1]),
+        Some(TurnEnding::Failed {
+            kind: ProblemKind::QuotaExhausted,
+            message: Some("Usage limit reached".to_owned()),
+            resets_at: Some(1_800_000_000),
+        })
+    );
+
+    f.send("third").await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-3"),
+        TurnOutcome::Interrupted,
+    ))
+    .await;
+    assert_eq!(
+        TurnEnding::of(&f.turns()[2]),
+        Some(TurnEnding::StoppedByPerson)
+    );
+
+    f.send("fourth").await;
+    f.fake.lose_process().await;
+    settle().await;
+    assert!(matches!(
+        TurnEnding::of(&f.turns()[3]),
+        Some(TurnEnding::ContactLost(reason)) if reason.starts_with("the harness process ended")
+    ));
 }
