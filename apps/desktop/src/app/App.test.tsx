@@ -10520,7 +10520,7 @@ test("page zoom keeps the applied value on native failure, exposes raw Details a
   }
 });
 
-function dialogAnimationSignals() {
+function dialogAnimationSignals(slots = ["dialog-content", "dialog-overlay"]) {
   vi.stubGlobal("CSS", { escape: (value: string) => value });
   const actualStyle = window.getComputedStyle;
   // jsdom has no CSS animation engine. Supply only its live animation-name
@@ -10529,11 +10529,7 @@ function dialogAnimationSignals() {
     .spyOn(window, "getComputedStyle")
     .mockImplementation((element, pseudo) => {
       const native = actualStyle(element, pseudo);
-      if (
-        !["dialog-content", "dialog-overlay"].includes(
-          element.getAttribute("data-slot") ?? "",
-        )
-      )
+      if (!slots.includes(element.getAttribute("data-slot") ?? ""))
         return native;
       return new Proxy(native, {
         get(target, key) {
@@ -10612,7 +10608,11 @@ test("New ticket keeps its closing render until the browser exit finishes, then 
 
 test("conditional History, Cleanup and Restore dialogs keep their owner through exit and restore focus", async () => {
   const user = userEvent.setup();
-  const { finishExit, restore } = dialogAnimationSignals();
+  const { finishExit, restore } = dialogAnimationSignals([
+    "dialog-content",
+    "dialog-overlay",
+    "dropdown-menu-content",
+  ]);
   const doc = {
     id: "presence-doc",
     title: "Presence reader",
@@ -10700,8 +10700,18 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     });
     actions.focus();
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("menuitem", { name: "History…" }));
+    const historyItem = await screen.findByRole("menuitem", {
+      name: "History…",
+    });
+    const historyMenu = screen.getByRole("menu");
+    await user.click(historyItem);
     const history = await screen.findByRole("dialog", { name: "History" });
+    await vi.waitFor(() =>
+      expect(historyMenu.hasAttribute("inert")).toBe(true),
+    );
+    finishExit(historyMenu);
+    await vi.waitFor(() => expect(historyMenu.isConnected).toBe(false));
+    expect(history.contains(document.activeElement)).toBe(true);
     let overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
     await user.keyboard("{Escape}");
     expect(history.isConnected).toBe(true);
@@ -10714,12 +10724,20 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     const more = screen.getByRole("button", { name: "More library actions" });
     more.focus();
     await user.keyboard("{Enter}");
-    await user.click(
-      await screen.findByRole("menuitem", { name: "Clean up unused files…" }),
-    );
+    const cleanupItem = await screen.findByRole("menuitem", {
+      name: "Clean up unused files…",
+    });
+    const cleanupMenu = screen.getByRole("menu");
+    await user.click(cleanupItem);
     const cleanup = await screen.findByRole("dialog", {
       name: "Clean up unused files",
     });
+    await vi.waitFor(() =>
+      expect(cleanupMenu.hasAttribute("inert")).toBe(true),
+    );
+    finishExit(cleanupMenu);
+    await vi.waitFor(() => expect(cleanupMenu.isConnected).toBe(false));
+    expect(cleanup.contains(document.activeElement)).toBe(true);
     overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
     await user.keyboard("{Escape}");
     expect(cleanup.isConnected).toBe(true);

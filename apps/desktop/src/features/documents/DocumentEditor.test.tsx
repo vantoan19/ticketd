@@ -1095,6 +1095,10 @@ it("quotes a passage shared by several connections once", async () => {
 });
 
 it("opens the Document's History from its actions, and says when it Needs review", async () => {
+  vi.mocked(documents.version).mockResolvedValue([
+    stored.updated_at,
+    stored.trashed,
+  ]);
   vi.mocked(syncReview.conflicts).mockResolvedValue([
     {
       kind: "document",

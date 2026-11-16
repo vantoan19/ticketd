@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useClosingOverlayRef } from "@/components/ui/use-closing-overlay-ref";
 import { cn } from "cn";
 import { XIcon } from "lucide-react";
 import { Dialog as SheetPrimitive } from "radix-ui";
@@ -42,6 +43,7 @@ function SheetOverlay({
 
 function SheetContent({
   className,
+  ref,
   children,
   side = "right",
   size = "default",
@@ -61,6 +63,7 @@ function SheetContent({
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
+  const contentRef = useClosingOverlayRef(ref);
   const focus = useFocusReturn(returnFocus, {
     ...(onOpenAutoFocus && { onOpenAutoFocus }),
     ...(onCloseAutoFocus && { onCloseAutoFocus }),
@@ -69,6 +72,7 @@ function SheetContent({
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content
+        ref={contentRef}
         data-slot="sheet-content"
         data-side={side}
         data-size={size}
