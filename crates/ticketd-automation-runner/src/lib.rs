@@ -13,7 +13,9 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_chat_host::{ChatHost, StopReason, TurnEnd, Unattended, WorkspaceOpener};
+use ticketd_chat_host::{
+    ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener,
+};
 use ticketd_core::{
     AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
     RunAction, StepOutcome,
@@ -44,6 +46,9 @@ enum Ran {
     /// ticketd closed the agent's harness, or would not start it, so the run
     /// cannot go on.
     AgentStopped(Option<StopReason>),
+    /// Storage failed starting or following the agent, so what happened to it is
+    /// unknown. Not the step's failure: no failure path follows it. The words say why.
+    StorageFailed(String),
 }
 
 /// The Chat host, while there is one to run agents on. The host answers `None`
@@ -220,6 +225,7 @@ impl Runner {
                     Ran::Step(outcome) => outcome,
                     Ran::TakenOver => return Ok(()),
                     Ran::AgentStopped(reason) => return Err(agent_stopped(reason).to_owned()),
+                    Ran::StorageFailed(why) => return Err(why),
                 },
                 RunAction::Notify { notification, .. } => self.notify(notification),
                 // Ended, here or elsewhere (the person stopped it or took it over):
@@ -276,6 +282,14 @@ impl Runner {
             // that started the run and its agent (#387 M3).
             Err(error) => match StopReason::of(&error) {
                 Some(reason) => Ran::AgentStopped(Some(reason)),
+                // The Workspace could not be read or written: the run's record is in
+                // doubt, not the agent's work, so the step's failure path must not run.
+                None if matches!(error, HostError::StorageFailed(_)) => {
+                    Ran::StorageFailed(format!(
+                        "ticketd could not keep this run's record. {}",
+                        sentence(&error.to_string())
+                    ))
+                }
                 None => Ran::Step(StepOutcome::Failed {
                     reason: format!(
                         "The agent could not be started. {}",
