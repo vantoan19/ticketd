@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import { FailureAlert } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import {
   describeFailure,
   type FailureDescription,
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Kbd } from "@/components/ui/kbd";
 import { Time } from "@/components/ui/time";
 import { Disclosure } from "@/components/ui/disclosure";
 import { IconButton } from "@/components/ui/icon-button";
@@ -91,7 +92,9 @@ function Request({
         // Picking again is the retry.
         setError({
           ...failure,
-          sentence: `${failure.sentence} Pick again to retry.`,
+          sentence: question
+            ? `${failure.sentence} Pick again to retry.`
+            : failure.sentence,
         });
       },
     );
@@ -119,8 +122,11 @@ function Request({
       className="chat-request"
       data-request={request.request}
       aria-labelledby={titleId}
-      {...(request.reason && { "aria-describedby": reasonId })}
+      {...(request.reason &&
+        (question || !error) && { "aria-describedby": reasonId })}
       onKeyDown={(event) => {
+        // Portaled Details owns its keys and returns focus to its own trigger.
+        if (!event.currentTarget.contains(event.target as Node)) return;
         // Esc inside a request goes back to the message box (CH-54).
         if (event.key === "Escape" && !event.nativeEvent.isComposing) {
           event.preventDefault();
@@ -207,13 +213,39 @@ function Request({
         {!question && !request.ticketd?.length && request.command && (
           <pre className="chat-out">{request.command}</pre>
         )}
-        {request.reason && (
-          <p
-            id={reasonId}
-            className={cn("chat-request-reason", !question && "text-xs")}
-          >
-            <CodeSpans text={request.reason} />
-          </p>
+        {question ? (
+          request.reason && (
+            <p id={reasonId} className="chat-request-reason">
+              <CodeSpans text={request.reason} />
+            </p>
+          )
+        ) : (
+          <div className="chat-approval-feedback">
+            {request.reason && (
+              <p
+                id={reasonId}
+                className={cn(
+                  "chat-request-reason text-xs",
+                  error && "invisible",
+                )}
+                aria-hidden={error ? true : undefined}
+              >
+                <CodeSpans text={request.reason} />
+              </p>
+            )}
+            <div
+              className={cn(!error && "invisible")}
+              aria-hidden={!error ? true : undefined}
+            >
+              <FailureState
+                size="inline"
+                label="Answer not sent"
+                detailsVariant="popover"
+                failure={error ?? describeFailure("", "send your answer")}
+                actions={<span>Pick again to retry.</span>}
+              />
+            </div>
+          </div>
         )}
         {question && commandDisclosure}
         {question ? (
@@ -254,15 +286,23 @@ function Request({
                 onClick={() => pick(option.id)}
               >
                 {option.label}
-                {sending === option.id && (
+                {index < 3 ? (
+                  <Kbd aria-hidden="true" className="w-5">
+                    {sending === option.id ? (
+                      <LoaderCircle size={12} className="chat-spin" />
+                    ) : (
+                      index + 1
+                    )}
+                  </Kbd>
+                ) : sending === option.id ? (
                   <LoaderCircle size={12} className="chat-spin" aria-hidden />
-                )}
+                ) : null}
               </Button>
             ))}
             {commandDisclosure}
           </div>
         )}
-        {error && <FailureAlert size="compact" failure={error} />}
+        {question && error && <FailureAlert size="compact" failure={error} />}
       </div>
     </section>
   );

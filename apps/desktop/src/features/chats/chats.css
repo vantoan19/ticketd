@@ -1187,6 +1187,19 @@ button.chat-file-name:focus-visible {
   margin-block: 12px -12px;
   padding-top: 0;
 }
+/* The reason and recovery share one slot, sized for either at each width. */
+.chat-approval-feedback {
+  display: grid;
+  margin-top: 8px;
+}
+.chat-approval-feedback > * {
+  grid-area: 1 / 1;
+}
+.chat-request[data-request="approval"]
+  .chat-approval-feedback
+  .chat-request-reason {
+  margin-top: 0;
+}
 .chat-request-head {
   display: flex;
   align-items: flex-start;
