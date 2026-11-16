@@ -9583,92 +9583,123 @@ test("Plan Add tickets returns focus to its opener after keyboard dismissal", as
 
 test("Activity Delete update transfers menu focus to safe confirmation and retries the same update", async () => {
   const user = userEvent.setup();
-  const ticket = bulkTicket(1);
-  let deleted = false;
-  let fail = true;
-  const activity = {
-    id: "delete-owned",
-    ticket_id: ticket.id,
-    brief: "Authored outcome to remove",
-    reported_at: "2026-11-16T00:00:00Z",
-    updated_at: "2026-11-16T00:00:00Z",
-    editing_agent: null,
-    supporting_document_id: "kept-details",
-  };
-  bridge.invoke.mockImplementation((command: string, args) => {
-    if (command === "find_tickets") return [ticket];
-    if (command === "show_ticket") return ticket;
-    if (command === "activity_feed")
-      return deleted ? [] : [{ type: "authored", activity }];
-    if (command === "show_document")
-      return {
-        id: "kept-details",
-        title: "Kept details",
-        body: "Supporting text",
-        created_at: activity.reported_at,
-        updated_at: activity.updated_at,
-        trashed: false,
-      };
-    if (command === "delete_activity") {
-      if (fail) throw new Error("Temporary write unavailable");
-      deleted = true;
-      return;
-    }
-    return bridgeDefault(command, args);
-  });
-  render(<App />);
-  await user.click(await screen.findByRole("button", { name: /First/ }));
-  const actions = await screen.findByRole("button", {
-    name: /Actions for update from/,
-  });
-  actions.focus();
-  await user.keyboard("{Enter}");
-  await user.click(
-    await screen.findByRole(
-      "menuitem",
-      { name: "Delete update" },
-      { timeout: 1500 },
-    ),
-  );
-  let confirm = await screen.findByRole("alertdialog", {
-    name: "Delete this update?",
-  });
-  expect(
-    within(confirm).getByText("Its details stay in Documents."),
-  ).toBeTruthy();
-  await vi.waitFor(() =>
-    expect(document.activeElement).toBe(
-      within(confirm).getByRole("button", { name: "Cancel" }),
-    ),
-  );
-  await user.keyboard("{Escape}");
-  await vi.waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  actions.focus();
-  await user.keyboard("{Enter}");
-  await user.keyboard("{End}{Enter}");
-  confirm = await screen.findByRole("alertdialog", {
-    name: "Delete this update?",
-  });
-  await user.click(
-    within(confirm).getByRole("button", { name: "Delete update" }),
-  );
-  expect(
-    await within(confirm).findByText(/Couldn't delete the update/),
-  ).toBeTruthy();
-  expect(screen.getByText(activity.brief)).toBeTruthy();
-  fail = false;
-  await user.click(
-    within(confirm).getByRole("button", { name: "Delete update" }),
-  );
-  await vi.waitFor(() => expect(screen.queryByText(activity.brief)).toBeNull());
-  const calls = bridge.invoke.mock.calls.filter(
-    ([command]) => command === "delete_activity",
-  );
-  expect(calls).toHaveLength(2);
-  expect(calls.map(([, args]) => args)).toEqual([
-    { reference: ticket.reference, id: activity.id },
-    { reference: ticket.reference, id: activity.id },
-  ]);
+  const { finishExit, restore } = dialogAnimationSignals(["popover-content"]);
+  try {
+    const ticket = bulkTicket(1);
+    let deleted = false;
+    let fail = true;
+    const activity = {
+      id: "delete-owned",
+      ticket_id: ticket.id,
+      brief: "Authored outcome to remove",
+      reported_at: "2026-11-16T00:00:00Z",
+      updated_at: "2026-11-16T00:00:00Z",
+      editing_agent: null,
+      supporting_document_id: "kept-details",
+    };
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "show_ticket") return ticket;
+      if (command === "activity_feed")
+        return deleted ? [] : [{ type: "authored", activity }];
+      if (command === "show_document")
+        return {
+          id: "kept-details",
+          title: "Kept details",
+          body: "Supporting text",
+          created_at: activity.reported_at,
+          updated_at: activity.updated_at,
+          trashed: false,
+        };
+      if (command === "delete_activity") {
+        if (fail) throw new Error("Temporary write unavailable");
+        deleted = true;
+        return;
+      }
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /First/ }));
+    const actions = await screen.findByRole("button", {
+      name: /Actions for update from/,
+    });
+    actions.focus();
+    await user.keyboard("{Enter}");
+    await user.click(
+      await screen.findByRole(
+        "menuitem",
+        { name: "Delete update" },
+        { timeout: 1500 },
+      ),
+    );
+    let confirm = await screen.findByRole("alertdialog", {
+      name: "Delete this update?",
+    });
+    expect(
+      within(confirm).getByText("Its details stay in Documents."),
+    ).toBeTruthy();
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(confirm).getByRole("button", { name: "Cancel" }),
+      ),
+    );
+    await user.keyboard("{Escape}");
+    expect(confirm.isConnected).toBe(true);
+    finishExit(confirm);
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).toBeNull(),
+    );
+    await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+    actions.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{End}{Enter}");
+    confirm = await screen.findByRole("alertdialog", {
+      name: "Delete this update?",
+    });
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Write an update…" }));
+    await screen.findByRole("textbox", { name: "New update rich text" });
+    await user.click(
+      screen.getByRole("button", { name: "Edit Markdown source" }),
+    );
+    const newer = screen.getByRole("textbox", { name: "New update source" });
+    fireEvent.change(newer, { target: { value: "Newer retained outcome" } });
+    newer.focus();
+    finishExit(confirm);
+    await user.keyboard("{End}!");
+    await vi.waitFor(() => expect(confirm.isConnected).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(newer));
+    expect(newer).toHaveProperty("value", "Newer retained outcome!");
+    actions.focus();
+    await user.keyboard("{Enter}{End}{Enter}");
+    confirm = await screen.findByRole("alertdialog", {
+      name: "Delete this update?",
+    });
+    await user.click(
+      within(confirm).getByRole("button", { name: "Delete update" }),
+    );
+    expect(
+      await within(confirm).findByText(/Couldn't delete the update/),
+    ).toBeTruthy();
+    expect(screen.getByText(activity.brief)).toBeTruthy();
+    fail = false;
+    await user.click(
+      within(confirm).getByRole("button", { name: "Delete update" }),
+    );
+    await vi.waitFor(() =>
+      expect(screen.queryByText(activity.brief)).toBeNull(),
+    );
+    const calls = bridge.invoke.mock.calls.filter(
+      ([command]) => command === "delete_activity",
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls.map(([, args]) => args)).toEqual([
+      { reference: ticket.reference, id: activity.id },
+      { reference: ticket.reference, id: activity.id },
+    ]);
+  } finally {
+    restore();
+  }
 });
 
 test("Plan multi-add is one retryable atomic request and Undo resumes only unfinished original Plans", async () => {
@@ -10713,7 +10744,7 @@ test("a newer typed Title keeps focus and its draft while delayed native zoom ch
   }
 });
 
-function dialogAnimationSignals() {
+function dialogAnimationSignals(slots = ["dialog-content", "dialog-overlay"]) {
   vi.stubGlobal("CSS", { escape: (value: string) => value });
   const actualStyle = window.getComputedStyle;
   // jsdom has no CSS animation engine. Supply only its live animation-name
@@ -10722,11 +10753,7 @@ function dialogAnimationSignals() {
     .spyOn(window, "getComputedStyle")
     .mockImplementation((element, pseudo) => {
       const native = actualStyle(element, pseudo);
-      if (
-        !["dialog-content", "dialog-overlay"].includes(
-          element.getAttribute("data-slot") ?? "",
-        )
-      )
+      if (!slots.includes(element.getAttribute("data-slot") ?? ""))
         return native;
       return new Proxy(native, {
         get(target, key) {
@@ -10805,7 +10832,11 @@ test("New ticket keeps its closing render until the browser exit finishes, then 
 
 test("conditional History, Cleanup and Restore dialogs keep their owner through exit and restore focus", async () => {
   const user = userEvent.setup();
-  const { finishExit, restore } = dialogAnimationSignals();
+  const { finishExit, restore } = dialogAnimationSignals([
+    "dialog-content",
+    "dialog-overlay",
+    "dropdown-menu-content",
+  ]);
   const doc = {
     id: "presence-doc",
     title: "Presence reader",
@@ -10893,8 +10924,18 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     });
     actions.focus();
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("menuitem", { name: "History…" }));
+    const historyItem = await screen.findByRole("menuitem", {
+      name: "History…",
+    });
+    const historyMenu = screen.getByRole("menu");
+    await user.click(historyItem);
     const history = await screen.findByRole("dialog", { name: "History" });
+    await vi.waitFor(() =>
+      expect(historyMenu.hasAttribute("inert")).toBe(true),
+    );
+    finishExit(historyMenu);
+    await vi.waitFor(() => expect(historyMenu.isConnected).toBe(false));
+    expect(history.contains(document.activeElement)).toBe(true);
     let overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
     await user.keyboard("{Escape}");
     expect(history.isConnected).toBe(true);
@@ -10907,12 +10948,20 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     const more = screen.getByRole("button", { name: "More library actions" });
     more.focus();
     await user.keyboard("{Enter}");
-    await user.click(
-      await screen.findByRole("menuitem", { name: "Clean up unused files…" }),
-    );
+    const cleanupItem = await screen.findByRole("menuitem", {
+      name: "Clean up unused files…",
+    });
+    const cleanupMenu = screen.getByRole("menu");
+    await user.click(cleanupItem);
     const cleanup = await screen.findByRole("dialog", {
       name: "Clean up unused files",
     });
+    await vi.waitFor(() =>
+      expect(cleanupMenu.hasAttribute("inert")).toBe(true),
+    );
+    finishExit(cleanupMenu);
+    await vi.waitFor(() => expect(cleanupMenu.isConnected).toBe(false));
+    expect(cleanup.contains(document.activeElement)).toBe(true);
     overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
     await user.keyboard("{Escape}");
     expect(cleanup.isConnected).toBe(true);

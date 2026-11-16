@@ -2,6 +2,21 @@ import { useRef, type RefObject } from "react";
 
 type AutoFocusHandler = (event: Event) => void;
 
+/** A newer interaction wins while an older overlay finishes leaving. */
+export function preserveNewerFocus(event: Event) {
+  const active = document.activeElement;
+  if (
+    active instanceof HTMLElement &&
+    active !== document.body &&
+    active.isConnected &&
+    (!(event.target instanceof Node) || !event.target.contains(active))
+  ) {
+    event.preventDefault();
+    return true;
+  }
+  return false;
+}
+
 /**
  * Radix returns focus on close only to a `Trigger` it rendered. Dialogs and
  * sheets here open from state, so they remember the element that had focus when
@@ -29,17 +44,7 @@ export function useFocusReturn(
     onCloseAutoFocus(event: Event) {
       handlers.onCloseAutoFocus?.(event);
       if (event.defaultPrevented) return;
-      const active = document.activeElement;
-      // A new pane or overlay can take focus while this one's exit finishes.
-      if (
-        active instanceof HTMLElement &&
-        active !== document.body &&
-        active.isConnected &&
-        (!(event.target instanceof Node) || !event.target.contains(active))
-      ) {
-        event.preventDefault();
-        return;
-      }
+      if (preserveNewerFocus(event)) return;
       const target =
         resolveReturnFocus?.() ??
         returnTo?.current ??

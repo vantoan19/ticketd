@@ -188,6 +188,11 @@
   --dur-3: 180ms;
   --dur-4: 240ms;
   --dur-exit: 100ms;
+  --overlay-slide: 4px;
+  --overlay-scale: 0.98;
+  --dialog-rise: 8px;
+  --dialog-scale: 0.985;
+  --sheet-scale: 0.96;
   --dur-lift: 120ms;
   --dur-settle: 160ms;
   --dur-arrival: 1200ms;
@@ -737,10 +742,10 @@
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
-.ui-overlay[data-slot="dialog-overlay"][data-state="open"] {
+.ui-overlay[data-state="open"] {
   animation: palette-scrim var(--dur-2) var(--ease-out);
 }
-.ui-overlay[data-slot="dialog-overlay"][data-state="closed"] {
+.ui-overlay[data-state="closed"] {
   animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 /* Design frame D shows nothing of the empty detail behind a modal scrim. */
@@ -748,9 +753,38 @@ body:has([data-slot="dialog-overlay"])
   [data-slot="empty-state"][data-size="hint"] {
   visibility: hidden;
 }
+.ui-popover,
+.ui-menu {
+  --overlay-offset-x: 0px;
+  --overlay-offset-y: calc(-1 * var(--overlay-slide));
+}
+:is(.ui-popover, .ui-menu)[data-side="top"] {
+  --overlay-offset-y: var(--overlay-slide);
+}
+:is(.ui-popover, .ui-menu)[data-side="left"] {
+  --overlay-offset-x: var(--overlay-slide);
+  --overlay-offset-y: 0px;
+}
+:is(.ui-popover, .ui-menu)[data-side="right"] {
+  --overlay-offset-x: calc(-1 * var(--overlay-slide));
+  --overlay-offset-y: 0px;
+}
 .ui-popover[data-state="open"],
 .ui-menu[data-state="open"] {
-  animation: overlay-enter var(--dur-3) var(--ease-out);
+  animation: menu-enter var(--dur-3) var(--ease-out);
+}
+.ui-popover[data-state="closed"],
+.ui-menu[data-state="closed"] {
+  animation: menu-leave var(--dur-exit) var(--ease-in);
+}
+:is(
+  .ui-popover,
+  .ui-menu,
+  .ui-dialog,
+  .ui-sheet,
+  .ui-overlay
+)[data-state="closed"] {
+  pointer-events: none;
 }
 .ui-dialog[data-state="open"] {
   animation: palette-enter var(--dur-4) var(--ease-out);
@@ -760,6 +794,31 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-sheet[data-state="open"] {
   animation: overlay-enter var(--dur-4) var(--ease-out);
+}
+.ui-sheet[data-state="closed"] {
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
+}
+@keyframes menu-enter {
+  from {
+    opacity: 0;
+    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
+      scale(var(--overlay-scale));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+@keyframes menu-leave {
+  from {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
+      scale(var(--overlay-scale));
+  }
 }
 /* Radix Presence waits for a changed animation name before unmounting. */
 @keyframes overlay-leave {
@@ -777,13 +836,13 @@ body:has([data-slot="dialog-overlay"])
   }
   to {
     opacity: 0;
-    transform: translateY(8px) scale(0.985);
+    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
   }
 }
 @keyframes overlay-enter {
   from {
     opacity: 0;
-    transform: scale(0.96);
+    transform: scale(var(--sheet-scale));
   }
   to {
     opacity: 1;
@@ -2948,7 +3007,7 @@ kbd,
 @keyframes palette-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.985);
+    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
   }
   to {
     opacity: 1;

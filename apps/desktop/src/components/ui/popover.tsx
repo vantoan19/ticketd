@@ -1,4 +1,6 @@
 import * as React from "react";
+import { preserveNewerFocus } from "@/components/ui/use-focus-return";
+import { useClosingOverlayRef } from "@/components/ui/use-closing-overlay-ref";
 import { cn } from "cn";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
@@ -26,20 +28,24 @@ function PopoverTrigger({
  */
 function PopoverContent({
   className,
+  ref,
   align = "center",
   sideOffset = 4,
   collisionPadding = 16,
   collisionBoundary,
+  onCloseAutoFocus,
   variant = "form",
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
   variant?:
     "form" | "workspace" | "list" | "compact-list" | "constrained-list" | "bar";
 }) {
+  const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
+        ref={contentRef}
         data-slot="popover-content"
         data-variant={variant}
         align={align}
@@ -52,6 +58,10 @@ function PopoverContent({
           className,
         )}
         {...props}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (!event.defaultPrevented) preserveNewerFocus(event);
+        }}
       />
     </PopoverPrimitive.Portal>
   );
