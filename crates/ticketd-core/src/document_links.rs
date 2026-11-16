@@ -394,20 +394,18 @@ impl Workspace {
         title: &str,
         follow: bool,
     ) -> Result<Ticket, Error> {
-        self.connection
-            .execute_batch("SAVEPOINT create_ticket_from_document")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            let logged = crate::events::head(&self.connection)?;
-            let source = self.show_document(id)?;
+        // The scope folds the creation and the body that links the Document into one
+        // `ticket.created` event.
+        self.in_write_scope(|workspace| {
+            let source = workspace.show_document(id)?;
             if source.trashed {
                 return Err(Error::DocumentTrashed(id.to_owned()));
             }
-            let ticket = self.create_ticket(title)?;
+            let ticket = workspace.create_ticket(title)?;
             if follow {
-                crate::inbox::follow(&self.connection, &ticket.id)?;
+                crate::inbox::follow(&workspace.connection, &ticket.id)?;
             }
-            let ticket = self.change_ticket(
+            workspace.change_ticket(
                 &ticket.reference,
                 TicketPatch {
                     body: Some(format!(
@@ -416,23 +414,8 @@ impl Workspace {
                     )),
                     ..Default::default()
                 },
-            )?;
-            crate::events::fold_into_creation(&self.connection, logged)?;
-            Ok(ticket)
-        })();
-        match result {
-            Ok(ticket) => {
-                self.connection
-                    .execute_batch("RELEASE create_ticket_from_document")?;
-                Ok(ticket)
-            }
-            Err(error) => {
-                self.connection.execute_batch(
-                    "ROLLBACK TO create_ticket_from_document; RELEASE create_ticket_from_document",
-                )?;
-                Err(error)
-            }
-        }
+            )
+        })
     }
 
     fn context_link_page(

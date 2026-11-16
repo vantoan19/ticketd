@@ -472,7 +472,7 @@ impl Workspace {
         }
         self.show_document(id)?;
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         if present {
             tx.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [&tag])?;
             tx.execute(
@@ -506,7 +506,7 @@ impl Workspace {
         self.connection.execute_batch("SAVEPOINT change_document")?;
         let result = (|| {
             // Take the write lock first so a busy database waits instead of failing.
-            crate::transaction_write_lock(&self.connection)?;
+            crate::write_scope::lock(&self.connection)?;
             if let Some(expected) = &patch.expected_updated_at
                 && *expected != self.show_document(id)?.updated_at
             {

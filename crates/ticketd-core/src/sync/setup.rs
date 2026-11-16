@@ -8,7 +8,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Cursor,
-    path::PathBuf,
+    path::{Path, PathBuf},
+    sync::{Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
 
@@ -271,6 +272,11 @@ pub struct SyncStatus {
     /// afterwards has none.
     #[serde(skip)]
     pub retry_after: Option<Duration>,
+    /// On the status of a run that did not start, because another run of this
+    /// Workspace file was still in progress in this process. That run made no
+    /// call to the storage and changed nothing. It is not stored.
+    #[serde(skip)]
+    pub run_in_progress: bool,
 }
 
 /// Where this Workspace syncs to and as whom: what a host needs to start a run.
@@ -791,6 +797,7 @@ impl Workspace {
             recovery: state.recovery,
             first_sync,
             retry_after: None,
+            run_in_progress: false,
         })
     }
 
@@ -951,49 +958,86 @@ impl Workspace {
         Ok((Workspace::open(&path)?, safety))
     }
 
-    /// For the host to call once at launch, before its first run: downloads
-    /// cut off when the app last stopped start again, and the first run
-    /// writes a fresh run token into this desktop's entry of the device
-    /// registry, which is how a copy of this Workspace file that also syncs
-    /// is found out. A file held back as one from a newer ticketd is read
-    /// again, since this launch may be of a ticketd that reads it.
-    pub fn start_sync_session(&mut self) -> Result<(), Error> {
-        self.connection
-            .execute("UPDATE sync_state SET run_due = 1", [])?;
-        self.connection
-            .execute("UPDATE sync_files SET version = NULL WHERE newer", [])?;
-        self.reset_interrupted_downloads()
-    }
-
     /// One full sync run: join the device registry, send Attachment bytes, sync
-    /// the records, fetch Attachment bytes.
+    /// the records, fetch Attachment bytes. The only way to run sync.
+    ///
+    /// The first run of a Workspace file in this process also begins the app
+    /// session: downloads cut off when the app last stopped start again, a
+    /// file held back as one from a newer ticketd is read again, and this
+    /// desktop writes a fresh run token into its entry of the device registry,
+    /// which is how a copy of the Workspace file that also syncs is found out.
+    ///
+    /// A run never overlaps another run of the same Workspace file in this
+    /// process: it returns at once, with [`SyncStatus::run_in_progress`] set
+    /// and no call to the storage. Other processes are not looked at; the CLI
+    /// never syncs. A host still keeps `sync_download_workspace` away from a
+    /// run, and reads [`SyncStatus::retry_after`] of the status returned.
     ///
     /// A failed run is not an error here: it becomes the status's `recovery`
     /// (with `recovery_message` for a failure that has no state of its own),
     /// and every local change is kept for the next run. `Err` means the
     /// Workspace is not connected or the outcome could not be saved.
     pub fn sync_now(&mut self, remote: &dyn RemoteStorage) -> Result<SyncStatus, Error> {
-        let outcome = self.run(remote);
-        self.conclude(outcome)
+        self.exclusive_run(|workspace| workspace.run(remote))
     }
 
-    /// The corrective action of the current recovery state, then a sync run.
-    /// A missing folder is created again and this Workspace uploaded to it
-    /// whole; every other state is a new attempt (after the desktop signed in
-    /// again, for an expired authorization).
+    /// The corrective action of the current recovery state, then a sync run
+    /// (see [`Workspace::sync_now`], which it shares its rules with). A missing
+    /// folder is created again and this Workspace uploaded to it whole; every
+    /// other state is a new attempt (after the desktop signed in again, for an
+    /// expired authorization).
     pub fn sync_recover(&mut self, remote: &dyn RemoteStorage) -> Result<SyncStatus, Error> {
-        let outcome = (|| {
-            let state = state(&self.connection)?;
+        self.exclusive_run(|workspace| {
+            let state = state(&workspace.connection)?;
             if state.recovery == Some(SyncRecovery::FolderMissing) {
                 let folder = state.folder.ok_or_else(not_connected)?;
                 let name = state.folder_name.unwrap_or_default();
                 remote.ensure_folder(&folder, &name)?;
-                forget_synced(&self.connection)?;
-                bind(&self.connection, &folder, &name, SyncDirection::Upload)?;
+                forget_synced(&workspace.connection)?;
+                bind(&workspace.connection, &folder, &name, SyncDirection::Upload)?;
             }
-            self.run(remote)
-        })();
+            workspace.run(remote)
+        })
+    }
+
+    fn exclusive_run(
+        &mut self,
+        run: impl FnOnce(&mut Self) -> Result<(), Error>,
+    ) -> Result<SyncStatus, Error> {
+        let file = self.run_key();
+        let Some(_running) = Running::claim(&file) else {
+            return Ok(SyncStatus {
+                run_in_progress: true,
+                ..self.sync_status()?
+            });
+        };
+        let outcome = self.begin_session(&file).and_then(|()| run(self));
         self.conclude(outcome)
+    }
+
+    /// What identifies this Workspace file among the runs of the process.
+    fn run_key(&self) -> PathBuf {
+        let path = self
+            .connection
+            .path()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        path.canonicalize().unwrap_or(path)
+    }
+
+    /// Begin the app session of `file` unless this process already did. Not
+    /// begun again after a failure, so that the next run does.
+    fn begin_session(&mut self, file: &Path) -> Result<(), Error> {
+        if Running::session_begun(file) {
+            return Ok(());
+        }
+        self.connection
+            .execute("UPDATE sync_state SET run_due = 1", [])?;
+        self.connection
+            .execute("UPDATE sync_files SET version = NULL WHERE newer", [])?;
+        self.reset_interrupted_downloads()?;
+        Running::begin_session(file);
+        Ok(())
     }
 
     fn conclude(&mut self, outcome: Result<(), Error>) -> Result<SyncStatus, Error> {
@@ -1077,8 +1121,8 @@ impl Workspace {
             self.register(remote, &folder, registry.as_deref(), &state)?;
         // Bytes go up before any record that names them.
         self.sync_attachment_records(remote, &folder, manifest.as_deref())?;
-        let report = self.sync_listed(remote, &folder, &device_name, listing)?;
-        if report.uploaded > 0 {
+        let uploaded = self.sync_listed(remote, &folder, &device_name, listing)?;
+        if uploaded > 0 {
             let now: String = self
                 .connection
                 .query_row(&format!("SELECT {NOW}"), [], |row| row.get(0))?;
@@ -1325,5 +1369,49 @@ impl Workspace {
             "{id}.json kept changing in the storage; sync will try again"
         ))
         .into())
+    }
+}
+
+/// Which Workspace files this process runs sync on right now, and which have
+/// begun their app session. A Workspace file is one desktop, however many
+/// handles on it exist.
+static RUNS: Mutex<Runs> = Mutex::new(Runs {
+    running: BTreeSet::new(),
+    begun: BTreeSet::new(),
+});
+
+struct Runs {
+    running: BTreeSet<PathBuf>,
+    begun: BTreeSet<PathBuf>,
+}
+
+fn runs() -> MutexGuard<'static, Runs> {
+    RUNS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The right to run sync on one Workspace file, given back when dropped, also
+/// when the run panics.
+struct Running(PathBuf);
+
+impl Running {
+    fn claim(file: &Path) -> Option<Self> {
+        runs()
+            .running
+            .insert(file.to_path_buf())
+            .then(|| Self(file.to_path_buf()))
+    }
+
+    fn session_begun(file: &Path) -> bool {
+        runs().begun.contains(file)
+    }
+
+    fn begin_session(file: &Path) {
+        runs().begun.insert(file.to_path_buf());
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        runs().running.remove(&self.0);
     }
 }

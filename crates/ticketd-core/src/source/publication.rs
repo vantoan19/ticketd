@@ -47,7 +47,7 @@ use super::{
     PublishRequest, SourceError, SourceFailure, clock,
     tracking::{self, Origin, failure_of},
 };
-use crate::{Error, Status, Ticket, Workspace, activities, history, transaction_write_lock};
+use crate::{Error, Status, Ticket, Workspace, activities, history};
 
 /// How long an `in_flight` attempt is trusted to still be running. The HTTP
 /// transport gives up after 30 seconds, so a live create finishes well inside it.
@@ -1012,7 +1012,7 @@ impl Workspace {
         let target = self.publication_target(engine, provider)?;
         let started = {
             let transaction = self.connection.savepoint()?;
-            transaction_write_lock(&transaction)?;
+            crate::write_scope::lock(&transaction)?;
             let ticket = subject(&transaction, reference)?;
             if let Some(attempt) =
                 latest_succeeded(&transaction, &ticket.id, options.now.as_deref())?
@@ -1216,7 +1216,7 @@ impl Workspace {
         now: Option<&str>,
     ) -> Result<Linked, Error> {
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let (still_open, started_at): (bool, String) = transaction.query_row(
             "SELECT status = 'in_flight', started_at FROM publication_attempts WHERE id = ?1",
             [&started.attempt_id],
@@ -1272,7 +1272,7 @@ impl Workspace {
         now: Option<&str>,
     ) -> Result<(), Error> {
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let now = clock(&transaction, now)?;
         let first_unknown: Option<(String, String)> = if status == AttemptState::Unresolved {
             transaction.query_row("SELECT ticket_id, destination FROM publication_attempts WHERE id = ?1 AND status = 'in_flight'", [attempt_id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?
@@ -1769,7 +1769,7 @@ impl Workspace {
             );
         }
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         // Compare-and-set: the attempt must still be the same open attempt.
         let still_open = open_attempt(&transaction, &ticket.id, now)?
             .is_some_and(|open| open.id == attempt.id && open.state != AttemptState::InFlight);
@@ -1903,7 +1903,7 @@ impl Workspace {
             ))));
         }
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let now = clock(&transaction, now)?;
         // The listing lags a creation by a few seconds, so a read this soon after
         // the create call could last have landed may miss the issue it made.

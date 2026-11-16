@@ -83,6 +83,17 @@ observations. They coordinate with the supervisor around submission and approval
 responses; they do not write workspace storage. The supervisor calls core
 workflows, which own validation, transactions and durable Chat records.
 
+Adapters also do not decide how a turn or its tools read. They report what the
+harness said plus the evidence they saw: that an interrupt was written before a
+failure, that an unattended session's allowed tools denied something, that a command
+could not start. One supervisor-side module (`outcome`) turns outcome and evidence
+into the turn's `TurnEnding` and its tools' states, so every harness is read by the
+same rules. The fake, the Claude transport and the Codex adapter are held to one
+conformance suite for the contract's guarantees: a stale generation is refused, a
+process lost after a write leaves the submission unknown, evidence arriving after a
+timeout settles the written submission, each request takes one answer, and a new
+turn is acknowledged as the adapter declares.
+
 Use an internal adapter interface with installation/capability inspection,
 new-session or explicit native-resume opening, input submission (new turn or
 supported steering), live interaction response, interruption, closure, and an
@@ -243,6 +254,16 @@ the provider that owns it now (`github`) or `local`, the same rule as the ticket
 list's source filter. Matching and the run state
 machine are functions with no SQL: the state machine takes the run's steps and how
 the step it was on ended, and answers with the next step or how the run ends.
+The executor drives a run with one core call, `advance_automation_run`, which
+records how its step ended and answers with the next piece of work that needs a
+process: an agent to run in its Chat, a notification to show, or the end of the
+run. The core runs Change ticket and If steps itself, inside the transaction that
+records the step before them, so a run that was stopped or taken over meanwhile
+makes none of their changes; a run that has already ended answers `Ended`.
+Every way a run can end (its steps ran out, Stop, turning the Automation off,
+deleting it, taking it over, an executor that cannot go on) goes through one
+function in the core, which decides from the run's status and the cause whether it
+may end, what happens to the step it was on, and whether it needs the person.
 Runs are local to the device, kept 90 days, and a run left Running by a process
 that is gone ends as Needs attention when the next one starts; nothing retries.
 
@@ -305,9 +326,12 @@ agent's: a run taken over or stopped just after a step's Chat was created starts
 no agent in it. Retention
 deletes a run with the Chats it still owns, so a Chat the person took over is kept.
 
-A Run agent step is an ordinary Chat, created in the step's folder, linked to the
-ticket and owned by the run (`chats.automation_run_id`), which keeps it out of the
-Chat list. The host opens its harness with an `Unattended` request: the agent's
+A Run agent step is an ordinary Chat, created by the core as the run reaches the
+step (the step's folder is checked first, so a folder that is gone fails the step
+and leaves no Chat), linked to the ticket and owned by the run
+(`chats.automation_run_id`), which keeps it out of the Chat list. The core also
+hands over what started the run, with the ticket's own words already fenced as data;
+the runner words the first message around it and cannot place them raw. The host opens its harness with an `Unattended` request: the agent's
 model, allowed tools and turn limit. An adapter given one never asks for approval
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
@@ -357,8 +381,8 @@ and closes the harness process. It waits on a signal kept for that Chat, so anot
 Chat's steps do not wake it. An unattended harness that asks for approval
 anyway is stopped and counted as denied.
 
-A Change ticket step is one core call, `apply_automation_change`: it logs its
-write with actor `automation`, so the change starts no Automation, and signs a
+A Change ticket step is the core's own work, done inside `advance_automation_run`: it
+logs its write with actor `automation`, so the change starts no Automation, and signs a
 status change or a posted update with the Automation's name. Text in a posted
 update or a notification holds field references (`{{ticket.reference}}`,
 `{{ticket.title}}`, `{{ticket.status}}`, `{{event.tag}}`) that the core fills in
@@ -368,7 +392,7 @@ runner's host. The desktop shows it from the Rust side, not from the page, becau
 a run goes on while the window is hidden to the tray; a click brings the window
 back and the page opens the ticket or the Automation's runs.
 
-An If step is one core read, `automation_if_passes`: it tests the step's checks
+An If step is also the core's own work: it tests the step's checks
 (tags, status, project) against the run's ticket as it is at that moment, so it
 sees what the steps before it and their agents recorded. The run goes down the
 Yes path when every check passes and down the No path otherwise. Paths never
@@ -381,6 +405,9 @@ fails, the run marks it Failed with its reason and goes down that path to its en
 and the run ends Completed: the failure was handled, so nothing asks for the
 person. A path with no steps handles the failure by ending the run. A step that
 fails with no failure path ends the run as Needs attention with the step's reason.
+Only a refusal by the Workspace fails a step: when storage itself fails, or the
+runner cannot open the Workspace, nothing is recorded and the executor gets the
+error. The run then ends as Needs attention saying so, never through a failure path.
 Only a step's own failure takes the path: a run the person stops, switches off
 with "Stop it and turn off" or takes over has left Running, so the outcome its
 executor reports later is refused and the path does not run.
@@ -667,6 +694,8 @@ Projects, Plans, Activities, tags, and trash/restore also need focused operation
 Desktop `create_ticket` submits initial content, status, project, Plan, tags, following and blocker references through the existing replayable `CreateTicketWithContent` operation. Its create and change use one Core batch/follow transaction. A failing blocker rolls back the complete creation and receipt. `blockers` is an optional mutation input, with default-empty and empty serialization omitted so legacy payload hashes and stored replay outcomes remain compatible; it adds no stored data.
 
 For each write, the core coordinates request-ID replay checks, validation against current data, persistence, history, and the saved request outcome. Changes and their successful request outcome commit together. Batches either commit completely or persist nothing.
+
+Inside the core, every ticket write runs in one write scope (`write_scope.rs`), so the order is kept in one place: a savepoint with the write lock, the Ticket reference resolved and checked for editability, the operation's own rule, history, Workspace events folded so a ticket created by the write logs one `ticket.created` with its final values, then the read back. A ticket in Trash is refused by default; a write that the Workspace allows on a ticket in Trash (restoring it, detaching a link to it from a visible ticket, following it, a reminder) says so explicitly. Scopes nest, so a write made of other writes, such as a batch, runs them inside its own.
 
 Record versions and stale-edit rejection are outside the MVP. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
 
@@ -1185,6 +1214,16 @@ revisions.
 Sync runs only in the desktop process, while the app is open. The CLI stays
 independent: it writes locally, its changes are captured with the write, and they
 upload when the desktop next runs. No background service is involved.
+
+`Workspace::sync_now` is the one way to run sync, and the engine and its tests
+use no other. The first run of a Workspace file in a process begins the app
+session itself (the run token, the downloads cut off when the app last stopped,
+files held back as from a newer ticketd), so the host has nothing to call at
+launch. A run does not overlap another run of the same Workspace file in the
+process: it returns at once with the status marked `run_in_progress` and makes no
+call to the storage. The host keeps two rules of its own: hold runs while
+`sync_download_workspace` replaces the Workspace file, and read `retry_after`
+from the status a run returns, since it is not stored.
 
 [ADR 0003](adr/0003-defer-record-versioning.md) continues to govern local edits.
 The last-synced copy is internal to sync and is not a record version in the

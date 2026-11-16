@@ -4,52 +4,23 @@
 
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
-    Error, NewChat, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord,
-    SyncValue, Trigger, Workspace,
-    sync::{
-        RecordKind, SyncChoice, SyncReport, SyncResolution,
-        remote::{FakeRemote, RemoteStorage},
-    },
+    Error, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord, SyncValue,
+    Trigger, Workspace,
+    sync::{AttachmentDownload, RecordKind, SyncChoice, SyncResolution, remote::RemoteKind},
 };
 
-const FOLDER: &str = "workspace";
+#[path = "support/sync_desks.rs"]
+mod sync_desks;
+use sync_desks::{Devices, desks};
+
 const NAMES: [&str; 2] = ["Desk A", "Desk B"];
 
-struct Devices {
-    _directory: tempfile::TempDir,
-    remote: FakeRemote,
-    workspaces: Vec<Workspace>,
-}
-
+/// Two desktops, as the app runs them.
 fn devices() -> Devices {
-    let directory = tempfile::tempdir().unwrap();
-    let remote = FakeRemote::new();
-    remote.ensure_folder(FOLDER, "Test").unwrap();
-    let mut workspaces: Vec<Workspace> = Vec::new();
-    for name in ["a", "b"] {
-        let mut workspace = Workspace::open(directory.path().join(name)).unwrap();
-        while workspaces
-            .iter()
-            .any(|other| other.device_code().unwrap() == workspace.device_code().unwrap())
-        {
-            workspace.renew_device_code().unwrap();
-        }
-        workspaces.push(workspace);
-    }
-    Devices {
-        _directory: directory,
-        remote,
-        workspaces,
-    }
+    Devices::new(&NAMES)
 }
 
 impl Devices {
-    fn sync(&mut self, device: usize) -> SyncReport {
-        self.workspaces[device]
-            .sync(&self.remote, FOLDER, NAMES[device])
-            .unwrap()
-    }
-
     /// Sync both ways until everything has travelled.
     fn settle(&mut self) {
         for device in [0, 1, 0, 1] {
@@ -69,6 +40,30 @@ impl Devices {
             })
             .unwrap();
         let automation = a.create_automation(triage(&agent.id)).unwrap();
+        self.settle();
+        (automation.id, agent.id)
+    }
+
+    /// The same, with a step folder that exists on this computer, for a test that
+    /// runs it: a step whose folder is missing fails before its agent starts.
+    fn shared_runnable_automation(&mut self) -> (String, String) {
+        let a = &mut self.workspaces[0];
+        let agent = a
+            .create_automation_agent(AutomationAgentSettings {
+                name: "Triage".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let mut definition = triage(&agent.id);
+        definition.steps = vec![Step {
+            id: "triage".into(),
+            action: StepAction::RunAgent {
+                agent_id: Some(agent.id.clone()),
+                execution_folder: Some(std::env::temp_dir().to_string_lossy().into_owned()),
+                on_failure: None,
+            },
+        }];
+        let automation = a.create_automation(definition).unwrap();
         self.settle();
         (automation.id, agent.id)
     }
@@ -738,11 +733,11 @@ fn a_change_to_an_agent_or_an_automation_waits_to_upload_and_the_switch_does_not
 
 #[test]
 fn a_workspace_in_the_previous_format_starts_syncing_the_automations_it_has() {
-    let directory = tempfile::tempdir().unwrap();
-    let (workspace, automation, agent) = workspace_with_files(&directory);
+    let desks = desks();
+    let (workspace, automation, agent) = workspace_with_files(&desks.directory);
     let token = workspace.change_token().unwrap();
     drop(workspace);
-    let db = rusqlite::Connection::open(directory.path().join("source")).unwrap();
+    let db = rusqlite::Connection::open(desks.directory.path().join("source")).unwrap();
     let mut drops = String::from("DROP TABLE automation_arrivals; DELETE FROM sync_dirty;");
     for table in ["automations", "automation_agents"] {
         for event in ["insert", "update", "delete"] {
@@ -753,7 +748,7 @@ fn a_workspace_in_the_previous_format_starts_syncing_the_automations_it_has() {
         .unwrap();
     drop(db);
 
-    let mut workspace = Workspace::open(directory.path().join("source")).unwrap();
+    let mut workspace = Workspace::open(desks.directory.path().join("source")).unwrap();
 
     assert_eq!(workspace.change_token().unwrap(), token);
     // Made on this desktop before Automations synced: not "arrived".
@@ -768,14 +763,22 @@ fn a_workspace_in_the_previous_format_starts_syncing_the_automations_it_has() {
         take(&mut workspace),
         [(RecordKind::Automation, automation.clone())]
     );
-    let remote = FakeRemote::new();
-    remote.ensure_folder(FOLDER, "Test").unwrap();
-    assert_eq!(
-        workspace.sync(&remote, FOLDER, NAMES[0]).unwrap().uploaded,
-        2
-    );
-    let mut other = Workspace::open(directory.path().join("other")).unwrap();
-    other.sync(&remote, FOLDER, NAMES[1]).unwrap();
+    workspace
+        .sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    workspace
+        .sync_upload_workspace(&desks.remote, "Test")
+        .unwrap();
+    workspace.sync_now(&desks.remote).unwrap();
+    let uploaded = desks
+        .remote
+        .stored_versions(&desks.folder())
+        .keys()
+        .filter(|key| key.kind != RemoteKind::Devices)
+        .count();
+    assert_eq!(uploaded, 2);
+    let mut other = desks.joined("other", AttachmentDownload::Automatic);
+    other.sync_now(&desks.remote).unwrap();
     assert_eq!(other.automation_agents().unwrap().len(), 1);
     assert_eq!(other.automation_agent(&agent).unwrap().id, agent);
     // Deleted before it ever synced: it arrives as deleted.
@@ -806,7 +809,7 @@ fn an_arrived_automation_starts_no_run_until_it_is_switched_on_here() {
 #[test]
 fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
     let mut devices = devices();
-    let (automation, _agent) = devices.shared_automation();
+    let (automation, _agent) = devices.shared_runnable_automation();
     let b = &mut devices.workspaces[1];
     b.set_automation_enabled(&automation, true).unwrap();
     let ticket = b.create_ticket("Crash on save").unwrap();
@@ -818,19 +821,10 @@ fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
     let b = &mut devices.workspaces[1];
     assert_eq!(b.queue_automation_runs().unwrap(), 1);
     let run = b.start_automation_runs(2).unwrap().remove(0);
-    b.advance_automation_run(&run.id, None).unwrap();
-    b.create_automation_run_chat(
-        &run.id,
-        "triage",
-        NewChat {
-            title: None,
-            harness: "codex".into(),
-            execution_folder: "C:\\code\\web-app".into(),
-            folder_managed: false,
-            links: Vec::new(),
-        },
-    )
-    .unwrap();
+    assert!(matches!(
+        b.advance_automation_run(&run.id, None).unwrap(),
+        RunAction::RunAgent(_)
+    ));
     b.advance_automation_run(&run.id, Some(StepOutcome::Completed))
         .unwrap();
 
@@ -850,7 +844,7 @@ fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
 #[test]
 fn a_run_in_progress_finishes_on_its_own_steps_when_an_edit_from_elsewhere_switches_it_off() {
     let mut devices = devices();
-    let (automation, _agent) = devices.shared_automation();
+    let (automation, _agent) = devices.shared_runnable_automation();
     let b = &mut devices.workspaces[1];
     b.set_automation_enabled(&automation, true).unwrap();
     let ticket = b.create_ticket("Crash on save").unwrap();
@@ -875,12 +869,7 @@ fn a_run_in_progress_finishes_on_its_own_steps_when_an_edit_from_elsewhere_switc
 
     let b = &mut devices.workspaces[1];
     assert!(!only(b).enabled);
-    assert_eq!(
-        started,
-        RunAction::RunStep {
-            step_id: "triage".into()
-        }
-    );
+    assert!(matches!(&started, RunAction::RunAgent(start) if start.step_id == "triage"));
     // The run still has the step as it was, and ends as any other run.
     let kept = b.automation_run(&run.id).unwrap();
     assert_eq!(kept.definition, run.definition);

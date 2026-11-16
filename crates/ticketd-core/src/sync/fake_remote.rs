@@ -180,6 +180,21 @@ impl FakeRemote {
         self.state().calls.clone()
     }
 
+    /// The current version of every file stored in `folder`, read as a test
+    /// looking at the storage and not as a call: it is not counted in
+    /// [`FakeRemote::calls`] and takes no injected failure. Empty if the
+    /// folder is missing.
+    pub fn stored_versions(&self, folder: &str) -> BTreeMap<RemoteKey, String> {
+        let state = self.state();
+        state
+            .folders
+            .get(folder)
+            .into_iter()
+            .flat_map(|stored| stored.files.iter())
+            .filter_map(|(key, file)| fake_file(key, file).map(|file| (key.clone(), file.version)))
+            .collect()
+    }
+
     /// Records the call and returns the state, the injected failure to report
     /// after applying (if any), or the injected failure to report instead.
     fn begin(

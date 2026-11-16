@@ -290,9 +290,8 @@ fn graph_nodes(
 ) -> Result<(Vec<GraphNode>, HashMap<String, String>), Error> {
     let ids_json = serde_json::to_string(&ids)?;
     let sql = format!(
-        "SELECT t.id, t.reference, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}), t.project_id FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
-        crate::source::held_sql("t.id"),
-        crate::history::unresolved_blocker_sql("b")
+        "SELECT t.id, t.reference, t.title, t.status, t.trashed, {}, t.project_id FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
+        crate::readiness::indicator_sql("t")
     );
     let mut statement = tx.prepare(&sql)?;
     let rows = statement
@@ -303,25 +302,17 @@ fn graph_nodes(
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, bool>(4)?,
-                row.get::<_, bool>(5)?,
-                row.get::<_, bool>(6)?,
-                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     let mut metadata = HashMap::new();
-    for (id, reference, title, status, trashed, held, blocked, project_id) in rows {
+    for (id, reference, title, status, trashed, availability, project_id) in rows {
         let status: Status = status.parse().map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
-        let availability = if held || trashed || status != Status::Todo {
-            None
-        } else if blocked {
-            Some("Blocked".into())
-        } else {
-            Some("Ready".into())
-        };
         metadata.insert(
             id.clone(),
             GraphNode {

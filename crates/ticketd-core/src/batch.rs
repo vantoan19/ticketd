@@ -86,34 +86,7 @@ impl Workspace {
                 "at most 1000 individual edits are allowed".into(),
             ));
         }
-        self.connection.execute_batch("SAVEPOINT batch")?;
-        if let Err(error) = crate::transaction_write_lock(&self.connection) {
-            let _ = self
-                .connection
-                .execute_batch("ROLLBACK TO batch; RELEASE batch");
-            return Err(error);
-        }
-        let result = crate::events::head(&self.connection).and_then(|logged| {
-            let tickets = self.apply_batch_inner(operations, follow_created)?;
-            crate::events::fold_into_creation(&self.connection, logged)?;
-            Ok(tickets)
-        });
-        match result {
-            Ok(tickets) => {
-                if let Err(error) = self.connection.execute_batch("RELEASE batch") {
-                    let _ = self
-                        .connection
-                        .execute_batch("ROLLBACK TO batch; RELEASE batch");
-                    return Err(error.into());
-                }
-                Ok(tickets)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO batch; RELEASE batch")?;
-                Err(error)
-            }
-        }
+        self.in_write_scope(|workspace| workspace.apply_batch_inner(operations, follow_created))
     }
 
     fn apply_batch_inner(

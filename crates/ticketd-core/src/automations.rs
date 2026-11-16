@@ -14,9 +14,6 @@ use crate::{Error, Status, Workspace};
 /// converts older records when it reads them.
 const SCHEMA_VERSION: u32 = 1;
 
-/// Why a run ended when its Automation was deleted.
-const DELETED: &str = "You deleted this Automation.";
-
 /// The longest name an Automation may have, in characters. The Rename dialog
 /// (`AutomationEditor.tsx`) stops at the same length.
 pub const AUTOMATION_NAME_LIMIT: usize = 120;
@@ -826,7 +823,7 @@ impl Workspace {
     ) -> Result<Automation, Error> {
         let definition = tidied(definition)?;
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         // A schedule counts again from a change to what starts the Automation, so
         // an old count never fires the new schedule at once. One that could not be
         // read before counts as changed.
@@ -868,7 +865,7 @@ impl Workspace {
     /// Returns the Chats of the agents that were working, for the host to interrupt.
     pub fn delete_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let changed = transaction.execute(
             "UPDATE automations SET trashed = 1 WHERE id = ?1 AND trashed = 0",
             [id],
@@ -880,10 +877,10 @@ impl Workspace {
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],
         )?;
-        let chats = crate::automation_background::end_active_runs(&transaction, id, DELETED)?;
-        transaction.execute(
-            "UPDATE automation_runs SET attention_cleared = 1 WHERE automation_id = ?1 AND reason = ?2",
-            params![id, DELETED],
+        let chats = crate::automation_background::end_active_runs(
+            &transaction,
+            id,
+            crate::automation_endings::Cause::Deleted,
         )?;
         transaction.commit()?;
         Ok(chats)
@@ -903,7 +900,7 @@ impl Workspace {
     /// far: what happened while it was off never starts a run.
     pub fn set_automation_enabled(&mut self, id: &str, enabled: bool) -> Result<Automation, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let mut automation = one(&transaction, id)?;
         if enabled {
             if let Some(problem) = automation.problems.first() {
