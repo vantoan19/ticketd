@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { failureText } from "@/lib/api/describe-failure";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   automationsClient,
   type TicketRun,
@@ -16,30 +19,37 @@ export function useTicketRuns(reference: string, active: boolean) {
   const chatOn = useChatFeature().enabled;
   const version = useWorkspaceChange();
   const [runs, setRuns] = useState<TicketRun[]>([]);
-  const [error, setError] = useState("");
-  const [tick, setTick] = useState(0);
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const generation = useRef(0);
+  const reload = useCallback(async () => {
+    const request = ++generation.current;
+    try {
+      const found = await automationsClient.ticketRuns(reference);
+      if (request !== generation.current) return false;
+      setRuns(found);
+      setError(null);
+      return true;
+    } catch (reason) {
+      if (request === generation.current)
+        setError(describeFailure(reason, "load this ticket's Automation runs"));
+      return false;
+    }
+  }, [reference]);
   useEffect(() => {
     if (!active) return;
+    const readGeneration = generation;
     let current = true;
-    void automationsClient.ticketRuns(reference).then(
-      (found) => {
-        if (!current) return;
-        setRuns(found);
-        // A read that works again takes the earlier failure off the ticket.
-        setError("");
-      },
-      (reason: unknown) =>
-        current &&
-        setError(failureText(reason, "load this ticket's Automation runs")),
-    );
+    void Promise.resolve().then(() => {
+      if (current) void reload();
+    });
     return () => {
       current = false;
+      readGeneration.current++;
     };
-  }, [reference, active, version, tick]);
-  const reload = useCallback(() => setTick((value) => value + 1), []);
+  }, [active, version, reload]);
   return {
     runs: active ? runs : [],
-    error: active ? error : "",
+    error: active ? error : null,
     reload,
     chatOn,
   };

@@ -916,8 +916,12 @@ graph query permit a 250/600 hydration window; legacy defaults remain 100/300.
 Core adjacency limits still bound each indexed relationship group, and every
 omission stays explicit. Client joins visit at most 3,000 connections per island
 and 3,000 in the final join (eight islands maximum). Client cursors retain the
-Plan/member/workspace window; Load more replaces it, and connection expansion
-reuses it. Missing hydration differs from deliberate omission. Unknown membership
+Plan/member/workspace window and its independent text/tag match continuation.
+Each filter window reads at most five workspace match pages shared by its Plans;
+Load more exhausts that match continuation before advancing the member window.
+A refresh hydrates all identities in the current window, up to 250, using its
+original cursor. It retains the current continuation, filters and selection.
+Load more replaces the window, and connection expansion reuses it. Missing hydration differs from deliberate omission. Unknown membership
 never implies an unplanned item. Flow and Next up require complete metadata and
 stop at 500 members or an omitted prerequisite page instead of classifying a
 partial set. These are projections and pagination controls over existing data;

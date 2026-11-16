@@ -264,7 +264,13 @@ export function Documents({
   // outside Trash, so nothing moves.
   const [restored, setRestored] = useState<DocumentSummary | null>(null);
   // The Trash row whose Restore takes focus once the list reloads.
-  const focusAfterRestore = useRef<number | null>(null);
+  const focusAfterRestore = useRef<{
+    index: number;
+    request: number;
+    origin: Element | null;
+  } | null>(null);
+  const trashGeneration = useRef(0);
+  const appliedTrashGeneration = useRef(0);
   const trashList = useRef<HTMLElement>(null);
   const restoredOpen = useRef<HTMLButtonElement>(null);
   // Only mention hidden Activity details when including them would actually find something.
@@ -292,35 +298,60 @@ export function Documents({
       .catch((reason: unknown) => failLoad(reason, "Documents"));
   }, [recentOffset, pinOffset, includeSupport, failLoad]);
   const loadTrash = useCallback(
-    () =>
+    (focus?: { index: number; origin: Element | null }) => {
+      const request = ++trashGeneration.current;
+      // A newer post-Restore read may supersede this one; only the latest read
+      // can apply the list and complete that action's pending focus.
+      if (focus) focusAfterRestore.current = { ...focus, request };
+      else if (focusAfterRestore.current)
+        focusAfterRestore.current.request = request;
       void upTo(trashOffset, (at) => documents.trash(at))
         .then((items) => {
+          if (request !== trashGeneration.current) return;
+          appliedTrashGeneration.current = request;
           setTrash(items);
           setTrashLoaded(true);
           setListError(null);
         })
-        .catch((reason: unknown) => failLoad(reason, "Trash")),
+        .catch((reason: unknown) => {
+          if (request === trashGeneration.current) failLoad(reason, "Trash");
+        });
+    },
     [trashOffset, failLoad],
   );
   useEffect(() => {
     if (!active || !showTrash) return;
+    const readGeneration = trashGeneration;
     loadTrash();
+    return () => {
+      readGeneration.current++;
+    };
     // `attempt` reloads after Retry.
   }, [active, showTrash, loadTrash, changeVersion, attempt]);
   useEffect(() => {
-    const index = focusAfterRestore.current;
-    if (index === null) return;
+    const focus = focusAfterRestore.current;
+    if (!active || !showTrash) {
+      focusAfterRestore.current = null;
+      return;
+    }
+    if (!focus || focus.request !== appliedTrashGeneration.current) return;
     focusAfterRestore.current = null;
-    // The row that took the restored one's place, else the one above, else Open.
+    // A deliberate focus move while the read was pending wins. Removing the
+    // original row naturally sends focus to body and still needs recovery.
+    if (
+      document.activeElement !== focus.origin &&
+      !(document.activeElement === document.body && !focus.origin?.isConnected)
+    )
+      return;
     const buttons = [
       ...(trashList.current?.querySelectorAll<HTMLButtonElement>(
         "[data-restore]",
       ) ?? []),
     ];
     (
-      buttons[Math.min(index, buttons.length - 1)] ?? restoredOpen.current
+      buttons[Math.min(focus.index, buttons.length - 1)] ?? restoredOpen.current
     )?.focus();
-  }, [trash]);
+  }, [trash, active, showTrash]);
   useEffect(() => {
     if (!active || view !== "all") return;
     const load = () =>
@@ -439,15 +470,16 @@ export function Documents({
       }),
     );
   };
-  const restore = (doc: DocumentSummary, index: number) =>
+  const restore = (doc: DocumentSummary, index: number) => {
+    const origin = document.activeElement;
     listAction(`restore ${doc.heading}`, () =>
       documents.setTrashed(doc.id, false, crypto.randomUUID()).then(() => {
         setRestored(doc);
-        focusAfterRestore.current = index;
-        loadTrash();
-        refresh();
+        loadTrash({ index, origin });
+        void refresh();
       }),
     );
+  };
   const searching = Boolean(query.trim() || filter.trim());
   const visibleRows = showTrash
     ? trash

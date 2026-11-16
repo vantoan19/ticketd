@@ -107,6 +107,7 @@ function bridgeAnswers(
 ) {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_sources") return [githubEntry];
+    if (command === "show_ticket") return ticket();
     if (command === "preview_publication") return preview;
     if (command === "publish_ticket") {
       if (publish) throw { ...publish.reject, fields: [] };

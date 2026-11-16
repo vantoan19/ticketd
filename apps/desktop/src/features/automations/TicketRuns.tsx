@@ -48,6 +48,8 @@ export function RunNotices({
     retry?: () => void;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [needsCheck, setNeedsCheck] = useState(false);
   const [all, setAll] = useState(false);
   const waiting = runs.filter((run) => run.needs_you);
   const folded = all ? 0 : Math.max(0, waiting.length - SHOWN);
@@ -57,20 +59,36 @@ export function RunNotices({
     retryable = true,
   ) => {
     setBusy(true);
-    void action()
-      .then(
-        () => setFailure(null),
-        (reason: unknown) =>
-          setFailure({
-            description: describeFailure(reason, verb),
-            ...(retryable && { retry: () => act(action, verb) }),
-          }),
-      )
-      .finally(() => {
-        setBusy(false);
-        reload();
-      });
+    void (async () => {
+      let failed = false;
+      try {
+        await action();
+        setFailure(null);
+      } catch (reason) {
+        failed = true;
+        if (!retryable) setNeedsCheck(true);
+        setFailure({
+          description: describeFailure(reason, verb),
+          ...(retryable && { retry: () => act(action, verb) }),
+        });
+      }
+      // Run again queues a new identity. Keep its old button locked while a
+      // read establishes whether the earlier request already queued that run.
+      const known = await reload();
+      if (known && !retryable) setNeedsCheck(false);
+      if (known && failed && !retryable) setFailure(null);
+      setBusy(false);
+    })();
   };
+  const checkRuns = async () => {
+    setChecking(true);
+    if (await reload()) {
+      setNeedsCheck(false);
+      setFailure(null);
+    }
+    setChecking(false);
+  };
+
   return (
     <>
       {waiting.slice(0, waiting.length - folded).map((run) => (
@@ -109,7 +127,7 @@ export function RunNotices({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busy}
+                disabled={busy || needsCheck}
                 onClick={() =>
                   act(
                     () => automationsClient.runAgain(run.id),
@@ -156,10 +174,16 @@ export function RunNotices({
           className="mb-6"
         />
       )}
-      {error && (
-        <p role="alert" className="mb-6">
-          {error}
-        </p>
+      {error && <FailureAlert failure={error} className="mb-6" />}
+      {(needsCheck || error) && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || checking}
+          onClick={() => void checkRuns()}
+        >
+          {checking ? "Checking saved runs…" : "Check saved runs"}
+        </Button>
       )}
     </>
   );

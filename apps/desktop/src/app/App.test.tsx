@@ -12526,3 +12526,602 @@ test("an unconfirmed publication hides diagnostics and prevents a blind second p
     bridge.invoke.mock.calls.filter(([cmd]) => cmd === "publish_ticket"),
   ).toHaveLength(1);
 });
+
+test("a small Plan reaches a matching member after 250 workspace matches without an unbounded initial read", async () => {
+  const plan = {
+    id: "late-match-plan",
+    name: "Late match Plan",
+    archived: false,
+  };
+  const member = bulkTicket(301, { title: "Needle member", plan_id: plan.id });
+  const matches = Array.from({ length: 301 }, (_, index) => ({
+    id: index === 300 ? member.id : `outside-match-${index}`,
+    kind: "ticket",
+    label:
+      index === 300 ? "T-KQ301 · Needle member" : `Needle outside ${index}`,
+    state: "Todo",
+    trashed: false,
+    activity_detail: false,
+  }));
+  let searches = 0;
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets") return [member];
+      if (command === "show_plan")
+        return {
+          plan,
+          members: [member],
+          documents: [],
+          counts: counted({ todo: 1 }),
+        };
+      if (command === "workspace_graph") {
+        const r = args.request as {
+          search: string | null;
+          hydrate_only: boolean;
+          visible_ids: string[];
+          cursor: string | null;
+        };
+        const offset = Number(r.cursor ?? 0);
+        if (r.search && !r.hydrate_only) searches++;
+        return {
+          nodes: r.hydrate_only
+            ? matches.filter((n) => r.visible_ids.includes(n.id))
+            : matches.slice(offset, offset + 50),
+          edges: [],
+          node_tags: {},
+          total: 301,
+          omitted: false,
+          omitted_groups: [],
+          next_cursor:
+            !r.hydrate_only && offset + 50 < matches.length
+              ? String(offset + 50)
+              : null,
+        };
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Late match Plan/ }),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+  const card = await screen.findByRole("button", {
+    name: "T-KQ301 Needle member",
+  });
+  card.focus();
+  fireEvent.keyDown(card, { key: "G", shiftKey: true });
+  const graph = await screen.findByRole("region", { name: "Workspace graph" });
+  await within(graph).findByText("1 ticket, 0 Documents");
+  fireEvent.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.change(screen.getByLabelText("Search"), {
+    target: { value: "Needle" },
+  });
+  await within(graph).findByText(
+    /Some matching items are outside this search window/,
+  );
+  expect(searches).toBeLessThanOrEqual(5);
+  fireEvent.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.click(within(graph).getByRole("button", { name: "Load more" }));
+  await within(graph).findByText("1 ticket, 0 Documents");
+  expect(graph.querySelector('[data-id="301"]')).toBeTruthy();
+  fireEvent.click(within(graph).getByRole("radio", { name: "List" }));
+  expect(
+    within(graph).getByRole("button", { name: "T-KQ301 · Needle member" }),
+  ).toBeTruthy();
+  expect(searches).toBe(7);
+  expect(within(graph).queryByRole("button", { name: "Load more" })).toBeNull();
+});
+
+test.each(["Plan", "Workspace"])(
+  "%s graph refresh retains its later window, filter, selection and next continuation",
+  async (scope) => {
+    const plan = {
+      id: "revision-window",
+      name: "Revision window",
+      archived: false,
+    };
+    const members = Array.from({ length: 260 }, (_, index) =>
+      bulkTicket(index + 1, {
+        title: `Window member ${index + 1}`,
+        plan_id: plan.id,
+      }),
+    );
+    const nodes = members.map((ticket) => ({
+      id: ticket.id,
+      kind: "ticket",
+      label: `${ticket.reference} · ${ticket.title}`,
+      state: "Todo",
+      trashed: false,
+      activity_detail: false,
+    }));
+    let version = 0;
+    const tokenBefore = bridge.token.next;
+    bridge.token.next = () => version;
+    let reads = 0;
+    bridge.invoke.mockImplementation(
+      (command: string, args: Record<string, unknown>) => {
+        if (command === "list_plans") return [plan];
+        if (command === "find_tickets") {
+          const f = args.filter as { offset: number; limit: number };
+          return members.slice(f.offset, f.offset + f.limit);
+        }
+        if (command === "show_plan") {
+          reads++;
+          return {
+            plan,
+            members: [],
+            documents: [],
+            counts: counted({ todo: 260 }),
+          };
+        }
+        if (command === "workspace_graph") {
+          const r = args.request as {
+            hydrate_only: boolean;
+            visible_ids: string[];
+            cursor: string | null;
+          };
+          return {
+            nodes: r.hydrate_only
+              ? nodes.filter((n) => r.visible_ids.includes(n.id))
+              : scope === "Workspace"
+                ? nodes.slice(Number(r.cursor ?? 0), Number(r.cursor ?? 0) + 50)
+                : [],
+            edges: [],
+            total: 260,
+            node_tags: {},
+            omitted: false,
+            omitted_groups: [],
+            next_cursor:
+              !r.hydrate_only &&
+              scope === "Workspace" &&
+              Number(r.cursor ?? 0) + 50 < nodes.length
+                ? String(Number(r.cursor ?? 0) + 50)
+                : null,
+          };
+        }
+        return bridgeDefault(command, args);
+      },
+    );
+    try {
+      render(<App />);
+      if (scope === "Plan") {
+        fireEvent.click(
+          await screen.findByRole("button", { name: /^Revision window/ }),
+        );
+        fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+        fireEvent.click(
+          await screen.findByRole("button", { name: "Open the full graph" }),
+        );
+      } else
+        fireEvent.click(
+          await screen.findByRole("button", { name: "Workspace graph" }),
+        );
+      const graph = await screen.findByRole("region", {
+        name: "Workspace graph",
+      });
+      await within(graph).findByText("119 tickets, 0 Documents");
+      fireEvent.click(within(graph).getByRole("button", { name: "Filter" }));
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "Type: All" }), {
+        key: "Enter",
+      });
+      fireEvent.click(await screen.findByRole("option", { name: "Tickets" }));
+      fireEvent.click(within(graph).getByRole("button", { name: "Filter" }));
+      await act(async () => {});
+
+      fireEvent.click(within(graph).getByRole("button", { name: "Load more" }));
+      await waitFor(() =>
+        expect(graph.querySelector('[data-id="120"]')).toBeTruthy(),
+      );
+      fireEvent.click(within(graph).getByRole("radio", { name: "List" }));
+      const row = within(graph).getByRole("button", {
+        name: "T-KQ120 · Window member 120",
+      });
+      fireEvent.click(row);
+      row.focus();
+      const before = [
+        ...graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+      ].map((n) => n.textContent);
+      const readBefore = reads;
+      version++;
+      await vi.waitFor(() => expect(reads).toBeGreaterThan(readBefore), {
+        timeout: 4000,
+      });
+      await act(async () => {});
+      expect(
+        [...graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li")].map(
+          (n) => n.textContent,
+        ),
+      ).toEqual(before);
+      expect(
+        within(graph).getByRole("button", {
+          name: "T-KQ120 · Window member 120",
+        }),
+      ).toBe(row);
+      expect(document.activeElement).toBe(row);
+      expect(
+        within(graph).getByRole("button", { name: "Center here" }),
+      ).toBeTruthy();
+      fireEvent.click(within(graph).getByRole("button", { name: "Load more" }));
+      await within(graph).findByRole("button", {
+        name: "T-KQ239 · Window member 239",
+      });
+      expect(
+        within(graph).getByRole("button", {
+          name: "T-KQ260 · Window member 260",
+        }),
+      ).toBeTruthy();
+      expect(
+        within(graph).queryByRole("button", {
+          name: "T-KQ1 · Window member 1",
+        }),
+      ).toBeNull();
+    } finally {
+      bridge.token.next = tokenBefore;
+    }
+  },
+);
+
+test.each(["confirmed", "lost reply"])(
+  "publication %s keeps a failed read recoverable without sending another issue",
+  async (outcome) => {
+    const ticket = bulkTicket(1);
+    const raw = "RAW-PUBLISH-READ-OR-REPLY";
+    let published = false;
+    let failRead = true;
+    let writes = 0;
+    const attempt = {
+      id: "publication-followup",
+      reference: "T-KQ1",
+      provider: "github",
+      destination: "acme/api",
+      title: "First",
+      body: "",
+      state: "succeeded",
+      started_at: "2026-11-16T00:00:00Z",
+      updated_at: "2026-11-16T00:00:00Z",
+      failure: null,
+      issue: null,
+    };
+    await renderReviewApp({
+      find_tickets: [ticket],
+      list_sources: [reviewSourceEntry],
+      show_ticket: () => {
+        if (published && failRead) throw new Error(raw);
+        return ticket;
+      },
+      preview_publication: {
+        reference: "T-KQ1",
+        provider: "github",
+        provider_name: "GitHub",
+        destination: "acme/api",
+        destinations: ["acme/api"],
+        title: "First",
+        body: "",
+        fingerprint: "00000000000000a1",
+        eligibility: { kind: "eligible" },
+        attempt: null,
+      },
+      publish_ticket: () => {
+        writes++;
+        published = true;
+        if (outcome === "lost reply") throw new Error(raw);
+        return { attempt, replayed: false };
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*First/ }));
+    await screen.findByRole("button", { name: "Ticket actions" });
+    openMenu("Ticket actions");
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Publish to GitHub…" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Publish T-KQ1 to GitHub",
+    });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Publish issue" }),
+    );
+    await act(async () => {});
+    expect(
+      within(dialog)
+        .queryByRole("button", { name: "Publish issue" })
+        ?.hasAttribute("disabled") ?? true,
+    ).toBe(true);
+    expect(
+      within(dialog).getByText(
+        outcome === "confirmed"
+          ? "Publication confirmed."
+          : "The outcome is not known.",
+      ),
+    ).toBeTruthy();
+    const check = within(dialog).getByRole("button", {
+      name: "Check saved state",
+    });
+    fireEvent.click(check);
+    await act(async () => {});
+    const alerts = within(dialog).getAllByRole("alert");
+    expect(alerts.every((a) => !a.textContent?.includes(raw))).toBe(true);
+    fireEvent.click(
+      within(dialog).getAllByRole("button", { name: "Details" })[0]!,
+    );
+    expect(screen.getByText(raw)).toBeTruthy();
+    expect(writes).toBe(1);
+    fireEvent.keyDown(screen.getByText(raw), { key: "Escape" });
+    failRead = false;
+    fireEvent.click(check);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Publish T-KQ1 to GitHub" }),
+      ).toBeNull(),
+    );
+    expect(writes).toBe(1);
+  },
+);
+
+test("Run again remains blocked through pending and failed authoritative reads after a lost reply", async () => {
+  const ticket = bulkTicket(1);
+  const run = {
+    id: "uncertain-run",
+    automation_id: "review",
+    automation_name: "Review",
+    status: "needs_attention",
+    reason: "Review outcome",
+    needs_you: true,
+    answer: null,
+    automation_deleted: false,
+    ticket: { id: "1", reference: "T-KQ1", title: "First" },
+    created_at: "2026-11-16T00:00:00Z",
+  };
+  let writes = 0;
+  let rejectRead: ((reason: unknown) => void) | undefined;
+  let reconcile = false;
+  await renderReviewApp({
+    find_tickets: [ticket],
+    show_ticket: ticket,
+    automation_run_list_for_ticket: () => {
+      if (!writes) return [run];
+      if (reconcile) return [{ ...run, needs_you: false }];
+      return new Promise((_resolve, reject) => {
+        rejectRead = reject;
+      });
+    },
+    automation_run_again: () => {
+      writes++;
+      throw new Error("RAW-LOST-RUN-REPLY");
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*First/ }));
+  const again = await screen.findByRole("button", { name: "Run again" });
+  fireEvent.click(again);
+  await waitFor(() => expect(rejectRead).toBeTypeOf("function"));
+  expect(again).toHaveProperty("disabled", true);
+  fireEvent.click(again);
+  expect(writes).toBe(1);
+  await act(async () => {
+    rejectRead!(new Error("RAW-RUN-READ-FAILURE"));
+  });
+  expect(again).toHaveProperty("disabled", true);
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  const check = screen.getByRole("button", { name: "Check saved runs" });
+  expect(
+    screen.getAllByRole("alert").every((a) => !a.textContent?.includes("RAW-")),
+  ).toBe(true);
+  reconcile = true;
+  fireEvent.click(check);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Run again" })).toBeNull(),
+  );
+  expect(writes).toBe(1);
+});
+
+test.each(["old first", "new first", "new focus"])(
+  "Document Trash restore handles %s deferred reads without losing or stealing focus",
+  async (order) => {
+    const rows = [
+      { id: "trash-alpha", heading: "Alpha" },
+      { id: "trash-beta", heading: "Beta" },
+    ];
+    const tokenBefore = bridge.token.next;
+    let version = 0;
+    bridge.token.next = () => version;
+    let reads = 0;
+    let resolveOld: ((rows: unknown) => void) | undefined;
+    let resolveNew: ((rows: unknown) => void) | undefined;
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "trashed_documents") {
+        reads++;
+        if (reads === 1) return rows;
+        return new Promise((resolve) => {
+          if (reads === 2) resolveOld = resolve;
+          else resolveNew = resolve;
+        });
+      }
+      if (command === "set_document_trashed")
+        return {
+          id: "trash-alpha",
+          title: "Alpha",
+          body: "",
+          trashed: false,
+          created_at: "now",
+          updated_at: "now",
+        };
+      return bridgeDefault(command, args);
+    });
+    try {
+      const user = userEvent.setup();
+      render(<App />);
+      await user.click(
+        await screen.findByRole("button", { name: "Documents" }),
+      );
+      const nav = await screen.findByRole("radio", { name: "Trash" });
+      await user.click(nav);
+      await screen.findByRole("button", { name: "Restore Alpha" });
+      version++;
+      await vi.waitFor(() => expect(resolveOld).toBeTypeOf("function"), {
+        timeout: 4000,
+      });
+      await user.click(screen.getByRole("button", { name: "Restore Alpha" }));
+      await waitFor(() => expect(resolveNew).toBeTypeOf("function"));
+      if (order === "new focus") nav.focus();
+      if (order === "new first") {
+        await act(async () => {
+          resolveNew!([rows[1]]);
+        });
+        await act(async () => {
+          resolveOld!(rows);
+        });
+      } else {
+        await act(async () => {
+          resolveOld!(rows);
+        });
+        await act(async () => {
+          resolveNew!([rows[1]]);
+        });
+      }
+      expect(
+        screen.queryByRole("button", { name: "Restore Alpha" }),
+      ).toBeNull();
+      expect(document.activeElement).toBe(
+        order === "new focus"
+          ? nav
+          : screen.getByRole("button", { name: "Restore Beta" }),
+      );
+    } finally {
+      bridge.token.next = tokenBefore;
+    }
+  },
+);
+
+test("many Plan filter windows retain bounded reads, full counts and identical Graph and List identities", async () => {
+  const plans = Array.from({ length: 12 }, (_, index) => ({
+    id: `late-plan-${index}`,
+    name: `Late Plan ${index}`,
+    archived: false,
+  }));
+  const members = plans.map((plan, index) =>
+    bulkTicket(index + 1, {
+      title: `Needle member ${index}`,
+      plan_id: plan.id,
+    }),
+  );
+  const all = [
+    ...Array.from({ length: 250 }, (_, index) => ({
+      id: `outside-${index}`,
+      kind: "document",
+      label: `Needle outside ${index}`,
+      state: null,
+      trashed: false,
+      activity_detail: false,
+    })),
+    ...members.map((ticket) => ({
+      id: ticket.id,
+      kind: "ticket",
+      label: `${ticket.reference} · ${ticket.title}`,
+      state: "Todo",
+      trashed: false,
+      activity_detail: false,
+    })),
+  ];
+  let planReads = 0;
+  let filterReads = 0;
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans")
+        return args.limit === undefined
+          ? plans
+          : plans.slice(
+              Number(args.offset),
+              Number(args.offset) + Number(args.limit),
+            );
+      if (command === "show_plan") {
+        planReads++;
+        return {
+          plan: plans.find((p) => p.id === args.id),
+          members: [],
+          documents: [],
+          counts: counted({ todo: 1 }),
+        };
+      }
+      if (command === "find_tickets") {
+        const f = args.filter as {
+          plan: string | null;
+          offset: number;
+          limit: number;
+        };
+        return (
+          f.plan ? members.filter((t) => t.plan_id === f.plan) : members
+        ).slice(f.offset, f.offset + f.limit);
+      }
+      if (command === "workspace_graph") {
+        const r = args.request as {
+          search: string | null;
+          hydrate_only: boolean;
+          cursor: string | null;
+          visible_ids: string[];
+        };
+        const offset = Number(r.cursor ?? 0);
+        if (r.search && !r.hydrate_only) filterReads++;
+        return {
+          nodes: r.hydrate_only
+            ? all.filter((n) => r.visible_ids.includes(n.id))
+            : all.slice(offset, offset + 50),
+          edges: [],
+          node_tags: {},
+          total: 262,
+          omitted: false,
+          omitted_groups: [],
+          next_cursor:
+            !r.hydrate_only && offset + 50 < all.length
+              ? String(offset + 50)
+              : null,
+        };
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Workspace graph" }),
+  );
+  const graph = await screen.findByRole("region", { name: "Workspace graph" });
+  await within(graph).findByText("Late Plan 7");
+  planReads = 0;
+  fireEvent.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.change(screen.getByLabelText("Search"), {
+    target: { value: "Needle" },
+  });
+  await within(graph).findByText(
+    /Some matching items are outside this search window/,
+  );
+  expect(planReads).toBeLessThanOrEqual(8);
+  expect(filterReads).toBeLessThanOrEqual(6);
+  fireEvent.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.click(within(graph).getByRole("button", { name: "Load more" }));
+  await within(graph).findByText("Late Plan 7");
+  await waitFor(() =>
+    expect(graph.querySelector('[data-id="8"]')).toBeTruthy(),
+  );
+  expect(within(graph).getAllByText("1 ticket, 0 Documents")).toHaveLength(8);
+  const drawn = [
+    ...graph.querySelectorAll(".react-flow__node-card[data-id]"),
+  ].map((n) => n.getAttribute("data-id"));
+  fireEvent.click(within(graph).getByRole("radio", { name: "List" }));
+  expect(
+    graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+  ).toHaveLength(drawn.length);
+  for (let index = 0; index < 8; index++)
+    expect(
+      within(graph).getByRole("button", {
+        name: `T-KQ${index + 1} · Needle member ${index}`,
+      }),
+    ).toBeTruthy();
+  // Finish this filter window, advance to the remaining Plans, then continue
+  // their filter window. No omitted island is stranded behind a discarded cursor.
+  fireEvent.click(within(graph).getByRole("button", { name: "Load more" }));
+  await waitFor(() => expect(planReads).toBeGreaterThanOrEqual(20));
+  fireEvent.click(within(graph).getByRole("button", { name: "Load more" }));
+  await within(graph).findByRole("button", {
+    name: "T-KQ12 · Needle member 11",
+  });
+});

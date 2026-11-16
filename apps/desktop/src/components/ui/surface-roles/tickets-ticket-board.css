@@ -69,6 +69,10 @@
 .board-card-top {
   color: var(--muted-foreground);
 }
+.board-card-top .ui-reference {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 .board-card-pending {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
