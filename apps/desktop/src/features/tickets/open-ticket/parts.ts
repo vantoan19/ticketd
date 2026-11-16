@@ -19,7 +19,7 @@ export type Part<Args extends unknown[], State> = (
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface Parts {}
 
-export const parts: { [Name in keyof Parts]: Parts[Name] } = {};
+export const parts: { [Name in keyof Parts]?: Parts[Name] } = {};
 
 export type PartName = keyof Parts;
 export type PartArgs<Name extends PartName> =
@@ -37,6 +37,7 @@ export function usePart(
   args: unknown[],
 ): unknown {
   if (name === undefined) return undefined;
-  const part = parts[name] as unknown as Part<unknown[], unknown>;
+  const part = parts[name] as unknown as Part<unknown[], unknown> | undefined;
+  if (!part) throw new Error(`The Open Ticket has no part named "${name}".`);
   return part(record, ...args);
 }

@@ -244,7 +244,9 @@ describe("the record", () => {
     );
     expect(await screen.findByRole("heading", { name: "Before" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "save" }));
-    expect(await screen.findByRole("heading", { name: "Returned" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "Returned" }),
+    ).toBeTruthy();
     await act(async () => reread.resolve(ticket("After")));
     expect(await screen.findByRole("heading", { name: "After" })).toBeTruthy();
     expect(recordReads()).toHaveLength(2);

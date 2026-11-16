@@ -1253,51 +1253,53 @@ function AppContent() {
                                       />
                                     )}
                                   <TicketListSync value={patchTicket}>
-                                  <InboxTriageProvider
-                                    active={view === "inbox"}
-                                    onSelectionChange={setInboxSelection}
-                                  >
-                                    <TicketWorkspaceView
-                                      key={`tickets:${recoveryGeneration}`}
-                                      workspace={workspace}
-                                      bulk={bulk}
-                                      hidden={
-                                        (firstRun && view === "tickets") ||
-                                        (view !== "tickets" &&
-                                          view !== "inbox") ||
-                                        graphOrigin !== null
-                                      }
-                                      inboxTarget={inboxTarget}
-                                      // The Inbox is a triage split: entries open
-                                      // beside it, without leaving the view (S6).
-                                      {...(view === "inbox" && {
-                                        inbox: (
-                                          <Inbox
-                                            revision={revision}
-                                            selected={workspace.selected}
-                                            onBrowse={() => setView("tickets")}
-                                            select={(reference, noteId) => {
-                                              setInboxTarget(
-                                                noteId && reference
-                                                  ? {
-                                                      reference,
-                                                      id: noteId,
-                                                      key: Date.now(),
-                                                    }
-                                                  : null,
-                                              );
-                                              setSelected(reference);
-                                            }}
-                                          />
-                                        ),
-                                      })}
-                                      onCreate={(trigger, status) => {
-                                        createTriggerRef.current = trigger;
-                                        setCreateStatus(status);
-                                        setCreating(true);
-                                      }}
-                                    />
-                                  </InboxTriageProvider>
+                                    <InboxTriageProvider
+                                      active={view === "inbox"}
+                                      onSelectionChange={setInboxSelection}
+                                    >
+                                      <TicketWorkspaceView
+                                        key={`tickets:${recoveryGeneration}`}
+                                        workspace={workspace}
+                                        bulk={bulk}
+                                        hidden={
+                                          (firstRun && view === "tickets") ||
+                                          (view !== "tickets" &&
+                                            view !== "inbox") ||
+                                          graphOrigin !== null
+                                        }
+                                        inboxTarget={inboxTarget}
+                                        // The Inbox is a triage split: entries open
+                                        // beside it, without leaving the view (S6).
+                                        {...(view === "inbox" && {
+                                          inbox: (
+                                            <Inbox
+                                              revision={revision}
+                                              selected={workspace.selected}
+                                              onBrowse={() =>
+                                                setView("tickets")
+                                              }
+                                              select={(reference, noteId) => {
+                                                setInboxTarget(
+                                                  noteId && reference
+                                                    ? {
+                                                        reference,
+                                                        id: noteId,
+                                                        key: Date.now(),
+                                                      }
+                                                    : null,
+                                                );
+                                                setSelected(reference);
+                                              }}
+                                            />
+                                          ),
+                                        })}
+                                        onCreate={(trigger, status) => {
+                                          createTriggerRef.current = trigger;
+                                          setCreateStatus(status);
+                                          setCreating(true);
+                                        }}
+                                      />
+                                    </InboxTriageProvider>
                                   </TicketListSync>
                                 </TicketCommandContext.Provider>
                               </ShellSlotProvider>

@@ -1,8 +1,13 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, notifyManager } from "@tanstack/react-query";
 import type { ChangeSignal } from "./change-signal";
 import { seedsFor, type Returned } from "./catalog";
 // Declared reads fill from returned Tickets only once they are declared.
 import "./reads";
+
+// Views hear of an answer in the same turn it arrives. The default waits a
+// timer tick, which a test with fake timers never gets, and which adds nothing
+// here: the batch already collects every update of one turn.
+notifyManager.setScheduler((callback) => queueMicrotask(callback));
 
 /**
  * The cache and the rules for when it goes stale. A read is stale only after the

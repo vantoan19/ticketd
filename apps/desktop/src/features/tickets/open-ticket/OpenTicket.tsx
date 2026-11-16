@@ -1,39 +1,10 @@
-import {
-  createContext,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Ticket } from "@/lib/api/client";
-import type { FailureDescription } from "@/lib/api/describe-failure";
 import { ticketRead, useRead, Visibility } from "@/lib/workspace-reads";
-import { useTicketChanged, type ReturnedTickets } from "./changed";
-
-export type OpenTicketState = {
-  reference: string;
-  record: Ticket;
-  /** A saved copy is shown while the first read of the record is unanswered. */
-  opening: boolean;
-  /** Whether the record is as current as the last change. */
-  current: boolean;
-  /** The last failure to refresh the record, kept while the page shows it. */
-  failure: FailureDescription | null;
-  retry(): void;
-  /** Reports a write of this Ticket (or others) that succeeded. */
-  changed(returned?: ReturnedTickets): Promise<void>;
-};
-
-const OpenTicketContext = createContext<OpenTicketState | null>(null);
-
-/** The open Ticket of the enclosing `<OpenTicket>`. */
-export function useOpenTicket(): OpenTicketState {
-  const open = useContext(OpenTicketContext);
-  if (!open) throw new Error("useOpenTicket must be used inside <OpenTicket>.");
-  return open;
-}
+import { useTicketChanged } from "./changed";
+import { OpenTicketContext, type OpenTicketState } from "./open-ticket-context";
 
 /**
  * A scope and a gate for one Ticket that is open: its children render once a

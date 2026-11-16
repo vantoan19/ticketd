@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { act, render, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { read, skip } from "./catalog";
@@ -243,6 +249,48 @@ describe("failure", () => {
     expect(result.current.failure).toBeNull();
     const failed = seen.indexOf("Couldn't load the title");
     expect(seen.slice(failed, -1).every((title) => title !== null)).toBe(true);
+  });
+});
+
+describe("current", () => {
+  it("is false from a change until the read is back", async () => {
+    const signal = fakeChangeSignal();
+    const again = deferred<string>();
+    const call = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockResolvedValueOnce("first")
+      .mockReturnValueOnce(again.promise)
+      .mockResolvedValue("third");
+    const spec = read({ key: "current", call, failure: "load" });
+    function Probe({ hidden }: { hidden: boolean }) {
+      return (
+        <Visibility hidden={hidden}>
+          <Current />
+        </Visibility>
+      );
+    }
+    function Current() {
+      const state = useRead(spec, "a");
+      return <output>{`${state.value}:${state.current}`}</output>;
+    }
+    const view = (hidden: boolean) => (
+      <TestReads signal={signal}>
+        <Probe hidden={hidden} />
+      </TestReads>
+    );
+    const { rerender } = render(view(false));
+    expect(await screen.findByText("first:true")).toBeTruthy();
+
+    act(() => signal.change());
+    expect(await screen.findByText("first:false")).toBeTruthy();
+    await act(async () => again.resolve("second"));
+    expect(await screen.findByText("second:true")).toBeTruthy();
+
+    // A change while hidden is caught up on once shown, and current after that.
+    rerender(view(true));
+    act(() => signal.change());
+    rerender(view(false));
+    expect(await screen.findByText("third:true")).toBeTruthy();
   });
 });
 
