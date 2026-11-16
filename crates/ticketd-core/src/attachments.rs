@@ -20,7 +20,6 @@ pub(crate) fn migrate_upload_settings(connection: &Connection) -> Result<(), Err
          INSERT OR IGNORE INTO attachment_upload_settings VALUES (1, 104857600);",
     )?;
     crate::change_token::migrate(connection)?;
-    connection.pragma_update(None, "user_version", 49)?;
     Ok(())
 }
 
@@ -84,7 +83,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS ticket_attachments_by_attachment ON ticket_attachments(attachment_id, ticket_id);",
     )?;
     crate::change_token::migrate(connection)?;
-    connection.pragma_update(None, "user_version", 47)?;
     Ok(())
 }
 

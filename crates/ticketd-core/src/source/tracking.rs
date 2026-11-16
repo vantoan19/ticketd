@@ -297,8 +297,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             locator TEXT, \
             display TEXT, \
             CHECK ((provider IS NULL) = (external_id IS NULL))); \
-         CREATE INDEX external_duplicate_targets_identity ON external_duplicate_targets(provider, external_id); \
-         PRAGMA user_version = 23;",
+         CREATE INDEX external_duplicate_targets_identity ON external_duplicate_targets(provider, external_id);",
     )?;
     Ok(())
 }

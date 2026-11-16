@@ -587,8 +587,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             url TEXT, \
             CHECK ((external_id IS NULL) = (locator IS NULL))); \
          CREATE UNIQUE INDEX publication_attempts_open ON publication_attempts(ticket_id) WHERE status IN ('in_flight', 'unresolved'); \
-         CREATE INDEX publication_attempts_ticket ON publication_attempts(ticket_id, started_at); \
-         PRAGMA user_version = 26;",
+         CREATE INDEX publication_attempts_ticket ON publication_attempts(ticket_id, started_at);",
     )?;
     Ok(())
 }

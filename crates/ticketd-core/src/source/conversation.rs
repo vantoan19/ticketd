@@ -57,8 +57,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             created_at TEXT NOT NULL, \
             edited_at TEXT, \
             PRIMARY KEY (ticket_id, kind, entry_id)); \
-         ALTER TABLE source_sync ADD COLUMN conversation_updated_at TEXT; \
-         PRAGMA user_version = 24;",
+         ALTER TABLE source_sync ADD COLUMN conversation_updated_at TEXT;",
     )?;
     Ok(())
 }

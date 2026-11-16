@@ -108,7 +108,7 @@ pub struct DuplicateDependencyPreview {
 }
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
-    conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT); PRAGMA user_version = 15;")?;
+    conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT);")?;
     Ok(())
 }
 
@@ -151,7 +151,6 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
             conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'relationship:duplicate', ?2, '')", params![source, reference])?;
         }
     }
-    conn.execute_batch("PRAGMA user_version = 21;")?;
     Ok(())
 }
 

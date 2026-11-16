@@ -17,7 +17,6 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
         "INSERT OR IGNORE INTO attachment_workspace VALUES (1, ?1)",
         [Uuid::new_v4().to_string()],
     )?;
-    tx.pragma_update(None, "user_version", 48)?;
     let mut statement = tx.prepare("SELECT id, body FROM tickets UNION ALL SELECT id, body FROM documents UNION ALL SELECT id, brief FROM activities")?;
     let content = statement
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -75,7 +74,7 @@ fn index_content(
     validate_new: bool,
 ) -> Result<(), Error> {
     // Earlier migrations rebuild mention indexes before attachment tables exist.
-    if tx.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? < 48 {
+    if !crate::backup::table_exists(tx, "embedded_attachments")? {
         return Ok(());
     }
     let prefix = format!("ticketd://attachment/{}/", workspace_id(tx)?);

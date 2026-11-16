@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Error, FORMAT_VERSION, Workspace,
-    backup::{PRE_MIGRATION_MARKER, SAFETY_MARKER, missing_tables, table_exists},
+    backup::{PRE_MIGRATION_MARKER, SAFETY_MARKER, missing_objects, table_exists},
 };
 
 /// What a workspace holds, for comparing it with a backup before a restore.
@@ -173,11 +173,9 @@ pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error
     if !(1..=FORMAT_VERSION).contains(&version) {
         return Ok(BackupCheck::NotTicketd);
     }
-    let missing = missing_tables(connection, version)?;
+    let missing = missing_objects(connection, version)?;
     if !missing.is_empty() {
-        return Ok(BackupCheck::MissingTables {
-            tables: missing.into_iter().map(str::to_owned).collect(),
-        });
+        return Ok(BackupCheck::MissingTables { tables: missing });
     }
     let integrity: String =
         connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
