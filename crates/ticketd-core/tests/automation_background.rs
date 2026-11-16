@@ -3,11 +3,16 @@
 
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
-    AutomationStepStatus, NewChat, NotifyTarget, RunAction, RunEnd, Step, StepAction, StepOutcome,
-    Trigger, Workspace,
+    AutomationStepStatus, NotifyTarget, RunAction, RunEnd, Step, StepAction, StepOutcome, Trigger,
+    Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
+
+/// A folder that exists, as a step's folder must.
+fn folder() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
 
 #[allow(clippy::unwrap_used)] // A Workspace that cannot open fails the test during setup.
 fn workspace() -> (tempfile::TempDir, Workspace) {
@@ -32,7 +37,7 @@ fn triage(workspace: &mut Workspace) -> Automation {
                 id: "triage".into(),
                 action: StepAction::RunAgent {
                     agent_id: Some(agent.id),
-                    execution_folder: Some("/work/app".into()),
+                    execution_folder: Some(folder()),
                     on_failure: Some(vec![Step {
                         id: "tell-me-it-failed".into(),
                         action: StepAction::Notify {
@@ -132,32 +137,21 @@ fn stopping_and_switching_off_ends_every_active_run_as_needs_attention() {
     // Both Automations queue a run for each ticket; one run of each starts.
     tag(&mut workspace, "Running");
     let started = workspace.start_automation_runs(2).unwrap();
-    for run in &started {
-        workspace.advance_automation_run(&run.id, None).unwrap();
-    }
     tag(&mut workspace, "Queued");
     let running = &started[0];
     assert_eq!(running.automation_id, automation.id);
-    let chat = workspace
-        .create_automation_run_chat(
-            &running.id,
-            "triage",
-            NewChat {
-                title: None,
-                harness: "codex".into(),
-                execution_folder: "/work/app".into(),
-                folder_managed: false,
-                links: Vec::new(),
-            },
-        )
-        .unwrap();
+    let begun = workspace.advance_automation_run(&running.id, None).unwrap();
+    let RunAction::RunAgent(agent) = begun else {
+        panic!("the run begins with its agent, got {begun:?}");
+    };
+    let chat_id = agent.chat_id;
 
     let chats = workspace
         .stop_and_turn_off_automation(&automation.id)
         .unwrap();
 
     // The Chat of the agent that was working, for the host to interrupt.
-    assert_eq!(chats, [chat.id]);
+    assert_eq!(chats, [chat_id]);
     assert!(!workspace.automation(&automation.id).unwrap().enabled);
     let runs = workspace.automation_runs(&automation.id).unwrap();
     assert_eq!(runs.len(), 2);
@@ -172,15 +166,16 @@ fn stopping_and_switching_off_ends_every_active_run_as_needs_attention() {
     let stopped = workspace.automation_run(&running.id).unwrap();
     assert_eq!(stopped.steps[0].status, AutomationStepStatus::Failed);
     assert_eq!(stopped.steps[0].reason, stopped.reason);
-    // The interrupted agent's turn ends as a failure a moment later. That outcome is
-    // refused, so the step's failure path does not run.
+    // The interrupted agent's turn ends as a failure a moment later. The run has
+    // ended, so that outcome is not recorded and the step's failure path does not run.
     let interrupted = StepOutcome::Failed {
         reason: "The agent could not finish.".into(),
     };
-    assert!(
+    assert_eq!(
         workspace
             .advance_automation_run(&running.id, Some(interrupted))
-            .is_err()
+            .unwrap(),
+        RunAction::Ended
     );
     assert_eq!(
         workspace.automation_run(&running.id).unwrap().steps,

@@ -4,8 +4,8 @@
 
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
-    Error, NewChat, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord,
-    SyncValue, Trigger, Workspace,
+    Error, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord, SyncValue,
+    Trigger, Workspace,
     sync::{AttachmentDownload, RecordKind, SyncChoice, SyncResolution, remote::RemoteKind},
 };
 
@@ -40,6 +40,30 @@ impl Devices {
             })
             .unwrap();
         let automation = a.create_automation(triage(&agent.id)).unwrap();
+        self.settle();
+        (automation.id, agent.id)
+    }
+
+    /// The same, with a step folder that exists on this computer, for a test that
+    /// runs it: a step whose folder is missing fails before its agent starts.
+    fn shared_runnable_automation(&mut self) -> (String, String) {
+        let a = &mut self.workspaces[0];
+        let agent = a
+            .create_automation_agent(AutomationAgentSettings {
+                name: "Triage".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let mut definition = triage(&agent.id);
+        definition.steps = vec![Step {
+            id: "triage".into(),
+            action: StepAction::RunAgent {
+                agent_id: Some(agent.id.clone()),
+                execution_folder: Some(std::env::temp_dir().to_string_lossy().into_owned()),
+                on_failure: None,
+            },
+        }];
+        let automation = a.create_automation(definition).unwrap();
         self.settle();
         (automation.id, agent.id)
     }
@@ -785,7 +809,7 @@ fn an_arrived_automation_starts_no_run_until_it_is_switched_on_here() {
 #[test]
 fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
     let mut devices = devices();
-    let (automation, _agent) = devices.shared_automation();
+    let (automation, _agent) = devices.shared_runnable_automation();
     let b = &mut devices.workspaces[1];
     b.set_automation_enabled(&automation, true).unwrap();
     let ticket = b.create_ticket("Crash on save").unwrap();
@@ -797,19 +821,10 @@ fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
     let b = &mut devices.workspaces[1];
     assert_eq!(b.queue_automation_runs().unwrap(), 1);
     let run = b.start_automation_runs(2).unwrap().remove(0);
-    b.advance_automation_run(&run.id, None).unwrap();
-    b.create_automation_run_chat(
-        &run.id,
-        "triage",
-        NewChat {
-            title: None,
-            harness: "codex".into(),
-            execution_folder: "C:\\code\\web-app".into(),
-            folder_managed: false,
-            links: Vec::new(),
-        },
-    )
-    .unwrap();
+    assert!(matches!(
+        b.advance_automation_run(&run.id, None).unwrap(),
+        RunAction::RunAgent(_)
+    ));
     b.advance_automation_run(&run.id, Some(StepOutcome::Completed))
         .unwrap();
 
@@ -829,7 +844,7 @@ fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
 #[test]
 fn a_run_in_progress_finishes_on_its_own_steps_when_an_edit_from_elsewhere_switches_it_off() {
     let mut devices = devices();
-    let (automation, _agent) = devices.shared_automation();
+    let (automation, _agent) = devices.shared_runnable_automation();
     let b = &mut devices.workspaces[1];
     b.set_automation_enabled(&automation, true).unwrap();
     let ticket = b.create_ticket("Crash on save").unwrap();
@@ -854,12 +869,7 @@ fn a_run_in_progress_finishes_on_its_own_steps_when_an_edit_from_elsewhere_switc
 
     let b = &mut devices.workspaces[1];
     assert!(!only(b).enabled);
-    assert_eq!(
-        started,
-        RunAction::RunStep {
-            step_id: "triage".into()
-        }
-    );
+    assert!(matches!(&started, RunAction::RunAgent(start) if start.step_id == "triage"));
     // The run still has the step as it was, and ends as any other run.
     let kept = b.automation_run(&run.id).unwrap();
     assert_eq!(kept.definition, run.definition);
