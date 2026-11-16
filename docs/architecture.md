@@ -83,6 +83,17 @@ observations. They coordinate with the supervisor around submission and approval
 responses; they do not write workspace storage. The supervisor calls core
 workflows, which own validation, transactions and durable Chat records.
 
+Adapters also do not decide how a turn or its tools read. They report what the
+harness said plus the evidence they saw: that an interrupt was written before a
+failure, that an unattended session's allowed tools denied something, that a command
+could not start. One supervisor-side module (`outcome`) turns outcome and evidence
+into the turn's `TurnEnding` and its tools' states, so every harness is read by the
+same rules. The fake, the Claude transport and the Codex adapter are held to one
+conformance suite for the contract's guarantees: a stale generation is refused, a
+process lost after a write leaves the submission unknown, evidence arriving after a
+timeout settles the written submission, each request takes one answer, and a new
+turn is acknowledged as the adapter declares.
+
 Use an internal adapter interface with installation/capability inspection,
 new-session or explicit native-resume opening, input submission (new turn or
 supported steering), live interaction response, interruption, closure, and an

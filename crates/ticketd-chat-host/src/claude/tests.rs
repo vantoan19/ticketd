@@ -16,6 +16,7 @@ use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, candidates, locate, verdict};
 use crate::conformance::{NewTurn, Provider};
 use crate::install::{LaunchEnvironment, Os};
+use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::stdio::{Line, read_line, spawn};
 use crate::{
@@ -313,7 +314,10 @@ async fn cancellation_invalidates_answers_even_when_one_is_already_on_its_way() 
         seen(&mut events).await,
         [
             "session sess-1",
-            "turn-ended local-turn-1 Interrupted [\"sub-1\"]"
+            // Claude Code ends an interrupted turn with an unsuccessful result; that an
+            // interrupt was written is evidence, and the supervisor reads the turn.
+            "turn-evidence local-turn-1 interrupt-written",
+            "turn-ended local-turn-1 Failed(Other) [\"sub-1\"]"
         ]
     );
 }
@@ -457,6 +461,7 @@ async fn structured_failures_end_the_turn_and_thrown_ones_do_not() {
         seen(&mut events).await,
         [
             "notice Warning local-turn-2 \"Claude Code reported a failure: late failure\"",
+            "turn-evidence local-turn-2 interrupt-written",
             "turn-ended local-turn-2 Completed [\"sub-2\"]",
         ]
     );
@@ -983,11 +988,8 @@ async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_
             start_turn(id, if id == "sub-1" { "Go" } else { "Again" }),
         )
         .await;
-        match drain(&mut opened.events).await.pop() {
-            Some(EventKind::TurnEnded {
-                outcome: crate::TurnOutcome::Failed(problem),
-                ..
-            }) => (problem.kind, problem.message),
+        match read_end(&drain(&mut opened.events).await) {
+            Some(crate::TurnOutcome::Failed(problem)) => (problem.kind, problem.message),
             other => panic!("a failed turn, got {other:?}"),
         }
     };
@@ -1051,7 +1053,7 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
 /// user doesn't want to proceed with this tool use", seen in live transcripts). It
 /// is left unfinished, which the turn then shows as "not finished", not failed.
 #[test]
-fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
+fn a_tool_that_failed_after_a_stop_is_reported_as_such() {
     use super::session::Session;
     use crate::ToolStatus;
     let mut session = Session::default();
@@ -1065,10 +1067,10 @@ fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
         .expect("modeled");
 
     assert!(
-        !events.iter().any(|event| matches!(
+        events.iter().any(|event| matches!(
             event,
             EventKind::ToolUpdated {
-                status: ToolStatus::Failed,
+                status: ToolStatus::FailedAfterInterrupt,
                 ..
             }
         )),

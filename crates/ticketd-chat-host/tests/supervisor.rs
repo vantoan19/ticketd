@@ -2011,3 +2011,127 @@ async fn a_turn_records_how_the_harness_or_the_person_ended_it() {
         Some(TurnEnding::ContactLost(reason)) if reason.starts_with("the harness process ended")
     ));
 }
+
+/// What the adapter reported about how a turn ended is read by the supervisor's rules
+/// alone, so every harness's turns read the same way and are stored as before.
+mod evidence {
+    use super::*;
+    use ticketd_chat_host::TurnEvidence;
+
+    async fn ended_with(
+        evidence: TurnEvidence,
+        outcome: TurnOutcome,
+    ) -> (Fixture, Option<TurnEnding>) {
+        let f = Fixture::new(FakeAdapter::codex());
+        f.send("first").await;
+        f.emit(EventKind::TurnEvidence {
+            turn: turn_1(),
+            evidence,
+        })
+        .await;
+        f.emit(turn_ended(turn_1(), outcome)).await;
+        let ending = f.first_ending();
+        (f, ending)
+    }
+
+    fn failed(kind: ProblemKind, message: &str) -> TurnOutcome {
+        TurnOutcome::Failed(Problem {
+            kind,
+            message: message.to_owned(),
+            detail: None,
+            resets_at: None,
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_denial_fails_a_turn_the_harness_called_completed_and_names_it() {
+        let evidence = TurnEvidence {
+            denied: Some("Claude Code was denied: Write.".to_owned()),
+            ..TurnEvidence::default()
+        };
+
+        let (f, ending) = ended_with(evidence, TurnOutcome::Completed).await;
+
+        assert_eq!(
+            ending,
+            Some(TurnEnding::Failed {
+                kind: ProblemKind::ToolDenied,
+                message: Some("Claude Code was denied: Write.".to_owned()),
+                resets_at: None,
+            })
+        );
+        assert_eq!(f.turns()[0].state, ChatTurnState::Failed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failure_after_an_interrupt_was_written_is_a_stop_not_a_failure() {
+        let evidence = TurnEvidence {
+            interrupt_written: true,
+            ..TurnEvidence::default()
+        };
+
+        let (f, ending) = ended_with(evidence, failed(ProblemKind::Other, "aborted")).await;
+
+        assert_eq!(ending, Some(TurnEnding::StoppedByPerson));
+        assert_eq!(f.turns()[0].state, ChatTurnState::Interrupted);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failure_without_that_evidence_stays_a_failure() {
+        let (_, ending) = ended_with(
+            TurnEvidence::default(),
+            failed(ProblemKind::Other, "it broke"),
+        )
+        .await;
+
+        assert!(
+            matches!(ending, Some(TurnEnding::Failed { .. })),
+            "{ending:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn evidence_belongs_to_the_turn_it_names() {
+        let f = Fixture::new(FakeAdapter::codex());
+        f.send("first").await;
+        f.emit(EventKind::TurnEvidence {
+            turn: NativeTurnId::new("another-turn"),
+            evidence: TurnEvidence {
+                denied: Some("Write was denied.".to_owned()),
+                ..TurnEvidence::default()
+            },
+        })
+        .await;
+
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+        assert_eq!(f.first_ending(), Some(TurnEnding::Completed));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tool_that_failed_after_an_interrupt_is_stored_unfinished() {
+        let f = Fixture::new(FakeAdapter::codex());
+        f.send("first").await;
+        let tool = |item: &str, status| EventKind::ToolUpdated {
+            turn: turn_1(),
+            item: NativeItemId::new(item),
+            title: "ticketd list".to_owned(),
+            status,
+            output: None,
+            detail: None,
+        };
+
+        f.emit(tool("cut", ToolStatus::FailedAfterInterrupt)).await;
+        f.emit(tool("broken", ToolStatus::Failed)).await;
+
+        let states: Vec<ChatToolState> = f
+            .items()
+            .into_iter()
+            .filter_map(|item| match item {
+                ChatItem::Tool(tool) => Some(tool.state),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(states, [ChatToolState::Running, ChatToolState::Failed]);
+    }
+}

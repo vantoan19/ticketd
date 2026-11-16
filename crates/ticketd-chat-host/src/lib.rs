@@ -16,6 +16,7 @@ mod contract;
 pub mod diffstat;
 mod host;
 mod install;
+mod outcome;
 pub mod records;
 #[cfg(test)]
 mod scripted;

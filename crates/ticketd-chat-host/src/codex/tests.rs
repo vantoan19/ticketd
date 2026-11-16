@@ -14,6 +14,7 @@ use tokio::time::{sleep, timeout};
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
 use crate::conformance::{NewTurn, Provider};
+use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
@@ -786,7 +787,7 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
 /// #387 3B3: a command a Stop cuts off completes as failed before the turn ends
 /// interrupted; it stays unfinished, which the turn then shows as "not finished".
 #[test]
-fn a_command_cut_off_by_a_stop_is_not_reported_as_failed() {
+fn a_command_that_failed_after_a_stop_is_reported_as_such() {
     let mut session = Session::default();
     session.notification("turn/started", &json!({"turn": {"id": "turn_1"}}));
     let command = |status: &str| json!({"turnId": "turn_1", "item": {"id": "cmd_1", "type": "commandExecution", "command": "ticketd list", "status": status, "processId": "42", "exitCode": null}});
@@ -799,7 +800,7 @@ fn a_command_cut_off_by_a_stop_is_not_reported_as_failed() {
         events.iter().any(|event| matches!(
             event,
             EventKind::ToolUpdated {
-                status: crate::ToolStatus::Running,
+                status: crate::ToolStatus::FailedAfterInterrupt,
                 ..
             }
         )),
@@ -922,11 +923,8 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
 
     submit(&mut peer, &opened.runtime, start_turn("sub-1", "Go")).await;
 
-    match drain(&mut opened.events).await.pop() {
-        Some(EventKind::TurnEnded {
-            outcome: TurnOutcome::Failed(problem),
-            ..
-        }) => {
+    match read_end(&drain(&mut opened.events).await) {
+        Some(TurnOutcome::Failed(problem)) => {
             assert_eq!(problem.kind, ProblemKind::ToolDenied);
             assert!(problem.message.contains("curl example.com"), "{problem:?}");
         }
@@ -1102,9 +1100,9 @@ fn a_command_codex_could_not_start_fails_an_unattended_turn() {
         let params = json!({"turnId": "turn_1", "item": item});
         session.notification("item/completed", &params);
         let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-        match session.notification("turn/completed", &turn).pop() {
-            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
-            other => panic!("the turn ended, got {other:?}"),
+        match read_end(&session.notification("turn/completed", &turn)) {
+            Some(outcome) => outcome,
+            None => panic!("the turn ended"),
         }
     };
 
@@ -1123,6 +1121,30 @@ fn a_command_codex_could_not_start_fails_an_unattended_turn() {
     assert_eq!(outcome(&not_started, false), TurnOutcome::Completed);
 }
 
+/// The adapter reports what Codex said and what it saw; it does not decide that the
+/// turn failed. That is the supervisor's rule (see `outcome`).
+#[test]
+fn a_declined_tool_is_reported_as_evidence_and_the_outcome_stays_codexs() {
+    let mut session = Session::default();
+    session.turn_overrides = Some(json!({}));
+    let item = json!({"type": "commandExecution", "id": "c_1", "command": "curl example.com",
+        "status": "declined"});
+    session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
+
+    let events = session.notification(
+        "turn/completed",
+        &json!({"turn": {"id": "turn_1", "status": "completed"}}),
+    );
+
+    assert_eq!(
+        events.iter().map(brief).collect::<Vec<_>>(),
+        [
+            "turn-evidence turn_1 denied \"Codex could not run curl example.com.\"",
+            "turn-ended turn_1 Completed []"
+        ]
+    );
+}
+
 /// 4B1: a file change Codex declined (outside the writable folders) or failed to write
 /// fails an unattended turn naming the file, though the agent then ended its turn. In
 /// a person's Chat the same items fail nothing.
@@ -1138,9 +1160,9 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
         let params = json!({"turnId": "turn_1", "item": item(status)});
         session.notification("item/completed", &params);
         let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-        match session.notification("turn/completed", &turn).pop() {
-            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
-            other => panic!("the turn ended, got {other:?}"),
+        match read_end(&session.notification("turn/completed", &turn)) {
+            Some(outcome) => outcome,
+            None => panic!("the turn ended"),
         }
     };
     for (status, message) in [
@@ -1183,11 +1205,8 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
             session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
         }
         let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-        match session.notification("turn/completed", &turn).pop() {
-            Some(EventKind::TurnEnded {
-                outcome: TurnOutcome::Failed(problem),
-                ..
-            }) => problem.message,
+        match read_end(&session.notification("turn/completed", &turn)) {
+            Some(TurnOutcome::Failed(problem)) => problem.message,
             other => panic!("a failed turn, got {other:?}"),
         }
     };
