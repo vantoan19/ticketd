@@ -399,6 +399,10 @@ function AppContent() {
     };
   }, [revision]);
   const firstRun =
+    workspace.listKnown &&
+    workspace.plansKnown &&
+    !workspace.queryError &&
+    !workspace.plansFailure &&
     workspaceInfo?.tickets === 0 &&
     workspaceInfo.documents === 0 &&
     workspaceInfo.projects === 0 &&
@@ -1032,6 +1036,9 @@ function AppContent() {
                                   graphOrigin === null && (
                                     <PlanList
                                       plans={plans}
+                                      known={workspace.plansKnown}
+                                      failure={workspace.plansFailure}
+                                      retry={workspace.refreshPlans}
                                       projects={projects}
                                       onTicket={(reference) => {
                                         setSelected(reference);

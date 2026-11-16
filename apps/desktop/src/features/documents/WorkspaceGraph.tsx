@@ -66,6 +66,8 @@ import "@xyflow/react/dist/style.css";
 import "./context-graph.css";
 
 type Graph = WorkspaceGraph & {
+  structuralPlans?: WorkspaceGraph["nodes"];
+  planMembership?: Record<string, string[]>;
   planCounts?: Record<string, PlanCounts>;
   availability?: Record<string, string | null>;
 };
@@ -307,8 +309,11 @@ export function WorkspaceGraph({
   const islandLayout = useMemo(() => {
     const points: Record<string, Point> = {};
     const islands: import("./ContextGraphCanvas").WorkspaceIsland[] = [];
-    const plans = mapNodes.filter((node) => node.kind === "plan");
-    const membership = new Map<string, string[]>();
+    const plans =
+      graph?.structuralPlans ?? mapNodes.filter((node) => node.kind === "plan");
+    const membership = new Map<string, string[]>(
+      Object.entries(graph?.planMembership ?? {}),
+    );
     for (const edge of shownEdges) {
       if (
         ["membership", "document", "spec"].includes(edge.kind) &&
@@ -325,6 +330,8 @@ export function WorkspaceGraph({
       const members = mapNodes.filter((node) =>
         membership.get(node.id)?.includes(plan.id),
       );
+      if (!members.length && !mapNodes.some((node) => node.id === plan.id))
+        continue;
       const tickets = members.filter((node) => node.kind === "ticket").length;
       const documents = members.filter(
         (node) => node.kind === "document",
@@ -382,7 +389,13 @@ export function WorkspaceGraph({
       });
     }
     return { islands, points, loose: new Set(loose.map((node) => node.id)) };
-  }, [mapNodes, shownEdges, planCounts]);
+  }, [
+    mapNodes,
+    shownEdges,
+    planCounts,
+    graph?.structuralPlans,
+    graph?.planMembership,
+  ]);
   const availability = graph?.availability;
   const nodes = useMemo(
     () =>

@@ -6095,6 +6095,111 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   ).toBeTruthy();
 });
 
+test("Chats distinguishes an unknown list from empty and keeps known rows after a failed refresh", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient, chatState } =
+    await import("@/features/chats/mock-client");
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [{ chat: chatState({ id: "known", title: "Known Chat" }) }],
+  });
+  const read = client.listChats.bind(client);
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const list = vi
+    .spyOn(client, "listChats")
+    .mockImplementation(async (scope) => {
+      await waiting;
+      throw new Error(`Synthetic initial ${scope} read failure`);
+    });
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  const pane = screen.getByRole("region", { name: "Chat list" });
+  expect(
+    within(pane).getByRole("status", { name: "Loading Chats" }),
+  ).toBeTruthy();
+  expect(within(pane).queryByText("0")).toBeNull();
+  expect(within(pane).queryByText("No Chats yet")).toBeNull();
+  await act(async () => release());
+  expect(
+    await within(pane).findByRole("button", { name: "Retry" }),
+  ).toBeTruthy();
+  expect(within(pane).queryByText("0")).toBeNull();
+  list.mockImplementation(read);
+  fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
+  expect(
+    await within(pane).findByRole("button", { name: /Known Chat,/ }),
+  ).toBeTruthy();
+  expect(within(pane).getByText("1")).toBeTruthy();
+  list.mockRejectedValueOnce(new Error("Synthetic read failure"));
+  await act(async () => client.patch("known", { title: "Known Chat" }));
+  expect(
+    await within(pane).findByRole("button", { name: "Retry" }),
+  ).toBeTruthy();
+  expect(
+    within(pane).getByRole("button", { name: /Known Chat,/ }),
+  ).toBeTruthy();
+  expect(within(pane).getByText("1")).toBeTruthy();
+  fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(within(pane).queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+});
+
+test.each([false, true])(
+  "New Chat Retry keeps the draft and creation identity follows payload edits (%s)",
+  async (edited) => {
+    const { ChatClientContext } = await import("@/features/chats/client");
+    const { createMockChatClient } =
+      await import("@/features/chats/mock-client");
+    const client = createMockChatClient({ enabled: true });
+    const create = vi
+      .spyOn(client, "createChat")
+      .mockRejectedValueOnce(new Error("Synthetic refusal"));
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+    const input = await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    });
+    fireEvent.change(input, { target: { value: "Keep these words" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(input).toHaveProperty("value", "Keep these words");
+    if (edited) {
+      fireEvent.change(input, { target: { value: "Edited words" } });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Claude Code, model Opus 5.5, effort Default",
+        }),
+      );
+      fireEvent.click(screen.getByRole("radio", { name: "High" }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    }
+    fireEvent.click(retry);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    if (edited) {
+      expect(create.mock.calls[1]?.[0].command_id).not.toBe(
+        create.mock.calls[0]?.[0].command_id,
+      );
+      expect(create.mock.calls[1]?.[0].message).toBe("Edited words");
+      expect(create.mock.calls[1]?.[0].effort).toBe("high");
+    } else expect(create.mock.calls[1]?.[0]).toEqual(create.mock.calls[0]?.[0]);
+    expect(client.created).toHaveLength(1);
+  },
+);
+
 test("New Chat exposes its complete current pick before the first message", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient } = await import("@/features/chats/mock-client");
@@ -8257,6 +8362,231 @@ test("Inbox loading announces its read without guessing urgency, then retains en
   expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
 });
 
+test.each(["Command line", "Agent skills"])(
+  "Settings %s keeps its last known setup state when Check again fails",
+  async (page) => {
+    let fail = false;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>) => {
+        if ((command === "check_cli" || command === "agent_skills") && fail) {
+          await waiting;
+          throw new Error("Synthetic check failure");
+        }
+        if (command === "agent_skills")
+          return [
+            {
+              id: "codex",
+              name: "Codex",
+              path: "/fake/skills",
+              detected: true,
+              state: "not_installed",
+              error: null,
+            },
+          ];
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(
+      within(
+        screen.getByRole("navigation", { name: "Settings sections" }),
+      ).getByRole("button", { name: new RegExp(`^${page}`) }),
+    );
+    const known =
+      page === "Command line"
+        ? "Get the ticketd executable"
+        : "Install for Codex";
+    await screen.findByText(known);
+    fail = true;
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(screen.getByText(known)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Checking…" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    await act(async () => release());
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.getByText(known)).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(
+      within(nav).getAllByRole("img", { name: "Needs setup" }).length,
+    ).toBeGreaterThan(0);
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+    );
+  },
+);
+
+test("Drive save Retry retains the unsaved interval and repeats its assignment", async () => {
+  let settings = syncSettings();
+  let fail = true;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "sync_status") return syncStatus();
+      if (command === "sync_settings") return settings;
+      if (command === "set_sync_settings") {
+        if (fail) throw new Error("Synthetic save failure");
+        settings = { ...settings, ...(args?.settings as object) };
+        return settings;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Google Drive" }),
+  );
+  const interval = await screen.findByRole("textbox", {
+    name: "Check for changes every",
+  });
+  fireEvent.change(interval, { target: { value: "45" } });
+  fireEvent.blur(interval);
+  expect(await screen.findByText("Not saved")).toBeTruthy();
+  expect(interval).toHaveProperty("value", "45");
+  expect(settings.poll_interval_secs).toBe(60);
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(
+    await screen.findByText("Saved", { selector: ".sync-field-note" }),
+  ).toBeTruthy();
+  expect(settings.poll_interval_secs).toBe(45);
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "set_sync_settings",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(writes[0]);
+});
+
+test("Chat Retry repeats a failed steer and removes only the refused queued item", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient, chatState } =
+    await import("@/features/chats/mock-client");
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      {
+        chat: chatState({
+          id: "working-retry",
+          title: "Working recovery",
+          activity: "working",
+          queue: [
+            { id: "first", text: "First queued" },
+            { id: "second", text: "Second queued" },
+          ],
+        }),
+      },
+    ],
+  });
+  const send = vi
+    .spyOn(client, "send")
+    .mockRejectedValueOnce(new Error("Synthetic steer failure"));
+  const remove = vi
+    .spyOn(client, "removeQueued")
+    .mockRejectedValueOnce(new Error("Synthetic remove failure"));
+  const queue = vi
+    .spyOn(client, "queue")
+    .mockRejectedValueOnce(new Error("Synthetic queue failure"));
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Working recovery,/ }),
+  );
+  const input = await screen.findByRole("textbox", { name: "Steer Codex" });
+  fireEvent.change(input, { target: { value: "Keep the steer" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+  await vi.waitFor(() => expect(input).toHaveProperty("value", ""));
+  expect(document.activeElement).toBe(input);
+  fireEvent.change(input, { target: { value: "Retry as Queue" } });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(queue).toHaveBeenCalledTimes(2));
+  expect(queue.mock.calls[1]).toEqual(queue.mock.calls[0]);
+  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  await vi.waitFor(() => expect(input).toHaveProperty("value", ""));
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Remove from queue" })[0]!,
+  );
+  expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.getByText("First queued")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(screen.queryByText("First queued")).toBeNull());
+  expect(screen.getByText("Second queued")).toBeTruthy();
+  expect(document.activeElement).toBe(input);
+  expect(remove.mock.calls).toEqual([
+    ["working-retry", "first"],
+    ["working-retry", "first"],
+  ]);
+  send.mockRejectedValueOnce(new Error("Synthetic uncertain submission"));
+  fireEvent.change(input, { target: { value: "Keep the uncertain draft" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByRole("button", { name: "Retry" });
+  act(() =>
+    client.patch("working-retry", {
+      problem: { kind: "uncertain_delivery", message_id: "unconfirmed" },
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(send).toHaveBeenCalledTimes(3);
+  expect(input).toHaveProperty("value", "Keep the uncertain draft");
+});
+
+test("Export Retry remembers the failed path and asks the save chooser again before writing", async () => {
+  const { workspaceClient } = await import("@/lib/api/workspace");
+  const choose = vi
+    .spyOn(workspaceClient, "chooseSavePath")
+    .mockResolvedValueOnce("/synthetic/export.json")
+    .mockResolvedValueOnce(null);
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "export_workspace")
+        throw new Error("Synthetic export failure");
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Export" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(choose).toHaveBeenCalledTimes(2));
+  expect(choose.mock.calls[1]?.[0].defaultPath).toBe("/synthetic/export.json");
+  expect(
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "export_workspace",
+    ),
+  ).toEqual([["export_workspace", { path: "/synthetic/export.json" }]]);
+  choose.mockRestore();
+});
+
 test("unknown relationship failures keep raw text behind Details and structured causes stay actionable", async () => {
   const user = userEvent.setup();
   const current = bulkTicket(1, { title: "Failure privacy outcome" });
@@ -8539,6 +8869,376 @@ test("an unknown Plan archive failure keeps raw diagnostics behind Details on th
   expect(await screen.findByText("SYNTHETIC_ARCHIVE_RAW")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
+
+test.each([
+  ["All tickets", "find_tickets"],
+  ["Documents", "recent_documents"],
+  ["Attachments", "search_attachments"],
+] as const)(
+  "%s keeps its initial count unknown through failure and recovers to known empty",
+  async (name, read) => {
+    let rejectRead: ((reason: unknown) => void) | undefined;
+    let failed = false;
+    const pending = new Promise((_, reject) => {
+      rejectRead = reject;
+    });
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "workspace_info")
+        return { tickets: 14, documents: 0, projects: 0, active_plans: 0 };
+      if (command === read && !failed) return pending;
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name }));
+    const header = screen.getByRole("heading", { name }).closest("header")!;
+    expect(header.querySelector('[data-slot="count"]')).toBeNull();
+    failed = true;
+    await act(async () => rejectRead?.(new Error("initial unavailable")));
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(header.querySelector('[data-slot="count"]')).toBeNull();
+    fireEvent.click(retry);
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+    );
+  },
+);
+
+test("Plans initial read stays unknown, retries its own failure and preserves known cards", async () => {
+  let rejectRead: ((reason: unknown) => void) | undefined;
+  const pending = new Promise((_, reject) => {
+    rejectRead = reject;
+  });
+  let fail = true;
+  const plan = {
+    id: "read-plan",
+    name: "Known Plan",
+    archived: false,
+    purpose: "Known purpose",
+  };
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "list_plans") return fail ? pending : [plan];
+    if (command === "show_plan")
+      return { plan, counts: counted({}), members: [], documents: [] };
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search or jump to…" }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
+  expect(screen.queryByText("No Plans yet")).toBeNull();
+  expect(screen.getByRole("status", { name: "Loading Plans" })).toBeTruthy();
+  await act(async () => rejectRead?.(new Error("Plans unavailable")));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.queryByText("No Plans yet")).toBeNull();
+  fail = false;
+  fireEvent.click(retry);
+  expect(
+    await screen.findByRole("button", { name: "Open Plan Known Plan" }),
+  ).toBeTruthy();
+});
+
+test("Workspace graph filters count matching records while retaining structural Plan membership", async () => {
+  const user = userEvent.setup();
+  const plan = {
+    id: "filter-island",
+    name: "Filtered island",
+    archived: false,
+  };
+  const tickets = [
+    bulkTicket(1, { title: "Unique match", plan_id: plan.id }),
+    bulkTicket(2, {
+      title: "Second member",
+      plan_id: plan.id,
+      status: "Done",
+      prerequisites: [
+        {
+          reference: "T-KQ1",
+          title: "Unique match",
+          status: "Todo",
+          trashed: false,
+          unresolved: true,
+        },
+      ],
+    }),
+  ];
+  const doc = {
+    id: "filter-doc",
+    kind: "document",
+    label: "Island spec",
+    state: null,
+    trashed: false,
+    activity_detail: false,
+  };
+  const all = [
+    {
+      id: plan.id,
+      kind: "plan",
+      label: plan.name,
+      state: "Active",
+      trashed: false,
+      activity_detail: false,
+    },
+    doc,
+    ...tickets.map((ticket) => ({
+      id: ticket.id,
+      kind: "ticket",
+      label: `${ticket.reference} · ${ticket.title}`,
+      ticket_reference: ticket.reference,
+      state: ticket.status,
+      trashed: false,
+      activity_detail: false,
+    })),
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket")
+        return tickets.find((t) => t.reference === args.reference);
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 1, done: 1 }),
+          members: tickets,
+          documents: [{ id: doc.id, heading: doc.label, trashed: false }],
+        };
+      if (command === "workspace_graph") {
+        const request = args.request as {
+          kind: string | null;
+          search: string | null;
+          relationship: string | null;
+          hydrate_only: boolean;
+          visible_ids: string[];
+        };
+        const matches = all.filter(
+          (node) =>
+            (!request.kind || node.kind === request.kind) &&
+            (!request.search || node.label.includes(request.search)),
+        );
+        const nodes = matches.filter(
+          (node) =>
+            (!request.hydrate_only || request.visible_ids.includes(node.id)) &&
+            (!request.relationship || tickets.some((t) => t.id === node.id)),
+        );
+        return {
+          nodes,
+          edges: [],
+          total: matches.length,
+          next_cursor: null,
+          omitted: false,
+          omitted_groups: [],
+          node_tags: {},
+        };
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: "Workspace graph" }),
+  );
+  const graph = screen.getByRole("region", { name: "Workspace graph" });
+  await within(graph).findByText("2 tickets, 1 Document");
+  await user.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Type: All" }), {
+    key: "Enter",
+  });
+  await user.click(screen.getByRole("option", { name: "Tickets" }));
+  await vi.waitFor(() =>
+    expect(within(graph).getByText("2 items · 1 connection")).toBeTruthy(),
+  );
+  expect(within(graph).getByText("2 tickets, 0 Documents")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await user.click(within(graph).getByRole("radio", { name: "List" }));
+  expect(within(graph).getByText(/Showing 2 of 2 items/)).toBeTruthy();
+  expect(
+    graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+  ).toHaveLength(2);
+  await user.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.change(screen.getByLabelText("Search"), {
+    target: { value: "Unique" },
+  });
+  await vi.waitFor(() =>
+    expect(within(graph).getByText("1 item · 0 connections")).toBeTruthy(),
+  );
+  expect(within(graph).getByText(/Showing 1 of 1 item/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
+  for (const [before, next] of [
+    ["Tickets", "Documents"],
+    ["Documents", "Plans"],
+  ] as const) {
+    fireEvent.keyDown(
+      screen.getByRole("combobox", { name: `Type: ${before}` }),
+      { key: "Enter" },
+    );
+    await user.click(screen.getByRole("option", { name: next }));
+    await vi.waitFor(() =>
+      expect(within(graph).getByText("1 item · 0 connections")).toBeTruthy(),
+    );
+    expect(within(graph).getByText(/Showing 1 of 1 item/)).toBeTruthy();
+    expect(
+      graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+    ).toHaveLength(1);
+  }
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Type: Plans" }), {
+    key: "Enter",
+  });
+  await user.click(screen.getByRole("option", { name: "All" }));
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Relationship: All" }),
+    { key: "Enter" },
+  );
+  await user.click(screen.getByRole("option", { name: "Blocks" }));
+  await user.keyboard("{Escape}");
+  await user.click(within(graph).getByRole("radio", { name: "Graph" }));
+  await within(graph).findByText("2 tickets, 0 Documents");
+  expect(within(graph).queryByText(/Not in a Plan/)).toBeNull();
+});
+
+test("supporting Document open failure survives an unrelated browse success and retries the intended reader", async () => {
+  const current = bulkTicket(1, { title: "Supporting reader outcome" });
+  const doc = {
+    id: "support-open",
+    title: "Supporting context",
+    body: "Recovered supporting paragraph",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  let rejectOpen: ((reason: unknown) => void) | undefined;
+  let finishBrowse: ((value: unknown) => void) | undefined;
+  const openRead = new Promise((_, reject) => {
+    rejectOpen = reject;
+  });
+  const browse = new Promise((resolve) => {
+    finishBrowse = resolve;
+  });
+  let retry = false;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "activity_feed")
+      return [
+        {
+          type: "authored",
+          activity: {
+            id: "support-update",
+            ticket_id: current.id,
+            brief: "Supporting result",
+            reported_at: doc.updated_at,
+            updated_at: doc.updated_at,
+            editing_agent: null,
+            supporting_document_id: doc.id,
+          },
+        },
+      ];
+    if (command === "show_document") return doc;
+    if (command === "open_document") return retry ? doc : openRead;
+    if (command === "recent_documents") return browse;
+    if (command === "document_tags") return [];
+    if (command === "document_version") return [doc.updated_at, false];
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Supporting reader outcome/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Open details" }));
+  await act(async () => rejectOpen?.(new Error("Open unavailable")));
+  await act(async () =>
+    finishBrowse?.([{ id: "known-browse", heading: "Known browse record" }]),
+  );
+  const retryButton = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.getByText(/Couldn't open the Document/)).toBeTruthy();
+  expect(screen.queryByText(doc.body)).toBeNull();
+  retry = true;
+  fireEvent.click(retryButton);
+  expect(await screen.findByText(doc.body)).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls
+      .filter(([command]) => command === "open_document")
+      .map(([, args]) => args),
+  ).toEqual([{ id: doc.id }, { id: doc.id }]);
+});
+
+test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
+  "%s retains known content and counts when a background read fails",
+  async (name) => {
+    const ticket = bulkTicket(1, { title: "Cached ticket" });
+    const plan = { id: "cached-plan", name: "Cached Plan", archived: false };
+    const file = {
+      id: "cached-file",
+      display_name: "cached.txt",
+      original_filename: "cached.txt",
+      size_bytes: 5,
+      kind: "local_snapshot",
+      locator: "fixture/cached.txt",
+      added_at: "2026-11-01T00:00:00Z",
+    };
+    let fail = false;
+    const read = {
+      "All tickets": "find_tickets",
+      Plans: "list_plans",
+      Documents: "recent_documents",
+      Attachments: "search_attachments",
+    }[name];
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === read && fail) throw new Error("Cached read unavailable");
+      if (command === "workspace_info")
+        return { tickets: 1, documents: 1, projects: 0, active_plans: 1 };
+      if (command === "find_tickets") return [ticket];
+      if (command === "count_tickets")
+        return { ...counted({ todo: 1 }), total: 1 };
+      if (command === "list_plans") return [plan];
+      if (command === "show_plan")
+        return { plan, counts: counted({}), members: [], documents: [] };
+      if (command === "recent_documents")
+        return [{ id: "cached-doc", heading: "Cached Document" }];
+      if (command === "search_attachments")
+        return [
+          {
+            attachment: file,
+            related: false,
+            usage: {
+              eligible: false,
+              legacy_drafts_pending: false,
+              protections: [],
+            },
+          },
+        ];
+      return bridgeDefault(command, args);
+    });
+    vi.useFakeTimers();
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name }));
+    await act(async () => {});
+    const header = screen.getByRole("heading", { name }).closest("header")!;
+    expect(header.querySelector('[data-slot="count"]')?.textContent).toMatch(
+      /^1/,
+    );
+    fail = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(header.querySelector('[data-slot="count"]')?.textContent).toMatch(
+      /^1/,
+    );
+    expect(
+      screen.getAllByText(
+        {
+          "All tickets": "Cached ticket",
+          Plans: "Cached Plan",
+          Documents: "Cached Document",
+          Attachments: "cached.txt",
+        }[name],
+      ).length,
+    ).toBeGreaterThan(0);
+  },
+);
 
 test.each(["tickets", "Documents"])(
   "palette keeps matching results and keyboard recovery when %s lookup fails",

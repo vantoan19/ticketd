@@ -209,6 +209,7 @@ export function PlanCard({
                     shortcut={shortcutLabel("list-open")}
                   >
                     <RecordLink
+                      variant="row"
                       reference={next.reference}
                       onClick={() => onTicket?.(next.reference)}
                     >
@@ -263,6 +264,31 @@ export function PlanCard({
           </CardCaption>
         </div>
         {children}
+      </article>
+    </Card>
+  );
+}
+
+/** Initial cards reserve the same rows as a loaded Plan; Skeleton owns the 300ms delay. */
+export function PlanCardSkeleton() {
+  return (
+    <Card variant="summary" asChild>
+      <article className="plan-card">
+        <div className="plan-card-heading">
+          <Skeleton className="size-5" />
+          <div className="plan-card-description">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-5 w-64" />
+          </div>
+          <Skeleton className="h-5 w-24" />
+        </div>
+        <Skeleton className="h-1.5 w-full" />
+        <Skeleton className="h-4 w-64" />
+        <CardFooter variant="summary" asChild>
+          <div className="plan-card-next">
+            <Skeleton className="h-5 w-64" />
+          </div>
+        </CardFooter>
       </article>
     </Card>
   );

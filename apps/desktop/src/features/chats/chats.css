@@ -322,10 +322,6 @@
   overflow-y: auto;
   overflow-anchor: none;
 }
-.chat-scroll::before {
-  content: "";
-  flex: 1 1 0;
-}
 /* Jump to latest: in its own 40px strip between the transcript and the dock,
    so it never covers text. It opens only once the reader scrolled up, and fades
    and closes in 120ms. */
@@ -805,8 +801,8 @@ button.chat-file-name:focus-visible {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 8px 8px 16px;
+  gap: 0;
+  padding: 0;
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
@@ -823,9 +819,9 @@ button.chat-file-name:focus-visible {
 }
 .chat-composer textarea {
   min-width: 0;
-  min-height: 24px;
+  min-height: 52px;
   max-height: 200px;
-  padding: 2px 8px 2px 0;
+  padding: 12px 14px 4px;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -846,6 +842,7 @@ button.chat-file-name:focus-visible {
    controls truncate instead of the end group wrapping (STATIC-6). */
 .chat-composer-row {
   min-height: 44px;
+  padding: 0 8px 0 6px;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;

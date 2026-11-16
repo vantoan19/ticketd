@@ -61,20 +61,23 @@ export function useChatList(scope: Retention) {
   const [state, setState] = useState<{
     scope: Retention;
     chats: ChatSummary[];
+    known: boolean;
     error: FailureDescription | null;
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let current = true;
     client.listChats(scope).then(
-      (chats) => current && setState({ scope, chats, error: null }),
+      (chats) =>
+        current && setState({ scope, chats, known: true, error: null }),
       (reason: unknown) =>
         current &&
-        setState({
+        setState((previous) => ({
           scope,
-          chats: [],
+          chats: previous?.scope === scope ? previous.chats : [],
+          known: previous?.scope === scope && previous.known,
           error: describeFailure(reason, "load Chats"),
-        }),
+        })),
     );
     return () => {
       current = false;

@@ -13,6 +13,9 @@ import { emptyCopy } from "@/lib/empty-copy";
 import { matchesShortcut, shortcutLabel } from "@/lib/shortcuts";
 import { Tooltip } from "@/components/ui/tooltip";
 import { NewPlanDialog } from "./NewPlanDialog";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import type { FailureDescription } from "@/lib/api/describe-failure";
+import { PlanCardSkeleton } from "./PlanCard";
 import { PlanCard } from "./PlanCard";
 import "./plan.css";
 /**
@@ -22,6 +25,9 @@ import "./plan.css";
  */
 export function PlanList({
   plans,
+  known = true,
+  failure = null,
+  retry,
   projects = [],
   onTicket,
   archived,
@@ -30,6 +36,9 @@ export function PlanList({
   refresh,
 }: {
   plans: Plan[];
+  known?: boolean;
+  failure?: FailureDescription | null;
+  retry?: () => Promise<void>;
   projects?: Project[];
   onTicket?: (reference: string) => void;
   archived: boolean;
@@ -125,7 +134,30 @@ export function PlanList({
           </>
         }
       />
-      {shown.length === 0 ? (
+      {known && failure && (
+        <FailureAlert
+          failure={failure}
+          onRetry={retry ?? refresh}
+          size="compact"
+        />
+      )}
+      {!known ? (
+        failure ? (
+          <FailureState failure={failure} onRetry={retry ?? refresh} />
+        ) : (
+          <div role="status" aria-label="Loading Plans">
+            <span className="sr-only">Loading Plans…</span>
+            <ul className="plan-index-list" aria-hidden="true">
+              <li>
+                <PlanCardSkeleton />
+              </li>
+              <li>
+                <PlanCardSkeleton />
+              </li>
+            </ul>
+          </div>
+        )
+      ) : shown.length === 0 ? (
         // "New Plan" sits in the header beside it: no second action (P9).
         <EmptyState
           icon={<Layers />}

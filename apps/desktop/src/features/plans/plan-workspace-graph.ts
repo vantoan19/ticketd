@@ -6,6 +6,8 @@ import {
 import { plansClient, type PlanCounts } from "@/lib/api/plans";
 import { allPlanMembers } from "./plan-members";
 export type PlanIslandGraph = WorkspaceGraph & {
+  structuralPlans: WorkspaceGraph["nodes"];
+  planMembership: Record<string, string[]>;
   planCounts: Record<string, PlanCounts>;
   availability: Record<string, string | null>;
 };
@@ -73,18 +75,16 @@ export async function planWorkspaceGraph(
   }
   // The Plan identity is already authoritative in show_plan, including when a
   // search matches its members rather than its title.
-  if (
-    nodes.size ||
-    ((!request.kind || request.kind === "plan") && wanted.has(id))
-  )
-    nodes.set(id, {
-      id,
-      kind: "plan",
-      label: view.plan.name,
-      state: view.plan.archived ? "Archived" : "Active",
-      trashed: false,
-      activity_detail: false,
-    });
+  const planNode: WorkspaceGraph["nodes"][number] = {
+    id,
+    kind: "plan",
+    label: view.plan.name,
+    state: view.plan.archived ? "Archived" : "Active",
+    trashed: false,
+    activity_detail: false,
+  };
+  if ((!request.kind || request.kind === "plan") && wanted.has(id))
+    nodes.set(id, planNode);
   const expected = members.filter(
     (ticket) =>
       (!request.kind || request.kind === "ticket") && wanted.has(ticket.id),
@@ -159,6 +159,15 @@ export async function planWorkspaceGraph(
     omittedGroups.add("Plan connections across batches");
   }
   return {
+    structuralPlans: [planNode],
+    planMembership: Object.fromEntries(
+      [
+        ...members.map((ticket) => ticket.id),
+        ...view.documents
+          .filter((document) => !document.trashed)
+          .map((document) => document.id),
+      ].map((target) => [target, [id]]),
+    ),
     planCounts: { [id]: view.counts },
     availability: Object.fromEntries(
       members.map((ticket) => [ticket.id, ticket.availability]),
@@ -228,6 +237,17 @@ export async function workspacePlanIslands(
         }
   return {
     ...page,
+    structuralPlans: islands.flatMap((island) => island.structuralPlans),
+    planMembership: Object.fromEntries(
+      [...nodes.keys()].map((id) => [
+        id,
+        [
+          ...new Set(
+            islands.flatMap((island) => island.planMembership[id] ?? []),
+          ),
+        ],
+      ]),
+    ),
     availability: Object.assign(
       {},
       ...islands.map((island) => island.availability),

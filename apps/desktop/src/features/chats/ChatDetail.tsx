@@ -363,14 +363,19 @@ function Conversation({
    * Runs a command; a refusal is said once, and the view keeps the host's
    * state. `name` says what did not happen: "send the message".
    */
-  const run = (action: Promise<unknown>, name: string) =>
+  const run = (
+    action: Promise<unknown>,
+    name: string,
+    retry?: () => void,
+    retryRequiresSend = false,
+  ) =>
     action.then(
       () => {
         setFailure(null);
         setArrival("");
       },
       (reason: unknown) => {
-        setFailure(chatFailure(reason, name));
+        setFailure({ ...chatFailure(reason, name, retry), retryRequiresSend });
         throw reason;
       },
     );
@@ -397,6 +402,7 @@ function Conversation({
   const plan = runningPlan(items);
   const turnStartedAt = lastAsk(items);
   const messageBox = useRef<HTMLTextAreaElement>(null);
+  const retrySend = useRef<(() => void) | null>(null);
   const dock = useRef<HTMLDivElement>(null);
   // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
   // must not strand the keyboard on the page: the message box takes it.
@@ -671,7 +677,10 @@ function Conversation({
             <FailureAlert
               size="compact"
               failure={failure.failure}
-              {...(failure.retry && { onRetry: failure.retry })}
+              {...(failure.retry &&
+                (!failure.retryRequiresSend || !chat.problem?.blocks_send) && {
+                  onRetry: failure.retry,
+                })}
             />
           )}
           {picked ? (
@@ -752,18 +761,32 @@ function Conversation({
                     ).then(() => {})
                   }
                   onEdit={edit}
-                  onRemove={(queuedId) =>
-                    quietly(
-                      client.removeQueued(id, queuedId),
-                      "remove the queued message",
-                    )
-                  }
+                  onRemove={(queuedId) => {
+                    const remove = () => {
+                      const origin = document.activeElement;
+                      void run(
+                        client.removeQueued(id, queuedId),
+                        "remove the queued message",
+                        remove,
+                      )
+                        .then(() => {
+                          if (
+                            document.activeElement === origin ||
+                            document.activeElement === document.body
+                          )
+                            messageBox.current?.focus();
+                        })
+                        .catch(() => {});
+                    };
+                    remove();
+                  }}
                   onResume={() =>
                     quietly(client.resumeQueue(id), "resume the queue")
                   }
                 />
               </DockSlot>
               <Composer
+                retryRef={retrySend}
                 key={`${id}:${edits}`}
                 framed={false}
                 inputRef={messageBox}
@@ -796,6 +819,13 @@ function Conversation({
                     answering && question
                       ? "send your answer"
                       : "send the message",
+                    answering
+                      ? undefined
+                      : () => {
+                          messageBox.current?.focus();
+                          retrySend.current?.();
+                        },
+                    true,
                   )
                 }
                 onQueue={(text, links) =>
@@ -809,6 +839,10 @@ function Conversation({
                         .then(() => clearQuotes(id)),
                     ),
                     "queue the message",
+                    () => {
+                      messageBox.current?.focus();
+                      retrySend.current?.();
+                    },
                   )
                 }
                 {...(pending.length > 0 && {
