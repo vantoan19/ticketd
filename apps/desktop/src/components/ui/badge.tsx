@@ -21,6 +21,7 @@ const badgeVariants = cva("ui-badge", {
     size: {
       default: "",
       sm: "ui-badge-sm",
+      "compact-responsive": "ui-badge-compact-responsive",
     },
     // `raised` sits on a recessed control, such as the property rail’s tag picker.
     tone: {

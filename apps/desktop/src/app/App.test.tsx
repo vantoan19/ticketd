@@ -1199,12 +1199,6 @@ function openMenu(name: string) {
   fireEvent.keyDown(screen.getByRole("button", { name }), { key: "Enter" });
 }
 
-function openSubmenu(name: string) {
-  fireEvent.keyDown(screen.getByRole("menuitem", { name }), {
-    key: "ArrowRight",
-  });
-}
-
 async function renderBulk(handlers: Record<string, unknown>) {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string, args?: unknown) => {
@@ -1278,7 +1272,8 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(screen.getByText("1 selected")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
+  openMenu("More selected ticket actions");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Select all 2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Select all 2" })).toBeNull();
   openMenu("Status of selected tickets");
@@ -1363,7 +1358,7 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
   expect(screen.getByText("2 selected")).toBeTruthy();
 });
 
-test("moves selected tickets to a project from the Organize menu", async () => {
+test("moves selected tickets to a project from the direct Project control", async () => {
   const changes: unknown[] = [];
   await renderBulk({
     find_tickets: () => [bulkTicket(1)],
@@ -1377,8 +1372,7 @@ test("moves selected tickets to a project from the Organize menu", async () => {
     },
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
-  openMenu("Organize selected tickets");
-  openSubmenu("Move to project");
+  openMenu("Project of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Project one" }));
   await act(async () => {});
   expect(changes).toEqual([{ project_id: "p1" }]);
@@ -1403,9 +1397,9 @@ test("sets an Plan in one request and shows how many selected tickets already ha
     },
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
-  fireEvent.click(screen.getByRole("button", { name: "Select all 3" }));
-  openMenu("Organize selected tickets");
-  openSubmenu("Set Plan");
+  openMenu("More selected ticket actions");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Select all 3" }));
+  openMenu("Plan of selected tickets");
   expect(screen.getByRole("menuitem", { name: "Launch 1 of 3" })).toBeTruthy();
   expect(screen.getByRole("menuitem", { name: "Polish 0 of 3" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: /Old/ })).toBeNull();
@@ -1414,7 +1408,7 @@ test("sets an Plan in one request and shows how many selected tickets already ha
   expect(changes).toEqual([{ plan_id: "e2" }]);
 });
 
-test("removes an Plan and adds or removes a tag from the Organize menu", async () => {
+test("removes a Plan and removes a tag from the direct controls", async () => {
   const changes: unknown[] = [];
   await renderBulk({
     find_tickets: () => [bulkTicket(1, { plan_id: "e1", tags: ["old"] })],
@@ -1424,12 +1418,11 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
     },
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
-  openMenu("Organize selected tickets");
-  openSubmenu("Set Plan");
+  openMenu("Plan of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Plan" }));
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
-  openMenu("Organize selected tickets");
+  openMenu("Tags of selected tickets");
   expect(screen.queryByRole("menuitem", { name: /Add or remove/ })).toBeNull();
   fireEvent.click(screen.getByRole("menuitem", { name: "Remove tag…" }));
   await act(async () => {});
@@ -1444,7 +1437,7 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
 });
 
-test("Organize has a separate Add tag action", async () => {
+test("Tags has a separate Add tag action", async () => {
   const changes: unknown[] = [];
   await renderBulk({
     find_tickets: () => [bulkTicket(1)],
@@ -1455,7 +1448,7 @@ test("Organize has a separate Add tag action", async () => {
     },
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
-  openMenu("Organize selected tickets");
+  openMenu("Tags of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Add tag…" }));
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "Add tag" });
@@ -2172,9 +2165,11 @@ test("Select all reaches every matching ticket, beyond the listed page (list B-0
     count_tickets: () => counted({ todo: 51 }),
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
-  fireEvent.click(screen.getByRole("button", { name: "Select all 50" }));
+  openMenu("More selected ticket actions");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Select all 50" }));
+  openMenu("More selected ticket actions");
   fireEvent.click(
-    screen.getByRole("button", { name: "Select all 51 matching" }),
+    screen.getByRole("menuitem", { name: "Select all 51 matching" }),
   );
   await act(async () => {});
   expect(screen.getByText("51 selected")).toBeTruthy();
@@ -5312,64 +5307,143 @@ test.each([
   },
 );
 
-test("ticket agent late start stays in the header until the next opening", async () => {
-  const { ChatClientContext } = await import("@/features/chats/client");
-  const { createMockChatClient, chatState } =
-    await import("@/features/chats/mock-client");
-  const tickets = paletteTickets();
-  const client = createMockChatClient({
-    enabled: true,
-    chats: [{ chat: chatState({ id: "late", title: "Late Chat" }) }],
-  });
-  bridge.invoke.mockImplementation((command: string, args: unknown) =>
-    command === "find_tickets"
-      ? tickets
-      : command === "show_ticket"
-        ? tickets[1]
-        : bridgeDefault(command, args as undefined),
-  );
-  render(
-    <ChatClientContext value={client}>
-      <App />
-    </ChatClientContext>,
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Focused Ticket/ }),
-  );
-  await screen.findByRole("group", { name: "Ticket properties" });
-  await vi.waitFor(() =>
+test.each([false, true])(
+  "ticket agent late start keeps the focused reference and header state until the next opening (narrow: %s)",
+  async (narrow) => {
+    narrowViewport = narrow;
+    const { ChatClientContext } = await import("@/features/chats/client");
+    const { createMockChatClient, chatState } =
+      await import("@/features/chats/mock-client");
+    const tickets = paletteTickets();
+    const client = createMockChatClient({
+      enabled: true,
+      chats: [{ chat: chatState({ id: "late", title: "Late Chat" }) }],
+    });
+    bridge.invoke.mockImplementation((command: string, args: unknown) =>
+      command === "find_tickets"
+        ? tickets
+        : command === "show_ticket"
+          ? tickets[1]
+          : bridgeDefault(command, args as undefined),
+    );
+    render(
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Focused Ticket/ }),
+    );
+    await screen.findByRole("group", { name: "Ticket properties" });
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".detail-scroll[data-agent-loading]"),
+      ).toBeNull(),
+    );
+    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    const copy = screen.getByRole("button", { name: "Copy reference" });
+    act(() => copy.focus());
+    act(() =>
+      client.patch("late", {
+        activity: "working",
+        links: [
+          {
+            kind: "ticket",
+            id: "2",
+            reference: "T-KQ2",
+            title: "Focused Ticket",
+            status: "Todo",
+          },
+        ],
+      }),
+    );
+    const header = screen
+      .getByRole("heading", { name: "T-KQ2" })
+      .closest(".detail-header")!;
+    await vi.waitFor(() =>
+      expect(within(header as HTMLElement).getByText("Working")).toBeTruthy(),
+    );
+    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(document.activeElement).toBe(copy);
+    act(() =>
+      client.push("late", {
+        kind: "request",
+        id: "late-approval",
+        at: "2026-11-16T00:00:00Z",
+        request: "approval",
+        title: "Run the check",
+        command: "npm test -- board",
+        options: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Decline" },
+        ],
+        state: "pending",
+        free_text: false,
+      }),
+    );
+    await within(header as HTMLElement).findByRole("button", {
+      name: "Review request",
+    });
     expect(
-      document.querySelector(".detail-scroll[data-agent-loading]"),
-    ).toBeNull(),
-  );
-  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
-  act(() =>
-    client.patch("late", {
-      activity: "working",
-      links: [
-        {
-          kind: "ticket",
-          id: "2",
-          reference: "T-KQ2",
-          title: "Focused Ticket",
-          status: "Todo",
-        },
-      ],
-    }),
-  );
-  const header = screen
-    .getByRole("heading", { name: "T-KQ2" })
-    .closest(".detail-header")!;
-  await vi.waitFor(() =>
-    expect(within(header as HTMLElement).getByText("Working")).toBeTruthy(),
-  );
-  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Close ticket/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Focused Ticket/ }));
-  expect(
-    await screen.findByRole("status", { name: "Ticket agent" }),
-  ).toBeTruthy();
-});
+      within(header as HTMLElement).getByText("Approval needed"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(document.activeElement).toBe(copy);
+    await act(async () => {
+      await client.answer("late", "late-approval", { option_id: "allow" });
+      client.patch("late", { activity: "idle" });
+    });
+    expect(
+      within(header as HTMLElement).queryByRole("status", { name: "Working" }),
+    ).toBeNull();
+    expect(
+      within(header as HTMLElement).queryByRole("button", {
+        name: "Review request",
+      }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy reference" })).toBe(copy);
+    expect(document.activeElement).toBe(copy);
+    act(() =>
+      client.push("late", {
+        kind: "request",
+        id: "route-approval",
+        at: "2026-11-16T00:00:00Z",
+        request: "approval",
+        title: "Run the check",
+        command: "npm test -- board",
+        options: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Decline" },
+        ],
+        state: "pending",
+        free_text: false,
+      }),
+    );
+    const review = await within(header as HTMLElement).findByRole("button", {
+      name: "Review request",
+    });
+    fireEvent.click(review);
+    expect(
+      await screen.findByRole("heading", { name: "Late Chat" }),
+    ).toBeTruthy();
+    expect(await screen.findByText("npm test -- board")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow once" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to T-KQ2" }));
+    await screen.findByRole("button", { name: "Copy reference" });
+    expect(
+      within(
+        screen
+          .getByRole("heading", { name: "T-KQ2" })
+          .closest(".detail-header") as HTMLElement,
+      ).queryByText("Approval needed"),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Close ticket/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Focused Ticket/ }));
+    expect(
+      await screen.findByRole("status", { name: "Ticket agent" }),
+    ).toBeTruthy();
+  },
+);
 
 test("ticket agent idle update preserves unseen Chat and opens its Activity", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
@@ -9302,3 +9376,205 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
     ).toBeGreaterThan(0);
   },
 );
+
+test.each(["tickets", "Documents"])(
+  "palette keeps matching results and keyboard recovery when %s lookup fails",
+  async (source) => {
+    const user = userEvent.setup();
+    let failed = true;
+    const query = source === "tickets" ? "Settings" : "Docs style guide";
+    const doc = {
+      id: "style-guide",
+      heading: query,
+      updated_at: "2026-11-16T00:00:00Z",
+    };
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "search_tickets" && source === "tickets" && failed)
+        throw new Error("private ticket lookup cause");
+      if (command === "search_documents" && source === "Documents" && failed)
+        throw new Error("private document lookup cause");
+      if (command === "search_tickets" && source === "tickets")
+        return [bulkTicket(9, { title: "Settings recovery ticket" })];
+      if (command === "recent_documents")
+        return source === "Documents" ? [doc] : [];
+      if (command === "search_documents")
+        return source === "Documents" ? [doc] : [];
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /^All tickets/ });
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    await user.type(input, query);
+    const result = await screen.findByRole("option", {
+      name: source === "tickets" ? /^Settings/ : new RegExp(query),
+    });
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent).toContain(
+      source === "tickets"
+        ? "Couldn't search tickets"
+        : "Couldn't search Documents",
+    );
+    expect(screen.queryByText("No tickets or destinations found.")).toBeNull();
+    expect(failure.textContent).not.toContain("private");
+    expect(document.activeElement).toBe(input);
+    const selected = result.getAttribute("aria-selected");
+    const retry = within(failure).getByRole("button", { name: "Retry" });
+    retry.focus();
+    failed = false;
+    await user.keyboard("{Enter}");
+    await vi.waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(input).toHaveProperty("value", query);
+    expect(document.activeElement).toBe(input);
+    expect(
+      screen
+        .getByRole("option", {
+          name: source === "tickets" ? /^Settings/ : new RegExp(query),
+        })
+        .getAttribute("aria-selected"),
+    ).toBe(selected);
+    expect(screen.getByRole("dialog", { name: "Go anywhere" })).toBeTruthy();
+  },
+);
+
+test("bulk selection exposes Status, Project, Plan, Tags and More directly", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  const bar = screen.getByRole("region", { name: "Bulk edit" });
+  for (const name of [
+    "Status of selected tickets",
+    "Project of selected tickets",
+    "Plan of selected tickets",
+    "Tags of selected tickets",
+    "More selected ticket actions",
+    "Clear selection",
+  ])
+    expect(within(bar).getByRole("button", { name })).toBeTruthy();
+  openMenu("More selected ticket actions");
+  expect(screen.getByRole("menuitem", { name: "No project" })).toBeTruthy();
+  expect(
+    screen.getByRole("menuitem", { name: "Remove from Plan" }),
+  ).toBeTruthy();
+});
+
+test("workspace failure defers the band while editing, recovers through its header notice and retains a vacated slot until navigation", async () => {
+  const tickets = paletteTickets();
+  let locked = true;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return tickets;
+    if (command === "show_ticket") return tickets[1];
+    if (command === "change_ticket") {
+      if (locked)
+        throw { code: "workspace_locked", message: "private lock cause" };
+      return { ...tickets[1], ...args.patch };
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Focused Ticket/ }),
+  );
+  const title = await screen.findByRole("textbox", { name: "Title" });
+  const main = screen.getByRole("main");
+  fireEvent.pointerEnter(main);
+  title.focus();
+  fireEvent.change(title, { target: { value: "Keep my draft" } });
+  const message =
+    "Another ticketd operation is using this workspace. Changes can't be saved right now.";
+  const [notice] = await screen.findAllByRole("button", { name: message });
+  expect(document.querySelector(".workspace-band-slot")).toBeNull();
+  // The disabled field's automatic loss of focus must not commit a reflow.
+  fireEvent.focusIn(document.body);
+  expect(document.querySelector(".workspace-band-slot")).toBeNull();
+  expect(notice).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const paletteInput = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.change(paletteInput, { target: { value: "workspace notice" } });
+  fireEvent.click(
+    await screen.findByRole("option", { name: "Review workspace notice" }),
+  );
+  const popup = await screen.findByRole("dialog", { name: "Workspace notice" });
+  fireEvent.click(within(popup).getByRole("button", { name: "Details" }));
+  const details = await screen.findByRole("dialog", {
+    name: "Failure details",
+  });
+  expect(details.textContent).toContain("private lock cause");
+  fireEvent.keyDown(details, { key: "Escape" });
+  locked = false;
+  fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: message })).toBeNull(),
+  );
+  expect(title).toHaveProperty("value", "Keep my draft");
+  expect(screen.getByText(/not saved/i)).toBeTruthy();
+  expect(document.querySelector(".workspace-band-slot")).toBeNull();
+  // A later failure settles at navigation, then successful Retry clears its wording immediately.
+  act(() => reportWorkspaceFailure("workspace_locked", "later lock cause"));
+  fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+  await screen.findByRole("heading", { name: "Documents" });
+  const slot = document.querySelector(".workspace-band-slot")!;
+  expect(slot.textContent).toContain(message);
+  fireEvent.pointerEnter(main);
+  const retry = within(slot as HTMLElement).getByRole("button", {
+    name: "Retry",
+  });
+  retry.focus();
+  fireEvent.keyDown(retry, { key: "Enter" });
+  fireEvent.click(retry);
+  await vi.waitFor(() => expect(slot.textContent).toBe(""));
+  expect(document.querySelector(".workspace-band-slot")).toBe(slot);
+  fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
+  await vi.waitFor(() =>
+    expect(document.querySelector(".workspace-band-slot")).toBeNull(),
+  );
+});
+
+test("deferred workspace notices share a pending protected Retry across pane headers", async () => {
+  const tickets = paletteTickets();
+  bridge.invoke.mockImplementation((command: string, args) =>
+    command === "find_tickets"
+      ? tickets
+      : command === "show_ticket"
+        ? tickets[1]
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Focused Ticket/ }),
+  );
+  const title = await screen.findByRole("textbox", { name: "Title" });
+  fireEvent.pointerEnter(screen.getByRole("main"));
+  title.focus();
+  act(() => reportWorkspaceFailure("workspace_read_only", "read-only cause"));
+  const label = "This workspace is read-only. Changes can't be saved.";
+  const notices = screen.getAllByRole("button", { name: label });
+  let finish: ((value: unknown) => void) | undefined;
+  let checks = 0;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return tickets;
+    if (command === "show_ticket") return tickets[1];
+    if (command === "sidebar_counts")
+      return new Promise((resolve) => {
+        checks += 1;
+        finish = resolve;
+      });
+    return bridgeDefault(command, args);
+  });
+  fireEvent.click(notices[0]!);
+  let popup = await screen.findByRole("dialog", { name: "Workspace notice" });
+  fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(checks).toBe(1));
+  fireEvent.keyDown(popup, { key: "Escape" });
+  fireEvent.click(notices[1]!);
+  popup = await screen.findByRole("dialog", { name: "Workspace notice" });
+  fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+  await act(async () => {});
+  expect(checks).toBe(1);
+  await act(async () => finish?.(bridgeDefault("sidebar_counts")));
+  expect(screen.queryByRole("button", { name: label })).toBeNull();
+  expect(document.querySelector(".workspace-band-slot")).toBeNull();
+});

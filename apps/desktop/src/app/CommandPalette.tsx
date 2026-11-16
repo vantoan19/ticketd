@@ -1,3 +1,9 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureDetails } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useReminderTime } from "@/features/tickets/use-reminder-time";
 import { SettingsNavigation } from "@/lib/settings-navigation";
 import { searchMatch } from "@/lib/search-match";
@@ -94,6 +100,7 @@ const targets = [
 ] satisfies { id: GoTo; label: string; icon: typeof Inbox; key?: ShortcutId }[];
 
 export function CommandPalette({
+  workspaceNotice = null,
   writeUpdate = null,
   memoryTickets = [],
   readyCount = null,
@@ -118,6 +125,7 @@ export function CommandPalette({
   plans,
   refresh,
 }: {
+  workspaceNotice?: { label: string; run: () => void } | null;
   writeUpdate?: (() => void) | null;
   memoryTickets?: Ticket[];
   readyCount?: number | null;
@@ -166,6 +174,15 @@ export function CommandPalette({
     query: string;
     items: DocumentSummary[];
   }>({ query: "", items: [] });
+  const [recentFailure, setRecentFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  const [documentFailure, setDocumentFailure] = useState<{
+    query: string;
+    failure: FailureDescription;
+  } | null>(null);
+  const [recentAttempt, setRecentAttempt] = useState(0);
+  const [documentAttempt, setDocumentAttempt] = useState(0);
   const [planCounts, setPlanCounts] = useState<Record<string, PlanCounts>>({});
   const [query, setQuery] = useState("");
   const [custom, setCustom] = useState(false);
@@ -185,10 +202,23 @@ export function CommandPalette({
     let active = true;
     void documents.recent(0).then(
       (items) => {
-        if (active) setRecentDocuments(items);
+        if (active) {
+          setRecentDocuments(items);
+          setRecentFailure(null);
+        }
       },
-      () => {},
+      (reason: unknown) => {
+        if (active)
+          setRecentFailure(describeFailure(reason, "load recent Documents"));
+      },
     );
+    return () => {
+      active = false;
+    };
+  }, [open, recentAttempt]);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
     void Promise.all(
       plans
         .filter((plan) => !plan.archived)
@@ -215,16 +245,25 @@ export function CommandPalette({
     const timer = window.setTimeout(() => {
       void documents.search(query.trim(), null, 0).then(
         (items) => {
-          if (active) setFoundDocuments({ query, items });
+          if (active) {
+            setFoundDocuments({ query, items });
+            setDocumentFailure(null);
+          }
         },
-        () => {},
+        (reason: unknown) => {
+          if (active)
+            setDocumentFailure({
+              query,
+              failure: describeFailure(reason, "search Documents"),
+            });
+        },
       );
     }, 150);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, commandsOnly, referencesOnly, query]);
+  }, [open, commandsOnly, referencesOnly, query, documentAttempt]);
   const actions = useTicketCommands({
     reference,
     initialTicket,
@@ -277,6 +316,32 @@ export function CommandPalette({
     open && !commandsOnly && !scope,
     () => true,
   );
+  const lookupFailures =
+    !scope && !commandsOnly
+      ? [
+          ...(search.failure
+            ? [{ key: "tickets", failure: search.failure, retry: search.retry }]
+            : []),
+          ...(!referencesOnly && recentFailure
+            ? [
+                {
+                  key: "recent",
+                  failure: recentFailure,
+                  retry: () => setRecentAttempt((count) => count + 1),
+                },
+              ]
+            : []),
+          ...(!referencesOnly && documentFailure?.query === query
+            ? [
+                {
+                  key: "documents",
+                  failure: documentFailure.failure,
+                  retry: () => setDocumentAttempt((count) => count + 1),
+                },
+              ]
+            : []),
+        ]
+      : [];
   const ticketResults = [
     ...new Map(
       [
@@ -852,6 +917,18 @@ export function CommandPalette({
                     </CommandItem>
                   </CommandGroup>
                 )}
+              {!scope && workspaceNotice && matches(workspaceNotice.label) && (
+                <CommandGroup heading="Workspace">
+                  <CommandItem
+                    value="workspace-notice"
+                    onSelect={() =>
+                      run(() => requestAnimationFrame(workspaceNotice.run))
+                    }
+                  >
+                    {workspaceNotice.label}
+                  </CommandItem>
+                </CommandGroup>
+              )}
               {!scope && (
                 <CommandGroup heading="Go to">
                   {targets
@@ -1039,11 +1116,42 @@ export function CommandPalette({
                 </CommandGroup>
               )}
               <CommandEmpty>
-                {actions.error ||
-                  search.error ||
-                  "No tickets or destinations found."}
+                {lookupFailures.length > 0
+                  ? "Some results couldn't be loaded."
+                  : actions.error || "No tickets or destinations found."}
               </CommandEmpty>
             </CommandList>
+            {lookupFailures.map(({ key, failure, retry }) => (
+              <div className="ui-palette-failure" key={key}>
+                <Alert
+                  tone="error"
+                  size="compact"
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <AlertDescription className="min-w-0 flex-1">
+                    <strong>{failure.title}.</strong> {failure.sentence}
+                  </AlertDescription>
+                  {failure.action === "retry" && (
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        retry();
+                        input.current?.focus({ preventScroll: true });
+                      }}
+                    >
+                      Retry
+                    </Button>
+                  )}
+                  <FailureDetails
+                    details={failure.details}
+                    variant="popover"
+                    small
+                  />
+                </Alert>
+              </div>
+            ))}
             <div className="ui-palette-footer">
               {actions.error ? (
                 <span role="alert">{actions.error}</span>

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
-import { ShellLeading } from "@/components/ui/list-header";
+import { ShellLeading, ShellNoticeSlot } from "@/components/ui/list-header";
 import "./patterns.css";
 
 /**
@@ -75,7 +75,10 @@ export function PageHeader({
           </div>
           {lede && <p className="ui-page-header-lede">{lede}</p>}
         </div>
-        {actions && <div className="ui-page-header-actions">{actions}</div>}
+        <div className="ui-page-header-actions">
+          <ShellNoticeSlot />
+          {actions}
+        </div>
       </div>
       {toolbar && <div className="ui-page-toolbar">{toolbar}</div>}
     </header>
