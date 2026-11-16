@@ -20,7 +20,7 @@ pub struct ActivityPatch {
     pub editing_agent: Option<String>,
 }
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE TABLE notes (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ticket_id TEXT NOT NULL REFERENCES tickets(id), content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), editing_agent TEXT); PRAGMA user_version = 5;")?;
+    tx.execute_batch("CREATE TABLE notes (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ticket_id TEXT NOT NULL REFERENCES tickets(id), content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), editing_agent TEXT);")?;
     Ok(())
 }
 fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Activity> {
@@ -230,8 +230,7 @@ pub(crate) fn migrate_updates(tx: &Transaction<'_>) -> Result<(), Error> {
         WHERE i.origin = 'imported' AND NOT EXISTS (SELECT 1 FROM ticket_history h WHERE h.ticket_id = i.ticket_id AND h.kind = 'source_import');
         INSERT INTO ticket_history (ticket_id, kind, from_value, to_value, timestamp, editing_agent)
         SELECT s.ticket_id, 'source_unavailable', '', s.last_error_code, s.failing_since, i.provider FROM source_sync s JOIN external_identities i ON i.ticket_id = s.ticket_id
-        WHERE s.failing_since IS NOT NULL AND s.last_error_code IN ('not_found', 'unauthenticated', 'forbidden', 'unavailable', 'protocol') AND NOT EXISTS (SELECT 1 FROM ticket_history h WHERE h.ticket_id = s.ticket_id AND h.kind = 'source_unavailable' AND h.timestamp = s.failing_since);
-        PRAGMA user_version = 28;")?;
+        WHERE s.failing_since IS NOT NULL AND s.last_error_code IN ('not_found', 'unauthenticated', 'forbidden', 'unavailable', 'protocol') AND NOT EXISTS (SELECT 1 FROM ticket_history h WHERE h.ticket_id = s.ticket_id AND h.kind = 'source_unavailable' AND h.timestamp = s.failing_since);")?;
     Ok(())
 }
 

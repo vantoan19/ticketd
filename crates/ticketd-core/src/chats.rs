@@ -65,8 +65,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS chat_notices_chat ON chat_notices(chat_id, position);
          CREATE TABLE IF NOT EXISTS chat_record_writes (chat_id TEXT NOT NULL, activity_id TEXT, history_number INTEGER);
          CREATE INDEX IF NOT EXISTS chat_record_writes_activity ON chat_record_writes(activity_id);
-         CREATE INDEX IF NOT EXISTS chat_record_writes_history ON chat_record_writes(history_number);
-         PRAGMA user_version = 66;"
+         CREATE INDEX IF NOT EXISTS chat_record_writes_history ON chat_record_writes(history_number);"
     ))?;
     Ok(())
 }
@@ -88,7 +87,6 @@ pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
              UPDATE chats SET seen_through = COALESCE((SELECT MAX(position) FROM chat_turns WHERE chat_id = chats.id), 0);",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 67;")?;
     Ok(())
 }
 
@@ -104,7 +102,6 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     if !has {
         connection.execute_batch("ALTER TABLE chat_tools ADD COLUMN started_at TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 68;")?;
     Ok(())
 }
 
@@ -130,7 +127,6 @@ pub(crate) fn migrate_request_times(connection: &Connection) -> Result<(), Error
             "ALTER TABLE chat_notices ADD COLUMN from_harness INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 72;")?;
     Ok(())
 }
 
@@ -148,7 +144,6 @@ pub(crate) fn migrate_marked_unread(connection: &Connection) -> Result<(), Error
             "ALTER TABLE chats ADD COLUMN marked_unread INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 71;")?;
     Ok(())
 }
 
@@ -167,7 +162,6 @@ pub(crate) fn migrate_read_through(connection: &Connection) -> Result<(), Error>
              ALTER TABLE chats ADD COLUMN read_through_position INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 70;")?;
     Ok(())
 }
 
@@ -182,7 +176,6 @@ pub(crate) fn migrate_interaction_tool(connection: &Connection) -> Result<(), Er
     if !has {
         connection.execute_batch("ALTER TABLE chat_interactions ADD COLUMN tool_id TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 69;")?;
     Ok(())
 }
 
@@ -199,7 +192,6 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
     if !has {
         connection.execute_batch("ALTER TABLE chat_turns ADD COLUMN ending TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 83;")?;
     Ok(())
 }
 

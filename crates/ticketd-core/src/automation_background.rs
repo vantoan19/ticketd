@@ -16,8 +16,7 @@ pub const DEFAULT_AUTOMATION_RUNS_AT_ONCE: usize = 2;
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS automation_settings (id INTEGER PRIMARY KEY CHECK(id = 1), runs_at_once INTEGER NOT NULL CHECK(runs_at_once > 0));
-         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});
-         PRAGMA user_version = 78;",
+         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});",
     ))?;
     Ok(())
 }

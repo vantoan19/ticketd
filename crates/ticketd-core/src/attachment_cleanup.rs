@@ -27,12 +27,12 @@ pub struct RemoteAttachmentRemoval {
 }
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
-    tx.execute_batch("ALTER TABLE attachments ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1) AND (quarantined=0 OR kind='local_snapshot')); ALTER TABLE attachments ADD COLUMN added_at TEXT; PRAGMA user_version=53;")?;
+    tx.execute_batch("ALTER TABLE attachments ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1) AND (quarantined=0 OR kind='local_snapshot')); ALTER TABLE attachments ADD COLUMN added_at TEXT;")?;
     Ok(())
 }
 
 pub(crate) fn migrate_purge(tx: &Connection) -> Result<(), Error> {
-    tx.execute_batch("ALTER TABLE attachments ADD COLUMN purge_state TEXT NOT NULL DEFAULT 'retained' CHECK(purge_state IN ('retained','pending','purged') AND (purge_state='retained' OR (kind='local_snapshot' AND quarantined=1))); PRAGMA user_version=54;")?;
+    tx.execute_batch("ALTER TABLE attachments ADD COLUMN purge_state TEXT NOT NULL DEFAULT 'retained' CHECK(purge_state IN ('retained','pending','purged') AND (purge_state='retained' OR (kind='local_snapshot' AND quarantined=1)));")?;
     Ok(())
 }
 
