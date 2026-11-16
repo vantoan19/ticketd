@@ -638,7 +638,7 @@ Agent skills and Command line check when their page opens and when Check again i
 chosen; skill installation also reads the resulting state. These checks refresh
 the nav's setup dot, whose update never starts another page check.
 
-Plan Add tickets submits the selected tickets through one atomic bulk membership change and retains its request ID after an unconfirmed result. Success offers Undo to each ticket’s original Plan. When originals differ, Undo uses one atomic request per original Plan; completed groups are retired immediately, and a failure states the restored count and retries only the remaining groups with their existing IDs. No compensating writes undo concurrent external changes.
+Plan Add tickets submits the selected tickets through one atomic bulk membership change and retains its request ID after an unconfirmed result. Success offers Undo to each ticket’s original Plan. When originals differ, Undo uses one atomic request per original Plan; completed groups are retired immediately, and a failure states the confirmed restored count and retries only the remaining groups with their existing IDs. No compensating writes undo concurrent external changes.
 
 ## 11. Design system and shared components
 

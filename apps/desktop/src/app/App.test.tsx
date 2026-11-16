@@ -9429,6 +9429,7 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
   let failAdd = true;
   let loseResponse = true;
   let failUndo = true;
+  let loseUndoResponse = true;
   bridge.invoke.mockImplementation((command: string, args) => {
     if (command === "list_plans")
       return [
@@ -9472,6 +9473,10 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
         loseResponse = false;
         throw new Error("Committed result response lost");
       }
+      if (request.change.plan_id === "P-original" && loseUndoResponse) {
+        loseUndoResponse = false;
+        throw new Error("Committed Undo result response lost");
+      }
       return result;
     }
     return bridgeDefault(command, args);
@@ -9510,20 +9515,28 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
   expect(addCalls[1]?.[1]).toEqual(addCalls[2]?.[1]);
   expect(tickets.map((t) => t.plan_id)).toEqual([plan.id, plan.id]);
   await user.click(screen.getByRole("button", { name: "Undo" }));
-  expect(await screen.findByText(/1 of 2 tickets restored/)).toBeTruthy();
+  expect(
+    await screen.findByText(/1 of 2 tickets confirmed restored/),
+  ).toBeTruthy();
   expect(tickets.map((t) => t.plan_id)).toEqual([null, plan.id]);
   failUndo = false;
   await user.click(screen.getByRole("button", { name: "Retry" }));
   await vi.waitFor(() =>
     expect(tickets.map((t) => t.plan_id)).toEqual([null, "P-original"]),
   );
+  await screen.findByText(/1 of 2 tickets confirmed restored/);
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/1 of 2 tickets confirmed restored/)).toBeNull(),
+  );
   const undoCalls = bridge.invoke.mock.calls.filter(
     ([c, a]) =>
       c === "bulk_change" &&
       (a as { change: { plan_id: string | null } }).change.plan_id !== plan.id,
   );
-  expect(undoCalls).toHaveLength(3);
+  expect(undoCalls).toHaveLength(4);
   expect(undoCalls[1]?.[1]).toEqual(undoCalls[2]?.[1]);
+  expect(undoCalls[2]?.[1]).toEqual(undoCalls[3]?.[1]);
   expect(bridge.invoke.mock.calls.some(([c]) => c === "set_plan")).toBe(false);
 });
 

@@ -95,7 +95,7 @@ export function AddTicketsDialog({
         );
         statusLine.show({
           tone: "error",
-          message: `${restored} of ${chosen.length} tickets restored. ${failure.title}. Retry continues with the remaining tickets.`,
+          message: `${restored} of ${chosen.length} tickets confirmed restored. ${failure.title}. Retry continues with the remaining tickets.`,
           details: failure.details,
           action: { label: "Retry", run: undo },
         });
