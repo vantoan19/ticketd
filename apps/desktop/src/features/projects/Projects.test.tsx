@@ -112,6 +112,9 @@ test("copies a checkout path and the project ID, and shows the folder in the fil
 test("empty state explains and offers New project", () => {
   render(<Projects {...props} projects={[]} />);
   expect(screen.getByText(/No projects yet/)).toBeTruthy();
+  expect(
+    screen.getAllByText(/A project is a repository on this computer/),
+  ).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("dialog", { name: "New project" })).toBeTruthy();
 });

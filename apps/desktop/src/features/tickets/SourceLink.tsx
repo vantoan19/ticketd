@@ -42,6 +42,7 @@ export function SourceLink({
             statusLine.show({
               tone: "error",
               message: `${failure.title}. ${failure.sentence}`,
+              details: failure.details,
               action: { label: "Copy link", run: () => copy("Link", url) },
             });
           });

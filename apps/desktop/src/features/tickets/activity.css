@@ -1,20 +1,16 @@
+@import "../../components/ui/surface-roles/tickets-activity.css";
+
 .activity {
   display: flex;
   flex-direction: column;
   gap: 16px;
   margin-top: 40px;
 }
-.activity-muted {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .activity-author {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  white-space: nowrap;
 }
 .activity-author > :last-child {
   min-width: 0;
@@ -24,31 +20,13 @@
   content: "· ";
 }
 
-/* The update composer: one frame from the first frame (P16). Idle it is a
-   40px field; opened, the editor sits in the same frame with the controls
-   row under it, and the frame grows only downward as the text grows. */
+/* One 44px frame at rest and on focus; the shared composer Card owns its
+   visual anatomy while content and Details grow in place. */
 .activity-composer,
 .activity-edit {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
-}
-.activity-composer:focus-within,
-.activity-edit:focus-within {
-  outline: 1px solid var(--input-focus);
-  outline-offset: -1px;
-}
-.activity-composer .markdown-editor,
-.activity-edit .markdown-editor {
-  box-shadow: none;
-  background: transparent;
-}
-.activity-composer .markdown-editor:has(.rich-document:focus-visible),
-.activity-edit .markdown-editor:has(.rich-document:focus-visible) {
-  outline: none;
 }
 /* Long drafts scroll inside the frame from 40vh on. */
 .activity-composer .rich-document,
@@ -59,23 +37,18 @@
 .activity-composer-idle {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 44px;
+  justify-content: space-between;
   padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-panel);
-  background: transparent;
-  color: var(--disabled-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  text-align: start;
-  cursor: text;
 }
-.activity-composer-idle:focus-visible {
-  outline: none;
+.activity-composer-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
-.activity-composer:has(.activity-composer-idle:focus-visible) {
-  outline: 1px solid var(--input-focus);
-  outline-offset: -1px;
+.activity-composer-prompt svg {
+  width: 16px;
+  height: 16px;
 }
 /* The bottom row: "Draft saved" · controls · + · Discard · Post ⌘↵. */
 .activity-composer-row {
@@ -89,11 +62,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .activity-controls {
   display: inline-flex;
@@ -114,16 +83,12 @@
 }
 .activity-details {
   margin: 0 12px;
-  box-shadow: 0 -1px 0 var(--group-hairline);
 }
 .activity-details-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 .activity-details .rich-document {
   padding-inline: 0;
@@ -137,11 +102,6 @@
   margin: 0;
 }
 /* Expanded, an update reads at the document's reading size (frame B). */
-.ticket-detail[data-expanded] .activity-note,
-.ticket-detail[data-expanded] .activity-note :is(p, li) {
-  font-size: var(--text-reading);
-  line-height: 24px;
-}
 .ticket-detail[data-expanded] .activity {
   --text-editor: var(--text-reading);
   --text-editor-line: 24px;
@@ -158,33 +118,39 @@
    open, so the timeline is not a column of identical icons (DB-16). */
 .activity-row-actions {
   display: inline-flex;
-  visibility: hidden;
+  pointer-events: none;
 }
 .activity [data-slot="comment-row"]:hover .activity-row-actions,
 .activity [data-slot="comment-row"]:focus-within .activity-row-actions,
 .activity [data-slot="comment-row"][data-open] .activity-row-actions,
-.activity-row-actions:has([data-state="open"]) {
-  visibility: visible;
+.activity-row-actions:has([data-state="open"]),
+.activity-row-actions[data-retained] {
+  pointer-events: auto;
 }
 @media (hover: none) {
   .activity-row-actions {
-    visibility: visible;
+    pointer-events: auto;
   }
-}
-.activity-confirm-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
 }
 .activity-confirm-text {
   margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .activity-confirm-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* Editing controls float in the existing pane bar; focus never inserts a row. */
+.activity-composer {
+  min-height: 44px;
+}
+.activity-composer > .markdown-editor > .rich-document {
+  min-height: 44px;
+  padding-block: 12px;
+}
+
+.activity-composer > .markdown-editor .cm-content {
+  padding-block: 12px;
 }

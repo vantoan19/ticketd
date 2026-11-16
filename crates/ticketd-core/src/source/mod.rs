@@ -47,7 +47,8 @@ pub use schema::{
 pub(crate) use tracking::duplicate_target;
 pub use tracking::{
     DuplicateTarget, FailureScope, Origin, Ownership, RefreshFailure, RefreshOptions,
-    RefreshReport, SourceCounts, SourceFailure, SourceFilter, TargetProblem, TicketSource,
+    RefreshReport, SourceAvailability, SourceCounts, SourceFailure, SourceFilter, TargetProblem,
+    TicketSource,
 };
 
 use crate::{Error, Workspace, transaction_write_lock};
@@ -186,7 +187,9 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
     Ok(())
 }
 
-pub(crate) use tracking::{closure_held, guard_change, guard_duplicate, held_sql};
+pub(crate) use tracking::{
+    availability_projection, closure_held, guard_change, guard_duplicate, held_sql,
+};
 
 /// Fills the ticket's external side and any blocking publication attempt.
 pub(crate) fn populate(

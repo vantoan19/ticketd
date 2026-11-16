@@ -1,9 +1,12 @@
 "use client";
 
+import { searchMatch } from "@/lib/search-match";
+
 import * as React from "react";
-import { Command as CommandPrimitive } from "cmdk";
+import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { cn } from "cn";
 import { SearchIcon } from "lucide-react";
+import { Kbd } from "@/components/ui/kbd";
 
 import {
   Dialog,
@@ -15,18 +18,41 @@ import {
 
 function Command({
   className,
+  variant = "default",
+  children,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive>) {
+}: React.ComponentProps<typeof CommandPrimitive> & {
+  variant?: "default" | "palette";
+}) {
   return (
     <CommandPrimitive
       data-slot="command"
+      data-variant={variant}
       className={cn(
         "flex h-full w-full flex-col overflow-hidden rounded-md",
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+      <CommandActiveOption />
+    </CommandPrimitive>
   );
+}
+
+/** cmdk 1.1.1 can publish its selected id before React commits the selected row.
+ * Resolve the committed option for assistive technology, including on first open. */
+function CommandActiveOption() {
+  const value = useCommandState((state) => state.value);
+  const marker = React.useRef<HTMLSpanElement>(null);
+  React.useLayoutEffect(() => {
+    const root = marker.current?.closest("[cmdk-root]");
+    const input = root?.querySelector("[cmdk-input]");
+    const selected = root?.querySelector('[cmdk-item][aria-selected="true"]');
+    if (selected?.id) input?.setAttribute("aria-activedescendant", selected.id);
+    else input?.removeAttribute("aria-activedescendant");
+  }, [value]);
+  return <span ref={marker} hidden />;
 }
 
 function CommandDialog({
@@ -44,14 +70,14 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn("overflow-hidden p-0", className)}
         showCloseButton={showCloseButton}
       >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
         <Command className="**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           {children}
         </Command>
@@ -62,14 +88,20 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  escapeHint = false,
+  scope,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  escapeHint?: boolean;
+  scope?: React.ReactNode;
+}) {
   return (
     <div
       data-slot="command-input-wrapper"
       className="flex h-9 items-center gap-2 border-b px-3"
     >
-      <SearchIcon className="size-4 shrink-0 opacity-50" />
+      {!scope && <SearchIcon className="size-4 shrink-0 opacity-50" />}
+      {scope}
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
@@ -78,6 +110,7 @@ function CommandInput({
         )}
         {...props}
       />
+      {escapeHint && <Kbd aria-hidden="true">esc</Kbd>}
     </div>
   );
 }
@@ -166,6 +199,27 @@ function CommandItem({
   );
 }
 
+/** The same ordered-letter match drives filtering and visible emphasis. */
+function CommandMatch({ text, query }: { text: string; query: string }) {
+  const indices = new Set(searchMatch(text, query) ?? []);
+  const parts: { text: string; match: boolean }[] = [];
+  for (let index = 0; index < text.length; index++) {
+    const match = indices.has(index);
+    const last = parts.at(-1);
+    if (last && last.match === match) last.text += text[index];
+    else parts.push({ text: text[index]!, match });
+  }
+  return parts.map((part, index) =>
+    part.match ? (
+      <mark className="ui-command-match" key={index}>
+        {part.text}
+      </mark>
+    ) : (
+      part.text
+    ),
+  );
+}
+
 function CommandShortcut({
   className,
   ...props
@@ -191,5 +245,6 @@ export {
   CommandGroup,
   CommandItem,
   CommandShortcut,
+  CommandMatch,
   CommandSeparator,
 };

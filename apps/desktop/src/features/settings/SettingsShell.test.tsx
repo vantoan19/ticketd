@@ -135,7 +135,7 @@ const navItem = (name: string | RegExp) =>
     { name: typeof name === "string" ? new RegExp(`^${name}`) : name },
   );
 
-test("the nav lists the groups and sections in order; Experimental is said on Chat's page, not in the nav", async () => {
+test("the nav lists the groups and sections in order with Experimental on the Chat entry", async () => {
   render(<Settings />);
   await act(async () => {});
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
@@ -154,8 +154,13 @@ test("the nav lists the groups and sections in order; Experimental is said on Ch
     ["Connections", ["Google Drive"]],
     ["Help", ["Keyboard shortcuts", "About"]],
   ]);
-  expect(navItem(/^Chat/).textContent).not.toContain("Experimental");
-  expect(navItem("Appearance").getAttribute("aria-current")).toBe("page");
+  expect(navItem(/^Chat/).textContent).toContain("Experimental");
+  fireEvent.click(navItem(/^Chat/));
+  expect(screen.getByRole("heading", { level: 1, name: "Chat" })).toBeTruthy();
+  expect(
+    within(nav).queryByRole("button", { name: /^Experimental$/ }),
+  ).toBeNull();
+  expect(navItem(/^Chat/).getAttribute("aria-current")).toBe("page");
 });
 
 test("Automations is listed under Agents, after Chat, only while Chat is on", async () => {

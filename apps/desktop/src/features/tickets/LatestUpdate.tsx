@@ -77,15 +77,31 @@ export function LatestUpdate({
       }`
     : undefined;
   if (variant === "line") {
+    if (loading) return <Skeleton className="h-7 w-full" />;
+    if (error)
+      return (
+        <FailureState
+          size="inline"
+          failure={error}
+          onRetry={() => setRetry((n) => n + 1)}
+        />
+      );
     if (!update) return null;
     return (
-      <p className="latest-update-line" aria-label="Latest update">
+      <button
+        type="button"
+        className="latest-update-line"
+        aria-label={`Go to update: ${text}`}
+        aria-description={exact}
+        onClick={() => onOpen?.(update.activity_id)}
+      >
         <Icon aria-hidden="true" />
         {when}
         <span>{text}</span>
-      </p>
+      </button>
     );
   }
+
   return (
     <RailSection label="Latest update">
       {loading ? (

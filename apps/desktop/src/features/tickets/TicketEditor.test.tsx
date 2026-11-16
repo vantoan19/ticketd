@@ -56,7 +56,7 @@ async function autosave() {
 }
 async function editDescription() {
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    fireEvent.click(screen.getByRole("group", { name: "Read description" }));
     await import("@/features/markdown/MarkdownEditor");
   });
 }
@@ -156,7 +156,9 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   await autosave();
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   expect(screen.getByRole("heading", { name: "Xin chào" })).toBeTruthy();
-  expect(screen.getByRole("alert").textContent).toContain("Disk full");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The result couldn't be confirmed",
+  );
   expect(screen.getByRole("img", { name: "Done" })).toBeTruthy();
   rerender(
     <TicketEditor
@@ -259,7 +261,7 @@ test("focuses the description on entry and reentry for rich and source documents
       await vi.advanceTimersByTimeAsync(30);
     });
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Edit description" }),
+      screen.getByRole("group", { name: "Read description" }),
     );
     await editDescription();
     await act(async () => {
@@ -415,7 +417,7 @@ test("leaving edit mode does not bring the highlight back or scroll again", asyn
   expect(marked()).not.toBeNull();
   expect(scroller.scrollTop).toBe(300);
   scroller.scrollTop = 12;
-  fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+  fireEvent.click(screen.getByRole("group", { name: "Read description" }));
   await act(async () => {
     await import("@/features/markdown/MarkdownEditor");
   });
@@ -490,7 +492,7 @@ test("an empty description has one add affordance and keeps focus when editing e
   expect(
     screen.getByRole("button", { name: "Add a description…" }),
   ).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "Read description" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add a description…" }));
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   await waitFor(() =>
@@ -711,7 +713,7 @@ test("unsaved text survives a reload and is checked against the stored text", as
   expect(screen.getByText("Agent title")).toBeTruthy();
 });
 
-test("clicking the description text does not start editing; the Edit button does", () => {
+test("clicking the description starts editing in place", () => {
   render(
     <TicketEditor
       ticket={{ ...initial, body: "Some **text**" }}
@@ -719,6 +721,6 @@ test("clicking the description text does not start editing; the Edit button does
     />,
   );
   fireEvent.click(screen.getByText("Some"));
-  expect(screen.getByRole("button", { name: "Edit description" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "Read description" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Done editing" })).toBeTruthy();
 });

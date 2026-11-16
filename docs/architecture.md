@@ -656,6 +656,8 @@ Projects, Plans, Activities, tags, and trash/restore also need focused operation
 
 ## Writes and concurrent editing
 
+Desktop `create_ticket` submits initial content, status, project, Plan, tags, following and blocker references through the existing replayable `CreateTicketWithContent` operation. Its create and change use one Core batch/follow transaction. A failing blocker rolls back the complete creation and receipt. `blockers` is an optional mutation input, with default-empty and empty serialization omitted so legacy payload hashes and stored replay outcomes remain compatible; it adds no stored data.
+
 For each write, the core coordinates request-ID replay checks, validation against current data, persistence, history, and the saved request outcome. Changes and their successful request outcome commit together. Batches either commit completely or persist nothing.
 
 Record versions and stale-edit rejection are outside the MVP. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
@@ -886,6 +888,44 @@ graph queries. The desktop owns capture/editing state and graph presentation;
 the CLI exposes the same operations without coordinating their transactions.
 Explicit relationship tables remain authoritative. Shared entity identities
 support cross-type references while concrete records retain domain invariants.
+
+Desktop Plan islands compose bounded existing reads: `list_plans` accepts optional
+limit/offset, and `show_plan` accepts optional member/Document limit/offset and
+`include_members`. Legacy calls retain complete output. Graph summaries, sidebar
+progress and palette progress omit members. Full PlanCounts use a grouped count
+independently of those pages; Document reads return headings and identities,
+never Markdown.
+
+The existing `find_tickets_with_updates` command accepts optional `metadata` and
+`flow` projections. Both return validated subsets of existing Ticket fields,
+never partial objects presented as full Tickets. Metadata selects no body,
+Activity, hierarchy or relationship payload. Flow additionally selects at most
+50 prerequisites per Ticket, its existing update timestamp and source-availability
+fields. A 51st prerequisite marks the page omitted. Indexed adjacency is bounded
+before sorting the small result; availability uses an existence query instead of
+materializing every prerequisite status. Legacy full-Ticket output is unchanged.
+
+A graph window selects at most eight Plans, 240 island identities, 50 workspace
+candidates, 250 presented nodes and 600 edges before requesting work. Each Plan
+uses one bounded summary, at most two 100-Ticket metadata reads and one graph
+hydration. One shared filtered search reads at most five pages. One metadata read
+resolves at most 50 off-window Ticket memberships; a bounded Plan hydration
+supplies their island labels. A final hydration joins connections across all
+selected identities. Optional `node_limit` and `edge_limit` inputs on the existing
+graph query permit a 250/600 hydration window; legacy defaults remain 100/300.
+Core adjacency limits still bound each indexed relationship group, and every
+omission stays explicit. Client joins visit at most 3,000 connections per island
+and 3,000 in the final join (eight islands maximum). Client cursors retain the
+Plan/member/workspace window and its independent text/tag match continuation.
+Each filter window reads at most five workspace match pages shared by its Plans;
+Load more exhausts that match continuation before advancing the member window.
+A refresh hydrates all identities in the current window, up to 250, using its
+original cursor. It retains the current continuation, filters and selection.
+Load more replaces the window, and connection expansion reuses it. Missing hydration differs from deliberate omission. Unknown membership
+never implies an unplanned item. Flow and Next up require complete metadata and
+stop at 500 members or an omitted prerequisite page instead of classifying a
+partial set. These are projections and pagination controls over existing data;
+no stored field or schema changes.
 
 ## Inline attachment references
 

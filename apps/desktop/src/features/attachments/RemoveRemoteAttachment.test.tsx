@@ -161,6 +161,8 @@ test("remote removal is explicit, keeps a Drive link and retries the same reques
   );
   // The library is now empty, so Clean up is gone and Add files takes focus.
   await waitFor(() =>
-    expect(document.activeElement?.textContent).toBe("Add files"),
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Add files" }),
+    ),
   );
 });

@@ -12,6 +12,12 @@ import { plural } from "@/lib/format";
  * filters"), filled by `emptyCopy`.
  */
 const COPY = {
+  "workspace-first-run": {
+    title: "Your workspace is ready",
+    sentence:
+      "Tickets you and your agents create appear here. Everything stays on this computer unless you choose to sync it.",
+    action: "New ticket",
+  },
   "tickets-first-run": {
     title: "No tickets yet",
     sentence: "Tickets you create or import appear here.",
@@ -67,14 +73,11 @@ const COPY = {
   },
   "board-column": { title: "No tickets", sentence: "" },
   "board-column-filtered": { title: "No matches", sentence: "" },
-  "inbox-all": {
-    title: "No updates to review",
-    sentence: "Changes on tickets you follow appear here.",
-  },
-  "inbox-unread": {
+  "inbox-caught-up": {
     title: "You're all caught up",
-    sentence: "Read changes stay under All.",
-    action: "Show all",
+    sentence:
+      "Approvals, reviews and reminders land here first, then updates from your agents on tickets you follow.",
+    action: "Show read entries",
   },
   plans: {
     title: "No Plans yet",
@@ -148,6 +151,19 @@ const COPY = {
   "chats-archived": {
     title: "Archived Chats wait here until you unarchive them.",
     sentence: "",
+  },
+  automations: {
+    title: "No Automations yet",
+    sentence: "An Automation runs steps on your tickets for you.",
+  },
+  agents: {
+    title: "No agents yet",
+    sentence:
+      "An agent supplies the instructions and tools for an Automation step.",
+  },
+  "automation-runs": {
+    title: "No runs yet",
+    sentence: "Run an Automation to see its progress and history here.",
   },
   "settings-search": {
     title: "No settings match “{query}”",

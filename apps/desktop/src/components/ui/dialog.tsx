@@ -7,10 +7,48 @@ import { Button } from "@/components/ui/button";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useFocusReturn } from "@/components/ui/use-focus-return";
 
+type Invocation = { element: HTMLElement | null; rect: DOMRect | null };
+const DialogInvocation = React.createContext<Invocation | null>(null);
+
+function captureInvocation(): Invocation {
+  let element =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const menu = element?.closest("[role=menu]");
+  if (menu?.id) {
+    element =
+      [...document.querySelectorAll<HTMLElement>("[aria-controls]")].find(
+        (trigger) => trigger.getAttribute("aria-controls") === menu.id,
+      ) ?? element;
+  }
+  return {
+    element,
+    rect:
+      element && element !== document.body
+        ? element.getBoundingClientRect()
+        : null,
+  };
+}
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+  const [invocation, setInvocation] = React.useState(() => ({
+    open: Boolean(props.open),
+    origin: props.open ? captureInvocation() : null,
+  }));
+  if (Boolean(props.open) !== invocation.open) {
+    setInvocation({
+      open: Boolean(props.open),
+      origin: props.open ? captureInvocation() : invocation.origin,
+    });
+  }
+  return (
+    <DialogInvocation value={invocation.origin}>
+      <DialogPrimitive.Root data-slot="dialog" {...props} />
+    </DialogInvocation>
+  );
 }
 
 function DialogTrigger({
@@ -48,13 +86,20 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  overlay = true,
+  surface = "default",
+  expanded = false,
   variant = "default",
   size,
   returnFocus,
+  resolveReturnFocus,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  overlay?: boolean;
+  surface?: "default" | "create" | "capture";
+  expanded?: boolean;
   showCloseButton?: boolean;
   /**
    * `flush` drops the padding and gap so the content draws its own
@@ -65,23 +110,40 @@ function DialogContent({
    * DESIGN.md section 11: `sm` 480 (confirm), `md` 640 (form, picker), `lg`
    * 920 (review, compare), all anchored at max(48px, 12vh) so they grow
    * downward and never re-centre; `viewer` (the attachment preview only) is
-   * min(1120px, 100vw − 64) by min(800px, 100vh − 64), centred. Use
+   * min(1120px, 100vw − 64) wide and fits below its 96px top anchor. Use
    * DialogShell for every dialog but the viewer.
    */
-  size?: "sm" | "md" | "lg" | "viewer";
+  size?: "sm" | "md" | "lg" | "viewer" | "palette";
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
+  /** The current logical opener when responsive chrome replaced the original node. */
+  resolveReturnFocus?: () => HTMLElement | null;
 }) {
-  const focus = useFocusReturn(returnFocus, {
-    ...(onOpenAutoFocus && { onOpenAutoFocus }),
-    ...(onCloseAutoFocus && { onCloseAutoFocus }),
-  });
+  const invocation = React.useContext(DialogInvocation);
+  const focus = useFocusReturn(
+    returnFocus,
+    {
+      ...(onOpenAutoFocus && { onOpenAutoFocus }),
+      ...(onCloseAutoFocus && { onCloseAutoFocus }),
+    },
+    invocation?.element,
+    resolveReturnFocus,
+  );
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      {overlay && <DialogOverlay />}
       <DialogPrimitive.Content
+        ref={(panel) => {
+          const rect = invocation?.rect;
+          if (panel && rect && size !== "palette") {
+            const left = panel.offsetLeft - panel.offsetWidth / 2;
+            panel.style.transformOrigin = `${rect.left + rect.width / 2 - left}px ${rect.top + rect.height / 2 - panel.offsetTop}px`;
+          }
+        }}
         data-slot="dialog-content"
         data-size={size ?? "default"}
+        data-surface={surface}
+        data-expanded={expanded || undefined}
         className={cn(
           // Position and width come from data-size in styles.css.
           "ui-dialog fixed z-50 grid outline-none",

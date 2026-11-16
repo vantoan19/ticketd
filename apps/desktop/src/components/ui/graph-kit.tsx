@@ -178,6 +178,8 @@ export function GraphNodeCard({
   meta,
   trailing,
   title,
+  variant,
+  reason,
   selected = false,
   outside = false,
   className,
@@ -189,6 +191,8 @@ export function GraphNodeCard({
   meta?: string;
   trailing?: ReactNode;
   title: string;
+  variant?: "flow" | "workspace" | "chip";
+  reason?: string;
   selected?: boolean;
   outside?: boolean;
   ref?: Ref<HTMLButtonElement>;
@@ -201,6 +205,7 @@ export function GraphNodeCard({
       aria-label={
         [reference, title].filter(Boolean).join(" ") + (meta ? `, ${meta}` : "")
       }
+      data-variant={variant}
       data-slot="graph-node"
       data-selected={selected || undefined}
       data-outside={outside || undefined}
@@ -214,6 +219,7 @@ export function GraphNodeCard({
         {trailing && <span className="ui-graph-node-trailing">{trailing}</span>}
       </span>
       <span className="ui-graph-node-title">{title}</span>
+      {reason && <span className="ui-graph-node-reason">{reason}</span>}
     </button>
   );
 }
@@ -392,5 +398,58 @@ export function GraphPanelActions({
         </Button>
       )}
     </>
+  );
+}
+
+/** Flow uses the graph cards in three readable wells, without graph pan or zoom. */
+export function GraphFlowLane({
+  title,
+  caption,
+  children,
+}: {
+  title: string;
+  caption: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="ui-graph-flow-lane" aria-label={title}>
+      <header>
+        <h2>{title}</h2>
+        <span>{caption}</span>
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/** A Plan's well and selectable label; its members stay independent canvas cards. */
+export function GraphIsland({
+  title,
+  caption,
+  icon,
+  onSelect,
+}: {
+  title: string;
+  caption: string;
+  icon?: ReactNode;
+  onSelect: () => void;
+}) {
+  return (
+    <div className="ui-graph-island" data-unplanned={!caption || undefined}>
+      {caption ? (
+        <button type="button" onClick={onSelect}>
+          {icon}
+          {title}
+          {caption && (
+            <>
+              <span>·</span>
+              <span>{caption}</span>
+            </>
+          )}
+        </button>
+      ) : (
+        <span className="ui-graph-island-label">{title}</span>
+      )}
+    </div>
   );
 }

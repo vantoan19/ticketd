@@ -54,6 +54,44 @@ function EventRow({
   );
 }
 
+/** Consecutive recorded changes, folded without crossing an authored update. */
+function EventGroup({
+  icon: Icon,
+  summary,
+  time,
+  children,
+}: {
+  icon: LucideIcon;
+  summary: string;
+  time: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const id = React.useId();
+  return (
+    <li data-slot="event-group" className="ui-event-group">
+      <div className="ui-event-group-header">
+        <button
+          type="button"
+          className="ui-event-group-toggle"
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="ui-event-row-badge">
+            <Icon aria-hidden="true" />
+          </span>
+          <span className="ui-event-group-summary">{summary}</span>
+        </button>
+        <span className="ui-event-row-time">{time}</span>
+      </div>
+      <ol id={id} className="ui-event-group-details" hidden={!open}>
+        {open && children}
+      </ol>
+    </li>
+  );
+}
+
 /**
  * A comment or update on a `Timeline`, with no card: the badge sits on the
  * line, `header` names who and when, as an event row does, with `actions` at the
@@ -61,6 +99,7 @@ function EventRow({
  */
 function CommentRow({
   icon: Icon,
+  mark,
   header,
   actions,
   label,
@@ -69,6 +108,7 @@ function CommentRow({
   ...props
 }: Omit<React.ComponentProps<"li">, "children"> & {
   icon: LucideIcon;
+  mark?: React.ReactNode;
   header: React.ReactNode;
   actions?: React.ReactNode;
   label: string;
@@ -81,7 +121,7 @@ function CommentRow({
       {...props}
     >
       <span data-slot="event-row-badge" className="ui-event-row-badge">
-        <Icon aria-hidden="true" />
+        {mark ?? <Icon aria-hidden="true" />}
       </span>
       <article aria-label={label} className="ui-comment-row-main">
         <div className="ui-comment-row-header">
@@ -94,4 +134,4 @@ function CommentRow({
   );
 }
 
-export { Timeline, EventRow, CommentRow };
+export { Timeline, EventRow, EventGroup, CommentRow };

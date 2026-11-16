@@ -1,3 +1,4 @@
+import { ShellNoticeSlot } from "@/components/ui/list-header";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Check, ChevronDown, Menu, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ export function SettingsPage({
             variant="ghost"
             size="sm"
             className="-ml-2 min-w-0"
+            data-responsive-navigation="settings-navigation"
             aria-haspopup="dialog"
             aria-expanded={navOpen}
             aria-label={`${label}, Settings sections${setup ? ", a section needs setup" : ""}`}
@@ -88,7 +90,10 @@ export function SettingsPage({
             </ol>
           </nav>
         )}
-        {endSlot && <div className="settings-panel-bar-end">{endSlot}</div>}
+        <div className="settings-panel-bar-end">
+          <ShellNoticeSlot />
+          {endSlot}
+        </div>
       </div>
       <div className="settings-page-column">
         {header ? (

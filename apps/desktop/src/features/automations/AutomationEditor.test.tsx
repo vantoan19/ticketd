@@ -18,6 +18,7 @@ import type {
 } from "@/features/automations/client";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
+import { selectAutomationView } from "@/test/automation-navigation";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 window.ResizeObserver = class {
@@ -550,7 +551,7 @@ test("an Automation synced from another desktop is off here until it is turned o
 test("an agent used by a step cannot be deleted, and its menu names the Automation", async () => {
   agents = [{ ...TRIAGE, used_by: ["Triage new tickets"] }];
   await open();
-  fireEvent.click(screen.getByRole("radio", { name: /^Agents/ }));
+  await selectAutomationView("Agents");
   fireEvent.click(await screen.findByRole("button", { name: /Triage/ }));
   await screen.findByRole("region", { name: "Triage" });
 
@@ -600,8 +601,8 @@ test("the Runs view lists the Automation's runs by day, each with its ticket, st
   ];
   await openFirst([TRIAGE_TAGGED]);
 
-  // The list header has a Runs view too; the second is the Automation's own.
-  fireEvent.click(screen.getAllByRole("radio", { name: "Runs" })[1]!);
+  // The Automation's Steps/Runs control opens its history.
+  fireEvent.click(screen.getByRole("radio", { name: "Runs" }));
 
   const today = await screen.findByRole("list", { name: "Runs, Today" });
   expect(screen.queryByRole("application", { name: "Steps" })).toBeNull();
@@ -628,8 +629,8 @@ test("the Runs view lists the Automation's runs by day, each with its ticket, st
 test("an Automation that has not run yet says so", async () => {
   await openFirst([TRIAGE_TAGGED]);
 
-  // The list header has a Runs view too; the second is the Automation's own.
-  fireEvent.click(screen.getAllByRole("radio", { name: "Runs" })[1]!);
+  // The Automation's Steps/Runs control opens its history.
+  fireEvent.click(screen.getByRole("radio", { name: "Runs" }));
 
   await screen.findByText("No runs yet");
   expect(

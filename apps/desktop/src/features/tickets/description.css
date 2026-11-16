@@ -1,7 +1,6 @@
-/* The state row: one 32px line under the title. Reading, it holds the state
-   line, the save state and Edit · E; editing the description, it is the
-   session row (save state, formatting, Done). Its height never changes, so
-   nothing below it moves when editing starts or ends (P16). */
+@import "../../components/ui/surface-roles/tickets-description.css";
+
+/* The state line keeps its place while controls float outside the prose. */
 .ticket-state-row {
   display: flex;
   align-items: center;
@@ -9,6 +8,18 @@
   height: 32px;
   margin-top: 4px;
   min-width: 0;
+}
+/* A normal local Ticket has no duplicate timestamp row. Save feedback uses
+   the existing description gap, so a save never pushes the prose down. */
+.ticket-state-row[data-floating] {
+  position: relative;
+  height: 0;
+  margin-top: 0;
+}
+.ticket-state-row[data-floating] .editor-save-state {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 0;
 }
 .ticket-state-text {
   display: flex;
@@ -21,107 +32,55 @@
   margin: 0;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
-}
-.ticket-session-tools {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  min-width: 0;
-  margin-left: -8px;
 }
 .editor-save-state {
   flex: none;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
 }
 .editor-save-state:empty {
   display: none;
-}
-/* Editing: the save state leads the row, Done ends it. */
-.ticket-state-row[data-session] .editor-save-state {
-  order: -1;
-}
-.ticket-state-row > .ui-button:last-child {
-  flex: none;
-  margin-right: -8px;
 }
 .description-document {
   display: block;
   margin-top: 0;
   min-height: 48px;
-  text-align: left;
-  color: var(--foreground);
-  line-height: normal;
   overflow-wrap: anywhere;
 }
 .editor-body {
+  --text-editor: var(--text-doc);
+  --text-editor-line: var(--text-doc-line);
   margin-top: 16px;
-}
-.editor-body:focus {
-  outline: none;
-}
-.editor-body:focus-visible {
-  outline: 2px solid var(--ring);
 }
 /* Editing in place: the frame sits where the reading card sits, 12px
    outside the text, and reads at the same size, so no line moves (DS-01). */
-.editor-body .markdown-editor[data-chrome="session"] {
+.editor-body .markdown-editor[data-chrome="floating"] {
   margin: -4px -12px -12px;
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 .ticket-detail[data-expanded] .editor-body {
   --text-editor: var(--text-reading);
-  --text-editor-line: 24px;
+  --text-editor-line: var(--text-reading-line);
 }
 .ticket-detail[data-expanded]
   .editor-body
-  .markdown-editor[data-chrome="session"] {
-  margin-top: 8px;
+  .markdown-editor[data-chrome="floating"] {
+  margin-top: -4px;
   margin-bottom: 0;
 }
 /* The followed passage flashes once, as any arrival does (detA TT-04). */
-.description-document [data-mention-target] {
-  border-radius: var(--radius);
-  animation: arrival-flash var(--dur-arrival) var(--ease-out) var(--dur-3) both;
-}
-.description-document [data-mention-target]:focus {
-  outline: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .description-document [data-mention-target] {
-    animation: none;
-  }
-}
 .mention-missing {
   margin-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .editor-conflict {
   margin-top: 16px;
 }
 .editor-conflict-question {
   margin-right: auto;
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .conflict-block {
   margin-top: 12px;
 }
-.conflict-block-label {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  font-weight: 500;
-  line-height: 16px;
-}
 /* The draft beside the saved text: a neutral rule, not the focus colour (CO-03). */
 .conflict-draft {
   padding-left: 12px;
-  border-left: 2px solid var(--border);
 }
 
 .ticket-save-error {
@@ -133,15 +92,14 @@
 
 /* The reading card sits 12px outside the text on every side (frame A/B); the
    margins cancel the padding so the text does not move. Beside the list the
-   text sits 24px under the state row; expanded it sits 36px under it. */
+   text sits 24px under the preceding strip or source state row at either width. */
 .description-reading .description-document {
   margin: -4px -12px -12px;
   padding: 12px;
   min-height: 48px;
-  border-radius: var(--radius);
 }
 .ticket-detail[data-expanded] .description-reading .description-document {
-  margin-top: 8px;
+  margin-top: -4px;
   margin-bottom: 0;
 }
 .ticket-detail[data-expanded] .subtickets {
@@ -155,20 +113,9 @@
   height: 40px;
   margin: -4px -12px 0;
   padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--disabled-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  text-align: start;
-  cursor: text;
 }
-.description-add:hover {
-  background: var(--hover);
-  color: var(--muted-foreground);
-}
-.description-add:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
+
+.description-edit-control {
+  display: inline-flex;
+  max-width: 100%;
 }

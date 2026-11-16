@@ -375,6 +375,18 @@ fn an_outage_marks_tickets_unavailable_since_the_first_failure_and_keeps_everyth
     let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Todo);
     assert_eq!(ticket.title, "Issue 1");
+    let metadata = f
+        .workspace
+        .find_ticket_metadata(
+            &ticketd_core::TicketFilter::default(),
+            Some(std::slice::from_ref(&ticket.id)),
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&metadata.items[0].source.as_ref().unwrap().unavailable).unwrap(),
+        serde_json::to_value(&source.unavailable).unwrap()
+    );
 
     // A second failure keeps the original "since".
     f.refresh_at(T2);
@@ -386,6 +398,22 @@ fn an_outage_marks_tickets_unavailable_since_the_first_failure_and_keeps_everyth
     let source = f.source(1);
     assert!(source.unavailable.is_none() && source.last_error.is_none());
     assert_eq!(source.last_refreshed_at.as_deref(), Some(T3));
+    let metadata = f
+        .workspace
+        .find_ticket_metadata(
+            &ticketd_core::TicketFilter::default(),
+            Some(std::slice::from_ref(&ticket.id)),
+            true,
+        )
+        .unwrap();
+    assert!(
+        metadata.items[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .unavailable
+            .is_none()
+    );
 }
 
 #[test]

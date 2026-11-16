@@ -11,8 +11,8 @@ import { setPreference, usePreferences } from "@/lib/preferences";
 import "./display-menu.css";
 
 /**
- * How the ticket list looks: Layout (List or Board) and Rows (Detailed or
- * Simple). Both choices are remembered on this computer like every preference.
+ * How the ticket list looks: Layout (List or Board) and Rows (One line or
+ * Detailed). Both choices are remembered on this computer like every preference.
  */
 export function DisplayMenu({
   onError,
@@ -63,8 +63,8 @@ export function DisplayMenu({
                 );
             }}
             options={[
+              { value: "simple", label: "One line" },
               { value: "detailed", label: "Detailed" },
-              { value: "simple", label: "Simple" },
             ]}
           />
         </div>

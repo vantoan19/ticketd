@@ -1,0 +1,31 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.rail-files {
+  list-style: none;
+}
+.rail-file-open {
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: start;
+}
+.rail-file-open:hover {
+  background: var(--accent);
+}
+.rail-file-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.rail-file-open > svg {
+  color: var(--muted-foreground);
+}
+.rail-file-name {
+  white-space: nowrap;
+}
+.rail-file-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}

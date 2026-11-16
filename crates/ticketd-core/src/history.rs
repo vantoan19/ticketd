@@ -125,25 +125,22 @@ pub(crate) fn availability(
     status: Status,
     trashed: bool,
 ) -> Result<Option<String>, Error> {
-    let mut statement = connection.prepare(
-        "SELECT b.status FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = ?1",
+    let unresolved: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = ?1 AND b.status <> 'Done')",
+        [id], |row| row.get(0),
     )?;
-    let blockers = statement
-        .query_map([id], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .map(|status| status.parse::<Status>())
-        .collect::<Result<Vec<_>, _>>()?;
     // A ticket whose issue the source closed for an unrecognized reason awaits a
     // local decision; it is neither Ready nor Blocked.
     if crate::source::closure_held(connection, id)? {
         return Ok(None);
     }
-    Ok(match readiness(status, trashed, blockers) {
-        Readiness::Ready => Some("Ready".into()),
-        Readiness::Blocked => Some("Blocked".into()),
-        Readiness::NoReadyState => None,
-    })
+    Ok(
+        match readiness(status, trashed, unresolved.then_some(Status::Todo)) {
+            Readiness::Ready => Some("Ready".into()),
+            Readiness::Blocked => Some("Blocked".into()),
+            Readiness::NoReadyState => None,
+        },
+    )
 }
 
 /// The blockers, with their statuses, that do not satisfy a dependency.

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { sourcesClient } from "@/lib/api/sources";
 import {
   describeFailure,
-  sentence,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 
@@ -24,14 +23,14 @@ export function useTicketRefresh(
       const report = await sourcesClient.refresh(reference);
       const first = report.failures[0];
       if (first) {
-        // The source's own sentence is written for people; it says what failed there.
+        // Source reports retain transport diagnostics; only shared public copy is shown.
         const described = describeFailure(
           { code: first.code, message: first.message },
           `refresh ${reference}`,
         );
         setFailure({
           ...described,
-          sentence: `${sentence(first.message)} Saved content is unchanged.`,
+          sentence: `${described.sentence} Saved content is unchanged.`,
         });
       }
       await refresh();

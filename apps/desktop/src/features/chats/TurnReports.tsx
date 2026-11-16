@@ -235,19 +235,28 @@ export function PlanPill({ item }: { item: ItemOf<"plan"> }) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        {/* A full-width row under the response, not a Button variant (DESIGN: plan pill). */}
+        {/* An intrinsic-width summary in the dock (DESIGN: plan pill). */}
         <button
           type="button"
           className="chat-plan-pill"
           aria-expanded={open}
           onMouseDown={(event) => event.preventDefault()}
         >
-          <ListTodo size={16} aria-hidden />
+          <span className="chat-plan-pill-icon" aria-hidden="true">
+            <ListTodo className="chat-plan-pill-mark" />
+            <Chevron open={open} />
+          </span>
           <span className="chat-plan-pill-count" aria-live="polite">
             {count.text}
           </span>
-          {now && <span className="chat-plan-pill-now">· {now}</span>}
-          <Chevron open={open} />
+          {now && (
+            <>
+              <span className="chat-plan-pill-separator" aria-hidden="true">
+                ·
+              </span>
+              <span className="chat-plan-pill-now">{now}</span>
+            </>
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent

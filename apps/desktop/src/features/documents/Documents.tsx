@@ -1,17 +1,43 @@
 import { emptyCopy } from "@/lib/empty-copy";
 import { PaneHeader } from "@/components/ui/list-header";
 import { Count } from "@/components/ui/count";
-import { SearchInput } from "@/components/ui/search-input";
+import { NavigatorSearch } from "@/components/ui/navigator";
+import { focusNavigatorRow } from "@/lib/navigator";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Pager } from "@/components/ui/pager";
 import { IconButton } from "@/components/ui/icon-button";
+import { Tooltip } from "@/components/ui/tooltip";
+import { Item } from "@/components/ui/item";
+import { compactAgo, formatDateTime } from "@/lib/format";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
 import { Badge, FilterChip } from "@/components/ui/badge";
 import { ContextGraphNavigation } from "./navigation";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Clock, FileText, Pin, Plus, SearchX, Tag, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Clock,
+  FileText,
+  Pin,
+  Plus,
+  Search,
+  SearchX,
+  Tag,
+  Trash2,
+} from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import {
@@ -28,24 +54,6 @@ import { DocumentEditor } from "./DocumentEditor";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./documents.css";
 
-/** Today and Yesterday read naturally; anything older is a short calendar date. */
-function relativeDate(value: string | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const days = Math.round(
-    (new Date().setHours(0, 0, 0, 0) - new Date(date).setHours(0, 0, 0, 0)) /
-      86_400_000,
-  );
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-}
 /**
  * Every page from the first up to `offset`, in order: "Show 50 more" appends
  * a page instead of replacing the list (P17).
@@ -79,6 +87,12 @@ function highlight(text: string, query: string) {
   return parts;
 }
 
+export type DocumentCommands = {
+  search: () => void;
+  pin: (() => void) | null;
+  pinned: boolean;
+};
+
 export function Documents({
   capture,
   active,
@@ -91,7 +105,9 @@ export function Documents({
   onDocumentClose,
   listRequest,
   backLabel = "Back to Documents",
+  onCommandsChange,
 }: {
+  onCommandsChange?: (commands: DocumentCommands | null) => void;
   /** Names where the reader's Back button goes: the list, or the ticket it was opened from. */
   backLabel?: string;
   capture: boolean;
@@ -107,6 +123,41 @@ export function Documents({
   listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
+  const [readerCloseRequest, setReaderCloseRequest] = useState(0);
+  const page = useRef<HTMLDivElement>(null);
+  const navigator = useRef<HTMLDivElement>(null);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const restoreSearchFocus = useRef(false);
+  useEffect(() => {
+    if (!searchOpen && restoreSearchFocus.current) {
+      restoreSearchFocus.current = false;
+      searchTrigger.current?.focus();
+    }
+  }, [searchOpen]);
+  const [contexts, setContexts] = useState<Record<string, string | null>>({});
+  const [focusedRow, setFocusedRow] = useState<string | null>(null);
+  const [groupPins, setGroupPins] = useState<DocumentSummary[]>([]);
+  const engaged = useRef(false);
+  const pendingBrowse = useRef<{
+    recent: DocumentSummary[];
+    pins: DocumentSummary[];
+  } | null>(null);
+  const releaseBrowse = (
+    nextFocus: EventTarget | null = document.activeElement,
+  ) => {
+    if (
+      engaged.current ||
+      (nextFocus instanceof Node && navigator.current?.contains(nextFocus))
+    )
+      return;
+    const pending = pendingBrowse.current;
+    if (pending) {
+      setRecent(pending.recent);
+      setGroupPins(pending.pins);
+      pendingBrowse.current = null;
+    }
+  };
   const [recent, setRecent] = useState<DocumentSummary[]>([]);
   const [pins, setPins] = useState<DocumentSummary[]>([]);
   const [trash, setTrash] = useState<DocumentSummary[]>([]);
@@ -117,6 +168,61 @@ export function Documents({
   const [allOffset, setAllOffset] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
+  // Reader identity and failure outlive unrelated successful navigator reads.
+  const [opening, setOpening] = useState<{
+    id: string;
+    failure: FailureDescription | null;
+  } | null>(null);
+  const openGeneration = useRef(0);
+  const loadReader = useCallback((id: string) => {
+    const request = ++openGeneration.current;
+    setOpening({ id, failure: null });
+    setSelected(null);
+    return Promise.all([documents.open(id), documents.tags(id)]).then(
+      ([doc, values]) => {
+        if (request !== openGeneration.current) return false;
+        setSelected(doc);
+        setTags(values);
+        setOpening(null);
+        setReaderError(null);
+        return true;
+      },
+      (reason: unknown) => {
+        if (request === openGeneration.current)
+          setOpening({
+            id,
+            failure: describeFailure(reason, "open the Document"),
+          });
+        return false;
+      },
+    );
+  }, []);
+  useEffect(() => {
+    if (!active || (!selected && !opening)) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !matchesShortcut(event, "close")) return;
+      if (
+        document.querySelector(
+          '[role="dialog"], [role="menu"], [role="listbox"]',
+        )
+      )
+        return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, [contenteditable]")
+      )
+        return;
+      if (page.current?.querySelector('[aria-label="Edit controls"]')) return;
+      event.preventDefault();
+      if (opening) {
+        openGeneration.current++;
+        setOpening(null);
+        onDocumentClose?.();
+      } else setReaderCloseRequest((value) => value + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, selected, opening, onDocumentClose]);
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [addingTag, setAddingTag] = useState(false);
@@ -158,54 +264,94 @@ export function Documents({
   // outside Trash, so nothing moves.
   const [restored, setRestored] = useState<DocumentSummary | null>(null);
   // The Trash row whose Restore takes focus once the list reloads.
-  const focusAfterRestore = useRef<number | null>(null);
+  const focusAfterRestore = useRef<{
+    index: number;
+    request: number;
+    origin: Element | null;
+  } | null>(null);
+  const trashGeneration = useRef(0);
+  const appliedTrashGeneration = useRef(0);
   const trashList = useRef<HTMLElement>(null);
   const restoredOpen = useRef<HTMLButtonElement>(null);
   // Only mention hidden Activity details when including them would actually find something.
   const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
   const refresh = useCallback(() => {
-    void Promise.all([
+    return Promise.all([
       upTo(recentOffset, (at) => documents.recent(at, includeSupport)),
       upTo(pinOffset, (at) => documents.pins(at)),
     ])
       .then(([r, p]) => {
-        setRecent(r);
         setPins(p);
+        if (
+          navigator.current?.querySelector("[data-document-row]") &&
+          (engaged.current ||
+            navigator.current?.contains(document.activeElement))
+        ) {
+          pendingBrowse.current = { recent: r, pins: p };
+        } else {
+          setRecent(r);
+          setGroupPins(p);
+        }
         setBrowseLoaded(true);
         setListError(null);
       })
       .catch((reason: unknown) => failLoad(reason, "Documents"));
   }, [recentOffset, pinOffset, includeSupport, failLoad]);
   const loadTrash = useCallback(
-    () =>
+    (focus?: { index: number; origin: Element | null }) => {
+      const request = ++trashGeneration.current;
+      // A newer post-Restore read may supersede this one; only the latest read
+      // can apply the list and complete that action's pending focus.
+      if (focus) focusAfterRestore.current = { ...focus, request };
+      else if (focusAfterRestore.current)
+        focusAfterRestore.current.request = request;
       void upTo(trashOffset, (at) => documents.trash(at))
         .then((items) => {
+          if (request !== trashGeneration.current) return;
+          appliedTrashGeneration.current = request;
           setTrash(items);
           setTrashLoaded(true);
           setListError(null);
         })
-        .catch((reason: unknown) => failLoad(reason, "Trash")),
+        .catch((reason: unknown) => {
+          if (request === trashGeneration.current) failLoad(reason, "Trash");
+        });
+    },
     [trashOffset, failLoad],
   );
   useEffect(() => {
     if (!active || !showTrash) return;
+    const readGeneration = trashGeneration;
     loadTrash();
+    return () => {
+      readGeneration.current++;
+    };
     // `attempt` reloads after Retry.
   }, [active, showTrash, loadTrash, changeVersion, attempt]);
   useEffect(() => {
-    const index = focusAfterRestore.current;
-    if (index === null) return;
+    const focus = focusAfterRestore.current;
+    if (!active || !showTrash) {
+      focusAfterRestore.current = null;
+      return;
+    }
+    if (!focus || focus.request !== appliedTrashGeneration.current) return;
     focusAfterRestore.current = null;
-    // The row that took the restored one's place, else the one above, else Open.
+    // A deliberate focus move while the read was pending wins. Removing the
+    // original row naturally sends focus to body and still needs recovery.
+    if (
+      document.activeElement !== focus.origin &&
+      !(document.activeElement === document.body && !focus.origin?.isConnected)
+    )
+      return;
     const buttons = [
       ...(trashList.current?.querySelectorAll<HTMLButtonElement>(
         "[data-restore]",
       ) ?? []),
     ];
     (
-      buttons[Math.min(index, buttons.length - 1)] ?? restoredOpen.current
+      buttons[Math.min(focus.index, buttons.length - 1)] ?? restoredOpen.current
     )?.focus();
-  }, [trash]);
+  }, [trash, active, showTrash]);
   useEffect(() => {
     if (!active || view !== "all") return;
     const load = () =>
@@ -227,16 +373,16 @@ export function Documents({
     failLoad,
   ]);
   useEffect(() => {
-    if (target)
-      void Promise.all([documents.open(target.id), documents.tags(target.id)])
-        .then(([doc, values]) => {
-          setSelected(doc);
-          setTags(values);
-          setListError(null);
-          setReaderError(null);
-        })
-        .catch((reason: unknown) => failLoad(reason, "the Document"));
-  }, [target, attempt, failLoad]);
+    openGeneration.current++;
+    setOpening(null);
+  }, [listRequest]);
+  useEffect(() => {
+    const generation = openGeneration;
+    if (target) void loadReader(target.id);
+    return () => {
+      generation.current++;
+    };
+  }, [target, loadReader]);
   useEffect(() => {
     if (!active) return;
     refresh();
@@ -301,21 +447,9 @@ export function Documents({
   }, [active, includeSupport, noVisible, query, filter, probeKey]);
   const hiddenMatches = hiddenProbe.key === probeKey && hiddenProbe.found;
   const open = (id: string) => {
-    void Promise.all([documents.open(id), documents.tags(id)])
-      .then(([doc, values]) => {
-        setSelected(doc);
-        setTags(values);
-        setListError(null);
-        setReaderError(null);
-        refresh();
-      })
-      .catch((reason: unknown) =>
-        setListError({
-          failure: describeFailure(reason, "open the Document"),
-          kind: "action",
-          retry: () => open(id),
-        }),
-      );
+    void loadReader(id).then((opened) => {
+      if (opened) void refresh();
+    });
   };
   /** Runs a list action; a failure shows beside the list with Retry. */
   const listAction = (action: string, change: () => Promise<unknown>) =>
@@ -336,20 +470,115 @@ export function Documents({
       }),
     );
   };
-  const restore = (doc: DocumentSummary, index: number) =>
+  const restore = (doc: DocumentSummary, index: number) => {
+    const origin = document.activeElement;
     listAction(`restore ${doc.heading}`, () =>
       documents.setTrashed(doc.id, false, crypto.randomUUID()).then(() => {
         setRestored(doc);
-        focusAfterRestore.current = index;
-        loadTrash();
-        refresh();
+        loadTrash({ index, origin });
+        void refresh();
       }),
     );
+  };
+  const searching = Boolean(query.trim() || filter.trim());
+  const visibleRows = showTrash
+    ? trash
+    : searching
+      ? results
+      : view === "all"
+        ? all
+        : [
+            ...groupPins,
+            ...recent.filter(
+              (doc) => !groupPins.some((pin) => pin.id === doc.id),
+            ),
+          ];
+  const visibleIds = visibleRows.map((doc) => doc.id).join(",");
+  useEffect(() => {
+    if (!active || !visibleIds) return;
+    let current = true;
+    void Promise.all(
+      visibleIds.split(",").map(async (id) => {
+        try {
+          const links = await documents.links(id);
+          const plan = links
+            .flat()
+            .find(
+              (link) =>
+                (link.source_kind === "plan" || link.target_kind === "plan") &&
+                !link.passage,
+            );
+          if (!plan) return [id, ""] as const;
+          const label =
+            plan.source_kind === "plan" ? plan.source_label : plan.target_label;
+          return [id, plan.explicit ? label : `Spec of ${label}`] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (current) setContexts(Object.fromEntries(entries));
+    });
+    return () => {
+      current = false;
+    };
+  }, [active, visibleIds, changeVersion]);
+  const tabRow =
+    visibleRows.find((doc) => doc.id === focusedRow)?.id ??
+    visibleRows.find((doc) => doc.id === selected?.id)?.id ??
+    visibleRows[0]?.id;
+  const commandId =
+    visibleRows.find((doc) => doc.id === focusedRow)?.id ??
+    selected?.id ??
+    null;
+  const commandPinned = pins.some((doc) => doc.id === commandId);
+  const searchCommand = useCallback(() => {
+    setSearchOpen(true);
+    setView((current) => (current === "trash" ? "recent" : current));
+    queueMicrotask(() =>
+      navigator.current
+        ?.querySelector<HTMLInputElement>("input[type=search]")
+        ?.focus(),
+    );
+  }, []);
+  const pinCommand = useCallback(
+    function pinDocument() {
+      if (!commandId) return;
+      void documents
+        .pin(commandId, !commandPinned)
+        .then(refresh)
+        .catch((reason: unknown) =>
+          setListError({
+            failure: describeFailure(reason, "pin the Document"),
+            kind: "action",
+            retry: pinDocument,
+          }),
+        );
+    },
+    [commandId, commandPinned, refresh],
+  );
+  const commands = useMemo<DocumentCommands>(
+    () => ({
+      search: searchCommand,
+      pin:
+        commandId &&
+        !showTrash &&
+        !(selected?.id === commandId && selected.trashed)
+          ? pinCommand
+          : null,
+      pinned: commandPinned,
+    }),
+    [searchCommand, pinCommand, commandId, showTrash, selected, commandPinned],
+  );
+  useEffect(() => {
+    onCommandsChange?.(active ? commands : null);
+    return () => onCommandsChange?.(null);
+  }, [active, commands, onCommandsChange]);
   const list = (items: DocumentSummary[], mark = "", inTrash = false) => (
     <ul className="document-list">
       {items.map((doc, index) => {
         const pinned = pins.some((p) => p.id === doc.id);
-        const date = relativeDate(doc.updated_at);
+        const date = doc.updated_at ? compactAgo(doc.updated_at) : "";
         const snippet =
           mark && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
@@ -357,86 +586,155 @@ export function Documents({
         return (
           // A row at ticket density (DL-06): the title, then one meta line
           // (origin, tags, date); the snippet only in search results.
-          <li
-            key={doc.id}
-            data-open={selected?.id === doc.id || undefined}
-            data-pinned={pinned || undefined}
-          >
-            <FileText aria-hidden="true" className="document-list-kind" />
-            <div className="document-list-content">
-              <button
-                type="button"
-                className="document-list-open"
-                aria-current={selected?.id === doc.id || undefined}
-                onClick={() => open(doc.id)}
-              >
-                <span className="truncate">{doc.heading}</span>
-              </button>
-              <p className="document-list-meta">
-                {doc.origin_ticket && (
-                  <span className="document-origin">
-                    Update details · {doc.origin_ticket}
-                  </span>
+          <Item asChild variant="navigator" key={doc.id}>
+            <li
+              data-open={selected?.id === doc.id || undefined}
+              data-pinned={pinned || undefined}
+            >
+              <FileText aria-hidden="true" className="document-list-kind" />
+              <div className="document-list-content">
+                <button
+                  type="button"
+                  className="document-list-open"
+                  aria-current={selected?.id === doc.id || undefined}
+                  data-document-row={doc.id}
+                  tabIndex={tabRow === doc.id ? 0 : -1}
+                  onFocus={() => setFocusedRow(doc.id)}
+                  aria-keyshortcuts={
+                    ariaKeyShortcuts("documents-move") + " Enter"
+                  }
+                  onKeyDown={(event) => {
+                    if (matchesShortcut(event, "documents-move")) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const rows = [
+                        ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
+                          "[data-document-row]",
+                        ) ?? []),
+                      ];
+                      focusNavigatorRow(rows, event.currentTarget, event.key);
+                    } else if (
+                      matchesShortcut(event, "documents-pin") &&
+                      !inTrash
+                    ) {
+                      event.preventDefault();
+                      listAction(
+                        `${pinned ? "unpin" : "pin"} ${doc.heading}`,
+                        () => documents.pin(doc.id, !pinned).then(refresh),
+                      );
+                    } else if (matchesShortcut(event, "documents-time")) {
+                      event.preventDefault();
+                      event.currentTarget
+                        .closest("li")
+                        ?.querySelector<HTMLElement>("time")
+                        ?.focus();
+                    } else if (event.key === "Enter") {
+                      event.preventDefault();
+                      open(doc.id);
+                    }
+                  }}
+                  onClick={() => open(doc.id)}
+                >
+                  <span className="truncate">{doc.heading}</span>
+                </button>
+                <p className="document-list-meta">
+                  {contexts[doc.id] ? (
+                    <span>{contexts[doc.id]}</span>
+                  ) : (
+                    !doc.origin_ticket &&
+                    !doc.tags?.length && (
+                      <span>
+                        {contexts[doc.id] === null
+                          ? "Links unavailable"
+                          : contexts[doc.id] === undefined
+                            ? "Loading links…"
+                            : "Not linked"}
+                      </span>
+                    )
+                  )}
+                  {doc.origin_ticket && (
+                    <span className="document-origin">
+                      Update details · {doc.origin_ticket}
+                    </span>
+                  )}
+                  {doc.tags?.map((tag) => (
+                    <Badge key={tag} size="sm" asChild>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label={`Show Documents tagged ${tag}`}
+                        onClick={() => {
+                          setFilter(tag);
+                          setOffset(0);
+                        }}
+                      >
+                        {tag}
+                      </button>
+                    </Badge>
+                  ))}
+                </p>
+                {snippet && (
+                  <p className="document-snippet">{highlight(snippet, mark)}</p>
                 )}
-                {doc.tags?.map((tag) => (
-                  <Badge key={tag} size="sm" asChild>
-                    <button
-                      type="button"
-                      aria-label={`Show Documents tagged ${tag}`}
-                      onClick={() => {
-                        setFilter(tag);
-                        setOffset(0);
-                      }}
-                    >
-                      {tag}
-                    </button>
-                  </Badge>
-                ))}
-                {date && (
+              </div>
+              {date && doc.updated_at && (
+                <Tooltip content={formatDateTime(doc.updated_at)}>
                   <time
                     className="document-list-date"
                     dateTime={doc.updated_at}
+                    tabIndex={-1}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" || event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.currentTarget
+                          .closest("li")
+                          ?.querySelector<HTMLButtonElement>(
+                            "[data-document-row]",
+                          )
+                          ?.focus();
+                      }
+                    }}
                   >
                     {date}
                   </time>
-                )}
-              </p>
-              {snippet && (
-                <p className="document-snippet">{highlight(snippet, mark)}</p>
+                </Tooltip>
               )}
-            </div>
-            {inTrash ? (
-              <Button
-                variant="outline"
-                size="sm"
-                data-restore
-                aria-label={`Restore ${doc.heading}`}
-                onClick={() => restore(doc, index)}
-              >
-                Restore
-              </Button>
-            ) : (
-              <span className="document-list-pin">
-                <IconButton
-                  label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
-                  aria-pressed={pinned}
-                  onClick={() =>
-                    listAction(
-                      `${pinned ? "unpin" : "pin"} ${doc.heading}`,
-                      () => documents.pin(doc.id, !pinned).then(refresh),
-                    )
-                  }
+              {inTrash ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-restore
+                  tabIndex={-1}
+                  aria-label={`Restore ${doc.heading}`}
+                  onClick={() => restore(doc, index)}
                 >
-                  <Pin fill={pinned ? "currentColor" : "none"} />
-                </IconButton>
-              </span>
-            )}
-          </li>
+                  Restore
+                </Button>
+              ) : (
+                <span className="document-list-pin">
+                  <IconButton
+                    tabIndex={-1}
+                    label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
+                    shortcut={shortcutLabel("documents-pin")}
+                    aria-pressed={pinned}
+                    onClick={() =>
+                      listAction(
+                        `${pinned ? "unpin" : "pin"} ${doc.heading}`,
+                        () => documents.pin(doc.id, !pinned).then(refresh),
+                      )
+                    }
+                  >
+                    <Pin fill={pinned ? "currentColor" : "none"} />
+                  </IconButton>
+                </span>
+              )}
+            </li>
+          </Item>
         );
       })}
     </ul>
   );
-  const searching = Boolean(query.trim() || filter.trim());
   const shownCount = showTrash
     ? trash.length
     : searching
@@ -444,22 +742,100 @@ export function Documents({
       : view === "all"
         ? all.length
         : recent.length;
+  const countKnown = showTrash
+    ? trashLoaded
+    : searching
+      ? searchKey === JSON.stringify([query, filter, offset, includeSupport])
+      : view === "all"
+        ? allLoaded
+        : browseLoaded;
   return (
     <div
       className="documents-page"
-      data-reading={selected !== null || undefined}
+      data-reading={selected !== null || opening !== null || undefined}
+      ref={page}
     >
-      <div className="documents-list-view">
+      <div
+        className="documents-list-view"
+        ref={navigator}
+        onPointerEnter={() => {
+          engaged.current = true;
+        }}
+        onPointerLeave={() => {
+          engaged.current = false;
+          releaseBrowse();
+        }}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget))
+            releaseBrowse(event.relatedTarget);
+        }}
+        onKeyDown={(event) => {
+          if (
+            matchesShortcut(event, "documents-search") &&
+            !(
+              event.target instanceof HTMLElement &&
+              event.target.closest("input, textarea, [contenteditable]")
+            )
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            searchCommand();
+          }
+        }}
+        onKeyDownCapture={(event) => {
+          if (event.key === "Escape" && searchOpen) {
+            event.preventDefault();
+            event.stopPropagation();
+            setSearchOpen(false);
+            setQuery("");
+            setOffset(0);
+            restoreSearchFocus.current = true;
+          }
+        }}
+      >
         <PaneHeader
           title="Documents"
-          count={<Count>{shownCount}</Count>}
+          count={countKnown ? <Count>{shownCount}</Count> : undefined}
+          titleEditor={
+            searchOpen ? (
+              <NavigatorSearch
+                aria-label="Search Documents"
+                placeholder="Search Documents…"
+                value={query}
+                onValueChange={(value) => {
+                  setQuery(value);
+                  setOffset(0);
+                }}
+              />
+            ) : undefined
+          }
           actions={
-            onCapture && (
-              <Button size="sm" onClick={onCapture}>
-                <Plus aria-hidden="true" />
-                New Document
-              </Button>
-            )
+            <>
+              {!searchOpen && (
+                <IconButton
+                  ref={searchTrigger}
+                  label="Search Documents"
+                  shortcut={shortcutLabel("documents-search")}
+                  aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
+                  onClick={() => {
+                    setSearchOpen(true);
+                    if (showTrash) setView("recent");
+                  }}
+                >
+                  <Search />
+                </IconButton>
+              )}
+              {onCapture && (
+                <IconButton
+                  label="New Document"
+                  shortcut={shortcutLabel("capture")}
+                  aria-keyshortcuts={ariaKeyShortcuts("capture")}
+                  onClick={onCapture}
+                >
+                  <Plus />
+                </IconButton>
+              )}
+            </>
           }
         />
         {/* One toolbar in every view: it never collapses or moves (DL-01, DL-02). */}
@@ -481,33 +857,6 @@ export function Documents({
               { value: "trash", label: "Trash" },
             ]}
           />
-          <SearchInput
-            aria-label="Search Documents"
-            placeholder="Search Documents…"
-            disabled={showTrash}
-            value={query}
-            onValueChange={(value) => {
-              setQuery(value);
-              setOffset(0);
-            }}
-          />
-          <label
-            className="documents-include"
-            data-hidden={showTrash || undefined}
-          >
-            <Switch
-              aria-label="Show update details"
-              checked={includeSupport}
-              disabled={showTrash}
-              onCheckedChange={(checked) => {
-                setIncludeSupport(checked);
-                setOffset(0);
-                setRecentOffset(0);
-                setAllOffset(0);
-              }}
-            />
-            Show update details
-          </label>
         </div>
         {filter.trim() && (
           <div className="documents-filters">
@@ -535,14 +884,14 @@ export function Documents({
             </Button>
           </p>
         )}
-        {listError?.kind === "action" && (
+        {listError && (listError.kind === "action" || countKnown) && (
           <FailureAlert
             size="compact"
             failure={listError.failure}
             onRetry={listError.retry}
           />
         )}
-        {listError?.kind === "load" ? (
+        {listError?.kind === "load" && !countKnown ? (
           <FailureState failure={listError.failure} onRetry={listError.retry} />
         ) : showTrash ? (
           <section ref={trashList} aria-label="Trash">
@@ -611,14 +960,14 @@ export function Documents({
           </section>
         ) : (
           <>
-            {view === "recent" && pins.length > 0 && (
+            {view === "recent" && groupPins.length > 0 && (
               <section aria-label="Pinned">
                 <h2 className="documents-group">
                   <Pin aria-hidden="true" />
                   Pinned
-                  <Count>{pins.length}</Count>
+                  <Count>{groupPins.length}</Count>
                 </h2>
-                {list(pins)}
+                {list(groupPins)}
                 {pins.length >= pinOffset + 50 && (
                   <Pager
                     noun="pinned Documents"
@@ -654,10 +1003,17 @@ export function Documents({
               </section>
             ) : (
               <section aria-label="Recently opened">
-                {pins.length > 0 && (
+                {groupPins.length > 0 && (
                   <h2 className="documents-group">
                     <Clock aria-hidden="true" />
                     Recent
+                    <Count>
+                      {
+                        recent.filter(
+                          (doc) => !groupPins.some((pin) => pin.id === doc.id),
+                        ).length
+                      }
+                    </Count>
                   </h2>
                 )}
                 {!browseLoaded ? (
@@ -676,7 +1032,9 @@ export function Documents({
                   )
                 )}
                 {list(
-                  recent.filter((doc) => !pins.some((p) => p.id === doc.id)),
+                  recent.filter(
+                    (doc) => !groupPins.some((p) => p.id === doc.id),
+                  ),
                 )}
                 {recent.length >= recentOffset + 50 && (
                   <Pager
@@ -688,7 +1046,54 @@ export function Documents({
             )}
           </>
         )}
+        <label
+          className="documents-include"
+          data-hidden={showTrash || undefined}
+        >
+          <Switch
+            aria-label="Show update details"
+            checked={includeSupport}
+            disabled={showTrash}
+            onCheckedChange={(checked) => {
+              setIncludeSupport(checked);
+              setOffset(0);
+              setRecentOffset(0);
+              setAllOffset(0);
+            }}
+          />
+          Show update details
+        </label>
       </div>
+      {opening && (
+        <article className="document-workspace" aria-label="Document reader">
+          <header className="document-bar">
+            <span className="document-return">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={backLabel}
+                onClick={() => {
+                  openGeneration.current++;
+                  setOpening(null);
+                  onDocumentClose?.();
+                }}
+              >
+                <ArrowLeft aria-hidden="true" />
+                {backLabel.replace(/^Back to /, "")}
+              </Button>
+            </span>
+            <span className="document-crumb-title">Document</span>
+          </header>
+          {opening.failure ? (
+            <FailureState
+              failure={opening.failure}
+              onRetry={() => open(opening.id)}
+            />
+          ) : (
+            <EmptyState role="status" description="Opening Document…" />
+          )}
+        </article>
+      )}
       {selected && (
         <DocumentEditor
           key={selected.id}
@@ -703,7 +1108,7 @@ export function Documents({
             );
           }}
           onOpenDocument={open}
-          closeRequest={listRequest ?? 0}
+          closeRequest={(listRequest ?? 0) + readerCloseRequest}
           backLabel={backLabel}
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
@@ -715,8 +1120,17 @@ export function Documents({
             onOpenTicket(reference);
           }}
           onClose={() => {
+            const closedId = selected.id;
             setSelected(null);
-            refresh();
+            void refresh().then(() => {
+              if (navigator.current?.closest("[hidden]")) return;
+              const row = [
+                ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
+                  "[data-document-row]",
+                ) ?? []),
+              ].find((button) => button.dataset.documentRow === closedId);
+              (row ?? searchTrigger.current)?.focus();
+            });
             onDocumentClose?.();
           }}
         >

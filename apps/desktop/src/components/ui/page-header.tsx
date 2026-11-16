@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
-import { ShellLeading } from "@/components/ui/list-header";
+import { ShellLeading, ShellNoticeSlot } from "@/components/ui/list-header";
 import "./patterns.css";
 
 /**
@@ -11,11 +11,13 @@ import "./patterns.css";
  */
 export function ManagementPage({
   className,
+  layout = "default",
   children,
   "aria-labelledby": labelledBy,
   "aria-label": label,
 }: {
   className?: string;
+  layout?: "default" | "centered" | "guide";
   children: ReactNode;
   "aria-labelledby"?: string;
   "aria-label"?: string;
@@ -25,7 +27,12 @@ export function ManagementPage({
       data-slot="management-page"
       aria-labelledby={labelledBy}
       aria-label={label}
-      className={cn("ui-management-page", className)}
+      className={cn(
+        "ui-management-page",
+        layout === "centered" && "ui-management-page-centered",
+        layout === "guide" && "ui-management-page-guide",
+        className,
+      )}
     >
       {children}
     </section>
@@ -68,7 +75,10 @@ export function PageHeader({
           </div>
           {lede && <p className="ui-page-header-lede">{lede}</p>}
         </div>
-        {actions && <div className="ui-page-header-actions">{actions}</div>}
+        <div className="ui-page-header-actions">
+          <ShellNoticeSlot />
+          {actions}
+        </div>
       </div>
       {toolbar && <div className="ui-page-toolbar">{toolbar}</div>}
     </header>

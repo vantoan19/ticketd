@@ -182,7 +182,9 @@ test("a Drive listing that fails is reported, not shown as no versions", async (
         ),
   );
   open();
-  expect((await screen.findByRole("alert")).textContent).toBe(
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't load versions");
+  expect(failure.textContent).not.toContain(
     "Could not load versions from Google Drive: offline",
   );
   expect(screen.queryByText("No earlier versions")).toBeNull();
@@ -260,9 +262,9 @@ test("older versions that Drive cannot list say why and can be asked for again",
   fireEvent.click(
     await screen.findByRole("button", { name: "Older versions from Drive" }),
   );
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Could not load versions: offline",
-  );
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't load older versions");
+  expect(failure.textContent).not.toContain("Could not load versions: offline");
   expect(
     screen.getByRole("button", { name: "Older versions from Drive" }),
   ).toBeTruthy();

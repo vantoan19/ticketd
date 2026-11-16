@@ -743,3 +743,69 @@ fn attached_document_is_its_own_connection_kind_without_a_passage() {
     assert_eq!(edge.kind, "attached");
     assert!(edge.explanation.is_none());
 }
+
+#[test]
+fn explicit_bounded_hydration_keeps_a_105_member_plan_and_cross_batch_links_with_legacy_defaults() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Hydrated Plan").unwrap();
+    let mut tickets = Vec::new();
+    for number in 0..105 {
+        let ticket = workspace
+            .create_ticket(&format!("Member {number}"))
+            .unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+        tickets.push(ticket);
+    }
+    workspace
+        .add_dependency(&tickets[104].reference, &tickets[0].reference, None)
+        .unwrap();
+    let ids = std::iter::once(plan.id.clone())
+        .chain(tickets.iter().map(|ticket| ticket.id.clone()))
+        .collect::<Vec<_>>();
+    let legacy = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            visible_ids: ids.clone(),
+            hydrate_only: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(legacy.nodes.len(), 100);
+    assert!(legacy.omitted);
+    let bounded = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            visible_ids: ids.clone(),
+            hydrate_only: true,
+            node_limit: Some(250),
+            edge_limit: Some(600),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(bounded.nodes.len(), 106);
+    assert_eq!(
+        bounded
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == "membership")
+            .count(),
+        105
+    );
+    assert!(bounded.edges.iter().any(|edge| edge.kind == "blocks"
+        && edge.source == tickets[104].id
+        && edge.target == tickets[0].id));
+    assert!(!bounded.omitted);
+    let limited = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            visible_ids: ids,
+            hydrate_only: true,
+            node_limit: Some(250),
+            edge_limit: Some(1),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(limited.edges.len(), 1);
+    assert!(limited.omitted);
+}

@@ -1,3 +1,5 @@
+import { CopyButton } from "@/components/ui/copy-button";
+import { Button } from "@/components/ui/button";
 import {
   useEffect,
   useId,
@@ -98,6 +100,7 @@ import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
+import { codeLanguageLabel, codeLowlight } from "./syntax-highlighting";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -157,7 +160,7 @@ import {
 import { linkPluginOptions } from "./link-options";
 import { slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
-import { readMarkdown, writeMarkdown } from "./plate-markdown";
+import { codeBlockText, readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
 const AttachmentProtection = createContext<(uri: string) => Promise<void>>(
   async () => {},
@@ -237,6 +240,12 @@ const CODE_LANGUAGES = [
   "markdown",
 ];
 
+function CodeSyntaxLeaf(props: PlateLeafProps) {
+  return (
+    <PlateLeaf {...props} className={String(props.leaf.className ?? "")} />
+  );
+}
+
 function Leaf(props: PlateLeafProps) {
   let children = props.children;
   if (props.leaf.bold) children = <strong>{children}</strong>;
@@ -282,9 +291,11 @@ function Element(props: PlateElementProps) {
   const tag = tags[element.type as keyof typeof tags] ?? "div";
   if (element.type === "table")
     return (
-      <PlateElement {...props} as="table">
-        <tbody>{children}</tbody>
-      </PlateElement>
+      <div className="markdown-table-scroll">
+        <PlateElement {...props} as="table">
+          <tbody>{children}</tbody>
+        </PlateElement>
+      </div>
     );
   if (element.type === "br")
     return (
@@ -405,7 +416,7 @@ function CodeFence(props: PlateElementProps) {
             aria-label="Code language"
             className="code-language"
             list={`${languageId}-languages`}
-            value={String(props.element.lang ?? "")}
+            value={codeLanguageLabel(String(props.element.lang ?? ""))}
             placeholder="Plain text"
             readOnly={readOnly}
             onChange={(event) => {
@@ -418,7 +429,14 @@ function CodeFence(props: PlateElementProps) {
             }}
           />
         }
-      />
+      >
+        <CopyButton
+          label="Copy code"
+          text={`${codeBlockText(props.element)}\n`}
+          size="icon-card"
+          onMouseDown={(event) => event.preventDefault()}
+        />
+      </BlockHeader>
       <datalist id={`${languageId}-languages`}>
         {CODE_LANGUAGES.map((lang) => (
           <option key={lang} value={lang} />
@@ -647,10 +665,12 @@ function LinkButton({
  */
 function SessionFormatting({
   onAttach,
+  floating = false,
   more,
   onMenuOpenChange,
 }: {
   onAttach: () => void;
+  floating?: boolean;
   /** The "…" menu opened or closed (Export reads the selection then). */
   onMenuOpenChange: (open: boolean) => void;
   /** Copy Markdown and Export: the last group of "…". */
@@ -686,31 +706,39 @@ function SessionFormatting({
       >
         <ItalicIcon />
       </IconButton>
-      <IconButton
-        type="button"
-        label="Bullet list"
-        onMouseDown={keepFocus}
-        onClick={() => insert(editor, "ul")}
-      >
-        <List />
-      </IconButton>
-      <IconButton
-        type="button"
-        label="Checklist"
-        onMouseDown={keepFocus}
-        onClick={() => insert(editor, "task")}
-      >
-        <ListChecks />
-      </IconButton>
+      {!floating && (
+        <>
+          <IconButton
+            type="button"
+            label="Bullet list"
+            onMouseDown={keepFocus}
+            onClick={() => insert(editor, "ul")}
+          >
+            <List />
+          </IconButton>
+          <IconButton
+            type="button"
+            label="Checklist"
+            onMouseDown={keepFocus}
+            onClick={() => insert(editor, "task")}
+          >
+            <ListChecks />
+          </IconButton>
+        </>
+      )}
       <LinkButton open={linkOpen} onOpenChange={setLinkOpen} />
-      <IconButton
-        type="button"
-        label="Insert attachment"
-        onMouseDown={keepFocus}
-        onClick={onAttach}
-      >
-        <Paperclip />
-      </IconButton>
+      {!floating && (
+        <>
+          <IconButton
+            type="button"
+            label="Insert attachment"
+            onMouseDown={keepFocus}
+            onClick={onAttach}
+          >
+            <Paperclip />
+          </IconButton>
+        </>
+      )}
       <DropdownMenu onOpenChange={onMenuOpenChange}>
         <DropdownMenuTrigger asChild>
           <IconButton
@@ -722,6 +750,22 @@ function SessionFormatting({
           </IconButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {floating && (
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => insert(editor, "ul")}>
+                <List aria-hidden="true" />
+                Bullet list
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => insert(editor, "task")}>
+                <ListChecks aria-hidden="true" />
+                Checklist
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onAttach}>
+                <Paperclip aria-hidden="true" />
+                Insert attachment
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          )}
           <DropdownMenuGroup>
             <DropdownMenuItem onSelect={() => toggleHeading(editor)}>
               <Heading2 aria-hidden="true" />
@@ -870,6 +914,7 @@ function SlashMenu({
   id,
   anchor,
   choices,
+  query,
   index,
   onChoose,
   onClose,
@@ -877,6 +922,7 @@ function SlashMenu({
   id: string;
   anchor: DOMRect | null;
   choices: ReturnType<typeof slashChoices>;
+  query: string;
   index: number;
   onChoose: (type: string) => void;
   onClose: () => void;
@@ -896,12 +942,22 @@ function SlashMenu({
     >
       <PopoverAnchor virtualRef={virtual} />
       <PopoverContent
-        variant="list"
+        variant="compact-list"
         side="bottom"
         align="start"
+        onEscapeKeyDown={(event) => {
+          // The caret stays in the editor outside this popover. Own Escape at
+          // the dismissable layer before closing can expose the editor beneath.
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }}
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
+        <div className="editor-caption px-2 py-1">
+          Blocks matching “{query}”
+        </div>
         <div id={id} role="listbox" aria-label="Insert block">
           {choices.length ? (
             choices.map(([type, title], position) => {
@@ -911,13 +967,34 @@ function SlashMenu({
                   key={type}
                   id={`${id}-${type}`}
                   role="option"
+                  aria-label={title}
                   aria-selected={position === index}
                   className="slash-option"
                   onMouseDown={keepFocus}
                   onClick={() => onChoose(type)}
                 >
                   <Icon aria-hidden="true" />
-                  {title}
+                  <span className="flex-1">{title}</span>
+                  <span className="editor-caption">
+                    {
+                      (
+                        {
+                          p: "text",
+                          h1: "#",
+                          h2: "##",
+                          h3: "###",
+                          ul: "-",
+                          ol: "1.",
+                          task: "[]",
+                          blockquote: ">",
+                          code_block: "```",
+                          hr: "---",
+                          table: "| |",
+                          mermaid: "```mermaid",
+                        } as Record<string, string>
+                      )[type]
+                    }
+                  </span>
                 </div>
               );
             })
@@ -965,6 +1042,7 @@ const richPlugins = [
     inputRules: [markdownLinkRule],
   }),
   CodeBlockPlugin.configure({
+    options: { lowlight: codeLowlight },
     inputRules: [openFenceRule],
   }),
   createPlatePlugin({
@@ -996,16 +1074,19 @@ export interface MarkdownEditorProps {
   /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
   paragraphAfterQuote?: boolean;
   /**
-   * `session`: a document being edited in place (description, Document). Its
+   * `floating`: in-place editing with controls hosted in FloatingEditBar.
+   * `session`: legacy host-row editing. Its
    * formatting row goes into `chromeHost`, the 32px session row its page
    * reserves, so nothing is inserted above the text and nothing toggles with
    * focus. `compact` (quick composers): no toolbar; formatting is the
    * selection bubble and slash, and only Insert attachment and the source
    * switch show, in `chromeHost` (the composer's bottom row) or under the text.
    */
-  chrome?: "session" | "compact";
+  chrome?: "session" | "compact" | "floating";
   /** Where the editor's controls render; see `chrome`. */
   chromeHost?: HTMLElement | null;
+  /** Another field currently owns the shared controls host. */
+  controlsHidden?: boolean;
   /** Escape with nothing open inside the editor: finish editing. */
   onEscape?: () => void;
   /** Recovery owner to explain independent Undo protection in attachment usage. */
@@ -1027,6 +1108,7 @@ export function MarkdownEditor({
   paragraphAfterQuote = false,
   chrome = "compact",
   chromeHost,
+  controlsHidden = false,
   onEscape,
   recoveryOwner = label,
   attachmentTicketReference = null,
@@ -1135,6 +1217,7 @@ export function MarkdownEditor({
       a: Element,
       code_block: CodeFence,
       code_line: Element,
+      code_syntax: CodeSyntaxLeaf,
       hr: Element,
       br: Element,
       img: Element,
@@ -1536,20 +1619,36 @@ export function MarkdownEditor({
       Source editing · has {document.reasons.join(", ")}
     </span>
   );
-  const sourceToggle = !forced && (
-    <IconButton
-      type="button"
-      label={source ? "Use rich editor" : "Edit Markdown source"}
-      aria-pressed={source}
-      onMouseDown={keepFocus}
-      onClick={() => {
-        setSourceMode((current) => !current);
-        closeSlash();
-      }}
-    >
-      <FileCode2 />
-    </IconButton>
-  );
+  const toggleSource = () => {
+    setSourceMode((current) => !current);
+    closeSlash();
+  };
+  const sourceToggle =
+    !forced &&
+    (chrome === "floating" ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={source ? "Use rich editor" : "Edit Markdown source"}
+        aria-pressed={source}
+        onMouseDown={keepFocus}
+        onClick={toggleSource}
+      >
+        <FileCode2 aria-hidden="true" />
+        Markdown
+      </Button>
+    ) : (
+      <IconButton
+        type="button"
+        label={source ? "Use rich editor" : "Edit Markdown source"}
+        aria-pressed={source}
+        onMouseDown={keepFocus}
+        onClick={toggleSource}
+      >
+        <FileCode2 />
+      </IconButton>
+    ));
   const attach = !readOnly && (
     <IconButton
       type="button"
@@ -1562,6 +1661,7 @@ export function MarkdownEditor({
   );
   /** The editor's controls, in the host's reserved row or under the text. */
   function controls(formatting: ReactNode | null) {
+    if (controlsHidden) return null;
     const row = (
       <span
         className="editor-controls"
@@ -1569,7 +1669,7 @@ export function MarkdownEditor({
         data-hosted={chromeHost ? "" : undefined}
       >
         {reason}
-        {chrome === "session"
+        {chrome !== "compact"
           ? (formatting ?? (
               <>
                 {attach}
@@ -1640,12 +1740,47 @@ export function MarkdownEditor({
         setFocused(false);
         closeSlash();
       }}
+      onKeyDownCapture={(event) => {
+        if (event.defaultPrevented) return;
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest(
+            '[role="dialog"], [role="menu"], [role="listbox"]',
+          )
+        )
+          return;
+        if (
+          !readOnly &&
+          !source &&
+          (event.metaKey || event.ctrlKey) &&
+          event.key.toLowerCase() === "k"
+        ) {
+          const link = (
+            chromeHost ?? container.current
+          )?.querySelector<HTMLButtonElement>('[aria-label="Link"]');
+          if (link) {
+            event.preventDefault();
+            event.stopPropagation();
+            link.click();
+          }
+        }
+        if (
+          event.key === "Escape" &&
+          onEscape &&
+          !slash &&
+          !event.nativeEvent.isComposing
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          onEscape();
+        }
+      }}
       onKeyDown={(event) => {
         // Escape in the source editor finishes too, as in the rich text.
         if (
           event.key === "Escape" &&
           onEscape &&
-          source &&
+          !slash &&
           !event.defaultPrevented
         ) {
           event.preventDefault();
@@ -1722,10 +1857,11 @@ export function MarkdownEditor({
             }
           }}
         >
-          {chrome === "session" &&
+          {chrome !== "compact" &&
             !readOnly &&
             controls(
               <SessionFormatting
+                floating={chrome === "floating"}
                 onAttach={beginAttachment}
                 more={moreItems}
                 onMenuOpenChange={captureExport}
@@ -1855,6 +1991,7 @@ export function MarkdownEditor({
             <SlashMenu
               id={slashMenuId}
               anchor={slashAnchor}
+              query={slashQuery}
               choices={choices}
               index={slashIndex}
               onChoose={choose}

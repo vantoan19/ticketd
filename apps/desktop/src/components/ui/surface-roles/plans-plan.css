@@ -1,0 +1,96 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.plan-summary-legend {
+  white-space: nowrap;
+}
+.plan-context-note {
+  white-space: nowrap;
+}
+.plan-context-note[data-invalid] {
+  color: var(--error-foreground);
+}
+.plan-purpose {
+  border-radius: var(--radius-segment);
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.plan-purpose[data-empty] {
+  color: var(--muted-foreground);
+}
+button.plan-purpose:hover {
+  background: var(--accent);
+}
+button.plan-purpose:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.plan-name-field {
+  font-weight: 500;
+}
+.plan-progress {
+  white-space: nowrap;
+}
+.plan-documents [data-slot="badge"] svg {
+  color: var(--muted-foreground);
+}
+.plan-doc-title {
+  white-space: nowrap;
+}
+.plan-doc-state {
+  color: var(--muted-foreground);
+}
+.plan-documents-more {
+  font-variant-numeric: tabular-nums;
+}
+.plan-context-action {
+  color: var(--muted-foreground);
+}
+.plan-documents-popover ul {
+  list-style: none;
+}
+.plan-documents-popover [data-slot="item"] > button:first-of-type {
+  text-align: left;
+  white-space: nowrap;
+}
+
+@container plan-workspace (max-width: 640px) {
+  .plan-summary-legend {
+    white-space: normal;
+  }
+  .plan-context-note {
+    white-space: normal;
+  }
+}
+.plan-index-list {
+  list-style: none;
+}
+.plan-index-name {
+  white-space: nowrap;
+}
+.plan-card-description p {
+  white-space: nowrap;
+}
+.plan-card-failure {
+  white-space: nowrap;
+}
+.plan-card-summary {
+  white-space: nowrap;
+}
+.plan-card-next .ui-record-link {
+  white-space: nowrap;
+}
+.plan-card-ready {
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .plan-card-description p {
+    white-space: normal;
+  }
+  .plan-card-failure {
+    white-space: normal;
+  }
+}
+
+.plan-card-title > .plan-card-caption {
+  white-space: nowrap;
+}

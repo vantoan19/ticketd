@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-ticket-files.css";
+
 /* Files in the rail: one row per Document or file. The row opens it; its
    icon and name sit on the label's edge (the hover fill bleeds 12px), the
    caption sits under the name, and one action waits in a reserved slot. */
@@ -6,7 +8,6 @@
   flex-direction: column;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .rail-file {
   position: relative;
@@ -21,42 +22,24 @@
   width: 100%;
   min-height: 32px;
   padding: 6px 12px;
-  border-radius: var(--radius);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  text-align: start;
 }
 .rail-file[data-action] .rail-file-open {
   padding-inline-end: 40px;
 }
-.rail-file-open:hover {
-  background: var(--accent);
-}
-.rail-file-open:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
 .rail-file-open > svg {
   width: 16px;
   height: 16px;
-  color: var(--muted-foreground);
 }
 .rail-file-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .rail-file-caption {
   grid-column: 2;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* The action's slot is reserved: the name ends before it, and it shows on
    hover, keyboard focus, and always on touch. */
@@ -74,4 +57,25 @@
   .rail-file-action {
     visibility: visible;
   }
+}
+
+.rail-section-column .rail-files {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rail-section-column .rail-file {
+  max-width: 100%;
+  min-width: 0;
+  margin-inline: 0;
+}
+.rail-section-column .rail-file-open {
+  width: auto;
+  max-width: 100%;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 0 12px 0 8px;
+}
+.rail-section-column .rail-file-open > svg {
+  grid-row: 1 / 3;
 }

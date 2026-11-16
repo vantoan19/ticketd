@@ -38,8 +38,14 @@ export function useAttachmentSearch(
   ticket: string | null,
   limit: number = ATTACHMENT_PAGE,
   refresh = 0,
+  holdLiveChanges = false,
 ) {
-  const revision = useWorkspaceChange();
+  const incomingRevision = useWorkspaceChange();
+  const [revision, setRevision] = useState(incomingRevision);
+  // Explicit search/filter/retry still answers immediately. Only unrelated live
+  // refreshes wait until the person leaves the navigator and its focused rows.
+  if (!holdLiveChanges && revision !== incomingRevision)
+    setRevision(incomingRevision);
   const [query, setQuery] = useState(search);
   useEffect(() => {
     if (query === search) return;
@@ -51,10 +57,12 @@ export function useAttachmentSearch(
     files: AttachmentSearchResult[];
     key: string | null;
     answered: { search: string; state: AttachmentState; limit: number };
+    known: boolean;
     error: FailureDescription | null;
   }>({
     files: [],
     key: null,
+    known: false,
     answered: { search, state, limit },
     error: null,
   });
@@ -71,16 +79,16 @@ export function useAttachmentSearch(
       })
       .then(
         (files) => {
-          if (current) setResult({ files, key, answered, error: null });
+          if (current)
+            setResult({ files, key, answered, known: true, error: null });
         },
         (reason: unknown) => {
           if (current)
-            setResult({
-              files: [],
+            setResult((previous) => ({
+              ...previous,
               key,
-              answered,
               error: describeFailure(reason, "load files"),
-            });
+            }));
         },
       );
     return () => {
@@ -89,6 +97,7 @@ export function useAttachmentSearch(
   }, [query, state, ticket, limit, key]);
   return {
     files: result.files,
+    known: result.known,
     error: result.error,
     answered: result.answered,
     loading: result.key === null,

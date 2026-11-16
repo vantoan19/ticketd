@@ -1,4 +1,6 @@
 import {
+  Children,
+  isValidElement,
   createContext,
   createElement,
   useContext,
@@ -23,6 +25,7 @@ import { writeClipboard } from "@/lib/clipboard";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
+import { codeLanguageLabel } from "./syntax-highlighting";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -258,8 +261,8 @@ function CodeBlock({ node }: ExtraProps) {
     return <MermaidDiagram source={content} />;
   return (
     <div className="markdown-code-block">
-      <BlockHeader label={language || "Code"}>
-        <CopyButton label="Copy code" text={content} />
+      <BlockHeader label={codeLanguageLabel(language) || "Code"}>
+        <CopyButton label="Copy code" text={content} size="icon-card" />
       </BlockHeader>
       <pre tabIndex={0}>
         <SyntaxCode source={content} language={language} />
@@ -289,7 +292,22 @@ function mentionBlock(tag: string) {
             "aria-describedby": mark.describedBy,
           }
         : props,
-      children as React.ReactNode,
+      tag === "li" && String(props.className ?? "").includes("task-list-item")
+        ? Children.map(children as React.ReactNode, (child) => {
+            const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
+              ? typeof child.type === "string"
+                ? child.type
+                : child.props.node?.tagName
+              : undefined;
+            // A child list has its own checked state; loose paragraphs already
+            // provide a block to decorate without striking the child list.
+            return name && ["ul", "ol", "p", "input"].includes(name) ? (
+              child
+            ) : (
+              <span className="markdown-task-text">{child}</span>
+            );
+          })
+        : (children as React.ReactNode),
     );
   };
 }

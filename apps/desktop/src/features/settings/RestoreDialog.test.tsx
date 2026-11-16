@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -90,7 +91,7 @@ async function openReview(onRestore: () => Promise<void> = async () => {}) {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose backup…" }));
-  return screen.findByRole("dialog", { name: "Replace this workspace?" });
+  return screen.findByRole("dialog");
 }
 
 function replaceButton(dialog: HTMLElement) {
@@ -229,6 +230,7 @@ test.each([
     const dialog = await openReview();
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toMatch(expected);
+    expect(screen.getByRole("dialog", { name: "Review backup" })).toBe(dialog);
     expect(alert.textContent).toContain("Your workspace hasn't changed.");
     // No dead destructive button: the way forward is another file (set BK-06).
     expect(
@@ -346,8 +348,9 @@ test("a failed restore keeps the review open and says so", async () => {
   const dialog = await openReview(reload);
   await within(dialog).findByText(/Integrity checked/);
   fireEvent.click(replaceButton(dialog));
-  expect((await within(dialog).findByRole("alert")).textContent).toContain(
-    "Workspace is in use.",
+  await revealFailureDetails(dialog);
+  expect(within(dialog).getByRole("alert").textContent).toContain(
+    "workspace is in use",
   );
   expect(reload).not.toHaveBeenCalled();
 });
@@ -387,6 +390,7 @@ test("an unreadable file is an error with the unchanged reassurance and no way t
   const dialog = await openReview();
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain("Couldn't read this backup");
+  expect(screen.getByRole("dialog", { name: "Review backup" })).toBe(dialog);
   expect(alert.textContent).toContain("Your workspace hasn't changed.");
   expect(
     within(dialog).queryByRole("button", {

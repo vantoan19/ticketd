@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { useEffect, useEffectEvent, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -7,6 +8,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { inboxClient } from "@/lib/api/inbox";
 
 /**
@@ -24,6 +26,10 @@ export function FollowToggle({
   revision: number;
   variant?: "rail" | "strip";
 }) {
+  const blocked = editingBlockedReason(useWorkspaceState()) !== null;
+  const line = useStatusLine();
+  const [readAttempt, setReadAttempt] = useState(0);
+  const [readFailed, setReadFailed] = useState(false);
   const [following, setFollowing] = useState(false);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
@@ -33,18 +39,23 @@ export function FollowToggle({
       .isFollowing(reference)
       .then((value) => {
         if (active) {
+          setReadFailed(false);
           setFollowing(value);
           setError(null);
         }
       })
       .catch((reason: unknown) => {
-        if (active) setError(describeFailure(reason, "check Follow"));
+        if (active) {
+          setReadFailed(true);
+          setError(describeFailure(reason, "check Follow"));
+        }
       });
     return () => {
       active = false;
     };
-  }, [reference, revision]);
+  }, [reference, revision, readAttempt]);
   async function toggle() {
+    setReadFailed(false);
     setPending(true);
     try {
       await inboxClient.setFollowing(reference, !following);
@@ -61,6 +72,17 @@ export function FollowToggle({
       setPending(false);
     }
   }
+  const retry = useEffectEvent(() =>
+    readFailed ? setReadAttempt((n) => n + 1) : void toggle(),
+  );
+  useEffect(() => {
+    if (variant !== "strip" || !error) return;
+    line.show({
+      tone: "error",
+      message: `${error.title}. ${error.sentence}`,
+      action: { label: "Retry", run: () => retry() },
+    });
+  }, [error, variant, line]);
   const Icon = following ? Eye : EyeOff;
   const failure = error && (
     <FailureCaption
@@ -71,17 +93,17 @@ export function FollowToggle({
   );
   if (variant === "strip")
     return (
-      <>
+      <span className="ticket-follow-slot">
         <IconButton
           label={following ? "Following" : "Follow"}
+          aria-label="Follow"
           aria-pressed={following}
-          disabled={pending}
+          disabled={pending || blocked}
           onClick={() => void toggle()}
         >
           <Icon aria-hidden="true" />
         </IconButton>
-        {failure}
-      </>
+      </span>
     );
   return (
     <>
@@ -90,7 +112,7 @@ export function FollowToggle({
         size="sm"
         aria-label="Follow"
         aria-pressed={following}
-        disabled={pending}
+        disabled={pending || blocked}
         onClick={() => void toggle()}
       >
         <Icon aria-hidden="true" />

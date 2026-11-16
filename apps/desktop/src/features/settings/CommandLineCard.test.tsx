@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -103,9 +104,9 @@ test("an installation guide that cannot open says so", async () => {
     await screen.findByRole("button", { name: "Installation guide" }),
   );
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain(
-    "Couldn't open the installation guide. No browser.",
-  );
+  expect(alert.textContent).toContain("Couldn't open the installation guide.");
+  await revealFailureDetails();
+  expect(alert.textContent).toContain("No browser");
   expect(alert.textContent).not.toContain("Error:");
   // Retry opens the guide again and clears the failure when it succeeds.
   vi.mocked(openUrl).mockResolvedValueOnce(undefined);
@@ -190,7 +191,7 @@ test("Check again sits in the Status section and is disabled while checking", as
   invoke.mockResolvedValueOnce(base);
   render(<CommandLineCard />);
   const status = screen.getByRole("region", { name: "Status" });
-  const button = within(status).getByRole("button", { name: "Check again" });
+  const button = within(status).getByRole("button", { name: "Checking…" });
   expect((button as HTMLButtonElement).disabled).toBe(true);
   expect(within(status).getByRole("status")).toBeTruthy();
   await screen.findByText("Installed");

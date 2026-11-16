@@ -326,10 +326,12 @@ const ESC_AFTER_LAYER_MS = 1000;
 function Conversation({
   snapshot,
   focusRequest,
+  onRequestsAnswered,
   notice,
 }: {
   snapshot: ChatSnapshot;
   focusRequest: boolean;
+  onRequestsAnswered?: () => void;
   notice?: ReactNode;
 }) {
   const client = useChatClient();
@@ -361,14 +363,19 @@ function Conversation({
    * Runs a command; a refusal is said once, and the view keeps the host's
    * state. `name` says what did not happen: "send the message".
    */
-  const run = (action: Promise<unknown>, name: string) =>
+  const run = (
+    action: Promise<unknown>,
+    name: string,
+    retry?: () => void,
+    retryRequiresSend = false,
+  ) =>
     action.then(
       () => {
         setFailure(null);
         setArrival("");
       },
       (reason: unknown) => {
-        setFailure(chatFailure(reason, name));
+        setFailure({ ...chatFailure(reason, name, retry), retryRequiresSend });
         throw reason;
       },
     );
@@ -395,6 +402,7 @@ function Conversation({
   const plan = runningPlan(items);
   const turnStartedAt = lastAsk(items);
   const messageBox = useRef<HTMLTextAreaElement>(null);
+  const retrySend = useRef<(() => void) | null>(null);
   const dock = useRef<HTMLDivElement>(null);
   // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
   // must not strand the keyboard on the page: the message box takes it.
@@ -438,6 +446,35 @@ function Conversation({
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
   );
+  const [answered, setAnswered] = useState<{
+    id: string;
+    origin: Element | null;
+  } | null>(null);
+  const handledAnswer = useRef<typeof answered>(null);
+  useEffect(() => {
+    if (
+      !answered ||
+      answered === handledAnswer.current ||
+      !items.some(
+        (item) =>
+          item.id === answered.id &&
+          item.kind === "request" &&
+          item.state === "answered",
+      )
+    )
+      return;
+    handledAnswer.current = answered;
+    // Only an answer made here returns to triage. Host updates alone never
+    // take focus, and moving elsewhere while the answer is sent keeps it there.
+    if (
+      document.activeElement !== answered.origin &&
+      document.activeElement !== document.body
+    )
+      return;
+    if (pending.length) {
+      dock.current?.querySelector<HTMLElement>(".chat-request-title")?.focus();
+    } else onRequestsAnswered?.();
+  }, [answered, items, pending.length, onRequestsAnswered]);
   // Opened from a notification: the request waiting then takes focus, once.
   const [notifiedRequest] = useState(() =>
     focusRequest ? pending[0]?.id : undefined,
@@ -508,6 +545,7 @@ function Conversation({
             },
           });
         else throw reason;
+        if (onRequestsAnswered) throw reason;
       },
     );
   const edit = (queued: { id: string; text: string }) =>
@@ -639,7 +677,10 @@ function Conversation({
             <FailureAlert
               size="compact"
               failure={failure.failure}
-              {...(failure.retry && { onRetry: failure.retry })}
+              {...(failure.retry &&
+                (!failure.retryRequiresSend || !chat.problem?.blocks_send) && {
+                  onRetry: failure.retry,
+                })}
             />
           )}
           {picked ? (
@@ -708,6 +749,10 @@ function Conversation({
                   {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
                   onAnswer={answer}
+                  {...(onRequestsAnswered && {
+                    onAnswered: (requestId: string, origin: Element | null) =>
+                      setAnswered({ id: requestId, origin }),
+                  })}
                   onLeave={() => messageBox.current?.focus()}
                   onSendNow={(queuedId) =>
                     run(
@@ -716,18 +761,32 @@ function Conversation({
                     ).then(() => {})
                   }
                   onEdit={edit}
-                  onRemove={(queuedId) =>
-                    quietly(
-                      client.removeQueued(id, queuedId),
-                      "remove the queued message",
-                    )
-                  }
+                  onRemove={(queuedId) => {
+                    const remove = () => {
+                      const origin = document.activeElement;
+                      void run(
+                        client.removeQueued(id, queuedId),
+                        "remove the queued message",
+                        remove,
+                      )
+                        .then(() => {
+                          if (
+                            document.activeElement === origin ||
+                            document.activeElement === document.body
+                          )
+                            messageBox.current?.focus();
+                        })
+                        .catch(() => {});
+                    };
+                    remove();
+                  }}
                   onResume={() =>
                     quietly(client.resumeQueue(id), "resume the queue")
                   }
                 />
               </DockSlot>
               <Composer
+                retryRef={retrySend}
                 key={`${id}:${edits}`}
                 framed={false}
                 inputRef={messageBox}
@@ -760,6 +819,13 @@ function Conversation({
                     answering && question
                       ? "send your answer"
                       : "send the message",
+                    answering
+                      ? undefined
+                      : () => {
+                          messageBox.current?.focus();
+                          retrySend.current?.();
+                        },
+                    true,
                   )
                 }
                 onQueue={(text, links) =>
@@ -773,6 +839,10 @@ function Conversation({
                         .then(() => clearQuotes(id)),
                     ),
                     "queue the message",
+                    () => {
+                      messageBox.current?.focus();
+                      retrySend.current?.();
+                    },
                   )
                 }
                 {...(pending.length > 0 && {
@@ -861,6 +931,7 @@ export function ChatDetail({
   notice,
   crumb,
   focusRequest = false,
+  onRequestsAnswered,
   title,
 }: {
   id: string;
@@ -879,6 +950,8 @@ export function ChatDetail({
   crumb?: ReactNode;
   /** Opened from a notification: a pending request's title takes focus once shown. */
   focusRequest?: boolean;
+  /** Inbox triage resumes after this view answers its final pending request. */
+  onRequestsAnswered?: () => void;
 }) {
   const client = useChatClient();
   const { snapshot, error, retry } = useChat(id);
@@ -997,6 +1070,7 @@ export function ChatDetail({
           key={id}
           snapshot={snapshot}
           focusRequest={focusRequest}
+          {...(onRequestsAnswered && { onRequestsAnswered })}
           notice={notice}
         />
       )}

@@ -1,3 +1,6 @@
+import { useInboxTriage, triageId } from "./inbox-triage-context";
+import { ChatDetail } from "@/features/chats/ChatDetail";
+import "@/features/chats/chats.css";
 import {
   useEffect,
   useLayoutEffect,
@@ -18,7 +21,7 @@ import {
 } from "@/components/ui/resizable";
 import { cn } from "cn";
 import { setPreference, usePreferences } from "@/lib/preferences";
-import { PlanDependencies } from "@/features/plans/PlanDependencies";
+import { PlanFlow } from "@/features/plans/PlanFlow";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { usePlanView } from "@/features/plans/usePlanView";
@@ -36,8 +39,8 @@ const DETAIL_PANEL_STYLE = {
   flexDirection: "column",
   overflow: "hidden",
 } as const;
-/** The list pane’s 360px plus the detail pane’s 480px: below this the panes stack. */
-const STACK_MIN_WIDTH = 840;
+/** Split mode is measured on the content panel; below 880px the ticket replaces its list. */
+const STACK_MIN_WIDTH = 880;
 const BOARD_SPLIT: Layout = { list: 44, detail: 56 };
 
 /**
@@ -65,13 +68,18 @@ export function TicketWorkspaceView({
 }) {
   const { selected, setSelected, clearMention } = workspace;
   const inboxMode = Boolean(inbox);
+  const triage = useInboxTriage();
+  const displayedSelection =
+    selected ??
+    (inboxMode && triage?.selection ? triageId(triage.selection) : null);
   // Entering or leaving the Inbox starts without an open ticket: the detail
   // beside it belongs to the list it was opened from.
-  const [wasInbox, setWasInbox] = useState(inboxMode);
-  if (wasInbox !== inboxMode) {
-    setWasInbox(inboxMode);
+  const wasInbox = useRef(inboxMode);
+  useLayoutEffect(() => {
+    if (wasInbox.current === inboxMode) return;
+    wasInbox.current = inboxMode;
     if (selected) setSelected(null);
-  }
+  }, [inboxMode, selected, setSelected]);
   const board = workspace.layout === "board" && !inboxMode;
   // This view is hidden, not unmounted, when another view opens. Leaving counts as
   // navigating, so a followed mention is not still highlighted on return.
@@ -130,25 +138,32 @@ export function TicketWorkspaceView({
   };
   const listSplit = useDefaultLayout({
     // Versioned: layouts saved by earlier builds (468px list) must not override
-    // the 384px default.
-    id: "ticketd.workspace.v2",
+    // the 360px default.
+    id: "ticketd.workspace.v3",
   });
   const boardSplit = useDefaultLayout({ id: "ticketd.workspace.board.v1" });
+  const inboxSplit = useDefaultLayout({ id: "ticketd.workspace.inbox.v1" });
+  const splitMode = inboxMode ? "inbox" : workspace.layout;
   const groupRef = useGroupRef();
   const listPanelRef = usePanelRef();
-  const activeSplit = useRef(workspace.layout);
-  const splitLayouts = useRef<{ list: Layout | undefined; board: Layout }>({
+  const activeSplit = useRef<"inbox" | "list" | "board">(splitMode);
+  const splitLayouts = useRef<{
+    list: Layout | undefined;
+    inbox: Layout | undefined;
+    board: Layout;
+  }>({
     list: listSplit.defaultLayout,
+    inbox: inboxSplit.defaultLayout,
     board: boardSplit.defaultLayout ?? BOARD_SPLIT,
   });
   useLayoutEffect(() => {
-    if (activeSplit.current === workspace.layout) return;
-    activeSplit.current = workspace.layout;
-    const layout = splitLayouts.current[workspace.layout];
+    if (activeSplit.current === splitMode) return;
+    activeSplit.current = splitMode;
+    const layout = splitLayouts.current[splitMode];
     // Change the library's layout without remounting the detail editor or board scrollers.
     if (layout) groupRef.current?.setLayout(layout);
-    else listPanelRef.current?.resize(384);
-  }, [workspace.layout, groupRef, listPanelRef]);
+    else listPanelRef.current?.resize(splitMode === "inbox" ? 392 : 360);
+  }, [splitMode, groupRef, listPanelRef]);
   const focusPane = useRef<"detail" | { reference: string | null } | null>(
     null,
   );
@@ -180,18 +195,23 @@ export function TicketWorkspaceView({
   // On the board an open card is a peek over its right side; the columns keep
   // their width (S5). Narrow windows stack as before; Expand takes the page.
   const peek = board && selected !== null && !narrow && !expanded;
-  // Escape closes the peek, unless a field, menu or dialog inside it has it.
+  // The document owns J/K and Escape unless editing or an overlay owns them.
   const peekState = useRef({ peek, selected });
   useEffect(() => {
     peekState.current = { peek, selected };
   });
   useEffect(() => {
-    if (!peek) return;
+    if (!selected) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
       if (
-        event.key !== "Escape" ||
+        !["Escape", "j", "k"].includes(event.key) ||
         event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.isComposing ||
+        event.repeat ||
         !(target instanceof HTMLElement) ||
         !target.closest("#detail") ||
         target.isContentEditable ||
@@ -201,22 +221,25 @@ export function TicketWorkspaceView({
       )
         return;
       event.preventDefault();
-      focusPane.current = { reference: peekState.current.selected };
-      setSelected(null);
+      if (event.key === "Escape") {
+        focusPane.current = { reference: peekState.current.selected };
+        setSelected(null);
+      } else workspace.openAdjacent(event.key === "j" ? 1 : -1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [peek, setSelected]);
+  }, [selected, setSelected, workspace]);
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);
     if (narrow && selected) setNarrowDetail(true);
   }
-  const [previousSelection, setPreviousSelection] = useState(selected);
-  if (previousSelection !== selected) {
-    setPreviousSelection(selected);
-    setNarrowDetail(selected !== null);
-    if (!selected) setExpanded(false);
+  const [previousSelection, setPreviousSelection] =
+    useState(displayedSelection);
+  if (previousSelection !== displayedSelection) {
+    setPreviousSelection(displayedSelection);
+    setNarrowDetail(displayedSelection !== null);
+    if (!displayedSelection) setExpanded(false);
   }
   // Choosing a sidebar scope while a ticket is open shows that scope's list, even
   // where the panes are stacked and the ticket would otherwise keep the screen.
@@ -252,13 +275,10 @@ export function TicketWorkspaceView({
           />
         )}
         {dependenciesOpen && !inboxMode && (
-          <PlanDependencies
+          <PlanFlow
+            key={`flow:${scopedPlan.id}`}
             id={scopedPlan.id}
             revision={workspace.revision}
-            projects={workspace.projects}
-            refresh={workspace.refresh}
-            onClose={showTickets}
-            archived={scopedPlan.archived}
             onOpen={(reference) => {
               showTickets();
               setSelected(reference);
@@ -268,22 +288,25 @@ export function TicketWorkspaceView({
         )}
         <ResizablePanelGroup
           orientation="horizontal"
+          resizeTargetMinimumSize={{ fine: 8, coarse: 44 }}
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={narrow || expanded || !selected || peek}
+          disabled={narrow || expanded || !displayedSelection || peek}
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
             board && "board-layout",
-            !selected && "unselected",
+            !displayedSelection && "unselected",
           )}
           data-peek={peek || undefined}
           groupRef={groupRef}
           defaultLayout={
-            workspace.layout === "board"
-              ? (boardSplit.defaultLayout ?? BOARD_SPLIT)
-              : listSplit.defaultLayout
+            splitMode === "inbox"
+              ? inboxSplit.defaultLayout
+              : splitMode === "board"
+                ? (boardSplit.defaultLayout ?? BOARD_SPLIT)
+                : listSplit.defaultLayout
           }
           onLayoutChanged={(layout, meta) => {
             const mode = activeSplit.current;
@@ -291,18 +314,25 @@ export function TicketWorkspaceView({
               splitLayouts.current[mode] = meta.requestedLayout ?? layout;
             // Full-width modes and window constraints must not overwrite the preferred split.
             if (meta.isUserInteraction)
-              (mode === "board" ? boardSplit : listSplit).onLayoutChanged(
-                layout,
-                meta,
-              );
+              (mode === "inbox"
+                ? inboxSplit
+                : mode === "board"
+                  ? boardSplit
+                  : listSplit
+              ).onLayoutChanged(layout, meta);
           }}
           hidden={hidden || Boolean(dependenciesOpen && !inboxMode)}
         >
           <ResizablePanel
             id="list"
             panelRef={listPanelRef}
-            minSize={360}
-            defaultSize={384}
+            minSize={inboxMode ? 360 : 300}
+            maxSize={
+              !inboxMode && !board && selected && !narrow && !expanded
+                ? 480
+                : undefined
+            }
+            defaultSize={inboxMode ? 392 : 360}
           >
             {inbox ?? (
               <TicketListPane
@@ -323,7 +353,7 @@ export function TicketWorkspaceView({
                   if (narrow) focusPane.current = "detail";
                   // The Open tickets preference: a ticket opened from the list may
                   // take the full width. Narrow windows already show it that way.
-                  else if (openTickets === "expanded") {
+                  else if (!board && openTickets === "expanded") {
                     setExpanded(true);
                     focusPane.current = "detail";
                   }
@@ -332,19 +362,41 @@ export function TicketWorkspaceView({
             )}
           </ResizablePanel>
           <ResizableHandle
+            overlay
             className="split-handle"
             aria-label="Resize ticket list"
           />
           <ResizablePanel
             id="detail"
-            minSize={480}
+            minSize={520}
             // The panel library makes its content box `overflow: auto` with an
             // auto height, so a percentage-height child never gets a bound and the
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
             style={DETAIL_PANEL_STYLE}
           >
+            {inboxMode && triage?.chatId ? (
+              <div className="inbox-chat-detail" data-inbox-chat>
+                <ChatDetail
+                  id={triage.chatId}
+                  expanded={expanded}
+                  single={narrow || expanded}
+                  onExpand={() => setExpanded(true)}
+                  onReturn={() => triage.openChat(null)}
+                  onClose={() => triage.openChat(null)}
+                  focusRequest
+                  onRequestsAnswered={() =>
+                    workspaceRef.current
+                      ?.querySelector<HTMLElement>(
+                        '.inbox-entry[aria-current="true"] .inbox-ticket',
+                      )
+                      ?.focus({ preventScroll: true })
+                  }
+                />
+              </div>
+            ) : null}
             <TicketDetailPane
               workspace={workspace}
+              hidden={inboxMode && !!triage?.chatId}
               {...(inboxMode && { context: "inbox" as const })}
               expanded={expanded}
               inboxTarget={inboxTarget}

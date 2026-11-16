@@ -66,19 +66,22 @@ describe("Markdown draft editor", () => {
     expect(combo.getAttribute("aria-controls")).toBe(menu.id);
     expect(combo.getAttribute("aria-expanded")).toBe("true");
     expect(
-      document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
-        ?.textContent,
+      document
+        .getElementById(combo.getAttribute("aria-activedescendant") ?? "")
+        ?.getAttribute("aria-label"),
     ).toBe("Paragraph");
     fireEvent.keyDown(combo, { key: "ArrowDown" });
     expect(
-      document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
-        ?.textContent,
+      document
+        .getElementById(combo.getAttribute("aria-activedescendant") ?? "")
+        ?.getAttribute("aria-label"),
     ).toBe("Heading 1");
     expect(document.activeElement).toBe(combo);
     fireEvent.keyDown(combo, { key: "h" });
     expect(
-      document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
-        ?.textContent,
+      document
+        .getElementById(combo.getAttribute("aria-activedescendant") ?? "")
+        ?.getAttribute("aria-label"),
     ).toBe("Heading 1");
     fireEvent.compositionStart(combo);
     fireEvent.keyDown(combo, { key: "/", isComposing: true, keyCode: 229 });

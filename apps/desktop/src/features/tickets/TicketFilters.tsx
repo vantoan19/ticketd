@@ -1,19 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   CircleDashed,
   CornerDownRight,
   Layers,
   ListFilter,
-  Search,
   Tag,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { FilterChip } from "@/components/ui/badge";
-import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeaderButton } from "@/components/ui/list-header";
-import { SearchInput } from "@/components/ui/search-input";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   DropdownMenu,
@@ -29,7 +33,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { plural } from "@/lib/format";
 import { client, type StatusCounts } from "@/lib/api/client";
 import { ticketStatuses } from "@/lib/statuses";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -140,10 +143,9 @@ function dimensions(p: Props) {
 }
 
 /**
- * Search and Filters for a ticket list (DESIGN.md section 6, S3).
+ * Filter controls for a ticket list (DESIGN.md section 6, S3).
  *
- * - `controls`: the header's Search button (it expands in place) and the
- *   Filters menu: one submenu per dimension built from menu rows with icons,
+ * - `controls`: the header's Filters menu: one submenu per dimension built from menu rows with icons,
  *   a trailing check on the current value and counts where they are cheap.
  *   It opens below its trigger inside the list pane, never over the open
  *   ticket, and with focus on its first row.
@@ -159,63 +161,67 @@ export function TicketFilters(p: Props) {
   if (p.part === "chips") return <FilterChips {...p} menu={menu} />;
   return (
     <span className="list-controls">
-      <HeaderSearch {...p} />
       <FiltersMenu {...p} menu={menu} filterCount={chips.length} />
       {p.part !== "controls" && <FilterChips {...p} menu={menu} />}
     </span>
   );
 }
 
-/** The header's search: an icon button that expands into the field in place. */
-function HeaderSearch(p: Props) {
-  const [searching, setSearching] = useState(false);
-  const update = (value: string) => {
-    p.setQuery(value);
-    p.resetPaging();
-  };
-  if (!searching)
-    return (
-      <IconButton
-        label={p.query ? `Search tickets: ${p.query}` : "Search tickets"}
-        onClick={() => setSearching(true)}
-      >
-        <Search />
-      </IconButton>
-    );
-  return (
-    <span className="header-search" role="search" data-slot="pane-search">
-      <SearchInput
-        fill
-        aria-label="Search tickets"
-        placeholder={`Search ${p.scopeName}…`}
-        autoFocus
-        value={p.query}
-        onValueChange={update}
-        onKeyDown={(event) => {
-          // A first Escape clears the words (SearchInput); the next closes.
-          if (event.key === "Escape") {
-            event.stopPropagation();
-            setSearching(false);
-          }
-        }}
-      />
-      {p.query.trim() && (
-        <span role="status" className="header-search-count">
-          {plural(p.total, "result")}
-          <span className="sr-only"> in {p.scopeName}</span>
-        </span>
-      )}
-      <IconButton label="Close search" onClick={() => setSearching(false)}>
-        <X />
-      </IconButton>
-    </span>
-  );
-}
-
 function FiltersMenu(
-  p: Props & { menu: FiltersMenuState; filterCount: number },
+  applied: Props & { menu: FiltersMenuState; filterCount: number },
 ) {
-  const { menu, filterCount } = p;
+  const { menu, filterCount } = applied;
+  const parentMenu = useRef<HTMLDivElement>(null);
+  const retiredHover = useRef<Dimension | null>(null);
+  const current = {
+    status: applied.status,
+    availability: applied.availability,
+    plan: applied.plan,
+    tags: applied.tags,
+    family: applied.family,
+  };
+  const [draft, setDraft] = useState(current);
+  const [wasOpen, setWasOpen] = useState(menu.open);
+  if (menu.open !== wasOpen) {
+    setWasOpen(menu.open);
+    if (menu.open) setDraft(current);
+  }
+  const commit = useEffectEvent(() => {
+    if (draft.status !== applied.status) applied.setStatus(draft.status);
+    if (draft.availability !== applied.availability)
+      applied.setAvailability(draft.availability);
+    if (draft.plan !== applied.plan) applied.setPlan(draft.plan);
+    if (draft.tags !== applied.tags) applied.setTags(draft.tags);
+    if (draft.family !== applied.family) applied.setFamily(draft.family);
+    if (
+      Object.keys(draft).some(
+        (key) =>
+          draft[key as keyof typeof draft] !==
+          current[key as keyof typeof current],
+      )
+    )
+      applied.resetPaging();
+  });
+  const previousOpen = useRef(false);
+  useEffect(() => {
+    if (previousOpen.current && !menu.open) commit();
+    previousOpen.current = menu.open;
+  }, [menu.open]);
+  function stage(key: keyof typeof draft, value: string) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+  // Drafts apply only after the picker closes; rows stay in place while choosing.
+  const setOpen = menu.setOpen;
+  const p = {
+    ...applied,
+    ...(menu.open ? draft : current),
+    setStatus: (value: string) => stage("status", value),
+    setAvailability: (value: string) => stage("availability", value),
+    setPlan: (value: string) => stage("plan", value),
+    setTags: (value: string) => stage("tags", value),
+    setFamily: (value: string) => stage("family", value),
+    resetPaging: () => {},
+  };
   const { shown, tagList, update } = dimensions(p);
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   useEffect(() => {
@@ -231,7 +237,9 @@ function FiltersMenu(
       active = false;
     };
   }, [menu.open]);
-  const allTags = [...new Set([...tagList, ...vocabulary])];
+  const allTags = [...new Set([...vocabulary, ...tagList])].sort((a, b) =>
+    a.localeCompare(b),
+  );
   const activePlans = p.plans.filter((item) => !item.archived);
   const archivedPlans = p.plans.filter((item) => item.archived);
   // Per-status totals mean something only while no status narrows them.
@@ -243,17 +251,31 @@ function FiltersMenu(
   };
   const sub = (dimension: Dimension) => ({
     open: menu.sub === dimension,
-    onOpenChange: (open: boolean) =>
-      menu.setSub(open ? dimension : menu.sub === dimension ? null : menu.sub),
+    onOpenChange: (open: boolean) => {
+      // Radix's pointer-hover timer can outlive a keyboard close. Only new
+      // pointer input or an explicit keyboard opening can renew that intent.
+      if (open && retiredHover.current === dimension) return;
+      menu.setSub(open ? dimension : menu.sub === dimension ? null : menu.sub);
+    },
   });
   const valueMeta = (value: string | undefined) =>
     value ? <span className="filters-menu-value">{value}</span> : null;
+  const keepSubmenuOnParentFocus: ComponentProps<
+    typeof DropdownMenuSubContent
+  >["onFocusOutside"] = (event) => {
+    // Radix returns focus to the parent menu as the pointer leaves its trigger.
+    // A direct move into a left-opening submenu can reach that focus event
+    // before Radix updates its pointer direction. Keep the choices mounted for
+    // the following pointerdown; another dimension, Escape or dismissal still
+    // closes them through the controlled menu state.
+    if (event.target === parentMenu.current) event.preventDefault();
+  };
   return (
-    <DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
+    <DropdownMenu open={menu.open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <PaneHeaderButton
           icon={<ListFilter />}
-          label="Filters"
+          label="Filter"
           aria-label={
             filterCount ? `Filters, ${filterCount} active` : "Filters"
           }
@@ -261,7 +283,25 @@ function FiltersMenu(
           {filterCount > 0 && <Count aria-hidden="true">{filterCount}</Count>}
         </PaneHeaderButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        ref={parentMenu}
+        align="end"
+        onPointerMoveCapture={() => {
+          retiredHover.current = null;
+        }}
+        onPointerDownCapture={() => {
+          retiredHover.current = null;
+        }}
+        onKeyDownCapture={(event) => {
+          if (event.key === "ArrowRight") retiredHover.current = null;
+          if (
+            event.key === "ArrowLeft" &&
+            event.target instanceof Element &&
+            event.target.closest('[data-slot="dropdown-menu-sub-content"]')
+          )
+            retiredHover.current = menu.sub;
+        }}
+      >
         {shown.Status && (
           <DropdownMenuSub {...sub("Status")}>
             <DropdownMenuSubTrigger>
@@ -269,7 +309,10 @@ function FiltersMenu(
               Status
               {valueMeta(p.status)}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent aria-label="Status">
+            <DropdownMenuSubContent
+              aria-label="Status"
+              onFocusOutside={keepSubmenuOnParentFocus}
+            >
               <DropdownMenuRadioGroup
                 value={p.status}
                 onValueChange={(value) => update(p.setStatus, value)}
@@ -301,7 +344,10 @@ function FiltersMenu(
               Availability
               {valueMeta(p.availability)}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent aria-label="Availability">
+            <DropdownMenuSubContent
+              aria-label="Availability"
+              onFocusOutside={keepSubmenuOnParentFocus}
+            >
               <DropdownMenuRadioGroup
                 value={p.availability}
                 onValueChange={(value) => update(p.setAvailability, value)}
@@ -344,7 +390,10 @@ function FiltersMenu(
                   : undefined,
               )}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent aria-label="Plan">
+            <DropdownMenuSubContent
+              aria-label="Plan"
+              onFocusOutside={keepSubmenuOnParentFocus}
+            >
               {p.plans.length === 0 && (
                 <DropdownMenuItem disabled>No Plans yet</DropdownMenuItem>
               )}
@@ -390,7 +439,11 @@ function FiltersMenu(
             Tags
             {valueMeta(tagList.length ? String(tagList.length) : undefined)}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Tags" className="max-h-80">
+          <DropdownMenuSubContent
+            aria-label="Tags"
+            className="max-h-80"
+            onFocusOutside={keepSubmenuOnParentFocus}
+          >
             {allTags.length === 0 && (
               <DropdownMenuItem disabled>No tags yet</DropdownMenuItem>
             )}
@@ -428,7 +481,11 @@ function FiltersMenu(
             Parent
             {valueMeta(p.family || undefined)}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Parent" className="w-80">
+          <DropdownMenuSubContent
+            aria-label="Parent"
+            className="w-80"
+            onFocusOutside={keepSubmenuOnParentFocus}
+          >
             {/* The picker owns its keys: arrows move its rows and typing
                 searches, rather than closing the submenu or jumping rows. */}
             <div
@@ -539,6 +596,12 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
   }, [key, all.length]);
   if (all.length === 0) return null;
   const hidden = all.length - fits;
+  function returnToFilters() {
+    row.current
+      ?.closest(".ticket-list")
+      ?.querySelector<HTMLButtonElement>('button[aria-label^="Filters"]')
+      ?.focus({ preventScroll: true });
+  }
   return (
     <div ref={row} className="filter-chips" aria-label="Active filters">
       {all.slice(0, fits).map((chip) => (
@@ -551,7 +614,10 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
                 ? `Remove Search: ${chip.value}`
                 : `Remove ${chip.dimension} filter`
             }
-            onRemove={chip.clear}
+            onRemove={() => {
+              returnToFilters();
+              chip.clear();
+            }}
             {...(chip.dimension !== "Search" && {
               onEdit: () => {
                 p.menu.setOpen(true);
@@ -573,7 +639,14 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
       )}
       {chips.length > 0 && (
         <span data-filter-tail="" className="filter-chips-tail">
-          <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              returnToFilters();
+              p.clearFilters();
+            }}
+          >
             Clear filters
           </Button>
         </span>

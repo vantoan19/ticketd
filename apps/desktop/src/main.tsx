@@ -6,13 +6,11 @@ import { ChatClientContext } from "@/features/chats/client";
 import { createHostChatClient } from "@/features/chats/host-client";
 import { applyStoredTheme } from "@/lib/preferences";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
-import { keepWebviewInStep } from "@/lib/webview-scale";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing application root");
 
 void applyStoredTheme();
-keepWebviewInStep();
 const applicationRoot = createRoot(root);
 if (import.meta.env.DEV && window.location.hash === "#plate-prototype") {
   void import("@/features/markdown/PlatePrototype").then(

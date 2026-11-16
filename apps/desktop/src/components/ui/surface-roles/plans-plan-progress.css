@@ -1,0 +1,35 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+.plan-ring {
+  fill: none;
+  stroke-width: 2;
+}
+
+.plan-ring-track {
+  stroke: var(--track);
+}
+.plan-ring-moving {
+  stroke: var(--seg-review);
+}
+.plan-ring-done {
+  stroke: var(--foreground);
+  stroke-linecap: round;
+}
+
+.plan-split-bar {
+  border-radius: calc(var(--radius) / 2);
+  background: var(--track);
+}
+
+.plan-split-bar [data-segment="done"] {
+  background: var(--seg-done);
+}
+.plan-split-bar [data-segment="review"] {
+  background: var(--seg-review);
+}
+.plan-split-bar [data-segment="progress"] {
+  background: var(--seg-progress);
+}
+
+.plan-split-bar[data-variant="summary"] {
+  background: var(--accent);
+}

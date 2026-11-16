@@ -4,24 +4,129 @@ import { Slot } from "radix-ui";
 
 type Props = React.ComponentProps<"div"> & { asChild?: boolean };
 
-function part(slot: string, base: string) {
-  return function Part({ className, asChild = false, ...props }: Props) {
-    const Comp = asChild ? Slot.Root : "div";
-    return <Comp data-slot={slot} className={cn(base, className)} {...props} />;
-  };
-}
-
 /**
  * The elevated surface for content that has an owner or a boundary: an
  * external source's description or comment, a settings group, a project.
  * Compose `CardHeader` (a 40px band), `CardBody` and `CardFooter`; `asChild`
  * lends a part's look to the element that carries its landmark or label.
  */
-const Card = part("card", "ui-card");
+function Card({
+  variant = "default",
+  className,
+  asChild = false,
+  ...props
+}: Props & {
+  variant?:
+    | "default"
+    | "well"
+    | "slot"
+    | "lift"
+    | "board"
+    | "triage"
+    | "summary"
+    | "file"
+    | "composer";
+}) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card"
+      data-variant={variant}
+      className={cn("ui-card", `ui-card-${variant}`, className)}
+      {...props}
+    />
+  );
+}
 /** The band that names the card: its title or owner at the start, actions at the end. */
-const CardHeader = part("card-header", "ui-card-header");
-const CardBody = part("card-body", "ui-card-body");
+function CardHeader({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-header"
+      className={cn("ui-card-header", className)}
+      {...props}
+    />
+  );
+}
+function CardBody({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-body"
+      className={cn("ui-card-body", className)}
+      {...props}
+    />
+  );
+}
 /** A recessed strip for the card's explanation or actions. */
-const CardFooter = part("card-footer", "ui-card-footer");
+function CardFooter({
+  className,
+  asChild = false,
+  variant = "default",
+  ...props
+}: Props & { variant?: "default" | "summary" }) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-footer"
+      className={cn(
+        "ui-card-footer",
+        variant === "summary" && "ui-card-footer-summary",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
-export { Card, CardHeader, CardBody, CardFooter };
+/** Shared content roles for summaries of records, independent of their feature. */
+function CardTitle({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-title"
+      className={cn("ui-card-title", className)}
+      {...props}
+    />
+  );
+}
+function CardValue({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-value"
+      className={cn("ui-card-value", className)}
+      {...props}
+    />
+  );
+}
+function CardCaption({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-caption"
+      className={cn("ui-card-caption", className)}
+      {...props}
+    />
+  );
+}
+function CardDescription({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-description"
+      className={cn("ui-card-description", className)}
+      {...props}
+    />
+  );
+}
+export {
+  Card,
+  CardHeader,
+  CardBody,
+  CardFooter,
+  CardTitle,
+  CardValue,
+  CardCaption,
+  CardDescription,
+};

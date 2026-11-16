@@ -15,7 +15,12 @@ import type {
   PublicationReview,
 } from "@/lib/api/publication";
 import { toFailure } from "@/lib/api/bridge-failure";
-import { sourcesClient, toSourceFailure } from "@/lib/api/sources";
+import { FailureDetails } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { sourcesClient } from "@/lib/api/sources";
 import { SourceLink } from "./SourceLink";
 import "./publication.css";
 
@@ -62,7 +67,7 @@ export function AttemptReview({
 type Load =
   | { kind: "loading" }
   | { kind: "ready"; review: PublicationReview }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; failure: FailureDescription };
 
 export function ReviewBody({
   attempt,
@@ -78,12 +83,12 @@ export function ReviewBody({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [issue, setIssue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   // An attach the core refused because the issue's text differs from what was
   // sent. It is repeated only when the person confirms the difference.
   const [different, setDifferent] = useState<{
     resolution: PublicationResolution;
-    message: string;
+    failure: FailureDescription;
   } | null>(null);
   const [round, setRound] = useState(0);
   const [linking, setLinking] = useState(false);
@@ -102,7 +107,10 @@ export function ReviewBody({
       },
       (reason: unknown) => {
         if (active)
-          setLoad({ kind: "failed", message: toSourceFailure(reason).message });
+          setLoad({
+            kind: "failed",
+            failure: describeFailure(reason, "review the publication"),
+          });
       },
     );
     return () => {
@@ -115,7 +123,7 @@ export function ReviewBody({
     acceptDifferentContent = false,
   ) {
     setBusy(true);
-    setError("");
+    setError(null);
     setDifferent(null);
     try {
       await sourcesClient.resolvePublication(attempt.reference, resolution, {
@@ -127,8 +135,11 @@ export function ReviewBody({
       // The attempt is unchanged: show why, keep the review open.
       const failure = toFailure(reason);
       if (failure.code === "publication_different_content")
-        setDifferent({ resolution, message: failure.message });
-      else setError(toSourceFailure(reason).message);
+        setDifferent({
+          resolution,
+          failure: describeFailure(failure, "attach this issue"),
+        });
+      else setError(describeFailure(reason, "resolve this publication"));
     } finally {
       setBusy(false);
     }
@@ -143,7 +154,8 @@ export function ReviewBody({
   if (load.kind === "failed")
     return (
       <p className="publication-error" role="alert">
-        {load.message}
+        {load.failure.title}. {load.failure.sentence}
+        <FailureDetails variant="popover" details={load.failure.details} />
         <Button variant="ghost" size="sm" onClick={checkAgain}>
           Check again
         </Button>
@@ -160,9 +172,24 @@ export function ReviewBody({
       <>
         <div className="publication-candidate-panel">
           <p className="publication-detail">
-            {review.lookup_failure
-              ? `GitHub could not be checked: ${review.lookup_failure.message}`
-              : `Checked GitHub just now · ${review.candidates.length} possible ${review.candidates.length === 1 ? "match" : "matches"}`}
+            {review.lookup_failure ? (
+              <>
+                {name} could not be checked.{" "}
+                {
+                  describeFailure(
+                    review.lookup_failure,
+                    "check publication matches",
+                  ).sentence
+                }
+                <FailureDetails
+                  variant="popover"
+                  small
+                  details={review.lookup_failure.message}
+                />
+              </>
+            ) : (
+              `Checked ${name} just now · ${review.candidates.length} possible ${review.candidates.length === 1 ? "match" : "matches"}`
+            )}
           </p>
           {review.candidates
             .filter((candidate) => !dismissed.includes(candidate.identity.id))
@@ -276,7 +303,13 @@ export function ReviewBody({
         )}
         {different && (
           <div className="publication-error" role="alert">
-            <p>{different.message}</p>
+            <p>
+              {different.failure.sentence}
+              <FailureDetails
+                variant="popover"
+                details={different.failure.details}
+              />
+            </p>
             <Button
               size="sm"
               disabled={busy}
@@ -295,7 +328,8 @@ export function ReviewBody({
         )}
         {error && (
           <p className="publication-error" role="alert">
-            {error}
+            {error.title}. {error.sentence}
+            <FailureDetails variant="popover" details={error.details} />
           </p>
         )}
       </>
@@ -331,8 +365,17 @@ export function ReviewBody({
       </div>
       {review.lookup_failure && (
         <p className="publication-detail" role="status">
-          {name} could not be searched just now ({review.lookup_failure.message}
-          ). That does not mean nothing was created.
+          {name} could not be searched just now.{" "}
+          {
+            describeFailure(review.lookup_failure, "check publication matches")
+              .sentence
+          }{" "}
+          That does not mean nothing was created.
+          <FailureDetails
+            variant="popover"
+            small
+            details={review.lookup_failure.message}
+          />
         </p>
       )}
       {review.candidates_complete === false && (
@@ -365,7 +408,11 @@ export function ReviewBody({
           className="publication-field"
         >
           <p className="publication-error" role="alert">
-            {different.message}
+            {different.failure.sentence}
+            <FailureDetails
+              variant="popover"
+              details={different.failure.details}
+            />
           </p>
           <div className="publication-attach">
             <Button
@@ -438,7 +485,8 @@ export function ReviewBody({
       )}
       {error && (
         <p className="publication-error" role="alert">
-          {error}
+          {error.title}. {error.sentence}
+          <FailureDetails variant="popover" details={error.details} />
         </p>
       )}
       <p className="publication-detail">{review.note}</p>

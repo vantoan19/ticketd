@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "cn";
 import { RadioGroup } from "radix-ui";
 import { Count } from "./count";
@@ -15,6 +15,41 @@ export type SegmentedOption<T extends string> = {
   title?: string;
 };
 
+const frame =
+  "ui-segmented inline-grid h-7 auto-cols-fr grid-flow-col items-center gap-0.5 rounded-md p-0.5";
+const segment =
+  "inline-flex h-6 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 text-secondary-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring) enabled:hover:text-foreground data-[state=checked]:text-foreground aria-selected:text-foreground disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0";
+
+/** The same segmented anatomy for tabs whose caller owns their keyboard model. */
+export function SegmentedTabList({
+  className,
+  plain = false,
+  ...props
+}: ComponentProps<"div"> & { plain?: boolean }) {
+  return (
+    <div
+      {...props}
+      role="tablist"
+      data-slot="segmented-control"
+      data-variant={plain ? "plain" : undefined}
+      className={cn(frame, className)}
+    />
+  );
+}
+export function SegmentedTab({
+  className,
+  ...props
+}: ComponentProps<"button">) {
+  return (
+    <button
+      {...props}
+      type="button"
+      role="tab"
+      className={cn(segment, className)}
+    />
+  );
+}
+
 /**
  * An exclusive choice among a few options. Never empty; arrow keys move the
  * selection. Segments are an equal-width grid that never wraps: a long
@@ -26,7 +61,6 @@ export function SegmentedControl<T extends string>({
   onValueChange,
   options,
   className,
-  compact = false,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledby,
 }: {
@@ -36,7 +70,7 @@ export function SegmentedControl<T extends string>({
   "aria-label"?: string;
   "aria-labelledby"?: string;
   className?: string;
-  /** The 28px header size: 12px labels with 8px padding. */
+  /** Kept for callers; every segmented control uses the shared 28px density. */
   compact?: boolean;
 }) {
   return (
@@ -47,10 +81,7 @@ export function SegmentedControl<T extends string>({
       data-slot="segmented-control"
       aria-label={ariaLabel}
       aria-labelledby={ariaLabelledby}
-      className={cn(
-        "inline-grid auto-cols-fr grid-flow-col items-center gap-0.5 rounded-md bg-(--recessed) p-0.5 shadow-(--shadow-border-base)",
-        className,
-      )}
+      className={cn(frame, className)}
     >
       {options.map((option) => (
         <RadioGroup.Item
@@ -58,10 +89,7 @@ export function SegmentedControl<T extends string>({
           value={option.value}
           disabled={option.disabled ?? false}
           title={option.title}
-          className={cn(
-            "inline-flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-sm px-2.5 text-sm text-secondary-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0",
-            compact && "h-6 px-2 text-xs",
-          )}
+          className={segment}
         >
           {option.icon}
           <span className="truncate">{option.label}</span>{" "}

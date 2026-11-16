@@ -177,3 +177,130 @@ fn document_plans_tell_spec_from_supporting_documents() {
     workspace.set_plan_spec(&plan.id, Some(&doc.id)).unwrap();
     assert!(workspace.document_plans(&doc.id).unwrap()[0].1);
 }
+
+#[test]
+fn bounded_plan_reads_keep_full_counts_and_legacy_views_while_paging_members_and_documents() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let first = workspace.create_plan("First").unwrap();
+    workspace.create_plan("Second").unwrap();
+    workspace.create_plan("Third").unwrap();
+    for number in 1..=3 {
+        let ticket = workspace
+            .create_ticket(&format!("Member {number}"))
+            .unwrap();
+        workspace
+            .change_ticket(
+                &ticket.reference,
+                ticketd_core::TicketPatch {
+                    plan_id: Some(Some(first.id.clone())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let document = workspace
+            .create_document(
+                Some(&format!("Document {number}")),
+                "large body is not read for the list",
+            )
+            .unwrap();
+        workspace
+            .set_plan_document(&first.id, &document.id, true)
+            .unwrap();
+    }
+    let complete = workspace.show_plan(&first.id).unwrap();
+    let first_page = workspace
+        .show_plan_bounded(&first.id, Some(2), 0, true)
+        .unwrap();
+    let second_page = workspace
+        .show_plan_bounded(&first.id, Some(2), 2, true)
+        .unwrap();
+    assert_eq!(first_page.members.len(), 2);
+    assert_eq!(second_page.members.len(), 1);
+    assert_eq!(first_page.counts.todo, 3);
+    assert_eq!(second_page.counts.todo, 3);
+    assert_eq!(first_page.documents.len(), 2);
+    assert_eq!(second_page.documents.len(), 1);
+    assert_eq!(
+        second_page.members[0].reference,
+        complete.members[2].reference
+    );
+    assert_eq!(second_page.documents[0].id, complete.documents[2].id);
+    assert!(
+        workspace
+            .show_plan_bounded(&first.id, Some(0), 0, true)
+            .unwrap()
+            .members
+            .is_empty()
+    );
+    let plans = workspace.list_plans_bounded(true, Some(2), 0).unwrap();
+    let rest = workspace.list_plans_bounded(true, Some(2), 2).unwrap();
+    assert_eq!(plans.len(), 2);
+    assert_eq!(rest.len(), 1);
+    assert_eq!(workspace.list_plans(true).unwrap().len(), 3);
+}
+
+#[test]
+fn metadata_projection_omits_bodies_and_bounds_prerequisites_without_changing_legacy_tickets() {
+    use ticketd_core::TicketFilter;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Projected").unwrap();
+    let ticket = workspace.create_ticket("Projected member").unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            ticketd_core::TicketPatch {
+                body: Some("Canonical body must never be copied into graph metadata".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .set_plan(&ticket.reference, Some(&plan.id), None)
+        .unwrap();
+    for number in 0..51 {
+        let blocker = workspace
+            .create_ticket(&format!("Blocker {number}"))
+            .unwrap();
+        workspace
+            .add_dependency(&blocker.reference, &ticket.reference, None)
+            .unwrap();
+    }
+    let filter = TicketFilter {
+        plan: Some(plan.id.clone()),
+        limit: 1,
+        ..Default::default()
+    };
+    let projection = workspace
+        .find_ticket_metadata(&filter, Some(std::slice::from_ref(&ticket.id)), false)
+        .unwrap();
+    assert_eq!(projection.items.len(), 1);
+    assert_eq!(projection.items[0].reference, ticket.reference);
+    assert_eq!(projection.items[0].availability.as_deref(), Some("Blocked"));
+    let encoded = serde_json::to_value(&projection.items[0]).unwrap();
+    assert!(encoded.get("body").is_none());
+    assert!(encoded.get("prerequisites").is_none());
+    assert!(!projection.omitted);
+    let flow = workspace.find_ticket_metadata(&filter, None, true).unwrap();
+    assert!(flow.omitted);
+    assert_eq!(flow.items[0].prerequisites.as_ref().unwrap().len(), 50);
+    let legacy = workspace.find_tickets(&filter).unwrap();
+    assert_eq!(
+        legacy[0].body,
+        "Canonical body must never be copied into graph metadata"
+    );
+    assert_eq!(legacy[0].prerequisites.len(), 51);
+    assert_eq!(legacy[0].availability, projection.items[0].availability);
+    let summary = workspace
+        .show_plan_bounded(&plan.id, Some(2), 0, false)
+        .unwrap();
+    assert!(summary.members.is_empty());
+    assert_eq!(summary.counts.todo, 1);
+    assert_eq!(workspace.show_plan(&plan.id).unwrap().members.len(), 1);
+    assert!(
+        workspace
+            .find_ticket_metadata(&filter, Some(&vec![ticket.id; 251]), false)
+            .is_err()
+    );
+}

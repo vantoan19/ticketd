@@ -93,39 +93,36 @@ function renderDetails(item: Ticket = ticket) {
   );
 }
 
-test("the property rail holds Status, Latest update, Project, Plan, Tags, Attention, Relationships and Files in order", async () => {
+test("all property chips stay above the description and linked context stays below it", async () => {
+  children = [
+    {
+      reference: "T-KQ5",
+      title: { text: "Part one" },
+      status: "Todo",
+      trashed: false,
+      unresolved: true,
+    },
+  ];
   renderDetails({ ...ticket, status: "In progress" });
-  const rail = await screen.findByRole("complementary", {
-    name: "Ticket properties",
-  });
-  await within(rail).findByRole("button", { name: "Add relationship" });
+  const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(
-    within(rail)
-      .getAllByRole("heading", { level: 3 })
-      .map((heading) => heading.textContent),
-  ).toEqual([
-    "Status",
-    "Latest update",
-    "Project",
-    "Plan",
-    "Tags",
-    "Attention",
-    "Relationships",
-    "Files",
-  ]);
-  // No source is set up: nothing says "Local", and there is no Source section.
-  expect(within(rail).queryByText("Local")).toBeNull();
-  expect(screen.queryByText(/Owned by GitHub/)).toBeNull();
-  expect(screen.queryByText(/Local ticket/)).toBeNull();
-  expect(
-    within(rail).getByRole("combobox", { name: "Status: In progress" }),
+    within(bar).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(
-    within(rail).getByRole("button", { name: "Project: No project" }),
+    within(bar).getByRole("button", { name: "Project: No project" }),
   ).toBeTruthy();
+  const linked = await screen.findByRole("heading", { name: "Linked 1" });
+  expect(bar.contains(linked)).toBe(false);
+  expect(
+    screen.getByText("A description to read.").compareDocumentPosition(linked) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("complementary", { name: "Ticket properties" }),
+  ).toBeNull();
 });
 
-test("the reading column runs title, state, description, then subtickets, and keeps the rail apart", async () => {
+test("the local reading column runs title, description, then Linked without a duplicate timestamp", async () => {
   children = [
     {
       reference: "T-KQ5",
@@ -136,46 +133,45 @@ test("the reading column runs title, state, description, then subtickets, and ke
     },
   ];
   renderDetails();
-  const subtickets = await screen.findByRole("heading", { name: "Subtickets" });
+  const subtickets = await screen.findByRole("heading", { name: "Linked 1" });
   const title = screen.getByRole("textbox", { name: "Title" });
-  const state = document.querySelector(".ticket-state-line")!;
+  expect(document.querySelector(".ticket-state-line")).toBeNull();
   const description = screen.getByText("Description");
-  const rail = screen.getByRole("complementary", {
+  const rail = screen.getByRole("group", {
     name: "Ticket properties",
   });
   const before = (first: Node, second: Node) =>
     Boolean(
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
     );
-  expect(before(title, state)).toBe(true);
-  expect(before(state, description)).toBe(true);
+  expect(before(title, description)).toBe(true);
   expect(before(description, subtickets)).toBe(true);
   expect(rail.contains(subtickets)).toBe(false);
   expect(rail.contains(title)).toBe(false);
 });
 
-test("Follow, the reminder, and the properties live in the rail, not the header", async () => {
+test("Follow lives in the header while reminder and properties stay in the property bar", async () => {
   renderDetails();
-  const rail = await screen.findByRole("complementary", {
+  const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  const follow = await within(rail).findByRole("button", { name: "Follow" });
+  const header = document.querySelector(".detail-header") as HTMLElement;
+  const follow = await within(header).findByRole("button", { name: "Follow" });
   expect(follow.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(follow);
   await waitFor(() =>
     expect(
-      within(rail)
+      within(header)
         .getByRole("button", { name: "Follow" })
         .getAttribute("aria-pressed"),
     ).toBe("true"),
   );
   // Visible words follow the state; the name stays "Follow".
-  expect(follow.textContent).toBe("Following");
+  expect(follow.getAttribute("aria-pressed")).toBe("true");
   expect(
     within(rail).getByRole("button", { name: "Manage reminder" }),
   ).toBeTruthy();
-  const header = document.querySelector(".detail-header") as HTMLElement;
-  expect(within(header).queryByRole("button", { name: /Follow/ })).toBeNull();
+  expect(within(rail).queryByRole("button", { name: /Follow/ })).toBeNull();
   expect(
     within(header).queryByRole("button", { name: /Manage reminder/ }),
   ).toBeNull();
@@ -203,10 +199,10 @@ test("the header shows the list position with Previous and Next", async () => {
 
 test("Latest update appears only for In progress and In review tickets", async () => {
   renderDetails();
-  const rail = await screen.findByRole("complementary", {
+  const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  await within(rail).findByRole("button", { name: "Add relationship" });
+  await screen.findByRole("button", { name: "Link a ticket" });
   expect(
     within(rail).queryByRole("heading", { name: "Latest update" }),
   ).toBeNull();
@@ -244,25 +240,21 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
       editing_agent: "agent",
     },
   });
-  const heading = screen.getByRole("heading", { name: "Latest update" });
-  fireEvent.click(
-    await within(heading.closest("section")!).findByRole("button", {
-      name: /^Go to update/,
-    }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: /^Go to update/ }));
   expect(
     (await screen.findByLabelText("Selected update")).textContent,
   ).toContain("Reported progress");
-  const rail = screen.getByRole("complementary", { name: "Ticket properties" });
+  const rail = screen.getByRole("group", { name: "Ticket properties" });
   // Each tag is its own chip, not one joined string.
   expect(within(rail).getByText("frontend")).toBeTruthy();
   expect(within(rail).getByText("urgent")).toBeTruthy();
 });
 
-test("Edit is a real button with its shortcut, and E starts editing", async () => {
+test("the description owns its shortcut, and E starts editing", async () => {
   renderDetails({ ...ticket, body: "Some text" });
-  const edit = await screen.findByRole("button", { name: "Edit description" });
-  expect(edit.textContent).toContain("E");
+  const edit = await screen.findByRole("group", { name: "Read description" });
+  expect(edit.getAttribute("aria-keyshortcuts")).toBe("E");
+  expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "e" });
   expect(
     await screen.findByRole("button", { name: "Done editing" }),
@@ -274,11 +266,12 @@ test("an empty ticket folds Subtickets and Evidence into one quiet add row (DB-3
   const row = await screen.findByRole("group", {
     name: "Add to this ticket",
   });
+  await within(row).findByRole("button", { name: "File" });
   expect(
     within(row)
       .getAllByRole("button")
       .map((button) => button.textContent),
-  ).toEqual(["Subticket", "Evidence", "Relationship"]);
+  ).toEqual(["Subticket", "Link", "Evidence", "File"]);
   // No empty sections stand in a stack under the description.
   expect(screen.queryByRole("heading", { name: "Subtickets" })).toBeNull();
   expect(screen.queryByRole("heading", { name: /^Evidence/ })).toBeNull();
@@ -319,13 +312,12 @@ test("showing another ticket starts its rail and document at the top", async () 
     offsets.set(this, value);
   });
   const view = render(<TicketDetails {...props} selected="T-KQ2" />);
-  await screen.findAllByRole("complementary", { hidden: true });
+  await screen.findAllByRole("group", { hidden: true });
   const scrollers = () => {
     const [shown] = document.querySelectorAll<HTMLElement>(".detail-content");
     return [
       document.querySelector<HTMLElement>(".detail-scroll")!,
       shown!.querySelector<HTMLElement>(".detail-document")!,
-      shown!.querySelector<HTMLElement>(".ticket-properties")!,
     ];
   };
   for (const node of scrollers()) node.scrollTop = 120;

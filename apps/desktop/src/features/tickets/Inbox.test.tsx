@@ -1,3 +1,9 @@
+import { ChatClientContext, chatSummarySchema } from "@/features/chats/client";
+import { createMockChatClient } from "@/features/chats/mock-client";
+import {
+  ChatFeatureContext,
+  NO_CHAT_OVERVIEW,
+} from "@/features/chats/use-chats";
 // @vitest-environment jsdom
 
 import {
@@ -26,6 +32,12 @@ vi.mock("@tauri-apps/api/core", () => ({
         ids.includes(e.id) ? { ...e, read: args.read as boolean } : e,
       );
     }
+    if (command === "reminder")
+      return (
+        store.find(
+          (e) => e.reference === args.reference && e.kind === "reminder",
+        )?.to_value ?? null
+      );
     if (command === "inbox") {
       const offset = args.offset as number;
       const limit = args.limit as number;
@@ -77,7 +89,7 @@ test("opening an entry marks it read and shown entries can be marked together", 
   await waitFor(() =>
     expect(screen.getAllByText("Unread", unreadState)).toHaveLength(1),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Mark shown as read" }));
+  fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
   await waitFor(() =>
     expect(screen.queryByText("Unread", unreadState)).toBeNull(),
   );
@@ -91,7 +103,9 @@ test("opens the note identified by an inbox entry and shows its text", async () 
     await screen.findByRole("button", { name: /T-KQ2.*Finding/ }),
   );
   expect(select).toHaveBeenCalledWith("T-KQ2", "note-id");
-  expect(screen.getByText(/New update: Original note · agent/)).toBeTruthy();
+  expect(screen.getByText(/Original note/).textContent).toBe(
+    "agent: Original note",
+  );
 });
 
 test("groups entries by local day and never shows internal event keys", async () => {
@@ -100,6 +114,7 @@ test("groups entries by local day and never shows internal event keys", async ()
     entry({
       id: 2,
       title: "Long ago",
+      read: true,
       kind: "relationship:discovered-while",
       from_value: "",
       to_value: "T-KQ9",
@@ -109,41 +124,21 @@ test("groups entries by local day and never shows internal event keys", async ()
   const view = render(
     <Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />,
   );
+  await screen.findByText("Now");
+  fireEvent.click(screen.getByRole("button", { name: "Show read entries" }));
   await screen.findByText("Long ago");
-  expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Earlier" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: /^Updates/ })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: /^Earlier/ })).toBeTruthy();
   expect(screen.getByText("Discovered while working on T-KQ9")).toBeTruthy();
   expect(view.container.textContent).not.toMatch(/relationship:/);
 });
 
-test("the Unread filter asks the core for unread entries and loads older pages", async () => {
-  store = Array.from({ length: 60 }, (_, i) =>
-    entry({ id: 100 - i, read: i % 2 === 1 }),
-  );
+test("an empty Needs you group stays caught up while updates remain", async () => {
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
-  await screen.findByRole("button", { name: /^T-KQ100/ });
-  fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
-  await waitFor(() =>
-    expect(calls.some((c) => c.args.unreadOnly === true)).toBe(true),
-  );
-  await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(30));
-  expect(screen.queryByRole("button", { name: /^T-KQ99/ })).toBeNull();
-  expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
-});
-
-test("an empty Inbox explains itself and offers to browse tickets", async () => {
-  store = [];
-  const onBrowse = vi.fn();
-  render(<Inbox revision={0} select={vi.fn()} onBrowse={onBrowse} />);
-  await screen.findByText("No updates to review");
-  // Nothing unread is shown, so there is nothing to mark (list I-07).
-  expect(
-    screen.queryByRole("button", { name: "Mark shown as read" }),
-  ).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Browse tickets to follow" }),
-  );
-  expect(onBrowse).toHaveBeenCalled();
+  await screen.findByText("First");
+  expect(screen.getByText("You're all caught up")).toBeTruthy();
+  expect(screen.queryByRole("radio", { name: "Unread" })).toBeNull();
+  expect(screen.getByRole("heading", { name: /Updates/ })).toBeTruthy();
 });
 
 test("loads older entries on request", async () => {
@@ -238,12 +233,95 @@ test("E marks the focused entry read without opening it", async () => {
   expect(select).not.toHaveBeenCalled();
 });
 
-test("an Unread view with nothing unread says so and offers Show all", async () => {
-  store = store.map((e) => ({ ...e, read: true }));
+test("entry shortcuts retain focus after opening and Snooze has a visible heading", async () => {
+  store = [
+    entry({ id: 7, kind: "reminder", to_value: "2020-01-01T00:00:00Z" }),
+  ];
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
-  await screen.findByText("First");
-  fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
-  expect(await screen.findByText("You're all caught up")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Show all" }));
-  expect(await screen.findByText("First")).toBeTruthy();
+  const row = await screen.findByRole("button", { name: /T-KQ7.*Ticket 7/ });
+  fireEvent.click(row);
+  expect(document.activeElement).toBe(row);
+  fireEvent.keyDown(row, { key: "h" });
+  expect(await screen.findByText("Snooze until")).toBeTruthy();
+});
+
+test("an old due reminder stays ahead of newer Updates beyond the first page", async () => {
+  store = [
+    ...Array.from({ length: 55 }, (_, i) => entry({ id: i + 1 })),
+    entry({
+      id: 99,
+      kind: "reminder",
+      title: "Old reminder",
+      timestamp: hours(72),
+      to_value: "2020-01-01T00:00:00Z",
+      read: true,
+    }),
+  ];
+  render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
+  expect(await screen.findByText("Old reminder")).toBeTruthy();
+  expect(screen.getAllByRole("listitem")[0]?.textContent).toContain(
+    "Old reminder",
+  );
+});
+
+test("approvals lead with the first linked ticket and keep Chat read and open actions", async () => {
+  const client = createMockChatClient();
+  const approval = chatSummarySchema.parse({
+    id: "chat-approval",
+    title: "Run checks",
+    harness_id: "codex",
+    harness_name: "codex",
+    tickets: [
+      { reference: "T-KQ2", status: "Todo" },
+      { reference: "T-KQ1", status: "Todo" },
+    ],
+    retention: "active",
+    activity: "waiting",
+    needs_you: true,
+    updated_at: new Date().toISOString(),
+    status: { rank: "approval", unseen: true, word: "Approval needed" },
+    muted: false,
+  });
+  vi.spyOn(client, "listChats").mockResolvedValue([approval]);
+  const markRead = vi.spyOn(client, "markRead").mockResolvedValue();
+  const requestChat = vi.fn();
+  const select = vi.fn();
+  render(
+    <ChatClientContext value={client}>
+      <ChatFeatureContext
+        value={{
+          enabled: true,
+          setEnabled: async () => {},
+          overview: NO_CHAT_OVERVIEW,
+          revision: 0,
+          openRequest: null,
+          chatRequest: null,
+          requestChat,
+        }}
+      >
+        <Inbox revision={0} select={select} onBrowse={vi.fn()} />
+      </ChatFeatureContext>
+    </ChatClientContext>,
+  );
+  const row = await screen.findByRole("button", { name: /T-KQ2.*Run checks/ });
+  expect(screen.getAllByRole("listitem")[0]?.textContent).toContain(
+    "Run checks",
+  );
+  fireEvent.click(row);
+  expect(requestChat).toHaveBeenCalledWith({
+    kind: "open",
+    chatId: "chat-approval",
+    retention: "active",
+  });
+  expect(select).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+  await waitFor(() => expect(markRead).toHaveBeenCalledWith("chat-approval"));
+  expect(
+    calls
+      .filter((call) => call.command === "set_inbox_read")
+      .every((call) =>
+        (call.args.ids as number[]).every((id) => typeof id === "number"),
+      ),
+  ).toBe(true);
+  expect(screen.getByRole("heading", { name: /Needs you/ })).toBeTruthy();
 });

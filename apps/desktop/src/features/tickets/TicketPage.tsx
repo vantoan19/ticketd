@@ -1,3 +1,13 @@
+import { TicketCommandPicker } from "./TicketCommandPicker";
+import { useContext } from "react";
+import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { TicketCommandContext } from "@/lib/ticket-command-actions";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -5,14 +15,11 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
-import { FollowToggle } from "@/features/tickets/Attention";
 import { Reminder } from "@/features/tickets/Reminder";
 import { RailPlacement } from "@/features/tickets/rail-placement";
-import { LinkedChats } from "@/features/chats/LinkedChats";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { TicketFiles } from "@/features/tickets/TicketFiles";
-import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
@@ -38,11 +45,12 @@ import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
 
-/** One ticket's reading column and its property rail. */
+/** The ticket document with its wrapping properties and linked context. */
 export function TicketPage({
   ticket,
   active,
-  narrow = false,
+  opening = false,
+
   outsideResults = false,
   projects,
   plans,
@@ -58,8 +66,8 @@ export function TicketPage({
   ticket: Ticket;
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
-  /** Too narrow for the rail: it folds into a property strip under the title. */
-  narrow?: boolean;
+  /** A known saved list copy reserves geometry until the fresh detail read settles. */
+  opening?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
   projects: Project[];
@@ -75,6 +83,7 @@ export function TicketPage({
   onMention: (target: MentionTarget) => void;
 }) {
   const now = useNow();
+  const openCommand = useContext(TicketCommandContext);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(ticket, revision, refresh, active);
   const sourcesConfigured = useSourcesConfigured();
@@ -83,52 +92,55 @@ export function TicketPage({
   // row of adds under the description, and appear once they have content.
   const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
+  const [fileAddTarget, setFileAddTarget] = useState<HTMLSpanElement | null>(
+    null,
+  );
   const noSubtickets = work.current?.links?.children_progress.total === 0;
   const noRelationships =
     Boolean(work.current?.links) && work.rows.length === 0;
-  const addRow = active &&
-    !ticket.trashed &&
-    (noSubtickets || evidenceCount === 0 || noRelationships) && (
-      <div
-        className="ticket-add-row"
-        role="group"
-        aria-label="Add to this ticket"
-      >
-        {noSubtickets && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => work.openLink("subticket")}
-          >
-            <Plus aria-hidden="true" />
-            Subticket
-          </Button>
-        )}
-        {evidenceCount === 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setEvidenceRequest((count) => count + 1)}
-          >
-            <Plus aria-hidden="true" />
-            Evidence
-          </Button>
-        )}
-        {noRelationships && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => work.openLink("related")}
-          >
-            <Plus aria-hidden="true" />
-            Relationship
-          </Button>
-        )}
-      </div>
-    );
+  const addRow = active && !ticket.trashed && (
+    <div
+      className="ticket-add-row"
+      role="group"
+      aria-label="Add to this ticket"
+    >
+      {noSubtickets && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => work.openLink("subticket")}
+        >
+          <Plus aria-hidden="true" />
+          Subticket
+        </Button>
+      )}
+      {noRelationships && (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Link a ticket"
+          onClick={() => work.openLink("related")}
+        >
+          <Plus aria-hidden="true" />
+          Link
+        </Button>
+      )}
+      {evidenceCount === 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setEvidenceRequest((count) => count + 1)}
+        >
+          <Plus aria-hidden="true" />
+          Evidence
+        </Button>
+      )}
+      <span ref={setFileAddTarget} />
+    </div>
+  );
   const ticketRuns = useTicketRuns(ticket.reference, active);
   // Pages stay mounted while hidden and the shared scrollers keep their
-  // offset, so showing a ticket starts it at the top: document, rail, detail.
+  // offset, so showing a ticket starts its document at the top.
   const page = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const content = page.current;
@@ -137,7 +149,6 @@ export function TicketPage({
       content.parentElement,
       content,
       content.querySelector(".detail-document"),
-      content.querySelector(":scope > .ticket-properties"),
     ]) {
       if (node) node.scrollTop = 0;
     }
@@ -157,85 +168,75 @@ export function TicketPage({
     original && source && original.display.startsWith(`${source.place}#`)
       ? original.display.slice(source.place.length)
       : original?.display;
-  const updated = ticket.updated_at && (
-    <Tooltip content={formatDateTime(ticket.updated_at)} side="bottom">
-      <time dateTime={ticket.updated_at} tabIndex={0}>
-        {relativeDateTime(ticket.updated_at, now)}
-      </time>
-    </Tooltip>
-  );
-  // One line under the title. Until a source is set up every ticket is local,
-  // so it says only when it changed (DESIGN.md section 7).
-  const stateLine = (
-    <p className="ticket-state-line">
-      {source && state ? (
-        <>
-          <span className="ticket-source-state">
-            {state.tone && <StatusDot tone={state.tone} size={10} />}
-            <span>
-              {state.text}
-              {original && (
-                <>
-                  {" "}
-                  of{" "}
-                  <Tooltip content={original.display} side="bottom">
-                    <span className="source-number" tabIndex={0}>
-                      {originalLabel}
-                    </span>
+  // The header owns the normal updated time. Only source or exceptional
+  // context needs a line between the property strip and the description.
+  const stateLine =
+    source || sourcesConfigured || ticket.source || outsideResults ? (
+      <p className="ticket-state-line">
+        {source && state ? (
+          <>
+            <span className="ticket-source-state">
+              {state.tone && <StatusDot tone={state.tone} size={10} />}
+              <span>
+                {state.text}
+                {original && (
+                  <>
+                    {" "}
+                    of{" "}
+                    <Tooltip content={original.display} side="bottom">
+                      <span className="source-number" tabIndex={0}>
+                        {originalLabel}
+                      </span>
+                    </Tooltip>
+                    {original.last_known && " (last known)"}
+                  </>
+                )}
+              </span>
+            </span>
+            {source.unavailable ? (
+              <span>
+                Last synced copy from{" "}
+                {source.last_refreshed_at
+                  ? formatDateTime(source.last_refreshed_at)
+                  : "an earlier sync"}
+              </span>
+            ) : (
+              <>
+                {source.state.state === "open" && <span>{source.number}</span>}
+                {source.closed_at && (
+                  <Tooltip
+                    content={formatDateTime(source.closed_at)}
+                    side="bottom"
+                  >
+                    <time dateTime={source.closed_at} tabIndex={0}>
+                      {relativeDateTime(source.closed_at, now)}
+                    </time>
                   </Tooltip>
-                  {original.last_known && " (last known)"}
-                </>
-              )}
-            </span>
-          </span>
-          {source.unavailable ? (
-            <span>
-              Last synced copy from{" "}
-              {source.last_refreshed_at
-                ? formatDateTime(source.last_refreshed_at)
-                : "an earlier sync"}
-            </span>
-          ) : (
-            <>
-              {source.state.state === "open" && <span>{source.number}</span>}
-              {source.closed_at && (
-                <Tooltip
-                  content={formatDateTime(source.closed_at)}
-                  side="bottom"
-                >
-                  <time dateTime={source.closed_at} tabIndex={0}>
-                    {relativeDateTime(source.closed_at, now)}
-                  </time>
-                </Tooltip>
-              )}
-            </>
-          )}
-        </>
-      ) : sourcesConfigured || ticket.source ? (
-        <span>Local ticket{updated && <> · updated {updated}</>}</span>
-      ) : (
-        updated && <span>Updated {updated}</span>
-      )}
-      {outsideResults && <span>Not in the current results</span>}
-    </p>
-  );
+                )}
+              </>
+            )}
+          </>
+        ) : sourcesConfigured || ticket.source ? (
+          <span>Local ticket</span>
+        ) : null}
+        {outsideResults && <span>Not in the current results</span>}
+      </p>
+    ) : null;
   // The source owns the title and description, so they are read, never edited.
   const contentLocked = Boolean(source?.content_locked);
   const attentionFor = (variant: "rail" | "strip") =>
     active &&
     !ticket.trashed && (
       <>
-        <FollowToggle
-          key={`follow-${ticket.reference}`}
-          reference={ticket.reference}
-          revision={revision}
-          variant={variant}
-        />
         <Reminder
           key={`reminder-${ticket.reference}`}
           reference={ticket.reference}
           revision={revision}
           variant={variant}
+          ticket={ticket}
+          projects={projects}
+          plans={plans}
+          refresh={refresh}
         />
       </>
     );
@@ -246,31 +247,35 @@ export function TicketPage({
       revision={revision}
       refresh={refresh}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
-    />
-  );
-  const chats = active && (
-    <LinkedChats
-      ticket={ticket}
-      folder={
-        projects.find((project) => project.id === ticket.project_id)?.path ??
-        null
-      }
-      chip={narrow}
+      emptyTarget={fileAddTarget}
     />
   );
   const relationships = active && (
-    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
+    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
+      <Backlinks
+        ticketId={ticket.id}
+        reference={ticket.reference}
+        revision={revision}
+        select={onMention}
+      />
+    </LinkedWork>
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
-  // Folded, the rail's values sit under the title as one strip, in rail
-  // order; the state line is the editor's own row above it.
-  const strip = narrow && (
+  // One property strip for every document width.
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const blockedReferences = work.current?.links
+    ? work.rows
+        .filter((row) => row.kind === "blocked_by" && row.unresolved)
+        .map((row) => row.reference)
+    : ticket.prerequisites
+        .filter((item) => item.unresolved && !item.trashed)
+        .map((item) => item.reference);
+  const strip = (
     <TicketProperties
       layout="strip"
-      chats={chats}
       attention={attentionFor("strip")}
       ticket={ticket}
-      active={active}
+      active={active && !opening}
       revision={revision}
       projects={projects}
       plans={plans}
@@ -278,13 +283,72 @@ export function TicketPage({
       refresh={refresh}
       onOpenTicket={select}
       onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-    />
+    >
+      {active && !ticket.trashed && (
+        <>
+          {blockedReferences.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => work.openLink("blocked_by")}
+            >
+              <Plus aria-hidden="true" />
+              Blocked by {blockedReferences.join(", ")}
+            </Button>
+          )}
+          <TicketCommandPicker
+            ticket={ticket}
+            projects={projects}
+            plans={plans}
+            refresh={refresh}
+            scope="Reminder"
+            open={reminderOpen}
+            onOpenChange={setReminderOpen}
+            anchorOnly
+            trigger={
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton label="Add ticket property" size="icon-compact">
+                    <Plus />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => {
+                    if (reminderOpen) event.preventDefault();
+                  }}
+                >
+                  {openCommand && (
+                    <DropdownMenuItem onSelect={() => setReminderOpen(true)}>
+                      Reminder
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onSelect={() => work.openLink("blocked_by")}
+                  >
+                    Blocked by
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => work.openLink("parent")}>
+                    Parent
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => work.openLink("related")}>
+                    Link
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            }
+          />
+        </>
+      )}
+    </TicketProperties>
   );
   return (
     <div
       ref={page}
       className="detail-content"
       hidden={!active}
+      inert={opening}
+      aria-busy={opening}
       data-trashed={ticket.trashed || undefined}
     >
       {/* Mounted here, not inside the rail or the narrow layout, so crossing
@@ -324,8 +388,8 @@ export function TicketPage({
             ) : (
               <h3 className="detail-title">{ticket.title}</h3>
             )}
-            {stateLine}
             {strip}
+            {stateLine}
             <div className="editor-body">
               {source && contentLocked ? (
                 <SourceDescription
@@ -355,6 +419,7 @@ export function TicketPage({
         ) : (
           <TicketEditor
             ticket={ticket}
+            readOnly={opening}
             onSaved={updateTicket}
             select={select}
             revision={revision}
@@ -365,9 +430,9 @@ export function TicketPage({
           </TicketEditor>
         )}
         {addRow}
-        {active && !ticket.trashed && !noSubtickets && (
-          <Subtickets work={work} select={select} external={Boolean(source)} />
-        )}
+        <RailPlacement value="column">
+          <div className="detail-connected">{relationships}</div>
+        </RailPlacement>
         {active && (
           <Evidence
             reference={ticket.reference}
@@ -379,23 +444,14 @@ export function TicketPage({
             onCount={setEvidenceCount}
           />
         )}
-        {narrow && (
+        {
           <RailPlacement value="column">
             <div className="detail-connected">
               {runs}
-              {relationships}
               {files}
             </div>
           </RailPlacement>
-        )}
-        {active && (
-          <Backlinks
-            ticketId={ticket.id}
-            reference={ticket.reference}
-            revision={revision}
-            select={onMention}
-          />
-        )}
+        }
         {active && ticket.source && (
           <SourceConversation
             source={ticket.source}
@@ -419,30 +475,12 @@ export function TicketPage({
           active={active}
           trashed={ticket.trashed}
           select={select}
+          foldEmpty
           latestNoteId={ticket.latest_update?.activity_id}
           sourceName={source?.provider_name}
           onChanged={refresh}
         />
       </div>
-      {!narrow && (
-        <TicketProperties
-          ticket={ticket}
-          chats={chats}
-          attention={attentionFor("rail")}
-          active={active}
-          revision={revision}
-          projects={projects}
-          plans={plans}
-          onSaved={updateTicket}
-          refresh={refresh}
-          onOpenTicket={select}
-          onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-        >
-          {runs}
-          {relationships}
-          {files}
-        </TicketProperties>
-      )}
     </div>
   );
 }

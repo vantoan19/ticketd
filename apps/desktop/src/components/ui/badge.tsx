@@ -9,7 +9,9 @@ const badgeVariants = cva("ui-badge", {
   variants: {
     variant: {
       tag: "",
+      experimental: "ui-badge-experimental",
       source: "ui-badge-source",
+      linked: "ui-badge-linked",
       doc: "ui-badge-doc",
       // 28px chip naming a record: icon or Reference, then a truncating title.
       record: "ui-badge-record",
@@ -19,6 +21,7 @@ const badgeVariants = cva("ui-badge", {
     size: {
       default: "",
       sm: "ui-badge-sm",
+      "compact-responsive": "ui-badge-compact-responsive",
     },
     // `raised` sits on a recessed control, such as the property rail’s tag picker.
     tone: {

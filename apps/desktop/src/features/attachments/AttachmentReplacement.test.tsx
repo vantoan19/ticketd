@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import {
@@ -114,9 +115,8 @@ test("replacement refuses a changed draft rather than guessing which reference m
     await screen.findByRole("radio", { name: "Select Replacement" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "content changed",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("content changed");
   expect(change).not.toHaveBeenCalled();
 });
 

@@ -1,4 +1,6 @@
-import { use, useContext, useState } from "react";
+import { use, useContext, useState, type ReactNode } from "react";
+import { Subtickets } from "./Subtickets";
+import { Progress } from "@/components/ui/progress";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -108,19 +110,37 @@ export function LinkedWork({
   work,
   select,
   onOpenGraph,
+  document = false,
+  children,
 }: {
   work: LinkedWorkState;
   select: (reference: string) => void;
   onOpenGraph: () => void;
+  document?: boolean;
+  children?: ReactNode;
 }) {
   const { reference, current, pending } = work;
   const error = work.error?.kind === "subticket" ? null : work.error;
-  const density = use(RailPlacement) === "column" ? "list" : "rail";
+  const placement = use(RailPlacement);
+  const density = document || placement === "column" ? "list" : "rail";
   // A trashed ticket keeps its relationships visible (an unresolved blocker still
   // matters) but they cannot be changed.
   const readOnly = work.ticket.trashed;
   const openContextGraph = useContext(ContextGraphNavigation);
-  const listed = work.rows.filter((row) => row.kind !== "subticket");
+  const subticketReferences = new Set(
+    work.rows
+      .filter((row) => row.kind === "subticket")
+      .map((row) => row.reference),
+  );
+  const listed = work.rows.filter(
+    (row) =>
+      row.kind !== "subticket" &&
+      !(
+        document &&
+        row.kind === "blocked_by" &&
+        subticketReferences.has(row.reference)
+      ),
+  );
   // Blockers that still hold this ticket back come first within "Blocked by".
   const blockers = listed
     .filter((row) => row.kind === "blocked_by")
@@ -145,16 +165,27 @@ export function LinkedWork({
       Open graph
     </RailRow>
   );
-  if (!current?.links || (rows.length === 0 && !external)) {
+  if (
+    !current?.links ||
+    (rows.length === 0 &&
+      !external &&
+      (!document || !current.links.children_progress.total))
+  ) {
+    if (document && current?.links && !current.failure && !error)
+      return <>{children}</>;
     if (readOnly && current?.links) return null;
     return (
-      <RailSection label="Relationships">
+      <RailSection label={document ? "Linked" : "Relationships"}>
         {!current && (
-          <Skeleton
-            className="h-8"
+          <div
+            className="linked-work-loading"
             role="status"
             aria-label="Loading relationships"
-          />
+          >
+            <Skeleton shape="circle" className="size-4" />
+            <Skeleton className="h-3 w-11" />
+            <Skeleton className="h-3 flex-1" />
+          </div>
         )}
         {current && !current.links && current.failure && (
           <FailureState
@@ -174,6 +205,7 @@ export function LinkedWork({
         )}
         {current?.links && openContextGraph && graph}
         {error && <FailureAlert size="compact" failure={error.failure} />}
+        {children}
       </RailSection>
     );
   }
@@ -234,7 +266,23 @@ export function LinkedWork({
   };
   return (
     <RailSection
-      label="Relationships"
+      label={document ? "Linked" : "Relationships"}
+      {...(document && {
+        count: `${new Set(work.rows.map((row) => row.reference)).size}${work.more === null ? "" : "+"}`,
+        summary: current.links.children_progress.total > 0 && (
+          <>
+            <span className="subtickets-summary">
+              {current.links.children_progress.done} of{" "}
+              {current.links.children_progress.total} subtickets done
+            </span>
+            <Progress
+              aria-label="Subticket progress"
+              value={current.links.children_progress.done}
+              max={current.links.children_progress.total}
+            />
+          </>
+        ),
+      })}
       {...(!readOnly && {
         actions: (
           <IconButton
@@ -254,7 +302,20 @@ export function LinkedWork({
           onRetry={work.retry}
         />
       )}
-      <div className="linked-work" id={`linked-work-${reference}`}>
+      <div
+        className={
+          document ? "linked-work linked-work-document" : "linked-work"
+        }
+        id={`linked-work-${reference}`}
+      >
+        {document && current.links.children_progress.total > 0 && (
+          <Subtickets
+            work={work}
+            select={select}
+            external={Boolean(externalSource(work.ticket))}
+            grouped
+          />
+        )}
         {groups.map((group, index) => (
           <section
             key={`${group.kind}-${index}`}
@@ -262,7 +323,7 @@ export function LinkedWork({
           >
             <div className="linked-work-group">
               <span>{linkLabel(group.kind)}</span>
-              {addFor(group.kind)}
+              {!document && addFor(group.kind)}
             </div>
             <ul className="reference-rows">{group.rows.map(renderRow)}</ul>
           </section>
@@ -286,7 +347,8 @@ export function LinkedWork({
         <Pager noun="relationships" onMore={() => void work.showMore()} />
       )}
       {error && <FailureAlert size="compact" failure={error.failure} />}
-      {graph}
+      {children}
+      {!document && graph}
     </RailSection>
   );
 }

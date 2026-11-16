@@ -1,18 +1,14 @@
+@import "../../components/ui/surface-roles/attachments-attachment-preview.css";
+
 .attachment-inline-preview {
   display: inline-flex;
   vertical-align: middle;
-  color: var(--muted-foreground);
   padding: 2px;
   margin-inline: 2px;
-  border-radius: var(--radius-segment);
 }
 .attachment-inline-preview svg {
   width: 13px;
   height: 13px;
-}
-.attachment-inline-preview:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 
 /* The preview, in the viewer dialog and the library's detail pane: a 48px
@@ -25,64 +21,43 @@
   min-height: 0;
   height: 100%;
 }
-.attachment-preview-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  padding: 8px 8px 8px 16px;
-  box-shadow: inset 0 -1px 0 var(--header-boundary);
-}
-.attachment-preview[data-layout="pane"] .attachment-preview-header {
-  padding-inline-start: 32px;
-}
-.attachment-preview-glyph {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  color: var(--muted-foreground);
-}
 .attachment-preview-title {
   flex: 1 1 auto;
   min-width: 0;
 }
 .attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
   overflow: hidden;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: var(--text-ui-line);
-  letter-spacing: -0.28px;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.attachment-preview-title > h2:focus {
-  outline: none;
 }
 .attachment-preview-actions {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
-}
-.attachment-preview-actions > :first-child {
-  margin-inline-end: 4px;
+  gap: 2px;
 }
 .attachment-rename {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
 }
 .attachment-rename > input {
-  flex: 1 1 200px;
+  flex: 1 1 0;
   min-width: 0;
 }
+.attachment-rename > button,
+.attachment-rename > span {
+  flex-shrink: 0;
+}
 .attachment-rename-failure {
-  flex-basis: 100%;
+  position: absolute;
+  top: 100%;
+  inset-inline: 0;
+  margin-top: 8px;
+  z-index: 1;
 }
 .attachment-preview-failure {
   flex: none;
@@ -108,44 +83,39 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
-  padding: 24px;
-  background: var(--recessed);
-  box-shadow: inset 0 -1px 0 var(--group-hairline);
+  height: 340px;
+  margin: 20px 24px 0;
+  padding: 20px;
+  overflow: auto;
 }
 .attachment-preview[data-layout="viewer"] .attachment-preview-stage {
   min-height: 0;
   overflow: auto;
-  box-shadow: inset -1px 0 0 var(--group-hairline);
 }
 .attachment-preview-canvas {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
   justify-content: center;
-  min-height: 280px;
+  min-height: 0;
   min-width: 0;
 }
 .attachment-preview[data-layout="pane"] .attachment-preview-canvas {
-  min-height: min(420px, 50vh);
+  min-height: 0;
 }
 .attachment-preview-loading {
   align-self: stretch;
   width: 100%;
+  height: 100%;
 }
 /* Images sit on a checkerboard, so a white or transparent one stays visible on
    the light stage; a tiny one is drawn at least 128px (shell AT-09). */
 .attachment-preview-image {
   max-width: 100%;
-  max-height: 60dvh;
+  max-height: 100%;
   min-width: min(128px, 100%);
   min-height: 128px;
   object-fit: contain;
-  background: repeating-conic-gradient(
-      var(--accent) 0 25%,
-      var(--surface) 0 50%
-    )
-    0 0 / 16px 16px;
-  box-shadow: var(--shadow-border-base);
 }
 .attachment-preview-canvas video {
   max-width: 100%;
@@ -162,14 +132,6 @@
   margin-inline: auto;
   padding: 16px 20px;
   overflow: auto;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  line-height: 20px;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .attachment-preview-textual {
@@ -179,16 +141,6 @@
   align-self: stretch;
   width: 100%;
   min-width: 0;
-}
-.attachment-preview-text:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.attachment-preview-text-note {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  text-align: center;
 }
 .attachment-preview-awaited {
   display: flex;
@@ -206,7 +158,7 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-  padding: 20px 32px 32px;
+  padding: 24px;
 }
 .attachment-preview[data-layout="viewer"] .attachment-preview-facts {
   padding: 24px;
@@ -214,53 +166,30 @@
 }
 .attachment-facts {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 120px minmax(0, 1fr);
   align-items: baseline;
-  gap: 8px 16px;
+  gap: 12px 16px;
   margin: 0;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .attachment-preview[data-layout="viewer"] .attachment-facts {
   grid-template-columns: 88px minmax(0, 1fr);
-}
-.attachment-facts dt {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .attachment-facts dd {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
 }
-.attachment-facts-name {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-}
-.attachment-facts-muted {
-  color: var(--muted-foreground);
-}
 .attachment-uses {
   display: grid;
   gap: 8px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .attachment-uses li {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-}
-.attachment-uses [data-slot="record-link"] {
-  text-align: start;
-}
-.attachment-uses small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .attachment-preview-extra {
   display: flex;
@@ -276,7 +205,6 @@
   }
   .attachment-preview[data-layout="viewer"] .attachment-preview-stage {
     flex: none;
-    box-shadow: inset 0 -1px 0 var(--group-hairline);
   }
   .attachment-preview-facts {
     padding: 20px 16px;

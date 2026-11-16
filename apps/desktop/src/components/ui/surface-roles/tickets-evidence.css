@@ -1,0 +1,45 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.evidence-list {
+  list-style: none;
+}
+.evidence-item {
+  border-radius: var(--radius);
+}
+.evidence-item:hover {
+  background: var(--hover);
+}
+.evidence-item-name {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.evidence-item-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.evidence-item-value {
+  white-space: pre-wrap;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.evidence-item-value[data-kind="code"] {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-variant-ligatures: none;
+}
+.evidence-confirm-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.evidence-confirm-text {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.ticket-add-row .ui-button {
+  color: var(--muted-foreground);
+}

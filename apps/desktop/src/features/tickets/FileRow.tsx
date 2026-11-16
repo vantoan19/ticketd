@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
+import { Card } from "@/components/ui/card";
+import { RailPlacement } from "./rail-placement";
 import { Tooltip } from "@/components/ui/tooltip";
 
 /**
@@ -21,20 +23,30 @@ export function FileRow({
   onOpen: () => void;
   action?: ReactNode;
 }) {
+  const placement = useContext(RailPlacement);
+  const open = (
+    <button
+      type="button"
+      className="rail-file-open"
+      aria-label={name}
+      onClick={onOpen}
+    >
+      {icon}
+      <Tooltip content={name} overflowOnly>
+        <span className="rail-file-name">{name}</span>
+      </Tooltip>
+      <small className="rail-file-caption">{caption}</small>
+    </button>
+  );
   return (
     <li className="rail-file" data-action={action ? "" : undefined}>
-      <button
-        type="button"
-        className="rail-file-open"
-        aria-label={name}
-        onClick={onOpen}
-      >
-        {icon}
-        <Tooltip content={name} overflowOnly>
-          <span className="rail-file-name">{name}</span>
-        </Tooltip>
-        <small className="rail-file-caption">{caption}</small>
-      </button>
+      {placement === "column" ? (
+        <Card asChild variant="file">
+          {open}
+        </Card>
+      ) : (
+        open
+      )}
       {action && <span className="rail-file-action">{action}</span>}
     </li>
   );

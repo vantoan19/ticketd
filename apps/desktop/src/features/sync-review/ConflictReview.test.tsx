@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 
 import {
@@ -158,9 +159,8 @@ test("Later closes without deciding, and a failed save stays open with its reaso
   open();
   await screen.findByRole("radio", { name: /Status from this desktop/ });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't save your choices. Disk is full.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("disk is full");
   expect(onResolved).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Later" }));
   expect(onClose).toHaveBeenCalled();

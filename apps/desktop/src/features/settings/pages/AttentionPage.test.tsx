@@ -92,7 +92,7 @@ test("a failed permission request is reported beside Reminders", async () => {
   render(<AttentionPage onOpenInbox={() => {}} />);
   fireEvent.click(notifySwitch());
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't ask for notification permission. Boom.",
+    "Couldn't ask for notification permission",
   );
 });
 

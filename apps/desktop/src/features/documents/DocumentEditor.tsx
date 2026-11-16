@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CloudCheck,
@@ -11,7 +12,15 @@ import {
   Network,
   Pin,
   SquarePen,
+  X,
 } from "lucide-react";
+import {
+  readCaptureTextDraft,
+  keepCaptureTextDraft,
+  clearCaptureTextDraft,
+} from "./capture-text-recovery";
+import { attachments as workspaceAttachments } from "@/lib/api/attachments";
+import { writeClipboard } from "@/lib/clipboard";
 import { client } from "@/lib/api/client";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -30,8 +39,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Badge } from "@/components/ui/badge";
+import { Reference } from "@/components/ui/reference";
 import { Input } from "@/components/ui/input";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -39,6 +50,8 @@ import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
 import { Kbd } from "@/components/ui/kbd";
+import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
+import { Count } from "@/components/ui/count";
 import { Time } from "@/components/ui/time";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import {
@@ -63,25 +76,29 @@ import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useRecordSyncState } from "@/features/sync/record-sync";
 
 /**
- * A Document reads in the workspace; a new thought is captured in the one
- * dialog (DialogShell md). Its footer holds the save state in the note slot
- * and Done; a failed save shows above the footer and never traps the dialog.
+ * A Document reads in the workspace; Capture uses the shared shell's floating
+ * card variant. Save state stays in the header, context in the footer, and a
+ * failed save keeps the same editor and recovery decisions in place.
  */
 function DocumentSurface({
   capture,
+  open,
+  onExitComplete,
   onClose,
   onDismiss,
-  blockedReason,
+  footer,
   note,
   error,
   children,
 }: {
+  footer: ReactNode;
   capture: boolean;
-  /** Done: save, then close. */
+  open: boolean;
+  onExitComplete: () => void;
+  /** Submit: save, then close. */
   onClose: () => void;
-  /** Cancel, the X and Escape: close (after a failed save, at once). */
+  /** The X and Escape use the same save and draft-protection controller. */
   onDismiss: () => void;
-  blockedReason: string | null;
   note: ReactNode;
   error: ReactNode;
   children: ReactNode;
@@ -90,14 +107,22 @@ function DocumentSurface({
     return <article className="document-workspace">{children}</article>;
   return (
     <DialogShell
-      open
+      open={open}
+      onExitComplete={onExitComplete}
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
-      title="Capture a thought"
-      primaryLabel="Done"
-      blockedReason={blockedReason}
-      footerNote={note}
+      title="New Document"
+      variant="capture"
+      headerActions={note}
+      footerLeading={footer}
+      primaryLabel={null}
+      blockedReason={null}
+      footerNote={
+        <>
+          <span>Kept in Documents</span> <Kbd>esc</Kbd>
+        </>
+      }
       error={error}
       onSubmit={onClose}
     >
@@ -221,9 +246,11 @@ export function DocumentEditor({
     (item) => item.kind === "document" && item.id === initial?.id,
   );
   const [historyOpen, setHistoryOpen] = useState(false);
-  // The session row's middle, where the editor puts its formatting (P16).
+  // The floating bar's controls slot, where the editor puts its formatting.
   const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   const recovery = useDraftRecovery();
+  const fallbackWorkspace = useRef<string | null>(null);
+  const [restoringCapture, setRestoringCapture] = useState(!initial);
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
   const [recovered] = useState(() =>
     recovery.read(recoveryOwner, recoverySchema),
@@ -300,6 +327,7 @@ export function DocumentEditor({
   const [leaveBlocked, setLeaveBlocked] = useState<(() => void) | null>(null);
   const [failedTrash, setFailedTrash] = useState(false);
   // Where a person tried to go after a failed save, when recovery could not keep the draft.
+  const [copyResult, setCopyResult] = useState("");
   const [draftAtRisk, setDraftAtRisk] = useState<(() => void) | null>(null);
   // Editor state model. A Trash/Restore click is a one-shot intent: it is queued in
   // `transition` until the draft is saved, and dropped (remembered in `failedTransition`
@@ -341,7 +369,7 @@ export function DocumentEditor({
   const externalRevision = useRef<string | null>(
     recovered?.externalRevision ?? null,
   );
-  const persistRecovery = () => {
+  const recoveryPayload = () => {
     const dirty =
       storedTitle(draft.current.title) !== saved.current.title ||
       draft.current.body !== saved.current.body ||
@@ -359,6 +387,10 @@ export function DocumentEditor({
             externalRevision: externalRevision.current,
           }
         : null;
+    return payload;
+  };
+  const persistRecovery = () => {
+    const payload = recoveryPayload();
     return recovery.put(
       recoveryOwner,
       payload,
@@ -374,6 +406,45 @@ export function DocumentEditor({
   useEffect(() => {
     void persistRecovery().catch(() => {});
   });
+  useEffect(() => {
+    if (initial) return;
+    let active = true;
+    void workspaceAttachments
+      .workspaceId()
+      .then((workspaceId) => {
+        if (!active) return null;
+        fallbackWorkspace.current = workspaceId;
+        return recovered ? null : readCaptureTextDraft(workspaceId);
+      })
+      .then((value) => {
+        if (!active || !value || draft.current.body || draft.current.title)
+          return;
+        const result = recoverySchema.safeParse(value);
+        if (!result.success) return;
+        const snapshot = result.data;
+        draft.current = snapshot.draft;
+        saved.current = snapshot.saved;
+        id.current = snapshot.id;
+        pending.current = snapshot.pending;
+        revision.current = snapshot.revision;
+        externalRef.current = snapshot.external;
+        externalRevision.current = snapshot.externalRevision;
+        setTitle(snapshot.draft.title);
+        setBody(snapshot.draft.body);
+        setSuggestion(snapshot.draft.suggestion);
+        setExternal(snapshot.external);
+        setDiscarded(snapshot.discarded);
+        setStatus("Draft restored");
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setRestoringCapture(false);
+      });
+    return () => {
+      active = false;
+      fallbackWorkspace.current = null;
+    };
+  }, [initial, recovered]);
   const lastVersion = useRef<string | null>(
     initial ? `${initial.updated_at}|${initial.trashed}` : null,
   );
@@ -387,10 +458,11 @@ export function DocumentEditor({
     closeRequested.current = false;
     action();
   };
-  const close = useRef(onClose);
+  const presence = useDialogPresence(onClose, !initial);
+  const close = useRef(initial ? onClose : presence.close);
   useEffect(() => {
-    close.current = onClose;
-  }, [onClose]);
+    close.current = initial ? onClose : presence.close;
+  }, [initial, onClose, presence.close]);
   const finishTransition = async () => {
     if (!transition.current || !id.current) return;
     setTransitioning(true);
@@ -498,6 +570,8 @@ export function DocumentEditor({
       await persistRecovery();
       saving.current = false;
       setStatus("Saved on this computer");
+      if (!initial && fallbackWorkspace.current)
+        void clearCaptureTextDraft(fallbackWorkspace.current).catch(() => {});
       refreshLinks();
       if (
         storedTitle(draft.current.title) !== saved.current.title ||
@@ -696,8 +770,17 @@ export function DocumentEditor({
       await persistRecovery();
       await recovery.flush();
     } catch {
-      setDraftAtRisk(() => action);
-      return;
+      try {
+        if (initial || !fallbackWorkspace.current)
+          throw new Error("Document recovery requires workspace protection");
+        await keepCaptureTextDraft(
+          fallbackWorkspace.current,
+          recoveryPayload(),
+        );
+      } catch {
+        setDraftAtRisk(() => action);
+        return;
+      }
     }
     closeRequested.current = false;
     afterSave.current = null;
@@ -790,9 +873,9 @@ export function DocumentEditor({
     <Input
       id="document-title"
       aria-label="Title"
-      className={capture ? undefined : "document-title-input"}
-      placeholder={capture ? "e.g. Retry policy for uploads" : "Title"}
-      readOnly={locked}
+      variant={capture ? "capture-title" : "title"}
+      placeholder={capture ? "Document title" : "Title"}
+      readOnly={locked || restoringCapture}
       value={title || (head ? heading : "")}
       onChange={(event) => {
         draft.current = { ...draft.current, title: event.target.value };
@@ -800,21 +883,27 @@ export function DocumentEditor({
       }}
     />
   );
-  const titleField = (
-    <FieldGroup>
-      <Field>
-        <FieldLabel htmlFor="document-title">
-          Title <small>Optional</small>
-        </FieldLabel>
-        {titleInput}
-      </Field>
-    </FieldGroup>
-  );
+  const [fadedStatus, setFadedStatus] = useState<string | null>(null);
+  const [previousStatus, setPreviousStatus] = useState(status);
+  if (previousStatus !== status) {
+    setPreviousStatus(status);
+    setFadedStatus(null);
+  }
+  useEffect(() => {
+    if (status !== "Saved on this computer") return;
+    const timer = window.setTimeout(() => setFadedStatus(status), 3000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
   const isSaved = status === "Saved on this computer";
   const sync = useRecordSyncState(savedDocument?.id ?? null, isSaved);
+  const reviewRequired = needsReview || sync === "needs_review";
   const statusLine = (
-    <span role="status" className="document-status">
-      {isSaved && (needsReview || sync === "needs_review") ? (
+    <span
+      role="status"
+      aria-label={capture ? "Document save status" : "Document sync status"}
+      className="document-status"
+    >
+      {reviewRequired ? (
         // Saved, but changed on two desktops: that is the state worth saying.
         <>
           <StatusDot tone="attention" size={10} />
@@ -828,7 +917,7 @@ export function DocumentEditor({
       ) : (
         <>
           {isSaved && <Check aria-hidden="true" />}
-          {capture && isSaved ? "Saved to Documents as you type" : status}
+          {capture && isSaved ? "Saved" : status}
         </>
       )}
     </span>
@@ -838,7 +927,7 @@ export function DocumentEditor({
   const draftNote = failedTrash
     ? ""
     : draftAtRisk
-      ? " This device can't keep the draft either. Retry, or discard it to close."
+      ? " This device cannot safely keep the draft. Attached files need workspace recovery. Retry, copy the text, or discard it to close."
       : recovery.active
         ? " Your draft stays on this device if you close."
         : " Your draft is still here.";
@@ -849,28 +938,51 @@ export function DocumentEditor({
       onRetry={retry}
       actions={
         draftAtRisk ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              closeRequested.current = false;
-              afterSave.current = null;
-              void recovery.put(recoveryOwner, null, []).catch(() => {});
-              draftAtRisk();
-            }}
-          >
-            Discard and close
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void writeClipboard(draft.current.body).then((failure) =>
+                  setCopyResult(
+                    failure
+                      ? `Couldn’t copy: ${failure}.`
+                      : "Draft text copied.",
+                  ),
+                );
+              }}
+            >
+              Copy text
+            </Button>
+            {copyResult && <span role="status">{copyResult}</span>}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                closeRequested.current = false;
+                afterSave.current = null;
+                void recovery.put(recoveryOwner, null, []).catch(() => {});
+                if (!initial && fallbackWorkspace.current)
+                  void clearCaptureTextDraft(fallbackWorkspace.current).catch(
+                    () => {},
+                  );
+                draftAtRisk();
+              }}
+            >
+              Discard and close
+            </Button>
+          </>
         ) : (
-          leaveBlocked &&
+          (capture || leaveBlocked) &&
           recovery.active && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => {
-                const leave = leaveBlocked;
+                const leave = leaveBlocked ?? (() => close.current());
                 setLeaveBlocked(null);
                 void leaveKeepingDraft(leave);
               }}
@@ -893,6 +1005,7 @@ export function DocumentEditor({
     : connected.find(
         (item) => item.kind === "plan" && item.attachment && item.attached,
       );
+  const crumbPlan = planSpec ?? planSupport;
   // Plans this Document is the spec of (or supports) have their own section; a Plan that is only
   // attached is not a mention, and every other connection is a mention, listed once.
   const isMention = (item: (typeof connected)[number]) =>
@@ -953,49 +1066,157 @@ export function DocumentEditor({
   );
   const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
   const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
+  const readerFeedback = (
+    <>
+      {saveError}
+      {external && (
+        <Alert ref={noticeRef} tabIndex={-1}>
+          <AlertDescription>
+            Saved content changed while you were editing. Choose “Reload saved
+            content” to discard your draft, or “Save my draft” to replace the
+            saved content with it.
+            {blockedLeaving && " Choose Reload or Save my draft first."}
+          </AlertDescription>
+          <AlertActions>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDiscarded(draft.current);
+                saved.current = external;
+                revision.current = externalRevision.current;
+                draft.current = external;
+                pending.current = null;
+                externalRef.current = null;
+                setExternal(null);
+                setBlockedLeaving(false);
+                setTitle(external.title);
+                setBody(external.body);
+                setSuggestion(null);
+                setFailed(false);
+                setStatus("Loaded saved content");
+                refocusEditor();
+              }}
+            >
+              Reload saved content
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                saved.current = external;
+                revision.current = externalRevision.current;
+                pending.current = null;
+                externalRef.current = null;
+                setExternal(null);
+                setBlockedLeaving(false);
+                void save();
+                refocusEditor();
+              }}
+            >
+              Save my draft
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+      {discarded && (
+        <Alert role="status" size="compact">
+          <AlertDescription>Your draft was discarded.</AlertDescription>
+          <Button
+            variant="outline"
+            onClick={() => {
+              draft.current = discarded;
+              setTitle(discarded.title);
+              setBody(discarded.body);
+              setDiscarded(null);
+              refocusEditor();
+            }}
+          >
+            Undo
+          </Button>
+        </Alert>
+      )}
+    </>
+  );
   return (
     <DocumentSurface
       capture={capture}
+      open={presence.dialog.open}
+      onExitComplete={presence.dialog.onExitComplete}
       onClose={requestClose}
       // Cancel, the X and Escape leave as every way out does: after a failed
       // save the draft is kept by draft recovery and the dialog closes, or,
       // when recovery can't keep it, the failure offers Discard and close
       // (plans DR-08, set ER-05).
       onDismiss={requestClose}
-      blockedReason={body.trim() ? null : "Write a thought to finish."}
-      note={body.trim() && !failed ? statusLine : null}
+      footer={
+        suggestion ? (
+          <Badge variant="linked">
+            <Link2 aria-hidden="true" />
+            Linked to <Reference>{suggestion}</Reference>
+            <IconButton
+              type="button"
+              label={`Remove connection to ${suggestion}`}
+              size="icon-card"
+              onClick={() => {
+                draft.current = { ...draft.current, suggestion: null };
+                setSuggestion(null);
+                refocusEditor();
+              }}
+            >
+              <X />
+            </IconButton>
+          </Badge>
+        ) : null
+      }
+      note={
+        <>
+          {statusLine}
+          {capture && <span ref={setSessionHost} />}
+        </>
+      }
       error={capture && saveError}
     >
       {initial && (
         <header className="document-bar">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="document-crumb"
-            aria-label={backLabel}
-            onClick={requestClose}
-          >
-            <ArrowLeft aria-hidden="true" />
-            {backLabel.replace(/^Back to /, "")}
-          </Button>
+          <span className="document-return">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={backLabel}
+              onClick={requestClose}
+            >
+              <ArrowLeft aria-hidden="true" />
+              {backLabel.replace(/^Back to /, "")}
+            </Button>
+          </span>
+          {crumbPlan && (
+            <span className="document-plan-crumb">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Open Plan ${crumbPlan.label}`}
+                onClick={() => navigate(() => onOpenPlan?.(crumbPlan.id))}
+              >
+                <Layers aria-hidden="true" />
+                {crumbPlan.label}
+              </Button>
+            </span>
+          )}
           <span aria-hidden="true" className="document-crumb-sep">
             /
           </span>
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
-            {!writing && (
-              <Button
-                ref={editTrigger}
-                variant="ghost"
-                size="sm"
-                aria-keyshortcuts="E"
-                disabled={transitioning}
-                onClick={() => setEditing(true)}
-              >
-                Edit
-                <Kbd aria-hidden="true">E</Kbd>
-              </Button>
-            )}
+            <Button
+              ref={editTrigger}
+              variant="ghost"
+              size="sm"
+              aria-keyshortcuts="E"
+              disabled={transitioning || writing || trashed}
+              onClick={() => setEditing(true)}
+            >
+              Edit
+              <Kbd aria-hidden="true">E</Kbd>
+            </Button>
             {onTogglePin && (
               <IconButton
                 label={pinned ? "Unpin Document" : "Pin Document"}
@@ -1051,17 +1272,19 @@ export function DocumentEditor({
       <div className="document-main">
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {trashed && (
-          <Alert role="status" size="compact">
-            <AlertDescription>In Trash</AlertDescription>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={transitioning}
-              onClick={toggleTrash}
-            >
-              Restore
-            </Button>
-          </Alert>
+          <div className="document-trash-notice">
+            <Alert role="status" size="compact">
+              <AlertDescription>In Trash</AlertDescription>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={transitioning}
+                onClick={toggleTrash}
+              >
+                Restore
+              </Button>
+            </Alert>
+          </div>
         )}
         {initial &&
           (writing ? (
@@ -1071,45 +1294,53 @@ export function DocumentEditor({
             <h1 className="document-title">{heading}</h1>
           ))}
         {initial && (
-          // One 32px row: "Updated 2 h ago" while reading; the session row
-          // (save state, formatting, Done) while editing. Nothing moves.
-          <div
-            className="document-state-row"
-            data-session={writing || undefined}
-          >
-            {writing ? (
-              <>
-                {statusLine}
-                <span ref={setSessionHost} className="document-session-tools" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Done editing"
-                  onClick={() => setEditing(false)}
-                >
-                  Done
-                  <Kbd aria-hidden="true">Esc</Kbd>
-                </Button>
-              </>
-            ) : (
-              <>
-                <p className="document-subtitle">
-                  Updated{" "}
-                  {Number.isNaN(Date.parse(updatedAt)) ? (
-                    updatedAt
-                  ) : (
-                    <Time value={updatedAt} />
-                  )}
-                  {planSpec && ` · spec of the Plan ${planSpec.label}`}
-                  {planSupport &&
-                    ` · supporting Document of the Plan ${planSupport.label}`}
-                </p>
-                {(needsReview || sync === "needs_review") && statusLine}
-              </>
-            )}
+          // Reading metadata stays in place; editing tools float outside the body.
+          <div className="document-state-row">
+            <p className="document-subtitle">
+              Updated{" "}
+              {Number.isNaN(Date.parse(updatedAt)) ? (
+                updatedAt
+              ) : (
+                <Time value={updatedAt} />
+              )}
+              {planSpec && ` · spec of the Plan ${planSpec.label}`}
+              {planSupport &&
+                ` · supporting Document of the Plan ${planSupport.label}`}
+            </p>
+            {(isSaved || reviewRequired) && statusLine}
           </div>
         )}
-        {suggestion && (
+        {initial && (writing || saveError || external || discarded) && (
+          <FloatingEditBar
+            feedback={
+              saveError || external || discarded ? readerFeedback : null
+            }
+            status={
+              failed && !external ? (
+                <span role="status" aria-label="Document save status">
+                  Not saved{" "}
+                  <Button variant="link" size="inline" onClick={retry}>
+                    Retry
+                  </Button>
+                </span>
+              ) : isSaved ? (
+                fadedStatus === status ? null : (
+                  <span role="status" aria-label="Document save status">
+                    <Check className="size-3" aria-hidden="true" />
+                    Saved
+                  </span>
+                )
+              ) : (
+                <span role="status" aria-label="Document save status">
+                  {status}
+                </span>
+              )
+            }
+            controlsRef={setSessionHost}
+            {...(writing && { onDone: () => setEditing(false) })}
+          />
+        )}
+        {!capture && suggestion && (
           <p>
             Connected to {suggestion}{" "}
             <Button
@@ -1125,72 +1356,7 @@ export function DocumentEditor({
             </Button>
           </p>
         )}
-        {external && (
-          <Alert ref={noticeRef} tabIndex={-1}>
-            <AlertDescription>
-              Saved content changed while you were editing. Choose “Reload saved
-              content” to discard your draft, or “Save my draft” to replace the
-              saved content with it.
-              {blockedLeaving && " Choose Reload or Save my draft first."}
-            </AlertDescription>
-            <AlertActions>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDiscarded(draft.current);
-                  saved.current = external;
-                  revision.current = externalRevision.current;
-                  draft.current = external;
-                  pending.current = null;
-                  externalRef.current = null;
-                  setExternal(null);
-                  setBlockedLeaving(false);
-                  setTitle(external.title);
-                  setBody(external.body);
-                  setSuggestion(null);
-                  setFailed(false);
-                  setStatus("Loaded saved content");
-                  refocusEditor();
-                }}
-              >
-                Reload saved content
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  saved.current = external;
-                  revision.current = externalRevision.current;
-                  pending.current = null;
-                  externalRef.current = null;
-                  setExternal(null);
-                  setBlockedLeaving(false);
-                  void save();
-                  refocusEditor();
-                }}
-              >
-                Save my draft
-              </Button>
-            </AlertActions>
-          </Alert>
-        )}
-        {discarded && (
-          <Alert role="status" size="compact">
-            <AlertDescription>Your draft was discarded.</AlertDescription>
-            <Button
-              variant="outline"
-              onClick={() => {
-                draft.current = discarded;
-                setTitle(discarded.title);
-                setBody(discarded.body);
-                setDiscarded(null);
-                refocusEditor();
-              }}
-            >
-              Undo
-            </Button>
-          </Alert>
-        )}
-        {initial && saveError}
+        {capture && titleInput}
         <div
           className="document-body"
           {...(initial &&
@@ -1211,13 +1377,11 @@ export function DocumentEditor({
               placeholder={
                 capture ? "Write a thought…" : "Write — type / for blocks"
               }
-              readOnly={locked}
+              readOnly={locked || restoringCapture}
               autoFocus={capture}
-              {...(!capture && {
-                chrome: "session" as const,
-                chromeHost: sessionHost,
-                onEscape: () => setEditing(false),
-              })}
+              chrome={capture ? "compact" : "floating"}
+              chromeHost={sessionHost}
+              {...(!capture && { onEscape: () => setEditing(false) })}
               focusRequest={focusRequest}
             />
           ) : (
@@ -1265,193 +1429,199 @@ export function DocumentEditor({
             </DocumentNavigation.Provider>
           )}
         </div>
-        {capture && titleField}
-      </div>
-      {initial && (
-        <aside className="document-rail" aria-label="Document details">
-          {linkError && (
-            <FailureAlert
-              size="compact"
-              failure={linkError}
-              onRetry={() => {
-                setLinkError(null);
-                refreshLinks();
-              }}
-            />
-          )}
-          {mentions.length > 0 && (
-            <section aria-label="Mentions">
-              <h2>Mentions</h2>
-              {links.some((group) => group.length === 100) && (
-                <p>Showing the first 100 items in each direction.</p>
-              )}
-              <ul>{mentions.map((item) => connectionRow(item))}</ul>
-              {passages.length > 0 && (
-                <div className="document-passage-caption">
-                  <span>
-                    {passages.length === 1 && mentions.length > 1
-                      ? mentions.length === 2
-                        ? "Both from"
-                        : "All from"
-                      : "From"}{" "}
-                    “
-                  </span>
-                  {passages.map((passage) => passageView(passage))}
-                  <span aria-hidden="true">”</span>
-                </div>
-              )}
+
+        {initial && (
+          <aside className="document-rail" aria-label="Document details">
+            <header className="document-linked-header">
+              <h2>Linked</h2>
+              <Count>{connected.length}</Count>
+            </header>
+            {linkError && (
+              <FailureAlert
+                size="compact"
+                failure={linkError}
+                onRetry={() => {
+                  setLinkError(null);
+                  refreshLinks();
+                }}
+              />
+            )}
+            {mentions.length > 0 && (
+              <section aria-label="Mentions">
+                <h2>Mentions</h2>
+                {links.some((group) => group.length === 100) && (
+                  <p>Showing the first 100 items in each direction.</p>
+                )}
+                <ul>{mentions.map((item) => connectionRow(item))}</ul>
+                {passages.length > 0 && (
+                  <div className="document-passage-caption">
+                    <span>
+                      {passages.length === 1 && mentions.length > 1
+                        ? mentions.length === 2
+                          ? "Both from"
+                          : "All from"
+                        : "From"}{" "}
+                      “
+                    </span>
+                    {passages.map((passage) => passageView(passage))}
+                    <span aria-hidden="true">”</span>
+                  </div>
+                )}
+              </section>
+            )}
+            {attachments.length > 0 && (
+              <section aria-label={attachmentLabel}>
+                <h2>{attachmentLabel}</h2>
+                <ul>{attachments.map((item) => connectionRow(item))}</ul>
+              </section>
+            )}
+            {typeof children === "function" ? children({ trashed }) : children}
+            <section aria-label="Document properties">
+              <dl>
+                {initial.origin_ticket && (
+                  <>
+                    <dt>Origin</dt>
+                    <dd>
+                      <Button
+                        variant="link"
+                        onClick={() =>
+                          navigate(() => onOpenTicket?.(initial.origin_ticket!))
+                        }
+                      >
+                        {initial.origin_ticket} · Update details
+                      </Button>
+                    </dd>
+                  </>
+                )}
+                <dt>Visibility</dt>
+                <dd>
+                  {initial.origin_brief
+                    ? initial.kept
+                      ? "Kept in Documents"
+                      : "Hidden with its update"
+                    : "Shown in Documents"}
+                </dd>
+              </dl>
+              <p className="document-timestamps">
+                {updatedAt === createdAt ? (
+                  <>
+                    Created and updated <DocumentDate value={updatedAt} />
+                  </>
+                ) : (
+                  <>
+                    Updated <DocumentDate value={updatedAt} /> · created{" "}
+                    <DocumentDate value={createdAt} />
+                  </>
+                )}
+              </p>
             </section>
-          )}
-          {attachments.length > 0 && (
-            <section aria-label={attachmentLabel}>
-              <h2>{attachmentLabel}</h2>
-              <ul>{attachments.map((item) => connectionRow(item))}</ul>
-            </section>
-          )}
-          {typeof children === "function" ? children({ trashed }) : children}
-          <section aria-label="Document properties">
-            <dl>
-              {initial.origin_ticket && (
-                <>
-                  <dt>Origin</dt>
-                  <dd>
-                    <Button
-                      variant="link"
-                      onClick={() =>
-                        navigate(() => onOpenTicket?.(initial.origin_ticket!))
-                      }
-                    >
-                      {initial.origin_ticket} · Update details
-                    </Button>
-                  </dd>
-                </>
-              )}
-              <dt>Visibility</dt>
-              <dd>
-                {initial.origin_brief
-                  ? initial.kept
-                    ? "Kept in Documents"
-                    : "Hidden with its update"
-                  : "Shown in Documents"}
-              </dd>
-            </dl>
-            <p className="document-timestamps">
-              {updatedAt === createdAt ? (
-                <>
-                  Created and updated <DocumentDate value={updatedAt} />
-                </>
-              ) : (
-                <>
-                  Updated <DocumentDate value={updatedAt} /> · created{" "}
-                  <DocumentDate value={createdAt} />
-                </>
-              )}
-            </p>
-          </section>
-          <div className="document-rail-actions">
-            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button disabled={locked} variant="ghost">
-                  <Link2 aria-hidden="true" />
-                  Link a Document
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start">
-                <DocumentPicker
-                  exclude={[initial.id]}
-                  onPick={(picked) => {
-                    const link = documentLinkMarkdown(
-                      picked.id,
-                      picked.heading,
-                    );
-                    const next = draft.current.body
-                      ? `${draft.current.body}\n\n${link}`
-                      : link;
-                    draft.current = { ...draft.current, body: next };
-                    setBody(next);
-                    setLinkError(null);
-                    setPickerOpen(false);
+            <div className="document-rail-actions">
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button disabled={locked} variant="ghost">
+                    <Link2 aria-hidden="true" />
+                    Link a Document
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start">
+                  <DocumentPicker
+                    exclude={[initial.id]}
+                    onPick={(picked) => {
+                      const link = documentLinkMarkdown(
+                        picked.id,
+                        picked.heading,
+                      );
+                      const next = draft.current.body
+                        ? `${draft.current.body}\n\n${link}`
+                        : link;
+                      draft.current = { ...draft.current, body: next };
+                      setBody(next);
+                      setLinkError(null);
+                      setPickerOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+              {!creatingFromDocument && (
+                <Button
+                  variant="ghost"
+                  disabled={locked}
+                  onClick={() => {
+                    // One click creates: the title starts as the Document's heading.
+                    if (!ticketTitle.trim()) setTicketTitle(heading);
+                    setCreatingFromDocument(true);
                   }}
+                >
+                  <SquarePen aria-hidden="true" />
+                  Create ticket from this
+                </Button>
+              )}
+              {onOpenGraph && (
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate(() => onOpenGraph(initial.id))}
+                >
+                  <Network aria-hidden="true" />
+                  Open graph
+                </Button>
+              )}
+            </div>
+            <div
+              hidden={!creatingFromDocument}
+              className="document-create-ticket"
+            >
+              <Field>
+                <FieldLabel htmlFor="ticket-from-document">
+                  New ticket title
+                </FieldLabel>
+                <Input
+                  id="ticket-from-document"
+                  value={ticketTitle}
+                  onChange={(event) => setTicketTitle(event.target.value)}
                 />
-              </PopoverContent>
-            </Popover>
-            {!creatingFromDocument && (
+              </Field>
               <Button
-                variant="ghost"
-                disabled={locked}
+                disabled={locked || !ticketTitle.trim()}
                 onClick={() => {
-                  // One click creates: the title starts as the Document's heading.
-                  if (!ticketTitle.trim()) setTicketTitle(heading);
-                  setCreatingFromDocument(true);
+                  if (creatingTicket.current) return;
+                  if (
+                    !ticketRequest.current ||
+                    ticketRequest.current.title !== ticketTitle
+                  )
+                    ticketRequest.current = {
+                      title: ticketTitle,
+                      id: crypto.randomUUID(),
+                    };
+                  creatingTicket.current = true;
+                  setCreateError(null);
+                  void documents
+                    .createTicket(
+                      initial.id,
+                      ticketTitle,
+                      ticketRequest.current.id,
+                    )
+                    .then((ticket) =>
+                      navigate(() => onOpenTicket?.(ticket.reference)),
+                    )
+                    .catch((error: unknown) =>
+                      setCreateError(
+                        describeFailure(error, "create the ticket"),
+                      ),
+                    )
+                    .finally(() => {
+                      creatingTicket.current = false;
+                    });
                 }}
               >
-                <SquarePen aria-hidden="true" />
-                Create ticket from this
+                Create ticket
               </Button>
-            )}
-            {onOpenGraph && (
-              <Button
-                variant="ghost"
-                onClick={() => navigate(() => onOpenGraph(initial.id))}
-              >
-                <Network aria-hidden="true" />
-                Open graph
-              </Button>
-            )}
-          </div>
-          <div
-            hidden={!creatingFromDocument}
-            className="document-create-ticket"
-          >
-            <Field>
-              <FieldLabel htmlFor="ticket-from-document">
-                New ticket title
-              </FieldLabel>
-              <Input
-                id="ticket-from-document"
-                value={ticketTitle}
-                onChange={(event) => setTicketTitle(event.target.value)}
-              />
-            </Field>
-            <Button
-              disabled={locked || !ticketTitle.trim()}
-              onClick={() => {
-                if (creatingTicket.current) return;
-                if (
-                  !ticketRequest.current ||
-                  ticketRequest.current.title !== ticketTitle
-                )
-                  ticketRequest.current = {
-                    title: ticketTitle,
-                    id: crypto.randomUUID(),
-                  };
-                creatingTicket.current = true;
-                setCreateError(null);
-                void documents
-                  .createTicket(
-                    initial.id,
-                    ticketTitle,
-                    ticketRequest.current.id,
-                  )
-                  .then((ticket) =>
-                    navigate(() => onOpenTicket?.(ticket.reference)),
-                  )
-                  .catch((error: unknown) =>
-                    setCreateError(describeFailure(error, "create the ticket")),
-                  )
-                  .finally(() => {
-                    creatingTicket.current = false;
-                  });
-              }}
-            >
-              Create ticket
-            </Button>
-            {createError && (
-              <FailureAlert size="compact" failure={createError} />
-            )}
-          </div>
-        </aside>
-      )}
+              {createError && (
+                <FailureAlert size="compact" failure={createError} />
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
     </DocumentSurface>
   );
 }
@@ -1549,7 +1719,8 @@ function ConnectedLabel({ item }: { item: Connection }) {
         ) : loading ? (
           <Skeleton
             aria-hidden="true"
-            className="size-4 shrink-0 rounded-full"
+            shape="circle"
+            className="size-4 shrink-0"
           />
         ) : (
           <CircleDashed aria-hidden="true" />

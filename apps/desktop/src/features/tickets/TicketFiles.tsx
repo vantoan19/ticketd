@@ -1,4 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
 import { FileText, Paperclip, Plus } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
@@ -36,7 +38,9 @@ export function TicketFiles({
   revision,
   refresh,
   onOpenUpdate,
+  emptyTarget,
 }: {
+  emptyTarget?: HTMLElement | null;
   ticket: Ticket;
   revision: number;
   refresh: () => Promise<void>;
@@ -107,58 +111,83 @@ export function TicketFiles({
         )
       : undefined;
   return (
-    <RailSection label="Files" {...(actions && { actions })}>
-      {!loaded && !failed && <Skeleton className="h-8" />}
-      {failed && (
-        <FailureState
-          size="inline"
-          failure={failed}
-          onRetry={() => {
-            files.retry();
-            docs.retry();
-          }}
-        />
-      )}
-      {!empty && (
-        <ul className="rail-files" aria-label="Files">
-          {(docs.links ?? []).map((link) => (
-            <DocumentRow
-              key={link.target_id}
-              link={link}
-              readOnly={readOnly}
-              ticketReference={ticket.reference}
-              onUnlink={() => void docs.unlink(link)}
-              onOpenUpdate={onOpenUpdate}
-            />
-          ))}
-          <AttachmentRows
-            files={files.found ?? []}
-            onOpen={(file) => {
-              files.setError(null);
-              setSelected(file);
-            }}
-          />
-        </ul>
-      )}
+    <>
       {empty &&
         !readOnly &&
-        menu(
-          <RailRow icon={<Plus aria-hidden="true" />} muted>
-            Attach…
-          </RailRow>,
+        emptyTarget &&
+        createPortal(
+          menu(
+            <Button variant="ghost" size="sm">
+              <Plus aria-hidden="true" />
+              File
+            </Button>,
+          ),
+          emptyTarget,
         )}
-      {docs.error && <FailureAlert size="compact" failure={docs.error} />}
-      {files.error && !selected && (
-        <FailureAlert size="compact" failure={files.error} />
-      )}
-      <AttachmentDialogs
-        ticket={ticket}
-        state={files}
-        picker={picker}
-        onPickerChange={setPicker}
-        selected={selected}
-        onSelected={setSelected}
-      />
-    </RailSection>
+      <div hidden={empty && Boolean(emptyTarget)}>
+        <RailSection
+          label="Files"
+          count={
+            loaded
+              ? (files.found?.length ?? 0) + (docs.links?.length ?? 0)
+              : undefined
+          }
+          {...(actions && { actions })}
+        >
+          {!loaded && !failed && <Skeleton className="h-8" />}
+          {failed && (
+            <FailureState
+              size="inline"
+              failure={failed}
+              onRetry={() => {
+                files.retry();
+                docs.retry();
+              }}
+            />
+          )}
+          {!empty && (
+            <ul className="rail-files" aria-label="Files">
+              {(docs.links ?? []).map((link) => (
+                <DocumentRow
+                  key={link.target_id}
+                  link={link}
+                  readOnly={readOnly}
+                  ticketReference={ticket.reference}
+                  onUnlink={() => void docs.unlink(link)}
+                  onOpenUpdate={onOpenUpdate}
+                />
+              ))}
+              <AttachmentRows
+                files={files.found ?? []}
+                onOpen={(file) => {
+                  files.setError(null);
+                  setSelected(file);
+                }}
+              />
+            </ul>
+          )}
+          {empty &&
+            !emptyTarget &&
+            !readOnly &&
+            menu(
+              <RailRow icon={<Plus aria-hidden="true" />} muted>
+                Attach…
+              </RailRow>,
+            )}
+          {docs.error && <FailureAlert size="compact" failure={docs.error} />}
+          {files.error && !selected && (
+            <FailureAlert size="compact" failure={files.error} />
+          )}
+          <AttachmentDialogs
+            ticket={ticket}
+            state={files}
+            picker={picker}
+            onPickerChange={setPicker}
+            selected={selected}
+            onSelected={setSelected}
+          />
+        </RailSection>
+      </div>
+    </>
   );
 }

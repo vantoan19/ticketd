@@ -104,7 +104,7 @@ export function ChoiceList({
   const row = (choice: Choice) => (
     <CommandItem
       key={choice.value}
-      value={choice.value}
+      value={choice.value || choice.label}
       keywords={[choice.label, choice.reference ?? ""]}
       size={size}
       disabled={choice.disabled ?? false}
@@ -145,7 +145,9 @@ export function ChoiceList({
           : 0
       }
       shouldFilter={!onQueryChange}
-      {...(current !== undefined && { defaultValue: current })}
+      {...(current !== undefined && {
+        defaultValue: current || clear?.label || "",
+      })}
     >
       {searchPlaceholder && (
         <CommandInput
@@ -161,7 +163,9 @@ export function ChoiceList({
       )}
       <CommandList
         {...(rows && {
-          style: { height: rows * (size === "tall" ? 36 : 32) + 8 },
+          style: {
+            height: `calc(${rows} * var(--choice-row-height, ${size === "tall" ? 36 : 32}px) + 8px)`,
+          },
         })}
       >
         {notice && (

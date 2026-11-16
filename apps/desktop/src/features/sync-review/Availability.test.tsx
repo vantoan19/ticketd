@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 
 import {
@@ -178,9 +179,8 @@ test("a download on open that fails says why and leaves Download", async () => {
   mode = "on_open";
   vi.mocked(syncReview.download).mockRejectedValue(new Error("offline"));
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
-  expect((await screen.findAllByRole("alert"))[0]?.textContent).toContain(
-    "Couldn't download the file. Offline.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByText("offline")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
 });

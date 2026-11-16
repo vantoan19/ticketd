@@ -515,6 +515,8 @@ pub struct WorkspaceGraphRequest {
     pub adjacency_limit: usize,
     pub visible_ids: Vec<String>,
     pub hydrate_only: bool,
+    pub node_limit: Option<usize>,
+    pub edge_limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -537,9 +539,20 @@ impl Workspace {
         request: &WorkspaceGraphRequest,
     ) -> Result<WorkspaceGraph, Error> {
         let tx = self.connection.unchecked_transaction()?;
-        let visible_truncated = request.visible_ids.len() > 100;
-        let mut ids: BTreeSet<String> = request.visible_ids.iter().take(100).cloned().collect();
-        let remaining = 100_usize.saturating_sub(ids.len()).min(50);
+        let node_limit = if request.hydrate_only {
+            request.node_limit.unwrap_or(100).clamp(1, 250)
+        } else {
+            100
+        };
+        let edge_limit = request.edge_limit.unwrap_or(MAX_EDGES).clamp(1, 600);
+        let visible_truncated = request.visible_ids.len() > node_limit;
+        let mut ids: BTreeSet<String> = request
+            .visible_ids
+            .iter()
+            .take(node_limit)
+            .cloned()
+            .collect();
+        let remaining = node_limit.saturating_sub(ids.len()).min(50);
         // Filters select candidates before paging so a match anywhere in the
         // workspace is reachable, not only within the first page of identities.
         let mut filter =
@@ -751,7 +764,7 @@ impl Workspace {
                 if !seen.insert(key) {
                     continue;
                 }
-                if edges.len() == MAX_EDGES {
+                if edges.len() == edge_limit {
                     omitted_groups.insert(kind.to_owned());
                     continue;
                 }

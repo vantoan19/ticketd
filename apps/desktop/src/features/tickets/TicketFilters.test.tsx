@@ -43,19 +43,10 @@ function props(
   };
 }
 
-test("Search and Filters start as named icon buttons and search opens on demand", () => {
-  const setQuery = vi.fn();
-  render(<TicketFilters part="controls" {...props({ setQuery })} />);
-  expect(
-    screen.queryByRole("searchbox", { name: "Search tickets" }),
-  ).toBeNull();
+test("ticket controls expose Filters and leave search to the palette", () => {
+  render(<TicketFilters part="controls" {...props()} />);
   expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "cache" },
-  });
-  expect(setQuery).toHaveBeenCalledWith("cache");
-  expect(screen.getByRole("search")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Search tickets" })).toBeNull();
 });
 
 test("Filters opens as a menu with focus on its first dimension, never on a clear action (list F-02)", async () => {
@@ -89,6 +80,17 @@ test("tags check in their submenu and stay one chip for the dimension", async ()
   });
   await act(async () => {});
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "ui" }));
+  expect(setTags).not.toHaveBeenCalled();
+  for (
+    let tries = 0;
+    tries < 3 && screen.queryAllByRole("menu").length;
+    tries++
+  ) {
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    await act(async () => {});
+  }
   expect(setTags).toHaveBeenCalledWith("ui");
   cleanup();
 

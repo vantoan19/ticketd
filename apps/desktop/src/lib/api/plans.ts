@@ -37,6 +37,7 @@ const viewSchema = z.object({
 
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
+export type PlanCounts = View["counts"];
 export const plansClient = {
   async setDocument(planId: string, documentId: string, present: boolean) {
     await invoke("set_plan_document", {
@@ -56,8 +57,14 @@ export const plansClient = {
   async graph(id: string) {
     return graphSchema.parse(await invoke("plan_dependency_graph", { id }));
   },
-  async show(id: string) {
-    return viewSchema.parse(await invoke("show_plan", { id }));
+  async show(id: string, limit?: number, offset = 0, includeMembers = true) {
+    return viewSchema.parse(
+      await invoke("show_plan", {
+        id,
+        ...(limit !== undefined && { limit, offset }),
+        ...(!includeMembers && { includeMembers }),
+      }),
+    );
   },
   async create(name: string) {
     return planSchema.parse(await invoke("create_plan", { name }));

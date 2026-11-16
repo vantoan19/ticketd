@@ -116,6 +116,8 @@ pub enum WriteRequest {
         tags: Vec<String>,
         #[serde(default)]
         follow: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        blockers: Vec<String>,
     },
     ChangeTicket {
         reference: String,
@@ -485,6 +487,7 @@ impl Workspace {
                 plan_id,
                 tags,
                 follow,
+                blockers,
             } => {
                 let mut tickets = self.apply_batch_following(
                     vec![
@@ -503,6 +506,7 @@ impl Workspace {
                                     ..Default::default()
                                 },
                                 add_tags: tags,
+                                add_blockers: blockers,
                                 ..Default::default()
                             }),
                         },
