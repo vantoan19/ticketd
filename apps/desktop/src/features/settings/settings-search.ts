@@ -171,7 +171,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Show Chat",
     description:
-      "Adds Chats to the sidebar and Automations to Search or jump to…, where you start and follow your agents’ work.",
+      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
     keywords:
       "chat claude codex ai experimental sidebar conversations automations",
     section: "chat",

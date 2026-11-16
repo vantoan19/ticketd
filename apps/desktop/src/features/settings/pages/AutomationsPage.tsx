@@ -29,7 +29,7 @@ export function AutomationsPage() {
     <SettingsPage
       {...sectionMeta("automations")}
       titleAccessory={<Badge variant="experimental">Experimental</Badge>}
-      lede="Run agents and steps on tickets without starting each one by hand. Open Automations from Search or jump to… to set them up."
+      lede="Run agents and steps on tickets without starting each one by hand. Open Automations from the sidebar to set them up."
       endSlot={<AppliesRightAway />}
     >
       <RunsAtOnce />

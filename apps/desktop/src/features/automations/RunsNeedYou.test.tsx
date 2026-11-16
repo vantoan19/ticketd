@@ -134,11 +134,11 @@ test.each([
   [1, "Automations, 1 run needs you"],
   [3, "Automations, 3 runs need you"],
 ])(
-  "with %i runs needing attention the palette destination is named %s",
+  "with %i runs needing attention the sidebar and palette destinations are named %s",
   async (count, name) => {
     waiting = count;
     app();
-    await screen.findByRole("button", { name: "Search or jump to…" });
+    expect(await screen.findByRole("button", { name })).toBeTruthy();
     fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
     const entry = await screen.findByRole("option", { name });
     expect(entry.textContent).toContain(
