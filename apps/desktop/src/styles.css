@@ -2350,16 +2350,17 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .markdown-document li + li {
   margin-top: 4px;
 }
-.markdown-document a {
+:is(.markdown-document, .rich-document) a {
   color: var(--foreground);
   text-decoration: underline;
-  text-decoration-color: var(--interactive);
-  text-underline-offset: 4px;
+  text-decoration-color: var(--ring);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
-.markdown-document blockquote {
-  box-shadow: -2px 0 var(--border);
-  margin-left: 4px;
-  padding-left: 16px;
+:is(.markdown-document, .rich-document) blockquote {
+  box-shadow: inset 2px 0 0 var(--border);
+  margin-left: 0;
+  padding-left: 14px;
   color: var(--muted-foreground);
 }
 .markdown-document hr {
@@ -2368,18 +2369,19 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   height: 1px;
   box-shadow: 0 1px var(--border);
 }
-.markdown-document code {
+:is(.markdown-document, .rich-document) code {
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
+  font-weight: 400;
+  line-height: var(--text-ui-line);
 }
-.markdown-document :not(pre) > code {
+:is(.markdown-document, .rich-document) :not(pre) > code {
   background: var(--recessed);
   border-radius: var(--radius-segment);
-  padding: 4px;
+  padding: 1px 5px;
 }
-.markdown-document pre,
+:is(.markdown-document, .rich-document) pre,
 .mermaid-source {
   margin: 0;
   padding: 12px;
@@ -2387,32 +2389,46 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   white-space: pre;
   background: var(--recessed);
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
+  font-weight: 400;
+  line-height: var(--text-ui-line);
 }
 .markdown-document input {
   margin-right: 8px;
 }
-/* One monochrome block: the language caption and the icon copy button share a
-   32px row above the code (no second tone, no syntax colors). */
+/* Read and rich editing share the same recessed code surface and typography. */
 .markdown-code-block {
+  min-width: 0;
+  overflow: hidden;
   background: var(--recessed);
+  border-radius: var(--radius-card);
 }
-.markdown-code-block pre {
-  padding: 0 12px 12px;
+:is(.markdown-document, .rich-document) .markdown-code-block pre {
+  margin: 0;
+  padding: 0 14px 12px;
   background: transparent;
 }
-.markdown-code-block,
 .mermaid-block {
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--shadow-border);
   border-radius: var(--radius);
 }
-.markdown-code-block {
-  /* The frame's hairline sits inside the 64px box, not around it (+2px). */
-  box-shadow: inset var(--shadow-border-base);
+.markdown-code-block :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal) {
+  color: var(--syntax-keyword);
+}
+.markdown-code-block :is(.hljs-title, .hljs-function) {
+  color: var(--syntax-title);
+}
+.markdown-code-block :is(.hljs-string, .hljs-attr) {
+  color: var(--syntax-string);
+}
+.markdown-code-block .hljs-number {
+  color: var(--syntax-number);
+}
+.markdown-code-block .hljs-comment {
+  color: var(--syntax-comment);
 }
 .markdown-block-toolbar {
   display: flex;
@@ -2420,8 +2436,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   flex-wrap: wrap;
   gap: 4px 8px;
   min-height: 32px;
-  padding: 0 4px 0 12px;
-  color: var(--secondary-foreground);
+  padding: 0 6px 0 12px;
+  color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
 }
@@ -3566,7 +3582,10 @@ kbd,
   background: transparent;
   box-shadow: none;
 }
-.document-workspace .document-body .rich-document {
+.document-workspace
+  .document-body
+  .markdown-editor[data-chrome="floating"]
+  .rich-document {
   padding: 0;
   min-height: 0;
 }
