@@ -122,7 +122,7 @@ test("all property chips stay above the description and linked context stays bel
   ).toBeNull();
 });
 
-test("the reading column runs title, state, description, then Linked, and keeps properties above it", async () => {
+test("the local reading column runs title, description, then Linked without a duplicate timestamp", async () => {
   children = [
     {
       reference: "T-KQ5",
@@ -135,7 +135,7 @@ test("the reading column runs title, state, description, then Linked, and keeps 
   renderDetails();
   const subtickets = await screen.findByRole("heading", { name: "Linked 1" });
   const title = screen.getByRole("textbox", { name: "Title" });
-  const state = document.querySelector(".ticket-state-line")!;
+  expect(document.querySelector(".ticket-state-line")).toBeNull();
   const description = screen.getByText("Description");
   const rail = screen.getByRole("group", {
     name: "Ticket properties",
@@ -144,8 +144,7 @@ test("the reading column runs title, state, description, then Linked, and keeps 
     Boolean(
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
     );
-  expect(before(title, state)).toBe(true);
-  expect(before(state, description)).toBe(true);
+  expect(before(title, description)).toBe(true);
   expect(before(description, subtickets)).toBe(true);
   expect(rail.contains(subtickets)).toBe(false);
   expect(rail.contains(title)).toBe(false);

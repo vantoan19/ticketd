@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { addableKinds } from "@/features/tickets/linked-work";
 import {
@@ -412,7 +413,8 @@ test("a refused link shows the reason inline and keeps the dialog open", async (
       name: "Link ticket",
     }),
   );
-  expect(await screen.findByText(/would create a cycle/)).toBeTruthy();
+  await revealFailureDetails();
+  expect(screen.getByText(/would create a cycle/)).toBeTruthy();
   expect(screen.getByRole("dialog")).toBeTruthy();
 });
 

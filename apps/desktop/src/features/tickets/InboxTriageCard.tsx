@@ -334,10 +334,12 @@ export function InboxTriageCard({
             <span>·</span>
             <Time value={entry?.timestamp ?? chat?.updated_at ?? ""} />
           </div>
-          <p>
-            {reference && <strong>{reference} · </strong>}
-            {entry?.title ?? chat?.title}
-          </p>
+          {(!ticket || !reference) && (
+            <p>
+              {reference && <strong>{reference} · </strong>}
+              {entry?.title ?? chat?.title}
+            </p>
+          )}
           {ready ? <p>{brief}</p> : <Skeleton className="mt-2 h-12 w-full" />}
           <div className="inbox-triage-evidence" data-slot="triage-evidence">
             {evidenceState?.reference === reference && evidenceState.error ? (

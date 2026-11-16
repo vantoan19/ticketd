@@ -1187,6 +1187,51 @@ body:has([data-slot="dialog-overlay"])
   font-size: var(--text-caption);
   white-space: nowrap;
 }
+.ui-event-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+.ui-event-group-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 32px;
+  text-align: left;
+  color: var(--muted-foreground);
+  font-size: var(--text-preview);
+  line-height: var(--text-ui-line);
+  border-radius: var(--radius);
+}
+.ui-event-group-toggle:hover {
+  background: var(--hover);
+}
+.ui-event-group-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ui-event-group-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-event-group-header > .ui-event-row-time {
+  padding-top: 0;
+}
+.ui-event-group-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ui-event-group-details[hidden] {
+  display: none;
+}
 /* A comment: badge on the line, a header like an event row, the body beneath. No card. */
 .ui-comment-row {
   display: flex;
@@ -2301,20 +2346,47 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   overflow-x: auto;
   max-width: 100%;
 }
-.markdown-document table {
+:is(.markdown-document, .rich-document) table {
   border-collapse: collapse;
   width: max-content;
   min-width: 100%;
   font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
-.markdown-document :is(td, th) {
-  border: 1px solid var(--border);
-  padding: 8px 12px;
+:is(.markdown-document, .rich-document) :is(td, th) {
+  border: 0;
+  padding: 8px 12px 8px 0;
+  font-variant-numeric: tabular-nums;
 }
-.markdown-document th {
-  background: var(--recessed);
+:is(.markdown-document, .rich-document) th {
+  padding-top: 0;
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
   font-weight: 500;
   text-align: left;
+}
+:is(.markdown-document, .rich-document) td {
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+.markdown-document
+  li:has(> .markdown-check[data-checked])
+  > .markdown-task-text,
+.markdown-document li > p:has(> .markdown-check[data-checked]),
+.rich-document li:has(> input[type="checkbox"]:checked) > div[data-slate-node] {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+.description-document
+  :is(.markdown-document, .rich-document)
+  :is(td, th)
+  :is(p, div) {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
 }
 .mermaid-block {
   cursor: default;
@@ -3089,6 +3161,21 @@ kbd,
   font-size: var(--text-reading);
   line-height: var(--text-reading-line);
 }
+.ticket-detail[data-expanded]
+  :is(.description-document, .editor-body)
+  :is(.markdown-document, .rich-document)
+  :is(h2, h3, h4, h5, h6) {
+  font-size: var(--text-reading-heading);
+  line-height: var(--text-reading-heading-line);
+  letter-spacing: var(--text-reading-heading-tracking);
+  font-weight: 600;
+}
+.ticket-detail[data-expanded]
+  :is(.description-document, .editor-body)
+  :is(.markdown-document, .rich-document)
+  > :is(h2, h3, h4, h5, h6):not(:first-child) {
+  margin-top: 32px;
+}
 .description-add {
   height: 48px;
   padding: 12px;
@@ -3559,10 +3646,20 @@ kbd,
 .ui-comment-row-meta time:focus-visible {
   outline-offset: -2px;
 }
-.rail-section-column .rail-file-open {
+.ui-card-file.rail-file-open {
+  height: 44px;
   min-height: 44px;
-  border-radius: var(--radius-panel);
+  grid-template-rows: var(--text-preview-line) var(--text-ui);
+  align-content: center;
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-border-base);
+  font-size: var(--text-ui);
+}
+.ui-card-file .rail-file-name {
+  line-height: var(--text-preview-line);
+}
+.ui-card-file .rail-file-caption {
+  line-height: var(--text-ui);
 }
 
 .ticket-header-title {
@@ -3586,7 +3683,7 @@ kbd,
   display: inline-block;
 }
 
-.rail-section-column .rail-file-open > svg {
+.ui-card-file.rail-file-open > svg {
   width: 28px;
   height: 28px;
   padding: 6px;
@@ -3622,6 +3719,14 @@ kbd,
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+
+.ui-card-triage [data-slot="triage-evidence"] [data-slot="button"] {
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .ui-card-value {

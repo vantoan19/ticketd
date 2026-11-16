@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -121,9 +122,8 @@ test("Show in the file manager reveals the file, and a failure lands in the foot
   );
   vi.mocked(workspaceClient.reveal).mockRejectedValueOnce(new Error("nope"));
   fireEvent.click(show);
-  expect((await screen.findByRole("alert")).textContent).toMatch(
-    /Couldn't show the file in .*\. Nope\./,
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("nope");
 });
 
 test("a workspace that cannot be read says so, and Retry reads it again", async () => {
@@ -131,7 +131,8 @@ test("a workspace that cannot be read says so, and Retry reads it again", async 
   render(<LocationPage />);
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("Couldn't read the workspace");
-  expect(alert.textContent).toContain("Locked.");
+  await revealFailureDetails();
+  expect(alert.textContent).toContain("locked");
   expect(screen.queryByText("Contents")).toBeNull();
   fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("Tickets")).toBeTruthy();

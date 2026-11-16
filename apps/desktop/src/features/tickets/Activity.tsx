@@ -50,6 +50,7 @@ import {
 import {
   Bot,
   FileText,
+  History,
   Link2,
   MessageSquare,
   MoreHorizontal,
@@ -57,7 +58,12 @@ import {
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
+import {
+  CommentRow,
+  EventRow,
+  EventGroup,
+  Timeline,
+} from "@/components/ui/timeline";
 import {
   client,
   type AuthoredActivity,
@@ -65,11 +71,7 @@ import {
   type Project,
 } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
-import {
-  describeAdditions,
-  historySentence,
-  isAddition,
-} from "./history-sentence";
+import { historySentence } from "./history-sentence";
 import type { Entry } from "@/lib/api/history";
 import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
@@ -256,23 +258,9 @@ export function Activity({
   const notes = feed.flatMap((item) =>
     item.type === "authored" ? [item.activity] : [],
   );
-  // Additions of one kind by one agent in the same second share one row.
-  const history = feed
-    .flatMap((item) => (item.type === "automatic" ? [item.event] : []))
-    .reduce<{ entry: Entry; values: string[] }[]>((rows, entry) => {
-      const together = isAddition(entry)
-        ? rows.find(
-            (row) =>
-              isAddition(row.entry) &&
-              row.entry.kind === entry.kind &&
-              row.entry.editing_agent === entry.editing_agent &&
-              row.entry.timestamp.slice(0, 19) === entry.timestamp.slice(0, 19),
-          )
-        : undefined;
-      if (together) together.values.push(entry.to_value);
-      else rows.push({ entry, values: [entry.to_value] });
-      return rows;
-    }, []);
+  const history = feed.flatMap((item) =>
+    item.type === "automatic" ? [item] : [],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [saved, setSaved] = useState<Draft>(
@@ -670,22 +658,46 @@ export function Activity({
     window.setTimeout(() => element.classList.remove("ui-arrived"), 1600);
     revealedTarget.current = { id: targetId, key: targetKey };
   }, [active, targetId, targetKey, feed, targetNote]);
-  const entries = [
+  const chronological = [
     ...displayedNotes.map((note) => ({
       type: "note" as const,
       timestamp: note.reported_at,
       note,
     })),
-    ...history.map(({ entry, values }, index) => ({
+    ...history.map((item) => ({
       type: "history" as const,
-      timestamp: entry.timestamp,
-      entry,
-      values,
-      index,
+      timestamp: item.event.timestamp,
+      id: item.id,
+      entry: item.event,
     })),
   ]
     .filter((item) => view === "all" || item.type === "note")
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  // Fold only adjacent recorded changes in the merged chronology. Authored
+  // updates are boundaries, even when changes share a kind or timestamp.
+  type Group = {
+    type: "history";
+    id: number;
+    timestamp: string;
+    changes: Entry[];
+  };
+  const entries = chronological.reduce<
+    (Extract<(typeof chronological)[number], { type: "note" }> | Group)[]
+  >((rows, item) => {
+    if (item.type === "note") rows.push(item);
+    else {
+      const previous = rows.at(-1);
+      if (previous?.type === "history") previous.changes.push(item.entry);
+      else
+        rows.push({
+          type: "history",
+          id: item.id,
+          timestamp: item.timestamp,
+          changes: [item.entry],
+        });
+    }
+    return rows;
+  }, []);
   // The newest update still in the list, so deleting the latest one moves the label.
   const newestNoteId = displayedNotes.reduce<AuthoredActivity | null>(
     (best, note) =>
@@ -1189,22 +1201,29 @@ export function Activity({
                 )}
               </CommentRow>
             ) : (
-              <EventRow
-                key={`history-${item.index}`}
-                icon={historyIcon(item.entry.kind, item.entry.to_value)}
-                time={<Time value={item.entry.timestamp} format="compact" />}
-                meta={
-                  item.entry.editing_agent && (
-                    <span className="activity-agent">
-                      {attribution(item.entry.editing_agent)}
-                    </span>
-                  )
-                }
+              <EventGroup
+                key={`history-${item.id}`}
+                icon={History}
+                summary={changeSummary(item.changes)}
+                time={<Time value={item.timestamp} format="compact" />}
               >
-                {item.values.length > 1
-                  ? describeAdditions(item.entry.kind, item.values)
-                  : historySentence(item.entry, lookups)}
-              </EventRow>
+                {item.changes.map((entry, index) => (
+                  <EventRow
+                    key={index}
+                    icon={historyIcon(entry.kind, entry.to_value)}
+                    time={<Time value={entry.timestamp} format="compact" />}
+                    meta={
+                      entry.editing_agent && (
+                        <span className="activity-agent">
+                          {attribution(entry.editing_agent)}
+                        </span>
+                      )
+                    }
+                  >
+                    {historySentence(entry, lookups)}
+                  </EventRow>
+                ))}
+              </EventGroup>
             ),
           )}
         </Timeline>
@@ -1218,6 +1237,31 @@ export function Activity({
       )}
     </section>
   );
+}
+
+/** A compact inventory of actual records; full values and attribution expand below. */
+function changeSummary(changes: Entry[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of changes) {
+    const kind =
+      entry.kind === "dependency" ||
+      entry.kind === "parent" ||
+      entry.kind.startsWith("relationship:")
+        ? "link"
+        : entry.kind;
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const parts = [...counts].map(([kind, count]) => {
+    if (kind === "evidence")
+      return `${count} ${count === 1 ? "piece" : "pieces"} of evidence`;
+    if (kind === "link") return `${count} ${count === 1 ? "link" : "links"}`;
+    if (kind === "status")
+      return `status to ${changes.find((entry) => entry.kind === "status")?.to_value}`;
+    if (kind === "plan") return "Plan";
+    if (kind === "project") return "project";
+    return `${count} ${count === 1 ? "other change" : "other changes"}`;
+  });
+  return `${changes.length} ${changes.length === 1 ? "change" : "changes"}: ${parts.join(", ")}`;
 }
 
 /**

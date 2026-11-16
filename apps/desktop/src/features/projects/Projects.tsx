@@ -86,6 +86,7 @@ function reportFailure(
   statusLine.show({
     tone: "error",
     message: `${failure.title}. ${failure.sentence}`,
+    details: failure.details,
     ...(retry &&
       failure.action === "retry" && { action: { label: "Retry", run: retry } }),
   });

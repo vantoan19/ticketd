@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -121,9 +122,8 @@ test("saved locally: offline changes wait, and the popover offers Sync now", asy
   api.syncNow.mockImplementation(real.syncNow);
   vi.mocked(invoke).mockRejectedValue(hostFailure("no network"));
   fireEvent.click(within(dialog).getByRole("button", { name: "Sync now" }));
-  expect((await within(dialog).findByRole("alert")).textContent).toContain(
-    "Couldn't sync. No network.",
-  );
+  await revealFailureDetails(dialog);
+  expect(within(dialog).getByRole("alert").textContent).toContain("no network");
 });
 
 test("Attachment download pending: the line counts files and what is left", async () => {

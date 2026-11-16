@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -131,9 +132,8 @@ test("an unreadable folder or a linked SKILL.md stays in its row with no Replace
     { ...codex, state: "not_a_file" },
   ]);
   render(<AgentSkillsCard />);
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Access is denied.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("Access is denied.");
   expect(screen.getByText("Couldn't check")).toBeTruthy();
   expect(screen.getByText(/is a link or folder/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Replace/ })).toBeNull();

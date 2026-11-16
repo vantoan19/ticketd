@@ -283,9 +283,11 @@ function Element(props: PlateElementProps) {
   const tag = tags[element.type as keyof typeof tags] ?? "div";
   if (element.type === "table")
     return (
-      <PlateElement {...props} as="table">
-        <tbody>{children}</tbody>
-      </PlateElement>
+      <div className="markdown-table-scroll">
+        <PlateElement {...props} as="table">
+          <tbody>{children}</tbody>
+        </PlateElement>
+      </div>
     );
   if (element.type === "br")
     return (

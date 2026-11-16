@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -174,7 +175,9 @@ test("a refused backup is explained in the footer and keeps the previous status"
   renderPage();
   await screen.findByText("ticketd-backup-2026-11-01.sqlite3");
   fireEvent.click(backUpButton());
-  const failure = await screen.findByText("A file already exists.");
+  await revealFailureDetails();
+  const failure = screen.getByRole("alert");
+  expect(failure.textContent).toContain("a file already exists");
   expect(failure.textContent).toContain("Couldn't save the backup.");
   expect(failure.closest(".settings-list-footer")).toBeTruthy();
   expect(screen.getByText("ticketd-backup-2026-11-01.sqlite3")).toBeTruthy();
@@ -250,7 +253,8 @@ test("a failed safety backup read is a message, never a count of 0", async () =>
   const section = screen.getByRole("region", { name: "Safety backups" });
   const alert = await within(section).findByRole("alert");
   expect(alert.textContent).toContain("Couldn't list safety backups");
-  expect(alert.textContent).toContain("No access.");
+  await revealFailureDetails(section);
+  expect(alert.textContent).toContain("no access");
   expect(within(section).queryByText("No safety backups yet")).toBeNull();
   vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   fireEvent.click(within(section).getByRole("button", { name: "Retry" }));

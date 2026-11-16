@@ -266,7 +266,7 @@ test("a failed read of the ticket's runs stops showing once a later read works",
   );
   const view = render(page(0));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "The workspace is busy",
+    "Couldn't load this ticket's Automation runs",
   );
 
   // The Workspace changes, the runs are read again, and this time it works.

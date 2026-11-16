@@ -1,4 +1,6 @@
 import {
+  Children,
+  isValidElement,
   createContext,
   createElement,
   useContext,
@@ -289,7 +291,22 @@ function mentionBlock(tag: string) {
             "aria-describedby": mark.describedBy,
           }
         : props,
-      children as React.ReactNode,
+      tag === "li" && String(props.className ?? "").includes("task-list-item")
+        ? Children.map(children as React.ReactNode, (child) => {
+            const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
+              ? typeof child.type === "string"
+                ? child.type
+                : child.props.node?.tagName
+              : undefined;
+            // A child list has its own checked state; loose paragraphs already
+            // provide a block to decorate without striking the child list.
+            return name && ["ul", "ol", "p", "input"].includes(name) ? (
+              child
+            ) : (
+              <span className="markdown-task-text">{child}</span>
+            );
+          })
+        : (children as React.ReactNode),
     );
   };
 }

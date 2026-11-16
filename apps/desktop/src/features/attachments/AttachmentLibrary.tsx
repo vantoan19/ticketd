@@ -210,6 +210,7 @@ function Library({
         statusLine.show({
           tone: "error",
           message: `${failure.title}. ${failure.sentence}`,
+          details: failure.details,
           ...(failure.action === "retry" && {
             action: { label: "Retry", run: () => restore(file) },
           }),
@@ -222,6 +223,7 @@ function Library({
       statusLine.show({
         tone: "error",
         message: `${failure.title}. ${failure.sentence}`,
+        details: failure.details,
         ...(failure.action === "retry" && {
           action: { label: "Retry", run: () => download(file) },
         }),
