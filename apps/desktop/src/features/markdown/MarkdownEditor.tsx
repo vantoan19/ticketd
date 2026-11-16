@@ -1,3 +1,4 @@
+import { CopyButton } from "@/components/ui/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   useEffect,
@@ -159,7 +160,7 @@ import {
 import { linkPluginOptions } from "./link-options";
 import { slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
-import { readMarkdown, writeMarkdown } from "./plate-markdown";
+import { codeBlockText, readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
 const AttachmentProtection = createContext<(uri: string) => Promise<void>>(
   async () => {},
@@ -428,7 +429,14 @@ function CodeFence(props: PlateElementProps) {
             }}
           />
         }
-      />
+      >
+        <CopyButton
+          label="Copy code"
+          text={`${codeBlockText(props.element)}\n`}
+          size="icon-card"
+          onMouseDown={(event) => event.preventDefault()}
+        />
+      </BlockHeader>
       <datalist id={`${languageId}-languages`}>
         {CODE_LANGUAGES.map((lang) => (
           <option key={lang} value={lang} />

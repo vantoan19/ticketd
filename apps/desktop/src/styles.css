@@ -1485,7 +1485,7 @@ body:has([data-slot="dialog-overlay"])
   flex: none;
   font-family: var(--font-mono);
   font-size: var(--text-code);
-  font-weight: 500;
+  font-weight: 400;
   line-height: var(--text-ui-line);
   color: var(--muted-foreground);
   white-space: nowrap;
@@ -2154,7 +2154,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: var(--text-code);
-  font-weight: 500;
+  font-weight: 400;
   line-height: 20px;
 }
 .detail-actions {
@@ -2311,6 +2311,31 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-size: var(--text-ui);
   line-height: 20px;
   overflow-wrap: anywhere;
+}
+@media (pointer: coarse) {
+  .chat-you-actions .ui-button,
+  .chat-turnpart .chat-fold {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+/* Chat replies use the same document role as descriptions, including their
+   Markdown root rather than only its parent. */
+.chat-ai,
+.chat-ai .markdown-document {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+}
+.chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--foreground);
+  font-size: var(--text-doc);
+  font-weight: 600;
+  line-height: var(--text-doc-line);
+  letter-spacing: normal;
+}
+.chat-pane[data-expanded] .chat-ai .markdown-document {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
 }
 .markdown-document > * + * {
   margin-top: 12px;

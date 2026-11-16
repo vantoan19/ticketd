@@ -88,6 +88,16 @@
   resize: vertical;
 }
 
+/* Reserve recovery feedback before any read or restore result arrives. */
+.sync-history-feedback {
+  flex: none;
+  height: 24px;
+  min-width: 0;
+}
+.sync-history-feedback .ui-failure-inline {
+  height: 100%;
+}
+
 /* History: versions on the left, the selected one compared with now on the right. */
 .sync-history {
   display: grid;
@@ -193,6 +203,16 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Preserve readable comparison columns on the narrow dialog. */
+@media (max-width: 600px) {
+  .sync-history {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 128px minmax(0, 1fr);
+    min-height: 320px;
+    max-height: none;
+  }
 }
 
 /* Attachment availability. */

@@ -1,3 +1,4 @@
+import { Item } from "@/components/ui/item";
 import { EmptyState } from "@/components/ui/empty-state";
 import { emptyCopy } from "@/lib/empty-copy";
 import { Fragment, useContext, useLayoutEffect, useRef, useState } from "react";
@@ -148,48 +149,50 @@ function ChatRow({
   });
   return (
     <li className="chat-row-item" onKeyDown={moveInList}>
-      <button
-        ref={row}
-        type="button"
-        className="chat-row"
-        data-chat-id={chat.id}
-        tabIndex={tabStop ? 0 : -1}
-        aria-current={active ? "true" : undefined}
-        data-attention={strong ? "" : undefined}
-        onClick={onOpen}
-        onKeyDown={(event) => {
-          // The standard keys for a context menu open the row's actions.
-          if (
-            event.key === "ContextMenu" ||
-            (event.shiftKey && event.key === "F10")
-          ) {
-            event.preventDefault();
-            setMenu(true);
-          }
-        }}
-      >
-        {/* Said after the title: a row reads title, harness, status, context, time. */}
-        <HarnessMark
-          harness={chat.harness_id}
-          name={chat.harness_name}
-          className="chat-row-mark"
-          decorative
-        />
-        <span className="chat-row-title">
-          {chat.title}
-          <span className="sr-only">, {chat.harness_name},</span>
-        </span>
-        <span className="chat-row-time">
-          {chat.muted && <BellOff size={14} aria-hidden="true" />}
-          {chatTime(chat.updated_at, now)}
-        </span>
-        <span className="chat-row-sub">
-          <ChatStatus status={chat.status} activity={chat.activity} />
-          <RowContext chat={chat} />
-        </span>
-        {chat.status.unseen && <span className="sr-only">, unread</span>}
-        {chat.muted && <span className="sr-only">, muted</span>}
-      </button>
+      <Item asChild variant="navigator">
+        <button
+          ref={row}
+          type="button"
+          className="chat-row"
+          data-chat-id={chat.id}
+          tabIndex={tabStop ? 0 : -1}
+          aria-current={active ? "true" : undefined}
+          data-attention={strong ? "" : undefined}
+          onClick={onOpen}
+          onKeyDown={(event) => {
+            // The standard keys for a context menu open the row's actions.
+            if (
+              event.key === "ContextMenu" ||
+              (event.shiftKey && event.key === "F10")
+            ) {
+              event.preventDefault();
+              setMenu(true);
+            }
+          }}
+        >
+          {/* Said after the title: a row reads title, harness, status, context, time. */}
+          <HarnessMark
+            harness={chat.harness_id}
+            name={chat.harness_name}
+            className="chat-row-mark"
+            decorative
+          />
+          <span className="chat-row-title">
+            {chat.title}
+            <span className="sr-only">, {chat.harness_name},</span>
+          </span>
+          <span className="chat-row-time">
+            {chat.muted && <BellOff size={14} aria-hidden="true" />}
+            {chatTime(chat.updated_at, now)}
+          </span>
+          <span className="chat-row-sub">
+            <ChatStatus status={chat.status} activity={chat.activity} />
+            <RowContext chat={chat} />
+          </span>
+          {chat.status.unseen && <span className="sr-only">, unread</span>}
+          {chat.muted && <span className="sr-only">, muted</span>}
+        </button>
+      </Item>
       <span
         ref={more}
         className="chat-row-more"
@@ -400,14 +403,16 @@ export function ChatsView({
             )}
             {[0, 1, 2].map((index) => (
               <li key={index} className="chat-row-item">
-                <div className="chat-row">
-                  <Skeleton className="size-4" shape="circle" />
-                  <Skeleton className="h-5 w-32 max-w-full" />
-                  <Skeleton className="h-4 w-8" />
-                  <span className="chat-row-sub">
-                    <Skeleton className="h-4 w-24" />
-                  </span>
-                </div>
+                <Item asChild variant="navigator">
+                  <div className="chat-row">
+                    <Skeleton className="size-4" shape="circle" />
+                    <Skeleton className="h-5 w-32 max-w-full" />
+                    <Skeleton className="h-4 w-8" />
+                    <span className="chat-row-sub">
+                      <Skeleton className="h-4 w-24" />
+                    </span>
+                  </div>
+                </Item>
               </li>
             ))}
           </ul>

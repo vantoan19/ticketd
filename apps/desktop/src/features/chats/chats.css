@@ -50,8 +50,8 @@
 }
 .chat-row-more {
   position: absolute;
-  top: 4px;
-  right: 8px;
+  top: 8px;
+  right: 18px;
   opacity: 0;
   transition: opacity var(--dur-exit) var(--ease-out);
 }
@@ -71,10 +71,13 @@
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   column-gap: 10px;
-  row-gap: 2px;
+  grid-template-rows: 20px 16px;
+  row-gap: 0;
   align-items: center;
-  width: 100%;
-  padding: 10px 16px;
+  width: calc(100% - 16px);
+  height: 52px;
+  margin: 0 8px;
+  padding: 8px 10px;
   text-align: left;
 }
 .chat-row:hover {
@@ -124,7 +127,7 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
-  height: 20px;
+  height: 16px;
 }
 .chat-row-sub > span:first-child {
   flex: 1;
@@ -397,10 +400,12 @@
 /* Your message: right-aligned on an accent fill, exactly as sent. Time and Copy
    show under it on hover or focus. */
 .chat-you-part {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+  padding-bottom: 6px;
 }
 .chat-you {
   max-width: 82%;
@@ -422,12 +427,17 @@
   overflow: hidden;
 }
 /* Show more sits right under the bubble, on its edge (STATIC-17): set on the Button. */
+/* Hover actions occupy their own overlay, so the source's 22px turn gap
+   does not grow by an invisible action row. The 6px inset is always reserved. */
 .chat-you-actions {
+  position: absolute;
+  right: -8px;
+  bottom: -26px;
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 32px;
-  margin: -4px -8px -12px 0;
+  margin: 0;
   opacity: 0;
 }
 .chat-you-part:hover .chat-you-actions,
@@ -470,17 +480,18 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.chat-ai {
-  font-size: var(--text-doc);
-  line-height: var(--text-doc-line);
-}
-/* Reply headings use the document role, keeping the Chat title dominant. */
-.chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--foreground);
-  font-size: var(--text-doc);
-  font-weight: 600;
-  line-height: var(--text-doc-line);
-  letter-spacing: normal;
+/* Touch keeps message actions visible in normal flow, with room for the
+   shared 44px targets before the next turn. */
+@media (pointer: coarse) {
+  .chat-you-part {
+    padding-bottom: 0;
+  }
+  .chat-you-actions {
+    position: static;
+    min-height: 44px;
+    margin-right: -8px;
+    opacity: 1;
+  }
 }
 /* A single line break in a reply is a new line, as in other chat apps. A hard
    break already ends in a newline, so its <br> is not drawn twice. */
@@ -622,9 +633,9 @@ button.chat-steps:hover {
   align-items: center;
   gap: 4px;
   max-width: calc(100% + 16px);
-  min-height: 32px;
-  margin: -6px 0 -6px -8px;
-  padding: 6px 8px;
+  min-height: 28px;
+  margin: -4px 0 -6px -8px;
+  padding: 4px 8px;
   border-radius: var(--radius);
   color: var(--muted-foreground);
   font-size: var(--text-ui);
@@ -1478,7 +1489,7 @@ button.chat-file-name:focus-visible {
   position: relative;
   z-index: 1;
   flex: none;
-  padding: 12px 32px 8px;
+  padding: 6px 20px;
 }
 /* Once the transcript is scrolled under the strip, its edge shows (CH-10). */
 .chat-linked[data-scrolled] {

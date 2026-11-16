@@ -105,13 +105,6 @@
   box-shadow: var(--shadow-border-base);
 }
 
-.source-filter [role="radio"][data-state="checked"] {
-  background: var(--accent);
-  box-shadow: none;
-}
-.source-filter [role="radio"]:hover {
-  background: var(--recessed);
-}
 .source-refresh {
   color: var(--muted-foreground);
   font-size: var(--text-caption);

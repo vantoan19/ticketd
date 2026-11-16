@@ -4687,6 +4687,11 @@ test("highlighted description edits preserve canonical code and links, and copy 
   await vi.waitFor(() =>
     expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
   );
+  const richCopy = screen.getByRole("button", { name: "Copy code" });
+  richCopy.focus();
+  await userEvent.keyboard("{Enter}");
+  await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith(code));
+  expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd());
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   expect(screen.getByRole("link", { name: "design notes" })).toBeTruthy();
   expect(
@@ -11204,6 +11209,11 @@ test("a responsive navigation sheet hands focus to the visible sidebar when its 
       screen.getByRole("button", { name: "All tickets" }),
     ),
   );
+  act(() => resizeViewport(true));
+  expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Open navigation" }),
+  );
 });
 
 test("Settings navigation keeps visible focus through narrow and wide replacements", async () => {
@@ -11508,4 +11518,78 @@ test("zoom keys wait for retained native scale and keep the latest Reset while i
     uninstall();
     dpr.mockRestore();
   }
+});
+
+test("Document History keeps an unconfirmed restore private and retries the same request", async () => {
+  const user = userEvent.setup();
+  const doc = {
+    id: "restore-history-doc",
+    title: "Restore history reader",
+    body: "Current paragraph",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  const requests: unknown[] = [];
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "recent_documents")
+      return [{ id: doc.id, heading: doc.title }];
+    if (command === "open_document" || command === "show_document") return doc;
+    if (command === "document_tags") return [];
+    if (command === "document_version") return [doc.updated_at, false];
+    if (command === "record_versions")
+      return [
+        {
+          id: "old",
+          timestamp: doc.updated_at,
+          device: "Studio desktop",
+          changed: ["body"],
+        },
+      ];
+    if (command === "record_version")
+      return {
+        fields: [
+          { field: "body", value: "Earlier paragraph", current: doc.body },
+        ],
+      };
+    if (command === "restore_record_version") {
+      requests.push(args);
+      if (requests.length === 1)
+        throw new Error("Synthetic restore failed: /private/workspace.sqlite");
+      doc.body = "Earlier paragraph";
+      return null;
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Documents" }));
+  await user.click(await screen.findByRole("button", { name: doc.title }));
+  const actions = screen.getByRole("button", { name: "Document actions" });
+  actions.focus();
+  await user.keyboard("{Enter}");
+  await user.click(await screen.findByRole("menuitem", { name: "History…" }));
+  const history = await screen.findByRole("dialog", { name: "History" });
+  await within(history).findByText("Earlier");
+  await user.click(within(history).getByRole("button", { name: "Restore" }));
+  const alert = await within(history).findByRole("alert");
+  expect(alert.textContent).toContain("The result couldn't be confirmed");
+  expect(alert.textContent).not.toContain("nothing changed");
+  expect(within(history).queryByText(/Synthetic restore failed/)).toBeNull();
+  expect(
+    within(history)
+      .getByRole("button", { name: /Studio desktop/ })
+      .getAttribute("aria-current"),
+  ).toBe("true");
+  await user.click(within(alert).getByRole("button", { name: "Details" }));
+  expect(await screen.findByText(/Synthetic restore failed/)).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("dialog", { name: "History" })).toBe(history);
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "History" })).toBeNull(),
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+  expect(doc.body).toBe("Earlier paragraph");
 });
