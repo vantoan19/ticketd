@@ -420,7 +420,7 @@ impl Workspace {
     /// how many runs were created.
     pub fn queue_automation_runs(&mut self) -> Result<usize, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let cursors = {
             let mut statement =
                 transaction.prepare("SELECT automation_id, cursor FROM automation_device_state")?;
@@ -485,7 +485,7 @@ impl Workspace {
             None => chrono::Local::now().naive_local(),
         };
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let on = {
             let mut statement = transaction
                 .prepare("SELECT automation_id, schedule_from FROM automation_device_state")?;
@@ -529,7 +529,7 @@ impl Workspace {
     /// anything in it is unfinished, and while a run of it is already going.
     pub fn run_automation_now(&mut self, automation_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let automation = crate::automations::one(&transaction, automation_id)?;
         if automation.definition.trigger != Some(Trigger::ByHand) {
             return Err(Error::AutomationRun(
@@ -557,7 +557,7 @@ impl Workspace {
     /// runs are Running. Returns the ones it started.
     pub fn start_automation_runs(&mut self, limit: usize) -> Result<Vec<AutomationRun>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let running: usize = transaction.query_row(
             "SELECT COUNT(*) FROM automation_runs WHERE status = 'running'",
             [],
@@ -595,7 +595,7 @@ impl Workspace {
         reason: &str,
     ) -> Result<usize, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let ids = {
             let going = serde_json::to_string(going)?;
             let mut statement = transaction.prepare(
@@ -615,7 +615,7 @@ impl Workspace {
     /// a run that has already ended (stopped, taken over) stays as it ended.
     pub fn fail_automation_run(&mut self, run_id: &str, reason: &str) -> Result<bool, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let ended = match end(&transaction, run_id, Cause::Abandoned(reason)) {
             Ok(ended) => ended.is_some(),
             // Removed meanwhile: there is nothing to end.
@@ -631,7 +631,7 @@ impl Workspace {
     /// failure path included: the outcome its executor reports later is refused.
     pub fn stop_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         if end(&transaction, run_id, Cause::Stopped)?.is_none() {
             return Err(Error::AutomationRun("the run has already ended".into()));
         }
@@ -647,7 +647,7 @@ impl Workspace {
     /// has an active run of it.
     pub fn run_automation_again(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let run = one(&transaction, run_id)?;
         if matches!(
             run.status,
@@ -694,7 +694,7 @@ impl Workspace {
     /// it. The run stays as it ended.
     pub fn dismiss_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         answer(&transaction, run_id, DISMISSED)?;
         let run = one(&transaction, run_id)?;
         transaction.commit()?;
@@ -713,7 +713,7 @@ impl Workspace {
         replied: bool,
     ) -> Result<Option<AutomationRun>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let owner: Option<String> = transaction
             .query_row(
                 "SELECT automation_run_id FROM chats WHERE id = ?1",

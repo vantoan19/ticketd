@@ -271,93 +271,90 @@ impl Workspace {
         agent: Option<&str>,
         reviewed: bool,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let source_id = relationships::id(&tx, source)?;
-        let canonical_id = relationships::id(&tx, canonical)?;
-        crate::ensure_editable(&tx, &source_id)?;
-        crate::source::guard_duplicate(&tx, &source_id, source)?;
-        crate::ensure_editable(&tx, &canonical_id)?;
-        let destination = final_canonical(&tx, &canonical_id)?;
-        crate::ensure_editable(&tx, &destination)?;
-        if source_id == canonical_id || source_id == destination {
-            return Err(Error::DuplicateCycle);
-        }
-        let incident: bool = tx.query_row(
+        crate::write_scope::run(&self.connection, |tx| {
+            let source_id = tx.even_if_trashed(source)?;
+            let canonical_id = tx.even_if_trashed(canonical)?;
+            tx.ensure_editable(&source_id)?;
+            crate::source::guard_duplicate(tx, &source_id, source)?;
+            tx.ensure_editable(&canonical_id)?;
+            let destination = final_canonical(tx, &canonical_id)?;
+            tx.ensure_editable(&destination)?;
+            if source_id == canonical_id || source_id == destination {
+                return Err(Error::DuplicateCycle);
+            }
+            let incident: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM dependencies WHERE blocker_id = ?1 OR dependent_id = ?1)",
             [&source_id],
             |r| r.get(0),
         )?;
-        if incident && !reviewed {
-            return Err(Error::DuplicateDependencies);
-        }
-        let status: String = tx.query_row(
-            "SELECT status FROM tickets WHERE id = ?1",
-            [&source_id],
-            |r| r.get(0),
-        )?;
-        let previous: Option<String> = tx.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&source_id], |r| r.get(0)).optional()?;
-        let target: String = tx.query_row(
-            "SELECT reference FROM tickets WHERE id = ?1",
-            [&destination],
-            |r| r.get(0),
-        )?;
-        if previous.as_deref() != Some(&target) {
-            let mut stmt = tx.prepare("SELECT t.id, t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1")?;
-            let children = stmt
-                .query_map([&source_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(stmt);
-            tx.execute(
-                "UPDATE duplicate_tickets SET canonical_id = ?1 WHERE canonical_id = ?2",
-                params![destination, source_id],
-            )?;
-            for (id, _) in children {
-                history::record(&tx, &id, "relationship:duplicate", source, &target, agent)?;
+            if incident && !reviewed {
+                return Err(Error::DuplicateDependencies);
             }
-            tx.execute("INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(source_id) DO UPDATE SET canonical_id = excluded.canonical_id", params![source_id, destination, status])?;
-            history::record(
-                &tx,
-                &source_id,
-                "relationship:duplicate",
-                previous.as_deref().unwrap_or(""),
-                &target,
-                agent,
-            )?;
-        }
-        if status != "Duplicate" {
-            tx.execute(
-                "UPDATE tickets SET status = 'Duplicate' WHERE id = ?1",
+            let status: String = tx.query_row(
+                "SELECT status FROM tickets WHERE id = ?1",
                 [&source_id],
+                |r| r.get(0),
             )?;
-            history::record(&tx, &source_id, "status", &status, "Duplicate", agent)?;
-        }
-        tx.commit()?;
-        self.show_ticket(source)
+            let previous: Option<String> = tx.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&source_id], |r| r.get(0)).optional()?;
+            let target: String = tx.query_row(
+                "SELECT reference FROM tickets WHERE id = ?1",
+                [&destination],
+                |r| r.get(0),
+            )?;
+            if previous.as_deref() != Some(&target) {
+                let mut stmt = tx.prepare("SELECT t.id, t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1")?;
+                let children = stmt
+                    .query_map([&source_id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(stmt);
+                tx.execute(
+                    "UPDATE duplicate_tickets SET canonical_id = ?1 WHERE canonical_id = ?2",
+                    params![destination, source_id],
+                )?;
+                for (id, _) in children {
+                    history::record(tx, &id, "relationship:duplicate", source, &target, agent)?;
+                }
+                tx.execute("INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(source_id) DO UPDATE SET canonical_id = excluded.canonical_id", params![source_id, destination, status])?;
+                history::record(
+                    tx,
+                    &source_id,
+                    "relationship:duplicate",
+                    previous.as_deref().unwrap_or(""),
+                    &target,
+                    agent,
+                )?;
+            }
+            if status != "Duplicate" {
+                tx.execute(
+                    "UPDATE tickets SET status = 'Duplicate' WHERE id = ?1",
+                    [&source_id],
+                )?;
+                history::record(tx, &source_id, "status", &status, "Duplicate", agent)?;
+            }
+            crate::read_ticket(tx, source)
+        })
     }
 
     pub fn remove_duplicate(&mut self, source: &str, agent: Option<&str>) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let id = relationships::id(&tx, source)?;
-        crate::ensure_editable(&tx, &id)?;
-        crate::source::guard_duplicate(&tx, &id, source)?;
-        let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, c.reference, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
-        if let Some((restore, canonical, status)) = existing {
-            tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;
-            history::record(&tx, &id, "relationship:duplicate", &canonical, "", agent)?;
-            if let Some(restore) = restore.filter(|r| r != &status) {
-                tx.execute(
-                    "UPDATE tickets SET status = ?1 WHERE id = ?2",
-                    params![restore, id],
-                )?;
-                history::record(&tx, &id, "status", &status, &restore, agent)?;
+        crate::write_scope::run(&self.connection, |tx| {
+            let id = tx.editable(source)?;
+            crate::source::guard_duplicate(tx, &id, source)?;
+            let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, c.reference, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+            if let Some((restore, canonical, status)) = existing {
+                tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;
+                history::record(tx, &id, "relationship:duplicate", &canonical, "", agent)?;
+                if let Some(restore) = restore.filter(|r| r != &status) {
+                    tx.execute(
+                        "UPDATE tickets SET status = ?1 WHERE id = ?2",
+                        params![restore, id],
+                    )?;
+                    history::record(tx, &id, "status", &status, &restore, agent)?;
+                }
             }
-        }
-        tx.commit()?;
-        self.show_ticket(source)
+            crate::read_ticket(tx, source)
+        })
     }
 }
 
@@ -433,7 +430,7 @@ impl Snapshot {
                 return Err(Error::DuplicateCycle);
             }
             for id in [&source_id, &canonical_id, &destination_id] {
-                crate::ensure_editable(connection, id)?;
+                crate::write_scope::ensure_editable(connection, id)?;
             }
         }
         // The cap is checked before any further work, so a huge review is cheap to refuse.
@@ -844,11 +841,8 @@ impl Workspace {
     ) -> Result<Ticket, Error> {
         // A savepoint composes with retryable writes, while acquiring the write lock before
         // reading ensures that the reviewed graph cannot change before commit.
-        self.connection
-            .execute_batch("SAVEPOINT duplicate_review")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            self.apply_dependency_review(
+        self.in_write_scope(|workspace| {
+            workspace.apply_dependency_review(
                 source,
                 canonical,
                 expected_canonical,
@@ -856,19 +850,8 @@ impl Workspace {
                 ReviewMode::Duplicate,
                 agent,
             )?;
-            self.mark_duplicate_internal(source, canonical, agent, true)
-        })();
-        match result {
-            Ok(ticket) => {
-                self.connection.execute_batch("RELEASE duplicate_review")?;
-                Ok(ticket)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO duplicate_review; RELEASE duplicate_review")?;
-                Err(error)
-            }
-        }
+            workspace.mark_duplicate_internal(source, canonical, agent, true)
+        })
     }
     pub fn edit_dependencies_reviewed(
         &mut self,
@@ -878,11 +861,8 @@ impl Workspace {
         decisions: Vec<DependencyDecision>,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        self.connection
-            .execute_batch("SAVEPOINT dependency_review")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            self.apply_dependency_review(
+        self.in_write_scope(|workspace| {
+            workspace.apply_dependency_review(
                 source,
                 canonical,
                 expected_canonical,
@@ -890,19 +870,8 @@ impl Workspace {
                 ReviewMode::Separate,
                 agent,
             )?;
-            self.show_ticket(source)
-        })();
-        match result {
-            Ok(ticket) => {
-                self.connection.execute_batch("RELEASE dependency_review")?;
-                Ok(ticket)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO dependency_review; RELEASE dependency_review")?;
-                Err(error)
-            }
-        }
+            workspace.show_ticket(source)
+        })
     }
 
     fn apply_dependency_review(

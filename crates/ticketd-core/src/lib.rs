@@ -58,6 +58,7 @@ mod sync_files;
 pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
 mod tags;
 mod ticket_documents;
+mod write_scope;
 pub use plans::{Plan, PlanCounts, PlanView};
 
 use std::{
@@ -1075,28 +1076,27 @@ impl Workspace {
         if title.is_empty() {
             return Err(Error::EmptyTitle);
         }
-        let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
-        if let Some(id) = project_id {
-            projects::find(&transaction, id)?;
-        }
-        if let Some(id) = plan_id {
-            plans::ensure_active(&transaction, id)?;
-        }
-        let id = Uuid::new_v4().to_string();
-        let reference = device::issue_reference(&transaction)?;
-        transaction.execute(
-            "INSERT INTO tickets (id, reference, title, status, project_id, plan_id) VALUES (?1, ?2, ?3, 'Todo', ?4, ?5)",
-            params![id, reference, title, project_id, plan_id],
-        )?;
-        if let Some(project_id) = project_id {
-            history::record(&transaction, &id, "project", "", project_id, None)?;
-        }
-        if let Some(plan_id) = plan_id {
-            history::record(&transaction, &id, "plan", "", plan_id, None)?;
-        }
-        transaction.commit()?;
-        self.show_ticket(&reference)
+        write_scope::run(&self.connection, |scope| {
+            if let Some(id) = project_id {
+                projects::find(scope, id)?;
+            }
+            if let Some(id) = plan_id {
+                plans::ensure_active(scope, id)?;
+            }
+            let id = Uuid::new_v4().to_string();
+            let reference = device::issue_reference(scope)?;
+            scope.execute(
+                "INSERT INTO tickets (id, reference, title, status, project_id, plan_id) VALUES (?1, ?2, ?3, 'Todo', ?4, ?5)",
+                params![id, reference, title, project_id, plan_id],
+            )?;
+            if let Some(project_id) = project_id {
+                history::record(scope, &id, "project", "", project_id, None)?;
+            }
+            if let Some(plan_id) = plan_id {
+                history::record(scope, &id, "plan", "", plan_id, None)?;
+            }
+            read_ticket(scope, &reference)
+        })
     }
 
     pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
@@ -1104,114 +1104,94 @@ impl Workspace {
         if title == Some("") {
             return Err(Error::EmptyTitle);
         }
-        let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
-        let ticket = transaction
-            .query_row(
-                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
-                [reference],
-                ticket_from_row,
-            )
-            .optional()?
-            .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-        ensure_editable(&transaction, &ticket.id)?;
-        let stale = |new: &Option<String>, expected: &Option<String>, stored: &str| {
-            new.is_some()
-                && expected
-                    .as_deref()
-                    .is_some_and(|expected| expected != stored)
-        };
-        if stale(&patch.title, &patch.expected_title, &ticket.title)
-            || stale(&patch.body, &patch.expected_body, &ticket.body)
-        {
-            return Err(Error::TicketChanged(reference.to_owned()));
-        }
-        source::guard_change(
-            &transaction,
-            &ticket,
-            title,
-            patch.body.as_deref(),
-            patch.status.unwrap_or(ticket.status),
-        )?;
-        if let Some(ref plan_id) = patch.plan_id {
-            if let Some(id) = plan_id {
-                if *plan_id == ticket.plan_id {
-                    plans::get(&transaction, id)?;
-                } else {
-                    // Moving a ticket out of an archived Plan stays allowed; moving in is not.
-                    plans::ensure_active(&transaction, id)?;
+        write_scope::run(&self.connection, |transaction| {
+            let ticket = transaction.editable_ticket(reference)?;
+            let stale = |new: &Option<String>, expected: &Option<String>, stored: &str| {
+                new.is_some()
+                    && expected
+                        .as_deref()
+                        .is_some_and(|expected| expected != stored)
+            };
+            if stale(&patch.title, &patch.expected_title, &ticket.title)
+                || stale(&patch.body, &patch.expected_body, &ticket.body)
+            {
+                return Err(Error::TicketChanged(reference.to_owned()));
+            }
+            source::guard_change(
+                transaction,
+                &ticket,
+                title,
+                patch.body.as_deref(),
+                patch.status.unwrap_or(ticket.status),
+            )?;
+            if let Some(ref plan_id) = patch.plan_id {
+                if let Some(id) = plan_id {
+                    if *plan_id == ticket.plan_id {
+                        plans::get(transaction, id)?;
+                    } else {
+                        // Moving a ticket out of an archived Plan stays allowed; moving in is not.
+                        plans::ensure_active(transaction, id)?;
+                    }
+                }
+                if *plan_id != ticket.plan_id {
+                    transaction.execute(
+                        "UPDATE tickets SET plan_id = ?1 WHERE id = ?2",
+                        params![plan_id, ticket.id],
+                    )?;
+                    history::record(
+                        transaction,
+                        &ticket.id,
+                        "plan",
+                        ticket.plan_id.as_deref().unwrap_or(""),
+                        plan_id.as_deref().unwrap_or(""),
+                        patch.editing_agent.as_deref(),
+                    )?;
                 }
             }
-            if *plan_id != ticket.plan_id {
-                transaction.execute(
-                    "UPDATE tickets SET plan_id = ?1 WHERE id = ?2",
-                    params![plan_id, ticket.id],
-                )?;
+            if let Some(ref project_id) = patch.project_id {
+                if let Some(id) = project_id {
+                    projects::find(transaction, id)?;
+                }
+                if *project_id != ticket.project_id {
+                    transaction.execute(
+                        "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
+                        params![project_id, ticket.id],
+                    )?;
+                    history::record(
+                        transaction,
+                        &ticket.id,
+                        "project",
+                        ticket.project_id.as_deref().unwrap_or(""),
+                        project_id.as_deref().unwrap_or(""),
+                        patch.editing_agent.as_deref(),
+                    )?;
+                }
+            }
+            let status = patch.status.unwrap_or(ticket.status);
+            if status != ticket.status {
+                if status == Status::Duplicate {
+                    return Err(Error::DuplicateNeedsCanonical);
+                }
+                if ticket.status == Status::Duplicate {
+                    duplicates::clear(transaction, &ticket.id, patch.editing_agent.as_deref())?;
+                }
+            }
+            transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE id = ?4", params![title, patch.body, status.to_string(), ticket.id])?;
+            if let Some(body) = patch.body.as_deref() {
+                document_links::index_body(transaction, &ticket.id, body)?;
+            }
+            if status != ticket.status {
                 history::record(
-                    &transaction,
+                    transaction,
                     &ticket.id,
-                    "plan",
-                    ticket.plan_id.as_deref().unwrap_or(""),
-                    plan_id.as_deref().unwrap_or(""),
+                    "status",
+                    &ticket.status.to_string(),
+                    &status.to_string(),
                     patch.editing_agent.as_deref(),
                 )?;
             }
-        }
-        if let Some(ref project_id) = patch.project_id {
-            if let Some(id) = project_id {
-                projects::find(&transaction, id)?;
-            }
-            if *project_id != ticket.project_id {
-                transaction.execute(
-                    "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
-                    params![project_id, ticket.id],
-                )?;
-                history::record(
-                    &transaction,
-                    &ticket.id,
-                    "project",
-                    ticket.project_id.as_deref().unwrap_or(""),
-                    project_id.as_deref().unwrap_or(""),
-                    patch.editing_agent.as_deref(),
-                )?;
-            }
-        }
-        let status = patch.status.unwrap_or(ticket.status);
-        if status != ticket.status {
-            if status == Status::Duplicate {
-                return Err(Error::DuplicateNeedsCanonical);
-            }
-            if ticket.status == Status::Duplicate {
-                duplicates::clear(&transaction, &ticket.id, patch.editing_agent.as_deref())?;
-            }
-        }
-        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE id = ?4", params![title, patch.body, status.to_string(), ticket.id])?;
-        if let Some(body) = patch.body.as_deref() {
-            document_links::index_body(&transaction, &ticket.id, body)?;
-        }
-        if status != ticket.status {
-            history::record(
-                &transaction,
-                &ticket.id,
-                "status",
-                &ticket.status.to_string(),
-                &status.to_string(),
-                patch.editing_agent.as_deref(),
-            )?;
-        }
-        let mut updated = transaction.query_row(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1",
-            [&ticket.id],
-            ticket_from_row,
-        )?;
-        updated.tags = tags::for_ticket(&transaction, &updated.id)?;
-        relationships::populate(&transaction, &mut updated)?;
-        hierarchy::populate(&transaction, &mut updated)?;
-        duplicates::populate(&transaction, &mut updated)?;
-        source::populate(&transaction, &mut updated)?;
-        activities::populate_update(&transaction, &mut updated)?;
-        transaction.commit()?;
-        Ok(updated)
+            read_ticket(transaction, reference)
+        })
     }
 
     pub fn set_trashed(
@@ -1220,29 +1200,29 @@ impl Workspace {
         trashed: bool,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id = relationships::id(&tx, reference)?;
-        let old: bool =
-            tx.query_row("SELECT trashed FROM tickets WHERE id = ?1", [&id], |row| {
-                row.get(0)
-            })?;
-        if old != trashed {
-            tx.execute(
-                "UPDATE tickets SET trashed = ?1 WHERE id = ?2",
-                params![trashed, id],
-            )?;
-            history::record(
-                &tx,
-                &id,
-                "trash",
-                if old { "trashed" } else { "active" },
-                if trashed { "trashed" } else { "active" },
-                agent,
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(reference)
+        write_scope::run(&self.connection, |scope| {
+            // Putting a ticket in Trash and restoring it are the writes a ticket in Trash allows.
+            let id = scope.even_if_trashed(reference)?;
+            let old: bool =
+                scope.query_row("SELECT trashed FROM tickets WHERE id = ?1", [&id], |row| {
+                    row.get(0)
+                })?;
+            if old != trashed {
+                scope.execute(
+                    "UPDATE tickets SET trashed = ?1 WHERE id = ?2",
+                    params![trashed, id],
+                )?;
+                history::record(
+                    scope,
+                    &id,
+                    "trash",
+                    if old { "trashed" } else { "active" },
+                    if trashed { "trashed" } else { "active" },
+                    agent,
+                )?;
+            }
+            read_ticket(scope, reference)
+        })
     }
 
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
@@ -1256,14 +1236,12 @@ impl Workspace {
         content: &str,
         agent: Option<&str>,
     ) -> Result<Activity, Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id_ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &id_ticket)?;
-        let result = activities::add(&tx, &id_ticket, content, agent)?;
-        inbox::record(&tx, &id_ticket, "activity", &result.id, content, agent)?;
-        tx.commit()?;
-        Ok(result)
+        write_scope::run(&self.connection, |scope| {
+            let id_ticket = scope.editable(reference)?;
+            let result = activities::add(scope, &id_ticket, content, agent)?;
+            inbox::record(scope, &id_ticket, "activity", &result.id, content, agent)?;
+            Ok(result)
+        })
     }
     pub fn add_activity_with_details(
         &mut self,
@@ -1278,46 +1256,43 @@ impl Workspace {
         if details.is_some() && existing_document_id.is_some() {
             return Err(Error::ConflictingActivitySupport);
         }
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &ticket)?;
-        let activity = activities::add(&tx, &ticket, brief, agent)?;
-        let document_id = if let Some(body) = details {
-            let id = uuid::Uuid::new_v4().to_string();
+        write_scope::run(&self.connection, |tx| {
+            let ticket = tx.editable(reference)?;
+            let activity = activities::add(tx, &ticket, brief, agent)?;
+            let document_id = if let Some(body) = details {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO entities (id, kind) VALUES (?1, 'document')",
+                    [&id],
+                )?;
+                tx.execute(
+                    "INSERT INTO documents (id, body, originating_activity_id) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![id, body, activity.id],
+                )?;
+                document_links::index_body(tx, &id, body)?;
+                Some(id)
+            } else if let Some(id) = existing_document_id {
+                let trashed: Option<bool> = tx
+                    .query_row("SELECT trashed FROM documents WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })
+                    .optional()?;
+                match trashed {
+                    None => return Err(Error::DocumentNotFound(id.to_owned())),
+                    Some(true) => return Err(Error::DocumentTrashed(id.to_owned())),
+                    Some(false) => {}
+                }
+                Some(id.to_owned())
+            } else {
+                None
+            };
             tx.execute(
-                "INSERT INTO entities (id, kind) VALUES (?1, 'document')",
-                [&id],
+                "UPDATE activities SET supporting_document_id = ?1 WHERE id = ?2",
+                rusqlite::params![document_id, activity.id],
             )?;
-            tx.execute(
-                "INSERT INTO documents (id, body, originating_activity_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![id, body, activity.id],
-            )?;
-            document_links::index_body(&tx, &id, body)?;
-            Some(id)
-        } else if let Some(id) = existing_document_id {
-            let trashed: Option<bool> = tx
-                .query_row("SELECT trashed FROM documents WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })
-                .optional()?;
-            match trashed {
-                None => return Err(Error::DocumentNotFound(id.to_owned())),
-                Some(true) => return Err(Error::DocumentTrashed(id.to_owned())),
-                Some(false) => {}
-            }
-            Some(id.to_owned())
-        } else {
-            None
-        };
-        tx.execute(
-            "UPDATE activities SET supporting_document_id = ?1 WHERE id = ?2",
-            rusqlite::params![document_id, activity.id],
-        )?;
-        inbox::record(&tx, &ticket, "activity", &activity.id, brief, agent)?;
-        let result = activities::get(&tx, &ticket, &activity.id)?;
-        tx.commit()?;
-        Ok(result)
+            inbox::record(tx, &ticket, "activity", &activity.id, brief, agent)?;
+            activities::get(tx, &ticket, &activity.id)
+        })
     }
     pub fn edit_activity(
         &mut self,
@@ -1325,23 +1300,17 @@ impl Workspace {
         id: &str,
         patch: ActivityPatch,
     ) -> Result<Activity, Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id_ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &id_ticket)?;
-        let result = activities::edit(&tx, &id_ticket, id, patch)?;
-        tx.commit()?;
-        Ok(result)
+        write_scope::run(&self.connection, |scope| {
+            let id_ticket = scope.editable(reference)?;
+            activities::edit(scope, &id_ticket, id, patch)
+        })
     }
     pub fn delete_activity(&mut self, reference: &str, id: &str) -> Result<(), Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id_ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &id_ticket)?;
-        tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 AND kept = 0 ON CONFLICT(document_id) DO NOTHING", [id])?;
-        activities::delete(&tx, &id_ticket, id)?;
-        tx.commit()?;
-        Ok(())
+        write_scope::run(&self.connection, |scope| {
+            let id_ticket = scope.editable(reference)?;
+            scope.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 AND kept = 0 ON CONFLICT(document_id) DO NOTHING", [id])?;
+            activities::delete(scope, &id_ticket, id)
+        })
     }
     /// Read the latest authored Activity without loading its history.
     pub fn latest_update(&self, reference: &str) -> Result<Option<LatestUpdate>, Error> {
@@ -1410,23 +1379,28 @@ impl Workspace {
     }
 
     pub fn show_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        let ticket = self
-            .connection
-            .query_row(
-                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
-                [reference],
-                ticket_from_row,
-            )
-            .optional()?;
-        let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-        ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
-        relationships::populate(&self.connection, &mut ticket)?;
-        hierarchy::populate(&self.connection, &mut ticket)?;
-        duplicates::populate(&self.connection, &mut ticket)?;
-        source::populate(&self.connection, &mut ticket)?;
-        activities::populate_update(&self.connection, &mut ticket)?;
-        Ok(ticket)
+        read_ticket(&self.connection, reference)
     }
+}
+
+/// A ticket with everything shown about it. A write calls this at the end of its scope, so
+/// the result is what the write left behind.
+pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
+    let ticket = connection
+        .query_row(
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+            [reference],
+            ticket_from_row,
+        )
+        .optional()?;
+    let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
+    ticket.tags = tags::for_ticket(connection, &ticket.id)?;
+    relationships::populate(connection, &mut ticket)?;
+    hierarchy::populate(connection, &mut ticket)?;
+    duplicates::populate(connection, &mut ticket)?;
+    source::populate(connection, &mut ticket)?;
+    activities::populate_update(connection, &mut ticket)?;
+    Ok(ticket)
 }
 
 fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
@@ -1458,25 +1432,6 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         parent: None,
         children: Vec::new(),
     })
-}
-
-// All ticket mutations must check this inside the same write transaction.
-pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), Error> {
-    let (trashed, reference): (bool, String) = connection.query_row(
-        "SELECT trashed, reference FROM tickets WHERE id = ?1",
-        [id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if trashed {
-        return Err(Error::Trashed(reference));
-    }
-    Ok(())
-}
-
-// A savepoint used independently acquires the write lock before reading invariants.
-fn transaction_write_lock(connection: &Connection) -> Result<(), Error> {
-    connection.execute("UPDATE tickets SET number = number WHERE 0", [])?;
-    Ok(())
 }
 
 mod batch;

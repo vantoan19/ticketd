@@ -38,7 +38,7 @@ use super::{
     conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
 };
-use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};
+use crate::{Error, Status, Ticket, Workspace, duplicates, history};
 
 /// Who may change a ticket's content now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1133,7 +1133,7 @@ impl Workspace {
         tracked: &[Tracked],
     ) -> Result<RefreshReport, Error> {
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         // Configuration can change while the connector is on the network.
         // Re-read it under the same write lock as the results: old discovery
         // cannot import new tickets or describe the rules saved afterwards.
