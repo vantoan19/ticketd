@@ -145,7 +145,14 @@ again whatever is observed later, and a resend the harness refuses returns the
 message to awaiting a decision with the earlier uncertainty intact. A failed turn
 keeps the kind of failure the adapter reported and, for a usage limit, the reset
 time the provider gave. Such a failure describes the turn that ended; it does not
-block the next message, which only a condition observed now does. An optional
+block the next message, which only a condition observed now does. How a turn ended
+is one typed fact, `TurnEnding` in `ticketd-chat-host`: completed, failed (with the
+kind, message and reset time), stopped by the person, stopped by ticketd for a named
+reason (quit, Chat turned off, a restore, a run taken over, a time limit, the run's step
+ending, the Chat trashed, an explicit resume, or storage failing), or contact lost. The
+supervisor stores it in `chat_turns.ending` beside the turn's state and wording, and the
+Chats list, the transcript and Automation runs read it from there; a turn recorded before
+format 83 has no ending and is read from its state and wording. An optional
 tool, MCP server or model that is unavailable is a typed problem of the running
 session that blocks nothing. Warnings, retries and unmodelled provider traffic
 are stored as bounded notices, and the settings a harness reports as in effect
@@ -359,7 +366,8 @@ from their Codex configuration (`on-request` and `read-only` when it sets none).
 has no turn limit to set, so the agent editor hides the Turns field for Codex. `ChatHost::run_unattended` sends the first
 message, stops a turn still going at the agent's time limit, reports how the turn
 ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
-and closes the harness process. An unattended harness that asks for approval
+and closes the harness process. It waits on a signal kept for that Chat, so another
+Chat's steps do not wake it. An unattended harness that asks for approval
 anyway is stopped and counted as denied.
 
 A Change ticket step is the core's own work, done inside `advance_automation_run`: it

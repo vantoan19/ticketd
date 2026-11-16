@@ -11,9 +11,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ticketd_core::{
-    CHAT_NOTICE_LIMIT, Chat, ChatInteractionKind, ChatInteractionState, ChatMessage,
-    ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error,
-    Workspace,
+    Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
+    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -23,9 +22,8 @@ use crate::host::{
     AGENT_CHANGES_RECORD_NAME, Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive,
     ChatProblem, ChatView, ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
     INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
-    SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode, SettingChangeState, StopState,
-    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, TicketdStop, WorkspaceOpener, is_refusal,
-    problem_key,
+    SNAPSHOT_ITEMS, SendMode, SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL,
+    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
 };
 use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
@@ -33,6 +31,7 @@ use crate::records::{
 };
 use crate::{
     HarnessCommand, HarnessSettings, SettingChange, SettingKey, SettingOutcome, StartSettings,
+    StopReason, TurnEnding,
 };
 
 /// Now, in milliseconds since the Unix epoch.
@@ -96,7 +95,7 @@ pub(crate) enum Command {
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
     /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
-    Shutdown(TicketdStop, oneshot::Sender<Option<String>>),
+    Shutdown(StopReason, oneshot::Sender<Option<String>>),
 }
 
 /// The result of an adapter call that ran in its own task.
@@ -246,7 +245,7 @@ pub(crate) struct Supervisor {
     shutting_down: bool,
     /// Why ticketd is shutting the Chat down, kept on a turn the harness reports
     /// interrupted meanwhile, so it does not read as the person's stop.
-    shut_down_for: Option<TicketdStop>,
+    shut_down_for: Option<StopReason>,
     /// The person resumed the queue or sent into it, so it may open a session. Without
     /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
     queue_started: bool,
@@ -349,8 +348,7 @@ impl Supervisor {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
-                        self.shut_down_for = Some(why);
-                        let unconfirmed = self.stop_runtime(why.detail()).await;
+                        let unconfirmed = self.stop_runtime(why).await;
                         self.publish();
                         self.board.report(&self.chat_id, None);
                         let _ = reply.send(unconfirmed);
@@ -359,7 +357,7 @@ impl Supervisor {
                     Some(command) => self.on_command(command).await,
                     None => {
                         self.shutting_down = true;
-                        self.stop_runtime(STOPPED_BY_TICKETD).await;
+                        self.stop_runtime(StopReason::Quit).await;
                         self.board.report(&self.chat_id, None);
                         return;
                     }
@@ -370,7 +368,7 @@ impl Supervisor {
             }
             if self.storage_failed.is_some() && (self.runtime.is_some() || self.opening.is_some()) {
                 // Controlled shutdown: nothing more can be recorded, so nothing more runs.
-                if let Some(reason) = self.stop_runtime("Chat storage failed").await {
+                if let Some(reason) = self.stop_runtime(StopReason::StorageFailed).await {
                     self.notice(format!("Stopping the harness was not confirmed: {reason}"));
                 }
             }
@@ -503,7 +501,7 @@ impl Supervisor {
             Command::Trash(reply) => {
                 let chat = self.chat_id.clone();
                 let result = match self.write(|core| core.set_chat_trashed(&chat, true)) {
-                    Ok(_) => Ok(self.stop_runtime("the Chat was moved to the trash").await),
+                    Ok(_) => Ok(self.stop_runtime(StopReason::Trashed).await),
                     Err(error) => Err(error.into()),
                 };
                 let _ = reply.send(result);
@@ -657,8 +655,15 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         if self.storage_failed.is_some() {
             // Accept work again only once storage can record what was lost meanwhile.
-            self.core(|core| core.mark_chat_contact_lost(Some(&chat), "Chat storage failed"))
-                .map_err(|error| HostError::StorageFailed(error.to_string()))?;
+            let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
+            self.core(|core| {
+                core.mark_chat_contact_lost(
+                    Some(&chat),
+                    &ending.detail().unwrap_or_default(),
+                    &ending.key(),
+                )
+            })
+            .map_err(|error| HostError::StorageFailed(error.to_string()))?;
             self.storage_failed = None;
             self.problem = None;
         }
@@ -864,7 +869,7 @@ impl Supervisor {
             }
         };
         if self.runtime.is_some() {
-            self.stop_runtime("replaced by an explicit resume").await;
+            self.stop_runtime(StopReason::ExplicitResume).await;
         }
         let (session, origin, preamble) = match mode {
             ResumeMode::FreshSession { history } => (
@@ -961,14 +966,20 @@ impl Supervisor {
 
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
     /// Returns why cleanup could not be confirmed, if it could not.
-    async fn stop_runtime(&mut self, detail: &str) -> Option<String> {
+    async fn stop_runtime(&mut self, why: StopReason) -> Option<String> {
+        // Kept while the runtime closes, so a turn the harness reports interrupted
+        // meanwhile is recorded as ticketd's stop and not as the person's.
+        let before = self.shut_down_for.replace(why);
         self.closing = true;
-        let unconfirmed = self.close_runtime(detail).await;
+        let unconfirmed = self.close_runtime(why).await;
         self.closing = false;
+        if !self.shutting_down {
+            self.shut_down_for = before;
+        }
         unconfirmed
     }
 
-    async fn close_runtime(&mut self, detail: &str) -> Option<String> {
+    async fn close_runtime(&mut self, why: StopReason) -> Option<String> {
         self.record(Vec::new());
         let deadline = Instant::now() + CLOSE_TIMEOUT;
         while self.opening.is_some() {
@@ -981,7 +992,7 @@ impl Supervisor {
             if let Some(reply) = opening.reply {
                 let _ = reply.send(Err(HostError::Quitting));
             }
-            self.runtime_gone(detail);
+            self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
             return Some("the harness was still starting".to_owned());
         }
         let Some(runtime) = &self.runtime else {
@@ -1023,7 +1034,7 @@ impl Supervisor {
             None
         };
         self.runtime = None;
-        self.runtime_gone(detail);
+        self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
         if let Some(reason) = &unconfirmed {
             self.problem = Some(ChatProblem::CleanupUnconfirmed {
                 reason: reason.clone(),
@@ -1045,12 +1056,18 @@ impl Supervisor {
     }
 
     /// Nothing more will be observed from the runtime: settle what it left open.
-    fn runtime_gone(&mut self, detail: &str) {
+    fn runtime_gone(&mut self, ending: &TurnEnding) {
         let chat = self.chat_id.clone();
         if let Some(changes) = self.agent_changes() {
             let _ = self.write(|core| core.record_chat_observations(&chat, vec![changes]));
         }
-        let _ = self.write(|core| core.mark_chat_contact_lost(Some(&chat), detail));
+        let _ = self.write(|core| {
+            core.mark_chat_contact_lost(
+                Some(&chat),
+                &ending.detail().unwrap_or_default(),
+                &ending.key(),
+            )
+        });
         self.active = None;
         self.unconfirmed_start = None;
         self.unconfirmed_deadline = None;
@@ -1079,7 +1096,7 @@ impl Supervisor {
             // `stop_runtime` settles what was open, with its own reason.
             return;
         }
-        self.runtime_gone(&detail);
+        self.runtime_gone(&TurnEnding::ContactLost(detail.clone()));
         if !quiet {
             self.pause(ChatProblem::RuntimeLost { detail });
         }
@@ -1811,31 +1828,15 @@ impl Supervisor {
                 // harness ends it as completed (Codex can, once interrupted).
                 let stopped = self.stop.is_some()
                     && self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
-                let (state, detail, problem, problem_resets_at) = match outcome {
-                    TurnOutcome::Completed if stopped => {
-                        (ChatTurnState::Interrupted, None, None, None)
-                    }
-                    TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
-                    TurnOutcome::Interrupted => (
-                        ChatTurnState::Interrupted,
-                        self.shut_down_for.map(|why| why.detail().to_owned()),
-                        None,
-                        None,
-                    ),
-                    TurnOutcome::Failed(problem) => (
-                        ChatTurnState::Failed,
-                        Some(problem.message.chars().take(CHAT_NOTICE_LIMIT).collect()),
-                        Some(problem_key(problem.kind).to_owned()),
-                        problem.resets_at,
-                    ),
+                let ending = match outcome {
+                    TurnOutcome::Completed if stopped => TurnEnding::StoppedByPerson,
+                    TurnOutcome::Completed => TurnEnding::Completed,
+                    TurnOutcome::Interrupted => self
+                        .shut_down_for
+                        .map_or(TurnEnding::StoppedByPerson, TurnEnding::StoppedByTicketd),
+                    TurnOutcome::Failed(problem) => TurnEnding::failed(&problem),
                 };
-                observations.push(ChatObservation::TurnEnded {
-                    turn_id: turn_id.clone(),
-                    state,
-                    detail,
-                    problem,
-                    problem_resets_at,
-                });
+                observations.push(ending.observation(turn_id.clone()));
                 self.record(observations);
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
                 self.interactions.retain(|_, live| live.turn_id != turn_id);
@@ -1846,8 +1847,8 @@ impl Supervisor {
                     // Queued input does not follow a turn that did not complete. A
                     // take-over ends the agent's turn for the person, who is about to
                     // send (#387 M2): their Chat's queue is not paused for it.
-                    if state != ChatTurnState::Completed
-                        && self.shut_down_for != Some(TicketdStop::TakenOver)
+                    if ending != TurnEnding::Completed
+                        && self.shut_down_for != Some(StopReason::TakenOver)
                     {
                         let chat = self.chat_id.clone();
                         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));

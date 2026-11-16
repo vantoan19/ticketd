@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::conditions::ChatProblemKind;
-use crate::{ChatLive, InteractionKind, TicketdStop, problem_kind};
+use crate::{ChatLive, InteractionKind, ProblemKind, TurnEnding};
 use serde::Serialize;
 use ticketd_core::{Chat, ChatAgentChange, ChatTurn, ChatTurnState};
 
@@ -126,11 +126,8 @@ fn plain_start(markdown: &str) -> Option<String> {
 }
 
 /// Why a turn ended with an error, in a few words: what its notice is titled.
-fn failure_detail(turn: &ChatTurn, harness: &str) -> String {
-    turn.problem
-        .as_deref()
-        .map_or(ChatProblemKind::Failed, |key| problem_kind(key).into())
-        .title(harness, true)
+fn failure_detail(kind: ProblemKind, harness: &str) -> String {
+    ChatProblemKind::from(kind).title(harness, true)
 }
 
 pub fn status(facts: &Facts<'_>) -> Status {
@@ -199,28 +196,22 @@ pub fn status(facts: &Facts<'_>) -> Status {
             .map(change_line)
             .or_else(|| facts.last_response.and_then(plain_start))
     };
-    let outcome = ended.map(
-        |turn| match (turn.state, TicketdStop::of(turn.detail.as_deref())) {
-            (ChatTurnState::Completed, _) => (Rank::Done, "Done".to_owned(), done()),
-            (ChatTurnState::Failed, _) => (
-                Rank::Failed,
-                "Failed".to_owned(),
-                Some(failure_detail(turn, facts.harness)),
-            ),
-            // ticketd stopped it, whether or not the harness reported the turn.
-            (ChatTurnState::Unknown | ChatTurnState::Interrupted, Some(stop)) => {
-                (Rank::Idle, stop.words().to_owned(), None)
-            }
-            (ChatTurnState::Unknown, None) => (
-                Rank::Failed,
-                "Interrupted".to_owned(),
-                Some(format!("{} stopped mid-turn", facts.harness)),
-            ),
-            (ChatTurnState::Interrupted | ChatTurnState::Active, _) => {
-                (Rank::Idle, "You stopped it".to_owned(), None)
-            }
-        },
-    );
+    let outcome = ended.and_then(TurnEnding::of).map(|ending| match ending {
+        TurnEnding::Completed => (Rank::Done, "Done".to_owned(), done()),
+        TurnEnding::Failed { kind, .. } => (
+            Rank::Failed,
+            "Failed".to_owned(),
+            Some(failure_detail(kind, facts.harness)),
+        ),
+        // ticketd stopped it, whether or not the harness reported the turn.
+        TurnEnding::StoppedByTicketd(reason) => (Rank::Idle, reason.words().to_owned(), None),
+        TurnEnding::ContactLost(_) => (
+            Rank::Failed,
+            "Interrupted".to_owned(),
+            Some(format!("{} stopped mid-turn", facts.harness)),
+        ),
+        TurnEnding::StoppedByPerson => (Rank::Idle, "You stopped it".to_owned(), None),
+    });
     if let Some((rank, word, detail)) = outcome.clone().filter(|_| unseen) {
         return make(rank, &word, detail);
     }

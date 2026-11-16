@@ -15,6 +15,7 @@ use crate::{
     Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey,
     SettingOutcome, StartSettings, SteeringBehavior, Subscription, Unattended,
 };
+use crate::{StopReason, TurnEnding};
 
 /// Provisional bounds, to be measured in #267.
 pub const TEXT_UPDATE_INTERVAL: Duration = Duration::from_millis(100);
@@ -55,73 +56,8 @@ pub const CONTEXT_RECORD_NAME: &str = "ticketd context";
 /// during a turn (`ChatAgentChange`s), so the transcript can show it after the turn.
 pub const AGENT_CHANGES_RECORD_NAME: &str = "ticketd changes";
 
-/// The detail recorded on a turn ticketd itself stopped on Quit, and on every such
-/// turn recorded before `TicketdStop` told the reasons apart.
+/// The detail recorded on a turn ticketd itself stopped on Quit (see [`crate::StopReason`]).
 pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
-
-/// Why ticketd itself stopped a Chat's harness. Recorded as the interrupted turn's
-/// detail, so the transcript and the list say what happened (L15).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TicketdStop {
-    /// Quit, or a backup being restored.
-    Quit,
-    TurnedOff,
-    /// The person took over the Automation run whose agent was working.
-    TakenOver,
-    /// The run's time limit passed while its agent was working.
-    TimeLimit,
-    /// The run's agent was closed because its step ended.
-    RunEnded,
-}
-
-impl TicketdStop {
-    const ALL: [Self; 5] = [
-        Self::Quit,
-        Self::TurnedOff,
-        Self::TakenOver,
-        Self::TimeLimit,
-        Self::RunEnded,
-    ];
-
-    pub const fn detail(self) -> &'static str {
-        match self {
-            Self::Quit => STOPPED_BY_TICKETD,
-            Self::TurnedOff => "ticketd stopped this Chat when Chat was turned off",
-            Self::TakenOver => "ticketd stopped this run's agent when the run was taken over",
-            Self::TimeLimit => "ticketd stopped this run's agent at the run's time limit",
-            Self::RunEnded => "ticketd stopped this run's agent when its step ended",
-        }
-    }
-
-    /// The reason a turn's recorded detail names, if ticketd stopped it.
-    pub fn of(detail: Option<&str>) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|stop| Some(stop.detail()) == detail)
-    }
-
-    /// For the person, without a full stop: "Stopped when ticketd quit".
-    pub const fn words(self) -> &'static str {
-        match self {
-            Self::Quit => "Stopped when ticketd quit",
-            Self::TurnedOff => "Stopped when Chat was turned off",
-            Self::TakenOver => "You took this run over",
-            Self::TimeLimit => "Stopped at the run's time limit",
-            Self::RunEnded => "Stopped when its run step ended",
-        }
-    }
-
-    /// The transcript's marker for it.
-    pub const fn marker(self) -> &'static str {
-        match self {
-            Self::Quit => "quit",
-            Self::TurnedOff => "turned_off",
-            Self::TakenOver => "taken_over",
-            Self::TimeLimit => "time_limit",
-            Self::RunEnded => "run_ended",
-        }
-    }
-}
 
 /// The `Chat.harness` value an adapter serves.
 pub fn harness_key(harness: Harness) -> &'static str {
@@ -348,6 +284,9 @@ pub struct ChatHost {
 pub(crate) struct Board {
     live: Mutex<HashMap<String, ChatLive>>,
     changed: watch::Sender<u64>,
+    /// One signal per Chat that something is waiting on (an Automation run's agent), so
+    /// the wait wakes for its own Chat and not for every Chat's every step.
+    signals: Mutex<HashMap<String, watch::Sender<u64>>>,
 }
 
 impl Board {
@@ -363,6 +302,32 @@ impl Board {
         };
         self.changed
             .send_modify(|count| *count = count.wrapping_add(1));
+        self.notify(chat_id);
+    }
+
+    fn signals(&self) -> MutexGuard<'_, HashMap<String, watch::Sender<u64>>> {
+        self.signals.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Wakes whoever waits on this Chat. Called when its supervisor reports and when
+    /// its unattended running ends.
+    pub(crate) fn notify(&self, chat_id: &str) {
+        if let Some(signal) = self.signals().get(chat_id) {
+            signal.send_modify(|count| *count = count.wrapping_add(1));
+        }
+    }
+
+    /// Starts listening for this Chat; a change from now on wakes the receiver.
+    pub(crate) fn listen(&self, chat_id: &str) -> watch::Receiver<u64> {
+        self.signals()
+            .entry(chat_id.to_owned())
+            .or_insert_with(|| watch::channel(0).0)
+            .subscribe()
+    }
+
+    /// Stops keeping a signal for this Chat once nothing waits on it.
+    pub(crate) fn stop_listening(&self, chat_id: &str) {
+        self.signals().remove(chat_id);
     }
 }
 
@@ -399,7 +364,12 @@ impl ChatHost {
         adapters: Vec<Arc<dyn HarnessAdapter>>,
         context: Option<ContextSource>,
     ) -> Result<Self, HostError> {
-        open_workspace()?.mark_chat_contact_lost(None, "ticketd was restarted")?;
+        let restarted = TurnEnding::ContactLost("ticketd was restarted".to_owned());
+        open_workspace()?.mark_chat_contact_lost(
+            None,
+            &restarted.detail().unwrap_or_default(),
+            &restarted.key(),
+        )?;
         Ok(Self {
             inner: Arc::new(Inner {
                 open_workspace,
@@ -407,6 +377,7 @@ impl ChatHost {
                 board: Arc::new(Board {
                     live: Mutex::new(HashMap::new()),
                     changed: watch::channel(0).0,
+                    signals: Mutex::new(HashMap::new()),
                 }),
                 adapters: adapters
                     .into_iter()
@@ -431,6 +402,15 @@ impl ChatHost {
     /// without a visible difference, so readers compare what they show.
     pub fn changed(&self) -> watch::Receiver<u64> {
         self.inner.board.changed.subscribe()
+    }
+
+    /// Starts listening for changes to one Chat only; see `Board::listen`.
+    pub(crate) fn listen(&self, chat_id: &str) -> watch::Receiver<u64> {
+        self.inner.board.listen(chat_id)
+    }
+
+    pub(crate) fn stop_listening(&self, chat_id: &str) {
+        self.inner.board.stop_listening(chat_id);
     }
 
     pub async fn inspect(&self, harness: &str) -> Result<Inspection, HostError> {
@@ -486,7 +466,7 @@ impl ChatHost {
         let mut closed = false;
         // The Chat acted on, and the Chat of a later step whose agent was working.
         for step in run.steps.iter().filter_map(|step| step.chat_id.as_deref()) {
-            closed |= self.end_unattended(step, TicketdStop::TakenOver).await && step == chat_id;
+            closed |= self.end_unattended(step, StopReason::TakenOver).await && step == chat_id;
         }
         Ok(Some(closed))
     }
@@ -520,7 +500,7 @@ impl ChatHost {
         // (Stop on the run, "Stop it and turn off", deleting the Automation) wants its
         // agent gone. Closing the harness, after an open in progress, also ends the
         // wait in `run_unattended`; an interrupt alone misses a turn not begun (#387 M4).
-        if self.end_unattended(chat_id, TicketdStop::RunEnded).await {
+        if self.end_unattended(chat_id, StopReason::RunEnded).await {
             return Ok(());
         }
         self.ask(chat_id, Command::Stop).await
@@ -657,7 +637,7 @@ impl ChatHost {
     /// supervisor, on every clone of this host, then stops every running Chat.
     pub async fn turn_off(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.off.store(true, Ordering::SeqCst);
-        self.stop_all(TicketdStop::TurnedOff).await
+        self.stop_all(StopReason::TurnedOff).await
     }
 
     /// Chat was switched on again; requests are served.
@@ -666,7 +646,7 @@ impl ChatHost {
     }
 
     /// Stops every running Chat with bounded cleanup and keeps the host usable.
-    pub async fn stop_all(&self, why: TicketdStop) -> Vec<UnconfirmedCleanup> {
+    pub async fn stop_all(&self, why: StopReason) -> Vec<UnconfirmedCleanup> {
         let chats: Vec<_> = self.chats().drain().collect();
         let mut waiting = Vec::new();
         for (chat_id, commands) in chats {
@@ -687,7 +667,7 @@ impl ChatHost {
     /// Refuses new work, then stops every running Chat. Close storage after this returns.
     pub async fn quit(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.quitting.store(true, Ordering::SeqCst);
-        self.stop_all(TicketdStop::Quit).await
+        self.stop_all(StopReason::Quit).await
     }
 
     /// Before the workspace is replaced by a backup: refuses every request that would
@@ -695,7 +675,7 @@ impl ChatHost {
     /// running Chat. Nothing runs until `finish_restore`.
     pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.restoring.store(true, Ordering::SeqCst);
-        self.stop_all(TicketdStop::Quit).await
+        self.stop_all(StopReason::Restore).await
     }
 
     /// The restore is over, whether or not it replaced anything; requests are served again.
@@ -840,7 +820,7 @@ impl ChatHost {
     /// Whoever gets here first does the closing, so a run that ends and a person who
     /// takes it over at the same moment never close the person's new session.
     /// Returns whether it was running unattended.
-    pub(crate) async fn end_unattended(&self, chat_id: &str, why: TicketdStop) -> bool {
+    pub(crate) async fn end_unattended(&self, chat_id: &str, why: StopReason) -> bool {
         if self.unattended().remove(chat_id).is_none() {
             return false;
         }
@@ -857,10 +837,7 @@ impl ChatHost {
             self.note_stopped(chat_id, why);
         }
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
-        self.inner
-            .board
-            .changed
-            .send_modify(|count| *count = count.wrapping_add(1));
+        self.inner.board.notify(chat_id);
         true
     }
 
@@ -881,7 +858,7 @@ impl ChatHost {
     }
 
     /// Says in the Chat why its agent stopped, when it stopped before any turn could.
-    fn note_stopped(&self, chat_id: &str, why: TicketdStop) {
+    fn note_stopped(&self, chat_id: &str, why: StopReason) {
         let Ok(mut workspace) = self.workspace() else {
             return;
         };
@@ -970,4 +947,42 @@ pub fn problem_kind(key: &str) -> ProblemKind {
     .into_iter()
     .find(|kind| problem_key(*kind) == key)
     .unwrap_or(ProblemKind::Other)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn board() -> Board {
+        Board {
+            live: Mutex::new(HashMap::new()),
+            changed: watch::channel(0).0,
+            signals: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// An Automation run's agent waits on its own Chat: what other Chats do wakes the
+    /// host-wide watch (the Chats list) and not this wait.
+    #[test]
+    fn a_wait_on_one_chat_wakes_for_that_chat_only() {
+        let board = board();
+        let waiting = board.listen("agent");
+
+        board.report("other", Some(ChatLive::idle()));
+        assert!(!waiting.has_changed().unwrap_or(true));
+
+        board.report("agent", Some(ChatLive::idle()));
+        assert!(waiting.has_changed().unwrap_or(false));
+    }
+
+    #[test]
+    fn a_chat_nobody_waits_on_keeps_no_signal() {
+        let board = board();
+        board.report("agent", None);
+        assert!(board.signals().is_empty());
+
+        let _waiting = board.listen("agent");
+        board.stop_listening("agent");
+        assert!(board.signals().is_empty());
+    }
 }
