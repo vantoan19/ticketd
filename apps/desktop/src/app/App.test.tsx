@@ -11912,6 +11912,13 @@ test("a retained native 200% reload initializes the palette and Reset recovers e
     .mockImplementation(() => actualZoom * 2);
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
     if (command === "plugin:window|scale_factor") return 2;
+    // The window check half a second after mount reads the window size; answer
+    // with one in step with the page, so it does not try a repair.
+    if (command === "plugin:window|inner_size")
+      return {
+        width: window.innerWidth * actualZoom * 2,
+        height: window.innerHeight * actualZoom * 2,
+      };
     if (command === "plugin:window|is_decorated") return true;
     if (command === "plugin:window|set_theme") return;
     if (command === "plugin:webview|set_webview_zoom") {
