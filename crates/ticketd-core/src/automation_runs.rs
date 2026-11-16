@@ -1,6 +1,7 @@
 //! Automation runs: one record per firing of an Automation, local to this device.
-//! This module queues runs from the Workspace event log, starts them in event order
-//! and records what `automation_run_machine` decides after each step.
+//! This module queues runs from the Workspace event log and starts them in event
+//! order; `automation_advance` moves a started run along, and `automation_endings`
+//! decides how it ends.
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -8,10 +9,8 @@ use uuid::Uuid;
 
 use crate::automation_endings::{Cause, end, end_each};
 use crate::automation_matching::{LOCAL_SOURCE, TicketFacts, matches};
-use crate::automation_run_machine::{RunAction, StepOutcome, next_action};
 use crate::automation_schedule::due;
 use crate::automations::{AutomationDefinition, Step, Trigger};
-use crate::chats::{Chat, NewChat};
 use crate::events::WorkspaceEvent;
 use crate::{Error, Workspace};
 
@@ -322,7 +321,7 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
         .collect()
 }
 
-fn one(connection: &Connection, id: &str) -> Result<AutomationRun, Error> {
+pub(crate) fn one(connection: &Connection, id: &str) -> Result<AutomationRun, Error> {
     read(connection, "r.id = ?1", id)?
         .pop()
         .ok_or_else(|| Error::AutomationRunNotFound(id.to_owned()))
@@ -586,86 +585,6 @@ impl Workspace {
         Ok(started)
     }
 
-    /// Records how the step a Running run was on ended (`None` to begin the run) and
-    /// returns what the run does next: the step is marked, and either the next step
-    /// is marked Running or the run ends.
-    pub fn advance_automation_run(
-        &mut self,
-        run_id: &str,
-        outcome: Option<StepOutcome>,
-    ) -> Result<RunAction, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
-        let run = one(&transaction, run_id)?;
-        if run.status != AutomationRunStatus::Running {
-            return Err(Error::AutomationRun("the run is not running".into()));
-        }
-        let current = run
-            .steps
-            .iter()
-            .find(|step| step.status == AutomationStepStatus::Running);
-        let finished = match (current, &outcome) {
-            (Some(step), Some(outcome)) => Some((step.step_id.as_str(), outcome)),
-            (None, None) => None,
-            (Some(_), None) => return Err(Error::AutomationRun("the run has begun".into())),
-            (None, Some(_)) => return Err(Error::AutomationRun("the run is on no step".into())),
-        };
-        if let Some((step_id, outcome)) = finished {
-            let (status, reason) = match outcome {
-                StepOutcome::Completed | StepOutcome::Branched { .. } => ("completed", None),
-                StepOutcome::Failed { reason } => ("failed", Some(reason)),
-            };
-            transaction.execute(
-                &format!("UPDATE automation_run_steps SET status = ?3, reason = ?4, ended_at = {NOW} WHERE run_id = ?1 AND step_id = ?2 AND status = 'running'"),
-                params![run_id, step_id, status, reason],
-            )?;
-        }
-        let action = next_action(&run.definition.steps, finished);
-        match &action {
-            RunAction::RunStep { step_id } => {
-                transaction.execute(
-                    "INSERT INTO automation_run_steps (run_id, position, step_id, status) VALUES (?1, ?2, ?3, 'running')",
-                    params![run_id, run.steps.len(), step_id],
-                )?;
-            }
-            RunAction::End(run_end) => {
-                end(&transaction, run_id, Cause::Path(run_end))?;
-            }
-        }
-        transaction.commit()?;
-        Ok(action)
-    }
-
-    /// Creates the Chat of the Run agent step a run is on. The Chat is owned by the
-    /// run, which keeps it out of the Chat list. Repeating the call returns the
-    /// first Chat. Refused, with no Chat left behind, when the run is no longer on
-    /// that step: the person stopped it or took it over meanwhile.
-    pub fn create_automation_run_chat(
-        &mut self,
-        run_id: &str,
-        step_id: &str,
-        chat: NewChat,
-    ) -> Result<Chat, Error> {
-        self.create_chat_with(
-            Some(&format!("{run_id}:{step_id}:chat")),
-            chat,
-            |connection, chat_id| {
-                connection.execute(
-                    "UPDATE chats SET automation_run_id = ?2 WHERE id = ?1",
-                    params![chat_id, run_id],
-                )?;
-                let changed = connection.execute(
-                    "UPDATE automation_run_steps SET chat_id = ?3 WHERE run_id = ?1 AND step_id = ?2 AND status = 'running'",
-                    params![run_id, step_id, chat_id],
-                )?;
-                if changed == 0 {
-                    return Err(Error::AutomationRun("the run is not on that step".into()));
-                }
-                Ok(())
-            },
-        )
-    }
-
     /// Ends every Running run that is not one of `going` as Needs attention with
     /// `reason`, failing the step it was on. For a host whose own runs are `going`:
     /// a run left Running by a process that is gone, or brought back by a restored
@@ -697,7 +616,12 @@ impl Workspace {
     pub fn fail_automation_run(&mut self, run_id: &str, reason: &str) -> Result<bool, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
-        let ended = end(&transaction, run_id, Cause::Abandoned(reason))?.is_some();
+        let ended = match end(&transaction, run_id, Cause::Abandoned(reason)) {
+            Ok(ended) => ended.is_some(),
+            // Removed meanwhile: there is nothing to end.
+            Err(Error::AutomationRunNotFound(_)) => false,
+            Err(error) => return Err(error),
+        };
         transaction.commit()?;
         Ok(ended)
     }

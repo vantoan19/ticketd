@@ -99,6 +99,7 @@ pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
     DEFAULT_ATTACHMENT_LIMIT,
 };
+mod automation_advance;
 mod automation_agents;
 mod automation_background;
 pub use automation_background::{DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE};
@@ -117,11 +118,12 @@ mod events;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
+pub use automation_advance::{AgentStart, RunAction, StartedBy, TicketData};
 pub use automation_agents::{
     AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
 };
 pub use automation_examples::AutomationExample;
-pub use automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
+pub use automation_run_machine::{RunEnd, StepOutcome};
 pub use automation_runs::{
     AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
     AutomationStepStatus, RunAnswer,
