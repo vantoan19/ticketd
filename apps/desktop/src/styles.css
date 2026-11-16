@@ -737,6 +737,12 @@
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
+.ui-overlay[data-slot="dialog-overlay"][data-state="open"] {
+  animation: palette-scrim var(--dur-2) var(--ease-out);
+}
+.ui-overlay[data-slot="dialog-overlay"][data-state="closed"] {
+  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+}
 /* Design frame D shows nothing of the empty detail behind a modal scrim. */
 body:has([data-slot="dialog-overlay"])
   [data-slot="empty-state"][data-size="hint"] {
