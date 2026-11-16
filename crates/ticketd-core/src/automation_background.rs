@@ -91,7 +91,7 @@ impl Workspace {
     /// working, for the host to interrupt.
     pub fn stop_and_turn_off_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         transaction.execute(
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],

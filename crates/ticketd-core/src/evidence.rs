@@ -1,4 +1,4 @@
-use crate::{Error, Workspace, ensure_editable, history, relationships, transaction_write_lock};
+use crate::{Error, Workspace, history, relationships, write_scope};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -94,23 +94,20 @@ impl Workspace {
         input: EvidenceInput,
     ) -> Result<Evidence, Error> {
         validate(&input)?;
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &ticket)?;
-        let id = Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO evidence (id,ticket_id,kind,name,value,editing_agent) VALUES (?1,?2,?3,?4,?5,?6)", params![id,ticket,kind_string(input.kind),input.name,input.value,input.editing_agent])?;
-        history::record(
-            &tx,
-            &ticket,
-            "evidence",
-            "",
-            &input.name,
-            input.editing_agent.as_deref(),
-        )?;
-        let result = get(&tx, &ticket, &id)?;
-        tx.commit()?;
-        Ok(result)
+        write_scope::run(&self.connection, |tx| {
+            let ticket = tx.editable(reference)?;
+            let id = Uuid::new_v4().to_string();
+            tx.execute("INSERT INTO evidence (id,ticket_id,kind,name,value,editing_agent) VALUES (?1,?2,?3,?4,?5,?6)", params![id,ticket,kind_string(input.kind),input.name,input.value,input.editing_agent])?;
+            history::record(
+                tx,
+                &ticket,
+                "evidence",
+                "",
+                &input.name,
+                input.editing_agent.as_deref(),
+            )?;
+            get(tx, &ticket, &id)
+        })
     }
     pub fn edit_evidence(
         &mut self,
@@ -119,37 +116,31 @@ impl Workspace {
         input: EvidenceInput,
     ) -> Result<Evidence, Error> {
         validate(&input)?;
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &ticket)?;
-        let old = get(&tx, &ticket, id)?;
-        tx.execute("UPDATE evidence SET kind=?1,name=?2,value=?3,editing_agent=?4,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ticket_id=?5 AND id=?6", params![kind_string(input.kind),input.name,input.value,input.editing_agent,ticket,id])?;
-        history::record(
-            &tx,
-            &ticket,
-            "evidence",
-            &old.name,
-            &input.name,
-            input.editing_agent.as_deref(),
-        )?;
-        let result = get(&tx, &ticket, id)?;
-        tx.commit()?;
-        Ok(result)
+        write_scope::run(&self.connection, |tx| {
+            let ticket = tx.editable(reference)?;
+            let old = get(tx, &ticket, id)?;
+            tx.execute("UPDATE evidence SET kind=?1,name=?2,value=?3,editing_agent=?4,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ticket_id=?5 AND id=?6", params![kind_string(input.kind),input.name,input.value,input.editing_agent,ticket,id])?;
+            history::record(
+                tx,
+                &ticket,
+                "evidence",
+                &old.name,
+                &input.name,
+                input.editing_agent.as_deref(),
+            )?;
+            get(tx, &ticket, id)
+        })
     }
     pub fn delete_evidence(&mut self, reference: &str, id: &str) -> Result<(), Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &ticket)?;
-        let old = get(&tx, &ticket, id)?;
-        tx.execute(
-            "DELETE FROM evidence WHERE ticket_id=?1 AND id=?2",
-            params![ticket, id],
-        )?;
-        history::record(&tx, &ticket, "evidence", &old.name, "", None)?;
-        tx.commit()?;
-        Ok(())
+        write_scope::run(&self.connection, |tx| {
+            let ticket = tx.editable(reference)?;
+            let old = get(tx, &ticket, id)?;
+            tx.execute(
+                "DELETE FROM evidence WHERE ticket_id=?1 AND id=?2",
+                params![ticket, id],
+            )?;
+            history::record(tx, &ticket, "evidence", &old.name, "", None)
+        })
     }
     pub fn evidence(
         &self,

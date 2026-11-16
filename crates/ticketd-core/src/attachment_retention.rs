@@ -110,7 +110,7 @@ impl Workspace {
             ));
         }
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let previous: Option<i64> = tx
             .query_row(
                 "SELECT revision FROM attachment_drafts WHERE owner=?1",

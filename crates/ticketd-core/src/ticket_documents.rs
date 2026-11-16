@@ -3,7 +3,7 @@
 
 use rusqlite::{Connection, params};
 
-use crate::{Error, Ticket, Workspace, relationships};
+use crate::{Error, Ticket, Workspace};
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     tx.execute_batch(
@@ -26,33 +26,37 @@ impl Workspace {
         document_id: &str,
         present: bool,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let ticket_id = relationships::id(&tx, reference)?;
-        if present {
-            let trashed: Option<bool> = rusqlite::OptionalExtension::optional(tx.query_row(
-                "SELECT trashed FROM documents WHERE id = ?1",
-                [document_id],
-                |row| row.get(0),
-            ))?;
-            match trashed {
-                None => return Err(Error::NotFound(document_id.to_owned())),
-                Some(true) => return Err(Error::DocumentTrashed(document_id.to_owned())),
-                Some(false) => {}
-            }
-            tx.execute(
+        crate::write_scope::run(&self.connection, |tx| {
+            // Detaching a Document is allowed from a ticket in Trash; attaching one is not.
+            let ticket_id = if present {
+                tx.editable(reference)?
+            } else {
+                tx.even_if_trashed(reference)?
+            };
+            if present {
+                let trashed: Option<bool> = rusqlite::OptionalExtension::optional(tx.query_row(
+                    "SELECT trashed FROM documents WHERE id = ?1",
+                    [document_id],
+                    |row| row.get(0),
+                ))?;
+                match trashed {
+                    None => return Err(Error::NotFound(document_id.to_owned())),
+                    Some(true) => return Err(Error::DocumentTrashed(document_id.to_owned())),
+                    Some(false) => {}
+                }
+                tx.execute(
                 "INSERT OR IGNORE INTO ticket_documents(ticket_id, document_id) VALUES (?1, ?2)",
                 params![ticket_id, document_id],
             )?;
-            // Attaching Activity details is a decision to keep them as a Document.
-            tx.execute("UPDATE documents SET kept = 1 WHERE id = ?1", [document_id])?;
-        } else {
-            tx.execute(
-                "DELETE FROM ticket_documents WHERE ticket_id = ?1 AND document_id = ?2",
-                params![ticket_id, document_id],
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(reference)
+                // Attaching Activity details is a decision to keep them as a Document.
+                tx.execute("UPDATE documents SET kept = 1 WHERE id = ?1", [document_id])?;
+            } else {
+                tx.execute(
+                    "DELETE FROM ticket_documents WHERE ticket_id = ?1 AND document_id = ?2",
+                    params![ticket_id, document_id],
+                )?;
+            }
+            crate::read_ticket(tx, reference)
+        })
     }
 }

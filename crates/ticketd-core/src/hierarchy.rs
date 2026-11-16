@@ -1,4 +1,4 @@
-use crate::{Error, Ticket, Workspace, history, relationships};
+use crate::{Error, Ticket, Workspace, history, relationships, write_scope};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
@@ -45,21 +45,21 @@ impl Workspace {
         child: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let parent_id = relationships::id(&tx, parent)?;
-        let child_id = relationships::id(&tx, child)?;
-        crate::ensure_editable(&tx, &parent_id)?;
-        let changed = tx.execute(
-            "DELETE FROM ticket_parents WHERE child_id = ?1 AND parent_id = ?2",
-            params![child_id, parent_id],
-        )?;
-        if changed != 0 {
-            history::record(&tx, &child_id, "parent", parent, "", agent)?;
-            history::record(&tx, &parent_id, "relationship:child", child, "", agent)?;
-        }
-        tx.commit()?;
-        self.show_ticket(parent)
+        write_scope::run(&self.connection, |tx| {
+            // The child may be in Trash: a visible parent can let it go.
+            let parent_id = tx.even_if_trashed(parent)?;
+            let child_id = tx.even_if_trashed(child)?;
+            tx.ensure_editable(&parent_id)?;
+            let changed = tx.execute(
+                "DELETE FROM ticket_parents WHERE child_id = ?1 AND parent_id = ?2",
+                params![child_id, parent_id],
+            )?;
+            if changed != 0 {
+                history::record(tx, &child_id, "parent", parent, "", agent)?;
+                history::record(tx, &parent_id, "relationship:child", child, "", agent)?;
+            }
+            crate::read_ticket(tx, parent)
+        })
     }
     pub fn set_parent(
         &mut self,
@@ -67,59 +67,58 @@ impl Workspace {
         parent: Option<&str>,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let child_id = relationships::id(&tx, child)?;
-        let old: Option<String> = tx.query_row("SELECT tickets.reference FROM ticket_parents JOIN tickets ON tickets.id = ticket_parents.parent_id WHERE child_id = ?1", [&child_id], |row| row.get(0)).optional()?;
-        // Removing a link is allowed if either endpoint remains visible.
-        if parent.is_none() {
-            if let Err(error) = crate::ensure_editable(&tx, &child_id) {
-                if let Some(ref old_parent) = old {
-                    let old_id = relationships::id(&tx, old_parent)?;
-                    crate::ensure_editable(&tx, &old_id)?;
-                } else {
-                    return Err(error);
+        write_scope::run(&self.connection, |tx| {
+            let child_id = tx.even_if_trashed(child)?;
+            let old: Option<String> = tx.query_row("SELECT tickets.reference FROM ticket_parents JOIN tickets ON tickets.id = ticket_parents.parent_id WHERE child_id = ?1", [&child_id], |row| row.get(0)).optional()?;
+            // Removing a link is allowed if either endpoint remains visible.
+            if parent.is_none() {
+                if let Err(error) = tx.ensure_editable(&child_id) {
+                    if let Some(ref old_parent) = old {
+                        let old_id = relationships::id(tx, old_parent)?;
+                        tx.ensure_editable(&old_id)?;
+                    } else {
+                        return Err(error);
+                    }
+                }
+            } else {
+                tx.ensure_editable(&child_id)?;
+            }
+            let parent_id = parent.map(|p| relationships::id(tx, p)).transpose()?;
+            if let Some(ref parent_id) = parent_id {
+                tx.ensure_editable(parent_id)?;
+                let invalid: bool = tx.query_row("SELECT ?1 = ?2 OR EXISTS(SELECT 1 FROM ticket_parents WHERE child_id = ?2) OR EXISTS(SELECT 1 FROM ticket_parents WHERE parent_id = ?1)", params![child_id, parent_id], |row| row.get(0))?;
+                if invalid {
+                    return Err(Error::InvalidHierarchy);
                 }
             }
-        } else {
-            crate::ensure_editable(&tx, &child_id)?;
-        }
-        let parent_id = parent.map(|p| relationships::id(&tx, p)).transpose()?;
-        if let Some(ref parent_id) = parent_id {
-            crate::ensure_editable(&tx, parent_id)?;
-            let invalid: bool = tx.query_row("SELECT ?1 = ?2 OR EXISTS(SELECT 1 FROM ticket_parents WHERE child_id = ?2) OR EXISTS(SELECT 1 FROM ticket_parents WHERE parent_id = ?1)", params![child_id, parent_id], |row| row.get(0))?;
-            if invalid {
-                return Err(Error::InvalidHierarchy);
-            }
-        }
-        if old.as_deref() != parent {
-            tx.execute(
-                "DELETE FROM ticket_parents WHERE child_id = ?1",
-                [&child_id],
-            )?;
-            if let Some(ref parent_id) = parent_id {
+            if old.as_deref() != parent {
                 tx.execute(
-                    "INSERT INTO ticket_parents (child_id, parent_id) VALUES (?1, ?2)",
-                    params![child_id, parent_id],
+                    "DELETE FROM ticket_parents WHERE child_id = ?1",
+                    [&child_id],
+                )?;
+                if let Some(ref parent_id) = parent_id {
+                    tx.execute(
+                        "INSERT INTO ticket_parents (child_id, parent_id) VALUES (?1, ?2)",
+                        params![child_id, parent_id],
+                    )?;
+                }
+                if let Some(old_parent) = old.as_deref() {
+                    let old_id = relationships::id(tx, old_parent)?;
+                    history::record(tx, &old_id, "relationship:child", child, "", agent)?;
+                }
+                if let Some(parent_id) = parent_id {
+                    history::record(tx, &parent_id, "relationship:child", "", child, agent)?;
+                }
+                history::record(
+                    tx,
+                    &child_id,
+                    "parent",
+                    old.as_deref().unwrap_or(""),
+                    parent.unwrap_or(""),
+                    agent,
                 )?;
             }
-            if let Some(old_parent) = old.as_deref() {
-                let old_id = relationships::id(&tx, old_parent)?;
-                history::record(&tx, &old_id, "relationship:child", child, "", agent)?;
-            }
-            if let Some(parent_id) = parent_id {
-                history::record(&tx, &parent_id, "relationship:child", "", child, agent)?;
-            }
-            history::record(
-                &tx,
-                &child_id,
-                "parent",
-                old.as_deref().unwrap_or(""),
-                parent.unwrap_or(""),
-                agent,
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(child)
+            crate::read_ticket(tx, child)
+        })
     }
 }

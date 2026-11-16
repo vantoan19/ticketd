@@ -72,7 +72,7 @@ impl Workspace {
             paths: vec![path.to_owned()],
         };
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         ensure_path_free(&tx, path, &project.id)?;
         tx.execute(
             "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
@@ -91,7 +91,7 @@ impl Workspace {
         let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
         let path = normalized.as_str();
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let old = find(&tx, id)?;
         ensure_path_free(&tx, path, id)?;
         if tx.execute(

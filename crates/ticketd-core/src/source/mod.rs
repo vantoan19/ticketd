@@ -51,7 +51,7 @@ pub use tracking::{
     TicketSource,
 };
 
-use crate::{Error, Workspace, transaction_write_lock};
+use crate::{Error, Workspace};
 
 /// A source's validated configuration as saved in the workspace.
 ///
@@ -256,7 +256,7 @@ impl Workspace {
         let preview = self.preview_source(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let previous: Option<String> = transaction
             .query_row(
                 "SELECT configuration FROM source_configurations WHERE provider = ?1",

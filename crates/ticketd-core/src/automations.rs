@@ -826,7 +826,7 @@ impl Workspace {
     ) -> Result<Automation, Error> {
         let definition = tidied(definition)?;
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         // A schedule counts again from a change to what starts the Automation, so
         // an old count never fires the new schedule at once. One that could not be
         // read before counts as changed.
@@ -868,7 +868,7 @@ impl Workspace {
     /// Returns the Chats of the agents that were working, for the host to interrupt.
     pub fn delete_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let changed = transaction.execute(
             "UPDATE automations SET trashed = 1 WHERE id = ?1 AND trashed = 0",
             [id],
@@ -903,7 +903,7 @@ impl Workspace {
     /// far: what happened while it was off never starts a run.
     pub fn set_automation_enabled(&mut self, id: &str, enabled: bool) -> Result<Automation, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let mut automation = one(&transaction, id)?;
         if enabled {
             if let Some(problem) = automation.problems.first() {
