@@ -334,7 +334,10 @@ export function WorkspaceSidebar({
       data-collapsed={collapsed || undefined}
       closeOnAction
     >
-      <SidebarHeader className="sidebar-header">
+      <SidebarHeader
+        className="sidebar-header"
+        data-responsive-navigation="navigation"
+      >
         <div className="sidebar-top" data-tauri-drag-region>
           {!isMobile && (
             <IconButton
@@ -394,7 +397,10 @@ export function WorkspaceSidebar({
           </Button>
         </Tooltip>
       </SidebarHeader>
-      <SidebarContent className="sidebar-body">
+      <SidebarContent
+        className="sidebar-body"
+        data-responsive-navigation="navigation"
+      >
         <nav aria-label="Workspace views" className="sidebar-nav">
           <SidebarMenu>
             <SidebarMenuItem>
@@ -632,7 +638,10 @@ export function WorkspaceSidebar({
           </SidebarGroup>
         </div>
       </SidebarContent>
-      <SidebarFooter className="sidebar-footer">
+      <SidebarFooter
+        className="sidebar-footer"
+        data-responsive-navigation="navigation"
+      >
         <SourceStatusFooter />
         <nav aria-label="Trash and settings" className="sidebar-footer-actions">
           <IconButton

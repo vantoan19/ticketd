@@ -10953,3 +10953,22 @@ test("Capture saves before its exit, retains the closing editor and reopens empt
     restore();
   }
 });
+
+test("a responsive navigation sheet hands focus to the visible sidebar when its focused row unmounts", async () => {
+  narrowViewport = true;
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  const trigger = await screen.findByRole("button", {
+    name: "Open navigation",
+  });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const sheet = await screen.findByRole("dialog", { name: "Navigation" });
+  within(sheet).getByRole("button", { name: "All tickets" }).focus();
+  act(() => resizeViewport(false));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "All tickets" }),
+    ),
+  );
+});
