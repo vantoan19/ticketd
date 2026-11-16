@@ -339,6 +339,9 @@ export function WorkspaceSidebar({
         data-responsive-navigation="navigation"
       >
         <div className="sidebar-top" data-tauri-drag-region>
+          <strong className="sidebar-wordmark" data-tauri-drag-region>
+            ticketd
+          </strong>
           {!isMobile && (
             <IconButton
               label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
