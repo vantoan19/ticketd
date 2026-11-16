@@ -214,7 +214,7 @@ export function WorkspaceSidebar({
   view: View;
   /** The workspace graph covers the current view; only its entry is active. */
   workspaceGraphOpen?: boolean;
-  onOpenPalette: () => void;
+  onOpenPalette: (origin: HTMLButtonElement) => void;
   createDisabledReason: string | null;
   /** Work-view counts; Projects and Plans carry none (DESIGN.md section 6). */
   counts: SidebarCounts | null;
@@ -330,10 +330,14 @@ export function WorkspaceSidebar({
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
       className="sidebar"
+      data-responsive-navigation="navigation"
       data-collapsed={collapsed || undefined}
       closeOnAction
     >
-      <SidebarHeader className="sidebar-header">
+      <SidebarHeader
+        className="sidebar-header"
+        data-responsive-navigation="navigation"
+      >
         <div className="sidebar-top" data-tauri-drag-region>
           {!isMobile && (
             <IconButton
@@ -381,8 +385,9 @@ export function WorkspaceSidebar({
           <Button
             variant="jump"
             aria-label="Search or jump to…"
+            data-responsive-navigation="search"
             aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
-            onClick={onOpenPalette}
+            onClick={(event) => onOpenPalette(event.currentTarget)}
           >
             <Search aria-hidden="true" />
             <span>Search or jump to…</span>
@@ -392,7 +397,10 @@ export function WorkspaceSidebar({
           </Button>
         </Tooltip>
       </SidebarHeader>
-      <SidebarContent className="sidebar-body">
+      <SidebarContent
+        className="sidebar-body"
+        data-responsive-navigation="navigation"
+      >
         <nav aria-label="Workspace views" className="sidebar-nav">
           <SidebarMenu>
             <SidebarMenuItem>
@@ -630,7 +638,10 @@ export function WorkspaceSidebar({
           </SidebarGroup>
         </div>
       </SidebarContent>
-      <SidebarFooter className="sidebar-footer">
+      <SidebarFooter
+        className="sidebar-footer"
+        data-responsive-navigation="navigation"
+      >
         <SourceStatusFooter />
         <nav aria-label="Trash and settings" className="sidebar-footer-actions">
           <IconButton

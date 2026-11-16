@@ -9,7 +9,9 @@ import {
   ticketCommandActions,
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
+import { keepWebviewInStep } from "@/lib/webview-scale";
 import { usePageZoom } from "./use-page-zoom";
+import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
 import { PageZoomStatus } from "./PageZoomStatus";
 import { CommandPalette } from "./CommandPalette";
 import { useCommandKeys, type GoTo } from "./use-command-keys";
@@ -134,6 +136,7 @@ export function App() {
 
 function AppContent() {
   const pageZoom = usePageZoom();
+  useEffect(keepWebviewInStep, []);
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
   const workspaceProblem = useWorkspaceState();
@@ -451,11 +454,15 @@ function AppContent() {
       (view === "tickets" ? workspace.selected : null)
     );
   }
-  function openPalette(scope: TicketCommandScope | null = null) {
+  function openPalette(
+    scope: TicketCommandScope | null = null,
+    origin?: HTMLElement,
+  ) {
     paletteReturn.current =
-      document.activeElement instanceof HTMLElement
+      origin ??
+      (document.activeElement instanceof HTMLElement
         ? document.activeElement
-        : null;
+        : null);
     setPaletteReference(actionReference());
     setPaletteScope(scope);
     setPaletteOpen(true);
@@ -522,6 +529,8 @@ function AppContent() {
   };
   useReminderNotifications(openNotifiedTicket);
   const isMobile = useIsMobile();
+  const { resolvePaletteFocus, resolveSettingsFocus } =
+    useResponsiveNavigationFocus(isMobile, paletteReturn);
   /**
    * The run a ticket, the Inbox or a notification asked to see, opened by the
    * Automations page.
@@ -846,6 +855,7 @@ function AppContent() {
                           }}
                           open={paletteOpen}
                           returnFocus={paletteReturn}
+                          resolveReturnFocus={resolvePaletteFocus}
                           onOpenChange={setPaletteOpen}
                           go={goTo}
                           chatsEnabled={chat.enabled}
@@ -872,6 +882,7 @@ function AppContent() {
                       >
                         {view === "settings" ? (
                           <SettingsNav
+                            resolveReturnFocus={resolveSettingsFocus}
                             selected={settingsSection}
                             onSelect={setSettingsSection}
                             origin={VIEW_NAMES[viewBeforeSettings]}
@@ -882,7 +893,9 @@ function AppContent() {
                           />
                         ) : (
                           <WorkspaceSidebar
-                            onOpenPalette={() => openPalette()}
+                            onOpenPalette={(origin) =>
+                              openPalette(null, origin)
+                            }
                             createDisabledReason={createDisabledReason}
                             counts={counts}
                             hasTickets={
@@ -941,7 +954,9 @@ function AppContent() {
                                   isMobile &&
                                   view !== "settings" && (
                                     <NarrowNav
-                                      onOpenPalette={() => openPalette()}
+                                      onOpenPalette={(origin) =>
+                                        openPalette(null, origin)
+                                      }
                                       waitingChats={chat.overview.needs_you}
                                       waitingRuns={
                                         chat.enabled

@@ -1,45 +1,71 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { setPageZoom } from "@/lib/page-zoom";
+import {
+  initializePageZoom,
+  pageZoomLevels as levels,
+  pageZoomPercent,
+  setPageZoom,
+} from "@/lib/page-zoom";
 import { matchesShortcut } from "@/lib/shortcuts";
 
-const levels = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200] as const;
 export type PageZoomAction =
   "page-zoom-in" | "page-zoom-out" | "page-zoom-reset";
 type Outcome = { percent: number; error?: unknown };
 
 /** One owner for native page zoom: keys and palette share the same request queue. */
 export function usePageZoom() {
-  const [percent, setPercent] = useState(100);
-  const [pending, setPending] = useState(false);
+  const [percent, setPercent] = useState(pageZoomPercent);
+  const [pending, setPending] = useState(() => "__TAURI_INTERNALS__" in window);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const applied = useRef(100);
-  const wanted = useRef(100);
+  const applied = useRef(percent);
+  const wanted = useRef(percent);
+  const force = useRef(false);
+  const initialization = useRef<Promise<void> | null>(null);
   const running = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
+    let active = true;
+    if ("__TAURI_INTERNALS__" in window) {
+      initialization.current = initializePageZoom().then((initial) => {
+        if (!active) return;
+        applied.current = initial;
+        wanted.current = initial;
+        setPercent(initial);
+        setPending(false);
+        initialization.current = null;
+      });
+    }
     return () => {
+      active = false;
       mounted.current = false;
     };
   }, []);
 
-  const request = useCallback(async (target: number) => {
+  const request = useCallback(async (target: number, always = false) => {
     wanted.current = target;
-    if (running.current || target === applied.current) return;
+    force.current ||= always;
+    if (running.current || (target === applied.current && !force.current))
+      return;
     running.current = true;
     setPending(true);
     try {
       // Only one IPC may be in flight. Coalesce intermediate keys, and always
       // finish at the latest target (especially a reset pressed during a request).
-      while (mounted.current && wanted.current !== applied.current) {
+      while (
+        mounted.current &&
+        (wanted.current !== applied.current || force.current)
+      ) {
         const next = wanted.current;
+        force.current = false;
         try {
           await setPageZoom(next);
           applied.current = next;
           if (!mounted.current) return;
           setPercent(next);
         } catch (error) {
-          // Failed targets and older queued keys cannot become later successes.
+          // A newer queued target (especially Reset) still needs its own
+          // native request when an older target fails.
+          if (wanted.current !== next || force.current) continue;
           wanted.current = applied.current;
           if (mounted.current) setOutcome({ percent: next, error });
           return;
@@ -54,20 +80,26 @@ export function usePageZoom() {
 
   const run = useCallback(
     (action: PageZoomAction) => {
-      const index = levels.findIndex((level) => level === wanted.current);
-      const target =
-        action === "page-zoom-reset"
-          ? 100
-          : levels[
-              Math.max(
-                0,
-                Math.min(
-                  levels.length - 1,
-                  index + (action === "page-zoom-in" ? 1 : -1),
-                ),
-              )
-            ];
-      if (target !== undefined) void request(target);
+      const apply = () => {
+        if (!mounted.current) return;
+        const index = levels.findIndex((level) => level === wanted.current);
+        const target =
+          action === "page-zoom-reset"
+            ? 100
+            : levels[
+                Math.max(
+                  0,
+                  Math.min(
+                    levels.length - 1,
+                    index + (action === "page-zoom-in" ? 1 : -1),
+                  ),
+                )
+              ];
+        if (target !== undefined)
+          void request(target, action === "page-zoom-reset");
+      };
+      if (initialization.current) void initialization.current.then(apply);
+      else apply();
     },
     [request],
   );
@@ -90,7 +122,11 @@ export function usePageZoom() {
     return () => window.removeEventListener("keydown", keydown, true);
   }, [run]);
 
-  return { percent, pending, outcome, run, retry: request };
+  const retry = useCallback(
+    (target: number) => request(target, true),
+    [request],
+  );
+  return { percent, pending, outcome, run, retry };
 }
 
 export type PageZoom = ReturnType<typeof usePageZoom>;
