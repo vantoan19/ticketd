@@ -1,11 +1,5 @@
 import { client, type Evidence, type Ticket } from "@/lib/api/client";
-import {
-  pagedRead,
-  skip,
-  usePagedRead,
-  type PagedState,
-} from "@/lib/workspace-reads";
-import { parts, type Part } from "../parts";
+import { pagedRead, skip, usePagedRead } from "@/lib/workspace-reads";
 
 /** The core answers evidence in pages of this many; a shorter page is the last. */
 const pageSize = 50;
@@ -21,15 +15,7 @@ const evidenceRead = pagedRead({
   more: "load more evidence",
 });
 
-declare module "../parts" {
-  interface Parts {
-    /** The Ticket's evidence: pull requests, commits, branches, worktrees, verifications. */
-    evidence: Part<[], PagedState<Evidence[]>>;
-  }
-}
-
-function useEvidence(record: Ticket | undefined) {
+/** The Ticket's evidence: pull requests, commits, branches, worktrees, verifications. */
+export function useEvidence(record: Ticket | undefined) {
   return usePagedRead(evidenceRead, record?.reference ?? skip);
 }
-
-parts.evidence = useEvidence;

@@ -23,14 +23,14 @@ export function useTicket<Name extends PartName>(
   part: Name,
   ...args: PartArgs<Name>
 ): PartState<Name>;
-export function useTicket(
+export function useTicket<Name extends PartName>(
   reference: string | null,
-  part?: PartName,
-  ...args: unknown[]
-): unknown {
+  part?: Name,
+  ...args: PartArgs<Name>
+): TicketState | PartState<Name> | undefined {
   const state = useRead(ticketRead, reference ?? skip);
   const served = usePart(state.value, part, args);
-  if (part) return served;
+  if (part !== undefined) return served;
   return {
     value:
       state.value ?? (state.failure?.code === "not_found" ? null : undefined),

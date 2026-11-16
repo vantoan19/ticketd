@@ -29,9 +29,12 @@ export function useOpenTicket<Name extends PartName>(
   part: Name,
   ...args: PartArgs<Name>
 ): PartState<Name>;
-export function useOpenTicket(part?: PartName, ...args: unknown[]): unknown {
+export function useOpenTicket<Name extends PartName>(
+  part?: Name,
+  ...args: PartArgs<Name>
+): OpenTicketState | PartState<Name> | undefined {
   const open = useContext(OpenTicketContext);
   if (!open) throw new Error("useOpenTicket must be used inside <OpenTicket>.");
   const served = usePart(open.record, part, args);
-  return part ? served : open;
+  return part === undefined ? open : served;
 }

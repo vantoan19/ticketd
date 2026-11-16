@@ -1,16 +1,14 @@
 import { useMemo, useState } from "react";
-import { documents } from "@/features/documents/api";
-import { client } from "@/lib/api/client";
+import { documents, type DocumentLink } from "@/features/documents/api";
+import { client, type Ticket } from "@/lib/api/client";
 import type { FailureDescription } from "@/lib/api/describe-failure";
 import { read, skip, useRead } from "@/lib/workspace-reads";
-import { parts, type Part } from "../parts";
 import { documentLinksRead } from "./files";
 
 // What mentions a Ticket: other tickets and updates (a window at a time), and
 // Documents.
 
 type Backlink = Awaited<ReturnType<typeof client.backlinks>>[number];
-type DocumentBacklink = Awaited<ReturnType<typeof documents.links>>[1][number];
 
 export type TicketBacklinks = {
   /** The shown window; the previous one stays while the next is read. */
@@ -20,15 +18,6 @@ export type TicketBacklinks = {
   failure: FailureDescription | null;
   retry(): void;
 };
-
-declare module "../parts" {
-  interface Parts {
-    /** One window of 20 backlinks, from `offset`, with the dates of updates. */
-    backlinks: Part<[offset: number], TicketBacklinks>;
-    /** The Documents that mention the Ticket (incoming links of kind document). */
-    documentBacklinks: Part<[], DocumentBacklink[]>;
-  }
-}
 
 const backlinksRead = read({
   key: "backlinks",
@@ -66,7 +55,7 @@ const PAGE = 100;
 const laterDocumentBacklinksRead = read({
   key: "documentBacklinksAfterFirstPage",
   call: async (id: string) => {
-    const found: DocumentBacklink[] = [];
+    const found: DocumentLink[] = [];
     for (let page = 1; page < 5; page += 1) {
       const [, incoming] = await documents.links(id, page * PAGE);
       found.push(...incoming.filter((link) => link.source_kind === "document"));
@@ -77,7 +66,11 @@ const laterDocumentBacklinksRead = read({
   failure: "load mentions",
 });
 
-parts.backlinks = function useBacklinksPart(record, offset) {
+/** One window of 20 backlinks, from `offset`, with the dates of updates. */
+export function useBacklinks(
+  record: Ticket | undefined,
+  offset: number,
+): TicketBacklinks {
   const state = useRead(
     backlinksRead,
     record ? { reference: record.reference, offset } : skip,
@@ -100,9 +93,12 @@ parts.backlinks = function useBacklinksPart(record, offset) {
     failure: state.failure,
     retry: state.retry,
   };
-};
+}
 
-parts.documentBacklinks = function useDocumentBacklinksPart(record) {
+/** The Documents that mention the Ticket (incoming links of kind document). */
+export function useDocumentBacklinks(
+  record: Ticket | undefined,
+): DocumentLink[] {
   const first = useRead(
     documentLinksRead,
     record ? { id: record.id, offset: 0 } : skip,
@@ -119,4 +115,4 @@ parts.documentBacklinks = function useDocumentBacklinksPart(record) {
     ],
     [incoming, later.value],
   );
-};
+}

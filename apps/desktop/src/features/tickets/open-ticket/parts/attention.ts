@@ -1,16 +1,8 @@
 import { inboxClient } from "@/lib/api/inbox";
-import { read, skip, useRead, type ReadState } from "@/lib/workspace-reads";
-import { parts, type Part } from "../parts";
+import type { Ticket } from "@/lib/api/client";
+import { read, skip, useRead } from "@/lib/workspace-reads";
 
 // The Ticket's reminder and whether the person follows it.
-
-declare module "../parts" {
-  interface Parts {
-    /** When the reminder is due; null when there is none. */
-    reminder: Part<[], ReadState<string | null>>;
-    following: Part<[], ReadState<boolean>>;
-  }
-}
 
 const reminderRead = read({
   key: "reminder",
@@ -24,10 +16,12 @@ const followingRead = read({
   failure: "check Follow",
 });
 
-parts.reminder = function useReminderPart(record) {
+/** When the reminder is due; null when there is none. */
+export function useReminder(record: Ticket | undefined) {
   return useRead(reminderRead, record?.reference ?? skip);
-};
+}
 
-parts.following = function useFollowingPart(record) {
+/** Whether the person follows the Ticket. */
+export function useFollowing(record: Ticket | undefined) {
   return useRead(followingRead, record?.reference ?? skip);
-};
+}

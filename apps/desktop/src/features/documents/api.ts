@@ -30,6 +30,8 @@ const linkSchema = z.object({
   /** The update that mentions the target, when the link comes from one. */
   activity_id: z.string().nullable().optional(),
 });
+/** One link between a Document and another record, as the core reports it. */
+export type DocumentLink = z.infer<typeof linkSchema>;
 const linkDocuments = {
   linkMarkdown: async (reference: string) =>
     z.string().parse(await invoke("context_link_markdown", { reference })),

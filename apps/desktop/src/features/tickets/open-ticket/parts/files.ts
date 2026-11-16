@@ -1,21 +1,11 @@
 import { useMemo } from "react";
-import { documents } from "@/features/documents/api";
-import { attachments, type Attachment } from "@/lib/api/attachments";
+import { documents, type DocumentLink } from "@/features/documents/api";
+import { attachments } from "@/lib/api/attachments";
 import type { FailureDescription } from "@/lib/api/describe-failure";
-import {
-  read,
-  skip,
-  useRead,
-  type ReadState,
-  type ReadStatus,
-} from "@/lib/workspace-reads";
-import { parts, type Part } from "../parts";
+import { read, skip, useRead, type ReadStatus } from "@/lib/workspace-reads";
+import type { Ticket } from "@/lib/api/client";
 
 // The files of a Ticket: attached files, and the Documents it links to.
-
-export type DocumentLink = Awaited<
-  ReturnType<typeof documents.links>
->[0][number];
 
 export type TicketDocumentLinks = {
   /** One link per Document by its strongest source; undefined until read. */
@@ -24,13 +14,6 @@ export type TicketDocumentLinks = {
   retry(): void;
   status: ReadStatus;
 };
-
-declare module "../parts" {
-  interface Parts {
-    attachments: Part<[], ReadState<Attachment[]>>;
-    documents: Part<[], TicketDocumentLinks>;
-  }
-}
 
 const attachmentsRead = read({
   key: "attachments",
@@ -64,11 +47,13 @@ function strongest(outgoing: DocumentLink[]): DocumentLink[] {
   return [...byDocument.values()].sort((a, b) => sourceRank(a) - sourceRank(b));
 }
 
-parts.attachments = function useAttachmentsPart(record) {
+/** The files attached to the Ticket. */
+export function useAttachments(record: Ticket | undefined) {
   return useRead(attachmentsRead, record?.reference ?? skip);
-};
+}
 
-parts.documents = function useDocumentsPart(record) {
+/** The Documents the Ticket links to, one per Document by its strongest source. */
+export function useDocuments(record: Ticket | undefined): TicketDocumentLinks {
   const state = useRead(
     documentLinksRead,
     record ? { id: record.id, offset: 0 } : skip,
@@ -84,4 +69,4 @@ parts.documents = function useDocumentsPart(record) {
     retry: state.retry,
     status: state.status,
   };
-};
+}

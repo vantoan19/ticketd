@@ -7,7 +7,6 @@ import {
   usePagedRead,
   type PagedState,
 } from "@/lib/workspace-reads";
-import { parts, type Part } from "../parts";
 
 /** A Ticket's relationships, one core page at a time. */
 const relationshipsRead = pagedRead({
@@ -33,14 +32,8 @@ export type LinkedWorkRead = Omit<PagedState<Relationships>, "failure"> & {
   moreFailure: PagedState<Relationships>["failure"];
 };
 
-declare module "../parts" {
-  interface Parts {
-    /** The Ticket's linked work, paged: parent, subtickets, blockers, related, duplicates. */
-    linkedWork: Part<[], LinkedWorkRead>;
-  }
-}
-
-function useLinkedWorkRead(record: Ticket | undefined): LinkedWorkRead {
+/** The Ticket's linked work, paged: parent, subtickets, blockers, related, duplicates. */
+export function useLinkedWork(record: Ticket | undefined): LinkedWorkRead {
   const state = usePagedRead(relationshipsRead, record?.reference ?? skip);
   const { value, failure: raw } = state;
   const moreFailed = raw?.title === loadingMore;
@@ -67,5 +60,3 @@ function useLinkedWorkRead(record: Ticket | undefined): LinkedWorkRead {
     loadingMore: state.loadingMore,
   };
 }
-
-parts.linkedWork = useLinkedWorkRead;

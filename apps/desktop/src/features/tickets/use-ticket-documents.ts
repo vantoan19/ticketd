@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { documents, type DocumentSummary } from "@/features/documents/api";
+import {
+  documents,
+  type DocumentLink,
+  type DocumentSummary,
+} from "@/features/documents/api";
 import { describeFailure } from "@/lib/api/describe-failure";
 import type { FailureDescription } from "@/lib/api/describe-failure";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useOpenTicket } from "./open-ticket";
-
-export type DocumentLink = Awaited<
-  ReturnType<typeof documents.links>
->[0][number];
 
 /**
  * The Documents a ticket links to, one per Document by its strongest source
