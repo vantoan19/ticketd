@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TicketDetails } from "./TicketDetails";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
@@ -43,6 +44,7 @@ beforeEach(() => {
   callbacks = [];
   changes.length = 0;
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "show_ticket") return ticket;
     if (command === "is_following") return false;
     if (command === "reminder") return null;
     if (command === "set_following") return null;
@@ -76,22 +78,24 @@ const ticket: Ticket = {
 };
 function renderDetails() {
   render(
-    <TicketDetails
-      mention={null}
-      selected={ticket.reference}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ [ticket.reference]: ticket }}
-      projects={[{ id: "p1", name: "Web portal" } as never]}
-      plans={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-      position={{ index: 2, total: 11 }}
-      onAdjacent={vi.fn()}
-    />,
+    <TestReads primed={{ ticket: ticket }}>
+      <TicketDetails
+        mention={null}
+        selected={ticket.reference}
+        expanded={false}
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        setSelected={vi.fn()}
+        opened={[ticket.reference]}
+        onMentionReady={vi.fn()}
+        onClearMention={vi.fn()}
+        projects={[{ id: "p1", name: "Web portal" } as never]}
+        plans={[]}
+        revision={0}
+        position={{ index: 2, total: 11 }}
+        onAdjacent={vi.fn()}
+      />
+    </TestReads>,
   );
 }
 

@@ -12,6 +12,7 @@ import type { Ticket, TicketSource } from "@/lib/api/client";
 import { SourceFilter } from "./SourceFilter";
 import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { TicketList } from "./TicketList";
 import { TicketProperties } from "./TicketProperties";
 import { freshness, sourceLocation, sourceState } from "./ticket-source";
@@ -91,20 +92,23 @@ function properties(value: Ticket, refresh = vi.fn(async () => {})) {
 
 function DetailsFixture({ value }: { value: Ticket }) {
   return (
-    <TicketDetails
-      selected={value.reference}
-      mention={null}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ [value.reference]: value }}
-      projects={[]}
-      plans={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />
+    // A new value is a new record in a fresh cache, as if re-read.
+    <TestReads key={JSON.stringify(value)} primed={{ ticket: value }}>
+      <TicketDetails
+        selected={value.reference}
+        mention={null}
+        expanded={false}
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        setSelected={vi.fn()}
+        opened={[value.reference]}
+        onMentionReady={vi.fn()}
+        onClearMention={vi.fn()}
+        projects={[]}
+        plans={[]}
+        revision={0}
+      />
+    </TestReads>
   );
 }
 

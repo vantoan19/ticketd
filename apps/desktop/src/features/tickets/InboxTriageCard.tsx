@@ -18,7 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip } from "@/components/ui/tooltip";
-import { client, type Ticket, type Evidence } from "@/lib/api/client";
+import { client, type Evidence } from "@/lib/api/client";
+import { useTicket, useTicketChanged } from "./open-ticket";
 import { inboxClient } from "@/lib/api/inbox";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useChatClient } from "@/features/chats/client";
@@ -36,15 +37,7 @@ import { useInboxAttention } from "./use-inbox-attention";
 import { requestTicketUpdate } from "./activity-composer-request";
 import { summarize, snoozeInstant, type SnoozeChoice } from "./inboxModel";
 
-export function InboxTriageCard({
-  ticket,
-  refresh,
-  updateTicket,
-}: {
-  ticket: Ticket | undefined;
-  refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
-}) {
+export function InboxTriageCard({ refresh }: { refresh: () => Promise<void> }) {
   const triage = useInboxTriage();
   const attention = useInboxAttention();
   const chats = useChatClient();
@@ -66,6 +59,8 @@ export function InboxTriageCard({
     chat?.tickets[0]?.reference ??
     chat?.first_ticket ??
     null;
+  const ticket = useTicket(reference).value ?? undefined;
+  const changed = useTicketChanged();
   const read = entry?.read ?? !chat?.status.unseen;
   const ticketReason =
     blocked ??
@@ -206,12 +201,12 @@ export function InboxTriageCard({
         `Moved ${reference} to Done`,
         async () => {
           before ??= (await client.showTicket(reference)).status;
-          updateTicket(
+          void changed(
             await client.changeTicket(reference, { status: "Done" }, id),
           );
         },
         async () => {
-          updateTicket(
+          void changed(
             await client.changeTicket(
               reference,
               { status: before ?? "In review" },

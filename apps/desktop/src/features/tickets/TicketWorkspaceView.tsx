@@ -33,6 +33,7 @@ import {
 } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
+import { Visibility } from "@/lib/workspace-reads";
 
 const DETAIL_PANEL_STYLE = {
   display: "flex",
@@ -251,7 +252,7 @@ export function TicketWorkspaceView({
     setNarrowDetail(false);
   }
   return (
-    <>
+    <Visibility hidden={hidden}>
       <div
         ref={workspaceRef}
         className="plan-workspace"
@@ -417,6 +418,6 @@ export function TicketWorkspaceView({
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-    </>
+    </Visibility>
   );
 }

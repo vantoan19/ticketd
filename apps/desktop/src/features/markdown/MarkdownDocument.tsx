@@ -148,18 +148,13 @@ function DocumentLink({
       <TicketReference
         reference={href.slice("ticketd://ticket/".length)}
         select={select}
-        revision={revision}
       />
     ) : (
       <>{children}</>
     );
   if (href?.startsWith("ticketd:"))
     return select ? (
-      <TicketReference
-        reference={href.slice(8)}
-        select={select}
-        revision={revision}
-      />
+      <TicketReference reference={href.slice(8)} select={select} />
     ) : (
       <>{children}</>
     );

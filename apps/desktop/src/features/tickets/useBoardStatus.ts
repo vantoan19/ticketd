@@ -23,7 +23,10 @@ type Notice = { message: string; undo?: () => unknown };
 export function useBoardStatus(workspace: {
   board: ReturnType<typeof useTicketBoard>;
   refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
+  /** Shows a Ticket in the list at once, without reporting a write. */
+  patchTicket: (ticket: Ticket) => void;
+  /** The write report: a status change succeeded and returned this Ticket. */
+  changed: (ticket: Ticket) => Promise<void>;
 }) {
   const latest = useRef(workspace);
   useEffect(() => {
@@ -103,9 +106,10 @@ export function useBoardStatus(workspace: {
   async function reconcile(reference: string) {
     // Successful request replays contain historical results, so only a new read is current.
     const current = await client.showTicket(reference);
-    latest.current.updateTicket(current);
+    const reported = latest.current.changed(current);
     latest.current.board.confirmTicket(current);
     await latest.current.refresh();
+    await reported;
     return current;
   }
   async function saved(reference: string, previous?: string) {
@@ -205,7 +209,7 @@ export function useBoardStatus(workspace: {
     try {
       // Authority may have changed since the card was read. The write also validates atomically.
       const current = await client.showTicket(reference);
-      latest.current.updateTicket(current);
+      latest.current.patchTicket(current);
       if (current.status === status) {
         await saved(reference);
         from = null;

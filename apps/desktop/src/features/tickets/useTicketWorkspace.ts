@@ -24,6 +24,7 @@ import {
   useOnWorkspaceChange,
   useWorkspaceChange,
 } from "@/lib/workspace-change";
+import { useWrote } from "@/lib/workspace-reads";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
 
@@ -48,9 +49,9 @@ async function readPages(filter: FindFilter, pages: number) {
 type RefreshOptions = { reportFailure?: boolean };
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
- * A mention being followed. It is not `ready` until the selected ticket has been
- * fetched after the selection, so it is judged against the stored text rather than
- * a cached copy.
+ * A mention being followed. It is not `ready` until the selected ticket's record
+ * is current (`useTicket().current`), so it is judged against the stored text
+ * rather than a copy a change has made stale.
  */
 export type FollowedMention = MentionTarget & { key: number; ready: boolean };
 export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
@@ -144,20 +145,35 @@ export function useTicketWorkspace(
   const [pendingNext, setPendingNext] = useState<number | null>(null);
   const [selected, selectTicket] = useState<string | null>(null);
   const [mention, setMention] = useState<FollowedMention | null>(null);
-  // Counts every selection, including of the ticket already open, so each one
-  // fetches the ticket afresh.
-  const [selections, setSelections] = useState(0);
+  // The Tickets opened in this session, in the order they were first selected.
+  // Each keeps its page mounted (hidden unless selected) in its Open Ticket.
+  const [opened, setOpened] = useState<string[]>([]);
   // Every selection ends the previous mention; following a backlink starts one.
   const setSelected = useCallback(
     (reference: string | null, target?: MentionTarget) => {
       selectTicket(reference);
+      if (reference)
+        setOpened((items) =>
+          items.includes(reference) ? items : [...items, reference],
+        );
       setMention(target ? { ...target, key: Date.now(), ready: false } : null);
-      setSelections((count) => count + 1);
     },
     [],
   );
   const clearMention = useCallback(() => setMention(null), []);
-  const [details, setDetails] = useState<Record<string, Ticket>>({});
+  const markMentionReady = useCallback(
+    (reference: string) =>
+      setMention((current) => markReady(current, reference)),
+    [],
+  );
+  // The latest copy of each Ticket this window wrote, so a list row that was
+  // held in place can tell it has moved once the list no longer holds it.
+  const [written, setWritten] = useState<Record<string, Ticket>>({});
+  const clearOpened = useCallback(() => {
+    setOpened([]);
+    setWritten({});
+  }, []);
+  const wrote = useWrote();
   // A local preference (sidebar, display) that could not be saved. It stays
   // until dismissed: a later list load has nothing to do with it.
   const [error, setError] = useState("");
@@ -165,15 +181,6 @@ export function useTicketWorkspace(
   // reported window-wide: the pane that failed says so.
   const [listFailure, setListFailure] = useState<FailureDescription | null>(
     null,
-  );
-  // Why the open ticket could not be fetched, by reference: its pane says so.
-  const [detailFailures, setDetailFailures] = useState<
-    Record<string, FailureDescription>
-  >({});
-  const [detailAttempt, setDetailAttempt] = useState(0);
-  const retryDetail = useCallback(
-    () => setDetailAttempt((value) => value + 1),
-    [],
   );
   const [loading, setLoading] = useState(true);
   const [listRevision, setRevision] = useState(0);
@@ -185,7 +192,6 @@ export function useTicketWorkspace(
   // Advances on every successful poll, changed data or not, for views that poll their own sources.
   const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
-  const detailGeneration = useRef(0);
   // Only the scope's own fields matter to a fetch; depending on the object would
   // refetch whenever the same scope is chosen again.
   const scopeKind = navigation.kind;
@@ -346,53 +352,6 @@ export function useTicketWorkspace(
     setPendingNext(null);
     if (target) setSelected(target.reference);
   }
-  useEffect(() => {
-    if (!selected) return;
-    let active = true;
-    const request = ++detailGeneration.current;
-    void client.showTicket(selected).then(
-      (ticket) => {
-        if (active && request === detailGeneration.current) {
-          setDetails((previous) => ({
-            ...previous,
-            [ticket.reference]: ticket,
-          }));
-          setDetailFailures((previous) => {
-            if (!(selected in previous)) return previous;
-            const rest = { ...previous };
-            delete rest[selected];
-            return rest;
-          });
-          setMention((current) => markReady(current, ticket.reference));
-        }
-      },
-      (reason: unknown) => {
-        if (!active) return;
-        // The detail pane shows this in place of the ticket, with Retry.
-        setDetailFailures((previous) => ({
-          ...previous,
-          [selected]: describeFailure(reason, `load ${selected}`),
-        }));
-        // Reveal against what is cached rather than never.
-        setMention((current) => markReady(current, selected));
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [selected, revision, selections, detailAttempt]);
-  // Trashing or restoring swaps the ticket's view; a mention does not outlive that.
-  const trashed = selected ? details[selected]?.trashed : undefined;
-  const [seen, setSeen] = useState<{
-    reference: string;
-    trashed: boolean;
-  } | null>(null);
-  if (selected && trashed !== undefined) {
-    if (seen?.reference !== selected || seen.trashed !== trashed) {
-      setSeen({ reference: selected, trashed });
-      if (seen?.reference === selected) setMention(null);
-    }
-  }
   /**
    * Imports matching issues and refreshes tracked tickets now, optionally only
    * one. Saved content stays visible while it runs and when it fails.
@@ -439,18 +398,21 @@ export function useTicketWorkspace(
       requestId,
       blockers,
     );
-    setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
+    // The new Ticket is known at once; reads catch up behind it.
+    const reported = wrote({ ticket });
     if (!keepOpen) {
       setCreating(false);
       setSelected(ticket.reference);
     }
     await refresh();
+    await reported;
     return ticket.reference;
   }
-  const updateTicket = useCallback((updated: Ticket) => {
+  // Shows a Ticket a write returned in the list at once (the Ticket list is not
+  // on the reads module yet) and drops a list read sent before the write.
+  const patchTicket = useCallback((updated: Ticket) => {
     generation.current++;
-    detailGeneration.current++;
-    setDetails((items) => ({ ...items, [updated.reference]: updated }));
+    setWritten((items) => ({ ...items, [updated.reference]: updated }));
     setTickets((items) =>
       items.map((item) => {
         if (item.id !== updated.id) return item;
@@ -464,7 +426,20 @@ export function useTicketWorkspace(
       }),
     );
   }, []);
-  const statusAction = useBoardStatus({ board, refresh, updateTicket });
+  // The write report for the workspace's own writes (see `useTicketChanged`).
+  const changed = useCallback(
+    (updated: Ticket) => {
+      patchTicket(updated);
+      return wrote({ ticket: updated });
+    },
+    [patchTicket, wrote],
+  );
+  const statusAction = useBoardStatus({
+    board,
+    refresh,
+    patchTicket,
+    changed,
+  });
   const total = counts ? counts.total : tickets.length;
   const selectedIndex = tickets.findIndex(
     (item) => item.reference === selected,
@@ -598,18 +573,18 @@ export function useTicketWorkspace(
     mention,
     clearMention,
     setSelected,
-    details,
-    setDetails,
+    opened,
+    written,
+    clearOpened,
+    markMentionReady,
     error,
     setError,
     listFailure,
-    detailFailure: selected ? (detailFailures[selected] ?? null) : null,
-    retryDetail,
     loading,
     revision,
     refresh,
     create,
-    updateTicket,
+    patchTicket,
     scopeName,
     scope,
     navigation,

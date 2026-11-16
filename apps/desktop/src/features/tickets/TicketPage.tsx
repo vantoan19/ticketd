@@ -40,41 +40,34 @@ import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useSourcesConfigured } from "@/features/tickets/use-publication-preview";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
-import type { Project, Ticket } from "@/lib/api/client";
+import type { Project } from "@/lib/api/client";
+import { useOpenTicket } from "./open-ticket";
 import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
 
 /** The ticket document with its wrapping properties and linked context. */
 export function TicketPage({
-  ticket,
   active,
-  opening = false,
-
   outsideResults = false,
   projects,
   plans,
   revision,
   refresh,
-  updateTicket,
   select,
   onOpenGraph,
   noteTarget,
   mention,
   onMention,
 }: {
-  ticket: Ticket;
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
-  /** A known saved list copy reserves geometry until the fresh detail read settles. */
-  opening?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
   projects: Project[];
   plans: Plan[];
   revision: number;
   refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
   select: (reference: string | null) => void;
   onOpenGraph: () => void;
   noteTarget: NoteTarget | null;
@@ -82,12 +75,15 @@ export function TicketPage({
   mention: (MentionTarget & { key: number }) | null;
   onMention: (target: MentionTarget) => void;
 }) {
+  // A known saved list copy (`opening`) reserves geometry until the fresh
+  // read of the record settles.
+  const { record: ticket, opening, changed } = useOpenTicket();
   const now = useNow();
   const openCommand = useContext(TicketCommandContext);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(ticket, revision, refresh, active);
   const sourcesConfigured = useSourcesConfigured();
-  const trash = useTicketTrash(updateTicket, refresh);
+  const trash = useTicketTrash(changed, refresh);
   // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
   // row of adds under the description, and appear once they have content.
   const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
@@ -279,7 +275,7 @@ export function TicketPage({
       revision={revision}
       projects={projects}
       plans={plans}
-      onSaved={updateTicket}
+      onSaved={changed}
       refresh={refresh}
       onOpenTicket={select}
       onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
@@ -420,7 +416,7 @@ export function TicketPage({
           <TicketEditor
             ticket={ticket}
             readOnly={opening}
-            onSaved={updateTicket}
+            onSaved={changed}
             select={select}
             revision={revision}
             mention={mention}

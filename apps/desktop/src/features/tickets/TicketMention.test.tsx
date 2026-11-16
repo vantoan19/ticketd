@@ -15,6 +15,8 @@ import { useTicketWorkspace } from "./useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault } from "@/test/bridge-defaults";
 import { TickingChanges } from "@/test/ticking-changes";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { TestReads } from "@/lib/workspace-reads/testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -176,15 +178,19 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
     await gate;
     return ticket("T-KQ2", STORED);
   });
+  const signal = fakeChangeSignal();
   render(
-    <TickingChanges>
+    <TestReads signal={signal}>
       <Harness />
-    </TickingChanges>,
+    </TestReads>,
   );
   act(() => api.select("T-KQ2"));
   await screen.findByText(passage);
   act(() => api.select("T-KQ1"));
+  // A CLI edit changes the body while T-KQ2 is hidden: the change makes the
+  // cached copy stale, and the page re-reads it when it is shown.
   fresh = true;
+  act(() => signal.change());
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
   // The cached body is on screen, but nothing is revealed or reported yet.
   expect(marked()).toBeNull();

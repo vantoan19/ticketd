@@ -9,19 +9,19 @@ import { describeFailure } from "@/lib/api/describe-failure";
  * with Retry. Nothing is inserted into the page.
  */
 export function useTicketTrash(
-  updateTicket: (ticket: Ticket) => void,
+  changed: (ticket: Ticket) => unknown,
   refresh: () => Promise<void>,
 ) {
   const [pending, setPending] = useState(false);
   const statusLine = useStatusLine();
   async function restore(reference: string) {
-    updateTicket(await client.setTrashed(reference, false));
+    void changed(await client.setTrashed(reference, false));
     await refresh();
   }
   async function setTrashed(reference: string, value: boolean) {
     setPending(true);
     try {
-      updateTicket(await client.setTrashed(reference, value));
+      void changed(await client.setTrashed(reference, value));
       await refresh();
       statusLine.show(
         value

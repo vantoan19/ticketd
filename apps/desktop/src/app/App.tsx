@@ -61,6 +61,7 @@ import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -69,6 +70,11 @@ import {
 } from "react";
 import { matchesShortcut } from "@/lib/shortcuts";
 import { WorkspaceReads } from "@/lib/workspace-reads";
+import {
+  TicketListSync,
+  useTicket,
+  useTicketChanged,
+} from "@/features/tickets/open-ticket";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 import { ExitDialog } from "@/features/sync/ExitDialog";
@@ -366,7 +372,8 @@ function AppContent() {
     projects,
     plans,
     setSelected,
-    setDetails,
+    clearOpened,
+    patchTicket,
     error,
     loading,
     revision,
@@ -419,7 +426,7 @@ function AppContent() {
     !loading &&
     !error &&
     workspace.tickets.length === 0 &&
-    Object.keys(workspace.details).length === 0 &&
+    workspace.opened.length === 0 &&
     (counts?.total ?? 0) === 0 &&
     (workspace.counts?.total ?? 0) === 0 &&
     navigation.kind === "all" &&
@@ -518,7 +525,15 @@ function AppContent() {
       setView("tickets");
     }
   };
-  const bulk = useBulkEdit(refresh);
+  // Writes made outside a ticket's page (the palette, bulk edits) report that
+  // the Workspace changed, so an open ticket shows them at once, and refresh
+  // the list.
+  const changed = useTicketChanged();
+  const reportChange = useCallback(async () => {
+    await changed();
+    await refresh();
+  }, [changed, refresh]);
+  const bulk = useBulkEdit(reportChange);
   const openNotifiedTicket = (reference: string) => {
     setInboxTarget(null);
     setSelected(reference);
@@ -594,6 +609,19 @@ function AppContent() {
       triggers.find((trigger) => !trigger.closest("[hidden]"))
     )?.click();
   };
+  // The Ticket the Inbox selection is about, for the Inbox commands, and the
+  // one the palette is acting on. Both share the open Ticket's read.
+  const inboxReference =
+    view === "inbox" && inboxSelection
+      ? inboxSelection.kind === "entry"
+        ? inboxSelection.entry.reference
+        : inboxSelection.kind === "approval"
+          ? (inboxSelection.chat.tickets[0]?.reference ??
+            inboxSelection.chat.first_ticket)
+          : null
+      : null;
+  const inboxTicket = useTicket(inboxReference ?? null).value ?? undefined;
+  const paletteTicket = useTicket(paletteReference).value ?? undefined;
   return (
     // Runs open in the Automations page, which is there only while Chat is on.
     // Without it a run's Inbox entry opens its ticket instead.
@@ -712,7 +740,7 @@ function AppContent() {
                                   const blocked =
                                     editingBlockedReason(workspaceProblem);
                                   const activeTicket = reference
-                                    ? workspace.details[reference]
+                                    ? inboxTicket
                                     : undefined;
                                   const ticketActionReason =
                                     ticketReason ??
@@ -837,7 +865,7 @@ function AppContent() {
                             }
                           }}
                           initialTicket={
-                            workspace.details[paletteReference ?? ""] ??
+                            paletteTicket ??
                             workspace.tickets.find(
                               (ticket) => ticket.reference === paletteReference,
                             ) ??
@@ -847,9 +875,7 @@ function AppContent() {
                           initialScope={paletteScope}
                           projects={projects}
                           plans={plans}
-                          refresh={async () => {
-                            await refresh();
-                          }}
+                          refresh={reportChange}
                           open={paletteOpen}
                           returnFocus={paletteReturn}
                           resolveReturnFocus={resolvePaletteFocus}
@@ -1017,7 +1043,7 @@ function AppContent() {
                                       onOpenInbox={() => setView("inbox")}
                                       onRestore={async () => {
                                         setSelected(null);
-                                        setDetails({});
+                                        clearOpened();
                                         bulk.reset();
                                         await refresh();
                                       }}
@@ -1226,6 +1252,7 @@ function AppContent() {
                                         }}
                                       />
                                     )}
+                                  <TicketListSync value={patchTicket}>
                                   <InboxTriageProvider
                                     active={view === "inbox"}
                                     onSelectionChange={setInboxSelection}
@@ -1271,6 +1298,7 @@ function AppContent() {
                                       }}
                                     />
                                   </InboxTriageProvider>
+                                  </TicketListSync>
                                 </TicketCommandContext.Provider>
                               </ShellSlotProvider>
                             </StatusLineRegion>

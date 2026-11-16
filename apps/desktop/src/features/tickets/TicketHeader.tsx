@@ -44,6 +44,7 @@ import { externalSource } from "@/features/tickets/ticket-source";
 import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { useTicketTrash } from "./use-ticket-trash";
+import { useTicketChanged } from "./open-ticket";
 import "./ticket-detail.css";
 
 /** The shell command an agent runs to read this ticket's context. */
@@ -66,7 +67,6 @@ export function TicketHeader({
   onClose,
   onOpenGraph,
   refresh,
-  updateTicket,
   position = null,
   onAdjacent,
   projects = [],
@@ -93,7 +93,6 @@ export function TicketHeader({
   /** Opens the ticket's graph; without it the menu leaves the entry out. */
   onOpenGraph?: () => void;
   refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
 }) {
   const now = useNow();
   const chatAbout = useChatAboutTicket(
@@ -143,7 +142,8 @@ export function TicketHeader({
     else document.getElementById("detail-heading")?.focus();
   }, [selected, ticket, position]);
   const statusLine = useStatusLine();
-  const trash = useTicketTrash(updateTicket, refresh);
+  const changed = useTicketChanged();
+  const trash = useTicketTrash(changed, refresh);
   // An export that fails says so in the status line, like the menu's copies.
   const exportError = exporter.error;
   useEffect(() => {

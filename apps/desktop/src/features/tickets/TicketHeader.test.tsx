@@ -10,6 +10,8 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { TicketHeader } from "./TicketHeader";
+import { TicketListSync } from "./open-ticket";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { reminderSummary } from "./reminder-summary";
 import type { Ticket } from "@/lib/api/client";
 
@@ -75,15 +77,19 @@ function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
     onOpenGraph: vi.fn(),
     select: vi.fn(),
     refresh: vi.fn(async () => {}),
-    updateTicket: vi.fn(),
     ...overrides,
   };
+  const listed = vi.fn();
   render(
-    <StatusLineRegion>
-      <TicketHeader {...props} />
-    </StatusLineRegion>,
+    <TestReads>
+      <TicketListSync value={listed}>
+        <StatusLineRegion>
+          <TicketHeader {...props} />
+        </StatusLineRegion>
+      </TicketListSync>
+    </TestReads>,
   );
-  return props;
+  return { ...props, listed };
 }
 async function chooseAction(name: string) {
   fireEvent.pointerDown(
@@ -154,7 +160,7 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
     screen.getByRole("button", { name: "Ticket actions" }),
   );
   await chooseAction("Move to Trash");
-  await waitFor(() => expect(props.updateTicket).toHaveBeenCalled());
+  await waitFor(() => expect(props.listed).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {
     reference: "T-KQ1",
     trashed: true,
@@ -236,26 +242,29 @@ test("Next onto the last ticket hands focus to Previous, not to nowhere", () => 
     onClose: vi.fn(),
     onOpenGraph: vi.fn(),
     refresh: vi.fn(async () => {}),
-    updateTicket: vi.fn(),
     onAdjacent,
   };
   const view = render(
-    <StatusLineRegion>
-      <TicketHeader {...props} position={{ index: 1, total: 2 }} />
-    </StatusLineRegion>,
+    <TestReads>
+      <StatusLineRegion>
+        <TicketHeader {...props} position={{ index: 1, total: 2 }} />
+      </StatusLineRegion>
+    </TestReads>,
   );
   const next = screen.getByRole("button", { name: "Next ticket" });
   next.focus();
   fireEvent.click(next);
   view.rerender(
-    <StatusLineRegion>
-      <TicketHeader
-        {...props}
-        selected="T-KQ2"
-        ticket={{ ...ticket, id: "2", reference: "T-KQ2" }}
-        position={{ index: 2, total: 2 }}
-      />
-    </StatusLineRegion>,
+    <TestReads>
+      <StatusLineRegion>
+        <TicketHeader
+          {...props}
+          selected="T-KQ2"
+          ticket={{ ...ticket, id: "2", reference: "T-KQ2" }}
+          position={{ index: 2, total: 2 }}
+        />
+      </StatusLineRegion>
+    </TestReads>,
   );
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Previous ticket" }),
