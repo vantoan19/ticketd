@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import { FailureState } from "@/components/ui/failure-alert";
 import { PathText } from "@/components/ui/path-text";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -277,7 +277,19 @@ export function AgentSkillsCard({
                       </span>
                     </span>
                   }
-                  description={summary(agents, status)}
+                  description={
+                    checkFailure ? (
+                      <FailureState
+                        size="inline"
+                        label="Refresh failed"
+                        detailsVariant="popover"
+                        failure={checkFailure}
+                        onRetry={checkAgain}
+                      />
+                    ) : (
+                      summary(agents, status)
+                    )
+                  }
                   trailing={
                     todo.length > 0 ? (
                       <Button
@@ -301,13 +313,6 @@ export function AgentSkillsCard({
           </div>
         )}
       </SettingsSection>
-      {load.phase === "done" && checkFailure && (
-        <FailureAlert
-          size="compact"
-          failure={checkFailure}
-          onRetry={checkAgain}
-        />
-      )}
       {load.phase !== "failed" && (
         <SettingsSection
           title="Agents on this computer"

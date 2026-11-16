@@ -7017,6 +7017,18 @@ test.each([
       name: "wants to run",
     });
     expect(document.activeElement).toBe(requestTitle);
+    for (const [index, label] of [
+      "Allow once",
+      "Allow for this session",
+      "Decline",
+    ].entries()) {
+      const option = screen.getByRole("button", { name: label });
+      expect(option.getAttribute("aria-keyshortcuts")).toBe(String(index + 1));
+      expect(option.querySelector("kbd")?.textContent).toBe(String(index + 1));
+      expect(option.querySelector("kbd")?.getAttribute("aria-hidden")).toBe(
+        "true",
+      );
+    }
     if (mode === "multiple")
       act(() =>
         chats.push("triage-chat", {
@@ -7049,6 +7061,21 @@ test.each([
     if (mode === "retry") {
       expect(await screen.findByText(/Pick again to retry/)).toBeTruthy();
       expect(document.activeElement).toBe(requestTitle);
+      const failure = screen.getByRole("alert");
+      expect(within(failure).getByText("Answer not sent")).toBeTruthy();
+      expect(screen.getByText("npm test -- board")).toBeTruthy();
+      const details = within(failure).getByRole("button", { name: "Details" });
+      await user.click(details);
+      const popup = await screen.findByRole("dialog", {
+        name: "Failure details",
+      });
+      expect(within(popup).getByText(/Disconnected/)).toBeTruthy();
+      await user.keyboard("{Escape}");
+      expect(
+        screen.queryByRole("dialog", { name: "Failure details" }),
+      ).toBeNull();
+      expect(document.activeElement).toBe(details);
+      act(() => requestTitle.focus());
       expect(
         approval.closest(".inbox-entry")?.getAttribute("aria-current"),
       ).toBe("true");
@@ -7560,6 +7587,77 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
   expect(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
   ).toBeTruthy();
+});
+
+test("Agent skills keeps installed rows and local recovery through a failed refresh", async () => {
+  const user = userEvent.setup();
+  let fail = false;
+  let reads = 0;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "agent_skills") {
+        if (++reads > 12) throw new Error("Agent skill checks did not settle");
+        if (fail) throw new Error("Synthetic cached refresh failure");
+        return [
+          {
+            id: "codex",
+            name: "Codex",
+            path: "/fake/skills",
+            detected: true,
+            state: "installed",
+            error: null,
+          },
+        ];
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Settings" }));
+  const nav = within(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  );
+  await user.click(nav.getByRole("button", { name: /^Agent skills/ }));
+  const skill = screen.getByRole("region", { name: "ticketd skill" });
+  const agents = screen.getByRole("region", {
+    name: "Agents on this computer",
+  });
+  await within(skill).findByText("Installed");
+  const codex = within(agents).getByRole("listitem");
+  const check = within(agents).getByRole("button", { name: "Check again" });
+  const settled = reads;
+  fail = true;
+  await user.click(check);
+  const failure = await within(skill).findByRole("alert");
+  expect(within(failure).getByText("Refresh failed")).toBeTruthy();
+  expect(within(skill).getByText("Installed")).toBeTruthy();
+  expect(within(agents).getByRole("listitem")).toBe(codex);
+  expect(within(codex).getByText("Installed")).toBeTruthy();
+  expect(reads).toBe(settled + 1);
+  const details = within(failure).getByRole("button", { name: "Details" });
+  await user.click(details);
+  const popup = await screen.findByRole("dialog", { name: "Failure details" });
+  expect(
+    within(popup).getByText(/Synthetic cached refresh failure/),
+  ).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Failure details" })).toBeNull();
+  expect(document.activeElement).toBe(details);
+  expect(within(agents).getByRole("button", { name: "Check again" })).toBe(
+    check,
+  );
+  fail = false;
+  await user.click(within(failure).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() => expect(within(skill).queryByRole("alert")).toBeNull());
+  expect(within(skill).getByText("Installed")).toBeTruthy();
+  expect(within(agents).getByRole("listitem")).toBe(codex);
+  expect(reads).toBeLessThanOrEqual(settled + 3);
+  expect(
+    within(nav.getByRole("button", { name: /^Agent skills/ })).queryByRole(
+      "img",
+      { name: "Needs setup" },
+    ),
+  ).toBeNull();
 });
 
 test("Settings Command line settles successful checks and Check again updates the setup dot", async () => {

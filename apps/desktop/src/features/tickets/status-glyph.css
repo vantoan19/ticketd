@@ -39,11 +39,11 @@
 }
 
 .status-glyph.is-changing .status-glyph-sweep-disc {
-  animation: status-glyph-sweep var(--dur-4) var(--ease-in-out);
+  animation: status-glyph-sweep var(--dur-4) var(--ease-out);
 }
 
 .status-glyph.is-changing .status-glyph-static {
-  animation: status-glyph-rest var(--dur-4) var(--ease-in-out);
+  animation: status-glyph-rest var(--dur-4) var(--ease-out);
 }
 
 .status-glyph.is-changing[data-status="Done"] {
