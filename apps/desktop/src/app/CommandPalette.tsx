@@ -1,3 +1,4 @@
+import type { PageZoom, PageZoomAction } from "./use-page-zoom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import {
@@ -41,7 +42,7 @@ import {
   ticketCommandActions,
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
-import { matchesShortcut } from "@/lib/shortcuts";
+import { ariaKeyShortcuts, matchesShortcut } from "@/lib/shortcuts";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { ConfirmLeaveDuplicate } from "@/features/tickets/ConfirmLeaveDuplicate";
 import { useContext, useEffect, useRef, useState, type RefObject } from "react";
@@ -56,6 +57,9 @@ import {
   Trash2,
   SquarePen,
   NotebookPen,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
   MessageSquarePlus,
 } from "lucide-react";
 import {
@@ -100,6 +104,7 @@ const targets = [
 ] satisfies { id: GoTo; label: string; icon: typeof Inbox; key?: ShortcutId }[];
 
 export function CommandPalette({
+  pageZoom = null,
   workspaceNotice = null,
   writeUpdate = null,
   memoryTickets = [],
@@ -125,6 +130,7 @@ export function CommandPalette({
   plans,
   refresh,
 }: {
+  pageZoom?: PageZoom | null;
   workspaceNotice?: { label: string; run: () => void } | null;
   writeUpdate?: (() => void) | null;
   memoryTickets?: Ticket[];
@@ -1111,6 +1117,48 @@ export function CommandPalette({
                             <KeyChords keys={shortcut(item.key).keys} />
                           </CommandShortcut>
                         ) : null}
+                      </CommandItem>
+                    ))}
+                </CommandGroup>
+              )}
+              {!scope && pageZoom && (
+                <CommandGroup heading="View">
+                  {(
+                    [
+                      { id: "page-zoom-in", label: "Zoom in", icon: ZoomIn },
+                      { id: "page-zoom-out", label: "Zoom out", icon: ZoomOut },
+                      {
+                        id: "page-zoom-reset",
+                        label: "Reset zoom",
+                        icon: RotateCcw,
+                      },
+                    ] satisfies {
+                      id: PageZoomAction;
+                      label: string;
+                      icon: typeof ZoomIn;
+                    }[]
+                  )
+                    .filter((item) => matches(item.label))
+                    .map((item) => (
+                      <CommandItem
+                        key={item.id}
+                        value={item.id}
+                        aria-keyshortcuts={ariaKeyShortcuts(item.id)}
+                        onSelect={() => {
+                          onOpenChange(false);
+                          pageZoom.run(item.id);
+                        }}
+                      >
+                        <item.icon aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={item.label} query={filter} />
+                        </span>
+                        <CommandShortcut>
+                          {pageZoom.pending
+                            ? "Changing…"
+                            : `${pageZoom.percent}%`}
+                          <KeyChords keys={shortcut(item.id).keys} />
+                        </CommandShortcut>
                       </CommandItem>
                     ))}
                 </CommandGroup>

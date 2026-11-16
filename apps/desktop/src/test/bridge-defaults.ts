@@ -14,6 +14,8 @@ export function bridgeDefault(
   args?: { id?: string; reference?: string },
 ): unknown {
   switch (command) {
+    case "plugin:webview|set_webview_zoom":
+      return null;
     case "attachment_upload_destination":
       return { kind: "local" };
     case "attachment_upload_limit":

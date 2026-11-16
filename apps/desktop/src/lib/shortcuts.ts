@@ -47,6 +47,31 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
 };
 
 export const SHORTCUTS = [
+  {
+    id: "page-zoom-in",
+    keys: [
+      ["Mod", "="],
+      ["Mod", "+"],
+      ["Mod", "Shift", "+"],
+    ],
+    scope: "Everywhere",
+    label: "Zoom in",
+    note: "Enlarge the whole app, including while typing; up to 200%.",
+  },
+  {
+    id: "page-zoom-out",
+    keys: [["Mod", "-"]],
+    scope: "Everywhere",
+    label: "Zoom out",
+    note: "Reduce the whole app, including while typing; down to 50%.",
+  },
+  {
+    id: "page-zoom-reset",
+    keys: [["Mod", "0"]],
+    scope: "Everywhere",
+    label: "Reset zoom",
+    note: "Return the whole app to 100%, including while typing.",
+  },
   ...(
     [
       [
@@ -497,7 +522,13 @@ export function ariaKeyShortcuts(id: ShortcutId, mac = isMacPlatform()) {
     .keys.map((chord) =>
       chord
         .map((key) =>
-          key === "Mod" ? (mac ? "Meta" : "Control") : (ARIA_NAMES[key] ?? key),
+          key === "Mod"
+            ? mac
+              ? "Meta"
+              : "Control"
+            : key === "+"
+              ? "Plus"
+              : (ARIA_NAMES[key] ?? key),
         )
         .join("+"),
     )

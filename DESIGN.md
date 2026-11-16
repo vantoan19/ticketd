@@ -339,7 +339,17 @@ Measure the available content panel width after navigation, not just the screen 
 
 A navigation sheet is at most 280px or viewport width minus 32px. Popovers retain 16px viewport clearance and collide away from edges. Forms that cannot fit a popover use a sheet/dialog with a scrollable body. At short heights, keep form actions reachable without clipping the body.
 
-Switching pane modes, resizing, or opening navigation must not remount drafts, reset selection, or lose list scroll position. Horizontal scrolling belongs only inside code, wide tables, or the graph canvas. At 200% zoom, reflow the shell rather than shrinking the type.
+Switching pane modes, resizing, or opening navigation must not remount drafts, reset selection, or lose list scroll position. Horizontal scrolling belongs only inside code, wide tables, or the graph canvas. At 200% zoom, reflow the shell rather than shrinking the type. Native page
+zoom uses the current webview's zoom API, from 50% to 200%; five Zoom in steps
+from 100% reach exactly 200%. Mod+= or Mod+plus enlarges, Mod+minus reduces,
+and Mod+0 resets to 100%, including while a field, rich editor, dialog or graph
+has focus. Bare plus/minus remain canvas controls. One application handler owns
+these keys; native automatic zoom hotkeys stay disabled. Requests serialize and
+coalesce to the latest target, so reset cannot be overtaken by an older request.
+Only confirmed native success updates the displayed percentage. Failure keeps
+the prior zoom and offers Retry with the native cause under Details. Zoom is
+window view state, never workspace data. The display-scale repair accounts for
+intentional page zoom before comparing page and window bounds.
 
 ## 6. Navigation and ticket list
 
@@ -829,7 +839,11 @@ and post a status line with Undo; Duplicate opens the existing dependency review
 The same keys act on a focused list row or board card before the open Ticket;
 Mod+Shift+C copies that reference, H means Remind me and R writes an update.
 Typing and overlays keep their own keys; completing an action returns focus
-to its opener.
+to its opener. The palette's View group follows the navigation and creation
+commands and offers Zoom in, Zoom out and Reset zoom, each with the confirmed
+percentage (or Changing…) and shortcut hints from the same registry as Settings
+› Keyboard shortcuts. Native page zoom uses only the
+`core:webview:allow-set-webview-zoom` capability on the main window.
 
 Keyboard access must cover navigation, row selection/opening, resizing, property changes, editing, overlay dismissal, and return to the list. Preserve distinct focus and selection. Announce save errors and meaningful async results without repeatedly announcing background polling. Use landmark regions and a logical heading sequence. Do not assign a visual heading level solely to obtain a font size.
 
