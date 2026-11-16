@@ -191,7 +191,7 @@ test("Check again sits in the Status section and is disabled while checking", as
   invoke.mockResolvedValueOnce(base);
   render(<CommandLineCard />);
   const status = screen.getByRole("region", { name: "Status" });
-  const button = within(status).getByRole("button", { name: "Check again" });
+  const button = within(status).getByRole("button", { name: "Checking…" });
   expect((button as HTMLButtonElement).disabled).toBe(true);
   expect(within(status).getByRole("status")).toBeTruthy();
   await screen.findByText("Installed");

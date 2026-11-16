@@ -7,6 +7,8 @@ import {
 export type ChatFailureNotice = {
   failure: FailureDescription;
   retry?: () => void;
+  /** A direct send waits for the host's uncertain-delivery decision first. */
+  retryRequiresSend?: boolean;
 };
 
 /** Describes a refused Chat action; `retry` repeats it when that can help. */

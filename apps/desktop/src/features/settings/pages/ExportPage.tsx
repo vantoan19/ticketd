@@ -30,6 +30,7 @@ function JsonSection() {
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [savedPath, setSavedPath] = useState("");
   const choosing = useRef(false);
+  const lastPath = useRef("");
   async function exportWorkspace() {
     // One save sheet at a time; Exporting… only once a path returns.
     if (choosing.current) return;
@@ -39,11 +40,12 @@ function JsonSection() {
     try {
       const path = await workspaceClient.chooseSavePath({
         title: "Export ticketd workspace",
-        defaultPath: `ticketd-export-${localDate()}.json`,
+        defaultPath: lastPath.current || `ticketd-export-${localDate()}.json`,
         filterName: "JSON",
         extension: "json",
       });
       if (path === null) return;
+      lastPath.current = path;
       setBusy(true);
       try {
         await client.exportWorkspace(path);
@@ -107,7 +109,21 @@ function JsonSection() {
                 <PathText path={savedPath} />
               </span>
             )}
-            {failure && <FailureAlert size="compact" failure={failure} />}
+            {failure && (
+              <FailureAlert
+                size="compact"
+                failure={failure}
+                onRetry={() => {
+                  if (!savedPath) void exportWorkspace();
+                  else
+                    void workspaceClient.reveal(savedPath).then(
+                      () => setFailure(null),
+                      (reason: unknown) =>
+                        setFailure(describeFailure(reason, "show the export")),
+                    );
+                }}
+              />
+            )}
           </SettingsListFooter>
         )}
       </SettingsList>

@@ -91,14 +91,21 @@ function useCommand() {
  */
 function Failure({
   children,
+  onRetry,
 }: {
   children: FailureDescription | string | null;
+  onRetry?: () => void;
 }) {
   if (!children) return null;
   return typeof children === "string" ? (
     <FieldError className="mt-3">{children}</FieldError>
   ) : (
-    <FailureAlert size="compact" failure={children} className="mt-3" />
+    <FailureAlert
+      size="compact"
+      failure={children}
+      className="mt-3"
+      {...(onRetry && { onRetry })}
+    />
   );
 }
 
@@ -726,6 +733,7 @@ function Disconnect({ folder }: { folder: string | undefined }) {
 type FieldNote =
   | { kind: "saving" }
   | { kind: "saved" }
+  | { kind: "not_saved" }
   | { kind: "invalid"; text: string }
   | null;
 
@@ -749,7 +757,13 @@ function SavedField({
         <FieldError id={`${id}-error`}>{note.text}</FieldError>
       ) : (
         <p className="sync-field-note" role="status">
-          {note?.kind === "saving" ? "Saving…" : note ? "Saved" : ""}
+          {note?.kind === "saving"
+            ? "Saving…"
+            : note?.kind === "not_saved"
+              ? "Not saved"
+              : note
+                ? "Saved"
+                : ""}
         </p>
       )}
     </div>
@@ -765,6 +779,7 @@ function DesktopSettings() {
   const [failure, setFailure] = useState<{
     failure: FailureDescription;
     section: "desktop" | "options";
+    retry?: () => void;
   } | null>(null);
   const [notes, setNotes] = useState<{
     name: FieldNote;
@@ -825,10 +840,11 @@ function DesktopSettings() {
         fade.current[field] = window.setTimeout(() => note(field, null), 2000);
       }
     } catch (reason) {
-      if (field) note(field, null);
+      if (field) note(field, { kind: "not_saved" });
       setFailure({
         failure: describeFailure(reason, "save the sync settings"),
         section: field === "name" ? "desktop" : "options",
+        retry: () => void save(change, field),
       });
     } finally {
       setSaving(false);
@@ -893,7 +909,11 @@ function DesktopSettings() {
                   aria-describedby={
                     invalid("name") ? "sync-name-error" : undefined
                   }
-                  onChange={(event) => setName(event.target.value)}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    setFailure(null);
+                    note("name", null);
+                  }}
                   onBlur={saveName}
                   onKeyDown={blurOnEnter}
                 />
@@ -901,7 +921,11 @@ function DesktopSettings() {
             }
           />
         </SettingsList>
-        {failure?.section === "desktop" && <Failure>{failure.failure}</Failure>}
+        {failure?.section === "desktop" && (
+          <Failure {...(failure.retry && { onRetry: failure.retry })}>
+            {failure.failure}
+          </Failure>
+        )}
       </SettingsSection>
       <SettingsSection title="Options">
         <SettingsList>
@@ -926,7 +950,11 @@ function DesktopSettings() {
                       ? "sync-interval-unit sync-interval-error"
                       : "sync-interval-unit"
                   }
-                  onChange={(event) => setSeconds(event.target.value)}
+                  onChange={(event) => {
+                    setSeconds(event.target.value);
+                    setFailure(null);
+                    note("interval", null);
+                  }}
                   onBlur={saveInterval}
                   onKeyDown={blurOnEnter}
                 />
@@ -968,7 +996,11 @@ function DesktopSettings() {
             </ChoiceTiles>
           </SettingsRow>
         </SettingsList>
-        {failure?.section === "options" && <Failure>{failure.failure}</Failure>}
+        {failure?.section === "options" && (
+          <Failure {...(failure.retry && { onRetry: failure.retry })}>
+            {failure.failure}
+          </Failure>
+        )}
       </SettingsSection>
     </>
   );
