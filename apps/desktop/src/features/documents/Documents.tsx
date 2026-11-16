@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  ArrowLeft,
   Clock,
   FileText,
   Pin,
@@ -167,8 +168,37 @@ export function Documents({
   const [allOffset, setAllOffset] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
+  // Reader identity and failure outlive unrelated successful navigator reads.
+  const [opening, setOpening] = useState<{
+    id: string;
+    failure: FailureDescription | null;
+  } | null>(null);
+  const openGeneration = useRef(0);
+  const loadReader = useCallback((id: string) => {
+    const request = ++openGeneration.current;
+    setOpening({ id, failure: null });
+    setSelected(null);
+    return Promise.all([documents.open(id), documents.tags(id)]).then(
+      ([doc, values]) => {
+        if (request !== openGeneration.current) return false;
+        setSelected(doc);
+        setTags(values);
+        setOpening(null);
+        setReaderError(null);
+        return true;
+      },
+      (reason: unknown) => {
+        if (request === openGeneration.current)
+          setOpening({
+            id,
+            failure: describeFailure(reason, "open the Document"),
+          });
+        return false;
+      },
+    );
+  }, []);
   useEffect(() => {
-    if (!active || !selected) return;
+    if (!active || (!selected && !opening)) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !matchesShortcut(event, "close")) return;
       if (
@@ -184,11 +214,15 @@ export function Documents({
         return;
       if (page.current?.querySelector('[aria-label="Edit controls"]')) return;
       event.preventDefault();
-      setReaderCloseRequest((value) => value + 1);
+      if (opening) {
+        openGeneration.current++;
+        setOpening(null);
+        onDocumentClose?.();
+      } else setReaderCloseRequest((value) => value + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, selected]);
+  }, [active, selected, opening, onDocumentClose]);
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [addingTag, setAddingTag] = useState(false);
@@ -308,16 +342,16 @@ export function Documents({
     failLoad,
   ]);
   useEffect(() => {
-    if (target)
-      void Promise.all([documents.open(target.id), documents.tags(target.id)])
-        .then(([doc, values]) => {
-          setSelected(doc);
-          setTags(values);
-          setListError(null);
-          setReaderError(null);
-        })
-        .catch((reason: unknown) => failLoad(reason, "the Document"));
-  }, [target, attempt, failLoad]);
+    openGeneration.current++;
+    setOpening(null);
+  }, [listRequest]);
+  useEffect(() => {
+    const generation = openGeneration;
+    if (target) void loadReader(target.id);
+    return () => {
+      generation.current++;
+    };
+  }, [target, loadReader]);
   useEffect(() => {
     if (!active) return;
     refresh();
@@ -382,21 +416,9 @@ export function Documents({
   }, [active, includeSupport, noVisible, query, filter, probeKey]);
   const hiddenMatches = hiddenProbe.key === probeKey && hiddenProbe.found;
   const open = (id: string) => {
-    void Promise.all([documents.open(id), documents.tags(id)])
-      .then(([doc, values]) => {
-        setSelected(doc);
-        setTags(values);
-        setListError(null);
-        setReaderError(null);
-        refresh();
-      })
-      .catch((reason: unknown) =>
-        setListError({
-          failure: describeFailure(reason, "open the Document"),
-          kind: "action",
-          retry: () => open(id),
-        }),
-      );
+    void loadReader(id).then((opened) => {
+      if (opened) void refresh();
+    });
   };
   /** Runs a list action; a failure shows beside the list with Retry. */
   const listAction = (action: string, change: () => Promise<unknown>) =>
@@ -688,10 +710,17 @@ export function Documents({
       : view === "all"
         ? all.length
         : recent.length;
+  const countKnown = showTrash
+    ? trashLoaded
+    : searching
+      ? searchKey === JSON.stringify([query, filter, offset, includeSupport])
+      : view === "all"
+        ? allLoaded
+        : browseLoaded;
   return (
     <div
       className="documents-page"
-      data-reading={selected !== null || undefined}
+      data-reading={selected !== null || opening !== null || undefined}
       ref={page}
     >
       <div
@@ -734,7 +763,7 @@ export function Documents({
       >
         <PaneHeader
           title="Documents"
-          count={<Count>{shownCount}</Count>}
+          count={countKnown ? <Count>{shownCount}</Count> : undefined}
           titleEditor={
             searchOpen ? (
               <NavigatorSearch
@@ -823,14 +852,14 @@ export function Documents({
             </Button>
           </p>
         )}
-        {listError?.kind === "action" && (
+        {listError && (listError.kind === "action" || countKnown) && (
           <FailureAlert
             size="compact"
             failure={listError.failure}
             onRetry={listError.retry}
           />
         )}
-        {listError?.kind === "load" ? (
+        {listError?.kind === "load" && !countKnown ? (
           <FailureState failure={listError.failure} onRetry={listError.retry} />
         ) : showTrash ? (
           <section ref={trashList} aria-label="Trash">
@@ -1003,6 +1032,36 @@ export function Documents({
           Show update details
         </label>
       </div>
+      {opening && (
+        <article className="document-workspace" aria-label="Document reader">
+          <header className="document-bar">
+            <span className="document-return">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={backLabel}
+                onClick={() => {
+                  openGeneration.current++;
+                  setOpening(null);
+                  onDocumentClose?.();
+                }}
+              >
+                <ArrowLeft aria-hidden="true" />
+                {backLabel.replace(/^Back to /, "")}
+              </Button>
+            </span>
+            <span className="document-crumb-title">Document</span>
+          </header>
+          {opening.failure ? (
+            <FailureState
+              failure={opening.failure}
+              onRetry={() => open(opening.id)}
+            />
+          ) : (
+            <EmptyState role="status" description="Opening Document…" />
+          )}
+        </article>
+      )}
       {selected && (
         <DocumentEditor
           key={selected.id}

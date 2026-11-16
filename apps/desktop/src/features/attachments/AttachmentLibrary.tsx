@@ -30,7 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureState } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader, PaneHeaderButton } from "@/components/ui/list-header";
 import { Pager } from "@/components/ui/pager";
@@ -171,7 +171,7 @@ function Library({
   const [hovered, setHovered] = useState(false);
   const [listFocused, setListFocused] = useState(false);
   const changed = () => setRefresh((value) => value + 1);
-  const { files, loading, pending, error, answered, more } =
+  const { files, loading, pending, error, answered, more, known } =
     useAttachmentSearch(
       search,
       state,
@@ -306,7 +306,7 @@ function Library({
         !query &&
         state === "all" &&
         !more &&
-        !loading && { count: <Count>{files.length}</Count> })}
+        known && { count: <Count>{files.length}</Count> })}
       titleEditor={
         searching ? (
           <NavigatorSearch
@@ -398,7 +398,8 @@ function Library({
     />
   );
   let body;
-  if (error) body = <FailureState failure={error} onRetry={changed} />;
+  if (error && !known)
+    body = <FailureState failure={error} onRetry={changed} />;
   else if (loading)
     body = (
       <EmptyState size="inline" role="status" description="Loading files…" />
@@ -535,6 +536,9 @@ function Library({
           </div>
         )}
         <div className="attachment-list-scroll">
+          {error && known && (
+            <FailureAlert failure={error} onRetry={changed} size="compact" />
+          )}
           {body}
           {!loading && !error && !libraryEmpty && (
             <div className="attachment-drop-hint">

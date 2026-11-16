@@ -8834,3 +8834,373 @@ test("an unknown Plan archive failure keeps raw diagnostics behind Details on th
   expect(await screen.findByText("SYNTHETIC_ARCHIVE_RAW")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
+
+test.each([
+  ["All tickets", "find_tickets"],
+  ["Documents", "recent_documents"],
+  ["Attachments", "search_attachments"],
+] as const)(
+  "%s keeps its initial count unknown through failure and recovers to known empty",
+  async (name, read) => {
+    let rejectRead: ((reason: unknown) => void) | undefined;
+    let failed = false;
+    const pending = new Promise((_, reject) => {
+      rejectRead = reject;
+    });
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "workspace_info")
+        return { tickets: 14, documents: 0, projects: 0, active_plans: 0 };
+      if (command === read && !failed) return pending;
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name }));
+    const header = screen.getByRole("heading", { name }).closest("header")!;
+    expect(header.querySelector('[data-slot="count"]')).toBeNull();
+    failed = true;
+    await act(async () => rejectRead?.(new Error("initial unavailable")));
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(header.querySelector('[data-slot="count"]')).toBeNull();
+    fireEvent.click(retry);
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+    );
+  },
+);
+
+test("Plans initial read stays unknown, retries its own failure and preserves known cards", async () => {
+  let rejectRead: ((reason: unknown) => void) | undefined;
+  const pending = new Promise((_, reject) => {
+    rejectRead = reject;
+  });
+  let fail = true;
+  const plan = {
+    id: "read-plan",
+    name: "Known Plan",
+    archived: false,
+    purpose: "Known purpose",
+  };
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "list_plans") return fail ? pending : [plan];
+    if (command === "show_plan")
+      return { plan, counts: counted({}), members: [], documents: [] };
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search or jump to…" }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
+  expect(screen.queryByText("No Plans yet")).toBeNull();
+  expect(screen.getByRole("status", { name: "Loading Plans" })).toBeTruthy();
+  await act(async () => rejectRead?.(new Error("Plans unavailable")));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.queryByText("No Plans yet")).toBeNull();
+  fail = false;
+  fireEvent.click(retry);
+  expect(
+    await screen.findByRole("button", { name: "Open Plan Known Plan" }),
+  ).toBeTruthy();
+});
+
+test("Workspace graph filters count matching records while retaining structural Plan membership", async () => {
+  const user = userEvent.setup();
+  const plan = {
+    id: "filter-island",
+    name: "Filtered island",
+    archived: false,
+  };
+  const tickets = [
+    bulkTicket(1, { title: "Unique match", plan_id: plan.id }),
+    bulkTicket(2, {
+      title: "Second member",
+      plan_id: plan.id,
+      status: "Done",
+      prerequisites: [
+        {
+          reference: "T-KQ1",
+          title: "Unique match",
+          status: "Todo",
+          trashed: false,
+          unresolved: true,
+        },
+      ],
+    }),
+  ];
+  const doc = {
+    id: "filter-doc",
+    kind: "document",
+    label: "Island spec",
+    state: null,
+    trashed: false,
+    activity_detail: false,
+  };
+  const all = [
+    {
+      id: plan.id,
+      kind: "plan",
+      label: plan.name,
+      state: "Active",
+      trashed: false,
+      activity_detail: false,
+    },
+    doc,
+    ...tickets.map((ticket) => ({
+      id: ticket.id,
+      kind: "ticket",
+      label: `${ticket.reference} · ${ticket.title}`,
+      ticket_reference: ticket.reference,
+      state: ticket.status,
+      trashed: false,
+      activity_detail: false,
+    })),
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket")
+        return tickets.find((t) => t.reference === args.reference);
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 1, done: 1 }),
+          members: tickets,
+          documents: [{ id: doc.id, heading: doc.label, trashed: false }],
+        };
+      if (command === "workspace_graph") {
+        const request = args.request as {
+          kind: string | null;
+          search: string | null;
+          relationship: string | null;
+          hydrate_only: boolean;
+          visible_ids: string[];
+        };
+        const matches = all.filter(
+          (node) =>
+            (!request.kind || node.kind === request.kind) &&
+            (!request.search || node.label.includes(request.search)),
+        );
+        const nodes = matches.filter(
+          (node) =>
+            (!request.hydrate_only || request.visible_ids.includes(node.id)) &&
+            (!request.relationship || tickets.some((t) => t.id === node.id)),
+        );
+        return {
+          nodes,
+          edges: [],
+          total: matches.length,
+          next_cursor: null,
+          omitted: false,
+          omitted_groups: [],
+          node_tags: {},
+        };
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: "Workspace graph" }),
+  );
+  const graph = screen.getByRole("region", { name: "Workspace graph" });
+  await within(graph).findByText("2 tickets, 1 Document");
+  await user.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Type: All" }), {
+    key: "Enter",
+  });
+  await user.click(screen.getByRole("option", { name: "Tickets" }));
+  await vi.waitFor(() =>
+    expect(within(graph).getByText("2 items · 1 connection")).toBeTruthy(),
+  );
+  expect(within(graph).getByText("2 tickets, 0 Documents")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await user.click(within(graph).getByRole("radio", { name: "List" }));
+  expect(within(graph).getByText(/Showing 2 of 2 items/)).toBeTruthy();
+  expect(
+    graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+  ).toHaveLength(2);
+  await user.click(within(graph).getByRole("button", { name: "Filter" }));
+  fireEvent.change(screen.getByLabelText("Search"), {
+    target: { value: "Unique" },
+  });
+  await vi.waitFor(() =>
+    expect(within(graph).getByText("1 item · 0 connections")).toBeTruthy(),
+  );
+  expect(within(graph).getByText(/Showing 1 of 1 item/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
+  for (const [before, next] of [
+    ["Tickets", "Documents"],
+    ["Documents", "Plans"],
+  ] as const) {
+    fireEvent.keyDown(
+      screen.getByRole("combobox", { name: `Type: ${before}` }),
+      { key: "Enter" },
+    );
+    await user.click(screen.getByRole("option", { name: next }));
+    await vi.waitFor(() =>
+      expect(within(graph).getByText("1 item · 0 connections")).toBeTruthy(),
+    );
+    expect(within(graph).getByText(/Showing 1 of 1 item/)).toBeTruthy();
+    expect(
+      graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+    ).toHaveLength(1);
+  }
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Type: Plans" }), {
+    key: "Enter",
+  });
+  await user.click(screen.getByRole("option", { name: "All" }));
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Relationship: All" }),
+    { key: "Enter" },
+  );
+  await user.click(screen.getByRole("option", { name: "Blocks" }));
+  await user.keyboard("{Escape}");
+  await user.click(within(graph).getByRole("radio", { name: "Graph" }));
+  await within(graph).findByText("2 tickets, 0 Documents");
+  expect(within(graph).queryByText(/Not in a Plan/)).toBeNull();
+});
+
+test("supporting Document open failure survives an unrelated browse success and retries the intended reader", async () => {
+  const current = bulkTicket(1, { title: "Supporting reader outcome" });
+  const doc = {
+    id: "support-open",
+    title: "Supporting context",
+    body: "Recovered supporting paragraph",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  let rejectOpen: ((reason: unknown) => void) | undefined;
+  let finishBrowse: ((value: unknown) => void) | undefined;
+  const openRead = new Promise((_, reject) => {
+    rejectOpen = reject;
+  });
+  const browse = new Promise((resolve) => {
+    finishBrowse = resolve;
+  });
+  let retry = false;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "activity_feed")
+      return [
+        {
+          type: "authored",
+          activity: {
+            id: "support-update",
+            ticket_id: current.id,
+            brief: "Supporting result",
+            reported_at: doc.updated_at,
+            updated_at: doc.updated_at,
+            editing_agent: null,
+            supporting_document_id: doc.id,
+          },
+        },
+      ];
+    if (command === "show_document") return doc;
+    if (command === "open_document") return retry ? doc : openRead;
+    if (command === "recent_documents") return browse;
+    if (command === "document_tags") return [];
+    if (command === "document_version") return [doc.updated_at, false];
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Supporting reader outcome/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Open details" }));
+  await act(async () => rejectOpen?.(new Error("Open unavailable")));
+  await act(async () =>
+    finishBrowse?.([{ id: "known-browse", heading: "Known browse record" }]),
+  );
+  const retryButton = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.getByText(/Couldn't open the Document/)).toBeTruthy();
+  expect(screen.queryByText(doc.body)).toBeNull();
+  retry = true;
+  fireEvent.click(retryButton);
+  expect(await screen.findByText(doc.body)).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls
+      .filter(([command]) => command === "open_document")
+      .map(([, args]) => args),
+  ).toEqual([{ id: doc.id }, { id: doc.id }]);
+});
+
+test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
+  "%s retains known content and counts when a background read fails",
+  async (name) => {
+    const ticket = bulkTicket(1, { title: "Cached ticket" });
+    const plan = { id: "cached-plan", name: "Cached Plan", archived: false };
+    const file = {
+      id: "cached-file",
+      display_name: "cached.txt",
+      original_filename: "cached.txt",
+      size_bytes: 5,
+      kind: "local_snapshot",
+      locator: "fixture/cached.txt",
+      added_at: "2026-11-01T00:00:00Z",
+    };
+    let fail = false;
+    const read = {
+      "All tickets": "find_tickets",
+      Plans: "list_plans",
+      Documents: "recent_documents",
+      Attachments: "search_attachments",
+    }[name];
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === read && fail) throw new Error("Cached read unavailable");
+      if (command === "workspace_info")
+        return { tickets: 1, documents: 1, projects: 0, active_plans: 1 };
+      if (command === "find_tickets") return [ticket];
+      if (command === "count_tickets")
+        return { ...counted({ todo: 1 }), total: 1 };
+      if (command === "list_plans") return [plan];
+      if (command === "show_plan")
+        return { plan, counts: counted({}), members: [], documents: [] };
+      if (command === "recent_documents")
+        return [{ id: "cached-doc", heading: "Cached Document" }];
+      if (command === "search_attachments")
+        return [
+          {
+            attachment: file,
+            related: false,
+            usage: {
+              eligible: false,
+              legacy_drafts_pending: false,
+              protections: [],
+            },
+          },
+        ];
+      return bridgeDefault(command, args);
+    });
+    vi.useFakeTimers();
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name }));
+    await act(async () => {});
+    const header = screen.getByRole("heading", { name }).closest("header")!;
+    expect(header.querySelector('[data-slot="count"]')?.textContent).toMatch(
+      /^1/,
+    );
+    fail = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(header.querySelector('[data-slot="count"]')?.textContent).toMatch(
+      /^1/,
+    );
+    expect(
+      screen.getAllByText(
+        {
+          "All tickets": "Cached ticket",
+          Plans: "Cached Plan",
+          Documents: "Cached Document",
+          Attachments: "cached.txt",
+        }[name],
+      ).length,
+    ).toBeGreaterThan(0);
+  },
+);

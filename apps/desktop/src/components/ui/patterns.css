@@ -538,6 +538,25 @@
 .ui-record-link .ui-reference {
   color: inherit;
 }
+.ui-record-link[data-variant="row"] {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  text-decoration: none;
+  font-size: var(--text-ui);
+  font-weight: 400;
+  line-height: var(--text-ui-line);
+}
+.ui-record-link[data-variant="row"] .ui-reference {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-code);
+}
+.ui-record-link[data-variant="row"] [data-slot="record-title"] {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .ui-record-link[data-gone] {
   color: var(--muted-foreground);
   text-decoration: none;

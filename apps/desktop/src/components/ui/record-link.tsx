@@ -14,24 +14,32 @@ import "./patterns.css";
 function RecordLink({
   reference,
   gone = false,
+  variant = "prose",
   className,
   children,
   ...props
 }: React.ComponentProps<"button"> & {
   reference?: string;
   gone?: boolean;
+  /** Compact structured record row with a muted reference and truncated title. */
+  variant?: "prose" | "row";
 }) {
   const content = (
     <>
       {reference && <Reference>{reference}</Reference>}
       {reference && children ? " " : null}
-      {children}
+      {variant === "row" ? (
+        <span data-slot="record-title">{children}</span>
+      ) : (
+        children
+      )}
     </>
   );
   if (gone)
     return (
       <span
         data-slot="record-link"
+        data-variant={variant}
         data-gone=""
         className={cn("ui-record-link", className)}
       >
@@ -42,6 +50,7 @@ function RecordLink({
     <button
       type="button"
       data-slot="record-link"
+      data-variant={variant}
       className={cn("ui-record-link", className)}
       {...props}
     >

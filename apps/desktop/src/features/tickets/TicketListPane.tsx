@@ -341,6 +341,7 @@ function TicketListBody({
           titleId="tickets-heading"
           count={
             // First run (S20): the title alone over an empty workspace.
+            workspace.listKnown &&
             !bare && (
               <Count>
                 {filtered && scopeTotal != null
