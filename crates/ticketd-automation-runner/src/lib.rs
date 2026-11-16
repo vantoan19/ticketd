@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_chat_host::{ChatHost, StopCause, TurnEnd, Unattended, WorkspaceOpener};
+use ticketd_chat_host::{ChatHost, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
     AutomationAgent, AutomationNotification, AutomationRun, ChatLink, ChatLinkKind, Error, NewChat,
     RunAction, StepAction, StepOutcome,
@@ -27,12 +27,12 @@ const RESTARTED: &str = "ticketd closed while this run was going.";
 /// backup brought it back, or its executor could not record how it ended.
 const ABANDONED: &str = "This run was still marked as going, but nothing was running it.";
 /// Why a run ended when ticketd closed its agent's harness (#387 M17).
-fn agent_stopped(cause: StopCause) -> &'static str {
-    match cause {
-        StopCause::Quit => "ticketd quit while this run was going.",
-        StopCause::TurnedOff => "Chat was turned off while this run was going.",
-        StopCause::Restore => "A backup was restored while this run was going.",
-        StopCause::Unknown => "ticketd stopped this run's agent before it finished.",
+fn agent_stopped(reason: Option<StopReason>) -> &'static str {
+    match reason {
+        Some(StopReason::Quit) => "ticketd quit while this run was going.",
+        Some(StopReason::TurnedOff) => "Chat was turned off while this run was going.",
+        Some(StopReason::Restore) => "A backup was restored while this run was going.",
+        Some(_) | None => "ticketd stopped this run's agent before it finished.",
     }
 }
 
@@ -43,7 +43,7 @@ enum Ran {
     TakenOver,
     /// ticketd closed the agent's harness, or would not start it, so the run
     /// cannot go on.
-    AgentStopped(StopCause),
+    AgentStopped(Option<StopReason>),
 }
 
 /// Shows a desktop notification, or says why it could not. The host supplies it: the
@@ -197,7 +197,7 @@ impl Runner {
             outcome = Some(match self.run_step(run, &step_id).await {
                 Ok(Ran::Step(outcome)) => outcome,
                 Ok(Ran::TakenOver) => return Ok(()),
-                Ok(Ran::AgentStopped(cause)) => return Err(agent_stopped(cause).to_owned()),
+                Ok(Ran::AgentStopped(reason)) => return Err(agent_stopped(reason).to_owned()),
                 // A step the core refused has failed; the reason is the core's.
                 Err(error) => StepOutcome::Failed {
                     reason: error.to_string(),
@@ -307,7 +307,7 @@ impl Runner {
         Ok(match ended {
             Ok(TurnEnd::Finished) => Ran::Step(StepOutcome::Completed),
             Ok(TurnEnd::TakenOver) => Ran::TakenOver,
-            Ok(TurnEnd::Stopped(cause)) => Ran::AgentStopped(cause),
+            Ok(TurnEnd::Stopped(reason)) => Ran::AgentStopped(reason),
             Ok(
                 end @ (TurnEnd::TurnLimitReached
                 | TurnEnd::TimeLimitReached
@@ -320,8 +320,8 @@ impl Runner {
             }),
             // Chat went off, ticketd quit or a restore began between the pass
             // that started the run and its agent (#387 M3).
-            Err(error) => match StopCause::of(&error) {
-                Some(cause) => Ran::AgentStopped(cause),
+            Err(error) => match StopReason::of(&error) {
+                Some(reason) => Ran::AgentStopped(Some(reason)),
                 None => Ran::Step(StepOutcome::Failed {
                     reason: format!(
                         "The agent could not be started. {}",
