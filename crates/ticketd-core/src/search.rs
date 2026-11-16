@@ -136,17 +136,11 @@ impl Workspace {
             values.push(tag.into());
         }
         if let Some(availability) = filter.availability {
-            sql.push_str(&format!(
-                " AND t.status = 'Todo' AND NOT {} AND ",
-                crate::source::held_sql("t.id")
-            ));
-            if matches!(availability, Availability::Ready) {
-                sql.push_str("NOT ");
-            }
-            sql.push_str(&format!(
-                "EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id WHERE d.dependent_id = t.id AND {})",
-                crate::history::unresolved_blocker_sql("blocker")
-            ));
+            sql.push_str(" AND ");
+            sql.push_str(&match availability {
+                Availability::Ready => crate::readiness::ready_sql("t"),
+                Availability::Blocked => crate::readiness::blocked_sql("t"),
+            });
         }
         if let Some(family) = family {
             sql.push_str(" AND (t.id = ? OR EXISTS (SELECT 1 FROM ticket_parents p WHERE p.parent_id = ? AND p.child_id = t.id))");
@@ -262,8 +256,7 @@ impl Workspace {
         drop(statement);
         let mut omitted = false;
         for ticket in &mut items {
-            ticket.availability =
-                crate::history::availability(&tx, &ticket.id, ticket.status, ticket.trashed)?;
+            ticket.availability = crate::readiness::indicator(&tx, &ticket.id)?;
             if prerequisites {
                 ticket.source = crate::source::availability_projection(&tx, &ticket.id)?;
                 let mut blockers = relationships::prerequisites(&tx, &ticket.id, Some(51))?;
