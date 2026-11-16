@@ -275,6 +275,7 @@ button.plan-purpose:focus-visible {
 }
 .plan-card-footer {
   display: grid;
+  min-width: 0;
   gap: 4px;
 }
 .plan-card-failure {
@@ -312,7 +313,9 @@ button.plan-purpose:focus-visible {
   flex: none;
 }
 .plan-card-next {
-  display: flex;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) fit-content(40%);
+  min-width: 0;
   align-items: center;
   gap: 10px;
   min-height: 43px;
@@ -323,7 +326,13 @@ button.plan-purpose:focus-visible {
   flex: none;
   width: 56px;
 }
-.plan-card-next > svg {
+.plan-card-next-ticket {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.plan-card-next-ticket > svg {
   flex: none;
 }
 .plan-card-next button {
@@ -337,13 +346,15 @@ button.plan-purpose:focus-visible {
   text-overflow: ellipsis;
 }
 .plan-card-ready {
+  flex: none;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 .plan-card-spec {
   margin-left: auto;
-  max-width: 40%;
+  max-width: 100%;
 }
 .plan-index-action {
   position: relative;
@@ -386,13 +397,15 @@ button.plan-purpose:focus-visible {
   }
   .plan-card-next {
     min-height: 73px;
-    flex-wrap: wrap;
+    grid-template-columns: 56px minmax(0, 1fr);
   }
   .plan-card-failure {
     height: 32px;
     white-space: normal;
   }
   .plan-card-spec {
+    grid-column: 1 / -1;
+    justify-self: end;
     max-width: 100%;
   }
 }

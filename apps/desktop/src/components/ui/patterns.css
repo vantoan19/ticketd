@@ -539,6 +539,7 @@
   color: inherit;
 }
 .ui-record-link[data-variant="row"] {
+  min-width: 0;
   display: inline-flex;
   align-items: baseline;
   gap: 10px;
@@ -553,6 +554,7 @@
   font-size: var(--text-code);
 }
 .ui-record-link[data-variant="row"] [data-slot="record-title"] {
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

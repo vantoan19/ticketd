@@ -4179,6 +4179,58 @@ test("Plans cards join full counts, Flow-ordered Ready work, newest update and s
   expect(await screen.findByRole("heading", { name: "T-KQ9" })).toBeTruthy();
 });
 
+test("a long Next up title keeps its ticket, Plan and spec separately keyboard reachable", async () => {
+  const title = "A very long next ticket title ".repeat(15).trim();
+  const ticket = bulkTicket(15, { title, availability: "Ready" });
+  const plan = {
+    id: "P-next",
+    name: "Next release",
+    archived: false,
+    spec_document_id: "next-spec",
+  };
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 1 }),
+          members: [ticket],
+          documents: [
+            { id: "next-spec", heading: "Next specification", trashed: false },
+          ],
+        };
+      if (command === "find_tickets") return [ticket];
+      if (command === "show_ticket") return ticket;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Plans" }));
+  const cards = await screen.findByRole("list", { name: "Active Plans" });
+  const openPlan = within(cards).getByRole("button", {
+    name: "Open Plan Next release",
+  });
+  const next = await within(cards).findByRole("button", {
+    name: `T-KQ15 ${title}`,
+  });
+  openPlan.focus();
+  await user.tab();
+  expect(document.activeElement).toBe(next);
+  expect(within(cards).getByText("Ready", { exact: true })).toBeTruthy();
+  await user.tab();
+  expect(document.activeElement).toBe(
+    within(cards).getByRole("button", { name: "Next specification" }),
+  );
+  await user.tab({ shift: true });
+  await user.keyboard("{Enter}");
+  expect(await screen.findByRole("heading", { name: "T-KQ15" })).toBeTruthy();
+  expect(screen.getByDisplayValue(title)).toBe(
+    screen.getByRole("textbox", { name: "Title" }),
+  );
+});
+
 test("New Plan is reachable from the palette and its registered page key", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
