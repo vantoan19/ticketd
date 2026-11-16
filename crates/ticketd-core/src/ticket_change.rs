@@ -71,6 +71,13 @@ pub(crate) enum Mode {
     Bulk,
 }
 
+/// How long a batch may take. A batch holds the Workspace's write lock until it ends,
+/// and every other writer (the CLI, another window, a sync run) waits for that lock no
+/// longer than the connection's busy timeout, which is also 10 seconds. A batch that
+/// ran past that would make them fail with "database is locked", so it stops first
+/// and rolls back instead.
+const BATCH_TIME_LIMIT: Duration = Duration::from_secs(10);
+
 /// The time a batch may take.
 pub(crate) struct Deadline(Instant);
 
@@ -80,7 +87,7 @@ impl Deadline {
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
-        if self.0.elapsed() > Duration::from_secs(10) {
+        if self.0.elapsed() > BATCH_TIME_LIMIT {
             return Err(Error::InvalidBatch("time limit exceeded".into()));
         }
         Ok(())

@@ -4,7 +4,6 @@ use ticketd_core::{
 };
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn the_json_export_carries_automations_agents_and_runs_but_not_device_state() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

@@ -100,7 +100,15 @@ fn decide(status: AutomationRunStatus, cause: Cause) -> Option<Ending> {
             step: StepFate::Fails(TAKEN_OVER.to_owned()),
             reaction: Reaction::Answered,
         }),
-        _ => None,
+        // Every other pair ends nothing. Listed, not a catch-all, so a new cause or
+        // status must be decided here.
+        (Cause::Path(_), Queued | Completed | NeedsAttention | TakenOver)
+        | (
+            Cause::Stopped | Cause::TurnedOff | Cause::Deleted,
+            Completed | NeedsAttention | TakenOver,
+        )
+        | (Cause::Abandoned(_), Queued | Completed | NeedsAttention | TakenOver)
+        | (Cause::TakenOver, Queued | Completed | TakenOver) => None,
     }
 }
 

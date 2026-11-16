@@ -220,7 +220,6 @@ fn apply(setup: &mut Setup, cause: Cause) {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn each_cause_ends_a_run_only_from_the_statuses_it_may() {
     for state in STATES {
         for cause in CAUSES {
@@ -241,7 +240,6 @@ fn each_cause_ends_a_run_only_from_the_statuses_it_may() {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn a_run_that_needs_the_person_is_counted_and_one_that_was_answered_is_not() {
     for (cause, counted) in [
         (Cause::Stop, 1),

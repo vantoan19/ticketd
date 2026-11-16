@@ -17,7 +17,8 @@ use ticketd_chat_host::{
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
-    ChatLinkKind, ChatListFilter, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
+    ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger,
+    Workspace,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},
@@ -1038,6 +1039,71 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
         f.needs_attention(),
         "This run was still marked as going, but nothing was running it."
     );
+}
+
+/// #422 item 4: the Chat host cannot read the Workspace when the agent starts, which
+/// is storage failing, not the agent step failing. The step's failure path must not
+/// run (it would complete the run); the run ends as Needs attention, with a reason,
+/// as a storage failure in a step the core runs does.
+#[tokio::test(start_paused = true)]
+async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_path() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    if let StepAction::RunAgent { on_failure, .. } = &mut definition.steps[0].action {
+        *on_failure = Some(vec![Step {
+            id: "tell".into(),
+            action: StepAction::Notify {
+                text: "The agent failed.".into(),
+                opens: NotifyTarget::Ticket,
+                on_failure: None,
+            },
+        }]);
+    }
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    // The host reads the Workspace through an opener that breaks once the run has
+    // started, before the agent's first message.
+    let broken = Arc::new(AtomicBool::new(false));
+    let (path, flag) = (f.path.clone(), broken.clone());
+    let flaky: WorkspaceOpener = Arc::new(move || {
+        if flag.load(Ordering::SeqCst) {
+            return Err(ticketd_core::Error::AutomationRun(
+                "the disk is gone".into(),
+            ));
+        }
+        Workspace::open(&path)
+    });
+    let host = ChatHost::new(
+        flaky,
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+    )
+    .unwrap();
+    let told = Arc::new(Mutex::new(0_usize));
+    let counted = told.clone();
+    let runner = Runner::new(
+        opener(&f.path),
+        Arc::new(move || Some(host.clone())),
+        Arc::new(move |_| {
+            *counted.lock().unwrap() += 1;
+            Ok(())
+        }),
+    )
+    .unwrap();
+    f.tag("Fix login");
+    broken.store(true, Ordering::SeqCst);
+
+    runner.tick().unwrap();
+    settle().await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+    let reason = run.reason.unwrap();
+    assert!(reason.contains("the disk is gone"), "{reason}");
+    assert_eq!(run.steps.len(), 1, "no failure path step ran");
+    assert_eq!(*told.lock().unwrap(), 0);
 }
 
 /// #387 M4: a run stopped while its agent's harness is still opening ends that

@@ -36,12 +36,14 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crate
 
 ## Module responsibilities
 
-| Module        | Responsibility                                                                                                                           |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                    |
-| Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                         |
-| CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and map errors to exit codes |
-| Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly            |
+| Module        | Responsibility                                                                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                                         |
+| Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                                              |
+| CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and report any error on stderr with exit status 1 |
+| Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly                                 |
+
+Every CLI error exits with status 1; the CLI does not tell failures apart by kind. The core classifies a failure as a `FailureKind` (`failure.rs`) so an interface can choose its words and next step, and only the desktop uses it.
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 
@@ -763,9 +765,11 @@ The code lives in `ticketd_core::source`, from the inside out:
   with deterministic fixtures in tests. GitHub uses the person's own credential
   (environment token or `gh auth token`), which is never stored, exported,
   backed up, logged, or sent to any host other than the API.
-- **Workflows** (`source/mod.rs`): methods on `Workspace` that call the engine
-  first and then write in one short transaction, so no network I/O happens while
-  the database is locked. `save_source` validates and previews before it saves.
+- **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
+  `conversation.rs`, `freshness.rs`, and `mod.rs` for saved configuration):
+  methods on `Workspace` that call the engine first and then write in one short
+  transaction, so no network I/O happens while the database is locked.
+  `save_source` validates and previews before it saves.
 
 Saved source configuration is workspace data (`source_configurations`), is
 included in export and backups, and is separate from any imported ticket.
@@ -1193,19 +1197,24 @@ Google Drive adapter
 ```
 
 Each device keeps its own SQLite Workspace and Attachment files, which remain the
-working copy. The live database is never placed in Drive. All sync logic lives in
-the core; the desktop only schedules it and shows its state.
+working copy. The live database is never placed in Drive. The sync rules live in
+the core: what is captured, how files convert, and how versions merge. The desktop
+schedules runs and shows their state, and holds two things the core does not:
+reading Drive's revisions for History (it supplies the Drive connection when
+asked), and the rule for resolving a conflict by hand, where only Markdown body
+text may be edited and an Automation is taken whole from one desktop
+(`sync_commands.rs`).
 
-| Part                     | Responsibility                                                                                                                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                                 |
-| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.         |
-| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                    |
-| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop.                                      |
-| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests. |
-| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                         |
-| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.   |
-| Workspace event log      | `events.rs` logs each committed ticket change through database triggers, with its previous and current values and actor kind; device-local, read by cursor, kept 90 days (ADR 0012).       |
+| Part                     | Responsibility                                                                                                                                                                                                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                                                                                                                                   |
+| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.                                                                                                           |
+| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                                                                                                                      |
+| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop. The rest are in `sync/engine.rs`: merging a record's sections by GUID, and the later refresh of a tracker's fields winning as a whole. |
+| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests.                                                                                                   |
+| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                                                                                                                           |
+| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.                                                                                                     |
+| Workspace event log      | `events.rs` logs each committed ticket change through database triggers, with its previous and current values and actor kind; device-local, read by cursor, kept 90 days (ADR 0012).                                                                                                         |
 
 A captured mark names a record, not a change. The file is produced from current
 state at upload time and compared with the last-synced copy, so a mark for a

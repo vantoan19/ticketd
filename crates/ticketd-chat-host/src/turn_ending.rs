@@ -36,7 +36,8 @@ pub enum StopReason {
 }
 
 impl StopReason {
-    const ALL: [Self; 9] = [
+    /// Every reason, for tests and decoders that look one up by its marker.
+    pub const ALL: [Self; 9] = [
         Self::Quit,
         Self::TurnedOff,
         Self::Restore,
@@ -54,7 +55,15 @@ impl StopReason {
             HostError::Quitting => Some(Self::Quit),
             HostError::TurnedOff => Some(Self::TurnedOff),
             HostError::Restoring => Some(Self::Restore),
-            _ => None,
+            // Refusals that are not ticketd stopping; a new error must be decided here.
+            HostError::Core(_)
+            | HostError::StorageFailed(_)
+            | HostError::InteractionExpired
+            | HostError::ContactLost
+            | HostError::Harness(_)
+            | HostError::HarnessUnavailable(_)
+            | HostError::Busy
+            | HostError::Working => None,
         }
     }
 
@@ -73,7 +82,8 @@ impl StopReason {
         }
     }
 
-    /// The transcript's marker for it.
+    /// The transcript's marker for it. Also the key stored after `stopped_by_ticketd:`
+    /// in `chat_turns.ending`, so stored endings and markers cannot differ.
     pub const fn marker(self) -> &'static str {
         match self {
             Self::Quit => "quit",
@@ -101,20 +111,6 @@ impl StopReason {
             Self::Trashed => "the Chat was moved to the trash",
             Self::ExplicitResume => "replaced by an explicit resume",
             Self::StorageFailed => "Chat storage failed",
-        }
-    }
-
-    const fn key(self) -> &'static str {
-        match self {
-            Self::Quit => "quit",
-            Self::TurnedOff => "turned_off",
-            Self::Restore => "restore",
-            Self::TakenOver => "taken_over",
-            Self::TimeLimit => "time_limit",
-            Self::RunEnded => "run_ended",
-            Self::Trashed => "trashed",
-            Self::ExplicitResume => "explicit_resume",
-            Self::StorageFailed => "storage_failed",
         }
     }
 
@@ -150,8 +146,8 @@ pub enum TurnEnding {
     /// ticketd stopped the turn, whether or not the harness reported it ended.
     StoppedByTicketd(StopReason),
     /// Contact with the harness was lost while the turn was active, so how it ended
-    /// was not observed. The reason is what was known of the loss.
-    ContactLost(String),
+    /// was not observed. The reason is what was known of the loss, if anything was.
+    ContactLost(Option<String>),
 }
 
 const COMPLETED: &str = "completed";
@@ -159,6 +155,11 @@ const FAILED: &str = "failed";
 const STOPPED_BY_PERSON: &str = "stopped_by_person";
 const STOPPED_BY_TICKETD_PREFIX: &str = "stopped_by_ticketd:";
 const CONTACT_LOST: &str = "contact_lost";
+
+/// A recorded loss reason, or `None` when none was known (older turns kept it as "").
+fn known(reason: Option<String>) -> Option<String> {
+    reason.filter(|reason| !reason.is_empty())
+}
 
 impl TurnEnding {
     /// A failed ending from what the harness reported.
@@ -191,12 +192,12 @@ impl TurnEnding {
                 resets_at: turn.problem_resets_at,
             }),
             STOPPED_BY_PERSON => Some(Self::StoppedByPerson),
-            CONTACT_LOST => Some(Self::ContactLost(message().unwrap_or_default())),
+            CONTACT_LOST => Some(Self::ContactLost(known(message()))),
             _ => {
                 let reason = key.strip_prefix(STOPPED_BY_TICKETD_PREFIX)?;
                 StopReason::ALL
                     .into_iter()
-                    .find(|candidate| candidate.key() == reason)
+                    .find(|candidate| candidate.marker() == reason)
                     .map(Self::StoppedByTicketd)
             }
         }
@@ -216,7 +217,7 @@ impl TurnEnding {
                 match StopReason::legacy(turn.detail.as_deref()) {
                     Some(reason) => Self::StoppedByTicketd(reason),
                     None if turn.state == ChatTurnState::Interrupted => Self::StoppedByPerson,
-                    None => Self::ContactLost(turn.detail.clone().unwrap_or_default()),
+                    None => Self::ContactLost(known(turn.detail.clone())),
                 }
             }
         }
@@ -229,7 +230,7 @@ impl TurnEnding {
             Self::Failed { .. } => FAILED.to_owned(),
             Self::StoppedByPerson => STOPPED_BY_PERSON.to_owned(),
             Self::StoppedByTicketd(reason) => {
-                format!("{STOPPED_BY_TICKETD_PREFIX}{}", reason.key())
+                format!("{STOPPED_BY_TICKETD_PREFIX}{}", reason.marker())
             }
             Self::ContactLost(_) => CONTACT_LOST.to_owned(),
         }
@@ -241,7 +242,7 @@ impl TurnEnding {
             Self::Completed | Self::StoppedByPerson => None,
             Self::Failed { message, .. } => message.clone(),
             Self::StoppedByTicketd(reason) => Some(reason.detail().to_owned()),
-            Self::ContactLost(reason) => Some(reason.clone()),
+            Self::ContactLost(reason) => reason.clone(),
         }
     }
 
@@ -327,7 +328,8 @@ mod tests {
         let endings = [
             TurnEnding::Completed,
             TurnEnding::StoppedByPerson,
-            TurnEnding::ContactLost("the harness process ended".to_owned()),
+            TurnEnding::ContactLost(Some("the harness process ended".to_owned())),
+            TurnEnding::ContactLost(None),
             TurnEnding::Failed {
                 kind: ProblemKind::QuotaExhausted,
                 message: Some("out of quota".to_owned()),
@@ -383,9 +385,14 @@ mod tests {
                 ChatTurnState::Unknown,
                 Some("the harness process ended")
             )),
-            Some(TurnEnding::ContactLost(
+            Some(TurnEnding::ContactLost(Some(
                 "the harness process ended".to_owned()
-            ))
+            )))
+        );
+        // An older turn that kept no reason stored "": that is no reason, not an empty one.
+        assert_eq!(
+            TurnEnding::of(&legacy(ChatTurnState::Unknown, Some(""))),
+            Some(TurnEnding::ContactLost(None))
         );
         assert_eq!(
             TurnEnding::of(&ChatTurn {

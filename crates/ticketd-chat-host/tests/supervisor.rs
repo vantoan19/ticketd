@@ -2008,7 +2008,7 @@ async fn a_turn_records_how_the_harness_or_the_person_ended_it() {
     settle().await;
     assert!(matches!(
         TurnEnding::of(&f.turns()[3]),
-        Some(TurnEnding::ContactLost(reason)) if reason.starts_with("the harness process ended")
+        Some(TurnEnding::ContactLost(Some(reason))) if reason.starts_with("the harness process ended")
     ));
 }
 

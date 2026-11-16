@@ -3849,49 +3849,77 @@ fn workflow_order_and_status_counts_describe_the_same_filtered_result() {
     assert_eq!(w.count_tickets(&query).unwrap().total(), 2);
 }
 
-/// Build a version-20 workspace holding every legacy duplicate shape, then open it so
-/// migration step 21 runs.
+/// A version-20 Workspace as that code left it: Tickets have a number and no reference yet.
+/// Rows are ticket, status, and (for a duplicate) the status undo returns to, seeded
+/// with SQL valid at version 20. A ticket's id is its title.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
+fn workspace_at_v20_with_duplicates(
+    path: &std::path::Path,
+    tickets: &[(&str, &str)],
+    duplicates: &[(&str, &str, Option<&str>)],
+) {
+    ticketd_core::create_workspace_at_format_version(path, 20).unwrap();
+    let db = rusqlite::Connection::open(path).unwrap();
+    for (title, status) in tickets {
+        db.execute(
+            "INSERT INTO tickets (id, title, status) VALUES (?1, ?1, ?2)",
+            [title, status],
+        )
+        .unwrap();
+    }
+    for (source, canonical, restore) in duplicates {
+        db.execute(
+            "INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3)",
+            rusqlite::params![source, canonical, restore],
+        )
+        .unwrap();
+    }
+}
+
+/// A ticket seeded by `workspace_at_v20_with_duplicates`, by the reference it has once
+/// the Workspace is current.
+struct Seeded {
+    reference: String,
+}
+
+impl Seeded {
+    fn at(number: u32) -> Self {
+        Self {
+            reference: format!("T-KQ{number}"),
+        }
+    }
+}
+
+/// A genuine version-20 Workspace holding every legacy duplicate shape, opened so
+/// migration step 21 runs. Tickets get references T-KQ1.. in the order they were seeded.
 #[test]
 fn legacy_canceled_duplicates_migrate_deliberately() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.db");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let canonical = workspace.create_ticket("Canonical").unwrap();
-    let ordinary = workspace.create_ticket("Ordinary canceled").unwrap();
-    let plain = workspace.create_ticket("Marked from in progress").unwrap();
-    let independent = workspace.create_ticket("Canceled again later").unwrap();
-    let moved_on = workspace.create_ticket("Moved on").unwrap();
-    for t in [&ordinary, &plain, &independent, &moved_on] {
-        set_status(&mut workspace, &t.reference, Status::InProgress);
-    }
-    set_status(&mut workspace, &ordinary.reference, Status::Canceled);
-    for t in [&plain, &independent, &moved_on] {
-        workspace
-            .mark_duplicate(&t.reference, &canonical.reference, None)
-            .unwrap();
-    }
-    drop(workspace);
-    // Rewrite to the legacy shape: duplicates were Canceled plus a link.
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute(
-        "UPDATE tickets SET status = 'Canceled' WHERE id IN (?1, ?2, ?3)",
-        [&plain.id, &independent.id, &moved_on.id],
-    )
-    .unwrap();
-    // Independent later status changes cleared the remembered status.
-    db.execute(
-        "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id IN (?1, ?2)",
-        [&independent.id, &moved_on.id],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE tickets SET status = 'Done' WHERE id = ?1",
-        [&moved_on.id],
-    )
-    .unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 20;")
-        .unwrap();
-    drop(db);
+    // Duplicates were Canceled plus a link. Independent later status changes cleared the
+    // remembered status, and one of those moved on to Done.
+    workspace_at_v20_with_duplicates(
+        &path,
+        &[
+            ("Canonical", "In progress"),
+            ("Ordinary canceled", "Canceled"),
+            ("Marked from in progress", "Canceled"),
+            ("Canceled again later", "Canceled"),
+            ("Moved on", "Done"),
+        ],
+        &[
+            ("Marked from in progress", "Canonical", Some("In progress")),
+            ("Canceled again later", "Canonical", None),
+            ("Moved on", "Canonical", None),
+        ],
+    );
+    let (canonical, ordinary, plain, independent, moved_on) = (
+        Seeded::at(1),
+        Seeded::at(2),
+        Seeded::at(3),
+        Seeded::at(4),
+        Seeded::at(5),
+    );
 
     let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(
@@ -3926,16 +3954,12 @@ fn legacy_canceled_duplicates_migrate_deliberately() {
     assert!(
         history
             .iter()
-            .any(|e| e.kind == "relationship:duplicate" && e.to_value == canonical.reference)
-    );
-    assert!(
-        history
-            .iter()
             .any(|e| e.kind == "status" && e.from_value == "Canceled" && e.to_value == "Duplicate")
     );
+    // The Ticket was known as T-1 at version 20, so that is what the entry names.
     let history = workspace.ticket_history(&moved_on.reference).unwrap();
     assert!(history.iter().any(|e| e.kind == "relationship:duplicate"
-        && e.from_value == canonical.reference
+        && e.from_value == "T-1"
         && e.to_value.is_empty()));
     // Undo returns to the status before marking, or to Canceled when that had been chosen
     // independently.
@@ -3954,6 +3978,25 @@ fn legacy_canceled_duplicates_migrate_deliberately() {
             .status,
         Status::Canceled
     );
+}
+
+/// Step 21 names the canonical Ticket of a duplicate whose status moved on in history. At
+/// version 20 a Ticket has a number and no reference, so the step cannot read one.
+#[test]
+fn a_version_20_workspace_with_a_moved_on_duplicate_migrates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    workspace_at_v20_with_duplicates(
+        &path,
+        &[("Canonical", "Todo"), ("Moved on", "Done")],
+        &[("Moved on", "Canonical", None)],
+    );
+
+    let workspace = Workspace::open(&path).unwrap();
+
+    let moved_on = workspace.show_ticket("T-KQ2").unwrap();
+    assert_eq!(moved_on.status, Status::Done);
+    assert_eq!(moved_on.duplicate_of, None);
 }
 
 mod duplicate_review_outcomes {

@@ -203,6 +203,8 @@ fn recorded_end(turn: &ChatTurn) -> Option<TurnEnd> {
         },
         TurnEnding::StoppedByTicketd(StopReason::TakenOver) => TurnEnd::TakenOver,
         TurnEnding::StoppedByTicketd(reason) => TurnEnd::Stopped(Some(reason)),
-        TurnEnding::ContactLost(detail) => TurnEnd::Crashed { detail },
+        TurnEnding::ContactLost(detail) => TurnEnd::Crashed {
+            detail: detail.unwrap_or_default(),
+        },
     })
 }

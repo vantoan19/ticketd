@@ -139,8 +139,10 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
             conn.execute("UPDATE duplicate_tickets SET restore_status = COALESCE(restore_status, 'Canceled') WHERE source_id = ?1", [&source])?;
             conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'status', 'Canceled', 'Duplicate')", [&source])?;
         } else {
+            // Step 21 runs on a version-20 Workspace, where a Ticket is known by its
+            // number: references arrive at step 56, and history keeps this one.
             let reference: String = conn.query_row(
-                "SELECT reference FROM tickets WHERE id = ?1",
+                "SELECT 'T-' || number FROM tickets WHERE id = ?1",
                 [&canonical],
                 |r| r.get(0),
             )?;
