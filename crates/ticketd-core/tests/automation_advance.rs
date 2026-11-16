@@ -71,7 +71,6 @@ fn started(
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn the_ticket_text_an_agent_is_told_cannot_leave_its_block_or_read_as_instructions() {
     let (_dir, mut workspace) = workspace();
     let run = started(
@@ -99,7 +98,6 @@ fn the_ticket_text_an_agent_is_told_cannot_leave_its_block_or_read_as_instructio
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn a_run_without_a_ticket_tells_its_agent_what_started_it_instead() {
     let (_dir, mut workspace) = workspace();
     let agent = workspace
@@ -129,7 +127,6 @@ fn a_run_without_a_ticket_tells_its_agent_what_started_it_instead() {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn a_folder_that_is_gone_fails_the_step_before_any_chat_is_made() {
     let (_dir, mut workspace) = workspace();
     let run = started(&mut workspace, "Fix login", |agent| {
@@ -164,7 +161,6 @@ fn a_folder_that_is_gone_fails_the_step_before_any_chat_is_made() {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn core_steps_run_in_the_transaction_that_records_the_step_before_them() {
     let (_dir, mut workspace) = workspace();
     let run = started(&mut workspace, "Fix login", |agent| {
@@ -216,7 +212,6 @@ fn core_steps_run_in_the_transaction_that_records_the_step_before_them() {
 /// step has not failed: nothing is recorded, the executor gets the error, and the
 /// failure path that would have ended the run Completed is not taken.
 #[test]
-#[allow(clippy::unwrap_used)]
 fn storage_failing_inside_a_step_is_an_error_not_the_steps_failure() {
     let (dir, mut workspace) = workspace();
     let run = started(&mut workspace, "Fix login", |_| {
@@ -245,7 +240,6 @@ fn storage_failing_inside_a_step_is_an_error_not_the_steps_failure() {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn a_report_for_a_run_that_has_not_started_is_refused() {
     let (_dir, mut workspace) = workspace();
     let agent = workspace

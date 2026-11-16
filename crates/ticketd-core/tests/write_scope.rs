@@ -1,9 +1,6 @@
 //! The write scope: what every Workspace write does to a ticket in Trash, and how many
 //! events a write that creates a ticket logs. One table runs each public ticket write.
 
-// Setup helpers and the tables of writes assert by panicking, as a test does.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 use serde_json::json;
 use ticketd_core::{
     ActivityPatch, BatchOperation, Error, EvidenceInput, EvidenceKind, RelationshipKind, Status,
@@ -28,6 +25,7 @@ struct Fixture {
     evidence: String,
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
@@ -357,6 +355,7 @@ fn a_ticket_in_trash_is_not_attached_a_document_but_keeps_the_ones_it_has() {
     );
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn created_events(workspace: &Workspace, after: i64) -> Vec<WorkspaceEvent> {
     workspace
         .workspace_events_after(after, 100)

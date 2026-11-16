@@ -3851,7 +3851,8 @@ fn workflow_order_and_status_counts_describe_the_same_filtered_result() {
 
 /// A version-20 Workspace as that code left it: Tickets have a number and no reference yet.
 /// Rows are ticket, status, and (for a duplicate) the status undo returns to, seeded
-/// with SQL valid at version 20. Returns the ids in the order given.
+/// with SQL valid at version 20. A ticket's id is its title.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn workspace_at_v20_with_duplicates(
     path: &std::path::Path,
     tickets: &[(&str, &str)],

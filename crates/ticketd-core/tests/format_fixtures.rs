@@ -17,7 +17,7 @@ fn fixture(version: i64) -> PathBuf {
 }
 
 /// A copy in a fresh folder, so no test touches the checked-in file.
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn copy_of(version: i64, dir: &Path) -> PathBuf {
     let copy = dir.join(format!("backup-v{version}.sqlite3"));
     std::fs::copy(fixture(version), &copy).unwrap();
@@ -25,7 +25,6 @@ fn copy_of(version: i64, dir: &Path) -> PathBuf {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn a_backup_saved_by_older_code_validates_restores_and_migrates_to_the_current_version() {
     for version in [55, 65, 72] {
         let dir = tempfile::tempdir().unwrap();

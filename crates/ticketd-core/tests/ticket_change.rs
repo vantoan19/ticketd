@@ -3,9 +3,6 @@
 //! Duplicate, which `change_ticket` answers by clearing the link and a batch (and so the
 //! combined single-ticket change) answers by refusing.
 
-// Setup helpers and the tables of entry points assert by panicking, as a test does.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 use serde_json::{Value, json};
 use ticketd_core::{
     BatchOperation, Error, Status, TicketChange, TicketPatch, Workspace, WriteRequest,
@@ -25,6 +22,7 @@ struct World {
     event_cursor: i64,
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn world(prepare: impl FnOnce(&mut Workspace, &str, &str)) -> World {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
@@ -51,6 +49,7 @@ fn world(prepare: impl FnOnce(&mut Workspace, &str, &str)) -> World {
 /// Everything a change leaves behind, with the values that differ between Workspaces
 /// (ids, times) replaced: the tickets, their history, their inbox entries and the
 /// Workspace events the change logged.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn outcome(world: &World, tickets: &[&str]) -> Value {
     let workspace = &world.workspace;
     let mut shown = Vec::new();
@@ -708,6 +707,7 @@ fn creating_a_ticket_is_the_same_change_through_every_entry() {
 }
 
 /// A ticket that duplicates `other`.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn duplicate(workspace: &mut Workspace, subject: &str, other: &str) {
     workspace.mark_duplicate(subject, other, None).unwrap();
 }
