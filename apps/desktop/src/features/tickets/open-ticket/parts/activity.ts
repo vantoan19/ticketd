@@ -1,6 +1,7 @@
 import { client, type Ticket } from "@/lib/api/client";
 import { latestUpdate } from "@/lib/api/progress";
 import {
+  byOffset,
   pagedRead,
   read,
   skip,
@@ -18,10 +19,7 @@ const activityRead = pagedRead({
   key: "activity-feed",
   call: (reference: string, offset: number) =>
     client.activityFeed(reference, offset),
-  next: (page, pages) =>
-    page.length === FEED_PAGE
-      ? pages.reduce((count, loaded) => count + loaded.length, 0)
-      : null,
+  next: byOffset(FEED_PAGE),
   join: (pages) => pages.flat(),
   failure: "load activity",
   more: "load more activity",

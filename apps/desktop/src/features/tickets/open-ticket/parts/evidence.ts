@@ -1,5 +1,5 @@
 import { client, type Evidence, type Ticket } from "@/lib/api/client";
-import { pagedRead, skip, usePagedRead } from "@/lib/workspace-reads";
+import { byOffset, pagedRead, skip, usePagedRead } from "@/lib/workspace-reads";
 
 /** The core answers evidence in pages of this many; a shorter page is the last. */
 const pageSize = 50;
@@ -8,8 +8,7 @@ const pageSize = 50;
 const evidenceRead = pagedRead({
   key: "evidence",
   call: (reference: string, offset) => client.evidence(reference, offset),
-  next: (page: Evidence[], pages) =>
-    page.length === pageSize ? pages.length * pageSize : null,
+  next: byOffset<Evidence>(pageSize),
   join: (pages: readonly Evidence[][]) => pages.flat(),
   failure: "load evidence",
   more: "load more evidence",

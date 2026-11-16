@@ -33,31 +33,58 @@ export function statusOf(
   return enabled ? "loading" : "idle";
 }
 
+type Kept = {
+  identity: string;
+  error: unknown;
+  action: string;
+  more: boolean;
+};
+
 /**
- * The failure in people's words; the same object until the failure changes.
- * TanStack clears the error when a retry of a never-answered read starts, so
- * the last one is kept (for the same read) until an answer succeeds.
+ * The failure in people's words, and whether it was a failed "Show more"; the
+ * same object until the failure changes. TanStack clears the error when a retry
+ * of a never-answered read starts, and `isFetchNextPageError` when any refetch
+ * starts, so the failure is kept as it was first worded (for the same read)
+ * until an answer succeeds.
  */
 export function useFailure(
   query: { status: "pending" | "error" | "success"; error: unknown },
   identity: string,
   action: string,
-): FailureDescription | null {
-  const [kept, setKept] = useState<{ identity: string; error: unknown } | null>(
-    null,
-  );
-  let error: unknown = null;
-  if (query.status === "error") error = query.error;
-  else if (query.status === "pending" && kept?.identity === identity) {
-    error = kept.error;
+  more = false,
+): { failure: FailureDescription | null; more: boolean } {
+  const [kept, setKept] = useState<Kept | null>(null);
+  let shown: Kept | null = null;
+  if (query.status === "error") {
+    shown =
+      kept?.error === query.error
+        ? kept
+        : { identity, error: query.error, action, more };
+    // Only a new failure is stored (a store on success would render twice). A
+    // read that has answered never goes back to "pending", so this stays right.
+    if (shown !== kept) setKept(shown);
+  } else if (query.status === "pending" && kept?.identity === identity) {
+    shown = kept;
   }
-  // Only a new failure is stored (a store on success would render twice). A
-  // read that has answered never goes back to "pending", so this stays correct.
-  if (query.status === "error" && kept?.error !== error) {
-    setKept({ identity, error });
-  }
-  return useMemo(
-    () => (error === null ? null : describeFailure(error, action)),
-    [error, action],
+  const error = shown?.error ?? null;
+  const worded = shown?.action ?? "";
+  const failure = useMemo(
+    () => (error === null ? null : describeFailure(error, worded)),
+    [error, worded],
   );
+  return { failure, more: shown?.more ?? false };
+}
+
+/**
+ * Adds `current` to a read's state as a getter, so a view that never asks for
+ * it does not re-render when it moves (it is a tracked property of the query).
+ */
+export function withCurrent<S extends object>(
+  state: S,
+  current: () => boolean,
+): S & { readonly current: boolean } {
+  const withGetter = Object.create(state, {
+    current: { get: current, enumerable: true },
+  });
+  return withGetter;
 }

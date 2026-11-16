@@ -76,6 +76,19 @@ export function pagedRead<A, P, V>(spec: {
   return { kind: "paged", ...spec };
 }
 
+/**
+ * `next` for a core that answers `pageSize` items at a time, from an offset: a
+ * full page means there may be another, a shorter one is the last.
+ */
+export function byOffset<T>(
+  pageSize: number,
+): (page: readonly T[], pages: readonly (readonly T[])[]) => number | null {
+  return (page, pages) =>
+    page.length === pageSize
+      ? pages.reduce((count, loaded) => count + loaded.length, 0)
+      : null;
+}
+
 /** The cache identity of a read with these arguments. */
 export function readKey(
   spec: { kind: string; key: string },

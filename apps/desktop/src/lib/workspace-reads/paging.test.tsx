@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { pagedRead } from "./catalog";
+import { byOffset, pagedRead } from "./catalog";
 import { fakeChangeSignal } from "./fake-signal";
 import { deferred, settle, wrap } from "./test-support";
 import { usePagedRead } from "./use-paged-read";
@@ -176,8 +176,50 @@ describe("paging", () => {
       "Couldn't load more of the list",
     );
     expect(result.current.value).toEqual(["a"]);
+    expect(result.current.failedMore).toBe(true);
     expect(result.current.loadingMore).toBe(false);
     await settle();
     expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("says a failed re-read is not a failed Show more", async () => {
+    const signal = fakeChangeSignal();
+    const call = pages({ n: 1 });
+    const spec = list(call);
+    const { result } = renderHook(() => usePagedRead(spec, null), {
+      wrapper: wrap(signal),
+    });
+    await waitFor(() => expect(result.current.value).toHaveLength(2));
+    expect(result.current.failedMore).toBe(false);
+
+    call.mockRejectedValueOnce(new Error("locked"));
+    act(() => signal.change());
+    await waitFor(() => expect(result.current.failure).not.toBeNull());
+    expect(result.current.failedMore).toBe(false);
+  });
+
+  it("pages by offset: a full page means another, a shorter one is the last", async () => {
+    const call = vi.fn(async (_args: null, offset: number) =>
+      offset === 0 ? ["a", "b"] : offset === 2 ? ["c", "d"] : ["e"],
+    );
+    const spec = pagedRead({
+      key: "by-offset",
+      call,
+      next: byOffset<string>(2),
+      join: (all: readonly string[][]) => all.flat(),
+      failure: "load",
+      more: "load more",
+    });
+    const { result } = renderHook(() => usePagedRead(spec, null), {
+      wrapper: wrap(),
+    });
+    await waitFor(() => expect(result.current.value).toEqual(["a", "b"]));
+    act(() => result.current.showMore());
+    await waitFor(() => expect(result.current.value).toHaveLength(4));
+    expect(call).toHaveBeenLastCalledWith(null, 2);
+    act(() => result.current.showMore());
+    await waitFor(() => expect(result.current.value).toHaveLength(5));
+    expect(call).toHaveBeenLastCalledWith(null, 4);
+    expect(result.current.more).toBe(false);
   });
 });

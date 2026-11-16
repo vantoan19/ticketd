@@ -1,6 +1,6 @@
 import type { Ticket } from "@/lib/api/client";
 import type { FailureDescription } from "@/lib/api/describe-failure";
-import { skip, ticketRead, useRead } from "@/lib/workspace-reads";
+import { skip, ticketRead, useRead, withCurrent } from "@/lib/workspace-reads";
 import { usePart, type PartArgs, type PartName, type PartState } from "./parts";
 
 export type TicketState = {
@@ -31,13 +31,13 @@ export function useTicket<Name extends PartName>(
   const state = useRead(ticketRead, reference ?? skip);
   const served = usePart(state.value, part, args);
   if (part !== undefined) return served;
-  return {
-    value:
-      state.value ?? (state.failure?.code === "not_found" ? null : undefined),
-    failure: state.failure,
-    retry: state.retry,
-    get current() {
-      return state.current;
+  return withCurrent(
+    {
+      value:
+        state.value ?? (state.failure?.code === "not_found" ? null : undefined),
+      failure: state.failure,
+      retry: state.retry,
     },
-  };
+    () => state.current,
+  );
 }

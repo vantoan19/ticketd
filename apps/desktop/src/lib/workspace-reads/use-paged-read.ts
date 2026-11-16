@@ -1,7 +1,12 @@
 import { useCallback, useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { readKey, skip, words, type PagedReadSpec, type Skip } from "./catalog";
-import { statusOf, useFailure, type ReadState } from "./read-state";
+import {
+  statusOf,
+  useFailure,
+  withCurrent,
+  type ReadState,
+} from "./read-state";
 import { useReads } from "./reads-context";
 import { useVisible } from "./visibility-context";
 
@@ -11,6 +16,8 @@ export type PagedState<V> = ReadState<V> & {
   /** Reads one more page; ignored while one is loading. */
   showMore(): void;
   loadingMore: boolean;
+  /** Whether `failure` is a failed `showMore()`, not a failed read or re-read. */
+  failedMore: boolean;
 };
 
 /**
@@ -40,10 +47,11 @@ export function usePagedRead<A, V, P>(
     args === skip
       ? ""
       : words(query.isFetchNextPageError ? spec.more : spec.failure, args);
-  const failure = useFailure(
+  const { failure, more: failedMore } = useFailure(
     query,
     JSON.stringify(readKey(spec, args)),
     action,
+    query.isFetchNextPageError,
   );
   const data = query.data;
   const value = useMemo(
@@ -57,16 +65,17 @@ export function usePagedRead<A, V, P>(
   const showMore = useCallback(() => {
     if (!loadingMore) void fetchNextPage({ cancelRefetch: false });
   }, [fetchNextPage, loadingMore]);
-  return {
-    value,
-    failure,
-    retry,
-    status: statusOf(value !== undefined, failure !== null, enabled),
-    get current() {
-      return query.data !== undefined && !query.isStale;
+  return withCurrent(
+    {
+      value,
+      failure,
+      failedMore,
+      retry,
+      status: statusOf(value !== undefined, failure !== null, enabled),
+      more: query.hasNextPage,
+      showMore,
+      loadingMore,
     },
-    more: query.hasNextPage,
-    showMore,
-    loadingMore,
-  };
+    () => query.data !== undefined && !query.isStale,
+  );
 }

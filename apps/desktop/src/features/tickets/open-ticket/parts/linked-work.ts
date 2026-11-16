@@ -5,6 +5,7 @@ import {
   pagedRead,
   skip,
   usePagedRead,
+  withCurrent,
   type PagedState,
 } from "@/lib/workspace-reads";
 
@@ -23,7 +24,6 @@ const relationshipsRead = pagedRead({
 
 /** The failure a read that already has links shows: they are kept, the refresh failed. */
 const refreshing = "Couldn't refresh relationships";
-const loadingMore = "Couldn't load more links";
 
 export type LinkedWorkRead = Omit<PagedState<Relationships>, "failure"> & {
   /** Why the links could not be read or refreshed; the links shown stay. */
@@ -35,8 +35,7 @@ export type LinkedWorkRead = Omit<PagedState<Relationships>, "failure"> & {
 /** The Ticket's linked work, paged: parent, subtickets, blockers, related, duplicates. */
 export function useLinkedWork(record: Ticket | undefined): LinkedWorkRead {
   const state = usePagedRead(relationshipsRead, record?.reference ?? skip);
-  const { value, failure: raw } = state;
-  const moreFailed = raw?.title === loadingMore;
+  const { value, failure: raw, failedMore: moreFailed } = state;
   const failure = useMemo(
     () =>
       raw === null || moreFailed
@@ -46,17 +45,18 @@ export function useLinkedWork(record: Ticket | undefined): LinkedWorkRead {
           : raw,
     [raw, moreFailed, value],
   );
-  return {
-    value,
-    failure,
-    moreFailure: moreFailed ? raw : null,
-    retry: state.retry,
-    status: state.status,
-    get current() {
-      return state.current;
+  return withCurrent(
+    {
+      value,
+      failure,
+      failedMore: moreFailed,
+      moreFailure: moreFailed ? raw : null,
+      retry: state.retry,
+      status: state.status,
+      more: state.more,
+      showMore: state.showMore,
+      loadingMore: state.loadingMore,
     },
-    more: state.more,
-    showMore: state.showMore,
-    loadingMore: state.loadingMore,
-  };
+    () => state.current,
+  );
 }

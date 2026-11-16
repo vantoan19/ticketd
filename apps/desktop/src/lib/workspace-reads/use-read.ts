@@ -1,7 +1,12 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readKey, skip, words, type ReadSpec, type Skip } from "./catalog";
-import { statusOf, useFailure, type ReadState } from "./read-state";
+import {
+  statusOf,
+  useFailure,
+  withCurrent,
+  type ReadState,
+} from "./read-state";
 import { useReads } from "./reads-context";
 import { useVisible } from "./visibility-context";
 
@@ -27,20 +32,20 @@ export function useRead<A, V>(
     },
     reads.client,
   );
-  const failure = useFailure(
+  const { failure } = useFailure(
     query,
     JSON.stringify(readKey(spec, args)),
     args === skip ? "" : words(spec.failure, args),
   );
   const refetch = query.refetch;
   const retry = useCallback(() => void refetch(), [refetch]);
-  return {
-    value: query.data,
-    failure,
-    retry,
-    status: statusOf(query.data !== undefined, failure !== null, enabled),
-    get current() {
-      return query.data !== undefined && !query.isStale;
+  return withCurrent(
+    {
+      value: query.data,
+      failure,
+      retry,
+      status: statusOf(query.data !== undefined, failure !== null, enabled),
     },
-  };
+    () => query.data !== undefined && !query.isStale,
+  );
 }
