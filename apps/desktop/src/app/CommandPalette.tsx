@@ -123,6 +123,7 @@ export function CommandPalette({
   ticket,
   chatsEnabled,
   returnFocus,
+  resolveReturnFocus,
   reference,
   initialScope,
   initialTicket,
@@ -164,6 +165,7 @@ export function CommandPalette({
   plans: { id: string; name: string; archived: boolean }[];
   refresh: () => Promise<void>;
   returnFocus: RefObject<HTMLElement | null>;
+  resolveReturnFocus?: () => HTMLElement | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   go: (target: GoTo) => void;
@@ -396,6 +398,7 @@ export function CommandPalette({
         <DialogContent
           size="palette"
           returnFocus={returnFocus}
+          {...(resolveReturnFocus && { resolveReturnFocus })}
           variant="flush"
           showCloseButton={false}
           onOpenAutoFocus={(event) => {

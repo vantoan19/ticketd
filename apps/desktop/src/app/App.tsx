@@ -10,6 +10,7 @@ import {
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
 import { usePageZoom } from "./use-page-zoom";
+import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
 import { PageZoomStatus } from "./PageZoomStatus";
 import { CommandPalette } from "./CommandPalette";
 import { useCommandKeys, type GoTo } from "./use-command-keys";
@@ -518,6 +519,10 @@ function AppContent() {
   };
   useReminderNotifications(openNotifiedTicket);
   const isMobile = useIsMobile();
+  const resolvePaletteFocus = useResponsiveNavigationFocus(
+    isMobile,
+    paletteReturn,
+  );
   /**
    * The run a ticket, the Inbox or a notification asked to see, opened by the
    * Automations page.
@@ -842,6 +847,7 @@ function AppContent() {
                           }}
                           open={paletteOpen}
                           returnFocus={paletteReturn}
+                          resolveReturnFocus={resolvePaletteFocus}
                           onOpenChange={setPaletteOpen}
                           go={goTo}
                           chatsEnabled={chat.enabled}

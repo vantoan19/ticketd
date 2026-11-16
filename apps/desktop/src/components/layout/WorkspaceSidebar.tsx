@@ -330,6 +330,7 @@ export function WorkspaceSidebar({
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
       className="sidebar"
+      data-responsive-navigation="navigation"
       data-collapsed={collapsed || undefined}
       closeOnAction
     >
@@ -381,6 +382,7 @@ export function WorkspaceSidebar({
           <Button
             variant="jump"
             aria-label="Search or jump to…"
+            data-responsive-navigation="search"
             aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
             onClick={onOpenPalette}
           >

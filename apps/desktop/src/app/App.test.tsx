@@ -45,11 +45,20 @@ Element.prototype.scrollIntoView = () => {};
 
 let narrowViewport = false;
 let ticketListWidth: number | null = null;
+const viewportListeners = new Set<() => void>();
+function resizeViewport(narrow: boolean) {
+  narrowViewport = narrow;
+  viewportListeners.forEach((listener) => listener());
+}
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
     matches: narrowViewport,
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(_event: string, listener: () => void) {
+      viewportListeners.add(listener);
+    },
+    removeEventListener(_event: string, listener: () => void) {
+      viewportListeners.delete(listener);
+    },
   }),
 });
 
@@ -9945,6 +9954,130 @@ test("page zoom keeps the applied value on native failure, exposes raw Details a
     expect(screen.queryByText("Zoom 125%")).toBeNull();
     fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
     expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+  } finally {
+    uninstall();
+  }
+});
+
+test("responsive navigation preserves logical focus when the focused sidebar control disappears", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  const settings = await screen.findByRole("button", { name: "Settings" });
+  fireEvent.click(settings);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Back to tickets" }),
+  );
+  const returned = await screen.findByRole("button", { name: "Settings" });
+  expect(document.activeElement).toBe(returned);
+  act(() => resizeViewport(true));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Open navigation" }),
+  );
+  const search = screen.getByRole("button", { name: "Search" });
+  search.focus();
+  act(() => resizeViewport(false));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Search or jump to…" }),
+  );
+  act(() => resizeViewport(true));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Search" }),
+  );
+});
+
+test("palette Reset zoom restores the visible Search equivalent when native zoom replaces its narrow opener", async () => {
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (
+      command === "plugin:window|set_background_color" ||
+      command === "plugin:webview|set_webview_background_color"
+    )
+      return;
+    if (command === "plugin:webview|set_webview_zoom") {
+      resizeViewport((args as { value: number }).value >= 1.75);
+      return;
+    }
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  render(<App />);
+  const settings = await screen.findByRole("button", { name: "Settings" });
+  settings.focus();
+  const uninstall = installNativeZoomBridge();
+  try {
+    for (let step = 0; step < 5; step += 1) {
+      fireEvent.keyDown(document.activeElement!, { key: "=", ctrlKey: true });
+      await act(async () => {});
+    }
+    expect(await screen.findByText("Zoom 200%")).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Open navigation" }),
+    );
+    const search = screen.getByRole("button", { name: "Search" });
+    search.focus();
+    fireEvent.click(search);
+    const filter = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.change(filter, { target: { value: "> Reset zoom" } });
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Search or jump to…" }),
+      ),
+    );
+  } finally {
+    uninstall();
+  }
+});
+
+test("a newer typed Title keeps focus and its draft while delayed native zoom changes layout", async () => {
+  let finish: (() => void) | undefined;
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (
+      command === "plugin:window|set_background_color" ||
+      command === "plugin:webview|set_webview_background_color"
+    )
+      return;
+    if (command === "plugin:webview|set_webview_zoom")
+      return new Promise<void>((resolve) => {
+        finish = () => {
+          resizeViewport((args as { value: number }).value >= 1.75);
+          resolve();
+        };
+      });
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  render(<App />);
+  const jump = await screen.findByRole("button", {
+    name: "Search or jump to…",
+  });
+  jump.focus();
+  const uninstall = installNativeZoomBridge();
+  try {
+    fireEvent.keyDown(jump, { key: "=", ctrlKey: true });
+    // Queue the final target while native zoom is still pending.
+    for (let step = 0; step < 4; step += 1)
+      fireEvent.keyDown(jump, { key: "=", ctrlKey: true });
+    fireEvent.click(sidebarNewTicket());
+    const title = await screen.findByRole("textbox", { name: "Title" });
+    title.focus();
+    fireEvent.change(title, {
+      target: { value: "Retain my responsive draft" },
+    });
+    await act(async () => finish?.());
+    await act(async () => finish?.());
+    expect(await screen.findByText("Zoom 200%")).toBeTruthy();
+    expect(document.activeElement).toBe(title);
+    expect((title as HTMLInputElement).value).toBe(
+      "Retain my responsive draft",
+    );
+    fireEvent.keyDown(title, { key: "0", ctrlKey: true });
+    await act(async () => finish?.());
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+    expect(document.activeElement).toBe(title);
+    expect((title as HTMLInputElement).value).toBe(
+      "Retain my responsive draft",
+    );
   } finally {
     uninstall();
   }

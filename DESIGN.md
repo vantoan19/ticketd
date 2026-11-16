@@ -841,7 +841,7 @@ to its opener. The palette's View group follows the navigation and creation
 commands and offers Zoom in, Zoom out and Reset zoom, each with the confirmed
 percentage (or Changing…) and shortcut hints from the same registry as Settings
 › Keyboard shortcuts. Native page zoom uses only the
-`core:webview:allow-set-webview-zoom` capability on the main window.
+`core:webview:allow-set-webview-zoom` capability on the main window. When zoom or window resizing replaces a focused navigation control, focus moves without scrolling to its visible equivalent: sidebar Search and header Search replace each other, and other sidebar actions lead to Open navigation. A palette invocation follows that same replacement if its opener disappears before close. A connected, visible editor or newer focused control keeps focus and its draft; native completion does not refocus it.
 
 Keyboard access must cover navigation, row selection/opening, resizing, property changes, editing, overlay dismissal, and return to the list. Preserve distinct focus and selection. Announce save errors and meaningful async results without repeatedly announcing background polling. Use landmark regions and a logical heading sequence. Do not assign a visual heading level solely to obtain a font size.
 

@@ -40,7 +40,10 @@ export function NarrowNav({
     <span className="shell-nav">
       <span className="shell-nav-button">
         <Tooltip content="Open navigation" side="bottom">
-          <SidebarTrigger aria-label={name}>
+          <SidebarTrigger
+            aria-label={name}
+            data-responsive-navigation="navigation"
+          >
             <Menu aria-hidden="true" />
           </SidebarTrigger>
         </Tooltip>
@@ -50,6 +53,7 @@ export function NarrowNav({
       </span>
       <IconButton
         label="Search"
+        data-responsive-navigation="search"
         shortcut={shortcutLabel("command-palette")}
         aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
         onClick={onOpenPalette}
