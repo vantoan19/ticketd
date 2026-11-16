@@ -59,7 +59,8 @@
 .activity-composer-idle {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 44px;
+  justify-content: space-between;
   padding: 0 12px;
   border: 0;
   border-radius: var(--radius-panel);
@@ -189,7 +190,15 @@
   margin-top: 16px;
 }
 
-/* Reserve the text and controls before opening, so the timeline stays put. */
+/* Editing controls float in the existing pane bar; focus never inserts a row. */
 .activity-composer {
-  min-height: 80px;
+  min-height: 44px;
+}
+.activity-composer > .markdown-editor > .rich-document {
+  min-height: 44px;
+  padding-block: 12px;
+}
+
+.activity-composer > .markdown-editor .cm-content {
+  padding-block: 12px;
 }

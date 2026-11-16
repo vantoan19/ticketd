@@ -15,18 +15,20 @@ export function useFocusReturn(
     onOpenAutoFocus?: AutoFocusHandler;
     onCloseAutoFocus?: AutoFocusHandler;
   },
+  invocation?: HTMLElement | null,
 ) {
   const opener = useRef<HTMLElement | null>(null);
   return {
     onOpenAutoFocus(event: Event) {
       const active = document.activeElement;
-      opener.current = active instanceof HTMLElement ? active : null;
+      opener.current =
+        invocation ?? (active instanceof HTMLElement ? active : null);
       handlers.onOpenAutoFocus?.(event);
     },
     onCloseAutoFocus(event: Event) {
       handlers.onCloseAutoFocus?.(event);
       if (event.defaultPrevented) return;
-      const target = returnTo?.current ?? opener.current;
+      const target = returnTo?.current ?? invocation ?? opener.current;
       if (target?.isConnected && target !== document.body) {
         event.preventDefault();
         target.focus();

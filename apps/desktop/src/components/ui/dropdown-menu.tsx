@@ -40,6 +40,7 @@ function DropdownMenuContent({
   sideOffset = 4,
   collisionPadding = 16,
   collisionBoundary,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   const boundary = useOverlayBoundary();
@@ -55,6 +56,13 @@ function DropdownMenuContent({
           className,
         )}
         {...props}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          // A selected action can open a dialog before this menu unmounts.
+          // The dialog owns focus until it closes and returns to this trigger.
+          if (document.activeElement?.closest('[data-slot="dialog-content"]'))
+            event.preventDefault();
+        }}
       />
     </DropdownMenuPrimitive.Portal>
   );

@@ -1,3 +1,4 @@
+import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { onTicketUpdate } from "./activity-composer-request";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
@@ -76,7 +77,7 @@ import type { Entry } from "@/lib/api/history";
 import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
 import { formatDateTime } from "@/lib/format";
-import { shortcutLabel } from "@/lib/shortcuts";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
@@ -894,7 +895,7 @@ export function Activity({
           </Button>
         </Alert>
       )}
-      {error ? (
+      {!composing && error ? (
         <FailureAlert size="compact" failure={error} />
       ) : (
         loadError && (
@@ -1000,53 +1001,67 @@ export function Activity({
                   </Badge>
                 </div>
               )}
-              <div className="activity-composer-row">
-                <span className="activity-caption">
-                  {hasDraft(saved) ? "Draft saved" : ""}
-                </span>
-                <span ref={setControlsHost} className="activity-controls" />
-                {plus}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => {
-                    if (hasDraft(saved)) clearDraft();
-                    setPicking(false);
-                    setComposing(false);
-                  }}
-                >
-                  {hasDraft(saved) ? "Discard draft" : "Cancel"}
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={pending || !hasText}
-                  aria-describedby={!hasText ? postHintId : undefined}
-                >
-                  {pending ? "Saving…" : "Post update"}
-                  {!pending && (
-                    <Kbd tone="inverted" aria-hidden="true">
-                      {submitHint}
-                    </Kbd>
-                  )}
-                </Button>
-                <span id={postHintId} className="sr-only">
-                  Write an update to post.
-                </span>
-              </div>
+              <FloatingEditBar
+                status={hasDraft(saved) ? "Draft saved" : ""}
+                controlsRef={setControlsHost}
+                feedback={
+                  error && (
+                    <FailureAlert
+                      size="compact"
+                      failure={error}
+                      onRetry={() => composerRef.current?.requestSubmit()}
+                    />
+                  )
+                }
+                actions={
+                  <>
+                    {plus}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => {
+                        if (hasDraft(saved)) clearDraft();
+                        setPicking(false);
+                        setComposing(false);
+                      }}
+                    >
+                      {hasDraft(saved) ? "Discard draft" : "Cancel"}
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => composerRef.current?.requestSubmit()}
+                      size="sm"
+                      disabled={pending || !hasText}
+                      aria-describedby={!hasText ? postHintId : undefined}
+                    >
+                      {pending ? "Saving…" : "Post update"}
+                      {!pending && (
+                        <Kbd tone="inverted" aria-hidden="true">
+                          {submitHint}
+                        </Kbd>
+                      )}
+                    </Button>
+                    <span id={postHintId} className="sr-only">
+                      Write an update to post.
+                    </span>
+                  </>
+                }
+              />
             </>
           ) : (
             <button
               type="button"
               className="activity-composer-idle"
+              aria-keyshortcuts={ariaKeyShortcuts("ticket-update")}
               onClick={() => {
                 setComposing(true);
                 setFocusUpdate((count) => count + 1);
               }}
             >
-              Write an update…
+              <span>Write an update…</span>
+              <Kbd aria-hidden="true">{shortcutLabel("ticket-update")}</Kbd>
             </button>
           )}
         </form>
@@ -1293,6 +1308,9 @@ function UpdateActions({
   repliedRef: React.RefObject<boolean>;
   focusComposer: () => void;
 }) {
+  const requested = useRef(false);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
     <span className="activity-row-actions">
       <Popover open={confirming} onOpenChange={onConfirm}>
@@ -1300,6 +1318,7 @@ function UpdateActions({
           <PopoverAnchor asChild>
             <DropdownMenuTrigger asChild>
               <IconButton
+                ref={trigger}
                 type="button"
                 tooltipSide="top"
                 disabled={disabled}
@@ -1312,6 +1331,12 @@ function UpdateActions({
           <DropdownMenuContent
             align="end"
             onCloseAutoFocus={(event) => {
+              if (requested.current) {
+                requested.current = false;
+                event.preventDefault();
+                onConfirm(true);
+                return;
+              }
               // Focus goes to the composer, not back to the menu button.
               if (repliedRef.current) {
                 event.preventDefault();
@@ -1329,7 +1354,9 @@ function UpdateActions({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => window.setTimeout(() => onConfirm(true), 0)}
+              onSelect={() => {
+                requested.current = true;
+              }}
             >
               Delete update
             </DropdownMenuItem>
@@ -1339,12 +1366,16 @@ function UpdateActions({
           align="end"
           role="alertdialog"
           aria-label="Delete this update?"
+          onCloseAutoFocus={(event) => {
+            if (trigger.current?.isConnected) {
+              event.preventDefault();
+              trigger.current.focus();
+            }
+          }}
           onOpenAutoFocus={(event) => {
             // Cancel takes focus: a destructive answer is never the default.
             event.preventDefault();
-            (event.currentTarget as HTMLElement | null)
-              ?.querySelector<HTMLButtonElement>("[data-cancel]")
-              ?.focus();
+            cancel.current?.focus();
           }}
         >
           <p className="activity-confirm-title">Delete this update?</p>
@@ -1358,6 +1389,7 @@ function UpdateActions({
               type="button"
               variant="ghost"
               size="sm"
+              ref={cancel}
               data-cancel
               onClick={() => onConfirm(false)}
             >

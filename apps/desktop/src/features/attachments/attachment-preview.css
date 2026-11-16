@@ -41,17 +41,24 @@
 .attachment-rename {
   display: flex;
   flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
 }
 .attachment-rename > input {
-  flex: 1 1 200px;
+  flex: 1 1 0;
   min-width: 0;
 }
+.attachment-rename > button,
+.attachment-rename > span {
+  flex-shrink: 0;
+}
 .attachment-rename-failure {
-  flex-basis: 100%;
+  position: absolute;
+  top: 48px;
+  inset-inline: 8px;
+  z-index: 1;
 }
 .attachment-preview-failure {
   flex: none;

@@ -4476,9 +4476,9 @@ test.each([
 test("description editing keeps its state row and floats controls outside the prose", async () => {
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets")
-      return [bulkTicket(1, { body: "A description" })];
+      return [bulkTicket(1, { id: "description-only", body: "A description" })];
     if (command === "show_ticket")
-      return bulkTicket(1, { body: "A description" });
+      return bulkTicket(1, { id: "description-only", body: "A description" });
     return bridgeDefault(command);
   });
   render(<App />);
@@ -4515,7 +4515,10 @@ test("description editing keeps its state row and floats controls outside the pr
 });
 
 test("floating save feedback retains a failed description draft and retries it", async () => {
-  let stored = bulkTicket(1, { body: "- [ ] Keep this draft" });
+  let stored = bulkTicket(1, {
+    id: "description-retry",
+    body: "- [ ] Keep this draft",
+  });
   let failSave: (reason: Error) => void = () => {};
   let attempts = 0;
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
@@ -8874,3 +8877,524 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
     ).toBeGreaterThan(0);
   },
 );
+
+test("Plan Add tickets returns focus to its opener after keyboard dismissal", async () => {
+  const user = userEvent.setup();
+  const plan = { id: "P-focus", name: "Focus Plan", archived: false };
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "list_plans") return [plan];
+    if (command === "show_plan")
+      return { plan, counts: counted({}), members: [], documents: [] };
+    return bridgeDefault(command, args as undefined);
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /^Focus Plan/ }));
+  const add = await screen.findByRole("button", { name: "Add tickets" });
+  await user.click(add);
+  await screen.findByRole("dialog", { name: "Add tickets to Focus Plan" });
+  await user.keyboard("{Escape}");
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(add));
+});
+
+test("Activity Delete update transfers menu focus to safe confirmation and retries the same update", async () => {
+  const user = userEvent.setup();
+  const ticket = bulkTicket(1);
+  let deleted = false;
+  let fail = true;
+  const activity = {
+    id: "delete-owned",
+    ticket_id: ticket.id,
+    brief: "Authored outcome to remove",
+    reported_at: "2026-11-16T00:00:00Z",
+    updated_at: "2026-11-16T00:00:00Z",
+    editing_agent: null,
+    supporting_document_id: "kept-details",
+  };
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    if (command === "activity_feed")
+      return deleted ? [] : [{ type: "authored", activity }];
+    if (command === "show_document")
+      return {
+        id: "kept-details",
+        title: "Kept details",
+        body: "Supporting text",
+        created_at: activity.reported_at,
+        updated_at: activity.updated_at,
+        trashed: false,
+      };
+    if (command === "delete_activity") {
+      if (fail) throw new Error("Temporary write unavailable");
+      deleted = true;
+      return;
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /First/ }));
+  const actions = await screen.findByRole("button", {
+    name: /Actions for update from/,
+  });
+  actions.focus();
+  await user.keyboard("{Enter}");
+  await user.click(
+    await screen.findByRole(
+      "menuitem",
+      { name: "Delete update" },
+      { timeout: 1500 },
+    ),
+  );
+  let confirm = await screen.findByRole("alertdialog", {
+    name: "Delete this update?",
+  });
+  expect(
+    within(confirm).getByText("Its details stay in Documents."),
+  ).toBeTruthy();
+  await vi.waitFor(() =>
+    expect(document.activeElement).toBe(
+      within(confirm).getByRole("button", { name: "Cancel" }),
+    ),
+  );
+  await user.keyboard("{Escape}");
+  await vi.waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  actions.focus();
+  await user.keyboard("{Enter}");
+  await user.keyboard("{End}{Enter}");
+  confirm = await screen.findByRole("alertdialog", {
+    name: "Delete this update?",
+  });
+  await user.click(
+    within(confirm).getByRole("button", { name: "Delete update" }),
+  );
+  expect(await screen.findByText(/Couldn't delete the update/)).toBeTruthy();
+  expect(screen.getByText(activity.brief)).toBeTruthy();
+  fail = false;
+  await user.click(
+    within(confirm).getByRole("button", { name: "Delete update" }),
+  );
+  await vi.waitFor(() => expect(screen.queryByText(activity.brief)).toBeNull());
+  const calls = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "delete_activity",
+  );
+  expect(calls).toHaveLength(2);
+  expect(calls.map(([, args]) => args)).toEqual([
+    { reference: ticket.reference, id: activity.id },
+    { reference: ticket.reference, id: activity.id },
+  ]);
+});
+
+test("Plan multi-add is one retryable atomic request and Undo resumes only unfinished original Plans", async () => {
+  const user = userEvent.setup();
+  const plan = { id: "P-add", name: "Atomic Plan", archived: false };
+  const tickets = [bulkTicket(1), bulkTicket(2, { plan_id: "P-original" })].map(
+    (ticket) => ({
+      ...ticket,
+      title: ticket.title ?? "",
+      plan_id: ticket.plan_id as string | null,
+    }),
+  );
+  const requests = new Map<string, unknown>();
+  let failAdd = true;
+  let failUndo = true;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "list_plans")
+      return [
+        plan,
+        { id: "P-original", name: "Original Plan", archived: false },
+      ];
+    if (command === "find_tickets" || command === "search_tickets")
+      return tickets;
+    if (command === "show_plan")
+      return {
+        plan,
+        counts: counted({
+          todo: tickets.filter((t) => t.plan_id === plan.id).length,
+        }),
+        members: tickets.filter((t) => t.plan_id === plan.id),
+        documents: [],
+      };
+    if (command === "bulk_change") {
+      const request = args as {
+        references: string[];
+        change: { plan_id: string | null };
+        requestId: string;
+      };
+      if (requests.has(request.requestId))
+        return requests.get(request.requestId);
+      if (request.change.plan_id === plan.id && failAdd)
+        throw new Error("Atomic member validation failed");
+      if (request.change.plan_id === "P-original" && failUndo)
+        throw new Error("Original Plan temporarily unavailable");
+      const selected = tickets.filter((t) =>
+        request.references.includes(t.reference),
+      );
+      for (const ticket of selected) ticket.plan_id = request.change.plan_id;
+      const result = selected.map((t) => ({ ...t }));
+      requests.set(request.requestId, result);
+      return result;
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /^Atomic Plan/ }));
+  await user.click(await screen.findByRole("button", { name: "Add tickets" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Add tickets to Atomic Plan",
+  });
+  await user.type(within(dialog).getByRole("combobox"), "T-KQ");
+  await user.click(
+    await within(dialog).findByRole("option", { name: /T-KQ1/ }),
+  );
+  await user.click(within(dialog).getByRole("option", { name: /T-KQ2/ }));
+  await user.click(within(dialog).getByRole("button", { name: "Add tickets" }));
+  expect(await within(dialog).findByText(/Couldn't add tickets/)).toBeTruthy();
+  expect(tickets.map((t) => t.plan_id)).toEqual([null, "P-original"]);
+  expect(
+    within(dialog).getByText("2 selected, 1 from another Plan."),
+  ).toBeTruthy();
+  failAdd = false;
+  await user.click(within(dialog).getByRole("button", { name: "Add tickets" }));
+  await screen.findByText("Added 2 tickets to Atomic Plan");
+  const addCalls = bridge.invoke.mock.calls.filter(
+    ([c]) => c === "bulk_change",
+  );
+  expect(addCalls).toHaveLength(2);
+  expect(addCalls[0]?.[1]).toEqual(addCalls[1]?.[1]);
+  expect(tickets.map((t) => t.plan_id)).toEqual([plan.id, plan.id]);
+  await user.click(screen.getByRole("button", { name: "Undo" }));
+  expect(await screen.findByText(/1 of 2 tickets restored/)).toBeTruthy();
+  expect(tickets.map((t) => t.plan_id)).toEqual([null, plan.id]);
+  failUndo = false;
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(tickets.map((t) => t.plan_id)).toEqual([null, "P-original"]),
+  );
+  const undoCalls = bridge.invoke.mock.calls.filter(
+    ([c, a]) =>
+      c === "bulk_change" &&
+      (a as { change: { plan_id: string | null } }).change.plan_id !== plan.id,
+  );
+  expect(undoCalls).toHaveLength(3);
+  expect(undoCalls[1]?.[1]).toEqual(undoCalls[2]?.[1]);
+  expect(bridge.invoke.mock.calls.some(([c]) => c === "set_plan")).toBe(false);
+});
+
+test("Document History and Attachment Cleanup return keyboard focus to their mounted menu triggers", async () => {
+  const user = userEvent.setup();
+  const doc = {
+    id: "history-doc",
+    title: "History reader",
+    body: "Stable reader paragraph",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  const file = {
+    id: "cleanup-file",
+    display_name: "kept.txt",
+    original_filename: "kept.txt",
+    size_bytes: 5,
+    kind: "local_snapshot",
+    locator: "kept",
+    added_at: doc.created_at,
+  };
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "recent_documents")
+      return [{ id: doc.id, heading: doc.title }];
+    if (command === "open_document" || command === "show_document") return doc;
+    if (
+      command === "document_tags" ||
+      command === "record_versions" ||
+      command === "attachment_cleanup_reviews"
+    )
+      return [];
+    if (command === "document_version") return [doc.updated_at, false];
+    if (command === "search_attachments")
+      return [
+        {
+          attachment: file,
+          related: false,
+          usage: {
+            eligible: true,
+            protections: [],
+            legacy_drafts_pending: false,
+          },
+        },
+      ];
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Documents" }));
+  await user.click(await screen.findByRole("button", { name: doc.title }));
+  const actions = await screen.findByRole("button", {
+    name: "Document actions",
+  });
+  actions.focus();
+  await user.keyboard("{Enter}");
+  await user.click(await screen.findByRole("menuitem", { name: "History…" }));
+  await screen.findByRole("dialog", { name: "History" });
+  await user.keyboard("{Escape}");
+  await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+  await user.click(screen.getByRole("button", { name: "Attachments" }));
+  await screen.findByRole("button", { name: file.display_name });
+  const more = screen.getByRole("button", { name: "More library actions" });
+  more.focus();
+  await user.keyboard("{Enter}");
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Clean up unused files…" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Clean up unused files",
+  });
+  await user.click(
+    within(dialog).getAllByRole("button", { name: "Close" })[0]!,
+  );
+  await vi.waitFor(() => expect(document.activeElement).toBe(more));
+});
+
+test("Document save failure keeps its draft and offers Retry beside floating edit controls", async () => {
+  let stored = {
+    id: "save-kept",
+    title: "Kept reader",
+    body: "Paragraph under edit",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  let fail = true;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "recent_documents")
+      return [{ id: stored.id, heading: stored.title }];
+    if (command === "open_document" || command === "show_document")
+      return stored;
+    if (command === "document_tags") return [];
+    if (command === "document_version") return [stored.updated_at, false];
+    if (command === "save_document") {
+      if (fail) throw new Error("Save unavailable");
+      stored = { ...stored, title: (args as { title: string }).title };
+      return stored;
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+  fireEvent.click(await screen.findByRole("button", { name: stored.title }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  const title = screen.getByRole("textbox", { name: "Title" });
+  fireEvent.change(title, { target: { value: "Retained title draft" } });
+  const body = await screen.findByRole("textbox", {
+    name: "Document rich text",
+  });
+  body.focus();
+  expect(await screen.findByText(/Couldn't save the Document/)).toBeTruthy();
+  expect(title).toHaveProperty("value", "Retained title draft");
+  expect(body.textContent).toContain(stored.body);
+  expect(document.activeElement).toBe(body);
+  const feedback = screen.getByRole("alert");
+  expect(feedback.closest(".floating-edit-position")).toBeTruthy();
+  fireEvent.click(within(feedback).getByRole("button", { name: "Details" }));
+  expect(await screen.findByText("Save unavailable")).toBeTruthy();
+  fail = false;
+  fireEvent.click(within(feedback).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/Couldn't save the Document/)).toBeNull(),
+  );
+  await vi.waitFor(() =>
+    expect(
+      bridge.invoke.mock.calls.filter(([c]) => c === "save_document"),
+    ).toHaveLength(2),
+  );
+  const requests = bridge.invoke.mock.calls.filter(
+    ([c]) => c === "save_document",
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests[0]?.[1]).toEqual(requests[1]?.[1]);
+});
+
+test("Activity R focuses the single composer and failed posting retains its request and draft for Retry", async () => {
+  const ticket = bulkTicket(1);
+  let fail = true;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    if (command === "add_activity_with_details") {
+      if (fail) throw new Error("Post unavailable");
+      return {
+        id: "posted",
+        ticket_id: ticket.id,
+        brief: (args as { brief: string }).brief,
+        reported_at: "2026-11-16T00:00:00Z",
+        updated_at: "2026-11-16T00:00:00Z",
+        editing_agent: null,
+      };
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  await screen.findByRole("button", { name: "File" });
+  fireEvent.keyDown(document.body, { key: "r" });
+  const editor = await screen.findByRole("textbox", {
+    name: "New update rich text",
+  });
+  await vi.waitFor(() => expect(document.activeElement).toBe(editor));
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const source = screen.getByRole("textbox", { name: "New update source" });
+  fireEvent.change(source, {
+    target: { value: "Retry retained authored outcome" },
+  });
+  fireEvent.keyDown(source, { key: "Enter", ctrlKey: true });
+  const error = await screen.findByRole("alert");
+  expect(error.textContent).toContain("Couldn't post the update");
+  expect(error.closest(".floating-edit-position")).toBeTruthy();
+  expect(source).toHaveProperty("value", "Retry retained authored outcome");
+  expect(screen.getAllByRole("button", { name: "Post update" })).toHaveLength(
+    1,
+  );
+  fail = false;
+  fireEvent.click(within(error).getByRole("button", { name: "Retry" }));
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("textbox", { name: "New update source" }),
+    ).toBeNull(),
+  );
+  const requests = bridge.invoke.mock.calls.filter(
+    ([c]) => c === "add_activity_with_details",
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests[0]?.[1]).toEqual(requests[1]?.[1]);
+});
+
+test("Attachment Rename keeps the draft and identity through failure, keyboard retry and Escape", async () => {
+  const user = userEvent.setup();
+  let file = {
+    id: "rename-owned",
+    display_name: "before.txt",
+    original_filename: "before.txt",
+    size_bytes: 5,
+    kind: "local_snapshot",
+    locator: "fixture/before",
+    added_at: "2026-11-16T00:00:00Z",
+  };
+  let fail = true;
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "search_attachments")
+      return [
+        {
+          attachment: file,
+          related: false,
+          usage: {
+            eligible: false,
+            protections: [],
+            legacy_drafts_pending: false,
+          },
+        },
+      ];
+    if (command === "attachment_preview")
+      return {
+        attachment: file,
+        status: "unsupported",
+        media_type: null,
+        message: null,
+        can_open: true,
+        text_excerpt: { text: "Preview stays here", truncated: false },
+        usage: { total: 0, legacy_drafts_pending: false, entries: [] },
+      };
+    if (command === "rename_attachment") {
+      if (fail) throw new Error("Rename unavailable");
+      file = {
+        ...file,
+        display_name: (args as { displayName: string }).displayName,
+      };
+      return file;
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Attachments" }));
+  await user.click(
+    await screen.findByRole("button", { name: file.display_name }),
+  );
+  let more = await screen.findByRole("button", { name: "More actions" });
+  more.focus();
+  await user.keyboard("{Enter}");
+  await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+  const input = await screen.findByRole("textbox", { name: "Display name" });
+  await user.clear(input);
+  await user.type(input, "retained.txt{Enter}");
+  expect(await screen.findByText("Not renamed")).toBeTruthy();
+  expect(input).toHaveProperty("value", "retained.txt");
+  expect(screen.getByText("Preview stays here")).toBeTruthy();
+  fail = false;
+  input.focus();
+  await user.keyboard("{Enter}");
+  await screen.findByRole("heading", { name: "retained.txt" });
+  const writes = bridge.invoke.mock.calls.filter(
+    ([c]) => c === "rename_attachment",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[0]?.[1]).toEqual(writes[1]?.[1]);
+  more = screen.getByRole("button", { name: "More actions" });
+  await vi.waitFor(() => expect(document.activeElement).toBe(more));
+  more.focus();
+  await user.keyboard("{Enter}");
+  await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+  await user.type(
+    await screen.findByRole("textbox", { name: "Display name" }),
+    " abandoned{Escape}",
+  );
+  expect(screen.queryByRole("textbox", { name: "Display name" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "retained.txt" })).toBeTruthy();
+  await vi.waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "More actions" }),
+    ),
+  );
+});
+
+test("Ticket description and update draft share one visible floating bar and follow field focus", async () => {
+  const ticket = bulkTicket(1, {
+    id: "shared-editor-bars",
+    body: "Description beside an update draft",
+  });
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  await screen.findByRole("button", { name: "File" });
+  fireEvent.keyDown(document.body, { key: "r" });
+  const update = await screen.findByRole("textbox", {
+    name: "New update rich text",
+  });
+  await vi.waitFor(() => expect(document.activeElement).toBe(update));
+  expect(screen.getAllByRole("group", { name: "Edit controls" })).toHaveLength(
+    1,
+  );
+  fireEvent.click(screen.getByText(ticket.body));
+  const description = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  description.focus();
+  expect(screen.getAllByRole("group", { name: "Edit controls" })).toHaveLength(
+    1,
+  );
+  expect(screen.getByRole("button", { name: "Done editing" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Post update" })).toBeNull();
+  await act(
+    async () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
+  screen.getByRole("textbox", { name: "New update rich text" }).focus();
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "Post update" })).toBeTruthy();
+  expect(
+    screen.getAllByRole("button", { name: "Edit Markdown source" }),
+  ).toHaveLength(1);
+});

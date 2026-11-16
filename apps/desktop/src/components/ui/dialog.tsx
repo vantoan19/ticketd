@@ -7,10 +7,48 @@ import { Button } from "@/components/ui/button";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useFocusReturn } from "@/components/ui/use-focus-return";
 
+type Invocation = { element: HTMLElement | null; rect: DOMRect | null };
+const DialogInvocation = React.createContext<Invocation | null>(null);
+
+function captureInvocation(): Invocation {
+  let element =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const menu = element?.closest("[role=menu]");
+  if (menu?.id) {
+    element =
+      [...document.querySelectorAll<HTMLElement>("[aria-controls]")].find(
+        (trigger) => trigger.getAttribute("aria-controls") === menu.id,
+      ) ?? element;
+  }
+  return {
+    element,
+    rect:
+      element && element !== document.body
+        ? element.getBoundingClientRect()
+        : null,
+  };
+}
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+  const [invocation, setInvocation] = React.useState(() => ({
+    open: Boolean(props.open),
+    origin: props.open ? captureInvocation() : null,
+  }));
+  if (Boolean(props.open) !== invocation.open) {
+    setInvocation({
+      open: Boolean(props.open),
+      origin: props.open ? captureInvocation() : invocation.origin,
+    });
+  }
+  return (
+    <DialogInvocation value={invocation.origin}>
+      <DialogPrimitive.Root data-slot="dialog" {...props} />
+    </DialogInvocation>
+  );
 }
 
 function DialogTrigger({
@@ -78,14 +116,26 @@ function DialogContent({
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
-  const focus = useFocusReturn(returnFocus, {
-    ...(onOpenAutoFocus && { onOpenAutoFocus }),
-    ...(onCloseAutoFocus && { onCloseAutoFocus }),
-  });
+  const invocation = React.useContext(DialogInvocation);
+  const focus = useFocusReturn(
+    returnFocus,
+    {
+      ...(onOpenAutoFocus && { onOpenAutoFocus }),
+      ...(onCloseAutoFocus && { onCloseAutoFocus }),
+    },
+    invocation?.element,
+  );
   return (
     <DialogPortal data-slot="dialog-portal">
       {overlay && <DialogOverlay />}
       <DialogPrimitive.Content
+        ref={(panel) => {
+          const rect = invocation?.rect;
+          if (panel && rect && size !== "palette") {
+            const left = panel.offsetLeft - panel.offsetWidth / 2;
+            panel.style.transformOrigin = `${rect.left + rect.width / 2 - left}px ${rect.top + rect.height / 2 - panel.offsetTop}px`;
+          }
+        }}
         data-slot="dialog-content"
         data-size={size ?? "default"}
         data-surface={surface}
