@@ -1,3 +1,4 @@
+import { pageZoomFactor } from "@/lib/page-zoom";
 import { PhysicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -57,10 +58,15 @@ export function keepWebviewInStep() {
         win.scaleFactor(),
         win.innerSize(),
       ]);
+      const zoom = pageZoomFactor();
+      // WebView2 includes page zoom in DPR; WebKit keeps display DPR separate.
+      // Compare the unzoomed page so accessible zoom is not mistaken for the
+      // wake-from-sleep display-scale failure this repair addresses.
+      const dprZoom = /win/i.test(navigator.platform) ? zoom : 1;
       const page = {
-        dpr: window.devicePixelRatio,
-        width: window.innerWidth,
-        height: window.innerHeight,
+        dpr: window.devicePixelRatio / dprZoom,
+        width: window.innerWidth * zoom,
+        height: window.innerHeight * zoom,
       };
       if (outOfStep(page, { scale, ...size })) await repair(win);
     } catch {
