@@ -1,17 +1,14 @@
 //! Commands for the Automations page. The rules live in the core; these translate.
 
-use std::sync::Arc;
-
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
-use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::{
     Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationExample,
-    AutomationRun, AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
-    DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE, RunAnswer,
+    AutomationRun, AutomationRunStatus, AutomationRunTicket, DEFAULT_AUTOMATION_RUNS_AT_ONCE,
+    MOST_AUTOMATION_RUNS_AT_ONCE, RunAnswer,
 };
 
-use crate::chat_commands::ChatBridge;
+use crate::automation_runner::AutomationRunner;
 use crate::open_workspace;
 
 /// An agent as the Agents list shows it: with the Automations that use it, which
@@ -119,19 +116,18 @@ pub fn automation_update(
         .map_err(|error| error.to_string())
 }
 
-/// Deletes an Automation, ends its active runs and interrupts the agents they
-/// were running: the core no longer takes those turns' outcomes.
+/// Deletes an Automation. The runner ends its active runs and closes the agents
+/// they had working.
 #[tauri::command]
-pub async fn automation_delete(bridge: State<'_, ChatBridge>, id: String) -> Result<(), String> {
-    let chats = open_workspace()
-        .and_then(|mut workspace| workspace.delete_automation(&id))
-        .map_err(|error| error.to_string())?;
-    for chat_id in chats {
-        // ponytail: as for Stop, an interrupt that fails leaves the agent to its
-        // turn and time limits; the run has ended either way.
-        let _ = bridge.chats().stop(&chat_id).await;
-    }
-    Ok(())
+pub async fn automation_delete(
+    runner: State<'_, AutomationRunner>,
+    id: String,
+) -> Result<(), String> {
+    let runner = runner.get().map_err(|error| error.to_string())?;
+    runner
+        .delete_automation(&id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// On or off for this device only.
@@ -237,30 +233,18 @@ pub fn automation_run_get(id: String) -> Result<AutomationRun, String> {
         .map_err(|error| error.to_string())
 }
 
-/// Ends a run in progress as Needs attention, and interrupts the agent it was
-/// running: the core no longer takes that turn's outcome, so nothing waits for it.
+/// Ends a run in progress as Needs attention. The runner closes the agent it had
+/// working: the core no longer takes that turn's outcome, so nothing waits for it.
 #[tauri::command]
 pub async fn automation_run_stop(
-    bridge: State<'_, ChatBridge>,
+    runner: State<'_, AutomationRunner>,
     id: String,
 ) -> Result<AutomationRun, String> {
-    let (stopped, chat_id) = open_workspace()
-        .and_then(|mut workspace| {
-            let chat_id = workspace
-                .automation_run(&id)?
-                .steps
-                .into_iter()
-                .find(|step| step.status == AutomationStepStatus::Running)
-                .and_then(|step| step.chat_id);
-            Ok((workspace.stop_automation_run(&id)?, chat_id))
-        })
-        .map_err(|error| error.to_string())?;
-    if let Some(chat_id) = chat_id {
-        // ponytail: an interrupt that fails leaves the agent to its turn and time
-        // limits; the run has ended either way.
-        let _ = bridge.chats().stop(&chat_id).await;
-    }
-    Ok(stopped)
+    let runner = runner.get().map_err(|error| error.to_string())?;
+    runner
+        .stop_run(&id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// Queues a new run for the event that started a finished one, which then no
@@ -290,23 +274,16 @@ pub fn automation_run_dismiss(id: String) -> Result<AutomationRun, String> {
 }
 
 /// "Stop it and turn off": off for this device, with the Automation's active runs
-/// ended as Needs attention and their agents interrupted.
+/// ended as Needs attention and their agents closed.
 #[tauri::command]
 pub async fn automation_stop_and_turn_off(
-    bridge: State<'_, ChatBridge>,
+    runner: State<'_, AutomationRunner>,
     id: String,
 ) -> Result<Automation, String> {
-    let stopped = match bridge.chats().automation_host() {
-        Some(host) => {
-            let open: WorkspaceOpener = Arc::new(open_workspace);
-            ticketd_automation_runner::stop_and_turn_off(&open, &host, &id).await
-        }
-        // Chat is off: no agent is running, so there is only the record to change.
-        None => open_workspace()
-            .and_then(|mut workspace| workspace.stop_and_turn_off_automation(&id).map(drop)),
-    };
-    stopped
-        .and_then(|()| open_workspace()?.automation(&id))
+    let runner = runner.get().map_err(|error| error.to_string())?;
+    runner
+        .stop_and_turn_off(&id)
+        .await
         .map_err(|error| error.to_string())
 }
 

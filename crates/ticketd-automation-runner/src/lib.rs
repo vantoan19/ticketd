@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use ticketd_chat_host::{ChatHost, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
-    AgentStart, AutomationAgent, AutomationNotification, AutomationRun, Error, RunAction,
-    StepOutcome,
+    AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
+    RunAction, StepOutcome,
 };
 
 use first_message::first_message;
@@ -46,6 +46,12 @@ enum Ran {
     AgentStopped(Option<StopReason>),
 }
 
+/// The Chat host, while there is one to run agents on. The host answers `None`
+/// while nothing may run: Chat is off, a backup is being restored, or it could not
+/// start. Asked each time it is needed, so the runner follows Chat being switched off
+/// and on.
+pub type HostSource = Arc<dyn Fn() -> Option<ChatHost> + Send + Sync>;
+
 /// Shows a desktop notification, or says why it could not. The host supplies it: the
 /// runner knows what to say, not how a desktop shows it.
 pub type Notifier = Arc<dyn Fn(AutomationNotification) -> Result<(), String> + Send + Sync>;
@@ -57,7 +63,7 @@ pub struct Runner {
 
 struct Inner {
     open_workspace: WorkspaceOpener,
-    host: ChatHost,
+    host: HostSource,
     notifier: Notifier,
     /// The runs this runner is executing. A run that is Running in the Workspace
     /// and not here has nothing behind it.
@@ -78,7 +84,7 @@ impl Runner {
     /// end as Needs attention before anything new starts. Nothing retries by itself.
     pub fn new(
         open_workspace: WorkspaceOpener,
-        host: ChatHost,
+        host: HostSource,
         notifier: Notifier,
     ) -> Result<Self, Error> {
         open_workspace()?.end_running_automation_runs(&[], RESTARTED)?;
@@ -109,10 +115,27 @@ impl Runner {
     /// Every part is tried, so one that fails does not hold up the others; the
     /// first failure is returned for the host to report.
     pub fn tick(&self) -> Result<(), Error> {
+        // Chat off or a restore under way: nothing is matched, and each cursor holds.
+        if (self.inner.host)().is_none() {
+            return Ok(());
+        }
         let recovered = self.recover();
+        let deleted = self.end_deleted();
         let queued = self.queue();
         let started = self.start_queued();
-        recovered.and(queued).and(started)
+        recovered.and(deleted).and(queued).and(started)
+    }
+
+    /// Ends the runs of Automations deleted on another desktop and brought here by
+    /// Workspace sync, as deleting one here does: its Queued runs never start, and
+    /// the agents of its Running runs are closed.
+    fn end_deleted(&self) -> Result<(), Error> {
+        let chats = (self.inner.open_workspace)()?.end_runs_of_deleted_automations()?;
+        if !chats.is_empty() {
+            let runner = self.clone();
+            tokio::spawn(async move { runner.interrupt(&chats).await });
+        }
+        Ok(())
     }
 
     /// Ends every Running run this runner is not executing as Needs attention.
@@ -135,8 +158,9 @@ impl Runner {
     /// Starts queued runs up to the limit, and none while Chat is not served (off,
     /// quitting, restoring): they wait until it is again (#387 M3).
     fn start_queued(&self) -> Result<(), Error> {
-        if self.inner.host.serving().is_err() {
-            return Ok(());
+        match (self.inner.host)() {
+            Some(host) if host.serving().is_ok() => {}
+            _ => return Ok(()),
         }
         let started = {
             let mut going = self.going();
@@ -227,9 +251,11 @@ impl Runner {
         };
         let time_limit = Duration::from_secs(u64::from(settings.time_limit_minutes) * 60);
         let message = first_message(&settings.instructions, &start.started_by);
-        let ended = self
-            .inner
-            .host
+        // Chat went off between the pass that started the run and its agent.
+        let Some(host) = (self.inner.host)() else {
+            return Ran::AgentStopped(None);
+        };
+        let ended = host
             .run_unattended(&start.chat_id, &message, unattended, time_limit)
             .await;
         match ended {
@@ -261,21 +287,53 @@ impl Runner {
     }
 }
 
-/// "Stop it and turn off": switches an Automation off on this device, ends its
-/// active runs as Needs attention and interrupts the agents they were running. The
-/// core refuses whatever those turns report afterwards, so nothing waits for them.
-pub async fn stop_and_turn_off(
-    open_workspace: &WorkspaceOpener,
-    host: &ChatHost,
-    automation_id: &str,
-) -> Result<(), Error> {
-    let chats = open_workspace()?.stop_and_turn_off_automation(automation_id)?;
-    for chat_id in chats {
-        // ponytail: an interrupt that fails leaves the agent to its turn and time
-        // limits; the run has ended either way.
-        let _ = host.stop(&chat_id).await;
+impl Runner {
+    /// The person's Stop of a Queued or Running run: it ends as Needs attention, and
+    /// the agent it had working is closed. The core ends the run and says which agents
+    /// were working in one transaction, so an agent started meanwhile is closed too;
+    /// the outcome its turn reports afterwards is refused, so nothing waits for it.
+    /// With Chat off there is no agent to close, and only the record changes.
+    pub async fn stop_run(&self, run_id: &str) -> Result<AutomationRun, Error> {
+        let (run, chats) = (self.inner.open_workspace)()?.stop_automation_run(run_id)?;
+        self.interrupt(&chats).await;
+        Ok(run)
     }
-    Ok(())
+
+    /// Deletes an Automation: its Queued and Running runs end as Needs attention,
+    /// already answered, and the agents they had working are closed.
+    pub async fn delete_automation(&self, automation_id: &str) -> Result<(), Error> {
+        let chats = (self.inner.open_workspace)()?.delete_automation(automation_id)?;
+        self.interrupt(&chats).await;
+        Ok(())
+    }
+
+    /// "Stop it and turn off": switches an Automation off on this device, ends its
+    /// active runs as Needs attention and closes the agents they had working. Returns
+    /// the Automation as it is then.
+    pub async fn stop_and_turn_off(&self, automation_id: &str) -> Result<Automation, Error> {
+        let chats = (self.inner.open_workspace)()?.stop_and_turn_off_automation(automation_id)?;
+        self.interrupt(&chats).await;
+        (self.inner.open_workspace)()?.automation(automation_id)
+    }
+
+    /// Closes the agents working in `chats`, whose runs have just ended. A harness
+    /// that cannot be confirmed closed is reported and left to its turn and time
+    /// limits; the run has ended either way.
+    async fn interrupt(&self, chats: &[String]) {
+        if chats.is_empty() {
+            return;
+        }
+        // Chat off: turning it off already stopped every agent.
+        let Some(host) = (self.inner.host)() else {
+            return;
+        };
+        for unconfirmed in host.end_run_agents(chats).await {
+            eprintln!(
+                "ticketd: the agent in Chat {} may still be running: {}",
+                unconfirmed.chat_id, unconfirmed.reason
+            );
+        }
+    }
 }
 
 /// `text` trimmed and ending as a sentence: a full stop is added unless it already

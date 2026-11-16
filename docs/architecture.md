@@ -286,8 +286,16 @@ is told so in its first message, and a Notify me step there opens the run.
 
 The person can stop a Queued or Running run, which ends it as Needs attention: the
 core marks the step it was on Failed and refuses the outcome its executor reports
-later, so not even the step's failure path runs, and the desktop interrupts the
-agent's Chat. Run again on a finished run queues a new run for the same Workspace
+later, so not even the step's failure path runs. The runner owns ending runs for
+a cause the person states (Stop of the run, "Stop it and turn off", Delete): the
+core ends the runs in one transaction and returns the Chats of the steps that had an
+agent working, so a step that started meanwhile is stopped too, and the runner then
+asks the Chat host to close those agents (`ChatHost::end_run_agents`), which
+records the turn as stopped by ticketd (`StopReason::RunEnded`). The desktop
+commands make one call into the runner each. With Chat off the runner only changes
+the record. An Automation deleted on another desktop and brought here by Workspace
+sync is treated the same at the runner's next pass: its Queued runs never start
+and its Running runs end as after a local Delete. Run again on a finished run queues a new run for the same Workspace
 event, from the first step of the Automation as it is now; the finished run stays
 as history. The run view draws a run from the definition the run keeps, so it shows
 the steps as they were even after the Automation is edited.
@@ -305,10 +313,10 @@ The person takes a run over in the Chat of one of its agent steps.
 core first: a message makes the Chat an ordinary one in the Chat list, and a run
 that was Running or needed attention ends as Taken over, with the step it was on
 ended there and nothing after it run. Stop takes over only a Running run, since
-nothing is going in the Chat of one that ended; that is also why stopping a run
-from the run view, which ends the run before it interrupts the Chat, stays Needs
-attention; its Stop then ends the Chat's unattended session as well, which closes
-an agent still opening. A Completed run stays Completed when the person replies in its Chat.
+nothing is going in the Chat of one that ended. `ChatHost::stop` always means the
+person's Stop and infers nothing from the database; when ticketd itself closes an
+agent because its run ended, the runner uses `ChatHost::end_run_agents`, so such a
+run stays Needs attention and the close also ends an agent still opening. A Completed run stays Completed when the person replies in its Chat.
 Taking over a run that is going also ends its agents' unattended sessions at once:
 a harness cannot change how it runs in place, so the host interrupts the turn and
 closes the harness process of every Chat the run had working, and the wait in
@@ -458,7 +466,7 @@ Automation on, closing the window exits as before.
 
 Switching an Automation off stops matching and leaves its active runs to finish.
 "Stop it and turn off" also ends its Queued and Running runs as Needs attention in
-the same transaction, and the runner then interrupts the agents they were
+the same transaction, and the runner then closes the agents they were
 running; what those turns report afterwards is refused.
 
 "Start ticketd when you sign in" registers the app with the system through

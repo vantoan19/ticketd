@@ -274,6 +274,12 @@ pub struct UnconfirmedCleanup {
     pub reason: String,
 }
 
+/// A Chat's unattended harness that `end_unattended` closed.
+pub(crate) struct Closed {
+    /// Why its shutdown could not be confirmed, if it could not.
+    unconfirmed: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct ChatHost {
     inner: Arc<Inner>,
@@ -466,7 +472,11 @@ impl ChatHost {
         let mut closed = false;
         // The Chat acted on, and the Chat of a later step whose agent was working.
         for step in run.steps.iter().filter_map(|step| step.chat_id.as_deref()) {
-            closed |= self.end_unattended(step, StopReason::TakenOver).await && step == chat_id;
+            closed |= self
+                .end_unattended(step, StopReason::TakenOver)
+                .await
+                .is_some()
+                && step == chat_id;
         }
         Ok(Some(closed))
     }
@@ -489,21 +499,40 @@ impl ChatHost {
         .await
     }
 
-    /// Pauses queue dispatch and asks the harness to interrupt the active turn. In
-    /// the Chat of an Automation run that is going, it takes the run over, which
-    /// stops the agent by closing its unattended harness.
+    /// The person's Stop: pauses queue dispatch and asks the harness to interrupt the
+    /// active turn. In the Chat of an Automation run that is going, it takes the run
+    /// over, which stops the agent by closing its unattended harness. It means the
+    /// person's Stop and nothing else: when ticketd closes an agent because its run
+    /// ended, it uses `end_run_agents`.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
         if self.take_over(chat_id, false).await? == Some(true) {
             return Ok(());
         }
-        // Still unattended with no run left to take over: whoever ended the run
-        // (Stop on the run, "Stop it and turn off", deleting the Automation) wants its
-        // agent gone. Closing the harness, after an open in progress, also ends the
-        // wait in `run_unattended`; an interrupt alone misses a turn not begun (#387 M4).
-        if self.end_unattended(chat_id, StopReason::RunEnded).await {
-            return Ok(());
-        }
         self.ask(chat_id, Command::Stop).await
+    }
+
+    /// Closes the agents an Automation run had working in `chat_ids`, because ticketd
+    /// ended the run (the person stopped it, turned its Automation off or deleted
+    /// it): each unattended harness is closed, after an open in progress, which also
+    /// ends the wait in `run_unattended`, and the turn it ends is recorded as
+    /// `StopReason::RunEnded`. An interrupt alone would miss a turn not begun
+    /// (#387 M4). A Chat that is no longer unattended, because the person took it
+    /// over meanwhile, is left alone. Returns the harnesses whose shutdown could not
+    /// be confirmed.
+    pub async fn end_run_agents(&self, chat_ids: &[String]) -> Vec<UnconfirmedCleanup> {
+        let mut unconfirmed = Vec::new();
+        for chat_id in chat_ids {
+            if let Some(Closed {
+                unconfirmed: Some(reason),
+            }) = self.end_unattended(chat_id, StopReason::RunEnded).await
+            {
+                unconfirmed.push(UnconfirmedCleanup {
+                    chat_id: chat_id.clone(),
+                    reason,
+                });
+            }
+        }
+        unconfirmed
     }
 
     /// Lets queued input dispatch again after Stop or a problem.
@@ -819,12 +848,10 @@ impl ChatHost {
     /// settings, so the next supervisor is an ordinary one, and closes the harness.
     /// Whoever gets here first does the closing, so a run that ends and a person who
     /// takes it over at the same moment never close the person's new session.
-    /// Returns whether it was running unattended.
-    pub(crate) async fn end_unattended(&self, chat_id: &str, why: StopReason) -> bool {
-        if self.unattended().remove(chat_id).is_none() {
-            return false;
-        }
-        self.close(chat_id, why).await;
+    /// Returns `None` when it was not running unattended.
+    pub(crate) async fn end_unattended(&self, chat_id: &str, why: StopReason) -> Option<Closed> {
+        self.unattended().remove(chat_id)?;
+        let cleanup = self.close(chat_id, why).await;
         // While a Chat is unattended, whatever is still queued in it is the agent's first
         // message, which the agent never took: the person did not write it, and it must
         // not wait to be sent for them (a reply starts the queue). What the agent did
@@ -838,7 +865,9 @@ impl ChatHost {
         }
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner.board.notify(chat_id);
-        true
+        Some(Closed {
+            unconfirmed: cleanup,
+        })
     }
 
     /// Sets the Chat's queued input aside, never to be sent. Best effort: when the
