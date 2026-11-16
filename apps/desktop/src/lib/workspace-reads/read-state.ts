@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   describeFailure,
   type FailureDescription,
@@ -33,11 +33,29 @@ export function statusOf(
   return enabled ? "loading" : "idle";
 }
 
-/** The failure in people's words; the same object until the failure changes. */
+/**
+ * The failure in people's words; the same object until the failure changes.
+ * TanStack clears the error when a retry of a never-answered read starts, so
+ * the last one is kept (for the same read) until an answer succeeds.
+ */
 export function useFailure(
-  error: unknown,
+  query: { status: "pending" | "error" | "success"; error: unknown },
+  identity: string,
   action: string,
 ): FailureDescription | null {
+  const [kept, setKept] = useState<{ identity: string; error: unknown } | null>(
+    null,
+  );
+  let error: unknown = null;
+  if (query.status === "error") error = query.error;
+  else if (query.status === "pending" && kept?.identity === identity) {
+    error = kept.error;
+  }
+  // Only a new failure is stored (a store on success would render twice). A
+  // read that has answered never goes back to "pending", so this stays correct.
+  if (query.status === "error" && kept?.error !== error) {
+    setKept({ identity, error });
+  }
   return useMemo(
     () => (error === null ? null : describeFailure(error, action)),
     [error, action],

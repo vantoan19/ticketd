@@ -9710,12 +9710,7 @@ test("unknown relationship failures keep raw text behind Details and structured 
   await user.click(within(alert).getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("It was deleted or moved.")).toBeTruthy();
   expect(screen.queryByText("SYNTHETIC_MISSING_RECORD")).toBeNull();
-  // A first read that is retried shows its loading state, then a new alert.
-  expect(
-    within(await screen.findByRole("alert")).queryByRole("button", {
-      name: "Retry",
-    }),
-  ).toBeNull();
+  expect(within(alert).queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
 test("pointer Delete removes existing evidence directly and Undo restores its fields", async () => {

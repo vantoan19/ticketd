@@ -40,7 +40,11 @@ export function usePagedRead<A, V, P>(
     args === skip
       ? ""
       : words(query.isFetchNextPageError ? spec.more : spec.failure, args);
-  const failure = useFailure(query.error, action);
+  const failure = useFailure(
+    query,
+    JSON.stringify(readKey(spec, args)),
+    action,
+  );
   const data = query.data;
   const value = useMemo(
     () => (data === undefined ? undefined : spec.join(data.pages)),
@@ -57,7 +61,7 @@ export function usePagedRead<A, V, P>(
     value,
     failure,
     retry,
-    status: statusOf(value !== undefined, query.error !== null, enabled),
+    status: statusOf(value !== undefined, failure !== null, enabled),
     get current() {
       return query.data !== undefined && !query.isStale;
     },

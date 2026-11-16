@@ -1,4 +1,8 @@
-import { QueryClient, notifyManager } from "@tanstack/react-query";
+import {
+  QueryClient,
+  notifyManager,
+  type QueryKey,
+} from "@tanstack/react-query";
 import type { ChangeSignal } from "./change-signal";
 import { seedsFor, type Returned } from "./catalog";
 // Declared reads fill from returned Tickets only once they are declared.
@@ -43,19 +47,44 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
 
   // A call cannot be aborted, but its answer can be dropped: cancelling reverts
   // the entry to what it held before the call and ignores the late answer.
-  const supersede = () =>
-    client.cancelQueries(
+  // It returns the visible "Show more" calls it dropped, so the page the person
+  // asked for is read again after the change (see `makeStale`).
+  const supersede = () => {
+    const showingMore = client
+      .getQueryCache()
+      .findAll({
+        predicate: (query) =>
+          query.state.fetchStatus === "fetching" &&
+          query.isActive() &&
+          query.state.fetchMeta?.fetchMore?.direction === "forward",
+      })
+      .map((query) => query.queryKey);
+    void client.cancelQueries(
       { predicate: (query) => query.state.fetchStatus === "fetching" },
       { revert: true, silent: true },
     );
+    return showingMore;
+  };
 
   // Marks everything stale and re-reads what is visible (active). Reads that
-  // started after the last `supersede` are reused rather than restarted.
-  const makeStale = () =>
-    client.invalidateQueries(
+  // started after the last `supersede` are reused rather than restarted. A page
+  // that was being added is read once the loaded ones are back, so it comes from
+  // after the change, and an answer to the old call is never shown.
+  const makeStale = async (showingMore: readonly QueryKey[] = []) => {
+    await client.invalidateQueries(
       { refetchType: "active" },
       { cancelRefetch: false },
     );
+    await Promise.all(
+      showingMore.map((queryKey) =>
+        client
+          .getQueryCache()
+          .find({ queryKey })
+          ?.fetch(undefined, { meta: { fetchMore: { direction: "forward" } } })
+          .catch(() => {}),
+      ),
+    );
+  };
 
   return {
     client,
@@ -65,19 +94,18 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
       }
     },
     changed() {
-      void supersede();
-      void makeStale();
+      void makeStale(supersede()).catch(() => {});
       moved();
     },
     async wrote(returned) {
       // Reads sent before the write may not include it.
-      void supersede();
+      const showingMore = supersede();
       for (const seed of seedsFor(returned)) {
         client.setQueryData(seed.key, seed.value);
       }
       // The poll must see the token this write produced as already seen.
       await signal.catchUp().catch(() => {});
-      const settled = makeStale();
+      const settled = makeStale(showingMore);
       moved();
       await settled.catch(() => {});
     },

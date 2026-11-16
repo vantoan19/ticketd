@@ -208,6 +208,44 @@ describe("failure", () => {
     expect(result.current.failure).toBeNull();
   });
 
+  it("keeps a failed first read's failure while Retry runs, until a read succeeds", async () => {
+    const retried = deferred<string>();
+    const call = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error("disk is busy"))
+      .mockReturnValueOnce(retried.promise);
+    const spec = read({
+      key: "retry-first-failure",
+      call,
+      failure: "load the title",
+    });
+    const seen: string[] = [];
+    const { result } = renderHook(
+      () => {
+        const state = useRead(spec, null);
+        seen.push(`${state.status}:${state.failure?.title ?? "-"}`);
+        return state;
+      },
+      { wrapper: wrap() },
+    );
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+
+    act(() => result.current.retry());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("failed");
+    expect(result.current.failure?.title).toBe("Couldn't load the title");
+    // Once failed, no render shows the read as loading again.
+    const failed = seen.indexOf("failed:Couldn't load the title");
+    expect(failed).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(failed)).not.toContain("loading:-");
+
+    await act(async () => retried.resolve("ok"));
+    await waitFor(() => expect(result.current.value).toBe("ok"));
+    expect(result.current.failure).toBeNull();
+    expect(result.current.status).toBe("ready");
+  });
+
   it("keeps the last value and the failure through a failed re-read and the next attempt", async () => {
     const signal = fakeChangeSignal();
     const retried = deferred<string>();

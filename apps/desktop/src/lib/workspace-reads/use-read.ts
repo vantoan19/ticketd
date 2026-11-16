@@ -28,7 +28,8 @@ export function useRead<A, V>(
     reads.client,
   );
   const failure = useFailure(
-    query.error,
+    query,
+    JSON.stringify(readKey(spec, args)),
     args === skip ? "" : words(spec.failure, args),
   );
   const refetch = query.refetch;
@@ -37,7 +38,7 @@ export function useRead<A, V>(
     value: query.data,
     failure,
     retry,
-    status: statusOf(query.data !== undefined, query.error !== null, enabled),
+    status: statusOf(query.data !== undefined, failure !== null, enabled),
     get current() {
       return query.data !== undefined && !query.isStale;
     },

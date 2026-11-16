@@ -97,6 +97,69 @@ describe("paging", () => {
     expect(call).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a failed first page's failure while Retry runs, until a read succeeds", async () => {
+    const retried = deferred<Page>();
+    const call = pages({ n: 1 });
+    call
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockReturnValueOnce(retried.promise);
+    const spec = list(call);
+    const seen: string[] = [];
+    const { result } = renderHook(
+      () => {
+        const state = usePagedRead(spec, null);
+        seen.push(`${state.status}:${state.failure?.title ?? "-"}`);
+        return state;
+      },
+      { wrapper: wrap() },
+    );
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.failure?.title).toBe("Couldn't load the list");
+
+    act(() => result.current.retry());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("failed");
+    expect(result.current.failure?.title).toBe("Couldn't load the list");
+    const failed = seen.indexOf("failed:Couldn't load the list");
+    expect(seen.slice(failed)).not.toContain("loading:-");
+
+    await act(async () => retried.resolve({ items: ["a"], next: null }));
+    await waitFor(() => expect(result.current.value).toEqual(["a"]));
+    expect(result.current.failure).toBeNull();
+    expect(result.current.status).toBe("ready");
+  });
+
+  it("re-reads the extra page too when a change arrives while Show more is loading", async () => {
+    const signal = fakeChangeSignal();
+    const generation = { n: 1 };
+    const call = pages(generation);
+    const spec = list(call);
+    const { result } = renderHook(() => usePagedRead(spec, null), {
+      wrapper: wrap(signal),
+    });
+    await waitFor(() => expect(result.current.value).toHaveLength(2));
+
+    const stale = deferred<Page>();
+    call.mockImplementationOnce(() => stale.promise);
+    act(() => result.current.showMore());
+    await waitFor(() => expect(result.current.loadingMore).toBe(true));
+    call.mockClear();
+
+    generation.n = 2;
+    act(() => signal.change());
+    // The call sent before the change answers late, with old data.
+    await act(async () =>
+      stale.resolve({ items: ["old-a", "old-b"], next: 4 }),
+    );
+    await waitFor(() =>
+      expect(result.current.value).toEqual(["g2-0", "g2-1", "g2-2", "g2-3"]),
+    );
+    expect(result.current.value).not.toContain("old-a");
+    expect(result.current.loadingMore).toBe(false);
+    expect(result.current.more).toBe(true);
+  });
+
   it("keeps the pages and words the failure as 'more' when Show more fails", async () => {
     const call = pages({ n: 1 });
     call
