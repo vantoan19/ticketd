@@ -108,6 +108,33 @@ type Load =
 
 const STATUS_ID = "agent-skill-status";
 
+function SkillStatusSkeleton() {
+  return (
+    <SettingsRow
+      leading={<Skeleton className="size-10" />}
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          <Badge>
+            <span className="font-mono">SKILL.md</span>
+          </Badge>
+          <span>
+            <StatusLabel tone="neutral">Checking…</StatusLabel>
+          </span>
+        </span>
+      }
+      description={
+        <Skeleton>
+          <span className="invisible">
+            Checking the ticketd skill for supported agents on this computer.
+            This can take a moment.
+          </span>
+        </Skeleton>
+      }
+      trailing={<Skeleton className="h-8 w-32" />}
+    />
+  );
+}
+
 export function AgentSkillsCard({
   onChanged,
 }: {
@@ -130,8 +157,6 @@ export function AgentSkillsCard({
   const focusAfterLoad = useRef(false);
 
   const refresh = () => {
-    setChecking(true);
-    setCheckFailure(null);
     return agentSkillsClient.list().then(
       (agents) => {
         setLoad({ phase: "done", agents });
@@ -162,6 +187,8 @@ export function AgentSkillsCard({
 
   /** Installs for each agent in turn; one failure does not stop the others. */
   const run = async (agents: AgentSkill[], replace: boolean) => {
+    setChecking(true);
+    setCheckFailure(null);
     setBusy(true);
     setFailures({});
     setResult(null);
@@ -195,6 +222,8 @@ export function AgentSkillsCard({
   };
 
   const checkAgain = () => {
+    setChecking(true);
+    setCheckFailure(null);
     setFailures({});
     setResult(null);
     void refresh();
@@ -220,56 +249,56 @@ export function AgentSkillsCard({
             onRetry={checkAgain}
           />
         ) : (
-          <SettingsList>
-            {load.phase === "loading" ? (
-              <div role="status" aria-label="Checking agent skills">
+          <div className="skill-status-slot">
+            <SettingsList className="skill-status-reserve" aria-hidden="true">
+              <SkillStatusSkeleton />
+            </SettingsList>
+            <SettingsList>
+              {load.phase === "loading" ? (
+                <div role="status" aria-label="Checking agent skills">
+                  <SkillStatusSkeleton />
+                </div>
+              ) : (
                 <SettingsRow
-                  leading={<Skeleton className="size-10" />}
-                  title={<Skeleton className="h-5 w-30" />}
-                  description={<Skeleton className="h-4 w-75 max-w-full" />}
-                  trailing={<Skeleton className="h-8 w-40" />}
-                />
-              </div>
-            ) : (
-              <SettingsRow
-                leading={
-                  <SettingsRowTile>
-                    <FileCheck size={20} />
-                  </SettingsRowTile>
-                }
-                title={
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Badge>
-                      <span className="font-mono">SKILL.md</span>
-                    </Badge>
-                    <span id={STATUS_ID} tabIndex={-1}>
-                      <StatusLabel tone={status.tone}>
-                        {status.label}
-                      </StatusLabel>
+                  leading={
+                    <SettingsRowTile>
+                      <FileCheck size={20} />
+                    </SettingsRowTile>
+                  }
+                  title={
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Badge>
+                        <span className="font-mono">SKILL.md</span>
+                      </Badge>
+                      <span id={STATUS_ID} tabIndex={-1}>
+                        <StatusLabel tone={status.tone}>
+                          {status.label}
+                        </StatusLabel>
+                      </span>
                     </span>
-                  </span>
-                }
-                description={summary(agents, status)}
-                trailing={
-                  todo.length > 0 ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => void run(todo, false)}
-                    >
-                      {busy ? "Installing…" : `${verb} for ${names(todo)}`}
-                    </Button>
-                  ) : null
-                }
-              />
-            )}
-            {result && (
-              <SettingsListFooter>
-                <span role="status">{result}</span>
-              </SettingsListFooter>
-            )}
-          </SettingsList>
+                  }
+                  description={summary(agents, status)}
+                  trailing={
+                    todo.length > 0 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void run(todo, false)}
+                      >
+                        {busy ? "Installing…" : `${verb} for ${names(todo)}`}
+                      </Button>
+                    ) : null
+                  }
+                />
+              )}
+              {result && (
+                <SettingsListFooter>
+                  <span role="status">{result}</span>
+                </SettingsListFooter>
+              )}
+            </SettingsList>
+          </div>
         )}
       </SettingsSection>
       {load.phase === "done" && checkFailure && (

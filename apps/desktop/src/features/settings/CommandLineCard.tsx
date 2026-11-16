@@ -51,6 +51,13 @@ type Check =
 const mono = "font-mono";
 
 type Failure = { failure: FailureDescription; retry: () => void };
+const CHECK_FAILURE: FailureDescription = {
+  code: "failed",
+  title: "Couldn't check the command-line tool",
+  sentence: "Choose Retry to check again.",
+  action: "retry",
+  details: " ",
+};
 
 /** Opens the guide; `onFailure` says why it did not open, and null clears it. */
 function InstallGuideLink({
@@ -279,8 +286,6 @@ export function CommandLineCard({
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
   const load = () => {
-    setChecking(true);
-    setFailure(null);
     void cliClient.check().then(
       (status) => {
         setCheck({ phase: "done", status });
@@ -292,7 +297,10 @@ export function CommandLineCard({
           previous.phase === "done" ? previous : { phase: "failed" },
         );
         setChecking(false);
-        setFailure(describeFailure(reason, "check the command-line tool"));
+        setFailure({
+          ...describeFailure(reason, "check the command-line tool"),
+          sentence: CHECK_FAILURE.sentence,
+        });
       },
     );
   };
@@ -303,6 +311,8 @@ export function CommandLineCard({
     firstCheck();
   }, []);
   const run = () => {
+    setChecking(true);
+    setFailure(null);
     load();
   };
   return (
@@ -339,6 +349,13 @@ export function CommandLineCard({
           </SettingsList>
         </div>
         <div className="cli-check-feedback">
+          <div className="cli-check-feedback-reserve" aria-hidden="true">
+            <FailureAlert
+              size="compact"
+              failure={CHECK_FAILURE}
+              onRetry={() => {}}
+            />
+          </div>
           {failure && (
             <FailureAlert size="compact" failure={failure} onRetry={run} />
           )}

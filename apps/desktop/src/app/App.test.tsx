@@ -6142,7 +6142,16 @@ test.each([false, true])(
     fireEvent.keyDown(input, { key: "Enter" });
     const retry = await screen.findByRole("button", { name: "Retry" });
     expect(input).toHaveProperty("value", "Keep these words");
-    if (edited) fireEvent.change(input, { target: { value: "Edited words" } });
+    if (edited) {
+      fireEvent.change(input, { target: { value: "Edited words" } });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Claude Code, model Opus 5.5, effort Default",
+        }),
+      );
+      fireEvent.click(screen.getByRole("radio", { name: "High" }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    }
     fireEvent.click(retry);
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     if (edited) {
@@ -6150,6 +6159,7 @@ test.each([false, true])(
         create.mock.calls[0]?.[0].command_id,
       );
       expect(create.mock.calls[1]?.[0].message).toBe("Edited words");
+      expect(create.mock.calls[1]?.[0].effort).toBe("high");
     } else expect(create.mock.calls[1]?.[0]).toEqual(create.mock.calls[0]?.[0]);
     expect(client.created).toHaveLength(1);
   },
@@ -8469,6 +8479,7 @@ test("Chat Retry repeats a failed steer and removes only the refused queued item
   await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
   await vi.waitFor(() => expect(input).toHaveProperty("value", ""));
+  expect(document.activeElement).toBe(input);
   fireEvent.change(input, { target: { value: "Retry as Queue" } });
   fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
   fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
@@ -8487,10 +8498,26 @@ test("Chat Retry repeats a failed steer and removes only the refused queued item
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await vi.waitFor(() => expect(screen.queryByText("First queued")).toBeNull());
   expect(screen.getByText("Second queued")).toBeTruthy();
+  expect(document.activeElement).toBe(input);
   expect(remove.mock.calls).toEqual([
     ["working-retry", "first"],
     ["working-retry", "first"],
   ]);
+  send.mockRejectedValueOnce(new Error("Synthetic uncertain submission"));
+  fireEvent.change(input, { target: { value: "Keep the uncertain draft" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByRole("button", { name: "Retry" });
+  act(() =>
+    client.patch("working-retry", {
+      problem: { kind: "uncertain_delivery", message_id: "unconfirmed" },
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(send).toHaveBeenCalledTimes(3);
+  expect(input).toHaveProperty("value", "Keep the uncertain draft");
 });
 
 test("Export Retry remembers the failed path and asks the save chooser again before writing", async () => {

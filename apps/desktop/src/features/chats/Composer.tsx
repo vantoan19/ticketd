@@ -76,9 +76,9 @@ export function Composer({
   const [text, setTextState] = useState(initialText);
   const [tokens, setTokens] = useState(initialTokens);
   const [busy, setBusy] = useState(false);
-  const [failedAction, setFailedAction] = useState<
-    ((text: string, links: LinkRef[]) => Promise<void>) | undefined
-  >();
+  const [failedAction, setFailedAction] = useState<"send" | "queue" | null>(
+    null,
+  );
   const setText = (next: string, nextTokens: Token[] = []) => {
     setTextState(next);
     setTokens(nextTokens);
@@ -94,16 +94,24 @@ export function Composer({
     action(message, linksOf(tokens)).then(
       () => {
         setText("");
-        setFailedAction(undefined);
+        setFailedAction(null);
         setBusy(false);
       },
       () => {
-        setFailedAction(() => action);
+        setFailedAction(action === onQueue ? "queue" : "send");
         setBusy(false);
       },
     );
   };
-  useImperativeHandle(retryRef, () => () => submit(failedAction));
+  useImperativeHandle(retryRef, () => () => {
+    if (
+      failedAction === "queue" &&
+      (state.queues || (state.send === "queue" && state.enabled))
+    )
+      submit(onQueue);
+    else if (failedAction === "send" && state.send !== "queue" && state.enabled)
+      submit(onSend);
+  });
   const primary = state.send === "queue" ? onQueue : onSend;
   const queue = () => {
     if (state.queues) submit(onQueue);
@@ -156,6 +164,7 @@ export function Composer({
             <IconButton
               type="button"
               variant="ghost"
+              size="icon-compact"
               label="Stop"
               shortcut="Esc"
               aria-keyshortcuts="Escape"

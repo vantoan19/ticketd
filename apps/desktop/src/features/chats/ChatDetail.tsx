@@ -363,14 +363,19 @@ function Conversation({
    * Runs a command; a refusal is said once, and the view keeps the host's
    * state. `name` says what did not happen: "send the message".
    */
-  const run = (action: Promise<unknown>, name: string, retry?: () => void) =>
+  const run = (
+    action: Promise<unknown>,
+    name: string,
+    retry?: () => void,
+    retryRequiresSend = false,
+  ) =>
     action.then(
       () => {
         setFailure(null);
         setArrival("");
       },
       (reason: unknown) => {
-        setFailure(chatFailure(reason, name, retry));
+        setFailure({ ...chatFailure(reason, name, retry), retryRequiresSend });
         throw reason;
       },
     );
@@ -672,7 +677,10 @@ function Conversation({
             <FailureAlert
               size="compact"
               failure={failure.failure}
-              {...(failure.retry && { onRetry: failure.retry })}
+              {...(failure.retry &&
+                (!failure.retryRequiresSend || !chat.problem?.blocks_send) && {
+                  onRetry: failure.retry,
+                })}
             />
           )}
           {picked ? (
@@ -754,12 +762,22 @@ function Conversation({
                   }
                   onEdit={edit}
                   onRemove={(queuedId) => {
-                    const remove = () =>
+                    const remove = () => {
+                      const origin = document.activeElement;
                       void run(
                         client.removeQueued(id, queuedId),
                         "remove the queued message",
                         remove,
-                      ).catch(() => {});
+                      )
+                        .then(() => {
+                          if (
+                            document.activeElement === origin ||
+                            document.activeElement === document.body
+                          )
+                            messageBox.current?.focus();
+                        })
+                        .catch(() => {});
+                    };
                     remove();
                   }}
                   onResume={() =>
@@ -801,7 +819,13 @@ function Conversation({
                     answering && question
                       ? "send your answer"
                       : "send the message",
-                    () => retrySend.current?.(),
+                    answering
+                      ? undefined
+                      : () => {
+                          messageBox.current?.focus();
+                          retrySend.current?.();
+                        },
+                    true,
                   )
                 }
                 onQueue={(text, links) =>
@@ -815,7 +839,10 @@ function Conversation({
                         .then(() => clearQuotes(id)),
                     ),
                     "queue the message",
-                    () => retrySend.current?.(),
+                    () => {
+                      messageBox.current?.focus();
+                      retrySend.current?.();
+                    },
                   )
                 }
                 {...(pending.length > 0 && {
