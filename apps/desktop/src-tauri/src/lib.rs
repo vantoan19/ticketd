@@ -1652,7 +1652,10 @@ pub fn run() -> Result<(), tauri::Error> {
             });
             let version = app.package_info().version.to_string();
             let chat = chat_commands::ChatBridge::new(version);
-            automation_runner::start(chat.chats(), app.handle().clone());
+            let runner =
+                automation_runner::AutomationRunner::new(chat.chats(), app.handle().clone());
+            automation_runner::start(runner.clone(), app.handle().clone());
+            tauri::Manager::manage(app, runner);
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             start_periodic_refresh(coordinator);

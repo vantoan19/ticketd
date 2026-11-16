@@ -2,13 +2,13 @@
 //! seconds. Everything a pass does lives in `ticketd-automation-runner`; this only
 //! decides when one may happen.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 use ticketd_automation_runner::{Notifier, Runner};
-use ticketd_chat_host::ChatHost;
+use ticketd_core::Error;
 
 use crate::chats::Chats;
 
@@ -50,46 +50,68 @@ pub fn open_on_click(app: &AppHandle) {
 /// nothing new in the event log, one reads each cursor and writes nothing.
 const TICK: Duration = Duration::from_secs(5);
 
-/// One pass, creating the runner the first time there is a host to run agents on.
-/// Blocking.
-fn pass(runner: Option<Runner>, host: ChatHost, app: &AppHandle) -> Option<Runner> {
-    let runner = match runner {
-        Some(runner) => runner,
-        None => {
-            let built = Runner::new(Arc::new(crate::open_workspace), host, notifier(app.clone()));
-            match built {
-                Ok(runner) => runner,
-                Err(error) => {
-                    eprintln!("ticketd: the Automation runner could not start: {error}");
-                    return None;
+/// The one Automation runner of this process, created the first time anything needs
+/// it, so that the loop and the commands that end runs reach the same one. It asks
+/// the Chats for the host each time, so it follows Chat being switched off and on.
+#[derive(Clone)]
+pub struct AutomationRunner {
+    chats: Arc<Chats>,
+    app: AppHandle,
+    runner: Arc<Mutex<Option<Runner>>>,
+}
+
+impl AutomationRunner {
+    pub fn new(chats: Arc<Chats>, app: AppHandle) -> Self {
+        Self {
+            chats,
+            app,
+            runner: Arc::default(),
+        }
+    }
+
+    /// The runner. Creating it ends the runs a process that is gone left Running.
+    pub fn get(&self) -> Result<Runner, Error> {
+        let mut slot = self.runner.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(runner) = slot.as_ref() {
+            return Ok(runner.clone());
+        }
+        let chats = Arc::clone(&self.chats);
+        let runner = Runner::new(
+            Arc::new(crate::open_workspace),
+            Arc::new(move || chats.automation_host()),
+            notifier(self.app.clone()),
+        )?;
+        *slot = Some(runner.clone());
+        Ok(runner)
+    }
+
+    /// One pass. A pass that fails (the Workspace is busy or unreadable) is tried
+    /// again at the next tick, which also ends any run the failure left Running.
+    /// Blocking.
+    fn pass(&self) {
+        match self.get() {
+            Ok(runner) => {
+                if let Err(error) = runner.tick() {
+                    eprintln!("ticketd: an Automation pass failed: {error}");
                 }
             }
+            Err(error) => eprintln!("ticketd: the Automation runner could not start: {error}"),
         }
-    };
-    // A pass that fails (the Workspace is busy or unreadable) is tried again at the
-    // next tick, which also ends any run the failure left Running.
-    if let Err(error) = runner.tick() {
-        eprintln!("ticketd: an Automation pass failed: {error}");
     }
-    Some(runner)
 }
 
 /// Starts the loop. While Chat is off, or a backup is being restored, there is no
 /// host and nothing is matched; each Automation's cursor holds, so changes made
 /// meanwhile start their runs at the first pass afterwards.
-pub fn start(chats: Arc<Chats>, app: AppHandle) {
+pub fn start(runner: AutomationRunner, app: AppHandle) {
     open_on_click(&app);
     tauri::async_runtime::spawn(async move {
-        let mut runner = None;
         loop {
-            if let Some(host) = chats.automation_host() {
-                let (current, app) = (runner.take(), app.clone());
+            if runner.chats.automation_host().is_some() {
+                let runner = runner.clone();
                 // The pass reads SQLite and may run the CLI: off the async threads.
                 // It starts its runs on this runtime, which a blocking thread is in.
-                runner = tauri::async_runtime::spawn_blocking(move || pass(current, host, &app))
-                    .await
-                    .ok()
-                    .flatten();
+                let _ = tauri::async_runtime::spawn_blocking(move || runner.pass()).await;
             }
             tokio::time::sleep(TICK).await;
         }
