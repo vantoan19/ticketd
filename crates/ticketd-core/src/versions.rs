@@ -98,8 +98,7 @@ pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
                 || CASE WHEN OLD.body IS NOT NEW.body THEN 'body ' ELSE '' END
                 || CASE WHEN OLD.trashed IS NOT NEW.trashed THEN 'trashed' ELSE '' END),
                 OLD.title, OLD.body, OLD.trashed, (SELECT origin FROM sync_capture));
-        END;
-        PRAGMA user_version = 57;",
+        END;",
     )?;
     Ok(())
 }

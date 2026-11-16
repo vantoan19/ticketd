@@ -22,12 +22,12 @@ pub struct InboxEntry {
 }
 
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE TABLE ticket_follows (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(person, ticket_id)); CREATE TABLE inbox_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), read INTEGER NOT NULL DEFAULT 0); CREATE INDEX inbox_person_id ON inbox_entries(person, id DESC); PRAGMA user_version = 14;")?;
+    tx.execute_batch("CREATE TABLE ticket_follows (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(person, ticket_id)); CREATE TABLE inbox_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), read INTEGER NOT NULL DEFAULT 0); CREATE INDEX inbox_person_id ON inbox_entries(person, id DESC);")?;
     Ok(())
 }
 
 pub(crate) fn migrate_reminders(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE TABLE ticket_reminders (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), due_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(person, ticket_id)); PRAGMA user_version = 18;")?;
+    tx.execute_batch("CREATE TABLE ticket_reminders (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), due_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(person, ticket_id));")?;
     Ok(())
 }
 

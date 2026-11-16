@@ -274,7 +274,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // Views refresh on the change token, so a change made elsewhere shows up.
     crate::change_token::track(connection, "automations")?;
     crate::change_token::track(connection, "automation_device_state")?;
-    connection.execute_batch("PRAGMA user_version = 75;")?;
     Ok(())
 }
 
@@ -289,7 +288,6 @@ pub(crate) fn migrate_sync(connection: &Connection) -> Result<(), Error> {
     crate::change_token::track(connection, "automation_arrivals")?;
     // Automations and agents join the tables whose changes are captured.
     crate::sync::migrate_capture(connection)?;
-    connection.execute_batch("PRAGMA user_version = 76;")?;
     Ok(())
 }
 
@@ -306,7 +304,6 @@ pub(crate) fn migrate_schedule(connection: &Connection) -> Result<(), Error> {
         connection
             .execute_batch("ALTER TABLE automation_device_state ADD COLUMN schedule_from TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 80;")?;
     Ok(())
 }
 

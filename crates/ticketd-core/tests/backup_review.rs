@@ -97,10 +97,7 @@ fn a_pre_document_backup_reports_zero_documents() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let backup = dir.path().join("old.sqlite3");
-    Connection::open(&backup)
-        .unwrap()
-        .execute_batch("CREATE TABLE tickets (id TEXT PRIMARY KEY); PRAGMA user_version = 1;")
-        .unwrap();
+    ticketd_core::create_workspace_at_format_version(&backup, 1).unwrap();
     let BackupCheck::Valid { summary, .. } = workspace.inspect_backup(&backup).unwrap().check
     else {
         panic!("expected a valid old backup")
@@ -426,35 +423,15 @@ fn restore_names_a_missing_backup_and_creates_a_missing_workspace() {
 fn backups_from_before_automations_synchronize_are_valid_and_restore() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = populated(&dir.path().join("workspace.sqlite3"));
-    // The Automation tables with the format version that added each, newest first
-    // so that each goes before the tables it refers to.
-    let tables = [
-        ("automation_settings", 78),
-        ("automation_run_steps", 77),
-        ("automation_runs", 77),
-        ("automation_arrivals", 76),
-        ("automation_device_state", 75),
-        ("automations", 75),
-        ("automation_agents", 74),
-    ];
     for version in [72, 75] {
-        // Shaped like a real Workspace of that version.
+        // A Workspace as that format version left it, built by the real migration ladder.
         let backup = dir.path().join(format!("v{version}.sqlite3"));
-        workspace.backup(&backup).unwrap();
-        let mut shape = String::new();
-        for table in ["automations", "automation_agents"] {
-            for event in ["insert", "update", "delete"] {
-                shape.push_str(&format!("DROP TRIGGER sync_capture_{table}_{event};"));
-            }
-        }
-        for (table, since) in tables {
-            if since > version {
-                shape.push_str(&format!("DROP TABLE {table};"));
-            }
-        }
+        ticketd_core::create_workspace_at_format_version(&backup, version).unwrap();
         Connection::open(&backup)
             .unwrap()
-            .execute_batch(&format!("{shape} PRAGMA user_version = {version};"))
+            .execute_batch(
+                "INSERT INTO tickets (id, reference, title, status) VALUES ('t1', 'T-KQ1', 'First', 'Todo'), ('t2', 'T-KQ2', 'Second', 'Todo');",
+            )
             .unwrap();
 
         let check = workspace.inspect_backup(&backup).unwrap().check;
@@ -478,5 +455,35 @@ fn backups_from_before_automations_synchronize_are_valid_and_restore() {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(migrated, FORMAT_VERSION);
+    }
+}
+
+/// A Workspace without a sync capture trigger would silently stop uploading edits to
+/// that table once restored, so a backup missing one is refused even at the current
+/// format version.
+#[test]
+fn a_current_backup_missing_one_sync_capture_trigger_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for trigger in [
+        "sync_capture_tickets_update",
+        "sync_capture_documents_insert",
+        "sync_capture_automation_agents_delete",
+    ] {
+        let backup = dir.path().join(format!("{trigger}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TRIGGER {trigger}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("a backup without {trigger} was accepted")
+        };
+        assert_eq!(tables, [trigger]);
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
     }
 }

@@ -80,7 +80,6 @@ pub(crate) fn migrate_uploads(tx: &Connection) -> Result<(), Error> {
         CREATE TRIGGER IF NOT EXISTS drive_upload_request_namespace BEFORE INSERT ON drive_upload_operations WHEN EXISTS(SELECT 1 FROM request_outcomes WHERE id=new.request_id) BEGIN SELECT RAISE(ABORT, 'request ID already used; choose a new upload operation'); END;
         CREATE TRIGGER IF NOT EXISTS write_drive_request_namespace BEFORE INSERT ON request_outcomes WHEN EXISTS(SELECT 1 FROM drive_upload_operations WHERE request_id=new.id) BEGIN SELECT RAISE(ABORT, 'request ID already used by a Drive upload'); END;")?;
     crate::change_token::migrate(tx)?;
-    tx.pragma_update(None, "user_version", 52)?;
     Ok(())
 }
 pub(crate) fn upload_request_claimed(connection: &Connection, id: &str) -> Result<bool, Error> {

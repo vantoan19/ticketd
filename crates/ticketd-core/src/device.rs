@@ -51,7 +51,6 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
         )?;
         tx.execute_batch("CREATE UNIQUE INDEX tickets_reference ON tickets(reference);")?;
     }
-    tx.execute_batch("PRAGMA user_version = 56;")?;
     Ok(())
 }
 

@@ -96,8 +96,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             error_code TEXT, \
             error_message TEXT, \
             failing_since TEXT, \
-            retry_after TEXT); \
-         PRAGMA user_version = 25;",
+            retry_after TEXT);",
     )?;
     Ok(())
 }
@@ -112,7 +111,6 @@ pub(crate) fn migrate_run_counts(connection: &Connection) -> Result<(), Error> {
         connection
             .execute_batch("ALTER TABLE source_status ADD COLUMN last_checked_tickets INTEGER")?;
     }
-    connection.execute_batch("PRAGMA user_version = 29;")?;
     Ok(())
 }
 
@@ -136,7 +134,6 @@ pub(crate) fn migrate_read_partitions(connection: &Connection) -> Result<(), Err
     if !has("read_partitions")? {
         connection.execute_batch("ALTER TABLE source_status ADD COLUMN read_partitions TEXT")?;
     }
-    connection.execute_batch("PRAGMA user_version = 82;")?;
     Ok(())
 }
 

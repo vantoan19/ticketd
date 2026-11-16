@@ -76,7 +76,7 @@ pub struct SaveOutcome {
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), Error> {
     connection.execute_batch(
-        "CREATE TABLE source_configurations (provider TEXT PRIMARY KEY, configuration TEXT NOT NULL, account TEXT NOT NULL, contract_version INTEGER NOT NULL, saved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))); PRAGMA user_version = 22;",
+        "CREATE TABLE source_configurations (provider TEXT PRIMARY KEY, configuration TEXT NOT NULL, account TEXT NOT NULL, contract_version INTEGER NOT NULL, saved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
     )?;
     Ok(())
 }
@@ -183,7 +183,6 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
             ))?;
         }
     }
-    connection.execute_batch("PRAGMA user_version = 27;")?;
     Ok(())
 }
 

@@ -12,7 +12,6 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     )?;
     // Re-create the change token triggers so the new table moves the token.
     crate::change_token::migrate(tx)?;
-    tx.execute_batch("PRAGMA user_version = 46;")?;
     Ok(())
 }
 

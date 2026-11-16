@@ -1,3 +1,6 @@
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use serde_json::json;
 use ticketd_core::{DraftRetention, Workspace};
 
@@ -155,17 +158,17 @@ fn recovery_backup_is_complete_and_failed_replacement_preserves_the_previous_dra
 fn older_workspace_with_retained_bytes_withholds_eligibility_until_browser_cutover() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
+    // Format version 49 predates draft tracking, so its retained bytes have no draft record.
+    let id = old_workspace::workspace_with_attachment(&path, 49, "legacy", b"legacy draft bytes");
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE attachment_upload_settings SET limit_bytes = 4096",
+            [],
+        )
+        .unwrap();
     let mut w = Workspace::open(&path).unwrap();
-    let source = dir.path().join("file.txt");
-    std::fs::write(&source, b"legacy draft bytes").unwrap();
-    let file = w.import_attachment("legacy", source, None).unwrap();
-    w.set_attachment_upload_limit(4096).unwrap();
-    drop(w);
-    let old = rusqlite::Connection::open(&path).unwrap();
-    old.execute_batch("DROP TABLE attachment_draft_references; DROP TABLE attachment_drafts; DROP TABLE attachment_draft_cutover; PRAGMA user_version=49;").unwrap();
-    drop(old);
-    let mut w = Workspace::open(&path).unwrap();
-    let usage = w.attachment_usage(&file.id).unwrap();
+    let usage = w.attachment_usage(&id).unwrap();
     assert_eq!(w.attachment_upload_limit().unwrap(), 4096);
     assert!(usage.legacy_drafts_pending);
     assert!(!usage.eligible);
@@ -179,9 +182,9 @@ fn older_workspace_with_retained_bytes_withholds_eligibility_until_browser_cutov
         }
     ));
     w.complete_draft_cutover().unwrap();
-    assert!(w.attachment_usage(&file.id).unwrap().eligible);
+    assert!(w.attachment_usage(&id).unwrap().eligible);
     let export = dir.path().join("export.txt");
-    w.export_attachment(&file.id, &export).unwrap();
+    w.export_attachment(&id, &export).unwrap();
     assert_eq!(std::fs::read(export).unwrap(), b"legacy draft bytes");
     let target = dir.path().join("recovered-49.sqlite3");
     drop(Workspace::open(&target).unwrap());
@@ -190,7 +193,7 @@ fn older_workspace_with_retained_bytes_withholds_eligibility_until_browser_cutov
     assert_eq!(recovered.attachment_upload_limit().unwrap(), 4096);
     assert!(recovered.draft_cutover_pending().unwrap());
     let export = dir.path().join("recovered-49.txt");
-    recovered.export_attachment(&file.id, &export).unwrap();
+    recovered.export_attachment(&id, &export).unwrap();
     assert_eq!(std::fs::read(export).unwrap(), b"legacy draft bytes");
 }
 
