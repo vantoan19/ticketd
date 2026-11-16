@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ticketd_automation_runner::{Runner, stop_and_turn_off};
+use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
@@ -18,6 +18,7 @@ use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
     ChatLinkKind, ChatListFilter, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
+    sync::remote::{FakeRemote, RemoteStorage},
 };
 
 const TAG: &str = "ready-for-triage";
@@ -132,7 +133,13 @@ impl Fixture {
             vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
         )
         .unwrap();
-        let runner = Runner::new(opener(&path), host.clone(), Arc::new(|_| Ok(()))).unwrap();
+        let serving = host.clone();
+        let runner = Runner::new(
+            opener(&path),
+            Arc::new(move || Some(serving.clone())),
+            Arc::new(|_| Ok(())),
+        )
+        .unwrap();
         Self {
             _dir: dir,
             path,
@@ -593,7 +600,12 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
 
     // A new process: a new host and runner over the same Workspace.
     let host = ChatHost::new(opener(&f.path), Vec::new()).unwrap();
-    Runner::new(opener(&f.path), host, Arc::new(|_| Ok(()))).unwrap();
+    Runner::new(
+        opener(&f.path),
+        Arc::new(move || Some(host.clone())),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
 
     assert_eq!(
         f.needs_attention(),
@@ -685,11 +697,10 @@ async fn stop_it_and_turn_off_interrupts_the_agent_and_the_run_needs_attention()
     let f = Fixture::new();
     f.agent_working().await;
 
-    stop_and_turn_off(&opener(&f.path), &f.host, &f.automation.id)
-        .await
-        .unwrap();
+    let automation = f.runner.stop_and_turn_off(&f.automation.id).await.unwrap();
     settle().await;
 
+    assert!(!automation.enabled);
     assert!(!f.core().automation(&f.automation.id).unwrap().enabled);
     assert!(
         f.fake
@@ -999,7 +1010,13 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
         }
         Workspace::open(&path)
     });
-    let runner = Runner::new(flaky, f.host.clone(), Arc::new(|_| Ok(()))).unwrap();
+    let host = f.host.clone();
+    let runner = Runner::new(
+        flaky,
+        Arc::new(move || Some(host.clone())),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
     f.tag("Fix login");
     runner.tick().unwrap();
     settle().await;
@@ -1032,9 +1049,7 @@ async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
     assert_eq!(run.status, AutomationRunStatus::Running);
     let chat = f.chat();
 
-    // What "Stop" on the run does: the core ends the run, then the host stops its Chat.
-    f.core().stop_automation_run(&run.id).unwrap();
-    let stopping = f.host.stop(&chat);
+    let stopping = f.runner.stop_run(&run.id);
     let ((), stopped) = tokio::join!(
         async {
             settle().await;
@@ -1042,7 +1057,7 @@ async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
         },
         stopping
     );
-    stopped.unwrap();
+    assert_eq!(stopped.unwrap().status, AutomationRunStatus::NeedsAttention);
     settle().await;
 
     assert_eq!(written(&f), ["close"]);
@@ -1084,8 +1099,7 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
                         .unwrap();
                 }
                 "stop the run" => {
-                    f.core().stop_automation_run(&run.id).unwrap();
-                    f.host.stop(&chat).await.unwrap();
+                    f.runner.stop_run(&run.id).await.unwrap();
                 }
                 _ => {
                     f.host.turn_off().await;
@@ -1139,8 +1153,7 @@ async fn a_run_ended_with_its_first_message_unconfirmed_does_not_offer_to_send_i
                     .unwrap();
             }
             _ => {
-                f.core().stop_automation_run(&run.id).unwrap();
-                f.host.stop(&chat).await.unwrap();
+                f.runner.stop_run(&run.id).await.unwrap();
             }
         }
         settle().await;
@@ -1410,5 +1423,137 @@ async fn a_schedule_missed_while_ticketd_was_closed_runs_once_at_the_first_pass(
              it: use the ticketd CLI to find the tickets your instructions are about. \
              Run it as `ticketd`, by that name, never by a path. Run one ticketd command per call, with nothing chained, piped or redirected.\n"
         )
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_a_run_closes_its_agent_and_the_turn_ends_as_ticketds_stop() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let run = f.runs().remove(0);
+
+    let stopped = f.runner.stop_run(&run.id).await.unwrap();
+    settle().await;
+
+    assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(stopped.reason.as_deref(), Some("You stopped this run."));
+    assert_eq!(f.needs_attention(), "You stopped this run.");
+    assert!(interrupted(&f));
+    // Not the person's Stop of the Chat: that would have taken the run over.
+    assert_eq!(
+        f.first_turn_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::RunEnded))
+    );
+    assert_eq!(f.listed_chats(), [] as [String; 0]);
+    // The interrupted turn's end changes nothing: the run has already ended.
+    f.end_turn(TurnOutcome::Interrupted).await;
+    assert_eq!(f.needs_attention(), "You stopped this run.");
+}
+
+#[tokio::test(start_paused = true)]
+async fn deleting_an_automation_closes_the_agents_of_its_runs_and_asks_nothing_of_the_person() {
+    let f = Fixture::new();
+    f.agent_working().await;
+
+    f.runner.delete_automation(&f.automation.id).await.unwrap();
+    settle().await;
+
+    assert_eq!(f.core().automations().unwrap(), []);
+    assert_eq!(f.needs_attention(), "You deleted this Automation.");
+    assert!(!f.runs()[0].needs_you);
+    assert!(interrupted(&f));
+    assert_eq!(
+        f.first_turn_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::RunEnded))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn with_chat_off_ending_a_run_changes_only_its_record() {
+    let f = Fixture::new();
+    f.host.turn_off().await;
+    f.tag("Fix login");
+    f.tick().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Queued);
+
+    // A runner with no Chat host to reach: Chat is off in this process.
+    let off = Runner::new(opener(&f.path), Arc::new(|| None), Arc::new(|_| Ok(()))).unwrap();
+    off.tick().unwrap();
+    let stopped = off.stop_run(&f.runs()[0].id).await.unwrap();
+
+    assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
+    off.delete_automation(&f.automation.id).await.unwrap();
+    assert_eq!(f.core().automations().unwrap(), []);
+    assert_eq!(f.fake.opens().len(), 0);
+}
+
+fn interrupted(f: &Fixture) -> bool {
+    f.fake
+        .written()
+        .iter()
+        .any(|written| matches!(written, Written::Interrupt(_)))
+}
+
+/// The Automation, deleted on a second desktop and brought to the first one by
+/// Workspace sync, which ends no run by itself.
+#[allow(clippy::unwrap_used)]
+fn deleted_on_another_desktop(f: &Fixture) {
+    const FOLDER: &str = "workspace";
+    let remote = FakeRemote::new();
+    remote.ensure_folder(FOLDER, "Test").unwrap();
+    let mut here = f.core();
+    here.sync(&remote, FOLDER, "Here").unwrap();
+    let mut there = Workspace::open(f._dir.path().join("there.sqlite3")).unwrap();
+    while there.device_code().unwrap() == here.device_code().unwrap() {
+        there.renew_device_code().unwrap();
+    }
+    there.sync(&remote, FOLDER, "There").unwrap();
+    there.delete_automation(&f.automation.id).unwrap();
+    there.sync(&remote, FOLDER, "There").unwrap();
+    here.sync(&remote, FOLDER, "Here").unwrap();
+    assert_eq!(here.automations().unwrap(), []);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_queued_runs_of_an_automation_deleted_through_sync_never_start() {
+    let f = Fixture::new();
+    f.host.turn_off().await;
+    f.tag("Fix login");
+    f.tick().await;
+    f.host.turn_on();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Queued);
+
+    deleted_on_another_desktop(&f);
+    f.tick().await;
+
+    assert_eq!(f.fake.opens().len(), 0);
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(run.reason.as_deref(), Some("You deleted this Automation."));
+    assert!(!run.needs_you);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_running_runs_of_an_automation_deleted_through_sync_end_at_the_next_pass() {
+    let f = Fixture::new();
+    f.agent_working().await;
+
+    deleted_on_another_desktop(&f);
+    // Until the pass nothing has noticed: the agent works on.
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    f.tick().await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(run.reason.as_deref(), Some("You deleted this Automation."));
+    assert!(!run.needs_you);
+    assert_eq!(run.steps[0].status, AutomationStepStatus::Failed);
+    // The agent is closed by a task of its own, which the pass does not wait for, and
+    // the fake harness confirms the close only when the bounded wait runs out.
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert!(interrupted(&f));
+    assert_eq!(
+        f.first_turn_ending(),
+        Some(TurnEnding::StoppedByTicketd(StopReason::RunEnded))
     );
 }

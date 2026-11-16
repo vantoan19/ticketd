@@ -71,7 +71,7 @@ impl ChatHost {
             Ok(TurnEnd::TimeLimitReached) => StopReason::TimeLimit,
             _ => StopReason::RunEnded,
         };
-        if !self.end_unattended(chat_id, why).await {
+        if self.end_unattended(chat_id, why).await.is_none() {
             return Ok(TurnEnd::TakenOver);
         }
         ended
@@ -135,14 +135,14 @@ impl ChatHost {
     }
 
     /// Stops the Chat's supervisor and its harness process with bounded cleanup.
-    pub(crate) async fn close(&self, chat_id: &str, why: StopReason) {
-        let Some(commands) = self.forget(chat_id) else {
-            return;
-        };
+    /// Returns why the shutdown could not be confirmed, if it could not.
+    pub(crate) async fn close(&self, chat_id: &str, why: StopReason) -> Option<String> {
+        let commands = self.forget(chat_id)?;
         let (reply, done) = oneshot::channel();
         if commands.send(Command::Shutdown(why, reply)).await.is_ok() {
-            let _ = done.await;
+            return done.await.ok().flatten();
         }
+        None
     }
 }
 

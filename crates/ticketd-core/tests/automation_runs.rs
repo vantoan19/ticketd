@@ -503,10 +503,16 @@ fn stopping_a_running_run_ends_it_needing_attention_without_its_failure_path() {
         ]
     });
     let run = started(&mut workspace);
-    workspace.advance_automation_run(&run.id, None).unwrap();
+    let RunAction::RunAgent(start) = workspace.advance_automation_run(&run.id, None).unwrap()
+    else {
+        panic!("the first step runs an agent");
+    };
 
-    let stopped = workspace.stop_automation_run(&run.id).unwrap();
+    let (stopped, working) = workspace.stop_automation_run(&run.id).unwrap();
 
+    // The Chat of the agent that was working comes back from the same transaction
+    // that ended the run, for the host to interrupt.
+    assert_eq!(working, [start.chat_id]);
     assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
     assert_eq!(stopped.reason.as_deref(), Some("You stopped this run."));
     assert!(stopped.ended_at.is_some());
@@ -544,8 +550,9 @@ fn stopping_a_queued_run_ends_it_before_any_step_runs() {
     workspace.queue_automation_runs().unwrap();
     let queued = runs(&workspace, &automation).remove(0);
 
-    let stopped = workspace.stop_automation_run(&queued.id).unwrap();
+    let (stopped, working) = workspace.stop_automation_run(&queued.id).unwrap();
 
+    assert_eq!(working, [] as [String; 0]);
     assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
     assert_eq!(stopped.steps, []);
     assert_eq!(workspace.start_automation_runs(2).unwrap(), []);

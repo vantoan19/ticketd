@@ -554,7 +554,8 @@ impl Workspace {
     }
 
     /// Moves Queued runs to Running, oldest triggering event first, until `limit`
-    /// runs are Running. Returns the ones it started.
+    /// runs are Running. Returns the ones it started. The runs of a deleted
+    /// Automation never start.
     pub fn start_automation_runs(&mut self, limit: usize) -> Result<Vec<AutomationRun>, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
@@ -565,7 +566,7 @@ impl Workspace {
         )?;
         let ids = {
             let mut statement = transaction.prepare(
-                "SELECT id FROM automation_runs WHERE status = 'queued' ORDER BY event_id, rowid LIMIT ?1",
+                "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE r.status = 'queued' AND a.trashed = 0 ORDER BY r.event_id, r.rowid LIMIT ?1",
             )?;
             statement
                 .query_map([limit.saturating_sub(running)], |row| {
@@ -629,15 +630,20 @@ impl Workspace {
     /// Ends a Queued or Running run as Needs attention because the person stopped
     /// it. The step it was on is marked Failed and nothing after it runs, its
     /// failure path included: the outcome its executor reports later is refused.
-    pub fn stop_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
+    /// Also returns the Chats of the agents that were working, read in the same
+    /// transaction that ends the run, for the host to interrupt.
+    pub fn stop_automation_run(
+        &mut self,
+        run_id: &str,
+    ) -> Result<(AutomationRun, Vec<String>), Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
-        if end(&transaction, run_id, Cause::Stopped)?.is_none() {
+        let Some(ended) = end(&transaction, run_id, Cause::Stopped)? else {
             return Err(Error::AutomationRun("the run has already ended".into()));
-        }
+        };
         let run = one(&transaction, run_id)?;
         transaction.commit()?;
-        Ok(run)
+        Ok((run, ended.chats))
     }
 
     /// Queues a new run for the Workspace event that started a finished run. It

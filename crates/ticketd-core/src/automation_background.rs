@@ -89,4 +89,24 @@ impl Workspace {
         transaction.commit()?;
         Ok(chats)
     }
+
+    /// Ends the Queued and Running runs of Automations that are deleted, as deleting
+    /// them here does: an Automation deleted on another desktop and brought here by
+    /// Workspace sync has runs that will no longer run. Returns the Chats of the
+    /// agents that were working, for the host to interrupt.
+    pub fn end_runs_of_deleted_automations(&mut self) -> Result<Vec<String>, Error> {
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let ids = {
+            let mut statement = transaction.prepare(
+                "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE a.trashed = 1 AND r.status IN ('queued', 'running')",
+            )?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let (_, chats) = end_each(&transaction, &ids, Cause::Deleted)?;
+        transaction.commit()?;
+        Ok(chats)
+    }
 }

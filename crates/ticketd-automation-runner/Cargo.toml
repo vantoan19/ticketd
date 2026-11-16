@@ -17,6 +17,6 @@ tokio = { version = "1", features = ["rt", "time"] }
 
 [dev-dependencies]
 # Tests assert literal Ticket references, so they build the fixed device code in.
-ticketd-core = { workspace = true, features = ["test-device-code"] }
+ticketd-core = { workspace = true, features = ["test-device-code", "fake-remote"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "test-util"] }
