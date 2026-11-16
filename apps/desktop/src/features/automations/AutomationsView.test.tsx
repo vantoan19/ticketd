@@ -585,8 +585,18 @@ test("the empty page offers New Automation and three examples, and choosing one 
     expect.stringContaining("Weekly summary"),
   ]);
   expect(
-    screen.getAllByRole("button", { name: "New Automation" }).length,
-  ).toBeGreaterThan(1);
+    screen.getAllByRole("button", { name: "New Automation" }),
+  ).toHaveLength(1);
+  expect(
+    within(screen.getByRole("region", { name: "Automation list" })).getByRole(
+      "group",
+      { name: "Start from an example" },
+    ),
+  ).toBe(examples);
+  expect(
+    screen.getByRole("radio", { name: "Automations" }).textContent,
+  ).not.toContain("0");
+  expect(screen.queryByRole("separator", { name: "Resize list" })).toBeNull();
 
   fireEvent.click(
     within(examples).getByRole("button", { name: /Weekly summary/ }),

@@ -662,6 +662,10 @@ the nav's setup dot, whose update never starts another page check.
 
 Plan Add tickets submits the selected tickets through one atomic bulk membership change and retains its request ID after an unconfirmed result. Success offers Undo to each ticket’s original Plan. When originals differ, Undo uses one atomic request per original Plan; completed groups are retired immediately, and a failure states the confirmed restored count and retries only the remaining groups with their existing IDs. No compensating writes undo concurrent external changes.
 
+Automations uses a 48px pane header with the current view's icon and name. Automations, Agents and Runs sit in a separate segmented row below it; zero counts are omitted. A populated list has a labelled New Automation or New agent action in the header. An empty view fills the available width with the shared EmptyState and one create action. Automations offers its three starter examples below that action, including at narrow widths; Agents explains what an agent supplies, and Runs explains where progress and history will appear.
+
+Automations keeps its list and detail panes mounted across loading, empty, narrow and expanded layouts, using the same single-pane behavior as Chats. The inactive pane and resize handle leave keyboard and accessibility navigation. Once there are items, the normal list-and-detail split returns at wide widths.
+
 ## 11. Design system and shared components
 
 ticketd's interface is assembled from one design system: the tokens in `apps/desktop/src/styles.css`, the bundled Geist fonts, and the shared React components in `apps/desktop/src/components/ui`, which are shadcn/ui copies restyled with the tokens. A web client can reuse them by building the same source; a separate package earns its place only once a second app imports the components.

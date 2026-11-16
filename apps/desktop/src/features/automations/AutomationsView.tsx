@@ -14,7 +14,6 @@ import {
   History,
   Play,
   Plus,
-  SquarePen,
   Tag,
   Workflow,
   Zap,
@@ -22,7 +21,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
-import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -75,7 +73,7 @@ const EXAMPLES = [
     example: "verify_ready_for_testing",
     icon: FlaskConical,
     title: "Verify what is ready for testing",
-    sub: "An agent checks the work and adds the tag verified when it passes; the ticket is then set to Done, or tagged needs-fix.",
+    sub: "Check ready work, then mark it Done or tag it needs-fix.",
   },
   {
     example: "weekly_summary",
@@ -428,28 +426,101 @@ export function AutomationsView({
       failed("delete", "The Automation could not be deleted."),
     );
 
+  const empty =
+    (tab === "automations" && automations?.length === 0) ||
+    (tab === "agents" && agents?.length === 0) ||
+    (tab === "runs" && runs?.length === 0);
+  const loading = automations === null || agents === null || runs === null;
+  const emptyContent =
+    tab === "automations" ? (
+      <div className="auto-empty auto-start">
+        <EmptyState
+          icon={<Workflow />}
+          title="Let agents act on tickets for you"
+          description="Run a sequence of steps when a ticket changes, on a schedule, or whenever you choose."
+          action={
+            <Button size="sm" onClick={() => void createAutomation()}>
+              <Plus aria-hidden />
+              New Automation
+            </Button>
+          }
+        />
+        <div
+          className="auto-starters"
+          role="group"
+          aria-label="Start from an example"
+        >
+          <p className="auto-starters-label">Or start from an example</p>
+          {EXAMPLES.map(({ example, icon: Icon, title, sub }) => (
+            <button
+              key={example}
+              type="button"
+              className="auto-starter"
+              onClick={() =>
+                void added(automationsClient.createExample(example))
+              }
+            >
+              <Icon size={16} aria-hidden />
+              <span className="auto-starter-title">{title}</span>
+              <span className="auto-starter-sub">{sub}</span>
+              <ArrowRight size={16} aria-hidden />
+            </button>
+          ))}
+        </div>
+      </div>
+    ) : tab === "agents" ? (
+      <EmptyState
+        icon={<Bot />}
+        title="An agent is who a step runs"
+        description="Choose its harness, instructions, and tools. Make one, then use it in any Automation."
+        action={
+          <Button size="sm" onClick={() => void createAgent()}>
+            <Plus aria-hidden />
+            New agent
+          </Button>
+        }
+      />
+    ) : (
+      <EmptyState
+        icon={<History />}
+        title="No runs yet"
+        description="Run an Automation to see its progress and history here."
+      />
+    );
   const listPane = (
-    <section className="ticket-list chat-pane" aria-label={TAB_NAMES[tab].list}>
+    <section
+      className="ticket-list chat-pane auto-list-pane"
+      data-empty={empty || undefined}
+      aria-label={TAB_NAMES[tab].list}
+    >
       <PaneHeader
-        hideTitle
         title={TAB_NAMES[tab].title}
+        icon={
+          tab === "automations" ? (
+            <Workflow />
+          ) : tab === "agents" ? (
+            <Bot />
+          ) : (
+            <History />
+          )
+        }
         actions={
-          tab === "agents" ? (
-            <IconButton label="New agent" onClick={() => void createAgent()}>
-              <SquarePen aria-hidden />
-            </IconButton>
+          empty || loading ? null : tab === "agents" ? (
+            <Button size="sm" onClick={() => void createAgent()}>
+              <Plus aria-hidden />
+              New agent
+            </Button>
           ) : (
             tab === "automations" && (
-              <IconButton
-                label="New Automation"
-                onClick={() => void createAutomation()}
-              >
-                <SquarePen aria-hidden />
-              </IconButton>
+              <Button size="sm" onClick={() => void createAutomation()}>
+                <Plus aria-hidden />
+                New Automation
+              </Button>
             )
           )
         }
-      >
+      />
+      <div className="auto-view-tabs">
         <SegmentedControl
           aria-label="Show"
           value={tab}
@@ -462,12 +533,12 @@ export function AutomationsView({
             {
               value: "automations",
               label: "Automations",
-              ...(automations && { count: automations.length }),
+              ...(automations?.length && { count: automations.length }),
             },
             {
               value: "agents",
               label: "Agents",
-              ...(agents && { count: agents.length }),
+              ...(agents?.length && { count: agents.length }),
             },
             {
               value: "runs",
@@ -478,21 +549,20 @@ export function AutomationsView({
             },
           ]}
         />
-      </PaneHeader>
+      </div>
       {error && (
         <p className="chat-list-empty" role="alert">
           {error}
         </p>
       )}
+      {empty && emptyContent}
       {tab === "runs" ? (
+        !empty &&
         runs && (
           <AllRunsList runs={runs} openId={listedRun} onOpen={openListedRun} />
         )
       ) : tab === "automations" ? (
         <>
-          {automations?.length === 0 && (
-            <p className="chat-list-empty">No Automations yet.</p>
-          )}
           <ul className="chat-rows" aria-label="Automations">
             {automations?.map((automation) => {
               // Runs arrive newest first: the first of its runs is the latest.
@@ -550,9 +620,6 @@ export function AutomationsView({
         </>
       ) : (
         <>
-          {agents?.length === 0 && (
-            <p className="chat-list-empty">No agents yet.</p>
-          )}
           <ul className="chat-rows" aria-label="Agents">
             {agents?.map((agent) => (
               <li key={agent.id}>
@@ -642,7 +709,7 @@ export function AutomationsView({
     />
   ) : (
     <section
-      className="ticket-detail chat-pane"
+      className="ticket-detail chat-pane auto-detail-pane"
       aria-label={
         tab === "agents"
           ? "No agent open"
@@ -651,76 +718,20 @@ export function AutomationsView({
             : "No Automation open"
       }
     >
-      {tab === "runs" ? (
-        runs?.length === 0 ? (
-          <EmptyState
-            icon={<History />}
-            title="No runs yet"
-            description="Every run of every Automation on this desktop shows here."
-          />
-        ) : (
-          <p className="chat-list-empty">Open a run to see its steps.</p>
-        )
-      ) : tab === "agents" ? (
-        agents?.length === 0 ? (
-          <EmptyState
-            icon={<Bot />}
-            title="An agent is who a step runs"
-            description="A harness, instructions, and the tools it may use. Make one, then use it in any Automation."
-            action={
-              <Button size="sm" onClick={() => void createAgent()}>
-                <Plus aria-hidden />
-                New agent
-              </Button>
-            }
-          />
-        ) : (
-          <p className="chat-list-empty">Open an agent, or make a new one.</p>
-        )
-      ) : automations?.length === 0 ? (
-        <div className="auto-empty auto-start">
-          <EmptyState
-            icon={<Workflow />}
-            title="Let agents act on tickets for you"
-            description="An Automation runs steps when a ticket changes: tag a ticket, and a triage agent picks it up."
-            action={
-              <Button size="sm" onClick={() => void createAutomation()}>
-                <Plus aria-hidden />
-                New Automation
-              </Button>
-            }
-          />
-          <div
-            className="auto-starters"
-            role="group"
-            aria-label="Start from an example"
-          >
-            <p className="auto-starters-label">Or start from an example</p>
-            {EXAMPLES.map(({ example, icon: Icon, title, sub }) => (
-              <button
-                key={example}
-                type="button"
-                className="auto-starter"
-                onClick={() =>
-                  void added(automationsClient.createExample(example))
-                }
-              >
-                <Icon size={16} aria-hidden />
-                <span className="auto-starter-title">{title}</span>
-                <span className="auto-starter-sub">{sub}</span>
-                <ArrowRight size={16} aria-hidden />
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <p className="chat-list-empty">
-          Open an Automation, or make a new one.
-        </p>
-      )}
+      <EmptyState
+        size="hint"
+        title={
+          tab === "runs"
+            ? "Open a run to see its steps."
+            : tab === "agents"
+              ? "Open an agent, or make a new one."
+              : "Open an Automation, or make a new one."
+        }
+      />
     </section>
   );
   const open = openAgent ?? openAutomation ?? listedRun;
+  const onePane = single || (!open && (empty || loading));
   return (
     <div ref={workspaceRef} className="plan-workspace">
       {failure && (
@@ -739,23 +750,33 @@ export function AutomationsView({
           </Alert>
         </div>
       )}
-      {single ? (
-        <div className="ticket-workspace chats-workspace">
-          {open ? detailPane : listPane}
-        </div>
-      ) : (
-        <div className="ticket-workspace chats-workspace">
-          <ResizablePanelGroup orientation="horizontal">
-            <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
-              {listPane}
-            </ResizablePanel>
-            <ResizableHandle aria-label="Resize list" />
-            <ResizablePanel id="chat-detail" minSize={480} style={PANEL_STYLE}>
-              {detailPane}
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </div>
-      )}
+      <div
+        className="ticket-workspace chats-workspace"
+        data-single={onePane ? (open ? "detail" : "list") : undefined}
+      >
+        <ResizablePanelGroup orientation="horizontal" disabled={onePane}>
+          <ResizablePanel
+            id="chat-list"
+            minSize={360}
+            defaultSize={384}
+            aria-hidden={onePane && !!open ? true : undefined}
+          >
+            {listPane}
+          </ResizablePanel>
+          <ResizableHandle
+            aria-label="Resize list"
+            aria-hidden={onePane || undefined}
+          />
+          <ResizablePanel
+            id="chat-detail"
+            minSize={480}
+            style={PANEL_STYLE}
+            aria-hidden={onePane && !open ? true : undefined}
+          >
+            {detailPane}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
     </div>
   );
 }
