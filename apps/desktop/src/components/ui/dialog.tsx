@@ -92,6 +92,7 @@ function DialogContent({
   variant = "default",
   size,
   returnFocus,
+  resolveReturnFocus,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
@@ -115,6 +116,8 @@ function DialogContent({
   size?: "sm" | "md" | "lg" | "viewer" | "palette";
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
+  /** The current logical opener when responsive chrome replaced the original node. */
+  resolveReturnFocus?: () => HTMLElement | null;
 }) {
   const invocation = React.useContext(DialogInvocation);
   const focus = useFocusReturn(
@@ -124,6 +127,7 @@ function DialogContent({
       ...(onCloseAutoFocus && { onCloseAutoFocus }),
     },
     invocation?.element,
+    resolveReturnFocus,
   );
   return (
     <DialogPortal data-slot="dialog-portal">

@@ -10382,3 +10382,236 @@ test("page zoom keeps the applied value on native failure, exposes raw Details a
     uninstall();
   }
 });
+
+function dialogAnimationSignals() {
+  vi.stubGlobal("CSS", { escape: (value: string) => value });
+  const actualStyle = window.getComputedStyle;
+  // jsdom has no CSS animation engine. Supply only its live animation-name
+  // signal to Radix; the assertions below concern draft, presence and focus.
+  const style = vi
+    .spyOn(window, "getComputedStyle")
+    .mockImplementation((element, pseudo) => {
+      const native = actualStyle(element, pseudo);
+      if (
+        !["dialog-content", "dialog-overlay"].includes(
+          element.getAttribute("data-slot") ?? "",
+        )
+      )
+        return native;
+      return new Proxy(native, {
+        get(target, key) {
+          if (key === "animationName")
+            return element.getAttribute("data-state") === "open"
+              ? "test-enter"
+              : "test-exit";
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+  const finishExit = (element: Element) => {
+    const event = new Event("animationend", { bubbles: true });
+    Object.defineProperty(event, "animationName", { value: "test-exit" });
+    fireEvent(element, event);
+  };
+  return {
+    finishExit,
+    restore: () => {
+      style.mockRestore();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+test("New ticket keeps its closing render until the browser exit finishes, then reopens with a fresh draft", async () => {
+  const user = userEvent.setup();
+  const { finishExit, restore } = dialogAnimationSignals();
+  try {
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "find_tickets") return [bulkTicket(1)];
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    const trigger = await screen.findByRole("button", {
+      name: "New ticket",
+    });
+    expect(
+      bridge.invoke.mock.calls.some(([command]) => command === "search_tags"),
+    ).toBe(false);
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "New ticket" });
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(dialog.isConnected).toBe(true);
+    expect(
+      within(dialog).getByRole("textbox", { name: "Title", hidden: true }),
+    ).toHaveProperty("value", "");
+    finishExit(dialog);
+    finishExit(overlay);
+    await vi.waitFor(() => expect(dialog.isConnected).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    await user.click(trigger);
+    const reopened = await screen.findByRole("dialog", { name: "New ticket" });
+    const title = within(reopened).getByRole("textbox", { name: "Title" });
+    expect(title).toHaveProperty("value", "");
+    await user.type(title, "Keep this draft");
+    const closingOverlay = document.querySelector(
+      '[data-slot="dialog-overlay"]',
+    )!;
+    await user.keyboard("{Escape}");
+    expect(reopened.isConnected).toBe(true);
+    finishExit(reopened);
+    finishExit(closingOverlay);
+    await vi.waitFor(() => expect(reopened.isConnected).toBe(false));
+    await user.click(trigger);
+    const retained = await screen.findByRole("dialog", { name: "New ticket" });
+    expect(
+      within(retained).getByRole("textbox", { name: "Title" }),
+    ).toHaveProperty("value", "Keep this draft");
+  } finally {
+    restore();
+  }
+});
+
+test("conditional History, Cleanup and Restore dialogs keep their owner through exit and restore focus", async () => {
+  const user = userEvent.setup();
+  const { finishExit, restore } = dialogAnimationSignals();
+  const doc = {
+    id: "presence-doc",
+    title: "Presence reader",
+    body: "Reader stays put",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  const file = {
+    id: "presence-file",
+    display_name: "kept.txt",
+    original_filename: "kept.txt",
+    kind: "local_snapshot",
+    locator: "fixture/kept",
+    size_bytes: 4,
+  };
+  const backup = "/tmp/lifecycle-backup.ticketd-backup";
+  const summary = {
+    last_change: null,
+    tickets: 1,
+    documents: 1,
+    activities: 0,
+    evidence: 0,
+    projects: 0,
+    plans: 0,
+  };
+  try {
+    bridge.invoke.mockImplementation((command: string, args) => {
+      if (command === "find_tickets") return [bulkTicket(1)];
+      if (command === "recent_documents")
+        return [{ id: doc.id, heading: doc.title }];
+      if (command === "open_document" || command === "show_document")
+        return doc;
+      if (
+        command === "document_tags" ||
+        command === "record_versions" ||
+        command === "attachment_cleanup_reviews"
+      )
+        return [];
+      if (command === "document_version") return [doc.updated_at, false];
+      if (command === "search_attachments")
+        return [
+          {
+            attachment: file,
+            related: false,
+            usage: {
+              eligible: true,
+              protections: [],
+              legacy_drafts_pending: false,
+            },
+          },
+        ];
+      if (command === "safety_backups")
+        return [
+          {
+            path: backup,
+            kind: "safety",
+            saved_at: doc.updated_at,
+            size_bytes: 1024,
+          },
+        ];
+      if (command === "inspect_backup")
+        return {
+          path: backup,
+          current: summary,
+          check: { status: "valid", format_version: 19, summary },
+        };
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /First/ });
+    expect(
+      bridge.invoke.mock.calls.some(([command]) =>
+        [
+          "record_versions",
+          "attachment_cleanup_reviews",
+          "inspect_backup",
+        ].includes(command),
+      ),
+    ).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Documents" }));
+    await user.click(await screen.findByRole("button", { name: doc.title }));
+    const actions = await screen.findByRole("button", {
+      name: "Document actions",
+    });
+    actions.focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "History…" }));
+    const history = await screen.findByRole("dialog", { name: "History" });
+    let overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
+    await user.keyboard("{Escape}");
+    expect(history.isConnected).toBe(true);
+    finishExit(history);
+    finishExit(overlay);
+    await vi.waitFor(() => expect(history.isConnected).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+    await user.click(screen.getByRole("button", { name: "Attachments" }));
+    await screen.findByRole("button", { name: file.display_name });
+    const more = screen.getByRole("button", { name: "More library actions" });
+    more.focus();
+    await user.keyboard("{Enter}");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Clean up unused files…" }),
+    );
+    const cleanup = await screen.findByRole("dialog", {
+      name: "Clean up unused files",
+    });
+    overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
+    await user.keyboard("{Escape}");
+    expect(cleanup.isConnected).toBe(true);
+    finishExit(cleanup);
+    finishExit(overlay);
+    await vi.waitFor(() => expect(cleanup.isConnected).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(more));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: "Backups" }));
+    const review = await screen.findByRole("button", {
+      name: `Restore… ${backup}`,
+    });
+    await user.click(review);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Replace this workspace?",
+    });
+    overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
+    await user.keyboard("{Escape}");
+    expect(dialog.isConnected).toBe(true);
+    finishExit(dialog);
+    finishExit(overlay);
+    await vi.waitFor(() => expect(dialog.isConnected).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(review));
+    expect(
+      bridge.invoke.mock.calls.some(
+        ([command]) => command === "restore_workspace",
+      ),
+    ).toBe(false);
+  } finally {
+    restore();
+  }
+});

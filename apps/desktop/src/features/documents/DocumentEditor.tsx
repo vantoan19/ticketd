@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CloudCheck,
@@ -81,6 +82,8 @@ import { useRecordSyncState } from "@/features/sync/record-sync";
  */
 function DocumentSurface({
   capture,
+  open,
+  onExitComplete,
   onClose,
   onDismiss,
   footer,
@@ -90,6 +93,8 @@ function DocumentSurface({
 }: {
   footer: ReactNode;
   capture: boolean;
+  open: boolean;
+  onExitComplete: () => void;
   /** Submit: save, then close. */
   onClose: () => void;
   /** The X and Escape use the same save and draft-protection controller. */
@@ -102,7 +107,8 @@ function DocumentSurface({
     return <article className="document-workspace">{children}</article>;
   return (
     <DialogShell
-      open
+      open={open}
+      onExitComplete={onExitComplete}
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
@@ -452,10 +458,11 @@ export function DocumentEditor({
     closeRequested.current = false;
     action();
   };
-  const close = useRef(onClose);
+  const presence = useDialogPresence(onClose, !initial);
+  const close = useRef(initial ? onClose : presence.close);
   useEffect(() => {
-    close.current = onClose;
-  }, [onClose]);
+    close.current = initial ? onClose : presence.close;
+  }, [initial, onClose, presence.close]);
   const finishTransition = async () => {
     if (!transition.current || !id.current) return;
     setTransitioning(true);
@@ -1132,6 +1139,8 @@ export function DocumentEditor({
   return (
     <DocumentSurface
       capture={capture}
+      open={presence.dialog.open}
+      onExitComplete={presence.dialog.onExitComplete}
       onClose={requestClose}
       // Cancel, the X and Escape leave as every way out does: after a failed
       // save the draft is kept by draft recovery and the dialog closes, or,

@@ -16,6 +16,7 @@ export function useFocusReturn(
     onCloseAutoFocus?: AutoFocusHandler;
   },
   invocation?: HTMLElement | null,
+  resolveReturnFocus?: () => HTMLElement | null,
 ) {
   const opener = useRef<HTMLElement | null>(null);
   return {
@@ -28,7 +29,22 @@ export function useFocusReturn(
     onCloseAutoFocus(event: Event) {
       handlers.onCloseAutoFocus?.(event);
       if (event.defaultPrevented) return;
-      const target = returnTo?.current ?? invocation ?? opener.current;
+      const active = document.activeElement;
+      // A new pane or overlay can take focus while this one's exit finishes.
+      if (
+        active instanceof HTMLElement &&
+        active !== document.body &&
+        active.isConnected &&
+        (!(event.target instanceof Node) || !event.target.contains(active))
+      ) {
+        event.preventDefault();
+        return;
+      }
+      const target =
+        resolveReturnFocus?.() ??
+        returnTo?.current ??
+        invocation ??
+        opener.current;
       if (
         target?.isConnected &&
         target !== document.body &&
