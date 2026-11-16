@@ -55,12 +55,12 @@ export function TicketList({
   simple = true,
   empty,
   scopeKey = "",
-  details = {},
+  lastWritten = {},
 }: {
   tickets: Ticket[];
   empty?: ReactNode;
   scopeKey?: string;
-  details?: Record<string, Ticket>;
+  lastWritten?: Record<string, Ticket>;
   selected: string | null;
   onOpen: (reference: string) => void;
   bulkSelection: string[];
@@ -109,7 +109,7 @@ export function TicketList({
   const sticky = useStickyRows(
     tickets,
     selected,
-    details,
+    lastWritten,
     bulkSelection,
     scopeKey,
   );

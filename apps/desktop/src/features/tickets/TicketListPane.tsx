@@ -481,7 +481,7 @@ function TicketListBody({
                     ])}
                     tickets={visibleTickets}
                     empty={emptyView}
-                    details={workspace.written}
+                    lastWritten={workspace.lastWritten}
                     scope={{
                       showPlan: !navigation.plan,
                       showProject: navigation.project === "all",

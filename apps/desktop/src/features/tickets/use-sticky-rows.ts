@@ -7,7 +7,7 @@ type Placement = { status: string; index: number; ticket: Ticket };
 export function useStickyRows(
   tickets: Ticket[],
   selected: string | null,
-  details: Record<string, Ticket>,
+  lastWritten: Record<string, Ticket>,
   bulkSelection: string[],
   scopeKey: string,
 ) {
@@ -64,7 +64,7 @@ export function useStickyRows(
       )
         return;
       const listed = tickets.find((ticket) => ticket.id === before.id);
-      const after = listed ?? details[before.reference];
+      const after = listed ?? lastWritten[before.reference];
       if (
         !next.has(before.id) &&
         ((!listed && allowMissing && previousScope === scopeKey) ||
@@ -190,7 +190,7 @@ export function useStickyRows(
     const index = displayed.findIndex((ticket) => ticket.id === id);
     const ticket =
       index < 0
-        ? (details[placement.ticket.reference] ?? placement.ticket)
+        ? (lastWritten[placement.ticket.reference] ?? placement.ticket)
         : displayed.splice(index, 1)[0]!;
     displayed.splice(Math.min(placement.index, displayed.length), 0, ticket);
   }
