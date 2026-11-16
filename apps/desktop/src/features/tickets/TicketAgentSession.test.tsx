@@ -4,7 +4,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { LatestUpdate } from "./LatestUpdate";
 import { TicketAgentSession } from "./TicketAgent";
-import { OpenTicketFor, ticketFor } from "./open-ticket/parts/activity-testing";
+import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
+import { ticketFor } from "./open-ticket/parts/ticket-fixture";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);

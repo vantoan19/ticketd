@@ -2,6 +2,7 @@ import {
   client,
   type ActivityFeedEntry,
   type AuthoredActivity,
+  type Ticket,
 } from "@/lib/api/client";
 import { latestUpdate, type LatestUpdate } from "@/lib/api/progress";
 import {
@@ -61,12 +62,19 @@ declare module "../parts" {
   }
 }
 
-parts.activity = (record) =>
-  usePagedRead(activityRead, record?.reference ?? skip);
-parts.activityNote = (record, id) =>
-  useRead(
+function useActivity(record: Ticket | undefined) {
+  return usePagedRead(activityRead, record?.reference ?? skip);
+}
+function useActivityNote(record: Ticket | undefined, id: string | undefined) {
+  return useRead(
     activityNoteRead,
     record && id !== undefined ? { reference: record.reference, id } : skip,
   );
-parts.latestUpdate = (record) =>
-  useRead(latestUpdateRead, record?.reference ?? skip);
+}
+function useLatestUpdate(record: Ticket | undefined) {
+  return useRead(latestUpdateRead, record?.reference ?? skip);
+}
+
+parts.activity = useActivity;
+parts.activityNote = useActivityNote;
+parts.latestUpdate = useLatestUpdate;
