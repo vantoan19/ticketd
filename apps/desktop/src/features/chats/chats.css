@@ -970,12 +970,8 @@ button.chat-file-name:focus-visible {
 }
 /* Harness tabs: one equal-width segmented strip that never wraps; a status
    word truncates inside its tab before the name does (CH-17). */
-.chat-picker-harnesses {
-  display: grid;
-  flex: none;
-  grid-auto-columns: minmax(0, 1fr);
-}
-.chat-picker-harness small {
+
+.chat-picker [role="tab"] small {
   flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
@@ -984,7 +980,7 @@ button.chat-file-name:focus-visible {
   line-height: var(--text-caption-line);
   text-overflow: ellipsis;
 }
-.chat-picker-harness[data-dim] > .chat-picker-harness-name {
+.chat-picker [role="tab"][data-dim] > .chat-picker-harness-name {
   color: var(--muted-foreground);
 }
 /* In a Chat (one harness) the body is as tall as its content. In New Chat,

@@ -410,7 +410,7 @@ export function HarnessPicker({
           <SegmentedTabList
             ref={tabList}
             plain={tabs.length === 1}
-            className="chat-picker-harnesses"
+            className="w-full shrink-0"
             aria-label="Harness"
             onKeyDown={onTabKey}
           >
@@ -418,7 +418,6 @@ export function HarnessPicker({
               <SegmentedTab
                 key={item.id}
                 data-harness={item.id}
-                className="chat-picker-harness"
                 aria-selected={item.id === tab?.id}
                 tabIndex={item.id === tab?.id ? 0 : -1}
                 data-dim={item.ready ? undefined : ""}
