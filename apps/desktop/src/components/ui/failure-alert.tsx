@@ -180,12 +180,18 @@ export function FailureState({
   onRetry,
   actions,
   size = "block",
+  label,
+  detailsVariant = "inline",
   className,
 }: {
   failure: FailureDescription;
   onRetry?: () => void;
   actions?: ReactNode;
   size?: "block" | "inline";
+  /** Short visible wording when the full title is available in Details. */
+  label?: string;
+  /** Stable rows open Details over content rather than inserting it. */
+  detailsVariant?: "inline" | "popover";
   className?: string;
 }) {
   if (size === "inline")
@@ -197,14 +203,18 @@ export function FailureState({
         className={cn("ui-failure-inline", className)}
       >
         <StatusLabel tone="attention" size="caption">
-          {failure.title}
+          {label ?? failure.title}
         </StatusLabel>
-        <span className="sr-only">{failure.sentence}</span>
+        <span className="sr-only">
+          {label && `${failure.title}. `}
+          {failure.sentence}
+        </span>
         <RetryButton failure={failure} onRetry={onRetry} variant="link" />
         {actions}
         <FailureDetails
           small
-          details={`${failure.sentence}\n\n${failure.details}`}
+          variant={detailsVariant}
+          details={`${label ? `${failure.title}. ` : ""}${failure.sentence}\n\n${failure.details}`}
         />
       </div>
     );
