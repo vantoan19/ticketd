@@ -28,10 +28,15 @@ impl DriveTransport for Http {
             r.method,
             r.url
         );
+        let is_token = r.url == TOKEN_URL;
         self.requests.lock().unwrap().push(r);
+        if is_token {
+            return Ok(token());
+        }
         Ok(self.responses.lock().unwrap().remove(0))
     }
 }
+const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 fn response(status: u16, body: &[u8]) -> DriveResponse {
     DriveResponse {
         status,
@@ -58,7 +63,7 @@ fn reference() -> DriveReference {
 
 #[test]
 fn google_copy_download_uses_authorized_bounded_blob_reads_without_mutation_or_conversion() {
-    let http=Http { requests:Mutex::new(vec![]),responses:Mutex::new(vec![token(),response(200,br#"{"id":"blob","name":"trace.log","mimeType":"application/octet-stream","size":"14","sha256Checksum":"52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698","version":"1","capabilities":{"canDownload":true}}"#),token(),DriveResponse {status:206,body:b"original bytes".to_vec(),headers:vec![("Content-Range".into(),"bytes 0-13/14".into())]}]) };
+    let http=Http { requests:Mutex::new(vec![]),responses:Mutex::new(vec![response(200,br#"{"id":"blob","name":"trace.log","mimeType":"application/octet-stream","size":"14","sha256Checksum":"52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698","version":"1","capabilities":{"canDownload":true}}"#),DriveResponse {status:206,body:b"original bytes".to_vec(),headers:vec![("Content-Range".into(),"bytes 0-13/14".into())]}]) };
     let provider = GoogleDriveCopies::new(&Vault, &http);
     let metadata = provider.inspect(&reference()).unwrap();
     assert_eq!(metadata.version.as_deref(), Some("1"));
@@ -66,9 +71,15 @@ fn google_copy_download_uses_authorized_bounded_blob_reads_without_mutation_or_c
     let mut output = Vec::new();
     provider.download(&reference(), 14, &mut output).unwrap();
     assert_eq!(output, b"original bytes");
-    let requests = http.requests.lock().unwrap();
+    let all = http.requests.lock().unwrap();
     assert_eq!(
-        requests[3]
+        all.iter().filter(|r| r.url == TOKEN_URL).count(),
+        1,
+        "inspecting and downloading share one access token"
+    );
+    let requests: Vec<_> = all.iter().filter(|r| r.url != TOKEN_URL).collect();
+    assert_eq!(
+        requests[1]
             .headers
             .iter()
             .find(|(k, _)| k == "Range")
@@ -77,24 +88,20 @@ fn google_copy_download_uses_authorized_bounded_blob_reads_without_mutation_or_c
         "bytes=0-13"
     );
     assert!(
-        requests[3]
+        requests[1]
             .headers
             .contains(&("X-Goog-Drive-Resource-Keys".into(), "blob/key".into()))
     );
-    assert!(requests[3].url.contains("alt=media"));
-    assert!(
-        requests
-            .iter()
-            .all(|r| r.method == "GET" || r.url == "https://oauth2.googleapis.com/token")
-    );
-    assert!(!format!("{requests:?}").contains("secret"));
+    assert!(requests[1].url.contains("alt=media"));
+    assert!(requests.iter().all(|r| r.method == "GET"));
+    assert!(!format!("{all:?}").contains("secret"));
 }
 
 #[test]
 fn native_content_is_not_converted_or_downloaded_even_when_provider_called_directly() {
     let http = Http {
         requests: Mutex::new(vec![]),
-        responses: Mutex::new(vec![token(), response(200, b"original bytes")]),
+        responses: Mutex::new(vec![response(200, b"original bytes")]),
     };
     let provider = GoogleDriveCopies::new(&Vault, &http);
     let mut reference = reference();
@@ -111,7 +118,6 @@ fn ranged_download_handles_multiple_chunks_and_refuses_inconsistent_or_short_res
     let http = Http {
         requests: Mutex::new(vec![]),
         responses: Mutex::new(vec![
-            token(),
             DriveResponse {
                 status: 206,
                 body: vec![b'a'; 262144],
@@ -131,8 +137,11 @@ fn ranged_download_handles_multiple_chunks_and_refuses_inconsistent_or_short_res
         .unwrap();
     assert_eq!(output.len(), 262147);
     assert_eq!(&output[262144..], b"end");
+    let requests = http.requests.lock().unwrap();
+    let reads: Vec<_> = requests.iter().filter(|r| r.url != TOKEN_URL).collect();
+    assert_eq!(reads.len(), 2);
     assert_eq!(
-        http.requests.lock().unwrap()[2]
+        reads[1]
             .headers
             .iter()
             .find(|(k, _)| k == "Range")
@@ -140,20 +149,18 @@ fn ranged_download_handles_multiple_chunks_and_refuses_inconsistent_or_short_res
             .1,
         "bytes=262144-262146"
     );
+    drop(requests);
     for (range, bytes) in [
         ("bytes 0-13/15", &b"original bytes"[..]),
         ("bytes 0-13/14", &b"short"[..]),
     ] {
         let http = Http {
             requests: Mutex::new(vec![]),
-            responses: Mutex::new(vec![
-                token(),
-                DriveResponse {
-                    status: 206,
-                    body: bytes.into(),
-                    headers: vec![("Content-Range".into(), range.into())],
-                },
-            ]),
+            responses: Mutex::new(vec![DriveResponse {
+                status: 206,
+                body: bytes.into(),
+                headers: vec![("Content-Range".into(), range.into())],
+            }]),
         };
         let mut output = Vec::new();
         assert!(

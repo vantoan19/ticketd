@@ -366,7 +366,7 @@ impl Workspace {
         if operation.remote_file_id.is_none() {
             let id = provider.reserve_file_id()?;
             if !valid_file_id(&id) {
-                return Err(super::invalid_response().into());
+                return Err(super::client::invalid_response().into());
             }
             operation.remote_file_id = Some(id);
             self.save_drive_upload(&operation)?;
@@ -386,7 +386,7 @@ impl Workspace {
             operation
                 .remote_file_id
                 .as_deref()
-                .ok_or_else(super::invalid_response)?,
+                .ok_or_else(super::client::invalid_response)?,
         );
         match resolved {
             Ok(Some(file)) => self.complete_drive_upload(operation, file),
@@ -411,7 +411,7 @@ impl Workspace {
         let id = operation
             .remote_file_id
             .as_deref()
-            .ok_or_else(super::invalid_response)?;
+            .ok_or_else(super::client::invalid_response)?;
         validate_metadata(id, &file.metadata)?;
         if file.metadata.size_bytes != Some(operation.request.size_bytes)
             || file.sha256_checksum.as_deref() != Some(&operation.request.sha256)

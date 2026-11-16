@@ -11,11 +11,9 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use super::provider::metadata_error;
-use super::upload_provider::{safe_session_url, send_chunks};
+use super::client::{ClientError, DriveClient, Failure, ReadError, Retry};
 use super::{
-    CredentialStore, DriveError, DriveErrorKind, DriveRequest, DriveResponse, DriveTransport,
-    GoogleDrive, valid_file_id,
+    CredentialStore, DriveError, DriveErrorKind, DriveResponse, DriveTransport, valid_file_id,
 };
 use crate::sync::remote::{
     RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteKind, RemoteRevision,
@@ -27,11 +25,6 @@ const UPLOAD: &str = "https://www.googleapis.com/upload/drive/v3/files";
 const FOLDER: &str = "application/vnd.google-apps.folder";
 const FILE_FIELDS: &str =
     "id,name,mimeType,size,headRevisionId,sha256Checksum,createdTime,trashed,appProperties";
-/// Download range size; the transport refuses response bodies above 1 MiB.
-const CHUNK: u64 = 256 * 1024;
-const MAX_RETRIES: u32 = 4;
-/// The longest `Retry-After` a call waits out itself.
-const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 // appProperties keys. Folders carry SYNC + ROLE, files carry KIND + ID.
 const SYNC: &str = "ticketdSync";
@@ -56,6 +49,16 @@ impl From<DriveError> for RemoteError {
             | DriveErrorKind::InvalidResponse
             | DriveErrorKind::Cancelled
             | DriveErrorKind::Uncertain => Self::Other(error.message),
+        }
+    }
+}
+
+impl From<ClientError> for RemoteError {
+    fn from(error: ClientError) -> Self {
+        match error {
+            ClientError::Drive(error) => error.into(),
+            ClientError::Refused(response) => refusal(&response),
+            ClientError::Unreadable => unreadable(),
         }
     }
 }
@@ -141,9 +144,7 @@ impl Entry {
 /// [`RemoteStorage`] on the Drive transport and OAuth boundary. One value
 /// serves any number of Workspace folders of the connected account.
 pub struct DriveRemote<'a> {
-    drive: GoogleDrive<'a>,
-    pause: Box<dyn Fn(Duration) + Send + Sync + 'a>,
-    bearer: Mutex<Option<Vec<(String, String)>>>,
+    client: DriveClient<'a>,
     folders: Mutex<HashMap<String, Folders>>,
     files: Mutex<HashMap<(String, RemoteKey), String>>,
 }
@@ -160,14 +161,6 @@ fn json<T: DeserializeOwned>(response: &DriveResponse) -> Result<T, RemoteError>
     serde_json::from_slice(&response.body).map_err(|_| unreadable())
 }
 
-fn header<'r>(response: &'r DriveResponse, name: &str) -> Option<&'r str> {
-    response
-        .headers
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-}
-
 fn url(path: &str, parameters: &[(&str, &str)]) -> Result<String, RemoteError> {
     url::Url::parse_with_params(&format!("{API}/{path}"), parameters)
         .map(String::from)
@@ -178,44 +171,15 @@ fn property(key: &str, value: &str) -> String {
     format!("appProperties has {{ key='{key}' and value='{value}' }}")
 }
 
-fn response_error(response: &DriveResponse) -> RemoteError {
-    let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
-    let has_reason = |wanted: &[&str]| {
-        body["error"]["errors"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|error| error["reason"].as_str())
-            .any(|reason| wanted.contains(&reason))
-    };
-    let retry_after = header(response, "retry-after")
-        .and_then(|seconds| seconds.trim().parse().ok())
-        .map(Duration::from_secs);
-    match response.status {
-        401 => RemoteError::Unauthorized,
-        403 if has_reason(&["storageQuotaExceeded", "teamDriveFileLimitExceeded"]) => {
-            RemoteError::StorageFull
-        }
-        429 => RemoteError::RateLimited { retry_after },
-        403 if has_reason(&[
-            "rateLimitExceeded",
-            "userRateLimitExceeded",
-            "dailyLimitExceeded",
-        ]) =>
-        {
-            RemoteError::RateLimited { retry_after }
-        }
-        500..=599 => RemoteError::Offline,
-        _ => RemoteError::Other(metadata_error(response).message),
+/// What a status Drive refused with means to sync.
+fn refusal(response: &DriveResponse) -> RemoteError {
+    match Failure::of(response) {
+        Failure::Unauthorized => RemoteError::Unauthorized,
+        Failure::StorageFull => RemoteError::StorageFull,
+        Failure::RateLimited { retry_after } => RemoteError::RateLimited { retry_after },
+        Failure::Unavailable => RemoteError::Offline,
+        other => RemoteError::Other(other.guidance().message),
     }
-}
-
-/// Exponential backoff with jitter: between half and all of 1 s, 2 s, 4 s…,
-/// and never shorter than the wait the server asked for.
-fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
-    let ceiling = 1000_u64 << attempt.min(5);
-    let jitter = uuid::Uuid::new_v4().as_u128() % u128::from(ceiling / 2 + 1);
-    Duration::from_millis(ceiling / 2 + jitter as u64).max(retry_after.unwrap_or_default())
 }
 
 fn content_type(kind: RemoteKind) -> &'static str {
@@ -241,14 +205,12 @@ fn check(folder: &str, key: Option<&RemoteKey>) -> Result<(), RemoteError> {
 
 impl<'a> DriveRemote<'a> {
     pub fn new(
-        connection_id: &'a str,
+        connection_id: &str,
         vault: &'a dyn CredentialStore,
         transport: &'a dyn DriveTransport,
     ) -> Self {
         Self {
-            drive: GoogleDrive::new(connection_id, vault, transport),
-            pause: Box::new(std::thread::sleep),
-            bearer: Mutex::new(None),
+            client: DriveClient::new(connection_id, vault, transport),
             folders: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
         }
@@ -265,25 +227,13 @@ impl<'a> DriveRemote<'a> {
 
     /// Replace the wait between retries, so tests control time.
     pub fn with_pause(mut self, pause: impl Fn(Duration) + Send + Sync + 'a) -> Self {
-        self.pause = Box::new(pause);
+        self.client = self.client.with_pause(pause);
         self
     }
 
-    fn authorization(&self) -> Result<Vec<(String, String)>, RemoteError> {
-        let mut bearer = lock(&self.bearer);
-        match &*bearer {
-            Some(headers) => Ok(headers.clone()),
-            None => {
-                let headers = self.drive.authorization()?;
-                *bearer = Some(headers.clone());
-                Ok(headers)
-            }
-        }
-    }
-
-    /// Sends with the cached access token, renews it once when refused, and
-    /// retries rate limits and server failures with backoff. Returns
-    /// successes, 404 and 409; every other status is an error.
+    /// Sends with the shared client, which renews the access token once when
+    /// refused and retries rate limits and server failures with backoff.
+    /// Returns successes, 404 and 409; every other status is an error.
     fn send(
         &self,
         method: &'static str,
@@ -291,37 +241,12 @@ impl<'a> DriveRemote<'a> {
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<DriveResponse, RemoteError> {
-        let mut renewed = false;
-        let mut attempt = 0;
-        loop {
-            let mut all = headers.to_vec();
-            all.extend(self.authorization()?);
-            let response = self.drive.transport.send(DriveRequest {
-                method,
-                url: url.into(),
-                headers: all,
-                body: body.to_vec(),
-            })?;
-            let error = match response.status {
-                200..=399 | 404 | 409 => return Ok(response),
-                401 if !renewed => {
-                    renewed = true;
-                    *lock(&self.bearer) = None;
-                    continue;
-                }
-                _ => response_error(&response),
-            };
-            let retry_after = match &error {
-                RemoteError::RateLimited { retry_after } => *retry_after,
-                RemoteError::Offline => None,
-                _ => return Err(error),
-            };
-            // A server may ask for any wait; a long one is the caller's to schedule.
-            if attempt == MAX_RETRIES || retry_after.is_some_and(|wait| wait > MAX_RETRY_AFTER) {
-                return Err(error);
-            }
-            (self.pause)(backoff(attempt, retry_after));
-            attempt += 1;
+        let response = self
+            .client
+            .send(method, url, headers, body, Retry::Backoff)?;
+        match response.status {
+            200..=399 | 404 | 409 => Ok(response),
+            _ => Err(refusal(&response)),
         }
     }
 
@@ -340,28 +265,30 @@ impl<'a> DriveRemote<'a> {
         }
         let fields = format!("nextPageToken,files({FILE_FIELDS})");
         let mut entries = Vec::new();
-        let mut token: Option<String> = None;
-        loop {
-            let mut parameters = vec![
-                ("q", q),
-                ("fields", fields.as_str()),
-                ("pageSize", "500"),
-                ("spaces", "drive"),
-            ];
-            if let Some(token) = &token {
-                parameters.push(("pageToken", token));
-            }
-            let response = self.get(&url("files", &parameters)?)?;
-            if response.status != 200 {
-                return Err(response_error(&response));
-            }
-            let page: Page = json(&response)?;
-            entries.extend(page.files);
-            token = page.next_page_token;
-            if token.is_none() {
-                return Ok(entries);
-            }
-        }
+        self.client.pages(
+            Retry::Backoff,
+            &mut |token| {
+                let mut parameters = vec![
+                    ("q", q),
+                    ("fields", fields.as_str()),
+                    ("pageSize", "500"),
+                    ("spaces", "drive"),
+                ];
+                if let Some(token) = token {
+                    parameters.push(("pageToken", token));
+                }
+                url("files", &parameters)
+            },
+            &mut |response| {
+                if response.status != 200 {
+                    return Err(refusal(&response));
+                }
+                let page: Page = json(&response)?;
+                entries.extend(page.files);
+                Ok(page.next_page_token)
+            },
+        )?;
+        Ok(entries)
     }
 
     fn entry(&self, id: &str) -> Result<Option<Entry>, RemoteError> {
@@ -372,25 +299,12 @@ impl<'a> DriveRemote<'a> {
         match response.status {
             200 => Ok(Some(json(&response)?)),
             404 => Ok(None),
-            _ => Err(response_error(&response)),
+            _ => Err(refusal(&response)),
         }
     }
 
     fn reserve(&self) -> Result<String, RemoteError> {
-        #[derive(Deserialize)]
-        struct Ids {
-            ids: Vec<String>,
-        }
-        let response = self.get(&format!(
-            "{API}/files/generateIds?count=1&space=drive&type=files"
-        ))?;
-        if response.status != 200 {
-            return Err(response_error(&response));
-        }
-        match json::<Ids>(&response)?.ids.as_slice() {
-            [id] if valid_file_id(id) => Ok(id.clone()),
-            _ => Err(unreadable()),
-        }
+        Ok(self.client.reserve_id(Retry::Backoff)?)
     }
 
     /// The Drive folders of a Workspace folder. `list` looks them up afresh so
@@ -555,7 +469,7 @@ impl<'a> DriveRemote<'a> {
         size: u64,
         content: &mut dyn RemoteContent,
     ) -> Result<Result<Entry, u16>, RemoteError> {
-        let opened = self.send(
+        let session = match self.client.open_session(
             method,
             &format!("{target}?uploadType=resumable&supportsAllDrives=true&fields={FILE_FIELDS}"),
             &[
@@ -567,34 +481,32 @@ impl<'a> DriveRemote<'a> {
                 ("X-Upload-Content-Length".into(), size.to_string()),
             ],
             metadata.to_string().as_bytes(),
-        )?;
-        if matches!(opened.status, 404 | 409) {
-            return Ok(Err(opened.status));
-        }
-        let session = header(&opened, "location")
-            .filter(|location| safe_session_url(location))
-            .ok_or_else(unreadable)?;
-        let response = send_chunks(
-            size,
-            content,
-            &mut |range, bytes| {
-                self.send(
-                    "PUT",
-                    session,
-                    &[
-                        ("Content-Type".into(), content_type(kind).into()),
-                        ("Content-Range".into(), range),
-                    ],
-                    &bytes,
-                )
-            },
-            &mut |_| Ok(()),
-        )?;
-        if !matches!(response.status, 200 | 201) {
-            return Err(RemoteError::Other(
-                "Google Drive did not complete the upload; it will be retried".into(),
-            ));
-        }
+            Retry::Backoff,
+        ) {
+            Ok(session) => session,
+            Err(ClientError::Refused(response)) if matches!(response.status, 404 | 409) => {
+                return Ok(Err(response.status));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let response = self
+            .client
+            .upload_chunks(
+                &session,
+                content_type(kind),
+                size,
+                content,
+                Retry::Backoff,
+                &mut |_| Ok(()),
+            )
+            .map_err(|error| match error {
+                ClientError::Refused(response) if matches!(response.status, 404 | 409) => {
+                    RemoteError::Other(
+                        "Google Drive did not complete the upload; it will be retried".into(),
+                    )
+                }
+                error => error.into(),
+            })?;
         let stored: Entry = json(&response)?;
         if stored.head_revision_id.is_some() {
             return Ok(Ok(stored));
@@ -629,31 +541,41 @@ impl<'a> DriveRemote<'a> {
         }
         let ok = |response: DriveResponse| match response.status {
             200 => Ok(response),
-            _ => Err(response_error(&response)),
+            _ => Err(refusal(&response)),
         };
-        let Some(mut token) = page_token.map(str::to_owned) else {
+        let Some(token) = page_token else {
             let response = ok(self.get(&format!("{API}/changes/startPageToken"))?)?;
             return Ok((Vec::new(), json::<Start>(&response)?.start_page_token));
         };
         let mut ids = Vec::new();
-        loop {
-            let response = ok(self.get(&url(
-                "changes",
-                &[
-                    ("pageToken", token.as_str()),
-                    ("spaces", "drive"),
-                    ("pageSize", "500"),
-                    ("fields", "nextPageToken,newStartPageToken,changes(fileId)"),
-                ],
-            )?)?)?;
-            let page: Page = json(&response)?;
-            ids.extend(page.changes.into_iter().filter_map(|change| change.file_id));
-            match (page.next_page_token, page.new_start_page_token) {
-                (Some(next), _) => token = next,
-                (None, Some(start)) => return Ok((ids, start)),
-                (None, None) => return Err(unreadable()),
-            }
-        }
+        let mut start = None;
+        self.client.pages(
+            Retry::Backoff,
+            &mut |next| {
+                url(
+                    "changes",
+                    &[
+                        ("pageToken", next.unwrap_or(token)),
+                        ("spaces", "drive"),
+                        ("pageSize", "500"),
+                        ("fields", "nextPageToken,newStartPageToken,changes(fileId)"),
+                    ],
+                )
+            },
+            &mut |response| {
+                let page: Page = json(&ok(response)?)?;
+                ids.extend(page.changes.into_iter().filter_map(|change| change.file_id));
+                match (page.next_page_token, page.new_start_page_token) {
+                    (Some(next), _) => Ok(Some(next)),
+                    (None, Some(newest)) => {
+                        start = Some(newest);
+                        Ok(None)
+                    }
+                    (None, None) => Err(unreadable()),
+                }
+            },
+        )?;
+        Ok((ids, start.ok_or_else(unreadable)?))
     }
 }
 
@@ -763,33 +685,27 @@ impl RemoteStorage for DriveRemote<'_> {
             .size
             .and_then(|size| size.parse().ok())
             .ok_or_else(unreadable)?;
-        let mut offset = 0;
-        while offset < size {
-            let length = (size - offset).min(CHUNK);
-            let response = self.send(
-                "GET",
+        self.client
+            .read_ranges(
                 &format!("{revision}?alt=media"),
-                &[(
-                    "Range".into(),
-                    format!("bytes={offset}-{}", offset + length - 1),
-                )],
                 &[],
-            )?;
-            let whole = response.status == 200 && offset == 0 && length == size;
-            if response.status == 404 {
-                return Err(RemoteError::NotFound);
-            }
-            if !(response.status == 206 || whole) || response.body.len() as u64 != length {
-                return Err(RemoteError::Other(
-                    "Google Drive returned incomplete download bytes; it will be retried".into(),
-                ));
-            }
-            output
-                .write_all(&response.body)
-                .map_err(|_| RemoteError::Other("cannot write the downloaded bytes".into()))?;
-            offset += length;
-        }
-        Ok(())
+                size,
+                Retry::Backoff,
+                output,
+            )
+            .map_err(|error| match error {
+                ReadError::Client(ClientError::Refused(response)) if response.status == 404 => {
+                    RemoteError::NotFound
+                }
+                ReadError::Client(error) => error.into(),
+                ReadError::Output => RemoteError::Other("cannot write the downloaded bytes".into()),
+                ReadError::ContentRange | ReadError::Length | ReadError::NotRanged => {
+                    RemoteError::Other(
+                        "Google Drive returned incomplete download bytes; it will be retried"
+                            .into(),
+                    )
+                }
+            })
     }
 
     // ponytail: Drive v3 has no conditional update, so the version is checked
@@ -877,35 +793,37 @@ impl RemoteStorage for DriveRemote<'_> {
         }
         let id = self.file_id(folder, key)?;
         let mut revisions = Vec::new();
-        let mut token: Option<String> = None;
-        loop {
-            let mut parameters = vec![
-                ("pageSize", "200"),
-                ("fields", "nextPageToken,revisions(id,modifiedTime,size)"),
-            ];
-            if let Some(token) = &token {
-                parameters.push(("pageToken", token));
-            }
-            let response = self.get(&url(&format!("files/{id}/revisions"), &parameters)?)?;
-            if response.status != 200 {
-                self.forget(folder, key);
-                return Err(RemoteError::NotFound);
-            }
-            let page: Page = json(&response)?;
-            revisions.extend(page.revisions.into_iter().map(|revision| {
-                RemoteRevision {
-                    version: revision.id,
-                    modified: revision.modified_time,
-                    size: revision
-                        .size
-                        .and_then(|size| size.parse().ok())
-                        .unwrap_or_default(),
+        self.client.pages(
+            Retry::Backoff,
+            &mut |token| {
+                let mut parameters = vec![
+                    ("pageSize", "200"),
+                    ("fields", "nextPageToken,revisions(id,modifiedTime,size)"),
+                ];
+                if let Some(token) = token {
+                    parameters.push(("pageToken", token));
                 }
-            }));
-            token = page.next_page_token;
-            if token.is_none() {
-                return Ok(revisions);
-            }
-        }
+                url(&format!("files/{id}/revisions"), &parameters)
+            },
+            &mut |response| {
+                if response.status != 200 {
+                    self.forget(folder, key);
+                    return Err(RemoteError::NotFound);
+                }
+                let page: Page = json(&response)?;
+                revisions.extend(page.revisions.into_iter().map(|revision| {
+                    RemoteRevision {
+                        version: revision.id,
+                        modified: revision.modified_time,
+                        size: revision
+                            .size
+                            .and_then(|size| size.parse().ok())
+                            .unwrap_or_default(),
+                    }
+                }));
+                Ok(page.next_page_token)
+            },
+        )?;
+        Ok(revisions)
     }
 }
