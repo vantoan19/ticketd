@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-ticket-detail.css";
+
 .detail-title-group {
   display: flex;
   flex: 0 1 auto;
@@ -17,23 +19,6 @@
   max-width: 760px;
   padding-top: 40px;
 }
-.ticket-detail .description-document,
-.ticket-detail .description-document :is(p, li),
-.ticket-detail .editor-body [role="textbox"] {
-  font-size: var(--text-doc);
-  line-height: var(--text-doc-line);
-}
-.detail-content:not([hidden]) .detail-document {
-  animation: ticket-document-enter var(--dur-2) var(--ease-out);
-}
-@keyframes ticket-document-enter {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
 .ticket-follow-slot {
   display: inline-flex;
   align-items: center;
@@ -43,7 +28,6 @@
   position: absolute;
   top: 100%;
   inset-inline-end: 0;
-  white-space: nowrap;
 }
 /* One 32px row under the title: "Updated 5 h ago", the source state, or
    save state. Its height is fixed so nothing moves when its words change. */
@@ -54,9 +38,6 @@
   gap: 4px 12px;
   min-height: 32px;
   margin: 4px 0 0;
-  color: var(--secondary-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .ticket-source-state {
   display: inline-flex;
@@ -75,17 +56,12 @@
 .list-position-text {
   min-width: 3ch;
   padding-inline: 0 4px;
-  text-align: end;
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
 }
 
 /* Clamped at 240px: the place gives way with an ellipsis, the number stays. */
 .header-source-link {
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
 }
 .header-source-place {
   min-width: 0;
@@ -97,20 +73,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--link-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  text-align: left;
-  text-decoration: none;
   text-underline-offset: 2px;
-}
-.source-link:hover {
-  text-decoration: underline;
-}
-.source-link:focus-visible {
-  border-radius: var(--radius-segment);
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .source-description .description-document {
   margin-top: 0;
@@ -123,14 +86,9 @@
   gap: 6px;
   margin: 0;
   padding-left: 18px;
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .source-caption {
   margin: 8px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 
 .source-link-icon {
@@ -138,39 +96,18 @@
   height: 12px;
   flex: none;
 }
-.source-number,
-.rail-source-identity .source-link {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-}
 .header-source-link {
   max-width: 240px;
 }
 .source-title-trigger {
   width: 100%;
-  text-align: left;
-  font: inherit;
-  letter-spacing: inherit;
-  border-radius: var(--radius);
-}
-.source-title-trigger:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .source-readonly-explanation {
   display: grid;
   gap: 8px;
-  box-shadow: var(--shadow-tooltip);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .source-readonly-explanation .source-caption {
   margin: 0;
-}
-[data-slot="card-header"] .source-link {
-  font-size: var(--text-caption);
-  white-space: nowrap;
 }
 .source-description-clip[data-collapsed] {
   max-height: 260px;
@@ -178,13 +115,11 @@
 }
 .source-description-toggle {
   margin: 0 4px 8px;
-  color: var(--link-foreground);
 }
 .source-card-actions {
   margin-left: auto;
 }
 .source-card-actions .ui-button {
-  font-size: var(--text-caption);
   gap: 4px;
   padding: 0 4px;
 }
@@ -201,37 +136,20 @@
 .rail-source > .ui-button {
   margin-left: -12px;
 }
-.take-ownership-effects {
-  list-style: disc;
-  color: var(--secondary-foreground);
-}
 .take-ownership-popover {
   width: 400px;
   max-width: calc(100vw - 32px);
   padding: 20px;
   display: grid;
   gap: 12px;
-  box-shadow: var(--shadow-large);
-}
-.take-ownership-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
 }
 
 /* A trashed ticket with no description says so, muted, at the text edge. */
-.ticket-no-description {
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
 
 .ticket-header-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .detail-connected:empty,

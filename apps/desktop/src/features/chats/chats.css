@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/chats-chats.css";
+
 /* Chat screens: the ticket list + detail split with one quiet conversation
    column. Layout only; every color, radius, shadow and size is a token. */
 .chats-workspace #chat-list,
@@ -42,7 +44,6 @@
   padding: 4px 0;
   /* Rows never scroll sideways: a row's visually hidden words sit past its end. */
   overflow: hidden auto;
-  list-style: none;
 }
 /* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
 .chat-row-item {
@@ -52,16 +53,9 @@
   position: absolute;
   top: 8px;
   right: 18px;
-  opacity: 0;
-  transition: opacity var(--dur-exit) var(--ease-out);
 }
 /* Keyboard focus shows it (Right Arrow reaches it); a click that leaves focus
    on the open row does not, so the open row keeps its time (CH-05). */
-.chat-row-item:hover .chat-row-more,
-.chat-row-item:has(:focus-visible) .chat-row-more,
-.chat-row-more[data-open] {
-  opacity: 1;
-}
 .chat-row-item:hover .chat-row-time,
 .chat-row-item:has(:focus-visible) .chat-row-time,
 .chat-row-item:has(.chat-row-more[data-open]) .chat-row-time {
@@ -78,17 +72,6 @@
   height: 52px;
   margin: 0 8px;
   padding: 8px 10px;
-  text-align: left;
-}
-.chat-row:hover {
-  background: var(--hover);
-}
-.chat-row[aria-current="true"] {
-  background: var(--accent);
-}
-.chat-row:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 .chat-row-mark {
   display: inline-flex;
@@ -96,24 +79,10 @@
   justify-content: center;
   width: 16px;
   height: 20px;
-  color: var(--muted-foreground);
 }
 .chat-row-title {
   overflow: hidden;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-row[data-attention] .chat-row-title {
-  font-weight: 500;
-}
-.chat-row-time,
-.chat-row-sub {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-row-time {
   display: inline-flex;
@@ -134,7 +103,6 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* The context gives way before the status does. */
 .chat-row-sub > span + span {
@@ -143,7 +111,6 @@
   max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* One context item at the line's end: the first ticket's status icon, its
    caption-size reference and "+N", or the Project's icon and name. */
@@ -152,10 +119,6 @@
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-.chat-row-context > .ui-reference {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-row-context > svg {
   flex: none;
@@ -174,15 +137,6 @@
   width: 16px;
   height: 16px;
 }
-.harness-mark svg {
-  fill: currentColor;
-}
-.harness-mark > svg[class*="lucide"] {
-  fill: none;
-}
-.harness-mark[data-dim] {
-  color: var(--disabled-foreground);
-}
 /* Line 2: the dot or spinner, the status word, then the detail, which truncates first. */
 .chat-status {
   display: flex;
@@ -197,17 +151,12 @@
    its dot or spinner; an idle Chat's last line stays muted (CH-05). */
 .chat-status-word {
   flex: none;
-  white-space: nowrap;
-}
-.chat-status[data-signal] > .chat-status-word {
-  color: var(--foreground);
 }
 .chat-status-detail {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* The context item gives way first in a narrow window. */
 @media (max-width: 459px) {
@@ -231,12 +180,7 @@
   min-width: 0;
   max-width: max-content;
   overflow: hidden;
-  color: var(--foreground);
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.detail-header h2.chat-head-title {
-  font-weight: 500;
 }
 /* The title group takes the free room and gives it up first, so the actions
    stay on the header's one 48px line, as on a ticket. */
@@ -260,21 +204,11 @@
    the folder's name capped at 18ch, and the chevron. It holds nothing else, so
    it never pushes into the title or the actions; below 460px only the icon
    and the chevron stay. Everything else is in its popover. */
-.chat-head-mark {
-  color: var(--foreground);
-}
 .chat-pane .detail-title-group > [data-context] {
   flex: 0 1 auto;
   min-width: 0;
   margin-left: auto;
   gap: 6px;
-  color: var(--muted-foreground);
-}
-.chat-pane
-  .detail-title-group
-  > [data-context][data-missing]
-  > svg:first-child {
-  color: var(--foreground);
 }
 .chat-context-name {
   flex: 0 1 auto;
@@ -282,7 +216,6 @@
   max-width: 18ch;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 @container ticket-detail (max-width: 459px) {
   .chat-context-name {
@@ -292,14 +225,6 @@
 /* The composer's context count: quiet mono tokens, words from 80%. */
 [data-context-count] {
   gap: 6px;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  font-variant-numeric: tabular-nums;
-}
-[data-context-count][data-full] {
-  color: var(--foreground);
-  font-family: inherit;
 }
 .chat-body {
   flex: 1;
@@ -335,18 +260,10 @@
   justify-content: center;
   height: 40px;
   overflow: hidden;
-  transition:
-    height var(--dur-lift) var(--ease-out),
-    opacity var(--dur-lift) var(--ease-out);
 }
 .chat-jump:not([data-shown]) {
   height: 0;
-  opacity: 0;
   visibility: hidden;
-  transition:
-    height var(--dur-lift) var(--ease-out),
-    opacity var(--dur-lift) var(--ease-out),
-    visibility var(--dur-instant) linear var(--dur-lift);
 }
 .chat-new-marker {
   display: inline-flex;
@@ -378,7 +295,6 @@
    while it moves. */
 .chat-dock-slot {
   flex: none;
-  transition: height var(--dur-2) var(--ease-out);
 }
 /* While it glides the slot is clipped from the top: the bottom of the card,
    where its buttons are, shows from the first frame (LIVE2-3). The clip
@@ -410,13 +326,6 @@
 .chat-you {
   max-width: 82%;
   padding: 10px 14px;
-  border-radius: var(--radius-panel) var(--radius-panel) var(--radius-segment)
-    var(--radius-panel);
-  background: var(--accent);
-  color: var(--foreground);
-  font-size: var(--text-doc);
-  line-height: var(--text-doc-line);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 /* Four lines, then Show more. */
@@ -438,11 +347,6 @@
   gap: 4px;
   min-height: 32px;
   margin: 0;
-  opacity: 0;
-}
-.chat-you-part:hover .chat-you-actions,
-.chat-you-actions:focus-within {
-  opacity: 1;
 }
 .chat-you-part .chat-caption {
   margin-top: 0;
@@ -459,26 +363,9 @@
   place-items: center;
   width: 96px;
   height: 72px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-}
-.chat-tile:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.chat-tile .attachment-thumbnail {
-  border-radius: var(--radius);
 }
 .chat-caption {
   align-self: flex-end;
-}
-.chat-caption,
-.chat-fine {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* Touch keeps message actions visible in normal flow, with room for the
    shared 44px targets before the next turn. */
@@ -490,14 +377,10 @@
     position: static;
     min-height: 44px;
     margin-right: -8px;
-    opacity: 1;
   }
 }
 /* A single line break in a reply is a new line, as in other chat apps. A hard
    break already ends in a newline, so its <br> is not drawn twice. */
-.chat-ai p {
-  white-space: pre-line;
-}
 .chat-ai p br {
   display: none;
 }
@@ -514,22 +397,12 @@
   margin: -16px 0 -8px -8px;
 }
 /* Response actions show on hover and whenever the keyboard is inside them. */
-.chat-turn .chat-actions {
-  opacity: 0;
-}
-.chat-turn:hover .chat-actions,
-.chat-turn .chat-actions:focus-within {
-  opacity: 1;
-}
 .chat-steps,
 .chat-working,
 .chat-line {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 /* A step row: one 28px line, `[icon] Verb target · suffix`; it wraps when
    narrow. As a button its hover fill reaches 8px past the text. */
@@ -541,18 +414,6 @@
   min-height: 28px;
   margin-left: -8px;
   padding: 4px 8px;
-  border-radius: var(--radius);
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-button.chat-steps:hover {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.chat-steps:focus-visible,
-.chat-fold:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .chat-row-icon {
   display: inline-flex;
@@ -572,57 +433,24 @@ button.chat-steps:hover {
    own (MOTION-8). */
 .chat-step-verb {
   display: inline-block;
-  transition: min-width var(--dur-settle) var(--ease-out);
-}
-@media (prefers-reduced-motion: reduce) {
-  .chat-step-verb {
-    transition: none;
-  }
 }
 /* The harness's warnings: one quiet line, opened only when asked (LIVE-9). */
-.chat-warnings {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
 .chat-warning-list {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
 /* An empty Chat says what to do (STATIC-16). */
 .chat-empty {
   margin: auto 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  text-align: center;
 }
 /* A row's chevron shows on hover, focus or while open. */
 .chat-steps .chat-chevron {
   flex: none;
   margin-top: 3px;
-  opacity: 0;
-}
-.chat-steps:hover .chat-chevron,
-.chat-steps:focus-visible .chat-chevron,
-.chat-steps[aria-expanded="true"] .chat-chevron {
-  opacity: 1;
 }
 /* A reference that opens nothing is plain mono; only a RecordLink is
    underlined (CH-28). */
-.chat-steps .ui-reference {
-  color: var(--foreground);
-}
 /* The turn row: muted, its chevron after the text and always shown. */
 /* A fold row that appears as a turn ends here fades in; history doesn't. */
-.chat-fold[data-fresh] {
-  animation: chat-fade-in var(--dur-lift) var(--ease-out);
-}
-@keyframes chat-fade-in {
-  from {
-    opacity: 0;
-  }
-}
 /* The working line's place, kept while a step row holds the spinner. */
 .chat-working-slot {
   min-height: var(--text-ui-line);
@@ -636,16 +464,6 @@ button.chat-steps:hover {
   min-height: 28px;
   margin: -4px 0 -6px -8px;
   padding: 4px 8px;
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-.chat-fold:hover {
-  background: var(--accent);
-  color: var(--foreground);
 }
 .chat-fold > svg {
   flex: none;
@@ -681,31 +499,17 @@ button.chat-steps:hover {
 .chat-output {
   position: relative;
   overflow: hidden;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
 }
 .chat-output-view {
   max-height: 264px;
   margin-right: 32px;
   overflow: auto;
 }
-.chat-output-view:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
 .chat-output pre {
   margin: 0;
   padding: 12px 0 12px 12px;
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-variant-ligatures: none;
-  line-height: var(--text-ui-line);
-  white-space: pre;
 }
 .chat-output-prompt {
-  color: var(--disabled-foreground);
   user-select: none;
 }
 .chat-output-copy {
@@ -719,8 +523,6 @@ button.chat-steps:hover {
 /* What ticketd says, not the harness: a smaller muted line with a marker. */
 .chat-note {
   align-items: flex-start;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-note > svg {
   flex: none;
@@ -732,24 +534,16 @@ button.chat-steps:hover {
   gap: 4px;
   margin: 0 0 4px 24px;
   padding: 0;
-  list-style: none;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .chat-steplist ul {
   display: flex;
   flex-direction: column;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .chat-steps code,
 .chat-steplist code,
 .chat-mono {
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
   overflow-wrap: anywhere;
 }
 /* A file a step named: the mono name is the button. Short of room it truncates
@@ -761,12 +555,7 @@ button.chat-steps:hover {
   /* A 24px target around a 20px line (STATIC-15). */
   padding: 2px;
   margin: -2px;
-  border-radius: var(--radius);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
   vertical-align: bottom;
-  white-space: nowrap;
 }
 .chat-file-head {
   min-width: 0;
@@ -776,36 +565,17 @@ button.chat-steps:hover {
 .chat-file-tail {
   flex: none;
 }
-button.chat-file-name:hover {
-  background: var(--accent);
-}
-button.chat-file-name:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
 .chat-step-alert {
   margin: 0 0 4px 24px;
 }
 /* An outcome is what the eye should find on a row: a word, never a colour. */
-.chat-steps [data-outcome] {
-  color: var(--foreground);
-  font-weight: 500;
-}
 .chat-steplist small {
   margin-left: 6px;
-  font-size: var(--text-caption);
 }
 .chat-out {
   margin: 4px 0 2px;
   padding: 10px 12px;
   overflow-x: auto;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  line-height: var(--text-ui-line);
-  white-space: pre;
 }
 .chat-composer {
   position: relative;
@@ -814,39 +584,15 @@ button.chat-file-name:focus-visible {
   flex-direction: column;
   gap: 0;
   padding: 0;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-}
-.chat-composer:focus-within {
-  box-shadow: 0 0 0 1px var(--input-focus);
 }
 /* Inside the tray the tray draws the ring and the focus edge. */
-.chat-composer[data-bare],
-.chat-composer[data-bare]:focus-within {
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
 .chat-composer textarea {
   min-width: 0;
   min-height: 52px;
   max-height: 200px;
   padding: 12px 14px 4px;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  outline: none;
-  background: transparent;
-  color: var(--foreground);
-  font: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
   resize: none;
   field-sizing: content;
-}
-.chat-composer textarea::placeholder {
-  color: var(--disabled-foreground);
 }
 /* The harness's controls (#368) on the left; Stop and the send button stay
    pinned at the end and never collapse. One line at every width: the leading
@@ -880,7 +626,6 @@ button.chat-file-name:focus-visible {
   flex-shrink: 1;
   gap: 6px;
   min-width: 0;
-  color: var(--muted-foreground);
 }
 .chat-control-label {
   min-width: 0;
@@ -890,15 +635,12 @@ button.chat-file-name:focus-visible {
 /* The effort's word beside its bars ("Medium"). */
 .chat-control-effort {
   flex: none;
-  color: var(--muted-foreground);
 }
 /* Held places while the harness or its models are still being asked: still,
    not pulsing, since nothing moves unless the person moved it. */
 .chat-skeleton {
   display: block;
   flex: none;
-  border-radius: var(--radius-segment);
-  background: var(--accent);
 }
 .chat-control-skeleton {
   width: 72px;
@@ -921,12 +663,6 @@ button.chat-file-name:focus-visible {
     display: none;
   }
 }
-.effort-glyph rect {
-  fill: var(--disabled-foreground);
-}
-.effort-glyph rect[data-on] {
-  fill: var(--foreground);
-}
 @container (max-width: 419px) {
   [data-control] .effort-glyph,
   [data-control] > .lucide-chevron-down {
@@ -945,13 +681,6 @@ button.chat-file-name:focus-visible {
   gap: 8px;
   min-height: 20px;
 }
-.chat-pick-option-line small,
-.chat-pick-option-note,
-.chat-pick-note {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
 .chat-pick-option-line small {
   margin-left: auto;
 }
@@ -965,9 +694,6 @@ button.chat-file-name:focus-visible {
 }
 /* The one picker for harness, model and effort (#368): harness tabs, then the
    chosen harness's models, then its efforts in one row. */
-.chat-controls > [data-control="model"] > .harness-mark {
-  color: var(--foreground);
-}
 /* The popover itself never scrolls: the picker is capped by the room the
    pane body leaves (less the popover's 16px padding), and only the model
    list scrolls inside it (CH-18). */
@@ -976,8 +702,6 @@ button.chat-file-name:focus-visible {
   flex-direction: column;
   gap: 8px;
   max-height: calc(var(--radix-popover-content-available-height) - 32px);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 /* Harness tabs: one equal-width segmented strip that never wraps; a status
    word truncates inside its tab before the name does (CH-17). */
@@ -986,13 +710,7 @@ button.chat-file-name:focus-visible {
   flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   text-overflow: ellipsis;
-}
-.chat-picker [role="tab"][data-dim] > .chat-picker-harness-name {
-  color: var(--muted-foreground);
 }
 /* In a Chat (one harness) the body is as tall as its content. In New Chat,
    where tabs switch, it keeps one height for every tab and while models
@@ -1008,12 +726,6 @@ button.chat-file-name:focus-visible {
 .chat-picker[data-switch] .chat-picker-body {
   height: 272px;
   min-height: 120px;
-}
-.chat-picker-label {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 500;
 }
 .chat-picker-models {
   display: flex;
@@ -1033,7 +745,6 @@ button.chat-file-name:focus-visible {
   flex: none;
   align-self: flex-start;
   margin-left: 2px;
-  color: var(--muted-foreground);
 }
 .chat-picker-skeleton-model {
   flex: none;
@@ -1048,40 +759,16 @@ button.chat-file-name:focus-visible {
   flex-direction: column;
   gap: 2px;
   padding: 6px 8px;
-  border-radius: var(--radius-segment);
-  text-align: left;
-}
-.chat-picker-model:enabled:hover,
-.chat-picker-model[data-state="checked"] {
-  background: var(--accent);
-}
-.chat-picker-model:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.chat-picker-model:disabled {
-  color: var(--disabled-foreground);
 }
 .chat-picker-model-line {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--foreground);
-}
-.chat-picker-model-line > small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-picker-model-line > svg {
   width: 14px;
   height: 14px;
   margin-left: auto;
-}
-.chat-picker-model > small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* Effort sits above the models, always in view; its segments share the
    width and never push past the popover's edge. */
@@ -1091,7 +778,6 @@ button.chat-file-name:focus-visible {
   flex-direction: column;
   gap: 6px;
   padding-bottom: 8px;
-  box-shadow: 0 1px 0 0 var(--group-hairline);
 }
 /* Every effort the harness lists shows, in equal segments that never wrap. */
 .chat-picker-effort > [data-slot="segmented-control"] {
@@ -1104,18 +790,11 @@ button.chat-file-name:focus-visible {
 .chat-picker-body > .chat-picker-note {
   flex: none;
   padding-top: 8px;
-  box-shadow: 0 -1px 0 0 var(--group-hairline);
-}
-.chat-picker-note {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* A trigger whose change waits for the turn to end: a small clock, with what
    applies next in its tooltip; the value itself is never squeezed (CH-19). */
 .chat-control-held {
   flex: none;
-  color: var(--muted-foreground);
 }
 .chat-send {
   display: flex;
@@ -1130,11 +809,6 @@ button.chat-file-name:focus-visible {
   display: flex;
   flex-direction: column;
 }
-.chat-send-item small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
 
 /* The composed tray (CH-22): the problem notice, the activity dock (request,
    plan pill, queue) and the message box inside one ring and one radius.
@@ -1146,17 +820,8 @@ button.chat-file-name:focus-visible {
   display: flex;
   flex-direction: column;
   container-type: inline-size;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-}
-.chat-tray:has(textarea:focus) {
-  box-shadow: 0 0 0 1px var(--input-focus);
 }
 /* Every section above the message box ends in a hairline. */
-.chat-tray-top .chat-dock-slot-content > * {
-  box-shadow: inset 0 -1px 0 0 var(--group-hairline);
-}
 /* In the picker the flat notice sits on the popover's own 16px edge. */
 .chat-picker-body > [data-slot="alert"] {
   padding-inline: 0;
@@ -1165,14 +830,9 @@ button.chat-file-name:focus-visible {
   position: relative;
   max-height: 45vh;
   overflow-y: auto;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .chat-activity > section {
   padding: 12px 16px;
-}
-.chat-activity > section + section {
-  box-shadow: inset 0 1px 0 0 var(--group-hairline);
 }
 .chat-activity > .chat-activity-slot {
   padding: 8px 12px;
@@ -1215,22 +875,11 @@ button.chat-file-name:focus-visible {
 .chat-request-head > svg {
   flex: none;
   margin-top: 2px;
-  color: var(--muted-foreground);
 }
 .chat-request-title {
   flex: 1;
   min-width: 0;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 500;
   overflow-wrap: anywhere;
-}
-.chat-request-title code {
-  font-weight: 500;
-}
-.chat-request-count,
-.chat-request-reason {
-  color: var(--muted-foreground);
 }
 .chat-request-count {
   flex: none;
@@ -1257,7 +906,6 @@ button.chat-file-name:focus-visible {
   bottom: 0;
   margin-block: 4px -12px;
   padding-block: 8px 12px;
-  background: var(--surface);
 }
 /* Question options: plain 40px rows with the accent hover and selected fill,
    no border and no number badge; 1–9 still pick (CH-23). */
@@ -1275,17 +923,6 @@ button.chat-file-name:focus-visible {
   width: 100%;
   min-height: 40px;
   padding: 10px 12px;
-  border-radius: var(--radius);
-  color: var(--foreground);
-  text-align: left;
-}
-.chat-option:hover:not(:disabled),
-.chat-option[data-selected] {
-  background: var(--accent);
-}
-.chat-option:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 .chat-request-command {
   margin-top: 4px;
@@ -1318,34 +955,21 @@ button.chat-file-name:focus-visible {
   flex: 1;
   min-width: 0;
   margin: 0;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.chat-option small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-request-error {
   margin-top: 8px;
-  color: var(--error-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-queue-head {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 32px;
   margin-top: -6px;
-  color: var(--muted-foreground);
 }
 .chat-queue ol {
   margin: 0 -8px;
   padding: 0;
-  list-style: none;
 }
 .chat-queue-card {
   display: flex;
@@ -1353,8 +977,6 @@ button.chat-file-name:focus-visible {
   gap: 8px;
   min-height: 32px;
   padding-left: 8px;
-  border-radius: var(--radius);
-  color: var(--foreground);
 }
 /* The card's words: its text, then why a refused steer waits here. */
 .chat-queue-main {
@@ -1367,12 +989,6 @@ button.chat-file-name:focus-visible {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-queue-note {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* The actions are hidden at rest and shown at full strength on hover or
    keyboard focus, never dimmed (P12, CH-26); on touch they always show.
@@ -1391,26 +1007,14 @@ button.chat-file-name:focus-visible {
 .chat-queue-sending {
   flex: none;
   padding-right: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 /* A card fills and shows its actions on hover or while the keyboard is in it. */
-.chat-queue-card:hover,
-.chat-queue-card:focus-within {
-  background: var(--accent);
-}
 .chat-queue-card:hover .chat-queue-actions,
 .chat-queue-card:focus-within .chat-queue-actions {
   visibility: visible;
 }
 /* Approval buttons stay in one row and wrap only when they must: stacked
    full-width buttons made the dock 190px tall at 420px. */
-@media (forced-colors: active) {
-  .chat-tray,
-  .chat-queue-card {
-    outline: 1px solid CanvasText;
-  }
-}
 /* The header's link picker opens under the whole header at its end. */
 .chat-link-anchor {
   position: absolute;
@@ -1442,19 +1046,8 @@ button.chat-file-name:focus-visible {
 .chat-new > div + div {
   padding-top: 20px;
 }
-.chat-new h2 {
-  color: var(--foreground);
-  font-size: var(--text-title);
-  line-height: var(--text-title-line);
-  font-weight: 600;
-  letter-spacing: -0.6px;
-  text-align: center;
-}
 /* New Chat's folder button and menu: "Folder: repo", recent folders with
    where they are, and the scratch folder. */
-.chat-folder-prefix {
-  color: var(--muted-foreground);
-}
 .chat-folder-option {
   display: flex;
   flex: 1;
@@ -1471,11 +1064,7 @@ button.chat-file-name:focus-visible {
 }
 .chat-folder-option small {
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .chat-chips {
   display: flex;
@@ -1492,9 +1081,6 @@ button.chat-file-name:focus-visible {
   padding: 6px 20px;
 }
 /* Once the transcript is scrolled under the strip, its edge shows (CH-10). */
-.chat-linked[data-scrolled] {
-  box-shadow: 0 1px 0 0 var(--header-boundary);
-}
 .chat-linked > div {
   display: flex;
   align-items: center;
@@ -1521,19 +1107,12 @@ button.chat-file-name:focus-visible {
   flex-direction: column;
   gap: 4px;
 }
-.chat-linked-all h3 {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 400;
-}
 .chat-linked-all ul {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .chat-linked-all .chat-chip {
   display: flex;
@@ -1541,7 +1120,6 @@ button.chat-file-name:focus-visible {
 }
 .chat-linked-all .chat-chip > button:last-child {
   position: static;
-  opacity: 1;
 }
 .chat-chip {
   position: relative;
@@ -1550,12 +1128,6 @@ button.chat-file-name:focus-visible {
   align-items: center;
   max-width: 280px;
   height: 28px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .chat-chip > button:first-child,
 .chat-chip-label {
@@ -1565,7 +1137,6 @@ button.chat-file-name:focus-visible {
   min-width: 0;
   height: 100%;
   padding: 0 8px;
-  border-radius: var(--radius);
 }
 /* Remove shows on hover or focus, over the chip's end. */
 .chat-chip > button:last-child {
@@ -1577,22 +1148,6 @@ button.chat-file-name:focus-visible {
   justify-content: center;
   width: 24px;
   height: 100%;
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--muted-foreground);
-  opacity: 0;
-}
-.chat-chip:hover > button:last-child,
-.chat-chip:focus-within > button:last-child {
-  opacity: 1;
-}
-.chat-chip > button:last-child:hover {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.chat-chip button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .chat-chip svg {
   flex: none;
@@ -1600,20 +1155,16 @@ button.chat-file-name:focus-visible {
 .chat-chip-title {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* The Chat context popover (header button and composer count): 280px, four
    groups split by one hairline: folder, harness, context, then ghost rows. */
 .chat-pop {
   display: flex;
   flex-direction: column;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .chat-pop > * + * {
   margin-top: 12px;
   padding-top: 12px;
-  box-shadow: inset 0 1px 0 0 var(--border);
 }
 .chat-pop section {
   display: flex;
@@ -1627,8 +1178,6 @@ button.chat-file-name:focus-visible {
   gap: 8px;
   min-width: 0;
   margin: -6px -6px 0 0;
-  color: var(--foreground);
-  font-weight: 500;
 }
 .chat-pop-branch {
   display: flex;
@@ -1636,9 +1185,6 @@ button.chat-file-name:focus-visible {
   gap: 4px;
   min-width: 0;
   margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-pop-branch > svg {
   flex: none;
@@ -1651,29 +1197,24 @@ button.chat-file-name:focus-visible {
 /* The branch is one 12px mono line, muted like the path above it (CH-8). */
 .chat-pop-branch-name {
   min-width: 0;
-  font-family: var(--font-mono);
   overflow: hidden;
   direction: rtl;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .chat-pop-line {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  color: var(--foreground);
 }
 .chat-pop-line > svg,
 .chat-pop-line > .harness-mark {
   flex: none;
-  color: var(--foreground);
 }
 .chat-pop-truncate {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .chat-pop-harness {
   display: flex;
@@ -1688,14 +1229,6 @@ button.chat-file-name:focus-visible {
   flex: none;
   align-items: center;
   gap: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-ui-line);
-}
-.chat-pop small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-pop small.chat-mono {
   margin-top: 2px;
@@ -1703,39 +1236,22 @@ button.chat-file-name:focus-visible {
 .chat-pop [data-recheck] {
   align-self: flex-start;
   margin: 4px 0 -6px -8px;
-  font-size: var(--text-caption);
 }
 .chat-pop-context-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-ui-line);
-}
-.chat-pop-context-head > .chat-mono {
-  color: var(--foreground);
-}
-.chat-pop-context:focus-visible {
-  outline: none;
 }
 /* One 4px bar: the share used, and a tick where the harness compacts. */
 .chat-pop-meter {
   position: relative;
   height: 4px;
   margin: 6px 0;
-  border-radius: var(--radius-pill);
-  background: var(--control-boundary);
 }
 .chat-pop-meter-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: var(--muted-foreground);
-}
-[data-full] > .chat-pop-meter > .chat-pop-meter-fill {
-  background: var(--foreground);
 }
 .chat-pop-skeleton-line {
   width: 60%;
@@ -1747,40 +1263,27 @@ button.chat-file-name:focus-visible {
   top: -2px;
   bottom: -2px;
   width: 1px;
-  background: var(--foreground);
 }
 .chat-pop-context-note {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-[data-full] > .chat-pop-context-note {
-  color: var(--foreground);
-}
 .chat-pop [data-details] {
   align-self: flex-start;
   margin: 4px 0 -6px -8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 .chat-pop-categories {
   display: flex;
   flex-direction: column;
   margin: 8px 0 0;
   padding: 0;
-  list-style: none;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-pop-categories li {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   padding: 2px 0;
-}
-.chat-pop-categories .chat-mono {
-  color: var(--foreground);
 }
 /* Ghost rows: text in line with the groups above, hover to the edge. */
 .chat-pop-rows {
@@ -1798,7 +1301,6 @@ button.chat-file-name:focus-visible {
 }
 .chat-pop-rows > button > .chat-pop-truncate {
   flex: 1 1 auto;
-  text-align: left;
 }
 .chat-pop-row {
   min-height: 32px;
@@ -1810,8 +1312,6 @@ button.chat-file-name:focus-visible {
 }
 .chat-pop-aside {
   flex: none;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 .chat-pop-rows > small {
   padding: 0 8px 4px;
@@ -1830,7 +1330,6 @@ button.chat-file-name:focus-visible {
   margin: 0;
   padding: 0;
   overflow-y: auto;
-  list-style: none;
 }
 .chat-pick-results button {
   display: flex;
@@ -1839,18 +1338,9 @@ button.chat-file-name:focus-visible {
   width: 100%;
   min-height: 28px;
   padding: 4px;
-  border-radius: var(--radius);
-  color: var(--foreground);
-  text-align: left;
-}
-.chat-pick-results button:hover,
-.chat-pick-results button:focus-visible {
-  outline: none;
-  background: var(--accent);
 }
 .chat-pick-results svg {
   flex: none;
-  color: var(--muted-foreground);
 }
 .chat-pickrow {
   display: flex;
@@ -1861,7 +1351,6 @@ button.chat-file-name:focus-visible {
 .chat-radio > input {
   flex: none;
   margin: 4px 0 0;
-  accent-color: var(--interactive);
 }
 .chat-pickrow > div {
   flex: 1;
@@ -1875,70 +1364,37 @@ button.chat-file-name:focus-visible {
   gap: 4px;
   margin: 4px 0;
   padding: 0;
-  border: 0;
 }
 .chat-radio {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 6px 0;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .chat-radio > span {
   display: flex;
   flex-direction: column;
 }
-.chat-radio small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
 .chat-divider {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-divider::before,
 .chat-divider::after {
   content: "";
   flex: 1;
   height: 1px;
-  background: var(--border);
 }
 /* One skeleton look: still, on the accent fill, like the shared Skeleton (CH-50). */
 .chat-skel {
   height: 10px;
-  border-radius: var(--radius-segment);
-  background: var(--accent);
 }
 .chat-skel-long {
   width: 78%;
 }
 .chat-skel-short {
   width: 56%;
-}
-.chat-dialog-text {
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.chat-spin {
-  animation: chat-spin var(--dur-spin) linear infinite;
-}
-@keyframes chat-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .chat-spin {
-    animation: none;
-  }
 }
 @media (max-width: 640px) {
   .chat-scroll,
@@ -1964,11 +1420,6 @@ button.chat-file-name:focus-visible {
 .chat-pane[data-expanded] .chat-you {
   max-width: min(82%, 560px);
 }
-.chat-pane[data-expanded] .chat-you,
-.chat-pane[data-expanded] .chat-ai {
-  font-size: var(--text-reading);
-  line-height: var(--text-reading-line);
-}
 /* New Chat's suggestions: up to three 36px rows under "Suggested". */
 .chat-suggestions {
   display: flex;
@@ -1977,35 +1428,23 @@ button.chat-file-name:focus-visible {
 }
 .chat-suggestions h3 {
   margin: 0 0 2px;
-  font-weight: 400;
 }
 .chat-suggestions ul {
   margin: 0 -8px;
   padding: 0;
-  list-style: none;
 }
 .chat-suggestion {
   width: 100%;
   padding-inline: 8px;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  text-align: left;
 }
 .chat-suggestion > svg {
   flex: none;
-  color: var(--muted-foreground);
-}
-.chat-suggestion:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .chat-suggestion-words {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .chat-suggestion-words .ui-reference {
   margin-inline: 4px;
@@ -2027,4 +1466,14 @@ button.chat-file-name:focus-visible {
 /* Group labels stay inside the one keyboard-navigable Chat list. */
 .chat-list-group {
   padding: 16px 16px 6px;
+}
+
+/* Touch has a permanent trailing lane, so More never covers the time or subline. */
+@media (pointer: coarse) {
+  .chat-row {
+    padding-right: 64px;
+  }
+  .chat-row-more {
+    top: 4px;
+  }
 }

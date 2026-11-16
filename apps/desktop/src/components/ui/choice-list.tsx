@@ -163,7 +163,9 @@ export function ChoiceList({
       )}
       <CommandList
         {...(rows && {
-          style: { height: rows * (size === "tall" ? 36 : 32) + 8 },
+          style: {
+            height: `calc(${rows} * var(--choice-row-height, ${size === "tall" ? 36 : 32}px) + 8px)`,
+          },
         })}
       >
         {notice && (

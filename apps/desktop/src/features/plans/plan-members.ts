@@ -1,10 +1,19 @@
-import { client, type Ticket } from "@/lib/api/client";
+import { client, type FlowTicketMetadata } from "@/lib/api/client";
 
 const MEMBER_PAGE = 50;
-export async function allPlanMembers(plan: string) {
-  const members: Ticket[] = [];
-  for (let offset = 0; ; offset += MEMBER_PAGE) {
-    const page = await client.findTickets({
+const MEMBER_LIMIT = 500;
+export class PlanMemberWindow extends Error {
+  constructor() {
+    super(
+      "This Plan exceeds the complete Flow metadata window. No lanes or next ticket were inferred from incomplete membership or prerequisites.",
+    );
+  }
+}
+/** Complete bounded Flow input, with an explicit refusal on omitted prerequisites. */
+export async function flowPlanMembers(plan: string) {
+  const members: FlowTicketMetadata[] = [];
+  for (let offset = 0; offset <= MEMBER_LIMIT; offset += MEMBER_PAGE) {
+    const page = await client.findFlowMetadata({
       query: "",
       unlinked: false,
       project: null,
@@ -13,10 +22,13 @@ export async function allPlanMembers(plan: string) {
       tags: [],
       availability: null,
       family: null,
-      limit: MEMBER_PAGE,
+      limit: Math.min(MEMBER_PAGE, MEMBER_LIMIT - offset + 1),
       offset,
     });
-    members.push(...page);
-    if (page.length < MEMBER_PAGE) return members;
+    if (page.omitted || members.length + page.items.length > MEMBER_LIMIT)
+      throw new PlanMemberWindow();
+    members.push(...page.items);
+    if (page.items.length < MEMBER_PAGE) return members;
   }
+  throw new PlanMemberWindow();
 }

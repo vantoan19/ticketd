@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-evidence.css";
+
 .evidence-section {
   margin-top: 40px;
 }
@@ -10,7 +12,6 @@
   gap: 4px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 /* A record row (P12): the same three lines at any width. Line 1 the name and
    its actions, line 2 the caption, line 3 the value (detB DB-24). */
@@ -20,10 +21,6 @@
   gap: 2px;
   margin: 0 -8px;
   padding: 6px 8px;
-  border-radius: var(--radius);
-}
-.evidence-item:hover {
-  background: var(--hover);
 }
 .evidence-item-heading {
   display: flex;
@@ -35,11 +32,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .evidence-item-actions {
   display: flex;
@@ -64,11 +57,6 @@
     visibility: visible;
   }
 }
-.evidence-item-meta {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .evidence-item > [data-slot="button"],
 .evidence-item > button {
   max-width: 100%;
@@ -77,26 +65,10 @@
 .evidence-item-value {
   max-height: 96px;
   overflow: auto;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.evidence-item-value[data-kind="code"] {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-variant-ligatures: none;
-}
-.evidence-confirm-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
 }
 .evidence-confirm-text {
   margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .evidence-confirm-actions {
   display: flex;
@@ -113,9 +85,6 @@
   align-items: center;
   gap: 4px;
   margin: 24px -8px 0;
-}
-.ticket-add-row .ui-button {
-  color: var(--muted-foreground);
 }
 
 .evidence-item {

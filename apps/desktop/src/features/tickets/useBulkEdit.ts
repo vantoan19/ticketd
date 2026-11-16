@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type BulkChange } from "@/lib/api/client";
-import { isWorkspaceCode, toFailure } from "@/lib/api/bridge-failure";
+import { toFailure } from "@/lib/api/bridge-failure";
 import {
   describeFailure,
-  sentence,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 
@@ -16,10 +15,9 @@ type Change =
 export type BulkFailure = {
   /** The ticket that prevented the batch, when the core named one. */
   reference: string | null;
-  message: string;
   /** False when the core rejected the batch itself; sending it again fails the same way. */
   retryable: boolean;
-  /** What the failure alert says: the ticket that prevented it and that nothing changed. */
+  /** Public copy and diagnostic Details, with certainty only for rejected batches. */
   description: FailureDescription;
 };
 
@@ -122,32 +120,25 @@ function bulkFailure(reason: unknown, selection: string[]): BulkFailure {
     failure.code === "batch_operation" && failure.index !== null
       ? (selection[failure.index] ?? null)
       : null;
-  const detail = failure.message
-    .trim()
-    .replace(/^invalid batch:\s*/i, "")
-    .replace(/\.$/, "");
-  const retryable = failure.code !== "batch_operation";
   const described = describeFailure(
     failure,
     reference
       ? `change ${reference}`
       : `change ${selection.length} ${selection.length === 1 ? "ticket" : "tickets"}`,
   );
+  const retryable =
+    failure.code !== "batch_operation" && described.action === "retry";
   return {
     retryable,
     reference,
-    // The reason leads; the reassurance follows.
-    message:
-      reference && !detail.includes(reference)
-        ? `${reference}: ${detail}. Nothing changed.`
-        : `${detail}. Nothing changed.`,
     description: {
       ...described,
-      // Workspace states have their own plain words; the core's reason for one
-      // ticket is written for people and is said with the reassurance.
-      sentence: isWorkspaceCode(failure.kind)
-        ? described.sentence
-        : `${sentence(detail)} Nothing changed.`,
+      // Only a structured batch rejection confirms that no operation ran.
+      // Transport failures can lose the reply after commit; the same ID is safe to retry.
+      sentence:
+        failure.code === "batch_operation"
+          ? "The batch was rejected. Nothing changed. Open Details to review the reason."
+          : `${described.sentence} The selection is kept.`,
       action: retryable ? "retry" : null,
     },
   };

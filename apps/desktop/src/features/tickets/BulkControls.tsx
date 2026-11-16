@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { FailureDetails } from "@/components/ui/failure-alert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -157,6 +158,10 @@ export function BulkControls({
               Retry
             </Button>
           )}
+          <FailureDetails
+            variant="popover"
+            details={failure.description.details}
+          />
           <IconButton
             label="Clear selection"
             size="icon-compact"

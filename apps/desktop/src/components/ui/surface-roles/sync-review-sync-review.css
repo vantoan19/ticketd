@@ -1,0 +1,94 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.sync-compare-head {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.sync-compare-head strong {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  color: var(--foreground);
+}
+.sync-compare-field {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.sync-compare-choices .sync-body {
+  font-weight: 400;
+}
+.sync-body {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  white-space: pre-wrap;
+}
+.sync-body ins,
+.sync-body del {
+  border-radius: var(--radius-segment);
+  background: var(--accent);
+}
+.sync-body ins {
+  text-decoration: underline;
+}
+.sync-body del {
+  text-decoration: line-through;
+  color: var(--muted-foreground);
+}
+.sync-result textarea {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+.sync-history {
+  box-shadow: 0 -1px 0 0 var(--border);
+}
+.sync-history-list {
+  box-shadow: 1px 0 0 0 var(--border);
+}
+.sync-history-list h3,
+.sync-history-list p {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.sync-history-list ul {
+  list-style: none;
+}
+.sync-version {
+  border-radius: var(--radius);
+  text-align: left;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.sync-version:hover {
+  background: var(--hover);
+}
+.sync-version[aria-current="true"] {
+  background: var(--accent);
+}
+.sync-version:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.sync-version small {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.sync-history-detail {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.sync-changes > .sync-col {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+.sync-changes > .sync-key {
+  color: var(--muted-foreground);
+}
+.sync-changes > .sync-pane {
+  border-radius: var(--radius);
+  background: var(--recessed);
+}

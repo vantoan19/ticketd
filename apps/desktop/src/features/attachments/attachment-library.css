@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/attachments-attachment-library.css";
+
 /* S14: a fixed navigator and a preview; narrow panels take turns. */
 .attachment-library-host {
   display: flex;
@@ -59,7 +61,6 @@
   flex-direction: column;
   margin: 0;
   padding: 6px 8px 0;
-  list-style: none;
 }
 .attachment-mrow {
   position: relative;
@@ -71,7 +72,6 @@
   width: 100%;
   height: 56px;
   padding: 8px 10px;
-  text-align: start;
 }
 .attachment-mrow-text {
   display: flex;
@@ -82,7 +82,6 @@
 .attachment-mrow-name {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .attachment-mrow-caption {
   display: flex;
@@ -99,13 +98,11 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .attachment-mrow-time {
   flex: none;
   align-self: end;
   min-width: 28px;
-  text-align: end;
 }
 .attachment-mrow-actions {
   position: absolute;
@@ -145,7 +142,6 @@
 .attachment-cleanup-files {
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .attachment-cleanup-files > li {
   display: flex;
@@ -174,10 +170,6 @@
 }
 .attachment-cleanup-files input {
   margin: 0;
-}
-.attachment-cleanup-files input:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 3px;
 }
 .attachment-cleanup-all {
   display: flex;

@@ -20,6 +20,15 @@ export function useStickyRows(
   const [previousSelected, setPreviousSelected] = useState(selected);
   const wake = useRef<() => void>(() => {});
   const hovered = useRef<string | null>(null);
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const interacting = useRef(new Set<string>());
+  useEffect(() => {
+    interacting.current = new Set(
+      [selected, focused, ...bulkSelection].filter(
+        (reference): reference is string => reference !== null,
+      ),
+    );
+  }, [selected, focused, bulkSelection]);
   const release = () => {
     setHeld((previous) => {
       if (previous.size) setArrivals(new Set(previous.keys()));
@@ -34,14 +43,15 @@ export function useStickyRows(
   if (previousSelected !== selected) {
     setAllowMissing(true);
     setPreviousSelected(selected);
-    if (held.size) {
+    if (held.size && selected !== null) {
       setArrivals(new Set(held.keys()));
       setHeld(new Map());
     }
   }
   if (source !== tickets) {
     const next = new Map(
-      previousSelected === selected && previousScope === scopeKey
+      (previousSelected === selected || selected === null) &&
+        previousScope === scopeKey
         ? held
         : undefined,
     );
@@ -49,6 +59,7 @@ export function useStickyRows(
       if (
         before.reference !== selected &&
         before.reference !== focused &&
+        before.id !== hoveredRow &&
         !bulkSelection.includes(before.reference)
       )
         return;
@@ -72,7 +83,14 @@ export function useStickyRows(
   useEffect(() => {
     const interact = (event: Event) => {
       const target = event.target;
-      if (!(target instanceof Element)) return;
+      // Disabled or unmounted controls can send focus to body without the
+      // person leaving the interaction. Only an actual destination releases it.
+      if (
+        !(target instanceof Element) ||
+        (event.type === "focusin" &&
+          (target === document.body || target === document.documentElement))
+      )
+        return;
       const row =
         target.closest<HTMLElement>("[data-ticket-reference]") ??
         target
@@ -83,6 +101,12 @@ export function useStickyRows(
         const reference = row.dataset.ticketReference ?? null;
         if (reference !== focused) release();
         setFocused(reference);
+      } else if (
+        target.closest(".bulk-controls") &&
+        !target.closest('[aria-label="Clear selection"]')
+      ) {
+        // The bulk bar and its pickers still act on the held selection.
+        setAllowMissing(true);
       } else if (target.closest(".ticket-detail")) {
         setAllowMissing(true);
       } else if (
@@ -92,7 +116,7 @@ export function useStickyRows(
         !target.closest(".ticket-detail")
       ) {
         setFocused(null);
-        if (event.type === "click" || !selected) release();
+        release();
       }
     };
     document.addEventListener("focusin", interact);
@@ -111,11 +135,24 @@ export function useStickyRows(
       window.clearTimeout(timeout);
       const remaining = 3000 - (Date.now() - lastInput);
       if (remaining > 0) timeout = window.setTimeout(check, remaining);
-      else if (
-        !hovered.current ||
-        !pending.split(",").includes(hovered.current)
-      )
-        release();
+      else {
+        setHeld((previous) => {
+          const next = new Map(previous);
+          const released = new Set<string>();
+          for (const [id, placement] of previous) {
+            if (
+              id === hovered.current ||
+              interacting.current.has(placement.ticket.reference)
+            )
+              continue;
+            next.delete(id);
+            released.add(id);
+          }
+          if (!released.size) return previous;
+          setArrivals(released);
+          return next;
+        });
+      }
     };
     wake.current = check;
     const schedule = () => {
@@ -167,9 +204,11 @@ export function useStickyRows(
       ),
     onPointerEnter: (id: string) => {
       hovered.current = id;
+      setHoveredRow(id);
     },
     onPointerLeave: () => {
       hovered.current = null;
+      setHoveredRow(null);
       wake.current();
     },
   };

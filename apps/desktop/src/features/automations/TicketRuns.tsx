@@ -5,6 +5,11 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import {
   automationsClient,
@@ -38,17 +43,28 @@ export function RunNotices({
   chatOn,
 }: ReturnType<typeof useTicketRuns>) {
   const openRun = useContext(RunNavigation);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<{
+    description: FailureDescription;
+    retry?: () => void;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [all, setAll] = useState(false);
   const waiting = runs.filter((run) => run.needs_you);
   const folded = all ? 0 : Math.max(0, waiting.length - SHOWN);
-  const act = (action: Promise<unknown>) => {
+  const act = (
+    action: () => Promise<unknown>,
+    verb: string,
+    retryable = true,
+  ) => {
     setBusy(true);
-    void action
+    void action()
       .then(
-        () => setFailure(""),
-        (reason: unknown) => setFailure(String(reason)),
+        () => setFailure(null),
+        (reason: unknown) =>
+          setFailure({
+            description: describeFailure(reason, verb),
+            ...(retryable && { retry: () => act(action, verb) }),
+          }),
       )
       .finally(() => {
         setBusy(false);
@@ -94,7 +110,13 @@ export function RunNotices({
                 variant="outline"
                 size="sm"
                 disabled={busy}
-                onClick={() => act(automationsClient.runAgain(run.id))}
+                onClick={() =>
+                  act(
+                    () => automationsClient.runAgain(run.id),
+                    "run this Automation again",
+                    false,
+                  )
+                }
               >
                 Run again
               </Button>
@@ -103,7 +125,12 @@ export function RunNotices({
               variant="ghost"
               size="sm"
               disabled={busy}
-              onClick={() => act(automationsClient.dismissRun(run.id))}
+              onClick={() =>
+                act(
+                  () => automationsClient.dismissRun(run.id),
+                  "dismiss this run",
+                )
+              }
             >
               Dismiss
             </Button>
@@ -122,9 +149,16 @@ export function RunNotices({
             : `Show ${folded} more runs that need attention`}
         </Button>
       )}
-      {(failure || error) && (
+      {failure && (
+        <FailureAlert
+          failure={failure.description}
+          {...(failure.retry && { onRetry: failure.retry })}
+          className="mb-6"
+        />
+      )}
+      {error && (
         <p role="alert" className="mb-6">
-          {failure || error}
+          {error}
         </p>
       )}
     </>

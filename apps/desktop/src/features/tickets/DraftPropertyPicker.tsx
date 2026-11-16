@@ -10,6 +10,11 @@ import type { Choice } from "@/components/ui/choice-list";
 import { TicketPropertyChoices } from "./TicketCommandPicker";
 import { client } from "@/lib/api/client";
 import { Ban } from "lucide-react";
+import { FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   shortcutLabel,
   matchesShortcut,
@@ -29,7 +34,11 @@ export function DraftPropertyPicker({
   shortcut,
   query,
   onQueryChange,
+  notice,
+  empty,
 }: {
+  notice?: ReactNode;
+  empty?: string;
   query?: string;
   onQueryChange?: (query: string) => void;
   label: string;
@@ -92,6 +101,8 @@ export function DraftPropertyPicker({
       >
         <TicketPropertyChoices
           scope={label}
+          {...(notice !== undefined && { notice })}
+          {...(empty !== undefined && { empty })}
           {...(query !== undefined && { query })}
           {...(onQueryChange && { onQueryChange })}
           selected={selected}
@@ -121,26 +132,58 @@ export function DraftBlockerPicker({
   const [tickets, setTickets] = useState<
     Awaited<ReturnType<typeof client.searchTickets>>
   >([]);
+  const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     const timer = window.setTimeout(() => {
       void client
         .searchTickets(query, "all", 0)
         .then((items) => {
-          if (active) setTickets(items);
+          if (active) {
+            setTickets(items);
+            setLoading(false);
+            setFailure(null);
+          }
         })
-        .catch(() => {});
+        .catch((reason: unknown) => {
+          if (active) {
+            setLoading(false);
+            setFailure(describeFailure(reason, "search blockers"));
+          }
+        });
     }, 150);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, attempt]);
   return (
     <DraftPropertyPicker
       label="Blocked by"
       query={query}
-      onQueryChange={setQuery}
+      onQueryChange={(value) => {
+        setLoading(true);
+        setFailure(null);
+        setQuery(value);
+      }}
+      empty={loading || failure ? "" : "No matches"}
+      notice={
+        failure ? (
+          <FailureState
+            size="inline"
+            failure={failure}
+            onRetry={() => {
+              setLoading(true);
+              setFailure(null);
+              setAttempt((value) => value + 1);
+            }}
+          />
+        ) : loading ? (
+          <span role="status">Searching blockers…</span>
+        ) : undefined
+      }
       display={values.length ? values.join(", ") : "Blocked by"}
       icon={<Ban aria-hidden="true" />}
       selected={values}

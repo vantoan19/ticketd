@@ -1,0 +1,65 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.cgraph-page {
+  background: var(--surface);
+}
+.cgraph-filters {
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+.cgraph-switch {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  white-space: nowrap;
+}
+.cgraph-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.cgraph-group > h3 {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+}
+.cgraph-rows {
+  list-style: none;
+}
+.cgraph-expand > p {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.cgraph-canvas {
+  transition: opacity var(--dur-settle) var(--ease-out);
+}
+.cgraph-canvas[data-pending] {
+  opacity: 0;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cgraph-canvas {
+    transition: none;
+  }
+}
+.cgraph-canvas .react-flow__edges {
+  color: var(--muted-foreground);
+}
+.cgraph-canvas .react-flow__edge-path {
+  stroke: currentColor;
+}
+.cgraph-edge-label {
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+@container (max-width: 640px) {
+  .cgraph-body .ui-graph-panel {
+    box-shadow: inset 0 1px 0 var(--border);
+  }
+}

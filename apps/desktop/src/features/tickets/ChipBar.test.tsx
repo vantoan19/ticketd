@@ -199,7 +199,7 @@ test("narrow, an agent update keeps its reserved strip after the property contro
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   // One line: who and when, then the excerpt.
-  const latest = (await within(bar).findByText(/Drafted a fix/)).closest(
+  const latest = (await screen.findByText(/Drafted a fix/)).closest(
     ".ticket-agent-strip",
   )!;
   expect(latest.textContent).toMatch(/^codex · .*Drafted a fix/);

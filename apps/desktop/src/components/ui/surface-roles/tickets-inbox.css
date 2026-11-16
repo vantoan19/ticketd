@@ -1,0 +1,100 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.inbox section h2 {
+  border-radius: var(--radius-card);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.inbox-entries {
+  list-style: none;
+}
+.inbox-entry {
+  border-radius: var(--radius-card);
+}
+.inbox-entry:hover {
+  background: var(--hover);
+}
+.inbox-entry[aria-current="true"] {
+  background: var(--accent);
+}
+.inbox-entry:has(.inbox-ticket:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.inbox-ticket {
+  text-align: left;
+  color: var(--foreground);
+}
+.inbox-ticket:focus-visible {
+  outline: none;
+}
+.inbox-icon {
+  color: var(--muted-foreground);
+}
+.inbox-title {
+  white-space: nowrap;
+}
+.inbox-entry[data-read="false"] .inbox-title {
+  font-weight: 500;
+}
+.inbox-summary {
+  color: var(--muted-foreground);
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
+  white-space: nowrap;
+}
+.inbox-trailing time {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-ui-line);
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .inbox-actions {
+    opacity: 0;
+  }
+  .inbox-entry:hover .inbox-actions,
+  .inbox-entry:focus-within .inbox-actions,
+  .inbox-actions:has([data-state="open"]) {
+    opacity: 1;
+  }
+  .inbox-entry:hover time,
+  .inbox-entry:focus-within time,
+  .inbox-entry:has(.inbox-actions [data-state="open"]) time {
+    opacity: 0;
+  }
+}
+.inbox-snooze-time {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+.inbox-agent-name {
+  color: var(--foreground);
+}
+.inbox-command {
+  color: var(--foreground);
+  font-size: var(--text-caption);
+}
+
+.inbox-triage-document {
+  animation: inbox-detail-enter var(--dur-2) var(--ease-out);
+}
+@keyframes inbox-detail-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ticket-detail:has(.inbox-triage-document) .detail-content:not([hidden]) {
+  animation: inbox-detail-enter var(--dur-2) var(--ease-out);
+}
+.inbox-triage-evidence {
+  white-space: nowrap;
+}

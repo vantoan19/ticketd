@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/chats-turn-reports.css";
+
 /* #367: reasoning, plan and changed files. Layout only; every
    color, radius, shadow and size comes from a token. */
 
@@ -21,28 +23,16 @@
 .chat-plan-pill[aria-expanded="true"] .chat-chevron {
   visibility: visible;
 }
-.chat-report-row [data-outcome],
-.chat-plan [data-outcome],
-.chat-file [data-outcome] {
-  color: var(--foreground);
-  font-weight: 500;
-}
 
 /* The reasoning text, once, muted and indented under its row. */
 .chat-reasoning {
   margin: 0 0 6px 24px;
-  color: var(--muted-foreground);
 }
 
 /* An unfinished plan's card. */
 /* STATIC-10: the card keeps the transcript's 14/20 scale. */
 .chat-plan {
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
   padding: 6px 8px 8px 16px;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
 }
 .chat-plan-head {
   display: flex;
@@ -52,14 +42,6 @@
 }
 .chat-plan-title {
   flex: 1;
-  font-weight: 500;
-}
-.chat-plan-save {
-  opacity: 0;
-}
-.chat-plan:hover .chat-plan-save,
-.chat-plan:focus-within .chat-plan-save {
-  opacity: 1;
 }
 .chat-plan-save-narrow {
   display: none;
@@ -74,15 +56,12 @@
 }
 .chat-plan-note {
   margin: 0 8px 2px 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
 }
 .chat-plan-steps {
   display: flex;
   flex-direction: column;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .chat-plan-steps li {
   display: flex;
@@ -92,13 +71,6 @@
 }
 .chat-plan-steps li > svg {
   flex: none;
-  color: var(--muted-foreground);
-}
-.chat-plan-steps li[data-now] {
-  font-weight: 500;
-}
-.chat-plan-steps li[data-now] > svg {
-  color: var(--foreground);
 }
 
 /* The plan's recessed 28px pill in the dock. */
@@ -110,34 +82,17 @@
   min-width: 0;
   height: 28px;
   padding: 0 10px;
-  border-radius: var(--radius-pill);
-  background: var(--recessed);
-  color: var(--muted-foreground);
-  font-size: var(--text-code);
-  text-align: left;
-}
-.chat-plan-pill:hover,
-.chat-plan-pill[aria-expanded="true"] {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.chat-plan-pill:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .chat-plan-pill > svg {
   flex: none;
 }
 .chat-plan-pill-count {
   flex: none;
-  color: var(--foreground);
-  white-space: nowrap;
 }
 .chat-plan-pill-now {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .chat-plan-pill-icon {
   position: relative;
@@ -156,27 +111,13 @@
 .chat-plan-pill[aria-expanded="true"] .chat-plan-pill-mark {
   visibility: hidden;
 }
-.chat-plan-pill-separator {
-  color: var(--faint);
-}
 
 /* Changed files: the row below the response, and its 32px file rows. */
-.chat-file-counts {
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 400;
-  font-variant-ligatures: none;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-}
 .chat-file-list {
   display: flex;
   flex-direction: column;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .chat-file {
   display: flex;
@@ -191,16 +132,6 @@
   min-width: 0;
   min-height: 32px;
   padding: 0 8px;
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-  text-align: left;
-}
-button.chat-file-main:hover {
-  background: var(--accent);
-}
-button.chat-file-main:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .chat-file-main > svg {
   flex: none;
@@ -208,37 +139,14 @@ button.chat-file-main:focus-visible {
 .chat-file-path {
   min-width: 0;
   overflow: hidden;
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 400;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-div.chat-file-main .chat-file-path {
-  color: var(--muted-foreground);
-}
-.chat-file-kind {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  white-space: nowrap;
 }
 .chat-file-main .chat-file-counts {
   flex: none;
   margin-left: auto;
   padding-left: 8px;
 }
-.chat-file-copy {
-  opacity: 0;
-}
-.chat-file:hover .chat-file-copy,
-.chat-file:focus-within .chat-file-copy {
-  opacity: 1;
-}
 .chat-file-error {
   margin: 0;
   padding: 0 8px 6px 32px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }

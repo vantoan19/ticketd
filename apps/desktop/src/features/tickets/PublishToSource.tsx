@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { FailureDetails, FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import { Upload } from "lucide-react";
 import { RailRow } from "./RailSection";
@@ -174,8 +179,8 @@ type Phase =
   | { kind: "ready"; preview: PublicationPreview }
   | { kind: "publishing"; preview: PublicationPreview }
   | { kind: "blocked"; preview: PublicationPreview; message: string }
-  | { kind: "unresolved"; message: string }
-  | { kind: "unavailable"; message: string };
+  | { kind: "unresolved"; message: string; details: string }
+  | { kind: "unavailable"; message: string; details?: string };
 
 /**
  * Previews the issue exactly as it will be sent, then creates it. A failure the
@@ -194,7 +199,7 @@ export function PublishDialog({
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [destination, setDestination] = useState<string | undefined>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [reloads, setReloads] = useState(0);
   const descriptionTarget = useRef<HTMLElement | null>(null);
 
@@ -222,11 +227,17 @@ export function PublishDialog({
           else setPhase({ kind: "ready", preview });
         },
         (reason: unknown) => {
-          if (active)
+          if (active) {
+            const failure = describeFailure(
+              reason,
+              "prepare the publication preview",
+            );
             setPhase({
               kind: "unavailable",
-              message: toSourceFailure(reason).message,
+              message: failure.sentence,
+              details: failure.details,
             });
+          }
         },
       );
     return () => {
@@ -240,7 +251,7 @@ export function PublishDialog({
 
   async function publish() {
     if (phase.kind !== "ready" || !preview || !chosen) return;
-    setError("");
+    setError(null);
     setPhase({ kind: "publishing", preview });
     try {
       await sourcesClient.publish(
@@ -254,18 +265,18 @@ export function PublishDialog({
     } catch (reason) {
       const failure = toSourceFailure(reason);
       if (failure.code === "publication_unresolved") {
-        setPhase({ kind: "unresolved", message: failure.message });
+        const described = describeFailure(failure, "publish this ticket");
+        setPhase({
+          kind: "unresolved",
+          message: described.sentence,
+          details: described.details,
+        });
         await refresh().catch(() => {});
         return;
       }
       // A refusal proves nothing was created, so trying again is safe. A ticket
       // that changed since the preview sent nothing: show what it holds now.
-      setError(
-        failure.code === "publication_failed" &&
-          !/nothing was created/i.test(failure.message)
-          ? `${failure.message.replace(/[.!?]$/, "")}. Nothing was created.`
-          : failure.message,
-      );
+      setError(describeFailure(failure, "publish this ticket"));
       if (
         failure.code === "publication_changed" ||
         failure.code === "publication_ineligible"
@@ -327,7 +338,7 @@ export function PublishDialog({
         ),
       })}
       {...(error && {
-        error: /[.!?]$/.test(error) ? error : `${error}.`,
+        error: <FailureAlert size="compact" failure={error} />,
       })}
       onSubmit={() => {
         if (blocked) {
@@ -369,6 +380,18 @@ export function PublishDialog({
       {phase.kind === "unavailable" && (
         <p className="publication-error" role="alert">
           {phase.message}
+          {phase.details && (
+            <FailureDetails variant="popover" details={phase.details} />
+          )}
+          {phase.details && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setReloads((count) => count + 1)}
+            >
+              Retry preview
+            </Button>
+          )}
         </p>
       )}
       {phase.kind === "unresolved" && (
@@ -376,6 +399,7 @@ export function PublishDialog({
           <p>
             <strong>The outcome is not known.</strong> {phase.message}
           </p>
+          <FailureDetails variant="popover" details={phase.details} />
           <p>
             {ticket.reference} stays local and cannot be published again until
             this is resolved. Check {name} before doing anything by hand.
@@ -394,7 +418,7 @@ export function PublishDialog({
                 onValueChange={(value) => {
                   setDestination(value);
                   setPhase({ kind: "loading", preview });
-                  setError("");
+                  setError(null);
                 }}
                 disabled={publishing || preview.destinations.length === 1}
               >

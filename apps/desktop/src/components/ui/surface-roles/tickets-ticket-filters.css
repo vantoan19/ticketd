@@ -1,0 +1,12 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.filter-chips {
+  white-space: nowrap;
+}
+.filters-menu-value,
+.filters-menu-count {
+  white-space: nowrap;
+}
+.filters-menu-caption {
+  white-space: normal;
+}

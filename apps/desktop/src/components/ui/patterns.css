@@ -146,10 +146,10 @@
   flex: none;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 48px;
   min-width: 0;
-  padding: 0 8px 0 16px;
+  padding: 0 10px 0 20px;
   box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .ui-pane-header[data-leading] {
@@ -159,8 +159,11 @@
   display: flex;
   flex: 0 1 auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+}
+.ui-pane-header-title > [data-slot="count"] {
+  margin-left: 2px;
 }
 .ui-pane-header-title > h1,
 .ui-pane-header-title > h2 {
@@ -170,7 +173,7 @@
   font-size: var(--text-ui);
   font-weight: 500;
   line-height: var(--text-ui-line);
-  letter-spacing: -0.28px;
+  letter-spacing: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -213,7 +216,7 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin-inline-start: auto;
 }
 /* Dense Plan and workspace graph headers keep the name above their actions. */
@@ -845,4 +848,71 @@
 .ui-pane-header-title > .attachment-rename {
   flex: 1;
   min-width: 0;
+}
+
+/* A pane edge owns its divider; the keyboard separator and its pointer area
+   overlay that edge so 360px + 520px still fits an 880px panel. */
+[data-slot="resizable-handle"][data-overlay] {
+  width: 0;
+  background: transparent;
+  z-index: 1;
+}
+[data-slot="resizable-handle"][data-overlay]::before {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+  content: "";
+}
+[data-slot="resizable-handle"][data-overlay]::after {
+  width: 8px;
+}
+[data-slot="resizable-handle"][data-overlay]:focus-visible::after {
+  outline: 2px solid var(--ring);
+}
+
+/* Touch uses real, non-overlapping control boxes; parent recipes may grow to
+   accommodate them. Fine-pointer sizes remain the specified compact roles. */
+@media (pointer: coarse) {
+  :root
+    body
+    :is(
+      button,
+      [role="button"],
+      [role="menuitem"],
+      [role="menuitemradio"],
+      [role="menuitemcheckbox"],
+      [role="option"],
+      [role="tab"],
+      [role="radio"],
+      [role="combobox"],
+      select,
+      input:not(
+        [type="checkbox"],
+        [type="radio"],
+        [type="range"],
+        [type="file"]
+      )
+    ) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .ui-pane-header-title > [data-control] {
+    margin-inline-start: 0;
+  }
+  [data-slot="command"] {
+    --choice-row-height: 44px;
+  }
+  [data-slot="segmented-control"] {
+    height: auto;
+    min-height: 48px;
+  }
+  [data-slot="command-input-wrapper"] {
+    height: auto;
+    min-height: 44px;
+  }
+  .ui-status-line {
+    height: 48px;
+  }
 }

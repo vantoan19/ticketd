@@ -1,0 +1,25 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.attachment-inline-preview:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
+  white-space: nowrap;
+}
+.attachment-preview-text {
+  white-space: pre-wrap;
+}
+.attachment-preview-text:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.attachment-preview-text-note {
+  text-align: center;
+}
+.attachment-uses {
+  list-style: none;
+}
+.attachment-uses [data-slot="record-link"] {
+  text-align: start;
+}

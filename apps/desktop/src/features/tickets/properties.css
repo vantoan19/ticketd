@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-properties.css";
+
 /* The property rail: labelled sections on the panel surface, beside the
    document column. Below a 760px pane (a 528px document column plus the
    232px rail) the rail folds into the property strip under the title; see
@@ -9,14 +11,12 @@
   gap: 20px;
   min-width: 0;
   padding: 20px 20px 48px;
-  background: var(--surface);
 }
 @container ticket-detail (min-width: 760px) {
   /* A flat rail split from the document by a 1px rule; it scrolls on its own
      within the pane (no viewport arithmetic). */
   .ticket-properties {
     padding: 20px;
-    box-shadow: inset 1px 0 0 0 var(--header-boundary);
   }
 }
 
@@ -37,10 +37,6 @@
 .rail-label {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  font-weight: 400;
-  line-height: var(--text-caption-line);
 }
 /* A 32px icon button inside a 16px label row: it overhangs both, and its
    glyph lines up with the rail's right edge. */
@@ -64,44 +60,18 @@
   min-height: 32px;
   margin-inline: -12px;
   padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  box-shadow: none;
-  color: var(--foreground);
-  font: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  text-align: start;
-  cursor: pointer;
-}
-.rail-row[data-muted] {
-  color: var(--muted-foreground);
-}
-.rail-row:hover,
-.rail-row[data-state="open"],
-.rail-status > [data-slot="select-trigger"]:hover,
-.rail-status > [data-slot="select-trigger"][data-state="open"] {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.rail-row:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 .rail-row svg,
 .rail-status [data-slot="select-trigger"] svg {
   flex: none;
   width: 16px;
   height: 16px;
-  color: var(--muted-foreground);
 }
 .rail-row-value {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .rail-row-trailing {
   display: inline-flex;
@@ -109,26 +79,12 @@
   align-items: center;
   gap: 4px;
   margin-inline-start: auto;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* No chevrons on the Status row. */
 .rail-status > [data-slot="select-trigger"] > svg:last-child {
   display: none;
 }
 /* Read-only (Trash, a locked workspace): full contrast, no hover. */
-.rail-row:disabled,
-.rail-row[data-readonly],
-.rail-status > [data-slot="select-trigger"][data-disabled] {
-  opacity: 1;
-  color: var(--foreground);
-  background: transparent;
-  cursor: default;
-}
-.rail-row[data-muted]:disabled {
-  color: var(--muted-foreground);
-}
 
 /* Tags are plain pills inside their row, wrapping onto more lines. */
 .rail-tags {
@@ -136,7 +92,6 @@
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-  white-space: normal;
 }
 .rail-row:has(.rail-tags) {
   padding-block: 6px;
@@ -145,13 +100,7 @@
 /* Status: the duplicate's canonical ticket and a source's caption under it. */
 .rail-status-note {
   display: block;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
-}
-.rail-status-note .ui-record-link {
-  color: var(--foreground);
 }
 
 .status-menu {
@@ -159,12 +108,7 @@
 }
 .status-menu [data-slot="select-label"],
 .status-menu-caption {
-  white-space: normal;
   padding: 8px 12px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 400;
 }
 
 /* Source section. */
@@ -173,20 +117,11 @@
   align-items: center;
   gap: 8px;
   min-height: 32px;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .rail-value svg {
   flex: none;
   width: 16px;
   height: 16px;
-  color: var(--muted-foreground);
-}
-.rail-section small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .rail-source {
   display: flex;
@@ -197,9 +132,6 @@
 }
 .rail-note {
   display: block;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
 .rail-source-identity {
@@ -211,7 +143,6 @@
   gap: 0;
   min-width: 0;
   max-width: 100%;
-  white-space: nowrap;
 }
 .rail-source-place {
   min-width: 0;
@@ -251,22 +182,6 @@
   height: auto;
   margin-inline: -12px;
   padding: 6px 12px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--foreground);
-  font: inherit;
-  font-size: var(--text-ui);
-  white-space: normal;
-  text-align: start;
-  cursor: pointer;
-}
-.latest-update:hover {
-  background: var(--accent);
-}
-.latest-update:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 .latest-update-meta svg {
   flex: none;
@@ -278,24 +193,18 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .latest-update-meta > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .latest-update-text {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  line-height: var(--text-ui-line);
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
 /* The property strip: a narrow pane's rail, folded under the title into one
@@ -318,13 +227,6 @@
   margin: 0;
   padding-inline: 8px;
   gap: 7px;
-  background: transparent;
-  box-shadow: none;
-}
-.property-strip .rail-row:hover,
-.property-strip > .ui-button:hover,
-.property-strip .rail-status > [data-slot="select-trigger"]:hover {
-  background: var(--accent);
 }
 .property-strip .rail-row:has(.rail-tags) {
   height: auto;
@@ -345,16 +247,11 @@
   min-width: 0;
   height: 28px;
   padding-inline: 10px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .latest-update-line > span:last-child {
   min-width: 0;
   overflow: hidden;
-  color: var(--foreground);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .latest-update-line > span:first-of-type {
   flex: none;
@@ -417,14 +314,6 @@
 .ticket-agent-copy > span {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail-scroll[data-agent-loading] {
-  overflow-y: hidden;
-}
-.detail-scroll[data-agent-loading] > .detail-content {
-  visibility: hidden;
 }
 
 .ticket-command-anchor {

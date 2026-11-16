@@ -101,6 +101,7 @@ beforeEach(() => {
       command: string,
       args?: {
         filter?: FindFilter;
+        projection?: string;
         reference?: string;
         id?: string;
         archived?: boolean | null;
@@ -162,9 +163,9 @@ beforeEach(() => {
         if (override) return override;
         const { offset, limit } = args.filter;
         if (limit > 50) throw new Error("Search batches must remain bounded");
-        return matching(args.filter)
-          .slice(offset, offset + limit)
-          .map((ticket) => ({ ticket, latest_update: null }));
+        const items = matching(args.filter).slice(offset, offset + limit);
+        if (args.projection) return { items, omitted: false };
+        return items.map((ticket) => ({ ticket, latest_update: null }));
       }
       if (command === "count_tickets" && args?.filter)
         return counts(matching(args.filter));

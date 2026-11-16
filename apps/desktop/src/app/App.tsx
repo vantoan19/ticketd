@@ -1127,6 +1127,7 @@ function AppContent() {
                                     hidden={graphOrigin !== "__workspace__"}
                                   >
                                     <WorkspaceGraph
+                                      projects={projects}
                                       planId={workspaceGraphPlan}
                                       active={graphOrigin === "__workspace__"}
                                       revision={revision}

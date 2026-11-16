@@ -49,6 +49,7 @@ type NoteTarget = { id: string; key: number };
 export function TicketPage({
   ticket,
   active,
+  opening = false,
 
   outsideResults = false,
   projects,
@@ -65,6 +66,8 @@ export function TicketPage({
   ticket: Ticket;
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
+  /** A known saved list copy reserves geometry until the fresh detail read settles. */
+  opening?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
   projects: Project[];
@@ -260,12 +263,19 @@ export function TicketPage({
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   // One property strip for every document width.
   const [reminderOpen, setReminderOpen] = useState(false);
+  const blockedReferences = work.current?.links
+    ? work.rows
+        .filter((row) => row.kind === "blocked_by" && row.unresolved)
+        .map((row) => row.reference)
+    : ticket.prerequisites
+        .filter((item) => item.unresolved && !item.trashed)
+        .map((item) => item.reference);
   const strip = (
     <TicketProperties
       layout="strip"
       attention={attentionFor("strip")}
       ticket={ticket}
-      active={active}
+      active={active && !opening}
       revision={revision}
       projects={projects}
       plans={plans}
@@ -276,20 +286,14 @@ export function TicketPage({
     >
       {active && !ticket.trashed && (
         <>
-          {work.rows.some(
-            (row) => row.kind === "blocked_by" && row.unresolved,
-          ) && (
+          {blockedReferences.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => work.openLink("blocked_by")}
             >
               <Plus aria-hidden="true" />
-              Blocked by{" "}
-              {work.rows
-                .filter((row) => row.kind === "blocked_by" && row.unresolved)
-                .map((row) => row.reference)
-                .join(", ")}
+              Blocked by {blockedReferences.join(", ")}
             </Button>
           )}
           <TicketCommandPicker
@@ -343,6 +347,8 @@ export function TicketPage({
       ref={page}
       className="detail-content"
       hidden={!active}
+      inert={opening}
+      aria-busy={opening}
       data-trashed={ticket.trashed || undefined}
     >
       {/* Mounted here, not inside the rail or the narrow layout, so crossing
@@ -413,6 +419,7 @@ export function TicketPage({
         ) : (
           <TicketEditor
             ticket={ticket}
+            readOnly={opening}
             onSaved={updateTicket}
             select={select}
             revision={revision}

@@ -10,7 +10,7 @@ import { ProgressKey } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useContext, useEffect, useState } from "react";
 import { FileText } from "lucide-react";
-import { type Project, type Ticket } from "@/lib/api/client";
+import { type Project, type FlowTicketMetadata } from "@/lib/api/client";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { shortcutLabel } from "@/lib/shortcuts";
 import { useWorkspaceChange } from "@/lib/workspace-change";
@@ -22,7 +22,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { Time } from "@/components/ui/time";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PlanRing, PlanSplitBar } from "./PlanProgress";
-import { allPlanMembers } from "./plan-members";
+import { flowPlanMembers } from "./plan-members";
 import { flowOrder } from "./flow-order";
 
 /** Counts never come from the member query: show_plan owns full-Plan progress. */
@@ -40,19 +40,19 @@ export function PlanCard({
   children?: React.ReactNode;
 }) {
   const [view, setView] = useState<View | null>(null);
-  const [members, setMembers] = useState<Ticket[] | null>(null);
+  const [members, setMembers] = useState<FlowTicketMetadata[] | null>(null);
   const [failed, setFailed] = useState(false);
   const revision = useWorkspaceChange();
   const openDocument = useContext(DocumentNavigation);
   useEffect(() => {
     let active = true;
     void Promise.allSettled([
-      plansClient.show(plan.id),
-      allPlanMembers(plan.id),
+      plansClient.show(plan.id, 501, 0, false),
+      flowPlanMembers(plan.id),
     ]).then(([summary, tickets]) => {
       if (!active) return;
       if (summary.status === "fulfilled") setView(summary.value);
-      if (tickets.status === "fulfilled") setMembers(tickets.value);
+      setMembers(tickets.status === "fulfilled" ? tickets.value : null);
       setFailed(summary.status === "rejected" || tickets.status === "rejected");
     });
     return () => {
@@ -62,22 +62,32 @@ export function PlanCard({
   const counts = view?.counts;
   const countable =
     counts && counts.todo + counts.in_progress + counts.in_review + counts.done;
-  const next =
+  const complete =
     members &&
+    view &&
+    Object.values(view.counts).reduce((sum, count) => sum + count, 0) ===
+      members.length;
+  const next =
+    complete &&
     flowOrder(members).find(
       (member) =>
         member.status === "Todo" &&
         member.availability === "Ready" &&
         !member.source?.unavailable,
     );
-  const ready = view?.members.filter(
-    (member) => member.status === "Todo" && member.availability === "Ready",
-  ).length;
-  const blocked = view?.members.filter(
-    (member) => member.status === "Todo" && member.availability === "Blocked",
-  ).length;
+  const ready = complete
+    ? members.filter(
+        (member) => member.status === "Todo" && member.availability === "Ready",
+      ).length
+    : undefined;
+  const blocked = complete
+    ? members.filter(
+        (member) =>
+          member.status === "Todo" && member.availability === "Blocked",
+      ).length
+    : undefined;
   const projectIds = new Set(
-    view?.members.flatMap((member) =>
+    (complete ? members : []).flatMap((member) =>
       member.project_id ? [member.project_id] : [],
     ),
   );
@@ -226,11 +236,13 @@ export function PlanCard({
               ) : (
                 <CardCaption asChild>
                   <span className="plan-card-caption">
-                    {members
+                    {complete
                       ? "No Ready tickets"
                       : failed
                         ? "Couldn't load next ticket"
-                        : "Loading…"}
+                        : members
+                          ? "Open the Plan to see its members"
+                          : "Loading…"}
                   </span>
                 </CardCaption>
               )}

@@ -1,19 +1,8 @@
+@import "../../components/ui/surface-roles/plans-plan-progress.css";
+
 .plan-ring {
   flex: none;
   transform: rotate(-90deg);
-  fill: none;
-  stroke-width: 2;
-}
-
-.plan-ring-track {
-  stroke: var(--track);
-}
-.plan-ring-moving {
-  stroke: var(--seg-review);
-}
-.plan-ring-done {
-  stroke: var(--foreground);
-  stroke-linecap: round;
 }
 
 .plan-split-bar {
@@ -21,21 +10,5 @@
   gap: 2px;
   height: 6px;
   min-width: 0;
-  border-radius: calc(var(--radius) / 2);
   overflow: hidden;
-  background: var(--track);
-}
-
-.plan-split-bar [data-segment="done"] {
-  background: var(--seg-done);
-}
-.plan-split-bar [data-segment="review"] {
-  background: var(--seg-review);
-}
-.plan-split-bar [data-segment="progress"] {
-  background: var(--seg-progress);
-}
-
-.plan-split-bar[data-variant="summary"] {
-  background: var(--accent);
 }

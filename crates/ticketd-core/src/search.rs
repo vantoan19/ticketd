@@ -62,6 +62,29 @@ impl Default for TicketFilter {
     }
 }
 
+/// Existing Ticket values for bounded graph/Flow reads; never a partial full Ticket.
+#[derive(Debug, Serialize)]
+pub struct TicketMetadata {
+    pub id: String,
+    pub reference: String,
+    pub title: String,
+    pub status: Status,
+    pub trashed: bool,
+    pub project_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub availability: Option<String>,
+    pub updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::source::SourceAvailability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prerequisites: Option<Vec<relationships::Prerequisite>>,
+}
+#[derive(Debug, Serialize)]
+pub struct TicketMetadataPage {
+    pub items: Vec<TicketMetadata>,
+    pub omitted: bool,
+}
+
 impl Workspace {
     /// The conditions a filter adds to `tickets t WHERE t.trashed = 0`, as `" AND ..."` clauses.
     /// Listing and counting share them, so a count always describes the tickets the list pages
@@ -173,6 +196,84 @@ impl Workspace {
             crate::activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
+    }
+
+    /// Metadata projection of the existing filtered page. Body, activity, parent,
+    /// child and unrelated source payloads are never selected or hydrated. Flow may request
+    /// at most 50 prerequisite values per Ticket; omissions are explicit.
+    pub fn find_ticket_metadata(
+        &self,
+        filter: &TicketFilter,
+        ids: Option<&[String]>,
+        prerequisites: bool,
+    ) -> Result<TicketMetadataPage, Error> {
+        let tx = self.connection.unchecked_transaction()?;
+        let (conditions, mut values) = self.filter_conditions(filter)?;
+        let mut sql = format!(
+            "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at FROM tickets t WHERE t.trashed = 0{conditions}"
+        );
+        if let Some(ids) = ids {
+            if ids.len() > 250 {
+                return Err(Error::InvalidBatch(
+                    "Metadata selection exceeds 250 identities".into(),
+                ));
+            }
+            sql.push_str(&format!(
+                " AND t.id IN ({})",
+                vec!["?"; ids.len()].join(",")
+            ));
+            values.extend(ids.iter().cloned().map(Value::from));
+        }
+        match filter.order {
+            TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
+            TicketOrder::Workflow => sql.push_str(&format!(
+                " ORDER BY {}, t.number DESC",
+                Status::workflow_order_sql("t.status")
+            )),
+        }
+        sql.push_str(" LIMIT ? OFFSET ?");
+        values.push(i64::from(filter.limit.clamp(1, 100)).into());
+        values.push(i64::from(filter.offset).into());
+        let mut statement = tx.prepare(&sql)?;
+        let mut items = statement
+            .query_map(params_from_iter(values), |row| {
+                let status: String = row.get(3)?;
+                Ok(TicketMetadata {
+                    id: row.get(0)?,
+                    reference: row.get(1)?,
+                    title: row.get(2)?,
+                    status: status.parse().map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            3,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
+                    trashed: row.get(4)?,
+                    project_id: row.get(5)?,
+                    plan_id: row.get(6)?,
+                    availability: None,
+                    updated_at: row.get(7)?,
+                    source: None,
+                    prerequisites: None,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        let mut omitted = false;
+        for ticket in &mut items {
+            ticket.availability =
+                crate::history::availability(&tx, &ticket.id, ticket.status, ticket.trashed)?;
+            if prerequisites {
+                ticket.source = crate::source::availability_projection(&tx, &ticket.id)?;
+                let mut blockers = relationships::prerequisites(&tx, &ticket.id, Some(51))?;
+                omitted |= blockers.len() > 50;
+                blockers.truncate(50);
+                ticket.prerequisites = Some(blockers);
+            }
+        }
+        tx.commit()?;
+        Ok(TicketMetadataPage { items, omitted })
     }
 
     /// Return the same filtered ticket page with bounded authored progress.

@@ -1,0 +1,80 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.reference-rows {
+  list-style: none;
+}
+.reference-row {
+  border-radius: var(--radius);
+}
+.reference-row:hover {
+  background: var(--accent);
+}
+.reference-row:has(.reference-row-title:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.reference-row-icon {
+  color: var(--muted-foreground);
+}
+.reference-row-title {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: start;
+  cursor: pointer;
+}
+.reference-row-title:focus-visible {
+  outline: none;
+}
+.reference-row-title::after {
+  border-radius: inherit;
+}
+.reference-row-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.reference-row[data-density="list"] .reference-row-title {
+  white-space: nowrap;
+}
+.linked-work-group {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.linked-work-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.link-ticket-sentence {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.link-ticket-results {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-border-base);
+}
+.link-ticket-results button {
+  text-align: left;
+  font-size: var(--text-ui);
+}
+.link-ticket-results button:hover,
+.link-ticket-results button:focus-visible {
+  background: var(--accent);
+}
+.link-ticket-results button span:last-child {
+  white-space: nowrap;
+}
+.link-ticket-reference {
+  color: var(--secondary-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-caption);
+}
+.link-ticket-chosen span {
+  white-space: nowrap;
+}

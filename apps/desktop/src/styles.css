@@ -2220,7 +2220,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.detail-content [role="status"]:empty {
+/* Empty announcements collapse; visual loading placeholders retain their geometry. */
+.detail-content [role="status"]:empty:not([data-slot="skeleton"]) {
   display: none;
 }
 .detail-document > .detail-title {
@@ -2238,8 +2239,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   width: min(360px, calc(100vw - 32px));
 }
 .split-handle {
-  width: 1px;
-  background: var(--border);
   cursor: col-resize;
 }
 .split-handle:focus-visible {
@@ -4125,5 +4124,45 @@ kbd,
     min-width: var(--header-control-height);
     padding-inline: 0;
     justify-content: center;
+  }
+}
+
+/* A row action keeps its compact mouse geometry and a real touch target. */
+@media (pointer: coarse) {
+  .ui-button-icon-row-action {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Coarse controls keep their parent's row and clipping boundary with them. */
+@media (pointer: coarse) {
+  .sidebar-heading:has(.sidebar-heading-link) {
+    height: 44px;
+    flex: none;
+  }
+  .sidebar-group,
+  .sidebar-nav li {
+    flex-shrink: 0;
+  }
+  .ui-dialog[data-surface="capture"] .dialog-shell-compact-header {
+    height: 48px;
+  }
+  .floating-edit-bar {
+    height: 48px;
+  }
+  .dialog-shell-compact-actions {
+    top: 2px;
+    max-width: calc(100% - 154px);
+  }
+  .ui-dialog[data-surface="capture"] .dialog-shell-compact-actions {
+    top: 2px;
+  }
+  .dialog-shell-compact-actions > .document-status {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

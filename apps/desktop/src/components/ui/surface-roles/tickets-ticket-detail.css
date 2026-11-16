@@ -1,0 +1,113 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.ticket-detail .description-document,
+.ticket-detail .description-document :is(p, li),
+.ticket-detail .editor-body [role="textbox"] {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+}
+.detail-content:not([hidden]) .detail-document {
+  animation: ticket-document-enter var(--dur-2) var(--ease-out);
+}
+@keyframes ticket-document-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ticket-follow-feedback {
+  white-space: nowrap;
+}
+.ticket-state-line {
+  color: var(--secondary-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.list-position-text {
+  text-align: end;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.header-source-link {
+  white-space: nowrap;
+}
+.source-link {
+  color: var(--link-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  text-align: left;
+  text-decoration: none;
+}
+.source-link:hover {
+  text-decoration: underline;
+}
+.source-link:focus-visible {
+  border-radius: var(--radius-segment);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.take-ownership-effects {
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.source-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.source-number,
+.rail-source-identity .source-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-weight: 500;
+}
+.source-title-trigger {
+  text-align: left;
+  font: inherit;
+  letter-spacing: inherit;
+  border-radius: var(--radius);
+}
+.source-title-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.source-readonly-explanation {
+  box-shadow: var(--shadow-tooltip);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+[data-slot="card-header"] .source-link {
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+.source-description-toggle {
+  color: var(--link-foreground);
+}
+.source-card-actions .ui-button {
+  font-size: var(--text-caption);
+}
+.take-ownership-effects {
+  list-style: disc;
+  color: var(--secondary-foreground);
+}
+.take-ownership-popover {
+  box-shadow: var(--shadow-large);
+}
+.take-ownership-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.ticket-no-description {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+
+.ticket-header-title {
+  white-space: nowrap;
+}

@@ -116,6 +116,17 @@ function TicketListBody({
     listFailure,
     refreshFailed,
   } = workspace;
+  // Complete well counts are an independent, authoritative total while the
+  // shared list read is unavailable; a failed well retains its own Retry.
+  const boardTotal =
+    workspace.layout === "board" &&
+    workspace.board.columns.every((column) => column.total !== null)
+      ? workspace.board.columns.reduce(
+          (sum, column) => sum + (column.total ?? 0),
+          0,
+        )
+      : null;
+  const headerTotal = boardTotal ?? total;
   // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const planAction = usePlanAction(planState);
@@ -341,14 +352,17 @@ function TicketListBody({
           titleId="tickets-heading"
           count={
             // First run (S20): the title alone over an empty workspace.
-            workspace.listKnown &&
+            (workspace.listKnown || boardTotal !== null) &&
             !bare && (
               <Count>
                 {filtered && scopeTotal != null
-                  ? ofTotal(total, scopeTotal)
-                  : total}
+                  ? ofTotal(headerTotal, scopeTotal)
+                  : headerTotal}
                 {!(filtered && scopeTotal != null) && (
-                  <span className="sr-only"> {noun(total, "ticket")}</span>
+                  <span className="sr-only">
+                    {" "}
+                    {noun(headerTotal, "ticket")}
+                  </span>
                 )}
               </Count>
             )

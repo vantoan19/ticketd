@@ -199,6 +199,7 @@ function ChatRow({
         data-open={menu ? "" : undefined}
       >
         <ChatActionsMenu
+          rowAction
           chat={{ ...chat, unseen: chat.status.unseen }}
           label={`Actions for ${chat.title}`}
           open={menu}

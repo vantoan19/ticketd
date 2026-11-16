@@ -288,6 +288,7 @@ export function TicketWorkspaceView({
         )}
         <ResizablePanelGroup
           orientation="horizontal"
+          resizeTargetMinimumSize={{ fine: 8, coarse: 44 }}
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
           disabled={narrow || expanded || !displayedSelection || peek}
@@ -361,12 +362,13 @@ export function TicketWorkspaceView({
             )}
           </ResizablePanel>
           <ResizableHandle
+            overlay
             className="split-handle"
             aria-label="Resize ticket list"
           />
           <ResizablePanel
             id="detail"
-            minSize={480}
+            minSize={520}
             // The panel library makes its content box `overflow: auto` with an
             // auto height, so a percentage-height child never gets a bound and the
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.

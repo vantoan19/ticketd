@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Cloud, LaptopMinimal, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureDetails } from "@/components/ui/failure-alert";
+import { describeFailure } from "@/lib/api/describe-failure";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Popover,
@@ -91,7 +93,16 @@ export function SourceRail({
           )}
           {!owner.unavailable && owner.last_error && (
             <small className="rail-note">
-              The last refresh failed: {owner.last_error.message}
+              The last refresh failed.{" "}
+              {
+                describeFailure(owner.last_error, "refresh this ticket")
+                  .sentence
+              }
+              <FailureDetails
+                variant="popover"
+                small
+                details={owner.last_error.message}
+              />
             </small>
           )}
           {owner.origin === "imported" && (

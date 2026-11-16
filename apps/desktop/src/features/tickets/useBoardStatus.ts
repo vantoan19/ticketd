@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { client, type Ticket } from "@/lib/api/client";
-import { failureText } from "@/lib/api/describe-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import type { useTicketBoard } from "./useTicketBoard";
 import { ticketStatusChoices } from "./ticket-source";
 
@@ -31,7 +34,9 @@ export function useBoardStatus(workspace: {
   const intents = useRef(new Map<string, Review>());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [moves, setMoves] = useState<ReadonlyMap<string, BoardMove>>(new Map());
-  const [failures, setFailures] = useState<Record<string, string>>({});
+  const [failures, setFailures] = useState<
+    Record<string, FailureDescription | null>
+  >({});
   const [notice, setNotice] = useState<{ scope: string } & Notice>({
     scope: workspace.board.key,
     message: "",
@@ -84,7 +89,7 @@ export function useBoardStatus(workspace: {
         '[aria-label="Ticket status board"]',
       );
       const trigger = board?.querySelector<HTMLElement>(
-        `[data-board-status-reference="${reference}"]`,
+        `[aria-label="Retry status change for ${reference}"], [data-board-status-reference="${reference}"]`,
       );
       const active = document.activeElement;
       if (
@@ -127,7 +132,7 @@ export function useBoardStatus(workspace: {
   async function submit(attempt: Attempt, from: BoardMove | null) {
     const reference = attempt.ticket.reference;
     lock(reference, true);
-    setFailures((old) => ({ ...old, [reference]: "" }));
+    setFailures((old) => ({ ...old, [reference]: null }));
     clearNotice();
     attempts.current.set(reference, attempt);
     const move = from ?? moveAtOnce(attempt.ticket, attempt.status);
@@ -153,9 +158,16 @@ export function useBoardStatus(workspace: {
       } catch {
         putBack(attempt.ticket, move);
       }
+      const failure = describeFailure(
+        reason,
+        `move ${reference} to ${attempt.status}`,
+      );
       setFailures((old) => ({
         ...old,
-        [reference]: `${failureText(reason, `move ${reference} to ${attempt.status}`)} ${placement}`,
+        [reference]: {
+          ...failure,
+          sentence: `${failure.sentence} ${placement}`,
+        },
       }));
       return false;
     } finally {
@@ -184,7 +196,7 @@ export function useBoardStatus(workspace: {
     );
     lock(reference, true);
     clearNotice();
-    setFailures((old) => ({ ...old, [reference]: "" }));
+    setFailures((old) => ({ ...old, [reference]: null }));
     // A move that needs a review (to or from Duplicate) waits for it.
     const reviewed =
       status === "Duplicate" ||
@@ -224,7 +236,10 @@ export function useBoardStatus(workspace: {
       putBack(ticket, from);
       setFailures((old) => ({
         ...old,
-        [reference]: failureText(reason, `change the status of ${reference}`),
+        [reference]: describeFailure(
+          reason,
+          `change the status of ${reference}`,
+        ),
       }));
     } finally {
       trackMove(reference, null);
@@ -267,7 +282,7 @@ export function useBoardStatus(workspace: {
     },
     /** Hides a card's failure once read (its × or a later success). */
     dismissFailure(reference: string) {
-      setFailures((old) => ({ ...old, [reference]: "" }));
+      setFailures((old) => ({ ...old, [reference]: null }));
     },
   };
 }

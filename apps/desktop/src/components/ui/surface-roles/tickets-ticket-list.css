@@ -1,0 +1,65 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.ticket-rows {
+  list-style: none;
+}
+.ticket-list .ticket-row {
+  text-align: left;
+}
+.ticket-title {
+  white-space: nowrap;
+}
+.ticket-row-state-label,
+.ticket-row-context-label,
+.ticket-row-update-brief {
+  white-space: nowrap;
+}
+.ticket-row-time {
+  text-align: right;
+  white-space: nowrap;
+}
+.ticket-select {
+  cursor: pointer;
+}
+.ticket-rows input[type="checkbox"] {
+  cursor: pointer;
+}
+.ticket-group-meta {
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ticket-select input:not(:checked),
+  .ticket-group-add,
+  .ticket-row-action {
+    opacity: 0;
+  }
+  .ticket-rows li:hover .ticket-select input,
+  .ticket-rows li:focus-within .ticket-select input,
+  .ticket-rows:has(input:checked) .ticket-select input,
+  .ticket-group-header:hover .ticket-group-add,
+  .ticket-group-add:focus-within,
+  .ticket-rows li:hover .ticket-row-action,
+  .ticket-rows li:focus-within .ticket-row-action {
+    opacity: 1;
+  }
+  .ticket-rows li:hover:has(.ticket-row-action) .ticket-row-time,
+  .ticket-rows li:focus-within:has(.ticket-row-action) .ticket-row-time {
+    opacity: 0;
+  }
+}
+.bulk-bar {
+  white-space: normal;
+}
+.bulk-menu-caption {
+  white-space: normal;
+}
+.bulk-count {
+  white-space: nowrap;
+}
+
+.source-refresh {
+  white-space: nowrap;
+}
+.ui-item-navigator .ticket-navigator-caption {
+  white-space: nowrap;
+}

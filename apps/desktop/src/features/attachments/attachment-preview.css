@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/attachments-attachment-preview.css";
+
 .attachment-inline-preview {
   display: inline-flex;
   vertical-align: middle;
@@ -7,10 +9,6 @@
 .attachment-inline-preview svg {
   width: 13px;
   height: 13px;
-}
-.attachment-inline-preview:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 
 /* The preview, in the viewer dialog and the library's detail pane: a 48px
@@ -30,7 +28,6 @@
 .attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .attachment-preview-actions {
   display: flex;
@@ -135,7 +132,6 @@
   margin-inline: auto;
   padding: 16px 20px;
   overflow: auto;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .attachment-preview-textual {
@@ -145,13 +141,6 @@
   align-self: stretch;
   width: 100%;
   min-width: 0;
-}
-.attachment-preview-text:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.attachment-preview-text-note {
-  text-align: center;
 }
 .attachment-preview-awaited {
   display: flex;
@@ -195,16 +184,12 @@
   gap: 8px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .attachment-uses li {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-}
-.attachment-uses [data-slot="record-link"] {
-  text-align: start;
 }
 .attachment-preview-extra {
   display: flex;

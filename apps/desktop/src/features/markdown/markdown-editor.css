@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/markdown-markdown-editor.css";
+
 /* The editor's reading size. Its page sets these on an ancestor where text
    reads at 16/24 (the expanded ticket, a Document); 14/20 everywhere else. */
 :root {
@@ -7,20 +9,13 @@
 .markdown-editor {
   position: relative;
   min-width: 0;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-border);
-  background: var(--surface);
-  color: var(--foreground);
 }
 /* The editor reads at its context's reading size (P16): 14/20 by default,
    16/24 where the page sets --text-editor (the expanded ticket, a Document). */
 .rich-document {
   padding: 10px 12px;
   min-height: 40px;
-  font-size: var(--text-editor);
-  line-height: var(--text-editor-line);
   overflow-wrap: anywhere;
-  outline: none;
 }
 /* Editing in place uses the reading hover card's frame: 12px outside the
    text on every side, so no line moves when Edit starts (detA DS-01). */
@@ -58,11 +53,7 @@
   margin-right: auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .editor-bubble {
   display: inline-flex;
@@ -81,43 +72,21 @@
   gap: 8px;
   height: 32px;
   padding: 0 8px;
-  border-radius: var(--radius);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  cursor: default;
 }
 .slash-option svg {
   width: 16px;
   height: 16px;
-  color: var(--muted-foreground);
-}
-.slash-option[aria-selected="true"] {
-  background: var(--accent);
-}
-.slash-option[aria-selected="true"] svg {
-  color: var(--foreground);
-}
-.slash-empty {
-  color: var(--muted-foreground);
 }
 .editor-image-label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--muted-foreground);
 }
 .editor-image-label svg {
   width: 14px;
   height: 14px;
 }
 /* The ring sits on the rounded frame, not the square text area inside it. */
-.rich-document:focus-visible {
-  outline: none;
-}
-.markdown-editor:has(.rich-document:focus-visible) {
-  outline: 2px solid var(--input-focus);
-  outline-offset: 0;
-}
 .rich-document > * {
   margin-block: 12px;
 }
@@ -128,35 +97,17 @@
 .rich-document > :last-child {
   margin-bottom: 0;
 }
-.rich-document h1 {
-  font-size: var(--text-section);
-  font-weight: 600;
-  line-height: 40px;
-  letter-spacing: -1.28px;
-}
 /* Headings are never smaller than the text around them (plans DR-14). */
-.rich-document :is(h2, h3, h4, h5, h6) {
-  font-size: var(--text-editor);
-  font-weight: 600;
-  line-height: var(--text-editor-line);
-  letter-spacing: -0.28px;
-}
-.rich-document strong {
-  font-weight: 600;
-}
 .rich-document ul {
-  list-style-type: disc;
   padding-left: 20px;
 }
 .rich-document ol {
-  list-style-type: decimal;
   padding-left: 20px;
 }
 .rich-document li + li {
   margin-top: 4px;
 }
 .rich-document li:has(> input[type="checkbox"]) {
-  list-style: none;
   margin-left: 0;
 }
 .rich-document[data-empty] > :first-child::before {
@@ -164,13 +115,11 @@
   position: absolute;
   inset: 0 auto auto 0;
   max-width: 100%;
-  color: var(--disabled-foreground);
   pointer-events: none;
   user-select: none;
 }
 .rich-document li > input {
   margin-right: 8px;
-  accent-color: var(--primary);
 }
 /* Only a task item keeps its text inline beside the checkbox; a plain item's
    text stays a block so the engine anchors the bullet to its first line. */
@@ -181,25 +130,10 @@
   width: 140px;
   height: 24px;
   padding: 0;
-  border: 0;
-  border-radius: var(--radius-segment);
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.rich-document .code-language:hover,
-.rich-document .code-language:focus-visible {
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
-  outline: none;
 }
 .editor-rule {
   display: block;
   height: 1px;
-  box-shadow: 0 1px var(--border);
 }
 /* The diagram draws its own frame; the wrapper adds none, so Edit shows one border. */
 .diagram-editor {
@@ -208,43 +142,12 @@
 .diagram-editor [data-slot="disclosure"] {
   margin-top: 8px;
 }
-.markdown-editor .cm-editor {
-  background: var(--surface);
-  color: var(--foreground);
-  border-radius: var(--radius);
-}
 /* Source mode is a lighter view: regular weight, no ligatures (plans DR-02). */
-.markdown-editor .cm-scroller {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 400;
-  font-variant-ligatures: none;
-  line-height: 20px;
-}
 .markdown-editor .cm-content {
   padding: 10px 0;
 }
-.markdown-editor .cm-gutters {
-  background: var(--recessed);
-  color: var(--muted-foreground);
-  border: 0;
-}
-.markdown-editor .cm-cursor {
-  border-left-color: var(--foreground);
-}
-.markdown-editor :is(.cm-activeLine, .cm-activeLineGutter) {
-  background: var(--recessed);
-}
 /* With theme="none" CodeMirror's base selection is a light grey in both themes;
    the extra classes outrank its focused rule. */
-.markdown-editor .cm-editor .cm-selectionLayer .cm-selectionBackground,
-.markdown-editor
-  .cm-editor.cm-focused
-  > .cm-scroller
-  > .cm-selectionLayer
-  .cm-selectionBackground {
-  background: color-mix(in srgb, var(--ring) 24%, transparent);
-}
 .mermaid-pending {
   height: 160px;
   padding: 12px;

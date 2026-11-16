@@ -8,6 +8,7 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
   PopoverContent,
@@ -28,7 +29,9 @@ export function FailureDetails({
   small = false,
   variant = "inline",
   className,
+  iconOnly = false,
 }: {
+  iconOnly?: boolean;
   details: string;
   /** A 24px toggle for caption lines. */
   small?: boolean;
@@ -40,7 +43,20 @@ export function FailureDetails({
   const id = useId();
   const { copied, error, copy } = useCopy();
   if (!details) return null;
-  const trigger = (
+  const trigger = iconOnly ? (
+    <IconButton
+      type="button"
+      label="Details"
+      size="icon-card"
+      aria-expanded={open}
+      aria-controls={id}
+      {...(variant === "inline" && {
+        onClick: () => setOpen((value) => !value),
+      })}
+    >
+      <ChevronRight aria-hidden className={open ? "rotate-90" : undefined} />
+    </IconButton>
+  ) : (
     <Button
       type="button"
       variant="ghost"
@@ -93,8 +109,10 @@ function RetryButton({
   failure,
   onRetry,
   variant = "ghost",
+  label,
 }: {
   failure: FailureDescription;
+  label?: string;
   onRetry: (() => void) | undefined;
   variant?: "ghost" | "outline" | "link";
 }) {
@@ -105,6 +123,7 @@ function RetryButton({
       variant={variant}
       size={variant === "link" ? "xs" : "sm"}
       onClick={onRetry}
+      {...(label && { "aria-label": label })}
     >
       Retry
     </Button>
@@ -249,7 +268,13 @@ export function FailureCaption({
   onRetry,
   label = "Not saved",
   className,
+  detailsVariant = "inline",
+  retryLabel,
+  detailsIconOnly = false,
 }: {
+  detailsIconOnly?: boolean;
+  detailsVariant?: "inline" | "popover";
+  retryLabel?: string;
   failure: FailureDescription;
   onRetry?: () => void;
   label?: string;
@@ -272,11 +297,18 @@ export function FailureCaption({
           <span aria-hidden="true" className="ui-failure-inline-separator">
             ·
           </span>
-          <RetryButton failure={failure} onRetry={onRetry} variant="link" />
+          <RetryButton
+            failure={failure}
+            onRetry={onRetry}
+            variant="link"
+            {...(retryLabel && { label: retryLabel })}
+          />
         </>
       )}
       <FailureDetails
         small
+        iconOnly={detailsIconOnly}
+        variant={detailsVariant}
         details={`${failure.sentence}\n\n${failure.details}`}
       />
     </div>

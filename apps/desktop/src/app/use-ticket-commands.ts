@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
-import { invoke } from "@/lib/api/bridge-failure";
+import { inboxClient } from "@/lib/api/inbox";
 import { failureText } from "@/lib/api/describe-failure";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useStatusLine } from "@/components/ui/use-status-line";
@@ -37,7 +37,15 @@ export function useTicketCommands({
   const [tags, setTags] = useState<string[]>([]);
   const [due, setDue] = useState<string | null>(null);
   const [reminderLoaded, setReminderLoaded] = useState<string | null>(null);
+  const [reminderReads, setReminderReads] = useState(0);
+  const reminderAttempt = useRef<{
+    key: string;
+    requestId: string;
+    dueAt: string | null;
+    previousDue: string | null;
+  } | null>(null);
   const [error, setError] = useState("");
+  const [retry, setRetry] = useState<(() => void) | null>(null);
   const [pending, setPending] = useState(false);
   const [duplicate, setDuplicate] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
@@ -88,26 +96,28 @@ export function useTicketCommands({
   useEffect(() => {
     if (!open || !reference || scope !== "Reminder") return;
     let active = true;
-    void invoke("reminder", { reference })
+    void inboxClient
+      .reminder(reference)
       .then((value) => {
-        if (value !== null && typeof value !== "string")
-          throw new Error("Invalid reminder");
         if (active) {
           setDue(value);
           setReminderLoaded(reference);
+          setRetry(null);
+          setError("");
         }
       })
       .catch((reason: unknown) => {
         if (active) {
           const message = failureText(reason, "load reminder");
           setError(message);
+          setRetry(() => () => setReminderReads((value) => value + 1));
           line.show({ message, tone: "error" });
         }
       });
     return () => {
       active = false;
     };
-  }, [open, reference, scope, line]);
+  }, [open, reference, scope, line, reminderReads]);
   const ticket =
     initialTicket ?? (target?.reference === reference ? target : null);
   const presets = reminderPresets(new Date());
@@ -251,14 +261,20 @@ export function useTicketCommands({
           customAt ??
           presets.find((p) => p.key === value)?.at.toISOString() ??
           null;
-        const requestId = crypto.randomUUID();
-        forward = () => invoke("set_reminder", { reference, dueAt, requestId });
-        undo = () =>
-          invoke("set_reminder", {
-            reference,
-            dueAt: due,
+        const key = JSON.stringify([reference, value, customAt ?? null]);
+        if (reminderAttempt.current?.key !== key)
+          reminderAttempt.current = {
+            key,
             requestId: crypto.randomUUID(),
-          });
+            dueAt,
+            previousDue: due,
+          };
+        const attempt = reminderAttempt.current;
+        const undoRequestId = crypto.randomUUID();
+        forward = () =>
+          inboxClient.snooze(reference, attempt.dueAt, attempt.requestId);
+        undo = () =>
+          inboxClient.snooze(reference, attempt.previousDue, undoRequestId);
         message = dueAt
           ? `Set a reminder for ${reference}`
           : `Dismissed reminder for ${reference}`;
@@ -268,6 +284,9 @@ export function useTicketCommands({
     setPending(true);
     try {
       await forward();
+      if (scope === "Reminder") reminderAttempt.current = null;
+      setRetry(null);
+      setError("");
       close();
       line.show({
         message,
@@ -290,6 +309,10 @@ export function useTicketCommands({
     } catch (reason) {
       const message = failureText(reason, `change ${scope.toLowerCase()}`);
       setError(message);
+      if (scope === "Reminder")
+        setRetry(() => () => {
+          void apply(value, confirmed, customAt);
+        });
       line.show({ message, tone: "error" });
     } finally {
       setPending(false);
@@ -303,6 +326,7 @@ export function useTicketCommands({
     pending: pending || (scope === "Reminder" && reminderLoaded !== reference),
     due,
     error,
+    retry,
     duplicate,
     setDuplicate,
     leaving,
