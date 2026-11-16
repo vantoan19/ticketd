@@ -14,8 +14,19 @@ import { SourceActivityContext } from "./source-activity";
 import { PublicationNotice, PublishDialog } from "./PublishToSource";
 import { TicketHeader } from "./TicketHeader";
 import { TestReads } from "@/lib/workspace-reads/testing";
-import { TicketProperties } from "./TicketProperties";
+import type { ComponentProps } from "react";
+import { TicketProperties as Properties } from "./TicketProperties";
+import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { open } from "@tauri-apps/plugin-dialog";
+
+/** The property rail as the Ticket page mounts it, inside the open Ticket. */
+function TicketProperties(props: ComponentProps<typeof Properties>) {
+  return (
+    <OpenTicketFor reference={props.ticket.reference} ticket={props.ticket}>
+      <Properties {...props} />
+    </OpenTicketFor>
+  );
+}
 
 window.ResizeObserver = class {
   observe() {}

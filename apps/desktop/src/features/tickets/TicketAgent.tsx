@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { failureText } from "@/lib/api/describe-failure";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -23,62 +22,44 @@ import {
 import { topChat } from "@/features/chats/use-ticket-chats";
 import type { ChatSummary } from "@/features/chats/client";
 import { duration, stepWords } from "@/features/chats/model";
-import { latestUpdate, type LatestUpdate } from "@/lib/api/progress";
+import type { LatestUpdate } from "@/lib/api/progress";
 import type { Ticket } from "@/lib/api/client";
 import { relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { useInboxAttention } from "./use-inbox-attention";
+import { useTicket } from "./open-ticket";
 import { progressBrief } from "./progress-brief";
 
 /** Decide the slot once per opening, before displaying the document. */
 export function TicketAgentSession({
   ticket,
-  revision,
   children,
 }: {
   ticket: Ticket | undefined;
-  revision: number;
   children: (loading: boolean) => ReactNode;
 }) {
   const { enabled } = useChatFeature();
   const { show } = useStatusLine();
-  const [attempt, setAttempt] = useState(0);
   const { list } = useLinkedChats(
     ticket && enabled ? { kind: "ticket", id: ticket.id } : null,
   );
-  const [update, setUpdate] = useState<{
-    reference: string;
-    value: LatestUpdate | null;
-  } | null>(null);
   const reference = ticket?.reference;
+  // The latest update is shared with the Ticket page's "Latest update" line.
+  const latest = useTicket(reference ?? null, "latestUpdate");
+  const { failure, retry } = latest;
   useEffect(() => {
-    if (!reference) return;
-    let current = true;
-    latestUpdate(reference).then(
-      (value) => {
-        if (current) setUpdate({ reference, value });
-      },
-      (reason: unknown) => {
-        if (!current) return;
-        setUpdate({ reference, value: null });
-        show({
-          tone: "error",
-          message: failureText(reason, "load the latest update"),
-          action: {
-            label: "Retry",
-            run: () => setAttempt((count) => count + 1),
-          },
-        });
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [reference, revision, attempt, show]);
+    if (!failure) return;
+    show({
+      tone: "error",
+      message: `${failure.title}. ${failure.sentence}`,
+      action: { label: "Retry", run: retry },
+    });
+  }, [failure, retry, show]);
+  // Answered, or failed: a failed read leaves the line without an update.
+  const answered = latest.value !== undefined || failure !== null;
+  const update = latest.value ?? null;
   const attention = useInboxAttention();
-  const ready = Boolean(
-    ticket && update?.reference === ticket.reference && (!enabled || list),
-  );
+  const ready = Boolean(ticket && answered && (!enabled || list));
   const chats = list?.chats ?? [];
   const projected =
     attention?.chats.filter((chat) =>
@@ -99,7 +80,6 @@ export function TicketAgentSession({
   }>({ reference: ticket?.reference, reserved: null });
   if (opening.reference !== ticket?.reference) {
     setOpening({ reference: ticket?.reference, reserved: null });
-    setUpdate(null);
   } else if (
     opening.reserved === null &&
     (ready || chat || ticket?.progress_summary?.editing_agent)
@@ -110,7 +90,7 @@ export function TicketAgentSession({
         chats.length > 0 ||
         projected.length > 0 ||
         Boolean(
-          update?.value?.editing_agent ||
+          update?.editing_agent ||
           ticket?.progress_summary?.editing_agent,
         ),
     });
@@ -121,9 +101,7 @@ export function TicketAgentSession({
         reserved:
           opening.reference === ticket?.reference && Boolean(opening.reserved),
         chat,
-        update: ready
-          ? (update?.value ?? null)
-          : (ticket?.progress_summary ?? null),
+        update: ready ? update : (ticket?.progress_summary ?? null),
       }}
     >
       {children(Boolean(ticket && !ready))}
