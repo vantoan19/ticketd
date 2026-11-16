@@ -4,6 +4,9 @@
 // share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use std::{
     collections::VecDeque,
     ops::ControlFlow,
@@ -533,19 +536,12 @@ fn saved_configuration_is_exported_and_survives_backup_and_restore() {
 #[test]
 fn version_twentyone_workspaces_gain_the_source_table_on_open() {
     let (_, engine) = setup();
-    let (dir, mut workspace) = workspace();
+    let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let ticket = workspace.create_ticket("Keep me").unwrap();
-    drop(workspace);
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 21;")
-        .unwrap();
-    drop(db);
+    ticketd_core::create_workspace_at_format_version(&path, 21).unwrap();
+    old_workspace::add_ticket(&path, "11111111-1111-4111-8111-111111111111", "Keep me");
     let mut workspace = Workspace::open(&path).unwrap();
-    assert_eq!(
-        workspace.show_ticket(&ticket.reference).unwrap().title,
-        "Keep me"
-    );
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap().title, "Keep me");
     workspace
         .save_source(&engine, "fake", &values(json!({"repositories": ["o/a"]})))
         .unwrap();

@@ -734,17 +734,40 @@ fn a_change_to_an_agent_or_an_automation_waits_to_upload_and_the_switch_does_not
 #[test]
 fn a_workspace_in_the_previous_format_starts_syncing_the_automations_it_has() {
     let desks = desks();
-    let (workspace, automation, agent) = workspace_with_files(&desks.directory);
-    let token = workspace.change_token().unwrap();
-    drop(workspace);
-    let db = rusqlite::Connection::open(desks.directory.path().join("source")).unwrap();
-    let mut drops = String::from("DROP TABLE automation_arrivals; DELETE FROM sync_dirty;");
-    for table in ["automations", "automation_agents"] {
-        for event in ["insert", "update", "delete"] {
-            drops.push_str(&format!("DROP TRIGGER sync_capture_{table}_{event};"));
-        }
-    }
-    db.execute_batch(&format!("{drops} PRAGMA user_version = 75;"))
+    // Version 75 had Automations and agents but no sync capture: made here, they have
+    // never been marked to upload.
+    let source = desks.directory.path().join("source");
+    ticketd_core::create_workspace_at_format_version(&source, 75).unwrap();
+    let (automation, agent) = (
+        "00000000-0000-4000-8000-0000000000a1".to_owned(),
+        "00000000-0000-4000-8000-0000000000a2".to_owned(),
+    );
+    let db = rusqlite::Connection::open(&source).unwrap();
+    db.execute(
+        "INSERT INTO automation_agents (id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes) \
+         VALUES (?1, 'Triage', 'claude-code', NULL, ?2, 1, 0, 1, '[\"cargo test\",\"npm test\"]', 0, 40, 20)",
+        rusqlite::params![agent, "Read the ticket.\n\nThen label it."],
+    )
+    .unwrap();
+    // The definition as version 75 stored it: schema 1 of the trigger, conditions and steps.
+    let flow = triage(&agent);
+    let stored = serde_json::json!({
+        "schema_version": 1,
+        "trigger": flow.trigger,
+        "conditions": flow.conditions,
+        "steps": flow.steps,
+    });
+    db.execute(
+        "INSERT INTO automations (id, name, definition) VALUES (?1, 'Triage new bugs', ?2)",
+        rusqlite::params![automation, stored.to_string()],
+    )
+    .unwrap();
+    let token: i64 = db
+        .query_row(
+            "SELECT token FROM workspace_changes WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     drop(db);
 

@@ -17,7 +17,8 @@ use ticketd_chat_host::{
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
-    ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
+    ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger,
+    Workspace,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},

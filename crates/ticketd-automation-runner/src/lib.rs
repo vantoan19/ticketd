@@ -13,9 +13,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_chat_host::{
-    ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener,
-};
+use ticketd_chat_host::{ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
     AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
     RunAction, StepOutcome,
