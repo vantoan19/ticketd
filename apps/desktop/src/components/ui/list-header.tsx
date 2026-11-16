@@ -141,38 +141,43 @@ export function PaneHeader({
       >
         {shell && variant !== "ticket" && <ShellLeading />}
         {leading}
-        <span className="ui-pane-header-title">
-          {icon && (
-            <span aria-hidden="true" className="ui-pane-header-icon">
-              {icon}
-            </span>
-          )}
-          {variant === "ticket"
-            ? null
-            : (titleEditor ??
-              (hideTitle ? (
-                <Heading id={titleId} className="sr-only">
-                  {title}
-                </Heading>
-              ) : titleControl ? (
-                <Heading
-                  id={titleId}
-                  tabIndex={titleId ? -1 : undefined}
-                  data-control=""
-                >
-                  {titleControl(title)}
-                </Heading>
-              ) : (
-                // The full title while it is cut, below the header.
-                <Tooltip content={title} side="bottom" overflowOnly>
-                  <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+        {(variant !== "ticket" ||
+          icon != null ||
+          count != null ||
+          children != null) && (
+          <span className="ui-pane-header-title">
+            {icon && (
+              <span aria-hidden="true" className="ui-pane-header-icon">
+                {icon}
+              </span>
+            )}
+            {variant === "ticket"
+              ? null
+              : (titleEditor ??
+                (hideTitle ? (
+                  <Heading id={titleId} className="sr-only">
                     {title}
                   </Heading>
-                </Tooltip>
-              )))}
-          {count}
-          {children}
-        </span>
+                ) : titleControl ? (
+                  <Heading
+                    id={titleId}
+                    tabIndex={titleId ? -1 : undefined}
+                    data-control=""
+                  >
+                    {titleControl(title)}
+                  </Heading>
+                ) : (
+                  // The full title while it is cut, below the header.
+                  <Tooltip content={title} side="bottom" overflowOnly>
+                    <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                      {title}
+                    </Heading>
+                  </Tooltip>
+                )))}
+            {count}
+            {children}
+          </span>
+        )}
         {(actions || notice !== undefined) && (
           <span className="ui-pane-header-actions">
             <ShellNoticeSlot />

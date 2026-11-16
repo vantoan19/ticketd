@@ -5307,104 +5307,143 @@ test.each([
   },
 );
 
-test("ticket agent late start stays in the header until the next opening", async () => {
-  const { ChatClientContext } = await import("@/features/chats/client");
-  const { createMockChatClient, chatState } =
-    await import("@/features/chats/mock-client");
-  const tickets = paletteTickets();
-  const client = createMockChatClient({
-    enabled: true,
-    chats: [{ chat: chatState({ id: "late", title: "Late Chat" }) }],
-  });
-  bridge.invoke.mockImplementation((command: string, args: unknown) =>
-    command === "find_tickets"
-      ? tickets
-      : command === "show_ticket"
-        ? tickets[1]
-        : bridgeDefault(command, args as undefined),
-  );
-  render(
-    <ChatClientContext value={client}>
-      <App />
-    </ChatClientContext>,
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Focused Ticket/ }),
-  );
-  await screen.findByRole("group", { name: "Ticket properties" });
-  await vi.waitFor(() =>
+test.each([false, true])(
+  "ticket agent late start keeps the focused reference and header state until the next opening (narrow: %s)",
+  async (narrow) => {
+    narrowViewport = narrow;
+    const { ChatClientContext } = await import("@/features/chats/client");
+    const { createMockChatClient, chatState } =
+      await import("@/features/chats/mock-client");
+    const tickets = paletteTickets();
+    const client = createMockChatClient({
+      enabled: true,
+      chats: [{ chat: chatState({ id: "late", title: "Late Chat" }) }],
+    });
+    bridge.invoke.mockImplementation((command: string, args: unknown) =>
+      command === "find_tickets"
+        ? tickets
+        : command === "show_ticket"
+          ? tickets[1]
+          : bridgeDefault(command, args as undefined),
+    );
+    render(
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Focused Ticket/ }),
+    );
+    await screen.findByRole("group", { name: "Ticket properties" });
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".detail-scroll[data-agent-loading]"),
+      ).toBeNull(),
+    );
+    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    const copy = screen.getByRole("button", { name: "Copy reference" });
+    act(() => copy.focus());
+    act(() =>
+      client.patch("late", {
+        activity: "working",
+        links: [
+          {
+            kind: "ticket",
+            id: "2",
+            reference: "T-KQ2",
+            title: "Focused Ticket",
+            status: "Todo",
+          },
+        ],
+      }),
+    );
+    const header = screen
+      .getByRole("heading", { name: "T-KQ2" })
+      .closest(".detail-header")!;
+    await vi.waitFor(() =>
+      expect(within(header as HTMLElement).getByText("Working")).toBeTruthy(),
+    );
+    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(document.activeElement).toBe(copy);
+    act(() =>
+      client.push("late", {
+        kind: "request",
+        id: "late-approval",
+        at: "2026-11-16T00:00:00Z",
+        request: "approval",
+        title: "Run the check",
+        command: "npm test -- board",
+        options: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Decline" },
+        ],
+        state: "pending",
+        free_text: false,
+      }),
+    );
+    await within(header as HTMLElement).findByRole("button", {
+      name: "Review request",
+    });
     expect(
-      document.querySelector(".detail-scroll[data-agent-loading]"),
-    ).toBeNull(),
-  );
-  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
-  act(() =>
-    client.patch("late", {
-      activity: "working",
-      links: [
-        {
-          kind: "ticket",
-          id: "2",
-          reference: "T-KQ2",
-          title: "Focused Ticket",
-          status: "Todo",
-        },
-      ],
-    }),
-  );
-  const header = screen
-    .getByRole("heading", { name: "T-KQ2" })
-    .closest(".detail-header")!;
-  await vi.waitFor(() =>
-    expect(within(header as HTMLElement).getByText("Working")).toBeTruthy(),
-  );
-  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
-  act(() =>
-    client.push("late", {
-      kind: "request",
-      id: "late-approval",
-      at: "2026-11-16T00:00:00Z",
-      request: "approval",
-      title: "Run the check",
-      command: "npm test -- board",
-      options: [
-        { id: "allow", label: "Allow once" },
-        { id: "deny", label: "Decline" },
-      ],
-      state: "pending",
-      free_text: false,
-    }),
-  );
-  const review = await within(header as HTMLElement).findByRole("button", {
-    name: "Review request",
-  });
-  expect(
-    within(header as HTMLElement).getByText("Approval needed"),
-  ).toBeTruthy();
-  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
-  fireEvent.click(review);
-  expect(
-    await screen.findByRole("heading", { name: "Late Chat" }),
-  ).toBeTruthy();
-  expect(await screen.findByText("npm test -- board")).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: "Allow once" }));
-  fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Focused Ticket/ }),
-  );
-  expect(
-    within(
-      screen
-        .getByRole("heading", { name: "T-KQ2" })
-        .closest(".detail-header") as HTMLElement,
-    ).queryByText("Approval needed"),
-  ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Close ticket/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Focused Ticket/ }));
-  expect(
-    await screen.findByRole("status", { name: "Ticket agent" }),
-  ).toBeTruthy();
-});
+      within(header as HTMLElement).getByText("Approval needed"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(document.activeElement).toBe(copy);
+    await act(async () => {
+      await client.answer("late", "late-approval", { option_id: "allow" });
+      client.patch("late", { activity: "idle" });
+    });
+    expect(
+      within(header as HTMLElement).queryByRole("status", { name: "Working" }),
+    ).toBeNull();
+    expect(
+      within(header as HTMLElement).queryByRole("button", {
+        name: "Review request",
+      }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy reference" })).toBe(copy);
+    expect(document.activeElement).toBe(copy);
+    act(() =>
+      client.push("late", {
+        kind: "request",
+        id: "route-approval",
+        at: "2026-11-16T00:00:00Z",
+        request: "approval",
+        title: "Run the check",
+        command: "npm test -- board",
+        options: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Decline" },
+        ],
+        state: "pending",
+        free_text: false,
+      }),
+    );
+    const review = await within(header as HTMLElement).findByRole("button", {
+      name: "Review request",
+    });
+    fireEvent.click(review);
+    expect(
+      await screen.findByRole("heading", { name: "Late Chat" }),
+    ).toBeTruthy();
+    expect(await screen.findByText("npm test -- board")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow once" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to T-KQ2" }));
+    await screen.findByRole("button", { name: "Copy reference" });
+    expect(
+      within(
+        screen
+          .getByRole("heading", { name: "T-KQ2" })
+          .closest(".detail-header") as HTMLElement,
+      ).queryByText("Approval needed"),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Close ticket/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Focused Ticket/ }));
+    expect(
+      await screen.findByRole("status", { name: "Ticket agent" }),
+    ).toBeTruthy();
+  },
+);
 
 test("ticket agent idle update preserves unseen Chat and opens its Activity", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");

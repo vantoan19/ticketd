@@ -23,6 +23,7 @@ const buttonVariants = cva(
         default: "h-10 px-4",
         xs: "h-8 px-2",
         compact: "h-7 gap-1.5 px-2.5",
+        "compact-responsive": "ui-button-compact-responsive h-7 gap-1.5 px-2.5",
         sm: "h-8 px-3",
         lg: "h-12 px-6",
         icon: "size-10",

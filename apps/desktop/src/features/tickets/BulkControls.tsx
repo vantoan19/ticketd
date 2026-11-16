@@ -178,7 +178,7 @@ export function BulkControls({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="compact"
+                    size="compact-responsive"
                     disabled={pending}
                     aria-label="Status of selected tickets"
                   >
@@ -237,7 +237,7 @@ export function BulkControls({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="compact"
+                    size="compact-responsive"
                     disabled={pending}
                     aria-label="Project of selected tickets"
                   >
@@ -278,7 +278,7 @@ export function BulkControls({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="compact"
+                    size="compact-responsive"
                     disabled={pending}
                     aria-label="Plan of selected tickets"
                   >
@@ -322,7 +322,7 @@ export function BulkControls({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="compact"
+                    size="compact-responsive"
                     disabled={pending}
                     aria-label="Tags of selected tickets"
                   >
@@ -347,7 +347,7 @@ export function BulkControls({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="compact"
+                    size="compact-responsive"
                     disabled={pending}
                     aria-label="More selected ticket actions"
                   >

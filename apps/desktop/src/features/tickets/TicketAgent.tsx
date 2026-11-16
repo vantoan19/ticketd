@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { failureText } from "@/lib/api/describe-failure";
-import { Loader2 } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -134,8 +134,8 @@ export function TicketAgentHeader({ reference }: { reference: string }) {
         <Button
           aria-label="Review request"
           aria-description="Approval needed"
-          variant="ghost"
-          size="compact"
+          variant="attention"
+          size="compact-responsive"
           onClick={() =>
             requestChat({
               kind: "open",
@@ -145,24 +145,34 @@ export function TicketAgentHeader({ reference }: { reference: string }) {
             })
           }
         >
-          <StatusDot tone="attention" size={6} />
-          <span className="ticket-agent-header-long">Approval needed</span>
-          <span className="ticket-agent-header-short" aria-hidden="true">
-            Review
+          <span className="ticket-agent-header-long">
+            <StatusDot tone="attention" size={6} />
           </span>
+          <span className="ticket-agent-header-long">Approval needed</span>
+          <TriangleAlert
+            className="ticket-agent-header-short"
+            aria-hidden="true"
+          />
         </Button>
       </Tooltip>
     );
   if (chat.status.rank !== "working") return null;
   return (
-    <Badge variant="record">
-      <HarnessMark
-        harness={agent.chat.harness_id}
-        name={agent.chat.harness_name}
-        decorative
-      />{" "}
-      Working
-    </Badge>
+    <Tooltip content="Working">
+      <Badge
+        variant="record"
+        size="compact-responsive"
+        role="status"
+        aria-label="Working"
+      >
+        <HarnessMark
+          harness={chat.harness_id}
+          name={chat.harness_name}
+          decorative
+        />
+        <span className="ticket-agent-header-long">Working</span>
+      </Badge>
+    </Tooltip>
   );
 }
 

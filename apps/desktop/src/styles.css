@@ -3892,7 +3892,6 @@ kbd,
   width: 28px;
   height: 28px;
 }
-.ui-button-attention,
 .ui-button-attention svg {
   color: var(--status-attention);
 }
@@ -3924,5 +3923,16 @@ kbd,
   .ui-shell-notice-slot {
     width: 44px;
     height: 44px;
+  }
+}
+
+/* Compact controls preserve their header/list lane when labels collapse. */
+@container (max-width: 600px) {
+  .ui-button-compact-responsive,
+  .ui-badge-compact-responsive {
+    width: var(--header-control-height);
+    min-width: var(--header-control-height);
+    padding-inline: 0;
+    justify-content: center;
   }
 }

@@ -329,10 +329,6 @@
   .bulk-bar > .bulk-count {
     padding-inline: 0 4px;
   }
-  .bulk-bar > button {
-    width: var(--header-control-height);
-    padding-inline: 0;
-  }
 }
 
 .ticket-list-overlays {
