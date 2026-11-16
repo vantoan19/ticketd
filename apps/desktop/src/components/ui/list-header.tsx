@@ -28,9 +28,14 @@ const Collapsed = createContext(false);
 export function ShellSlotProvider({
   nav,
   crumb,
+  notice,
   children,
 }: ShellSlot & { children: ReactNode }) {
-  return <ShellSlotContext value={{ nav, crumb }}>{children}</ShellSlotContext>;
+  return (
+    <ShellSlotContext value={{ nav, crumb, notice }}>
+      {children}
+    </ShellSlotContext>
+  );
 }
 
 /**
@@ -118,6 +123,7 @@ export function PaneHeader({
   }, []);
   const Heading = titleLevel === 1 ? "h1" : "h2";
   const shell = useShellLeading();
+  const { notice } = useShellSlot();
   return (
     <Collapsed value={collapsed}>
       <header
@@ -135,39 +141,49 @@ export function PaneHeader({
       >
         {shell && variant !== "ticket" && <ShellLeading />}
         {leading}
-        <span className="ui-pane-header-title">
-          {icon && (
-            <span aria-hidden="true" className="ui-pane-header-icon">
-              {icon}
-            </span>
-          )}
-          {variant === "ticket"
-            ? null
-            : (titleEditor ??
-              (hideTitle ? (
-                <Heading id={titleId} className="sr-only">
-                  {title}
-                </Heading>
-              ) : titleControl ? (
-                <Heading
-                  id={titleId}
-                  tabIndex={titleId ? -1 : undefined}
-                  data-control=""
-                >
-                  {titleControl(title)}
-                </Heading>
-              ) : (
-                // The full title while it is cut, below the header.
-                <Tooltip content={title} side="bottom" overflowOnly>
-                  <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+        {(variant !== "ticket" ||
+          icon != null ||
+          count != null ||
+          children != null) && (
+          <span className="ui-pane-header-title">
+            {icon && (
+              <span aria-hidden="true" className="ui-pane-header-icon">
+                {icon}
+              </span>
+            )}
+            {variant === "ticket"
+              ? null
+              : (titleEditor ??
+                (hideTitle ? (
+                  <Heading id={titleId} className="sr-only">
                     {title}
                   </Heading>
-                </Tooltip>
-              )))}
-          {count}
-          {children}
-        </span>
-        {actions && <span className="ui-pane-header-actions">{actions}</span>}
+                ) : titleControl ? (
+                  <Heading
+                    id={titleId}
+                    tabIndex={titleId ? -1 : undefined}
+                    data-control=""
+                  >
+                    {titleControl(title)}
+                  </Heading>
+                ) : (
+                  // The full title while it is cut, below the header.
+                  <Tooltip content={title} side="bottom" overflowOnly>
+                    <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                      {title}
+                    </Heading>
+                  </Tooltip>
+                )))}
+            {count}
+            {children}
+          </span>
+        )}
+        {(actions || notice !== undefined) && (
+          <span className="ui-pane-header-actions">
+            <ShellNoticeSlot />
+            {actions}
+          </span>
+        )}
       </header>
       {caption && <p className="ui-pane-header-caption">{caption}</p>}
     </Collapsed>
@@ -229,5 +245,13 @@ export function ReturnCrumb({
       </Button>
       <span aria-hidden="true">/</span>
     </span>
+  );
+}
+
+/** Kept in the header from its first frame, so failure controls cannot displace actions. */
+export function ShellNoticeSlot() {
+  const { notice } = useShellSlot();
+  return notice === undefined ? null : (
+    <span className="ui-shell-notice-slot">{notice}</span>
   );
 }

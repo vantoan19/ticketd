@@ -1,6 +1,9 @@
 import { useEffect, useEffectEvent, useState } from "react";
 import { client, type Ticket } from "@/lib/api/client";
-import { failureText } from "@/lib/api/describe-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { typedReference } from "./ticket-references";
 
 const MATCHES = 8;
@@ -16,9 +19,13 @@ export function useTicketSearch(
   open: boolean,
   accept: (ticket: Ticket) => boolean,
 ) {
-  const [results, setResults] = useState<Ticket[]>([]);
+  const [found, setFound] = useState<{ query: string; items: Ticket[] }>({
+    query: "",
+    items: [],
+  });
   const [resolvedQuery, setResolvedQuery] = useState("");
-  const [error, setError] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const keep = useEffectEvent(accept);
   useEffect(() => {
     const text = query.trim();
@@ -41,9 +48,10 @@ export function useTicketSearch(
           if (!active) return;
           const seen = new Set<string>();
           setResolvedQuery(text);
-          setError("");
-          setResults(
-            lists
+          setFailure(null);
+          setFound({
+            query: text,
+            items: lists
               .flat()
               .filter(
                 (item) =>
@@ -52,13 +60,12 @@ export function useTicketSearch(
                   seen.add(item.reference),
               )
               .slice(0, MATCHES),
-          );
+          });
         },
         (reason: unknown) => {
           if (active) {
             setResolvedQuery(text);
-            setResults([]);
-            setError(failureText(reason, "search tickets"));
+            setFailure(describeFailure(reason, "search tickets"));
           }
         },
       );
@@ -67,13 +74,18 @@ export function useTicketSearch(
       active = false;
       window.clearTimeout(timer);
     };
-  }, [query, open]);
+  }, [query, open, attempt]);
   return {
-    results: resolvedQuery === query.trim() ? results : [],
-    error: resolvedQuery === query.trim() ? error : "",
+    results: found.query === query.trim() ? found.items : [],
+    error:
+      resolvedQuery === query.trim() && failure
+        ? `${failure.title}. ${failure.sentence}`
+        : "",
+    failure: resolvedQuery === query.trim() ? failure : null,
+    retry: () => setAttempt((count) => count + 1),
     reset() {
-      setResults([]);
-      setError("");
+      setFound({ query: "", items: [] });
+      setFailure(null);
     },
   };
 }

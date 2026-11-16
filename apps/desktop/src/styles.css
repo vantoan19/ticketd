@@ -99,6 +99,7 @@
     0 0 0 1px #00000014, 0 12px 28px -8px #00000033, 0 4px 8px -4px #0000001a;
   --surface: #fff;
   --recessed: #f2f2f2;
+  --workspace-band: var(--recessed);
   --foreground: #171717;
   --muted-foreground: #4d4d4d;
   --disabled-foreground: #6b6b6b;
@@ -236,6 +237,7 @@
   --tooltip-foreground: #ededed;
   --link-foreground: #52aeff;
   --recessed: #1a1a1a;
+  --workspace-band: #1d1d1d;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
   --disabled-foreground: #8a8a8a;
@@ -1033,7 +1035,7 @@ body:has([data-slot="dialog-overlay"])
   gap: 4px 8px;
   min-height: 40px;
   padding: 4px 8px 4px 16px;
-  background: var(--recessed);
+  background: var(--workspace-band);
   box-shadow: inset 0 -1px 0 var(--border);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
@@ -3880,4 +3882,57 @@ kbd,
 }
 .ui-button-property:hover {
   background: var(--accent);
+}
+
+/* The header's reserved notice control never moves adjacent actions. */
+.ui-shell-notice-slot {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  width: 28px;
+  height: 28px;
+}
+.ui-button-attention svg {
+  color: var(--status-blocked);
+}
+.workspace-band-slot {
+  flex: none;
+  height: 40px;
+}
+.ui-popover[data-variant="workspace"] .workspace-band {
+  height: auto;
+  flex-wrap: wrap;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.ui-popover[data-variant="workspace"] .workspace-band-message {
+  flex-basis: 100%;
+  align-items: flex-start;
+}
+.ui-popover[data-variant="workspace"]
+  .workspace-band-message
+  > span:last-child {
+  white-space: normal;
+}
+.ui-palette-failure {
+  padding: 8px 16px;
+}
+
+@media (pointer: coarse) {
+  .ui-shell-notice-slot {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* Compact controls preserve their header/list lane when labels collapse. */
+@container (max-width: 600px) {
+  .ui-button-compact-responsive,
+  .ui-badge-compact-responsive {
+    width: var(--header-control-height);
+    min-width: var(--header-control-height);
+    padding-inline: 0;
+    justify-content: center;
+  }
 }

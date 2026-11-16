@@ -223,7 +223,7 @@ export function TicketHeader({
                 </Tooltip>
               </span>
             )}
-            <TicketAgentHeader />
+            {selected && <TicketAgentHeader reference={selected} />}
             {owner && (
               <SourceLink url={owner.url} className="header-source-link">
                 <span className="sr-only">Open on {owner.provider_name}: </span>
