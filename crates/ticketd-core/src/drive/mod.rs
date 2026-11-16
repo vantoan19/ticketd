@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{Attachment, Error, Workspace};
+mod client;
 mod provider;
 pub use provider::*;
 mod oauth;
