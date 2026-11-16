@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
+import {
+  ariaKeyShortcuts,
+  shortcutLabel,
+  type ShortcutId,
+} from "@/lib/shortcuts";
 import { useCopy } from "@/components/ui/use-copy";
 
 /**
@@ -16,6 +21,7 @@ export function CopyButton({
   subject,
   icon,
   className,
+  shortcutId,
 }: {
   text: string;
   label: string;
@@ -26,6 +32,8 @@ export function CopyButton({
   subject?: string;
   icon?: ReactNode;
   className?: string;
+  /** The registered action, only for a copy that actually owns this key. */
+  shortcutId?: ShortcutId;
 }) {
   const { copied, error, copy } = useCopy();
   // The tooltip keeps the short label; the name tells rows apart.
@@ -35,6 +43,10 @@ export function CopyButton({
       <IconButton
         type="button"
         label={copied ? "Copied" : error ? "Copy unavailable" : label}
+        {...(shortcutId && {
+          "aria-keyshortcuts": ariaKeyShortcuts(shortcutId),
+          ...(!copied && !error && { shortcut: shortcutLabel(shortcutId) }),
+        })}
         {...name}
         data-copied={copied ? "" : undefined}
         {...(className && { className })}
