@@ -13125,3 +13125,322 @@ test("many Plan filter windows retain bounded reads, full counts and identical G
     name: "T-KQ12 · Needle member 11",
   });
 });
+
+test.each([false, true])(
+  "a saturated Workspace island keeps every candidate reachable with an opaque next page (%s)",
+  async (hasNextPage) => {
+    const plan = {
+      id: "saturated-plan",
+      name: "Saturated island",
+      archived: false,
+    };
+    const members = Array.from({ length: 119 }, (_, index) =>
+      bulkTicket(index + 1, {
+        title: `Island member ${index + 1}`,
+        plan_id: plan.id,
+      }),
+    );
+    const documents = Array.from({ length: 119 }, (_, index) => ({
+      id: `island-doc-${index}`,
+      heading: `Island Document ${index}`,
+      trashed: false,
+    }));
+    const islandNodes = [
+      ...members.map((t) => ({
+        id: t.id,
+        kind: "ticket",
+        label: `${t.reference} · ${t.title}`,
+        state: "Todo",
+        trashed: false,
+        activity_detail: false,
+      })),
+      ...documents.map((d) => ({
+        id: d.id,
+        kind: "document",
+        label: d.heading,
+        state: null,
+        trashed: false,
+        activity_detail: false,
+      })),
+    ];
+    const outside = Array.from(
+      { length: hasNextPage ? 90 : 40 },
+      (_, index) => ({
+        id: `candidate-${index}`,
+        kind: "document",
+        label: `Outside Document ${index}`,
+        state: null,
+        trashed: false,
+        activity_detail: false,
+      }),
+    );
+    // Ten current members precede distinct candidates; raw-page positions cannot
+    // be counted from just the identities newly inserted into the drawing.
+    const firstPage = [...islandNodes.slice(0, 10), ...outside.slice(0, 40)];
+    const all = [...islandNodes, ...outside];
+    let reads = 0;
+    let version = 0;
+    const tokenBefore = bridge.token.next;
+    bridge.token.next = () => version;
+    const candidateCursors: (string | null)[] = [];
+    bridge.invoke.mockImplementation(
+      (command: string, args: Record<string, unknown>) => {
+        if (command === "list_plans")
+          return args.limit === undefined || Number(args.offset) === 0
+            ? [plan]
+            : [];
+        if (command === "show_plan") {
+          reads++;
+          return {
+            plan,
+            members: [],
+            documents,
+            counts: counted({ todo: 119 }),
+          };
+        }
+        if (command === "find_tickets") {
+          const f = args.filter as {
+            offset: number;
+            limit: number;
+            plan: string | null;
+          };
+          return f.plan ? members.slice(f.offset, f.offset + f.limit) : [];
+        }
+        if (command === "workspace_graph") {
+          const r = args.request as {
+            hydrate_only: boolean;
+            visible_ids: string[];
+            cursor: string | null;
+          };
+          if (!r.hydrate_only) candidateCursors.push(r.cursor);
+          return {
+            nodes: r.hydrate_only
+              ? all.filter((n) => r.visible_ids.includes(n.id))
+              : r.cursor === "opaque|next:page%"
+                ? outside.slice(40)
+                : firstPage,
+            edges: [],
+            node_tags: {},
+            total: hasNextPage ? 329 : 279,
+            omitted: false,
+            omitted_groups: [],
+            next_cursor:
+              !r.hydrate_only && hasNextPage && r.cursor === null
+                ? "opaque|next:page%"
+                : null,
+          };
+        }
+        return bridgeDefault(command, args);
+      },
+    );
+    try {
+      render(<App />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Workspace graph" }),
+      );
+      const graph = await screen.findByRole("region", {
+        name: "Workspace graph",
+      });
+      await within(graph).findByText("119 tickets, 119 Documents");
+      expect(graph.textContent).toContain("250 items");
+      const reached = new Set<string>();
+      const allReached = new Set<string>();
+      for (let page = 0; page < 6; page++) {
+        const drawn = [...graph.querySelectorAll(".react-flow__node[data-id]")]
+          .map((n) => n.getAttribute("data-id")!)
+          .filter((id) => id === plan.id || all.some((n) => n.id === id));
+        fireEvent.click(within(graph).getByRole("radio", { name: "List" }));
+        const rows = [
+          ...graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li"),
+        ];
+        expect(rows).toHaveLength(drawn.length);
+        drawn.forEach((id) => allReached.add(id));
+        for (const node of outside) {
+          const present = within(graph).queryByRole("button", {
+            name: node.label,
+          });
+          expect(!!present).toBe(drawn.includes(node.id));
+          if (present) reached.add(node.id);
+        }
+        if (page === 1) {
+          const row = within(graph).getByRole("button", {
+            name: "Outside Document 11",
+          });
+          fireEvent.click(row);
+          row.focus();
+          const before = rows.map((r) => r.textContent);
+          const previousReads = reads;
+          version++;
+          await vi.waitFor(() => expect(reads).toBeGreaterThan(previousReads), {
+            timeout: 4000,
+          });
+          await act(async () => {});
+          expect(
+            [...graph.querySelectorAll(".cgraph-scroll .cgraph-rows > li")].map(
+              (r) => r.textContent,
+            ),
+          ).toEqual(before);
+          expect(document.activeElement).toBe(row);
+        }
+        const more = within(graph).queryByRole("button", { name: "Load more" });
+        if (!more) break;
+        fireEvent.click(within(graph).getByRole("radio", { name: "Graph" }));
+        fireEvent.click(
+          within(graph).getByRole("button", { name: "Load more" }),
+        );
+        await act(async () => {});
+      }
+      expect(reached.size).toBe(hasNextPage ? 90 : 40);
+      expect(allReached.size).toBe(hasNextPage ? 329 : 279);
+      expect(
+        within(graph).queryByRole("button", { name: "Load more" }),
+      ).toBeNull();
+      expect(
+        candidateCursors.every(
+          (value) => value === null || value === "opaque|next:page%",
+        ),
+      ).toBe(true);
+      expect(candidateCursors.includes("opaque|next:page%")).toBe(hasNextPage);
+      expect(reads).toBeLessThanOrEqual(6);
+    } finally {
+      bridge.token.next = tokenBefore;
+    }
+  },
+);
+
+test("scrolling Inbox group headings preserves the focused triage entry and keyboard navigation", async () => {
+  const due = "2020-01-01T00:00:00Z";
+  await renderReviewApp({
+    inbox: [1, 2].map((id) => ({
+      id,
+      reference: `T-KQ${id}`,
+      title: `Scroll reminder ${id}`,
+      kind: "reminder",
+      from_value: "",
+      to_value: due,
+      timestamp: due,
+      read: false,
+      editing_agent: null,
+    })),
+    reminder: due,
+    set_inbox_read: () => null,
+    find_tickets: [bulkTicket(1), bulkTicket(2)],
+    show_ticket: ({ reference }: { reference: string }) =>
+      bulkTicket(reference === "T-KQ1" ? 1 : 2),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  const first = await screen.findByRole("button", {
+    name: /T-KQ1.*Scroll reminder 1.*Your reminder/,
+  });
+  const second = screen.getByRole("button", {
+    name: /T-KQ2.*Scroll reminder 2.*Your reminder/,
+  });
+  fireEvent.click(first);
+  first.focus();
+  const heading = screen.getByRole("heading", { name: /Needs you/ });
+  const scroller = first.closest(".inbox-body")!;
+  let sectionTop = 4;
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      return {
+        x: 0,
+        y: 0,
+        top: this.tagName === "SECTION" ? sectionTop : 0,
+        left: 0,
+        bottom: 36,
+        right: 392,
+        width: 392,
+        height: 36,
+        toJSON: () => ({}),
+      };
+    });
+  try {
+    for (const position of [-20, 4]) {
+      sectionTop = position;
+      fireEvent.scroll(scroller);
+      expect(document.activeElement).toBe(first);
+      expect(screen.getByRole("heading", { name: /Needs you/ })).toBe(heading);
+      expect(first.closest(".inbox-entry")?.getAttribute("aria-current")).toBe(
+        "true",
+      );
+    }
+    fireEvent.keyDown(first, { key: "j" });
+    await waitFor(() =>
+      expect(second.closest(".inbox-entry")?.getAttribute("aria-current")).toBe(
+        "true",
+      ),
+    );
+    expect(document.activeElement).toBe(first);
+  } finally {
+    geometry.mockRestore();
+  }
+});
+
+test.each(["unavailable", "mixed", "none"])(
+  "Plan Next up distinguishes %s Ready work without contradicting Core counts",
+  async (state) => {
+    const plan = {
+      id: "source-next-plan",
+      name: "Source availability",
+      archived: false,
+    };
+    const unavailable = bulkTicket(3, {
+      title: "Unavailable Ready work",
+      plan_id: plan.id,
+      availability: state === "none" ? "Blocked" : "Ready",
+      source: {
+        ...reviewSource,
+        unavailable: {
+          code: "offline",
+          message: "The source is offline.",
+          since: "2026-11-16T00:00:00Z",
+        },
+      },
+    });
+    const usable = bulkTicket(2, {
+      title: "Available Ready work",
+      plan_id: plan.id,
+      availability: "Ready",
+    });
+    const members = state === "mixed" ? [unavailable, usable] : [unavailable];
+    await renderReviewApp({
+      list_plans: [plan],
+      find_tickets: members,
+      show_plan: {
+        plan,
+        members: [],
+        documents: [],
+        counts: counted({ todo: members.length }),
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+    const cards = await screen.findByRole("list", { name: "Active Plans" });
+    await within(cards).findByText(`0 of ${members.length} done`);
+    if (state === "unavailable") {
+      expect(
+        await within(cards).findByText("Ready work has unavailable sources"),
+      ).toBeTruthy();
+      expect(within(cards).getByText(/1 ready, 0 blocked/)).toBeTruthy();
+      expect(within(cards).queryByText("No Ready tickets")).toBeNull();
+    } else if (state === "mixed") {
+      expect(
+        await within(cards).findByRole("button", {
+          name: "T-KQ2 Available Ready work",
+        }),
+      ).toBeTruthy();
+      expect(within(cards).getByText(/2 ready, 0 blocked/)).toBeTruthy();
+      expect(
+        within(cards).queryByText("Ready work has unavailable sources"),
+      ).toBeNull();
+    } else {
+      expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
+      expect(within(cards).getByText(/0 ready, 1 blocked/)).toBeTruthy();
+    }
+    expect(
+      within(cards).queryByRole("button", {
+        name: "T-KQ3 Unavailable Ready work",
+      }),
+    ).toBeNull();
+  },
+);

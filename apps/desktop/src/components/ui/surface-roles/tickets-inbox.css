@@ -2,11 +2,16 @@
 
 .inbox section h2 {
   border-radius: var(--radius-card);
-  background: var(--background);
+  background: transparent;
   color: var(--foreground);
   font-size: var(--text-ui);
   font-weight: 500;
   line-height: var(--text-ui-line);
+}
+.inbox section h2[data-stuck] {
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: 0 1px 0 var(--group-hairline);
 }
 .inbox-entries {
   list-style: none;

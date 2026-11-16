@@ -1,5 +1,6 @@
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { StatusLineContext } from "@/components/ui/use-status-line";
+import { useStickyGroupHeadings } from "@/components/ui/use-sticky-group-headings";
 import { Skeleton } from "@/components/ui/skeleton";
 import { onInboxAction } from "./inbox-commands";
 import { useInboxAction } from "./use-inbox-action";
@@ -746,6 +747,7 @@ function InboxContent({
   const arriving = useRef<number | null>(null);
   const revealingRead = useRef(false);
   const body = useRef<HTMLDivElement>(null);
+  useStickyGroupHeadings(body);
   useEffect(() => {
     if (revealingRead.current) {
       body.current
@@ -834,7 +836,7 @@ function InboxContent({
         )}
         {groups.map(([group, items]) => (
           <section key={group} aria-labelledby={`inbox-group-${group}`}>
-            <h2 id={`inbox-group-${group}`}>
+            <h2 id={`inbox-group-${group}`} data-sticky-group-heading>
               {group === "Needs you" && <StatusDot tone="attention" size={6} />}
               {group}
               <Count>
