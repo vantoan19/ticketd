@@ -10938,7 +10938,7 @@ test("Capture saves before its exit, retains the closing editor and reopens empt
     );
     expect(dialog.isConnected).toBe(true);
     expect(source).toHaveProperty("value", "Retain this captured thought");
-    expect(saved?.body).toBe("Retain this captured thought");
+    expect(saved).toMatchObject({ body: "Retain this captured thought" });
     finishExit(dialog);
     await vi.waitFor(() => expect(dialog.isConnected).toBe(false));
     await user.keyboard("{Control>}{Shift>}n{/Shift}{/Control}");
