@@ -24,7 +24,8 @@ function Card({
     | "board"
     | "triage"
     | "summary"
-    | "file";
+    | "file"
+    | "composer";
 }) {
   const Comp = asChild ? Slot.Root : "div";
   return (

@@ -80,7 +80,7 @@ it("lets an empty Capture close without creating a Document", async () => {
   renderEditor(<DocumentEditor initial={null} onClose={close} />);
   expect(screen.getByText("Kept in Documents")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(close).toHaveBeenCalledOnce();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(documents.save).not.toHaveBeenCalled();
 });
 it("tells a capture it is saved to Documents once it has text", async () => {
@@ -126,7 +126,7 @@ it("keeps a failed capture open and retries the same request before returning", 
   );
   await screen.findByText("Saved");
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(close).toHaveBeenCalledOnce();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
 });
 it("after a failed capture save, closing explains the risk and can discard", async () => {
   // DR-08: closing never waits on a save that cannot succeed.
@@ -151,7 +151,7 @@ it("after a failed capture save, closing explains the risk and can discard", asy
   fireEvent.click(
     await screen.findByRole("button", { name: "Discard and close" }),
   );
-  expect(close).toHaveBeenCalledOnce();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(documents.save).toHaveBeenCalledOnce();
 });
 it("notices saved changes beneath a focused draft and offers reload", async () => {
@@ -350,16 +350,17 @@ it("opens a trashed Document readably and restores it", async () => {
   );
 });
 it("keeps capture typing unchanged while saving the suggested connection", async () => {
-  vi.mocked(documents.save).mockResolvedValue({
-    id: "d1",
-    title: null,
-    body: "Thought\n\n[T-KQ12](ticketd://ticket/T-KQ12)",
-    created_at: "now",
-    updated_at: "now",
-    trashed: false,
-  });
+  let finishSave!: (
+    document: Awaited<ReturnType<typeof documents.save>>,
+  ) => void;
+  vi.mocked(documents.save).mockReturnValue(
+    new Promise((resolve) => {
+      finishSave = resolve;
+    }),
+  );
+  const close = vi.fn();
   renderEditor(
-    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-KQ12" />,
+    <DocumentEditor initial={null} onClose={close} currentTicket="T-KQ12" />,
   );
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
@@ -372,6 +373,18 @@ it("keeps capture typing unchanged while saving the suggested connection", async
   expect(
     (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,
   ).toBe("Thought");
+  expect(close).not.toHaveBeenCalled();
+  await act(async () => {
+    finishSave({
+      id: "d1",
+      title: null,
+      body: "Thought\n\n[T-KQ12](ticketd://ticket/T-KQ12)",
+      created_at: "now",
+      updated_at: "now",
+      trashed: false,
+    });
+  });
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
 });
 it("removes a suggested connection after the first save", async () => {
   vi.mocked(documents.save).mockResolvedValue({
@@ -1082,6 +1095,10 @@ it("quotes a passage shared by several connections once", async () => {
 });
 
 it("opens the Document's History from its actions, and says when it Needs review", async () => {
+  vi.mocked(documents.version).mockResolvedValue([
+    stored.updated_at,
+    stored.trashed,
+  ]);
   vi.mocked(syncReview.conflicts).mockResolvedValue([
     {
       kind: "document",

@@ -244,7 +244,7 @@ test.each(["ticket", "document"])(
     expect(kind === "ticket" ? openTicket : openDocument).toHaveBeenCalledWith(
       kind === "ticket" ? "T-KQ7" : "document-id",
     );
-    expect(close).toHaveBeenCalledOnce();
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
   },
 );
 
@@ -506,3 +506,50 @@ test.each(["image/png", "video/mp4"])(
     expect(element.hasAttribute("src")).toBe(false);
   },
 );
+
+test("viewer retains its media and owner until the closing animation completes", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id"
+      ? "workspace"
+      : {
+          attachment: file,
+          status: "unsupported",
+          media_type: null,
+          message: null,
+          can_open: true,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        },
+  );
+  vi.stubGlobal("CSS", { escape: (value: string) => value });
+  const actualStyle = window.getComputedStyle;
+  vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
+    const native = actualStyle(element, pseudo);
+    if (!element.hasAttribute("data-slot")) return native;
+    return new Proxy(native, {
+      get(target, key) {
+        if (key === "animationName")
+          return element.getAttribute("data-state") === "closed"
+            ? "test-exit"
+            : "test-enter";
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  });
+  try {
+    const close = vi.fn();
+    render(<AttachmentPreview target={{ id: file.id }} onClose={close} />);
+    await screen.findByRole("heading", { name: "Screenshot" });
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(close).not.toHaveBeenCalled();
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.getAttribute("data-state")).toBe("closed");
+    const end = new Event("animationend", { bubbles: true });
+    Object.defineProperty(end, "animationName", { value: "test-exit" });
+    fireEvent(dialog, end);
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

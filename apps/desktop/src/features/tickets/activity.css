@@ -24,29 +24,27 @@
   content: "· ";
 }
 
-/* The update composer: one frame from the first frame (P16). Idle it is a
-   40px field; opened, the editor sits in the same frame with the controls
-   row under it, and the frame grows only downward as the text grows. */
+/* One 44px frame at rest and on focus; the shared composer Card owns its
+   visual anatomy while content and Details grow in place. */
 .activity-composer,
 .activity-edit {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+.activity-edit {
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-border);
 }
-.activity-composer:focus-within,
 .activity-edit:focus-within {
   outline: 2px solid var(--input-focus);
   outline-offset: -1px;
 }
-.activity-composer .markdown-editor,
 .activity-edit .markdown-editor {
   box-shadow: none;
   background: transparent;
 }
-.activity-composer .markdown-editor:has(.rich-document:focus-visible),
 .activity-edit .markdown-editor:has(.rich-document:focus-visible) {
   outline: none;
 }
@@ -59,10 +57,11 @@
 .activity-composer-idle {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 44px;
+  justify-content: space-between;
   padding: 0 12px;
   border: 0;
-  border-radius: var(--radius-panel);
+  border-radius: inherit;
   background: transparent;
   color: var(--disabled-foreground);
   font-size: var(--text-ui);
@@ -73,9 +72,14 @@
 .activity-composer-idle:focus-visible {
   outline: none;
 }
-.activity-composer:has(.activity-composer-idle:focus-visible) {
-  outline: 2px solid var(--input-focus);
-  outline-offset: -1px;
+.activity-composer-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity-composer-prompt svg {
+  width: 16px;
+  height: 16px;
 }
 /* The bottom row: "Draft saved" · controls · + · Discard · Post ⌘↵. */
 .activity-composer-row {
@@ -158,17 +162,21 @@
    open, so the timeline is not a column of identical icons (DB-16). */
 .activity-row-actions {
   display: inline-flex;
-  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 .activity [data-slot="comment-row"]:hover .activity-row-actions,
 .activity [data-slot="comment-row"]:focus-within .activity-row-actions,
 .activity [data-slot="comment-row"][data-open] .activity-row-actions,
-.activity-row-actions:has([data-state="open"]) {
-  visibility: visible;
+.activity-row-actions:has([data-state="open"]),
+.activity-row-actions[data-retained] {
+  opacity: 1;
+  pointer-events: auto;
 }
 @media (hover: none) {
   .activity-row-actions {
-    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 .activity-confirm-title {
@@ -189,7 +197,15 @@
   margin-top: 16px;
 }
 
-/* Reserve the text and controls before opening, so the timeline stays put. */
+/* Editing controls float in the existing pane bar; focus never inserts a row. */
 .activity-composer {
-  min-height: 80px;
+  min-height: 44px;
+}
+.activity-composer > .markdown-editor > .rich-document {
+  min-height: 44px;
+  padding-block: 12px;
+}
+
+.activity-composer > .markdown-editor .cm-content {
+  padding-block: 12px;
 }

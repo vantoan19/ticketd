@@ -99,6 +99,10 @@
     0 0 0 1px #00000014, 0 12px 28px -8px #00000033, 0 4px 8px -4px #0000001a;
   --surface: #fff;
   --recessed: #f2f2f2;
+  --segmented-track: var(--recessed);
+  --segmented-thumb: var(--surface);
+  --footer-band: var(--recessed);
+  --shadow-segmented-thumb: 0 0 0 1px #0000000f, 0 1px 2px #00000014;
   --workspace-band: var(--recessed);
   --foreground: #171717;
   --muted-foreground: #4d4d4d;
@@ -184,6 +188,11 @@
   --dur-3: 180ms;
   --dur-4: 240ms;
   --dur-exit: 100ms;
+  --overlay-slide: 4px;
+  --overlay-scale: 0.98;
+  --dialog-rise: 8px;
+  --dialog-scale: 0.985;
+  --sheet-scale: 0.96;
   --dur-lift: 120ms;
   --dur-settle: 160ms;
   --dur-arrival: 1200ms;
@@ -237,6 +246,10 @@
   --tooltip-foreground: #ededed;
   --link-foreground: #52aeff;
   --recessed: #1a1a1a;
+  --segmented-track: #212121;
+  --segmented-thumb: #333333;
+  --footer-band: #1b1b1b;
+  --shadow-segmented-thumb: 0 0 0 1px #ffffff14;
   --workspace-band: #1d1d1d;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
@@ -563,7 +576,8 @@
   font-weight: 400;
   line-height: 20px;
 }
-.ui-input:focus-visible {
+.ui-input:focus-visible,
+.ui-card-composer:focus-within {
   box-shadow: none;
   outline: 1px solid var(--input-focus);
   outline-offset: 0;
@@ -608,12 +622,32 @@
   [data-slot="choice-tile-radio"] {
   box-shadow: inset 0 0 0 5px var(--interactive);
 }
-/* Dark: --surface is darker than the --recessed track, so the chosen segment
-   rises on --accent instead. */
-:where(:root[data-theme="dark"], [data-theme-preview="dark"])
-  [data-slot="segmented-control"]:not([data-theme-preview="light"] *)
-  [role="radio"][data-state="checked"] {
-  background: var(--accent);
+.ui-segmented {
+  background: var(--segmented-track);
+}
+.ui-segmented :is([role="radio"], [role="tab"]) {
+  font-size: var(--text-code);
+  line-height: var(--text-ui-line);
+}
+.ui-segmented
+  :is(
+    [role="radio"][data-state="checked"],
+    [role="tab"][aria-selected="true"]
+  ) {
+  background: var(--segmented-thumb);
+  box-shadow: var(--shadow-segmented-thumb);
+}
+.ui-segmented[data-variant="plain"] {
+  padding: 0;
+  background: none;
+}
+.ui-segmented[data-variant="plain"] [role="tab"] {
+  height: 28px;
+  justify-content: flex-start;
+  padding-inline: 0;
+  background: none;
+  box-shadow: none;
+  font-size: var(--text-ui);
 }
 /* A disabled switch keeps its shape at full strength: a recessed track and a
    disabled-foreground thumb, no opacity. */
@@ -708,23 +742,107 @@
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
+.ui-overlay[data-state="open"] {
+  animation: palette-scrim var(--dur-2) var(--ease-out);
+}
+.ui-overlay[data-state="closed"] {
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
+}
 /* Design frame D shows nothing of the empty detail behind a modal scrim. */
 body:has([data-slot="dialog-overlay"])
   [data-slot="empty-state"][data-size="hint"] {
   visibility: hidden;
 }
+.ui-popover,
+.ui-menu {
+  --overlay-offset-x: 0px;
+  --overlay-offset-y: calc(-1 * var(--overlay-slide));
+}
+:is(.ui-popover, .ui-menu)[data-side="top"] {
+  --overlay-offset-y: var(--overlay-slide);
+}
+:is(.ui-popover, .ui-menu)[data-side="left"] {
+  --overlay-offset-x: var(--overlay-slide);
+  --overlay-offset-y: 0px;
+}
+:is(.ui-popover, .ui-menu)[data-side="right"] {
+  --overlay-offset-x: calc(-1 * var(--overlay-slide));
+  --overlay-offset-y: 0px;
+}
 .ui-popover[data-state="open"],
 .ui-menu[data-state="open"] {
-  animation: overlay-enter var(--dur-3) var(--ease-out);
+  animation: menu-enter var(--dur-3) var(--ease-out);
 }
-.ui-dialog[data-state="open"],
+.ui-popover[data-state="closed"],
+.ui-menu[data-state="closed"] {
+  animation: menu-leave var(--dur-exit) var(--ease-in);
+}
+:is(
+  .ui-popover,
+  .ui-menu,
+  .ui-dialog,
+  .ui-sheet,
+  .ui-overlay
+)[data-state="closed"] {
+  pointer-events: none;
+}
+.ui-dialog[data-state="open"] {
+  animation: palette-enter var(--dur-4) var(--ease-out);
+}
+.ui-dialog[data-state="closed"] {
+  animation: dialog-leave var(--dur-exit) var(--ease-in);
+}
 .ui-sheet[data-state="open"] {
   animation: overlay-enter var(--dur-4) var(--ease-out);
+}
+.ui-sheet[data-state="closed"] {
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
+}
+@keyframes menu-enter {
+  from {
+    opacity: 0;
+    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
+      scale(var(--overlay-scale));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+@keyframes menu-leave {
+  from {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
+      scale(var(--overlay-scale));
+  }
+}
+/* Radix Presence waits for a changed animation name before unmounting. */
+@keyframes overlay-leave {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-leave {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
+  }
 }
 @keyframes overlay-enter {
   from {
     opacity: 0;
-    transform: scale(0.96);
+    transform: scale(var(--sheet-scale));
   }
   to {
     opacity: 1;
@@ -1071,6 +1189,18 @@ body:has([data-slot="dialog-overlay"])
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
+}
+.ui-card-composer {
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.ui-card-composer .markdown-editor {
+  box-shadow: none;
+  background: transparent;
+}
+.ui-card-composer .markdown-editor:has(.rich-document:focus-visible) {
+  outline: none;
 }
 .ui-card-header {
   display: flex;
@@ -2550,6 +2680,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
    a typed search never re-centres them (DESIGN.md section 11). */
 .ui-dialog {
   --dialog-top: max(48px, 12vh);
+  transform-origin: 50% 0;
   top: var(--dialog-top);
   left: 50%;
   translate: -50% 0;
@@ -2701,8 +2832,8 @@ html[data-input="pointer"] .sidebar-nav button:focus-visible {
 /* The footer band: recessed under a hairline, one note slot beside Cancel
    and the primary. */
 .dialog-shell-footer {
-  min-height: 60px;
-  background: var(--recessed);
+  min-height: 56px;
+  background: var(--footer-band);
   box-shadow: inset 0 1px 0 var(--group-hairline);
 }
 .dialog-shell-note {
@@ -2871,12 +3002,12 @@ kbd,
   animation: palette-enter var(--dur-3) var(--ease-out);
 }
 .ui-dialog[data-size="palette"][data-state="closed"] {
-  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 @keyframes palette-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.985);
+    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
   }
   to {
     opacity: 1;
@@ -2941,7 +3072,7 @@ kbd,
   gap: 16px;
   min-height: 40px;
   padding: 0 16px;
-  background: var(--recessed);
+  background: var(--footer-band);
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
@@ -2956,7 +3087,7 @@ kbd,
   }
 }
 .ui-overlay:has(+ .ui-dialog[data-size="palette"][data-state="closed"]) {
-  animation: palette-scrim var(--dur-exit) var(--ease-in) reverse;
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 
 [data-variant="palette"] [data-slot="command-shortcut"] {
@@ -3096,8 +3227,24 @@ kbd,
   bottom: 16px;
   inset-inline: 12px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   pointer-events: none;
+}
+.floating-edit-position[hidden],
+.floating-edit-bar[hidden] {
+  display: none;
+}
+/* An inactive draft can fail while another field owns the one control bar. */
+.floating-edit-position[data-inactive] {
+  padding-bottom: 48px;
+}
+.floating-edit-feedback {
+  width: min(100%, 640px);
+  max-height: 50dvh;
+  overflow-y: auto;
+  pointer-events: auto;
 }
 .floating-edit-bar {
   display: flex;

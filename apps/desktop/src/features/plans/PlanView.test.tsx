@@ -109,6 +109,17 @@ beforeEach(() => {
         if (target) target.purpose = input?.purpose ?? "";
         return target;
       }
+      case "bulk_change": {
+        const change = input as unknown as {
+          references: string[];
+          change: { plan_id: string | null };
+        };
+        const selected = tickets.filter((item) =>
+          change.references.includes(item.reference),
+        );
+        for (const item of selected) item.plan = change.change.plan_id ?? "";
+        return selected.map(ticket);
+      }
       case "set_plan": {
         const target = tickets.find(
           (item) => item.reference === input?.reference,
@@ -331,8 +342,11 @@ test("adds an existing ticket from search, with Undo", async () => {
   fireEvent.click(within(dialog).getByRole("button", { name: "Add tickets" }));
   await waitFor(() =>
     expect(calls).toContainEqual([
-      "set_plan",
-      { reference: "T-KQ3", plan: "e1" },
+      "bulk_change",
+      expect.objectContaining({
+        references: ["T-KQ3"],
+        change: { plan_id: "e1" },
+      }),
     ]),
   );
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -341,8 +355,11 @@ test("adds an existing ticket from search, with Undo", async () => {
   // Undo puts it back where it was: in no Plan.
   await waitFor(() =>
     expect(calls).toContainEqual([
-      "set_plan",
-      { reference: "T-KQ3", plan: null },
+      "bulk_change",
+      expect.objectContaining({
+        references: ["T-KQ3"],
+        change: { plan_id: null },
+      }),
     ]),
   );
 });

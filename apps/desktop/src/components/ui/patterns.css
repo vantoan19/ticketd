@@ -837,3 +837,12 @@
     margin-top: 8px;
   }
 }
+
+/* An inline attachment rename shares the title slot without wrapping the header. */
+.ui-pane-header:has(.attachment-rename) .ui-pane-header-title {
+  flex: 1;
+}
+.ui-pane-header-title > .attachment-rename {
+  flex: 1;
+  min-width: 0;
+}

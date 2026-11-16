@@ -16,6 +16,7 @@ import {
   AlertDescription,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { CopyButton } from "@/components/ui/copy-button";
 import {
   Dialog,
@@ -364,6 +365,17 @@ function PreviewHeader({
   const canRestore = Boolean(file?.quarantined) && !preview.gone;
   const notDownloaded = preview.stored?.state === "not_downloaded";
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreTrigger = useRef<HTMLButtonElement>(null);
+  const wasRenaming = useRef(renaming);
+  useLayoutEffect(() => {
+    if (
+      wasRenaming.current &&
+      !renaming &&
+      document.activeElement === document.body
+    )
+      moreTrigger.current?.focus({ preventScroll: true });
+    wasRenaming.current = renaming;
+  }, [renaming]);
   const open = useCallback(() => {
     if (file && !busy && blocked === null)
       void preview.action("open the file", () => attachments.open(file.id));
@@ -483,6 +495,7 @@ function PreviewHeader({
               <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
                 <DropdownMenuTrigger asChild>
                   <IconButton
+                    ref={moreTrigger}
                     label="More actions"
                     shortcut={shortcutLabel("attachments-more")}
                     aria-keyshortcuts={ariaKeyShortcuts("attachments-more")}
@@ -909,6 +922,7 @@ export function AttachmentPreview({
   actions?: ReactNode;
 }) {
   const preview = usePreview(target);
+  const presence = useDialogPresence(onClose);
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const replacementRequest = useRef<AbortController | null>(null);
@@ -916,7 +930,7 @@ export function AttachmentPreview({
   useEffect(() => () => replacementRequest.current?.abort(), []);
   function close() {
     replacementRequest.current?.abort();
-    onClose();
+    presence.close();
   }
   const replace = onReplace
     ? () => {
@@ -953,12 +967,20 @@ export function AttachmentPreview({
     );
   return (
     <Dialog
-      open
+      open={presence.dialog.open}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
-      <DialogContent variant="flush" size="viewer" showCloseButton={false}>
+      <DialogContent
+        variant="flush"
+        size="viewer"
+        showCloseButton={false}
+        inert={!presence.dialog.open || undefined}
+        onCloseAutoFocus={() => {
+          if (!presence.dialog.open) presence.dialog.onExitComplete();
+        }}
+      >
         <div className="attachment-preview" data-layout="viewer">
           <PreviewHeader
             preview={preview}
