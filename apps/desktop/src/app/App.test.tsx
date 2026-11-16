@@ -5809,6 +5809,125 @@ test.each(["All tickets", "Plan"])(
   },
 );
 
+test("leaving a focused filter submenu cancels the earlier pointer hover opening intent", async () => {
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "search_tags") return ["board", "ui"];
+    if (command === "find_tickets")
+      return [bulkTicket(1, { title: "Intent row" })];
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: /Intent row/ });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
+  try {
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    const tags = screen.getByRole("menuitem", { name: "Tags" });
+    await user.hover(tags);
+    await user.click(tags);
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("menuitemcheckbox", { name: "board" }),
+    );
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.queryByRole("menu", { name: "Tags" })).toBeNull();
+    expect(document.activeElement).toBe(tags);
+    // The old hover timer must not reopen a submenu the person just left.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(101);
+    });
+    expect(screen.queryByRole("menu", { name: "Tags" })).toBeNull();
+    expect(document.activeElement).toBe(tags);
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("menu", { name: "Tags" })).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("menuitemcheckbox", { name: "board" }),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("filter drafts keep every tag and Status when keyboard selection closes a pointer-opened menu", async () => {
+  const user = userEvent.setup();
+  const tickets = [
+    bulkTicket(1, {
+      title: "Both draft tags",
+      status: "Todo",
+      tags: ["board", "ui"],
+    }),
+    bulkTicket(2, { title: "Other draft row", status: "Done", tags: [] }),
+  ];
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "search_tags") return ["board", "ui"];
+    if (command === "find_tickets") {
+      const filter = (
+        args as { filter: { status: string | null; tags: string[] } }
+      ).filter;
+      return tickets.filter(
+        (ticket) =>
+          (!filter.status || ticket.status === filter.status) &&
+          filter.tags.every((tag) => ticket.tags.includes(tag)),
+      );
+    }
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const retained = await screen.findByRole("button", {
+    name: /Other draft row/,
+  });
+  const trigger = screen.getByRole("button", { name: "Filters" });
+  await user.click(trigger);
+  await user.click(screen.getByRole("menuitem", { name: /^Tags/ }));
+  await user.click(
+    await screen.findByRole("menuitemcheckbox", { name: "board" }),
+  );
+  await user.click(screen.getByRole("menuitemcheckbox", { name: "ui" }));
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  expect(retained.isConnected).toBe(true);
+  // Move back to the parent dimension and choose Status with the keyboard.
+  await user.keyboard("{ArrowLeft}{Home}{ArrowRight}{End}{Enter}");
+  const bar = await screen.findByLabelText("Active filters");
+  expect(bar.textContent).toContain("StatusDuplicate");
+  expect(bar.textContent).toContain("Tagsboard, ui");
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
+  expect(document.activeElement).toBe(trigger);
+  await screen.findByText("No tickets match these filters");
+  expect(
+    screen.queryByRole("heading", { name: "Your workspace is ready" }),
+  ).toBeNull();
+  expect(
+    screen.getByText("Nothing in All tickets matches the 2 filters on."),
+  ).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls
+      .filter(([name]) => name === "find_tickets")
+      .map(([, args]) => args),
+  ).toEqual([
+    expect.objectContaining({
+      filter: expect.objectContaining({ status: null, tags: [] }),
+    }),
+    expect.objectContaining({
+      filter: expect.objectContaining({
+        status: "Duplicate",
+        tags: ["board", "ui"],
+      }),
+    }),
+  ]);
+  await user.click(trigger);
+  await user.click(screen.getByRole("menuitem", { name: /^Tags/ }));
+  for (const tag of ["board", "ui"])
+    expect(
+      screen
+        .getByRole("menuitemcheckbox", { name: tag })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  await user.keyboard("{Escape}");
+  await user.click(within(bar).getByRole("button", { name: "Clear filters" }));
+  await screen.findByRole("button", { name: /Other draft row/ });
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
 test("filter checks stay staged until the menu closes, then the bar follows the header", async () => {
   const tickets = [
     bulkTicket(1, { title: "First retained row", tags: ["polish"] }),
@@ -9760,6 +9879,7 @@ test("page zoom serializes rapid keys and a pending reset wins over stale target
 });
 
 test("page zoom keeps the applied value on native failure, exposes raw Details and retries the failed action", async () => {
+  const user = userEvent.setup();
   let fail = false;
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
     if (command === "plugin:webview|set_webview_zoom" && fail)
@@ -9776,36 +9896,53 @@ test("page zoom keeps the applied value on native failure, exposes raw Details a
     expect(await screen.findByText("Zoom 110%")).toBeTruthy();
     fail = true;
     fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
-    const failure = await screen.findByRole("alert");
-    expect(failure.textContent).toContain(
+    expect((await screen.findByRole("alert")).textContent).toContain(
       "Couldn't change zoom. Your previous zoom is kept. Try again.",
     );
     expect(screen.queryByText("Zoom 125%")).toBeNull();
     expect(screen.queryByText(/native diagnostic/)).toBeNull();
-    fireEvent.click(within(failure).getByRole("button", { name: "Details" }));
-    expect(
-      await screen.findByText(
-        "Webview zoom permission rejected: native diagnostic",
-      ),
-    ).toBeTruthy();
-    fireEvent.click(within(failure).getByRole("button", { name: "Details" }));
     fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
     const input = await screen.findByRole("combobox", {
       name: "Search tickets and destinations",
     });
     fireEvent.change(input, { target: { value: "> Zoom in" } });
+    const option = await screen.findByRole("option", { name: /Zoom in/ });
+    expect(option.textContent).toContain("110%");
+    // The palette retries the same native action and retains the same prior zoom.
+    await user.click(option);
+    const failure = await screen.findByRole("alert");
+    await user.click(within(failure).getByRole("button", { name: "Details" }));
     expect(
-      (await screen.findByRole("option", { name: /Zoom in/ })).textContent,
-    ).toContain("110%");
-    fireEvent.keyDown(input, { key: "Escape" });
+      await screen.findByText(
+        "Webview zoom permission rejected: native diagnostic",
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Copy details" }),
+      ),
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByText(/native diagnostic/)).toBeNull(),
+    );
+    expect(screen.getByRole("alert")).toBe(failure);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(document.activeElement).toBe(
+      within(failure).getByRole("button", { name: "Details" }),
+    );
     fail = false;
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Zoom 125%")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
       { label: "main", value: 1.1 },
       { label: "main", value: 1.25 },
       { label: "main", value: 1.25 },
+      { label: "main", value: 1.25 },
     ]);
+    expect(await screen.findByText("Zoom 125%")).toBeTruthy();
+    screen.getByRole("button", { name: "Dismiss" }).focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("Zoom 125%")).toBeNull();
     fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
     expect(await screen.findByText("Zoom 100%")).toBeTruthy();
   } finally {

@@ -412,7 +412,7 @@ Ticket headers show only title, count, Filter and Display. Search belongs to the
 
 Filter is a menu with Status, Availability, Plan, Tags and Parent submenus. Tags stay in vocabulary order while checked. Both the trigger and empty-state explanation count active dimensions, so several tags count as one filter. Active chips retain the shared chip anatomy and Clear filters.
 
-Active filters use one 44px bar directly beneath the header, with 26px chips and a trailing Clear filters control. No bar or blank gap is inserted in unfiltered S01. The picker stages its checked values until it closes, so choosing a first value, typing in a picker, and toggling tags never move the ledger behind an open menu. Closing applies the draft and reflows the list once. The chip row never wraps, hides excess chips behind “+N more”, and reserves Clear filters even at 480px. Bulk controls and the status line keep their separate bottom slots. Source filtering remains separate and preserves the selected source when ordinary filters clear.
+Active filters use one 44px bar directly beneath the header, with 26px chips and a trailing Clear filters control. No bar or blank gap is inserted in unfiltered S01. The picker stages its checked values until it closes, so choosing a first value, typing in a picker, and toggling tags never move the ledger behind an open menu. Closing applies every staged dimension and reflows the list once. A keyboard close retires any earlier hover-open request until new pointer input or a keyboard opening renews it. Single-choice selections close and commit naturally; Tags stays open for multiple checks. Submenus render in portals so the scrolling parent menu cannot clip their choices or pointer hit areas, and use Radix’s available dimensions to remain inside the pane at narrow widths. The chip row never wraps, hides excess chips behind “+N more”, and reserves Clear filters even at 480px. Bulk controls and the status line keep their separate bottom slots. Source filtering remains separate and preserves the selected source when ordinary filters clear.
 
 ### Board
 
@@ -746,7 +746,7 @@ Primary buttons use the inverted neutral pair. Destructive buttons sit on `--err
 
 Fields have persistent labels; placeholders are examples, not labels. Forms use aligned full-width inputs, shared field spacing, and a trailing action row. Put the destructive action away from ordinary submit controls. Do not place an unstyled native select beside a themed button and consider the form finished.
 
-Menus are for short action choices. Popovers are for small, focused edits. Dialogs are for multi-field forms, consequential confirmation, and dependency review. Every dialog/sheet has a title, a close path, correct focus containment, and focus return. Escape closes only the foremost surface and must not silently discard a draft. One action must not open a stack of overlapping editors.
+Menus are for short action choices. Popovers are for small, focused edits. Dialogs are for multi-field forms, consequential confirmation, and dependency review. Every dialog/sheet has a title, a close path, correct focus containment, and focus return. Escape closes only the foremost surface and must not silently discard a draft. A status line handles Escape from its own DOM controls; Escape from its portaled failure Details closes only Details, returns focus to its trigger and retains the error with Retry. One action must not open a stack of overlapping editors.
 
 ### Menus, selects and choice lists
 

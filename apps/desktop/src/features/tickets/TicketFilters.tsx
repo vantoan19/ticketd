@@ -172,6 +172,7 @@ function FiltersMenu(
 ) {
   const { menu, filterCount } = applied;
   const parentMenu = useRef<HTMLDivElement>(null);
+  const retiredHover = useRef<Dimension | null>(null);
   const current = {
     status: applied.status,
     availability: applied.availability,
@@ -250,8 +251,12 @@ function FiltersMenu(
   };
   const sub = (dimension: Dimension) => ({
     open: menu.sub === dimension,
-    onOpenChange: (open: boolean) =>
-      menu.setSub(open ? dimension : menu.sub === dimension ? null : menu.sub),
+    onOpenChange: (open: boolean) => {
+      // Radix's pointer-hover timer can outlive a keyboard close. Only new
+      // pointer input or an explicit keyboard opening can renew that intent.
+      if (open && retiredHover.current === dimension) return;
+      menu.setSub(open ? dimension : menu.sub === dimension ? null : menu.sub);
+    },
   });
   const valueMeta = (value: string | undefined) =>
     value ? <span className="filters-menu-value">{value}</span> : null;
@@ -278,7 +283,25 @@ function FiltersMenu(
           {filterCount > 0 && <Count aria-hidden="true">{filterCount}</Count>}
         </PaneHeaderButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent ref={parentMenu} align="end">
+      <DropdownMenuContent
+        ref={parentMenu}
+        align="end"
+        onPointerMoveCapture={() => {
+          retiredHover.current = null;
+        }}
+        onPointerDownCapture={() => {
+          retiredHover.current = null;
+        }}
+        onKeyDownCapture={(event) => {
+          if (event.key === "ArrowRight") retiredHover.current = null;
+          if (
+            event.key === "ArrowLeft" &&
+            event.target instanceof Element &&
+            event.target.closest('[data-slot="dropdown-menu-sub-content"]')
+          )
+            retiredHover.current = menu.sub;
+        }}
+      >
         {shown.Status && (
           <DropdownMenuSub {...sub("Status")}>
             <DropdownMenuSubTrigger>

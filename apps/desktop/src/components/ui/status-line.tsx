@@ -243,6 +243,13 @@ function FloatingLine({
           setFocused(false);
       }}
       onKeyDown={(event) => {
+        // A portaled Details popover owns its keys, even though React bubbles
+        // them through this line. Only keys from the line itself dismiss it.
+        if (
+          event.defaultPrevented ||
+          !event.currentTarget.contains(event.target as Node)
+        )
+          return;
         if (event.key === "Escape") {
           event.stopPropagation();
           close();
