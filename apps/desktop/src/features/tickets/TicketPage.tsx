@@ -81,7 +81,7 @@ export function TicketPage({
   const now = useNow();
   const openCommand = useContext(TicketCommandContext);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
-  const work = useLinkedWork(ticket, revision, refresh, active);
+  const work = useLinkedWork();
   const sourcesConfigured = useSourcesConfigured();
   const trash = useTicketTrash(changed, refresh);
   // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
@@ -431,10 +431,7 @@ export function TicketPage({
         </RailPlacement>
         {active && (
           <Evidence
-            reference={ticket.reference}
-            revision={revision}
             trashed={ticket.trashed}
-            refresh={refresh}
             folded
             addRequest={evidenceRequest}
             onCount={setEvidenceCount}

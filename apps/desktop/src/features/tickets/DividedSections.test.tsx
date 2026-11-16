@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
 import { Backlinks } from "./Backlinks";
-import { Evidence } from "./Evidence";
+import { OpenEvidence } from "./evidence-test-support";
 import { Subtickets } from "./Subtickets";
 import type { LinkedWorkState } from "./useLinkedWork";
 
@@ -48,12 +48,7 @@ test("each major ticket section opens with its heading row, set apart by space a
   render(
     <>
       <Subtickets work={work} select={() => {}} />
-      <Evidence
-        reference="T-KQ1"
-        revision={0}
-        trashed={false}
-        refresh={async () => {}}
-      />
+      <OpenEvidence reference="T-KQ1" />
       <Backlinks reference="T-KQ1" revision={0} select={() => {}} />
       <Activity
         reference="T-KQ1"
