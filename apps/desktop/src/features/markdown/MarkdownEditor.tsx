@@ -99,6 +99,7 @@ import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
+import { codeLanguageLabel, codeLowlight } from "./syntax-highlighting";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -237,6 +238,12 @@ const CODE_LANGUAGES = [
   "css",
   "markdown",
 ];
+
+function CodeSyntaxLeaf(props: PlateLeafProps) {
+  return (
+    <PlateLeaf {...props} className={String(props.leaf.className ?? "")} />
+  );
+}
 
 function Leaf(props: PlateLeafProps) {
   let children = props.children;
@@ -408,7 +415,7 @@ function CodeFence(props: PlateElementProps) {
             aria-label="Code language"
             className="code-language"
             list={`${languageId}-languages`}
-            value={String(props.element.lang ?? "")}
+            value={codeLanguageLabel(String(props.element.lang ?? ""))}
             placeholder="Plain text"
             readOnly={readOnly}
             onChange={(event) => {
@@ -1020,6 +1027,7 @@ const richPlugins = [
     inputRules: [markdownLinkRule],
   }),
   CodeBlockPlugin.configure({
+    options: { lowlight: codeLowlight },
     inputRules: [openFenceRule],
   }),
   createPlatePlugin({
@@ -1194,6 +1202,7 @@ export function MarkdownEditor({
       a: Element,
       code_block: CodeFence,
       code_line: Element,
+      code_syntax: CodeSyntaxLeaf,
       hr: Element,
       br: Element,
       img: Element,

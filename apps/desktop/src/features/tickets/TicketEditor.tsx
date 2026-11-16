@@ -589,8 +589,17 @@ export function TicketEditor({
     setState("pending");
   }
   function finishEditing() {
+    const previousFocus = document.activeElement;
     setBodyMode("reading");
-    window.requestAnimationFrame(() => editButton.current?.focus());
+    window.requestAnimationFrame(() => {
+      // Closing hides the editor and can leave focus on the body. Respect any
+      // newer focus choice, and keep the pane at its current reading position.
+      if (
+        document.activeElement === document.body ||
+        document.activeElement === previousFocus
+      )
+        editButton.current?.focus({ preventScroll: true });
+    });
   }
   const saveState = saving
     ? "Saving…"

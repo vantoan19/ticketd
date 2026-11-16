@@ -4572,6 +4572,130 @@ test("description editing keeps its state row and floats controls outside the pr
   ).toBeTruthy();
 });
 
+test.each(["Escape", "Done"])(
+  "%s leaves description editing without scrolling its reading surface",
+  async (exit) => {
+    bridge.invoke.mockImplementation((command: string) => {
+      if (command === "find_tickets")
+        return [bulkTicket(1, { body: "Keep the reading position" })];
+      if (command === "show_ticket")
+        return bulkTicket(1, { body: "Keep the reading position" });
+      return bridgeDefault(command);
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+    fireEvent.click(await screen.findByText("Keep the reading position"));
+    const editor = await screen.findByRole("textbox", {
+      name: "Description rich text",
+    });
+    editor.focus();
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    try {
+      if (exit === "Escape") fireEvent.keyDown(editor, { key: "Escape" });
+      else
+        fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
+      const reading = screen.getByRole("group", { name: "Read description" });
+      await vi.waitFor(() => expect(document.activeElement).toBe(reading));
+      const restoration = focus.mock.contexts.findIndex(
+        (node) => node === reading,
+      );
+      expect(focus.mock.calls[restoration]?.[0]).toEqual({
+        preventScroll: true,
+      });
+    } finally {
+      focus.mockRestore();
+    }
+  },
+);
+
+test("description exit respects a newer focus choice", async () => {
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets")
+      return [bulkTicket(1, { body: "Keep typing in the title" })];
+    if (command === "show_ticket")
+      return bulkTicket(1, { body: "Keep typing in the title" });
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  fireEvent.click(await screen.findByText("Keep typing in the title"));
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  await vi.waitFor(() => expect(document.activeElement).toBe(editor));
+  const frames: FrameRequestCallback[] = [];
+  const frame = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+  try {
+    fireEvent.keyDown(editor, { key: "Escape" });
+    const title = screen.getByRole("textbox", { name: "Title" });
+    title.focus();
+    act(() => frames.forEach((callback) => callback(0)));
+    expect(document.activeElement).toBe(title);
+  } finally {
+    frame.mockRestore();
+  }
+});
+
+test("highlighted description edits preserve canonical code and links, and copy the fence source", async () => {
+  const code =
+    "const shift = measureLayoutShift(board);\nexpect(shift).toBeLessThan(0.01);\n";
+  const body =
+    "Use `measureLayoutShift` and [design notes](https://example.com/design).\n\n- [ ] Keep the slot\n\n```typescript\n" +
+    code +
+    "```\n\n> Keep columns still.\n";
+  let stored = bulkTicket(1, { body });
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "find_tickets") return [stored];
+    if (command === "show_ticket") return stored;
+    if (command === "change_ticket") {
+      stored = { ...stored, ...(args as { patch: { body: string } }).patch };
+      return stored;
+    }
+    return bridgeDefault(command, args as { id?: string; reference?: string });
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  const copy = await screen.findByRole("button", { name: "Copy code" });
+  copy.focus();
+  await userEvent.keyboard("{Enter}");
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(code));
+  expect(
+    screen.getByRole("link", { name: "design notes" }).getAttribute("href"),
+  ).toBe("https://example.com/design");
+  fireEvent.keyDown(document.body, { key: "e" });
+  const checkbox = await screen.findByRole("checkbox", {
+    name: "Checklist item",
+  });
+  expect(
+    screen.getByRole("combobox", { name: "Code language" }),
+  ).toHaveProperty("value", "TypeScript");
+  expect(stored.body).toBe(body);
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
+  ).toBe(false);
+  fireEvent.click(checkbox);
+  await vi.waitFor(() =>
+    expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
+  expect(screen.getByRole("link", { name: "design notes" })).toBeTruthy();
+  expect(
+    within(screen.getByRole("group", { name: "Read description" })).getByText(
+      "Keep columns still.",
+    ),
+  ).toBeTruthy();
+});
+
 test("floating save feedback retains a failed description draft and retries it", async () => {
   let stored = bulkTicket(1, {
     id: "description-retry",
@@ -9585,7 +9709,7 @@ test("Activity Delete update transfers menu focus to safe confirmation and retri
   const user = userEvent.setup();
   const { finishExit, restore } = dialogAnimationSignals(["popover-content"]);
   try {
-    const ticket = bulkTicket(1);
+    const ticket = bulkTicket(1, { id: "activity-delete-focus" });
     let deleted = false;
     let fail = true;
     const activity = {
