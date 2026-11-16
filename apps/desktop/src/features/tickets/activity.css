@@ -24,29 +24,27 @@
   content: "· ";
 }
 
-/* The update composer: one frame from the first frame (P16). Idle it is a
-   40px field; opened, the editor sits in the same frame with the controls
-   row under it, and the frame grows only downward as the text grows. */
+/* One 44px frame at rest and on focus; the shared composer Card owns its
+   visual anatomy while content and Details grow in place. */
 .activity-composer,
 .activity-edit {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+.activity-edit {
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-border);
 }
-.activity-composer:focus-within,
 .activity-edit:focus-within {
   outline: 2px solid var(--input-focus);
   outline-offset: -1px;
 }
-.activity-composer .markdown-editor,
 .activity-edit .markdown-editor {
   box-shadow: none;
   background: transparent;
 }
-.activity-composer .markdown-editor:has(.rich-document:focus-visible),
 .activity-edit .markdown-editor:has(.rich-document:focus-visible) {
   outline: none;
 }
@@ -63,7 +61,7 @@
   justify-content: space-between;
   padding: 0 12px;
   border: 0;
-  border-radius: var(--radius-panel);
+  border-radius: inherit;
   background: transparent;
   color: var(--disabled-foreground);
   font-size: var(--text-ui);
@@ -74,9 +72,14 @@
 .activity-composer-idle:focus-visible {
   outline: none;
 }
-.activity-composer:has(.activity-composer-idle:focus-visible) {
-  outline: 2px solid var(--input-focus);
-  outline-offset: -1px;
+.activity-composer-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity-composer-prompt svg {
+  width: 16px;
+  height: 16px;
 }
 /* The bottom row: "Draft saved" · controls · + · Discard · Post ⌘↵. */
 .activity-composer-row {

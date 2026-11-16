@@ -39,6 +39,7 @@
   gap: 2px;
 }
 .attachment-rename {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-wrap: nowrap;
@@ -56,8 +57,9 @@
 }
 .attachment-rename-failure {
   position: absolute;
-  top: 48px;
-  inset-inline: 8px;
+  top: 100%;
+  inset-inline: 0;
+  margin-top: 8px;
   z-index: 1;
 }
 .attachment-preview-failure {

@@ -9298,7 +9298,9 @@ test("Activity Delete update transfers menu focus to safe confirmation and retri
   await user.click(
     within(confirm).getByRole("button", { name: "Delete update" }),
   );
-  expect(await screen.findByText(/Couldn't delete the update/)).toBeTruthy();
+  expect(
+    await within(confirm).findByText(/Couldn't delete the update/),
+  ).toBeTruthy();
   expect(screen.getByText(activity.brief)).toBeTruthy();
   fail = false;
   await user.click(
@@ -9327,6 +9329,7 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
   );
   const requests = new Map<string, unknown>();
   let failAdd = true;
+  let loseResponse = true;
   let failUndo = true;
   bridge.invoke.mockImplementation((command: string, args) => {
     if (command === "list_plans")
@@ -9353,7 +9356,11 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
       };
       if (requests.has(request.requestId))
         return requests.get(request.requestId);
-      if (request.change.plan_id === plan.id && failAdd)
+      if (
+        request.change.plan_id === plan.id &&
+        failAdd &&
+        request.references.includes("T-KQ2")
+      )
         throw new Error("Atomic member validation failed");
       if (request.change.plan_id === "P-original" && failUndo)
         throw new Error("Original Plan temporarily unavailable");
@@ -9363,6 +9370,10 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
       for (const ticket of selected) ticket.plan_id = request.change.plan_id;
       const result = selected.map((t) => ({ ...t }));
       requests.set(request.requestId, result);
+      if (request.change.plan_id === plan.id && loseResponse) {
+        loseResponse = false;
+        throw new Error("Committed result response lost");
+      }
       return result;
     }
     return bridgeDefault(command, args);
@@ -9386,12 +9397,19 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
   ).toBeTruthy();
   failAdd = false;
   await user.click(within(dialog).getByRole("button", { name: "Add tickets" }));
+  await within(dialog).findByText(/Couldn't add tickets/);
+  expect(tickets.map((t) => t.plan_id)).toEqual([plan.id, plan.id]);
+  expect(
+    screen.getByRole("dialog", { name: "Add tickets to Atomic Plan" }),
+  ).toBe(dialog);
+  await user.click(within(dialog).getByRole("button", { name: "Retry" }));
   await screen.findByText("Added 2 tickets to Atomic Plan");
   const addCalls = bridge.invoke.mock.calls.filter(
     ([c]) => c === "bulk_change",
   );
-  expect(addCalls).toHaveLength(2);
+  expect(addCalls).toHaveLength(3);
   expect(addCalls[0]?.[1]).toEqual(addCalls[1]?.[1]);
+  expect(addCalls[1]?.[1]).toEqual(addCalls[2]?.[1]);
   expect(tickets.map((t) => t.plan_id)).toEqual([plan.id, plan.id]);
   await user.click(screen.getByRole("button", { name: "Undo" }));
   expect(await screen.findByText(/1 of 2 tickets restored/)).toBeTruthy();
@@ -9692,6 +9710,8 @@ test("Ticket description and update draft share one visible floating bar and fol
   bridge.invoke.mockImplementation((command: string, args) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
+    if (command === "add_activity_with_details")
+      throw new Error("Draft post unavailable");
     return bridgeDefault(command, args);
   });
   render(<App />);
@@ -9705,6 +9725,14 @@ test("Ticket description and update draft share one visible floating bar and fol
   expect(screen.getAllByRole("group", { name: "Edit controls" })).toHaveLength(
     1,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const source = screen.getByRole("textbox", { name: "New update source" });
+  fireEvent.change(source, {
+    target: { value: "Retain this failed update draft" },
+  });
+  fireEvent.keyDown(source, { key: "Enter", ctrlKey: true });
+  const failure = await screen.findByRole("alert");
+  fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
   fireEvent.click(screen.getByText(ticket.body));
   const description = await screen.findByRole("textbox", {
     name: "Description rich text",
@@ -9715,6 +9743,10 @@ test("Ticket description and update draft share one visible floating bar and fol
   );
   expect(screen.getByRole("button", { name: "Done editing" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Post update" })).toBeNull();
+  expect(failure.hidden).toBe(false);
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Couldn't post the update",
+  );
   await act(
     async () =>
       new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),

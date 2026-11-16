@@ -974,24 +974,6 @@ button.chat-file-name:focus-visible {
   display: grid;
   flex: none;
   grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
-}
-.chat-picker-harness {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: var(--radius-segment);
-  color: var(--muted-foreground);
-  white-space: nowrap;
 }
 .chat-picker-harness small {
   flex: 0 1000 auto;
@@ -1001,30 +983,6 @@ button.chat-file-name:focus-visible {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   text-overflow: ellipsis;
-}
-.chat-picker-harness:hover {
-  color: var(--foreground);
-}
-.chat-picker-harness:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.chat-picker-harness[aria-selected="true"] {
-  background: var(--surface);
-  box-shadow: var(--shadow-small);
-  color: var(--foreground);
-}
-/* A Chat's one harness reads as a heading, not a lone segment. */
-.chat-picker-harnesses:has(> :only-child) {
-  padding: 0;
-  background: none;
-  box-shadow: none;
-}
-.chat-picker-harnesses > .chat-picker-harness:only-child {
-  padding-inline: 0;
-  background: none;
-  box-shadow: none;
-  font-weight: 500;
 }
 .chat-picker-harness[data-dim] > .chat-picker-harness-name {
   color: var(--muted-foreground);

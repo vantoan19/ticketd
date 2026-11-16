@@ -23,7 +23,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import {
+  SegmentedControl,
+  SegmentedTabList,
+  SegmentedTab,
+} from "@/components/ui/segmented-control";
 import { Tooltip } from "@/components/ui/tooltip";
 import { shortcutLabel } from "@/lib/shortcuts";
 import type {
@@ -403,18 +407,16 @@ export function HarnessPicker({
         }}
       >
         <div className="chat-picker" data-switch={locked ? undefined : ""}>
-          <div
+          <SegmentedTabList
             ref={tabList}
+            plain={tabs.length === 1}
             className="chat-picker-harnesses"
-            role="tablist"
             aria-label="Harness"
             onKeyDown={onTabKey}
           >
             {tabs.map((item) => (
-              <button
+              <SegmentedTab
                 key={item.id}
-                type="button"
-                role="tab"
                 data-harness={item.id}
                 className="chat-picker-harness"
                 aria-selected={item.id === tab?.id}
@@ -432,9 +434,9 @@ export function HarnessPicker({
                   {item.name}
                 </span>
                 {!item.ready && item.word && <small>· {item.word}</small>}
-              </button>
+              </SegmentedTab>
             ))}
-          </div>
+          </SegmentedTabList>
           <div ref={body} className="chat-picker-body" role="tabpanel">
             {tab && !tab.ready && notice ? (
               notice(tab.id)

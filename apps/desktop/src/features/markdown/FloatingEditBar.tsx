@@ -75,7 +75,11 @@ export function FloatingEditBar({
       />
       {pane &&
         createPortal(
-          <div className="floating-edit-position" hidden={!active}>
+          <div
+            className="floating-edit-position"
+            hidden={!active && !feedback}
+            data-inactive={!active || undefined}
+          >
             {feedback && (
               <div className="floating-edit-feedback">{feedback}</div>
             )}
@@ -83,6 +87,7 @@ export function FloatingEditBar({
               role="group"
               aria-label="Edit controls"
               className="floating-edit-bar"
+              hidden={!active}
             >
               <span className="floating-edit-status">{status}</span>
               <span ref={controlsRef} className="floating-edit-tools" />

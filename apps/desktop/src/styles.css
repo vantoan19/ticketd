@@ -569,7 +569,8 @@
   font-weight: 400;
   line-height: 20px;
 }
-.ui-input:focus-visible {
+.ui-input:focus-visible,
+.ui-card-composer:focus-within {
   box-shadow: none;
   outline: 1px solid var(--input-focus);
   outline-offset: 0;
@@ -617,13 +618,29 @@
 .ui-segmented {
   background: var(--segmented-track);
 }
-.ui-segmented [role="radio"] {
+.ui-segmented :is([role="radio"], [role="tab"]) {
   font-size: var(--text-code);
   line-height: var(--text-ui-line);
 }
-.ui-segmented [role="radio"][data-state="checked"] {
+.ui-segmented
+  :is(
+    [role="radio"][data-state="checked"],
+    [role="tab"][aria-selected="true"]
+  ) {
   background: var(--segmented-thumb);
   box-shadow: var(--shadow-segmented-thumb);
+}
+.ui-segmented[data-variant="plain"] {
+  padding: 0;
+  background: none;
+}
+.ui-segmented[data-variant="plain"] [role="tab"] {
+  height: 28px;
+  justify-content: flex-start;
+  padding-inline: 0;
+  background: none;
+  box-shadow: none;
+  font-size: var(--text-ui);
 }
 /* A disabled switch keeps its shape at full strength: a recessed track and a
    disabled-foreground thumb, no opacity. */
@@ -1086,6 +1103,18 @@ body:has([data-slot="dialog-overlay"])
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
+}
+.ui-card-composer {
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.ui-card-composer .markdown-editor {
+  box-shadow: none;
+  background: transparent;
+}
+.ui-card-composer .markdown-editor:has(.rich-document:focus-visible) {
+  outline: none;
 }
 .ui-card-header {
   display: flex;
@@ -3117,8 +3146,13 @@ kbd,
   gap: 8px;
   pointer-events: none;
 }
-.floating-edit-position[hidden] {
+.floating-edit-position[hidden],
+.floating-edit-bar[hidden] {
   display: none;
+}
+/* An inactive draft can fail while another field owns the one control bar. */
+.floating-edit-position[data-inactive] {
+  padding-bottom: 48px;
 }
 .floating-edit-feedback {
   width: min(100%, 640px);

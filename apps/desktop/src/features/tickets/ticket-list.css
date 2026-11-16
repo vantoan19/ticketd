@@ -293,12 +293,7 @@
 .source-filter {
   padding: 8px 8px 0;
 }
-.source-filter [data-slot="segmented-control"] {
-  padding: 0;
-}
-.source-filter [role="radio"] {
-  height: 32px;
-}
+
 .source-refresh {
   max-width: 130px;
   overflow: hidden;

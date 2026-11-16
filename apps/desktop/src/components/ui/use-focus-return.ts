@@ -29,9 +29,13 @@ export function useFocusReturn(
       handlers.onCloseAutoFocus?.(event);
       if (event.defaultPrevented) return;
       const target = returnTo?.current ?? invocation ?? opener.current;
-      if (target?.isConnected && target !== document.body) {
+      if (
+        target?.isConnected &&
+        target !== document.body &&
+        !target.closest("[hidden], [inert]")
+      ) {
         event.preventDefault();
-        target.focus();
+        target.focus({ preventScroll: true });
       }
     },
   };
