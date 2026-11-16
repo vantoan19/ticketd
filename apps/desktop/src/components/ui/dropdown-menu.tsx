@@ -270,19 +270,27 @@ function DropdownMenuSubTrigger({
   );
 }
 
+/** Submenus escape the parent's scroll clip and share its pane boundaries. */
 function DropdownMenuSubContent({
   className,
+  collisionPadding = 16,
+  collisionBoundary,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+  const boundary = useOverlayBoundary();
   return (
-    <DropdownMenuPrimitive.SubContent
-      data-slot="dropdown-menu-sub-content"
-      className={cn(
-        "ui-menu z-50 min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden p-1",
-        className,
-      )}
-      {...props}
-    />
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        data-slot="dropdown-menu-sub-content"
+        collisionPadding={collisionPadding}
+        collisionBoundary={collisionBoundary ?? boundary}
+        className={cn(
+          "ui-menu z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-32 max-w-(--radix-dropdown-menu-content-available-width) origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto p-1",
+          className,
+        )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
   );
 }
 
