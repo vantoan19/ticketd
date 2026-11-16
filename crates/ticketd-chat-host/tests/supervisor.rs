@@ -60,7 +60,11 @@ impl Fixture {
     fn new(fake: FakeAdapter) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
-        let chat = new_chat(&mut Workspace::open(&path).unwrap(), "codex");
+        let harness = match fake.harness() {
+            Harness::ClaudeCode => "claude-code",
+            Harness::Codex => "codex",
+        };
+        let chat = new_chat(&mut Workspace::open(&path).unwrap(), harness);
         let storage_up = Arc::new(AtomicBool::new(true));
         let host = start_host(&path, &storage_up, &fake);
         Self {
@@ -355,6 +359,41 @@ async fn a_late_acknowledgment_settles_the_same_attempt_and_the_queue_then_conti
     assert_eq!(submits.len(), 2);
     assert_eq!(submits[1].text, "second");
     assert_eq!(submits[1].kind, SubmissionKind::StartTurn);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_claude_like_harness_never_acknowledges_a_new_turn_so_it_stays_unconfirmed_until_processed()
+ {
+    let f = Fixture::new(FakeAdapter::claude());
+    let input = f.send("first").await;
+    f.queue("second").await;
+
+    // The harness took the input and said nothing more: possibly delivered, not
+    // acknowledged, and nothing else is sent while it is unconfirmed.
+    let attempt = f.message(&input.id).attempts[0].clone();
+    assert_eq!(attempt.delivery, ChatDelivery::Possible);
+    assert!(f.live().await.delivery_unconfirmed);
+    assert_eq!(f.submits().len(), 1);
+
+    // Processing correlates the input with a turn, which is only known now. It is
+    // evidence the input arrived, not an acknowledgment.
+    f.emit(EventKind::TurnStarted { turn: turn_1() }).await;
+    f.emit(EventKind::SubmissionEvidence {
+        submission: SubmissionId(attempt.id),
+        evidence: DeliveryEvidence::Processing { turn: turn_1() },
+    })
+    .await;
+    let attempts = f.message(&input.id).attempts;
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].delivery, ChatDelivery::Possible);
+    assert!(attempts[0].turn_id.is_some());
+    assert!(!f.live().await.delivery_unconfirmed);
+    assert_eq!(f.submits().len(), 1);
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submits = f.submits();
+    assert_eq!(submits.len(), 2);
+    assert_eq!(submits[1].text, "second");
 }
 
 #[tokio::test(start_paused = true)]

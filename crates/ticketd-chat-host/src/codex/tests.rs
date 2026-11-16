@@ -6,12 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
+use crate::conformance::{NewTurn, Provider};
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
@@ -219,15 +221,6 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     assert_eq!(
         seen(&mut events).await,
         ["turn-ended turn_1 Interrupted [\"sub-1\"]"]
-    );
-
-    // A refusal that arrives late is evidence too.
-    let outcome = submit(&mut peer, &runtime, start_turn("sub-2", "Again")).await;
-    assert_eq!(outcome, DispatchOutcome::Written);
-    peer.play().await;
-    assert_eq!(
-        seen(&mut events).await,
-        ["evidence sub-2 Rejected { reason: \"server is shutting down (code -32600)\" }"]
     );
     peer.assert_nothing_written().await;
 }
@@ -520,75 +513,6 @@ fn terminal_errors_keep_their_provider_meaning() {
         kind_of(json!({"httpConnectionFailed": {"httpStatusCode": 503}})),
         ProblemKind::Other
     );
-}
-
-#[tokio::test(start_paused = true)]
-async fn losing_the_process_after_a_write_leaves_the_submission_unknown() {
-    let (mut peer, runtime, mut events) = open().await;
-    peer.load(fixture!("process_loss"));
-
-    let (outcome, ()) = tokio::join!(runtime.submit(start_turn("sub-1", "Deploy it")), async {
-        peer.play().await;
-        let stderr = b"warning: noisy\nfatal: connection reset\n";
-        peer.stderr.write_all(stderr).await.expect("stderr");
-        sleep(Duration::from_millis(1)).await;
-        peer.exit(1);
-    });
-
-    assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
-    let lost = drain(&mut events).await;
-    let [
-        EventKind::RuntimeLost {
-            exit_code: Some(1),
-            diagnostics,
-        },
-    ] = lost.as_slice()
-    else {
-        panic!("only the loss, got {lost:?}");
-    };
-    assert!(diagnostics.ends_with("fatal: connection reset"));
-    assert_eq!(events.recv().await, None);
-
-    let closed = Refusal::RuntimeClosed;
-    let submitted = runtime.submit(start_turn("sub-1", "Deploy it")).await;
-    let responded = runtime.respond(approve("0", ApprovalDecision::Allow)).await;
-    let interrupted = runtime.interrupt(interrupt("turn_1")).await;
-    assert_eq!(submitted, DispatchOutcome::NotSent(closed.clone()));
-    assert_eq!(responded, RespondOutcome::NotSent(closed.clone()));
-    assert_eq!(interrupted, InterruptOutcome::NotSent(closed));
-}
-
-#[tokio::test(start_paused = true)]
-async fn commands_from_another_generation_write_nothing() {
-    let (mut peer, runtime, _events) = open().await;
-    let old = RuntimeGeneration(6);
-    let stale = Refusal::StaleGeneration {
-        current: GENERATION,
-    };
-
-    let submitted = runtime
-        .submit(Submission {
-            generation: old,
-            ..start_turn("sub-1", "Hello")
-        })
-        .await;
-    let responded = runtime
-        .respond(InteractionResponse {
-            generation: old,
-            ..approve("0", ApprovalDecision::Allow)
-        })
-        .await;
-    let interrupted = runtime
-        .interrupt(InterruptRequest {
-            generation: old,
-            ..interrupt("turn_1")
-        })
-        .await;
-
-    assert_eq!(submitted, DispatchOutcome::NotSent(stale.clone()));
-    assert_eq!(responded, RespondOutcome::NotSent(stale.clone()));
-    assert_eq!(interrupted, InterruptOutcome::NotSent(stale));
-    peer.assert_nothing_written().await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -1561,4 +1485,136 @@ fn open_refuses_a_codex_below_the_floor_with_the_picker_reason() {
     );
     assert!(super::too_old("codex-cli 0.163.0").is_none());
     assert!(super::too_old("codex-cli unknown").is_none());
+}
+
+/// Codex app-server as the conformance suite's provider: it plays app-server's side
+/// of each scenario.
+pub(crate) struct AppServer {
+    peer: Peer,
+    runtime: Arc<dyn HarnessRuntime>,
+    events: EventStream,
+    /// The id of the next request the adapter writes.
+    next_request: u32,
+}
+
+pub(crate) async fn provider() -> Box<dyn Provider> {
+    let (peer, runtime, events) = open().await;
+    Box::new(AppServer {
+        peer,
+        runtime,
+        events,
+        next_request: 3,
+    })
+}
+
+impl AppServer {
+    fn request(&mut self) -> u32 {
+        self.next_request += 1;
+        self.next_request - 1
+    }
+
+    /// The `turn/start` request the adapter writes for `id`, as a transcript line.
+    fn started(&mut self, id: &str) -> (u32, String) {
+        let request = self.request();
+        let line = format!(
+            r#"{{"client":{{"id":{request},"method":"turn/start","params":{{"threadId":"thr_1","clientUserMessageId":"{id}","input":[{{"type":"text","text":"hello","text_elements":[]}}]}}}}}}"#
+        );
+        (request, line)
+    }
+}
+
+#[async_trait]
+impl Provider for AppServer {
+    fn new_turn(&self) -> NewTurn {
+        NewTurn::Acknowledged
+    }
+
+    fn loss(&self) -> (Option<i32>, &'static str) {
+        (Some(1), "fatal: connection reset")
+    }
+
+    fn runtime(&self) -> Arc<dyn HarnessRuntime> {
+        Arc::clone(&self.runtime)
+    }
+
+    fn events(&mut self) -> &mut EventStream {
+        &mut self.events
+    }
+
+    async fn start_turn(&mut self, id: &str) -> DispatchOutcome {
+        let (request, client) = self.started(id);
+        let turn = r#"{"id":"turn_1","status":"inProgress","items":[],"error":null}"#;
+        self.peer.load(&format!(
+            r#"{client}
+{{"server":{{"method":"turn/started","params":{{"threadId":"thr_1","turn":{turn}}}}}}}
+{{"server":{{"id":{request},"result":{{"turn":{turn}}}}}}}
+"#
+        ));
+        submit(&mut self.peer, &self.runtime, start_turn(id, "hello")).await
+    }
+
+    async fn show_processing(&mut self, _id: &str) -> NativeTurnId {
+        unreachable!("Codex acknowledges a new turn")
+    }
+
+    async fn submit_unanswered(&mut self, id: &str) -> DispatchOutcome {
+        let (_, client) = self.started(id);
+        self.peer.load(&client);
+        submit(&mut self.peer, &self.runtime, start_turn(id, "hello")).await
+    }
+
+    async fn refuse_late(&mut self, _id: &str) {
+        // The refusal answers the request that carried the input: the last one.
+        let request = self.next_request - 1;
+        self.peer.load(&format!(
+            r#"{{"server":{{"id":{request},"error":{{"code":-32600,"message":"server is shutting down","data":{{"reason":"serverShuttingDown"}}}}}}}}"#
+        ));
+        self.peer.play().await;
+    }
+
+    async fn submit_and_lose_process(&mut self, id: &str) -> DispatchOutcome {
+        let (_, client) = self.started(id);
+        self.peer.load(&client);
+        let (outcome, ()) = tokio::join!(self.runtime.submit(start_turn(id, "hello")), async {
+            self.peer.play().await;
+            let stderr = b"warning: noisy\nfatal: connection reset\n";
+            self.peer.stderr.write_all(stderr).await.expect("stderr");
+            sleep(Duration::from_millis(1)).await;
+            self.peer.exit(1);
+        });
+        outcome
+    }
+
+    async fn request_approval(&mut self) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_2","startedAtMs":2,"command":"ls","cwd":"/work/chat-1","reason":"Needs approval"}}}"#,
+        );
+        self.peer.play().await;
+        drain(&mut self.events)
+            .await
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => Some(request.request),
+                _ => None,
+            })
+            .expect("app-server asked for approval")
+    }
+
+    async fn respond(&mut self, response: InteractionResponse) -> RespondOutcome {
+        let (outcome, frame) = tokio::join!(
+            self.runtime.respond(response),
+            timeout(Duration::from_millis(100), self.peer.written())
+        );
+        if outcome == RespondOutcome::Sent {
+            let expected = json!({"id": 0, "result": {"decision": "accept"}});
+            assert_eq!(frame.expect("the answer was written"), expected);
+        } else {
+            assert!(frame.is_err(), "a refused answer wrote {frame:?}");
+        }
+        outcome
+    }
+
+    async fn assert_nothing_else_written(&mut self) {
+        self.peer.assert_nothing_written().await;
+    }
 }
