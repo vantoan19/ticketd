@@ -10,6 +10,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { TicketFiles as TicketDocuments } from "@/features/tickets/TicketFiles";
 import type { Ticket } from "@/lib/api/client";
+import { Backlinks } from "@/features/tickets/Backlinks";
+import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 
 window.ResizeObserver ??= class {
   observe() {}
@@ -30,6 +32,11 @@ const ticket = {
   title: "Work",
   body: "Description",
 } as Ticket;
+const files = (onOpenUpdate?: (activityId: string) => void) => (
+  <TestOpenTicket ticket={ticket}>
+    <TicketDocuments {...(onOpenUpdate && { onOpenUpdate })} />
+  </TestOpenTicket>
+);
 const link = (id: string, label: string, explicit: boolean) => ({
   source_id: "t1",
   target_id: id,
@@ -53,10 +60,9 @@ test("unlinking removes only an explicit reference and a mention offers Edit des
           : null,
     ),
   );
-  const refresh = vi.fn(() => Promise.resolve());
   const edit = vi.fn();
   window.addEventListener("ticketd:edit-description", edit);
-  render(<TicketDocuments ticket={ticket} revision={0} refresh={refresh} />);
+  render(files());
   fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("set_ticket_document", {
@@ -86,13 +92,7 @@ test("attaching Activity details from the picker links them without a separate k
       ]);
     return Promise.resolve(command === "ticket_attachments" ? [] : null);
   });
-  render(
-    <TicketDocuments
-      ticket={ticket}
-      revision={0}
-      refresh={() => Promise.resolve()}
-    />,
-  );
+  render(files());
   // Empty Files: one "Attach…" row opens File… / Document….
   fireEvent.pointerDown(
     await screen.findByRole("button", { name: "Attach…" }),
@@ -126,14 +126,7 @@ test("a Document mentioned only by an update says so and opens that update", asy
     ),
   );
   const open = vi.fn();
-  render(
-    <TicketDocuments
-      ticket={ticket}
-      revision={0}
-      refresh={() => Promise.resolve()}
-      onOpenUpdate={open}
-    />,
-  );
+  render(files(open));
   fireEvent.click(
     await screen.findByRole("button", { name: "Go to the update" }),
   );
@@ -150,13 +143,7 @@ test("a failed read says so with Retry instead of reading as no Documents", asyn
       ? Promise.resolve([[link("d1", "Linked", true)], []])
       : Promise.reject({ code: "failed", message: "disk I/O error" });
   });
-  render(
-    <TicketDocuments
-      ticket={ticket}
-      revision={0}
-      refresh={() => Promise.resolve()}
-    />,
-  );
+  render(files());
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Couldn't load Documents",
   );
@@ -164,4 +151,98 @@ test("a failed read says so with Retry instead of reading as no Documents", asyn
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByRole("button", { name: "Linked" })).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("returning to the window does not read the files again", async () => {
+  vi.mocked(invoke).mockImplementation((command) =>
+    Promise.resolve(
+      command === "document_context_links"
+        ? [[link("d1", "Linked", true)], []]
+        : command === "ticket_attachments"
+          ? []
+          : null,
+    ),
+  );
+  render(files());
+  await screen.findByRole("button", { name: "Linked" });
+  const reads = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(
+        ([command]) =>
+          command === "document_context_links" ||
+          command === "ticket_attachments",
+      ).length;
+  const before = reads();
+  window.dispatchEvent(new Event("focus"));
+  await new Promise((done) => setTimeout(done, 20));
+  expect(reads()).toBe(before);
+});
+
+test("Files and Backlinks read the Ticket's links to Documents once", async () => {
+  vi.mocked(invoke).mockImplementation((command) =>
+    Promise.resolve(
+      command === "document_context_links"
+        ? [[link("d1", "Linked", true)], []]
+        : command === "ticket_attachments" || command === "ticket_backlinks"
+          ? []
+          : null,
+    ),
+  );
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketDocuments />
+      <Backlinks select={() => {}} />
+    </TestOpenTicket>,
+  );
+  await screen.findByRole("button", { name: "Linked" });
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("ticket_backlinks", expect.anything()),
+  );
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "document_context_links"),
+  ).toHaveLength(1);
+});
+
+test("a Document attached from the picker appears once the change is reported", async () => {
+  let attached = false;
+  vi.mocked(invoke).mockImplementation((command) => {
+    if (command === "document_context_links")
+      return Promise.resolve([attached ? [link("d9", "Trace", true)] : [], []]);
+    if (command === "set_ticket_document") {
+      attached = true;
+      return Promise.resolve(null);
+    }
+    if (command === "recent_documents")
+      return Promise.resolve([
+        { id: "d9", heading: "Trace", origin_ticket: "T-KQ11" },
+      ]);
+    return Promise.resolve(command === "ticket_attachments" ? [] : null);
+  });
+  render(files());
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "Attach…" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Document…" }));
+  fireEvent.click(await screen.findByText("T-KQ11 · Update details"));
+  expect(await screen.findByRole("button", { name: "Trace" })).toBeTruthy();
+});
+
+test("a Document whose removal failed comes back", async () => {
+  vi.mocked(invoke).mockImplementation((command) => {
+    if (command === "document_context_links")
+      return Promise.resolve([[link("d1", "Linked", true)], []]);
+    if (command === "set_ticket_document")
+      return Promise.reject({ code: "failed", message: "disk I/O error" });
+    return Promise.resolve(command === "ticket_attachments" ? [] : null);
+  });
+  render(files());
+  fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't remove the Document",
+  );
+  expect(screen.getByRole("button", { name: "Linked" })).toBeTruthy();
 });

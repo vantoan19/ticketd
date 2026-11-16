@@ -1,21 +1,14 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useState } from "react";
 import { DocumentNavigation } from "@/features/documents/navigation";
-import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { FailureState } from "@/components/ui/failure-alert";
-import { client } from "@/lib/api/client";
-import {
-  describeFailure,
-  type FailureDescription,
-} from "@/lib/api/describe-failure";
+import { useOpenTicket } from "./open-ticket";
 import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
 import { formatDateTime } from "@/lib/format";
 import "./backlinks.css";
 import { Reference } from "@/components/ui/reference";
-
-type Link = Awaited<ReturnType<typeof client.backlinks>>[number];
 
 /** Where a mention was found, so the source ticket can reveal the passage. */
 export type MentionTarget = {
@@ -31,87 +24,21 @@ export type MentionTarget = {
 };
 
 export function Backlinks({
-  reference,
-  ticketId,
-  revision,
   select,
 }: {
-  reference: string;
-  ticketId?: string;
-  revision: number;
   select: (target: MentionTarget) => void;
 }) {
+  const { reference } = useOpenTicket();
   const openDocument = useContext(DocumentNavigation);
-  const [documentLinks, setDocumentLinks] = useState<
-    Awaited<ReturnType<typeof documents.links>>[1]
-  >([]);
-  const [links, setLinks] = useState<Link[]>([]);
-  const [noteDates, setNoteDates] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
-  const [error, setError] = useState<FailureDescription | null>(null);
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    let active = true;
-    void client
-      .backlinks(reference, offset)
-      .then(async (result) => {
-        if (!active) return;
-        setLinks(result);
-        setError(null);
-        // The mention itself carries no date, so read each note's.
-        const dated = await Promise.all(
-          result.flatMap((link) =>
-            link.activity_id
-              ? [
-                  client
-                    .activity(link.source_reference, link.activity_id)
-                    .then(
-                      (note) => [link.activity_id, note?.reported_at] as const,
-                    )
-                    .catch(() => null),
-                ]
-              : [],
-          ),
-        );
-        if (!active) return;
-        setNoteDates(
-          Object.fromEntries(
-            dated.flatMap((entry) =>
-              entry?.[0] && entry[1] ? [[entry[0], entry[1]]] : [],
-            ),
-          ),
-        );
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(describeFailure(reason, "load mentions"));
-      });
-    return () => {
-      active = false;
-    };
-  }, [reference, revision, offset, attempt]);
-  useEffect(() => {
-    let active = true;
-    if (!ticketId)
-      return () => {
-        active = false;
-      };
-    // Incoming links mix tickets, Plans and Documents; page through them so
-    // Document mentions past the first 100 links are not lost.
-    void (async () => {
-      const found: typeof documentLinks = [];
-      for (let page = 0; page < 5; page += 1) {
-        const [, incoming] = await documents.links(ticketId, page * 100);
-        found.push(
-          ...incoming.filter((link) => link.source_kind === "document"),
-        );
-        if (incoming.length < 100) break;
-      }
-      if (active) setDocumentLinks(found);
-    })().catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [ticketId, revision]);
+  const {
+    links: found,
+    dates: noteDates,
+    failure: error,
+    retry,
+  } = useOpenTicket("backlinks", offset);
+  const links = found ?? [];
+  const documentLinks = useOpenTicket("documentBacklinks");
   if (
     !error &&
     links.length === 0 &&
@@ -131,13 +58,7 @@ export function Backlinks({
             : undefined
         }
       />
-      {error && (
-        <FailureState
-          size="inline"
-          failure={error}
-          onRetry={() => setAttempt((value) => value + 1)}
-        />
-      )}
+      {error && <FailureState size="inline" failure={error} onRetry={retry} />}
       <ul className="backlink-list">
         {documentLinks.map((link) => (
           <li key={`${link.source_id}-${link.passage}`}>

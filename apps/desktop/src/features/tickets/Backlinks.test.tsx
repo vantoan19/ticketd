@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import type { Ticket } from "@/lib/api/client";
 import { Backlinks } from "./Backlinks";
+import { TestOpenTicket } from "./open-ticket/testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
+const ticket = { id: "ticket", reference: "T-KQ1", trashed: false } as Ticket;
+function backlinks(select = vi.fn()) {
+  return (
+    <TestOpenTicket ticket={ticket}>
+      <Backlinks select={select} />
+    </TestOpenTicket>
+  );
+}
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
@@ -43,7 +53,7 @@ test("lists each mention with its location and opens the source passage", async 
     throw new Error(`Unexpected ${command}`);
   });
   const select = vi.fn();
-  render(<Backlinks reference="T-KQ1" revision={0} select={select} />);
+  render(backlinks(select));
   await screen.findByText("Cache layer");
   expect(screen.getByRole("heading", { name: /Mentioned in/ })).toBeTruthy();
   expect(screen.getByText("Description")).toBeTruthy();
@@ -91,13 +101,49 @@ test("finds Document mentions beyond the first hundred incoming links", async ()
       throw new Error(`Unexpected ${command}`);
     },
   );
-  render(
-    <Backlinks
-      reference="T-KQ1"
-      ticketId="ticket"
-      revision={0}
-      select={vi.fn()}
-    />,
-  );
+  render(backlinks());
   expect(await screen.findByText("document 1")).toBeTruthy();
+  // Page 0 is the read Files shares; only the pages after it are read here.
+  expect(
+    bridge.invoke.mock.calls.filter(
+      ([command, args]) =>
+        command === "document_context_links" && args.offset === 0,
+    ),
+  ).toHaveLength(1);
+});
+
+test("pages through backlinks by window, keeping the shown window while the next one loads", async () => {
+  const link = (index: number) => ({
+    source_reference: `T-S${index}`,
+    source_title: `Source ${index}`,
+    activity_id: null,
+    passage: "Mentions T-KQ1",
+    mention_start: 9,
+    mention_end: 14,
+  });
+  let release: () => void = () => {};
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { offset?: number }) => {
+      if (command === "ticket_backlinks") {
+        if (args?.offset) {
+          await new Promise<void>((resolve) => (release = resolve));
+          return [link(99)];
+        }
+        return Array.from({ length: 20 }, (_, index) => link(index));
+      }
+      if (command === "document_context_links") return [[], []];
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(backlinks());
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More backlinks" }),
+  );
+  // The first window stays until the next arrives, so nothing jumps.
+  expect(screen.getByText("Source 0")).toBeTruthy();
+  release();
+  expect(await screen.findByText("Source 99")).toBeTruthy();
+  expect(screen.queryByText("Source 0")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Previous backlinks" }));
+  expect(await screen.findByText("Source 0")).toBeTruthy();
 });

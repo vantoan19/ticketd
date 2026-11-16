@@ -17,7 +17,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import type { Attachment } from "@/lib/api/attachments";
-import type { Ticket } from "@/lib/api/client";
+import { useOpenTicket } from "./open-ticket";
 import { DocumentPicker } from "./DocumentPicker";
 import { RailRow, RailSection } from "./RailSection";
 import { AttachmentDialogs, AttachmentRows } from "./TicketAttachments";
@@ -34,21 +34,16 @@ import "./ticket-files.css";
  * when it has none.
  */
 export function TicketFiles({
-  ticket,
-  revision,
-  refresh,
   onOpenUpdate,
   emptyTarget,
 }: {
   emptyTarget?: HTMLElement | null;
-  ticket: Ticket;
-  revision: number;
-  refresh: () => Promise<void>;
   /** Shows the update that mentions a Document. */
   onOpenUpdate?: (activityId: string) => void;
 }) {
-  const files = useTicketAttachments({ ticket, revision, refresh });
-  const docs = useTicketDocuments({ ticket, revision, refresh });
+  const { record: ticket } = useOpenTicket();
+  const files = useTicketAttachments();
+  const docs = useTicketDocuments();
   const [picker, setPicker] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [selected, setSelected] = useState<Attachment | null>(null);
