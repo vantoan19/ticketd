@@ -1,0 +1,73 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.ticket-state-row .ticket-state-line {
+  white-space: nowrap;
+}
+.editor-save-state {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.description-document {
+  text-align: left;
+  color: var(--foreground);
+  line-height: normal;
+}
+.editor-body:focus {
+  outline: none;
+}
+.editor-body:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.description-document [data-mention-target] {
+  border-radius: var(--radius);
+  animation: arrival-flash var(--dur-arrival) var(--ease-out) var(--dur-3) both;
+}
+.description-document [data-mention-target]:focus {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .description-document [data-mention-target] {
+    animation: none;
+  }
+}
+.mention-missing {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.editor-conflict-question {
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.conflict-block-label {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 16px;
+}
+.conflict-draft {
+  border-left: 2px solid var(--border);
+}
+.description-reading .description-document {
+  border-radius: var(--radius);
+}
+.description-add {
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--disabled-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  text-align: start;
+  cursor: text;
+}
+.description-add:hover {
+  background: var(--hover);
+  color: var(--muted-foreground);
+}
+.description-add:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}

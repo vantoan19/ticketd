@@ -1,9 +1,10 @@
+@import "../../../components/ui/surface-roles/settings-pages-appearance.css";
+
 /* Theme miniatures use the same scoped tokens as the full application. */
 .mini {
   display: flex;
   height: 96px;
   overflow: hidden;
-  border-radius: var(--radius-card);
 }
 .mini-screen {
   display: flex;
@@ -11,7 +12,6 @@
   min-width: 0;
   gap: 5px;
   padding: 8px;
-  background: var(--background);
 }
 .mini-side {
   display: flex;
@@ -24,11 +24,6 @@
 .mini-pane b {
   display: block;
   height: 4px;
-  border-radius: var(--radius-segment);
-  background: var(--track);
-}
-.mini-side i[data-on] {
-  background: var(--accent);
 }
 .mini-pane {
   display: flex;
@@ -37,13 +32,9 @@
   flex-direction: column;
   gap: 5px;
   padding: 8px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-panel);
 }
 .mini-pane b[data-head] {
   width: 60%;
-  background: var(--foreground);
 }
 .mini-pane b:last-child {
   width: 80%;
@@ -51,17 +42,11 @@
 .mini[data-system] .mini-screen:first-child {
   padding-right: 0;
 }
-.mini[data-system] .mini-screen:first-child .mini-pane {
-  border-radius: var(--radius) 0 0 var(--radius);
-}
 .mini[data-system] .mini-screen:last-child {
   padding-left: 0;
 }
 .mini[data-system] .mini-screen:last-child .mini-side {
   display: none;
-}
-.mini[data-system] .mini-screen:last-child .mini-pane {
-  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .mini[data-system] .mini-pane b:last-child {

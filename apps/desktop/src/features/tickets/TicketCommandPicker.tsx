@@ -186,6 +186,21 @@ export function TicketCommandPicker({
               onQueryChange={setQuery}
             />
           )}
+          {actions.error && (
+            <div className="ticket-command-custom">
+              <span role="alert">{actions.error}</span>
+              {actions.retry && (
+                <Button
+                  variant="link"
+                  size="xs"
+                  disabled={actions.pending || actions.blocked}
+                  onClick={actions.retry}
+                >
+                  Retry
+                </Button>
+              )}
+            </div>
+          )}
         </PopoverContent>
       </Popover>
       {actions.duplicate && (
@@ -223,7 +238,11 @@ export function TicketPropertyChoices({
   onCreate,
   query,
   onQueryChange,
+  notice,
+  empty,
 }: {
+  notice?: ReactNode;
+  empty?: string;
   query?: string;
   onQueryChange?: (query: string) => void;
   scope: string;
@@ -237,6 +256,8 @@ export function TicketPropertyChoices({
   return (
     <ChoiceList
       label={`${scope} choices`}
+      {...(notice !== undefined && { notice })}
+      {...(empty !== undefined && { empty })}
       searchPlaceholder={`Search ${scope.toLowerCase()}…`}
       selected={selected}
       {...(query !== undefined && { query })}

@@ -16,7 +16,7 @@ import {
   PopoverTitle,
   PopoverDescription,
 } from "@/components/ui/popover";
-import { invoke } from "@/lib/api/bridge-failure";
+import { inboxClient } from "@/lib/api/inbox";
 import { useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -78,10 +78,9 @@ export function Reminder({
   } | null>(null);
   useEffect(() => {
     let active = true;
-    void invoke("reminder", { reference })
+    void inboxClient
+      .reminder(reference)
       .then((value) => {
-        if (value !== null && typeof value !== "string")
-          throw new Error("Invalid reminder");
         if (active) {
           setDue(value);
           setLoadFailure(null);
@@ -113,14 +112,8 @@ export function Reminder({
     }
     const request = attempt.current;
     try {
-      await invoke("set_reminder", {
-        reference,
-        dueAt: request.dueAt,
-        requestId: request.id,
-      });
-      const value: unknown = await invoke("reminder", { reference });
-      if (value !== null && typeof value !== "string")
-        throw new Error("Invalid reminder");
+      await inboxClient.snooze(reference, request.dueAt, request.id);
+      const value = await inboxClient.reminder(reference);
       setDue(value);
       attempt.current = null;
       setError(null);

@@ -177,11 +177,15 @@ export function LinkedWork({
     return (
       <RailSection label={document ? "Linked" : "Relationships"}>
         {!current && (
-          <Skeleton
-            className="h-8"
+          <div
+            className="linked-work-loading"
             role="status"
             aria-label="Loading relationships"
-          />
+          >
+            <Skeleton shape="circle" className="size-4" />
+            <Skeleton className="h-3 w-11" />
+            <Skeleton className="h-3 flex-1" />
+          </div>
         )}
         {current && !current.links && current.failure && (
           <FailureState

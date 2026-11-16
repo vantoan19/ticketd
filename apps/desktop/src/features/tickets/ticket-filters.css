@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-ticket-filters.css";
+
 /* Search and Filters (DESIGN.md section 6, S3). Layout only: the menu, its
    rows and the chips are shared components. */
 .list-controls {
@@ -16,7 +18,6 @@
   height: 44px;
   padding: 0 16px 0 20px;
   overflow: hidden;
-  white-space: nowrap;
 }
 .filter-chips > [data-filter-chip] {
   display: flex;
@@ -37,7 +38,6 @@
   margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .filters-menu-value {
   padding-left: 16px;
@@ -56,5 +56,4 @@
 .filters-menu-caption {
   max-width: 240px;
   padding: 4px 8px 6px;
-  white-space: normal;
 }

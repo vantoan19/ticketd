@@ -1,0 +1,83 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.activity-muted {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.activity-author {
+  white-space: nowrap;
+}
+.activity-edit {
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border);
+}
+.activity-edit:focus-within {
+  outline: 2px solid var(--input-focus);
+  outline-offset: -1px;
+}
+.activity-edit .markdown-editor {
+  box-shadow: none;
+  background: transparent;
+}
+.activity-edit .markdown-editor:has(.rich-document:focus-visible) {
+  outline: none;
+}
+.activity-composer-idle {
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--disabled-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  text-align: start;
+  cursor: text;
+}
+.activity-composer-idle:focus-visible {
+  outline: none;
+}
+.activity-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.activity-details {
+  box-shadow: 0 -1px 0 var(--group-hairline);
+}
+.activity-details-label {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.ticket-detail[data-expanded] .activity-note,
+.ticket-detail[data-expanded] .activity-note :is(p, li) {
+  font-size: var(--text-reading);
+  line-height: 24px;
+}
+.activity-row-actions {
+  opacity: 0;
+}
+.activity [data-slot="comment-row"]:hover .activity-row-actions,
+.activity [data-slot="comment-row"]:focus-within .activity-row-actions,
+.activity [data-slot="comment-row"][data-open] .activity-row-actions,
+.activity-row-actions:has([data-state="open"]),
+.activity-row-actions[data-retained] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .activity-row-actions {
+    opacity: 1;
+  }
+}
+.activity-confirm-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.activity-confirm-text {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}

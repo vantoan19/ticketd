@@ -18,14 +18,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import type { Ticket } from "@/lib/api/client";
+import type { FlowTicketMetadata } from "@/lib/api/client";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { matchesShortcut, shortcutLabel } from "@/lib/shortcuts";
 import { useWorkspaceChange } from "@/lib/workspace-change";
-import { allPlanMembers } from "./plan-members";
+import { flowPlanMembers, PlanMemberWindow } from "./plan-members";
 import { planFlow } from "./flow-model";
 import "./plan-flow.css";
 
@@ -40,7 +40,7 @@ export function PlanFlow({
   revision: number;
   onOpen: (reference: string) => void;
 }) {
-  const [members, setMembers] = useState<Ticket[] | null>(null);
+  const [members, setMembers] = useState<FlowTicketMetadata[] | null>(null);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function PlanFlow({
   >([]);
   useEffect(() => {
     let active = true;
-    void allPlanMembers(id).then(
+    void flowPlanMembers(id).then(
       (value) => {
         if (active) {
           setMembers(value);
@@ -61,8 +61,19 @@ export function PlanFlow({
         }
       },
       (reason) => {
-        if (active)
-          setFailure(describeFailure(reason, "load this Plan’s Flow"));
+        if (active) {
+          setMembers(null);
+          const failure = describeFailure(reason, "load this Plan’s Flow");
+          setFailure(
+            reason instanceof PlanMemberWindow
+              ? {
+                  ...failure,
+                  sentence:
+                    "This Plan exceeds the complete Flow window (500 tickets or 50 blockers per ticket). Use List to page its members, or open the full graph.",
+                }
+              : failure,
+          );
+        }
       },
     );
     return () => {

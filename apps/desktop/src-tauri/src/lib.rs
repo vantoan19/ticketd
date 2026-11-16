@@ -548,12 +548,31 @@ fn show_ticket(reference: String) -> Result<Ticket, BridgeFailure> {
         .map_err(BridgeFailure::from)
 }
 
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum TicketPage {
+    Full(Vec<ticketd_core::TicketWithUpdate>),
+    Metadata(ticketd_core::TicketMetadataPage),
+}
 #[tauri::command]
 fn find_tickets_with_updates(
     filter: TicketFilter,
-) -> Result<Vec<ticketd_core::TicketWithUpdate>, BridgeFailure> {
+    projection: Option<String>,
+    ids: Option<Vec<String>>,
+) -> Result<TicketPage, BridgeFailure> {
+    if projection
+        .as_deref()
+        .is_some_and(|value| value != "metadata" && value != "flow")
+    {
+        return Err("Unknown Ticket projection".into());
+    }
     open_workspace()
-        .and_then(|w| w.find_tickets_with_updates(&filter))
+        .and_then(|w| match projection.as_deref() {
+            Some(value) => w
+                .find_ticket_metadata(&filter, ids.as_deref(), value == "flow")
+                .map(TicketPage::Metadata),
+            None => w.find_tickets_with_updates(&filter).map(TicketPage::Full),
+        })
         .map_err(BridgeFailure::from)
 }
 #[tauri::command]
@@ -620,6 +639,7 @@ fn create_ticket(
     tags: Vec<String>,
     follow: bool,
     request_id: Option<String>,
+    blockers: Option<Vec<String>>,
 ) -> Result<Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut workspace| {
@@ -633,6 +653,7 @@ fn create_ticket(
                     plan_id,
                     tags,
                     follow,
+                    blockers: blockers.unwrap_or_default(),
                 },
             )
         })
@@ -1101,9 +1122,11 @@ fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, Bridg
 }
 
 #[tauri::command]
-fn list_plans() -> Result<Vec<Plan>, BridgeFailure> {
+fn list_plans(limit: Option<u32>, offset: Option<u32>) -> Result<Vec<Plan>, BridgeFailure> {
     open_workspace()
-        .and_then(|w| w.list_plans(true))
+        .and_then(|w| {
+            w.list_plans_bounded(true, limit.map(|value| value.min(100)), offset.unwrap_or(0))
+        })
         .map_err(BridgeFailure::from)
 }
 #[tauri::command]
@@ -1180,9 +1203,21 @@ fn set_plan_spec(
 }
 
 #[tauri::command]
-fn show_plan(id: String) -> Result<PlanView, BridgeFailure> {
+fn show_plan(
+    id: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    include_members: Option<bool>,
+) -> Result<PlanView, BridgeFailure> {
     open_workspace()
-        .and_then(|w| w.show_plan(&id))
+        .and_then(|w| {
+            w.show_plan_bounded(
+                &id,
+                limit.map(|value| value.min(501)),
+                offset.unwrap_or(0),
+                include_members.unwrap_or(true),
+            )
+        })
         .map_err(BridgeFailure::from)
 }
 #[tauri::command]

@@ -1,4 +1,3 @@
-import { TicketLinksIncomplete } from "./create-ticket-failure";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
@@ -278,8 +277,6 @@ export function CreateTicketDialog({
           ...failure,
           sentence: `${submittedCreation.reference} was created. ${failure.sentence}`,
         });
-      } else if (reason instanceof TicketLinksIncomplete) {
-        setError(reason.failure);
       } else if (creationAttempted) {
         const failure = describeFailure(reason, "confirm the new ticket");
         setError({

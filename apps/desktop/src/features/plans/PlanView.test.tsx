@@ -31,6 +31,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: unknown) => {
     if (command === "find_tickets_with_updates") {
       const tickets: unknown[] = await bridge.invoke("find_tickets", args);
+      if (args && typeof args === "object" && "projection" in args)
+        return { items: tickets, omitted: false };
       return tickets.map((ticket) => ({ ticket, latest_update: null }));
     }
     return bridge.invoke(command, args);

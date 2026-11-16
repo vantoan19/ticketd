@@ -37,6 +37,7 @@ export function TicketDetails({
   onReturn,
   setSelected,
   details,
+  preview,
   projects,
   plans,
   revision,
@@ -69,6 +70,8 @@ export function TicketDetails({
   onReturn: () => void;
   setSelected: (value: string | null, mention?: MentionTarget) => void;
   details: Record<string, Ticket>;
+  /** A complete Ticket already read for the list, retained while its fresh read runs. */
+  preview?: Ticket | undefined;
   projects: Project[];
   plans: Plan[];
   revision: number;
@@ -111,7 +114,7 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       <OverlayBoundary element={boundary}>
-        <TicketAgentSession ticket={ticket} revision={revision}>
+        <TicketAgentSession ticket={ticket ?? preview} revision={revision}>
           {(agentLoading) => (
             <>
               <TicketHeader
@@ -147,25 +150,21 @@ export function TicketDetails({
                     scroller.scrollTop > titleBottom ? selected : null,
                   );
                 }}
-                data-agent-loading={agentLoading || undefined}
               >
+                {agentLoading && (
+                  <span
+                    className="sr-only"
+                    role="status"
+                    aria-label="Loading ticket agent context"
+                  >
+                    Loading agent context.
+                  </span>
+                )}
                 <InboxTriageCard
                   ticket={ticket}
                   refresh={refresh}
                   updateTicket={updateTicket}
                 />
-                {agentLoading && (
-                  <div
-                    className="detail-document"
-                    role="status"
-                    aria-label="Loading ticket agent context"
-                  >
-                    <Skeleton className="h-9 w-3/4" />
-                    <Skeleton className="mt-3 h-7 w-full" />
-                    <Skeleton className="mt-8 h-11 w-full" />
-                    <Skeleton className="mt-6 h-24 w-full" />
-                  </div>
-                )}
                 {selected === null && !triage?.selection && (
                   <EmptyState
                     size="hint"
@@ -184,7 +183,7 @@ export function TicketDetails({
                     {...(onRetry && { onRetry })}
                   />
                 )}
-                {selected !== null && !ticket && !failure && (
+                {selected !== null && !ticket && !preview && !failure && (
                   <div
                     className="detail-document"
                     role="status"
@@ -196,10 +195,19 @@ export function TicketDetails({
                     <Skeleton className="mt-6 h-24 w-full" />
                   </div>
                 )}
-                {Object.values(details).map((item) => (
+                {selected && !ticket && !failure && preview && (
+                  <span className="sr-only" role="status">
+                    Loading the latest ticket. Showing its saved copy.
+                  </span>
+                )}
+                {[
+                  ...Object.values(details),
+                  ...(!ticket && !failure && preview ? [preview] : []),
+                ].map((item) => (
                   <TicketPage
                     key={item.id}
                     ticket={item}
+                    opening={!ticket && item.reference === selected}
                     active={item.reference === selected}
                     outsideResults={
                       outsideResults && item.reference === selected

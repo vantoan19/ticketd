@@ -71,6 +71,7 @@ export function TicketDetailPane({
         inboxTarget={inboxTarget}
         setSelected={onSelect}
         details={details}
+        preview={resultTickets.find((ticket) => ticket.reference === selected)}
         projects={projects}
         plans={plans}
         revision={revision}

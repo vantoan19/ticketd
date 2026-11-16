@@ -52,7 +52,24 @@ vi.mock("@xyflow/react", () => ({
   MarkerType: { ArrowClosed: "arrowclosed" },
 }));
 vi.mock("@/lib/api/client", () => ({
-  client: { workspaceGraph: vi.fn(), listPlans: vi.fn().mockResolvedValue([]) },
+  client: {
+    workspaceGraph: vi.fn(),
+    listPlans: vi.fn().mockResolvedValue([]),
+    findTicketMetadata: vi.fn(async (_filter, ids: string[]) => ({
+      items: ids.map((id) => ({
+        id,
+        reference: id === "one" ? "T-KQ1" : "T-KQ2",
+        title: id === "one" ? "First" : "Second",
+        status: "Todo",
+        trashed: false,
+        project_id: null,
+        plan_id: null,
+        availability: "Ready",
+        updated_at: "2026-11-06T00:00:00Z",
+      })),
+      omitted: false,
+    })),
+  },
 }));
 
 test("filters workspace results and focuses a selected item deliberately", async () => {

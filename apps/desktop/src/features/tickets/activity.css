@@ -1,20 +1,16 @@
+@import "../../components/ui/surface-roles/tickets-activity.css";
+
 .activity {
   display: flex;
   flex-direction: column;
   gap: 16px;
   margin-top: 40px;
 }
-.activity-muted {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .activity-author {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  white-space: nowrap;
 }
 .activity-author > :last-child {
   min-width: 0;
@@ -32,22 +28,6 @@
   flex-direction: column;
   min-width: 0;
 }
-.activity-edit {
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
-}
-.activity-edit:focus-within {
-  outline: 2px solid var(--input-focus);
-  outline-offset: -1px;
-}
-.activity-edit .markdown-editor {
-  box-shadow: none;
-  background: transparent;
-}
-.activity-edit .markdown-editor:has(.rich-document:focus-visible) {
-  outline: none;
-}
 /* Long drafts scroll inside the frame from 40vh on. */
 .activity-composer .rich-document,
 .activity-edit .rich-document {
@@ -60,17 +40,6 @@
   height: 44px;
   justify-content: space-between;
   padding: 0 12px;
-  border: 0;
-  border-radius: inherit;
-  background: transparent;
-  color: var(--disabled-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  text-align: start;
-  cursor: text;
-}
-.activity-composer-idle:focus-visible {
-  outline: none;
 }
 .activity-composer-prompt {
   display: inline-flex;
@@ -93,11 +62,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .activity-controls {
   display: inline-flex;
@@ -118,16 +83,12 @@
 }
 .activity-details {
   margin: 0 12px;
-  box-shadow: 0 -1px 0 var(--group-hairline);
 }
 .activity-details-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 .activity-details .rich-document {
   padding-inline: 0;
@@ -141,11 +102,6 @@
   margin: 0;
 }
 /* Expanded, an update reads at the document's reading size (frame B). */
-.ticket-detail[data-expanded] .activity-note,
-.ticket-detail[data-expanded] .activity-note :is(p, li) {
-  font-size: var(--text-reading);
-  line-height: 24px;
-}
 .ticket-detail[data-expanded] .activity {
   --text-editor: var(--text-reading);
   --text-editor-line: 24px;
@@ -162,7 +118,6 @@
    open, so the timeline is not a column of identical icons (DB-16). */
 .activity-row-actions {
   display: inline-flex;
-  opacity: 0;
   pointer-events: none;
 }
 .activity [data-slot="comment-row"]:hover .activity-row-actions,
@@ -170,25 +125,15 @@
 .activity [data-slot="comment-row"][data-open] .activity-row-actions,
 .activity-row-actions:has([data-state="open"]),
 .activity-row-actions[data-retained] {
-  opacity: 1;
   pointer-events: auto;
 }
 @media (hover: none) {
   .activity-row-actions {
-    opacity: 1;
     pointer-events: auto;
   }
 }
-.activity-confirm-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-}
 .activity-confirm-text {
   margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .activity-confirm-actions {
   display: flex;

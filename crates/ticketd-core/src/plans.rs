@@ -106,19 +106,31 @@ impl Workspace {
         get(&self.connection, id)
     }
     pub fn list_plans(&self, include_archived: bool) -> Result<Vec<Plan>, Error> {
+        self.list_plans_bounded(include_archived, None, 0)
+    }
+    /// Existing Plan metadata, with an optional caller-owned read budget.
+    pub fn list_plans_bounded(
+        &self,
+        include_archived: bool,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Vec<Plan>, Error> {
         let mut stmt = self.connection.prepare(
-            "SELECT id, name, archived, purpose, spec_document_id FROM plans WHERE ?1 OR archived = 0 ORDER BY name, id",
+            "SELECT id, name, archived, purpose, spec_document_id FROM plans WHERE ?1 OR archived = 0 ORDER BY name, id LIMIT ?2 OFFSET ?3",
         )?;
         Ok(stmt
-            .query_map([include_archived], |r| {
-                Ok(Plan {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    archived: r.get(2)?,
-                    purpose: r.get(3)?,
-                    spec_document_id: r.get(4)?,
-                })
-            })?
+            .query_map(
+                params![include_archived, limit.map(i64::from).unwrap_or(-1), offset],
+                |r| {
+                    Ok(Plan {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        archived: r.get(2)?,
+                        purpose: r.get(3)?,
+                        spec_document_id: r.get(4)?,
+                    })
+                },
+            )?
             .collect::<Result<Vec<_>, _>>()?)
     }
     /// Active Plans a Document is attached to, with whether it is that Plan's designated spec.
@@ -143,32 +155,51 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?)
     }
     pub fn show_plan(&self, id: &str) -> Result<PlanView, Error> {
+        self.show_plan_bounded(id, None, 0, true)
+    }
+    /// Preserve the Plan view and full counts while bounding member/document reads.
+    pub fn show_plan_bounded(
+        &self,
+        id: &str,
+        limit: Option<u32>,
+        offset: u32,
+        include_members: bool,
+    ) -> Result<PlanView, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let plan = get(&tx, id)?;
-        let mut stmt = tx.prepare(
-            "SELECT reference FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number",
-        )?;
+        let mut counts = PlanCounts::default();
+        {
+            let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status")?;
+            for row in stmt.query_map([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            })? {
+                let (status, count) = row?;
+                match status.parse::<Status>()? {
+                    Status::Todo => counts.todo = count,
+                    Status::InProgress => counts.in_progress = count,
+                    Status::InReview => counts.in_review = count,
+                    Status::Done => counts.done = count,
+                    Status::Canceled => counts.canceled = count,
+                    Status::Duplicate => counts.duplicate = count,
+                }
+            }
+        }
+        let bound = limit.map(i64::from).unwrap_or(-1);
+        let mut stmt = tx.prepare("SELECT reference FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT ?2 OFFSET ?3")?;
         let references = stmt
-            .query_map([id], |r| r.get::<_, String>(0))?
+            .query_map(
+                params![id, if include_members { bound } else { 0 }, offset],
+                |r| r.get::<_, String>(0),
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
-        let mut counts = PlanCounts::default();
-        let mut members = Vec::new();
-        for reference in references {
-            let ticket = self.show_ticket(&reference)?;
-            match ticket.status {
-                Status::Todo => counts.todo += 1,
-                Status::InProgress => counts.in_progress += 1,
-                Status::InReview => counts.in_review += 1,
-                Status::Done => counts.done += 1,
-                Status::Canceled => counts.canceled += 1,
-                Status::Duplicate => counts.duplicate += 1,
-            };
-            members.push(ticket);
-        }
+        let members = references
+            .into_iter()
+            .map(|reference| self.show_ticket(&reference))
+            .collect::<Result<Vec<_>, _>>()?;
         let documents = {
-            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id", crate::documents::HEADING))?;
-            stmt.query_map([id], |row| {
+            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
+            stmt.query_map(params![id, bound, offset], |row| {
                 Ok(PlanDocument {
                     id: row.get(0)?,
                     heading: row.get(1)?,

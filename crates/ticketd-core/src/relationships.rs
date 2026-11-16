@@ -23,27 +23,53 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) fn prerequisites(
+    connection: &Connection,
+    ticket_id: &str,
+    limit: Option<u32>,
+) -> Result<Vec<Prerequisite>, Error> {
+    // A bounded projection follows the adjacency index before sorting its small
+    // result. Sorting all neighbors before LIMIT would defeat the read budget.
+    let order = if limit.is_some() {
+        "dependencies.blocker_id"
+    } else {
+        "tickets.number"
+    };
+    let mut statement = connection.prepare(&format!("SELECT reference, title, status, trashed, tickets.number FROM dependencies JOIN tickets ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY {order} LIMIT ?2"))?;
+    let mut prerequisites = statement
+        .query_map(
+            params![ticket_id, limit.map(i64::from).unwrap_or(-1)],
+            |row| {
+                let status: String = row.get(2)?;
+                let status: Status = status.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
+                Ok((
+                    Prerequisite {
+                        reference: row.get::<_, String>(0)?,
+                        title: row.get(1)?,
+                        trashed: row.get(3)?,
+                        unresolved: !status.satisfies_dependency(),
+                        status,
+                    },
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    prerequisites.sort_by_key(|(_, number)| *number);
+    Ok(prerequisites
+        .into_iter()
+        .map(|(blocker, _)| blocker)
+        .collect())
+}
+
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    let mut statement = connection.prepare("SELECT reference, title, status, trashed FROM tickets JOIN dependencies ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY number")?;
-    ticket.prerequisites = statement
-        .query_map([&ticket.id], |row| {
-            let status: String = row.get(2)?;
-            let status: Status = status.parse().map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    2,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                )
-            })?;
-            Ok(Prerequisite {
-                reference: row.get::<_, String>(0)?,
-                title: row.get(1)?,
-                trashed: row.get(3)?,
-                unresolved: !status.satisfies_dependency(),
-                status,
-            })
-        })?
-        .collect::<Result<_, _>>()?;
+    ticket.prerequisites = prerequisites(connection, &ticket.id, None)?;
     ticket.availability = match history::readiness(
         ticket.status,
         ticket.trashed,

@@ -945,6 +945,13 @@ function SlashMenu({
         variant="compact-list"
         side="bottom"
         align="start"
+        onEscapeKeyDown={(event) => {
+          // The caret stays in the editor outside this popover. Own Escape at
+          // the dismissable layer before closing can expose the editor beneath.
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }}
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
@@ -1734,6 +1741,7 @@ export function MarkdownEditor({
         closeSlash();
       }}
       onKeyDownCapture={(event) => {
+        if (event.defaultPrevented) return;
         if (
           event.target instanceof HTMLElement &&
           event.target.closest(

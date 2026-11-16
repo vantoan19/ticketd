@@ -1167,7 +1167,12 @@ export function DocumentEditor({
           </Badge>
         ) : null
       }
-      note={statusLine}
+      note={
+        <>
+          {statusLine}
+          {capture && <span ref={setSessionHost} />}
+        </>
+      }
       error={capture && saveError}
     >
       {initial && (
@@ -1374,11 +1379,9 @@ export function DocumentEditor({
               }
               readOnly={locked || restoringCapture}
               autoFocus={capture}
-              {...(!capture && {
-                chrome: "floating" as const,
-                chromeHost: sessionHost,
-                onEscape: () => setEditing(false),
-              })}
+              chrome={capture ? "compact" : "floating"}
+              chromeHost={sessionHost}
+              {...(!capture && { onEscape: () => setEditing(false) })}
               focusRequest={focusRequest}
             />
           ) : (

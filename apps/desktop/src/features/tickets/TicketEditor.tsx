@@ -114,6 +114,7 @@ function restore(
 }
 export function TicketEditor({
   ticket,
+  readOnly = false,
   onSaved,
   stateLine,
   children,
@@ -122,6 +123,8 @@ export function TicketEditor({
   mention = null,
 }: {
   ticket: Ticket;
+  /** Keep the saved copy's geometry while a fresh read is pending. */
+  readOnly?: boolean;
   onSaved: (ticket: Ticket) => void;
   /**
    * The ticket's stable state line. Editor controls float outside the prose.
@@ -136,7 +139,10 @@ export function TicketEditor({
 }) {
   const recovery = useDraftRecovery();
   const recoveryOwner = `ticket:${ticket.id}`;
-  const blockedReason = editingBlockedReason(useWorkspaceState());
+  const workspaceBlockedReason = editingBlockedReason(useWorkspaceState());
+  const blockedReason = readOnly
+    ? "Loading the latest ticket."
+    : workspaceBlockedReason;
   const [restored] = useState(() =>
     restore(
       ticket,

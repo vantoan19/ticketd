@@ -100,13 +100,19 @@ export function TicketAgentSession({
   if (opening.reference !== ticket?.reference) {
     setOpening({ reference: ticket?.reference, reserved: null });
     setUpdate(null);
-  } else if (ready && opening.reserved === null)
+  } else if (
+    opening.reserved === null &&
+    (ready || chat || ticket?.progress_summary?.editing_agent)
+  )
     setOpening({
       reference: ticket?.reference,
       reserved:
         chats.length > 0 ||
         projected.length > 0 ||
-        Boolean(update?.value?.editing_agent),
+        Boolean(
+          update?.value?.editing_agent ||
+          ticket?.progress_summary?.editing_agent,
+        ),
     });
   return (
     <AgentContext
@@ -115,7 +121,9 @@ export function TicketAgentSession({
         reserved:
           opening.reference === ticket?.reference && Boolean(opening.reserved),
         chat,
-        update: ready ? (update?.value ?? null) : null,
+        update: ready
+          ? (update?.value ?? null)
+          : (ticket?.progress_summary ?? null),
       }}
     >
       {children(Boolean(ticket && !ready))}

@@ -93,11 +93,33 @@ function plainCause(code: FailureCode, message: string): string {
       return "The account isn't allowed to do this.";
     case "cycle":
       return `${sentence(message)} Choose another ticket.`;
+    case "publication_failed":
+      return "The source refused the publication. Nothing was created. Try again.";
+    case "publication_unresolved":
+      return "The issue may already exist. Review the publication outcome before trying again.";
+    case "publication_changed":
+      return "The ticket changed since its preview, so nothing was sent. Review the updated preview before publishing.";
+    case "publication_ineligible":
+      return "This ticket cannot be published in its current state. Review the updated preview.";
+    case "publication_different_content":
+      return "The issue has different content from the text sent. Review the difference before attaching.";
+    case "publication_unverified":
+      return "The outcome could not be verified. The attempt stays unresolved. Check again when the source is available.";
+    case "publication_candidates":
+      return "Possible matching issues still need review. Attach a matching issue or check again.";
+    case "publication_mismatch":
+      return "The issue does not match this publication. Choose another issue.";
+    case "publication_settled":
+      return "This publication was resolved elsewhere. Reload to review its saved outcome.";
+    case "publication_nothing_to_resolve":
+      return "There is no unresolved publication to review. Reload the ticket.";
+    case "publication_still_running":
+      return "Publication is still running. Wait and check again.";
     default:
       // An unclassified host message can contain paths, diagnostics or secrets.
       // The write may have committed before its reply failed, so make no
       // claim that nothing changed; the action-specific title names the request.
-      return "The result couldn't be confirmed. Try again, or open Details for more information.";
+      return "The result couldn't be confirmed. Check the saved state before trying again.";
   }
 }
 
@@ -110,12 +132,22 @@ function nextStep(code: FailureCode): FailureDescription["action"] {
       return "reconnect";
     case "conflict":
     case "review_changed":
+    case "publication_changed":
+    case "publication_ineligible":
+    case "publication_settled":
+    case "publication_nothing_to_resolve":
+    case "publication_still_running":
+    case "publication_unverified":
+    case "publication_unresolved":
       return "reload";
     case "cycle":
     case "not_found":
+    case "publication_mismatch":
       return "choose_another";
     case "forbidden":
     case "workspace_unreadable":
+    case "publication_different_content":
+    case "publication_candidates":
       return null;
     default:
       return "retry";

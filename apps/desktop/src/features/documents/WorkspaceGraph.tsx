@@ -61,6 +61,7 @@ import {
   client,
   type WorkspaceGraph,
   type WorkspaceGraphRequest,
+  type TicketMetadata,
 } from "@/lib/api/client";
 import "@xyflow/react/dist/style.css";
 import "./context-graph.css";
@@ -70,6 +71,9 @@ type Graph = WorkspaceGraph & {
   planMembership?: Record<string, string[]>;
   planCounts?: Record<string, PlanCounts>;
   availability?: Record<string, string | null>;
+  partialTotal?: boolean;
+  windowCursor?: string | null;
+  ticketMetadata?: Record<string, TicketMetadata>;
 };
 
 // Radix Select items cannot have an empty value.
@@ -87,14 +91,6 @@ const RELATIONSHIPS = [
   "related",
   "discovered",
 ];
-/** Ticket reference to project name ("" when it has none), shared by every mount. */
-const projectOf = new Map<string, string>();
-const availabilityOf = new Map<string, string | null>();
-
-function projectName(node: { ticket_reference?: string | null | undefined }) {
-  return (node.ticket_reference && projectOf.get(node.ticket_reference)) || "";
-}
-
 /** Connections among the shown items, or the item's own total when only one is shown. */
 function connectionSummary(graph: Graph): string {
   const count = (n: number) => `${n} ${n === 1 ? "connection" : "connections"}`;
@@ -105,6 +101,7 @@ function connectionSummary(graph: Graph): string {
 
 export function WorkspaceGraph({
   planId = null,
+  projects = [],
   active,
   revision,
   onBack,
@@ -112,6 +109,7 @@ export function WorkspaceGraph({
   onOpen,
 }: {
   planId?: string | null;
+  projects?: readonly { id: string; name: string }[];
   active: boolean;
   revision: number;
   /** Leaves the graph for All tickets (the empty state's way out). */
@@ -155,8 +153,6 @@ export function WorkspaceGraph({
   };
   const [loadingPage, setLoadingPage] = useState(false);
   const [fit, setFit] = useState(true);
-  // Bumped when more ticket projects are known, so cards and the panel redraw.
-  const [projectsVersion, setProjectsVersion] = useState(0);
   const [viewport, setViewport] = useState<Viewport>({
     x: 100,
     y: 100,
@@ -306,13 +302,14 @@ export function WorkspaceGraph({
   const mapNodes = useMemo(() => graph?.nodes ?? [], [graph]);
   const shownEdges = useMemo(() => graph?.edges ?? [], [graph]);
   const planCounts = graph?.planCounts;
+  const planMembership = graph?.planMembership;
   const islandLayout = useMemo(() => {
     const points: Record<string, Point> = {};
     const islands: import("./ContextGraphCanvas").WorkspaceIsland[] = [];
     const plans =
       graph?.structuralPlans ?? mapNodes.filter((node) => node.kind === "plan");
     const membership = new Map<string, string[]>(
-      Object.entries(graph?.planMembership ?? {}),
+      Object.entries(planMembership ?? {}),
     );
     for (const edge of shownEdges) {
       if (
@@ -374,7 +371,7 @@ export function WorkspaceGraph({
     if (loose.length) {
       islands.push({
         id: "__unplanned__",
-        title: `Not in a Plan · ${loose.length}`,
+        title: `${loose.some((node) => planMembership?.[node.id] === undefined || (planMembership[node.id]?.length ?? 0) > 0) ? "Plan membership not loaded" : "Not in a Plan"} · ${loose.length}`,
         caption: "",
         x: 24,
         y: top,
@@ -394,7 +391,7 @@ export function WorkspaceGraph({
     shownEdges,
     planCounts,
     graph?.structuralPlans,
-    graph?.planMembership,
+    planMembership,
   ]);
   const availability = graph?.availability;
   const nodes = useMemo(
@@ -419,16 +416,13 @@ export function WorkspaceGraph({
                   : (node.state ?? ""),
             kind: node.kind,
             status: statusOf(node),
-            availability:
-              availability?.[node.id] ?? availabilityOf.get(node.id) ?? "",
+            availability: availability?.[node.id] ?? "",
             variant: islandLayout.loose.has(node.id)
               ? ("chip" as const)
               : ("workspace" as const),
           };
         }),
-    // projectName reads projectOf, which projectsVersion tracks.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mapNodes, islandLayout, projectsVersion, availability, shownEdges],
+    [mapNodes, islandLayout, availability, shownEdges],
   );
   // Plan wells express membership and linked Documents without a web of
   // structural lines; every relationship remains named in the selection panel.
@@ -455,55 +449,13 @@ export function WorkspaceGraph({
     };
   }, [revision]);
   const preview = graph?.nodes.find((node) => node.id === selected);
-  // The graph carries no project, so each shown ticket's project is looked up
-  // once from the existing ticket and project lists.
-  const wanted = useMemo(
-    () => [
-      ...new Set(
-        [...mapNodes, ...(preview ? [preview] : [])].flatMap((node) =>
-          node.kind === "ticket" && node.ticket_reference
-            ? [node.ticket_reference]
-            : [],
-        ),
-      ),
-    ],
-    [mapNodes, preview],
+  const projectNames = new Map(
+    projects.map((project) => [project.id, project.name]),
   );
-  useEffect(() => {
-    const missing = wanted.filter((reference) => !projectOf.has(reference));
-    if (!missing.length) return;
-    let current = true;
-    void (async () => {
-      try {
-        const names = new Map(
-          ((await client.listProjects()) ?? []).map((item) => [
-            item.id,
-            item.name,
-          ]),
-        );
-        await Promise.all(
-          missing.map(async (reference) => {
-            try {
-              const ticket = await client.showTicket(reference);
-              availabilityOf.set(ticket.id, ticket.availability);
-              projectOf.set(
-                reference,
-                (ticket.project_id && names.get(ticket.project_id)) || "",
-              );
-            } catch {
-              // A card without a project is still a card.
-            }
-          }),
-        );
-      } catch {
-        return;
-      }
-      if (current) setProjectsVersion((n) => n + 1);
-    })();
-    return () => {
-      current = false;
-    };
-  }, [wanted]);
+  const projectName = (node: { id: string }) => {
+    const id = graph?.ticketMetadata?.[node.id]?.project_id;
+    return (id && projectNames.get(id)) || "";
+  };
   const showMap = mapChoice;
   const filtered = !!(search || kind || tag || relationship);
   function refine(change: () => void) {
@@ -524,12 +476,19 @@ export function WorkspaceGraph({
     setLoadingPage(true);
     const advance = pagesLoaded >= 4 || graph.nodes.length >= 100;
     try {
-      const page = await workspacePlanIslands({
-        ...request,
-        cursor: graph.next_cursor,
-        adjacency_limit: adjacencyLimit,
-        visible_ids: advance ? [] : graph.nodes.map((node) => node.id),
-      });
+      const page = await (planId
+        ? planWorkspaceGraph(planId, {
+            ...request,
+            cursor: graph.next_cursor,
+            adjacency_limit: adjacencyLimit,
+            visible_ids: [],
+          })
+        : workspacePlanIslands({
+            ...request,
+            cursor: graph.next_cursor,
+            adjacency_limit: adjacencyLimit,
+            visible_ids: advance ? [] : graph.nodes.map((node) => node.id),
+          }));
       if (currentRequest.current !== request) return;
       if (advance) {
         cursors.current = [graph.next_cursor];
@@ -555,6 +514,7 @@ export function WorkspaceGraph({
     try {
       const expansion = {
         ...request,
+        cursor: graph.windowCursor ?? null,
         adjacency_limit: limit,
         visible_ids: graph.nodes.map((node) => node.id),
         hydrate_only: true,
@@ -585,21 +545,38 @@ export function WorkspaceGraph({
   const empty = !!graph && graph.nodes.length === 0 && !graph.next_cursor;
   const statusText = graph && (
     <>
-      {relationship && graph.nodes.length === 0
-        ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
-        : relationship
-          ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
-          : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
+      {graph.partialTotal
+        ? `Showing ${graph.nodes.length} loaded items`
+        : relationship && graph.nodes.length === 0
+          ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
+          : relationship
+            ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
+            : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
       · {connectionSummary(graph)}
-      {graph.omitted_groups.includes("Plan connections across batches") && (
+      {graph.omitted_groups.includes("Plan island window") && (
+        <> · Some Plan islands are not loaded; Load more shows another window</>
+      )}
+      {graph.omitted_groups.includes("Plan member window") && (
         <>
           {" "}
-          · Some connections across the 100-item graph limit are hidden; open an
-          item to see its connections
+          · Some Plan tickets or Documents are not loaded; Load more shows
+          another window
         </>
       )}
+      {graph.omitted_groups.includes("Plan filter window") && (
+        <> · Some matching items are outside this search window</>
+      )}
+      {graph.omitted_groups.includes("Workspace node window") && (
+        <> · Some items are outside the 250-item window</>
+      )}
       {graph.omitted_groups.some(
-        (group) => group !== "Plan connections across batches",
+        (group) =>
+          ![
+            "Plan island window",
+            "Plan member window",
+            "Plan filter window",
+            "Workspace node window",
+          ].includes(group),
       ) &&
         adjacencyLimit < 12 && (
           <>
@@ -615,7 +592,13 @@ export function WorkspaceGraph({
           </>
         )}
       {graph.omitted_groups.some(
-        (group) => group !== "Plan connections across batches",
+        (group) =>
+          ![
+            "Plan island window",
+            "Plan member window",
+            "Plan filter window",
+            "Workspace node window",
+          ].includes(group),
       ) &&
         adjacencyLimit >= 12 && (
           <> · Some connections are hidden; open an item to see all</>

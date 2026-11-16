@@ -1,0 +1,122 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.chat-report-row [data-outcome],
+.chat-plan [data-outcome],
+.chat-file [data-outcome] {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.chat-reasoning {
+  color: var(--muted-foreground);
+}
+.chat-plan {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.chat-plan-title {
+  font-weight: 500;
+}
+.chat-plan-save {
+  opacity: 0;
+}
+.chat-plan:hover .chat-plan-save,
+.chat-plan:focus-within .chat-plan-save {
+  opacity: 1;
+}
+.chat-plan-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+}
+.chat-plan-steps {
+  list-style: none;
+}
+.chat-plan-steps li > svg {
+  color: var(--muted-foreground);
+}
+.chat-plan-steps li[data-now] {
+  font-weight: 500;
+}
+.chat-plan-steps li[data-now] > svg {
+  color: var(--foreground);
+}
+.chat-plan-pill {
+  border-radius: var(--radius-pill);
+  background: var(--recessed);
+  color: var(--muted-foreground);
+  font-size: var(--text-code);
+  text-align: left;
+}
+.chat-plan-pill:hover,
+.chat-plan-pill[aria-expanded="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.chat-plan-pill:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.chat-plan-pill-count {
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.chat-plan-pill-now {
+  white-space: nowrap;
+}
+.chat-plan-pill-separator {
+  color: var(--faint);
+}
+.chat-file-counts {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.chat-file-list {
+  list-style: none;
+}
+.chat-file-main {
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  text-align: left;
+}
+button.chat-file-main:hover {
+  background: var(--accent);
+}
+button.chat-file-main:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.chat-file-path {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-weight: 400;
+  white-space: nowrap;
+}
+div.chat-file-main .chat-file-path {
+  color: var(--muted-foreground);
+}
+.chat-file-kind {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.chat-file-copy {
+  opacity: 0;
+}
+.chat-file:hover .chat-file-copy,
+.chat-file:focus-within .chat-file-copy {
+  opacity: 1;
+}
+.chat-file-error {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}

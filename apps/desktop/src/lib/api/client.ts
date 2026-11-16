@@ -225,6 +225,8 @@ export type WorkspaceGraphRequest = {
   adjacency_limit: number;
   visible_ids: string[];
   hydrate_only: boolean;
+  node_limit?: number;
+  edge_limit?: number;
 };
 
 export const graphSchema = z.object({
@@ -355,6 +357,28 @@ export type EvidenceInput = Pick<
 export type AuthoredActivity = z.infer<typeof activitySchema>;
 export type ActivityFeedEntry = z.infer<typeof activityFeedSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
+const ticketMetadataSchema = ticketSchema
+  .pick({
+    id: true,
+    reference: true,
+    title: true,
+    status: true,
+    trashed: true,
+    project_id: true,
+    plan_id: true,
+    availability: true,
+  })
+  .extend({
+    status: statusSchema,
+    availability: z.enum(["Ready", "Blocked"]).nullable(),
+  });
+const flowTicketMetadataSchema = ticketMetadataSchema.extend({
+  prerequisites: ticketSchema.shape.prerequisites,
+  updated_at: ticketSchema.shape.updated_at,
+  source: ticketSourceSchema.pick({ unavailable: true }).nullish(),
+});
+export type TicketMetadata = z.infer<typeof ticketMetadataSchema>;
+export type FlowTicketMetadata = z.infer<typeof flowTicketMetadataSchema>;
 export type FindFilter = {
   query: string;
   project: string | null;
@@ -612,7 +636,7 @@ export const client = {
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
   },
-  async listPlans() {
+  async listPlans(limit?: number, offset = 0) {
     return z
       .array(
         z.object({
@@ -622,7 +646,11 @@ export const client = {
           purpose: z.string().default(""),
         }),
       )
-      .parse(await invoke("list_plans"));
+      .parse(
+        await (limit === undefined
+          ? invoke("list_plans")
+          : invoke("list_plans", { limit, offset })),
+      );
   },
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
@@ -735,6 +763,30 @@ export const client = {
       progress_summary: latest_update,
     }));
   },
+  async findTicketMetadata(filter: FindFilter, ids?: string[]) {
+    return z
+      .object({ items: z.array(ticketMetadataSchema), omitted: z.boolean() })
+      .parse(
+        await invoke("find_tickets_with_updates", {
+          filter,
+          projection: "metadata",
+          ...(ids && { ids }),
+        }),
+      );
+  },
+  async findFlowMetadata(filter: FindFilter) {
+    return z
+      .object({
+        items: z.array(flowTicketMetadataSchema),
+        omitted: z.boolean(),
+      })
+      .parse(
+        await invoke("find_tickets_with_updates", {
+          filter,
+          projection: "flow",
+        }),
+      );
+  },
   /** Counts the whole filtered result by status, ignoring its paging. */
   async countTickets(filter: FindFilter) {
     return statusCountsSchema.parse(await invoke("count_tickets", { filter }));
@@ -785,6 +837,7 @@ export const client = {
     tags: string[],
     follow: boolean,
     requestId?: string,
+    blockers: string[] = [],
   ) {
     return ticketSchema.parse(
       await invoke("create_ticket", {
@@ -795,6 +848,7 @@ export const client = {
         planId,
         tags,
         follow,
+        ...(blockers.length > 0 && { blockers }),
         ...(requestId && { requestId }),
       }),
     );

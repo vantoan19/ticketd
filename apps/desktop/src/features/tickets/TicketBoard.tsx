@@ -19,6 +19,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Pager } from "@/components/ui/pager";
 import { Reference } from "@/components/ui/reference";
 import { StatusDot } from "@/components/ui/status-dot";
+import { FailureCaption } from "@/components/ui/failure-alert";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -426,7 +427,9 @@ export function TicketBoard({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => void workspace.board.refresh()}
+                        onClick={() =>
+                          void workspace.refresh({ reportFailure: true })
+                        }
                       >
                         Retry
                       </Button>
@@ -579,6 +582,7 @@ function BoardCard({
       data-ticket-reference={ticket.reference}
       data-dragging={dragging || undefined}
       aria-busy={pending}
+      data-failed={failure ? "" : undefined}
     >
       <Button
         variant="card"
@@ -591,6 +595,11 @@ function BoardCard({
 
         onClick={onClick}
       >
+        {failure && (
+          <span className="sr-only">
+            {ticket.status} {ticket.reference}
+          </span>
+        )}
         <span className="board-card-top">
           <StatusIcon status={ticket.status} size={14} decorative />
           <Reference>{ticket.reference}</Reference>{" "}
@@ -708,17 +717,14 @@ function BoardCard({
         </DropdownMenu>
       </span>
       {failure && (
-        // The reason stays on the card that failed, with Retry (BD-10).
-        <div className="board-card-failure" role="alert">
-          <span>Not saved. {failure}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label={`Retry status change for ${ticket.reference}`}
-            onClick={() => statusAction.retry(ticket.reference)}
-          >
-            Retry
-          </Button>
+        <div className="board-card-failure">
+          <FailureCaption
+            failure={failure}
+            retryLabel={`Retry status change for ${ticket.reference}`}
+            detailsVariant="popover"
+            detailsIconOnly
+            onRetry={() => statusAction.retry(ticket.reference)}
+          />
         </div>
       )}
     </div>

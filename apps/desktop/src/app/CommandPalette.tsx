@@ -232,7 +232,10 @@ export function CommandPalette({
         .filter((plan) => !plan.archived)
         .map(async (plan) => {
           try {
-            return [plan.id, (await plansClient.show(plan.id)).counts] as const;
+            return [
+              plan.id,
+              (await plansClient.show(plan.id, 0, 0, false)).counts,
+            ] as const;
           } catch {
             return null;
           }
@@ -1205,7 +1208,19 @@ export function CommandPalette({
             ))}
             <div className="ui-palette-footer">
               {actions.error ? (
-                <span role="alert">{actions.error}</span>
+                <>
+                  <span role="alert">{actions.error}</span>
+                  {actions.retry && (
+                    <Button
+                      variant="link"
+                      size="xs"
+                      disabled={actions.pending || actions.blocked}
+                      onClick={actions.retry}
+                    >
+                      Retry
+                    </Button>
+                  )}
+                </>
               ) : scope ? (
                 <>
                   <span>

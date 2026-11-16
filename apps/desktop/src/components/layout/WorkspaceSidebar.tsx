@@ -250,7 +250,10 @@ export function WorkspaceSidebar({
         .filter((plan) => !plan.archived)
         .map(async (plan) => {
           try {
-            return [plan.id, (await plansClient.show(plan.id)).counts] as const;
+            return [
+              plan.id,
+              (await plansClient.show(plan.id, 0, 0, false)).counts,
+            ] as const;
           } catch {
             return null;
           }

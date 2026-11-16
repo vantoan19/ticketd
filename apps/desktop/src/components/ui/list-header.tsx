@@ -61,10 +61,10 @@ export function ShellLeading({ navOnly = false }: { navOnly?: boolean }) {
  * with the shell's controls (ShellSlotProvider:
  * the narrow-nav button, the way back to the graph), then `leading`, such as
  * the pane's own `ReturnCrumb`; the title
- * (14/20/500) truncates, with `count` 8px after it (a `Count`, or a summary in
+ * (14/20/500) truncates, with `count` effectively 8px after it (6px gap plus 2px optical spacing) (a `Count`, or a summary in
  * that slot) and optional `children` as inline meta (a SegmentedControl).
- * `actions` is the right cluster of 32px controls in a fixed order: Refresh,
- * Search, Filters, Display; use `PaneHeaderButton` for labelled ones so they
+ * `actions` is the right cluster of the view’s 28px controls. Ticket lists
+ * have Filter and Display; use `PaneHeaderButton` for labelled ones so they
  * collapse to icons with tooltips below a 420px pane. A search field marked
  * `data-slot="pane-search"` expands in place over the title. `caption` adds
  * one fixed 28px line under the header ("Todo tickets with nothing left to

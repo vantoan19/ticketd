@@ -1,4 +1,9 @@
 import { useEffect, useState } from "react";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,7 +45,8 @@ function RunsAtOnce() {
   /** What the setting starts at and the most it takes, as the core has them. */
   const [limits, setLimits] = useState({ default: 0, most: 0 });
   const [confirmed, setConfirmed] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<string | FailureDescription>("");
+  const [readRound, setReadRound] = useState(0);
   useEffect(() => {
     let current = true;
     automationsClient.runsAtOnce().then(
@@ -49,14 +55,15 @@ function RunsAtOnce() {
         setValue(String(runs));
         setSaved(runs);
         setLimits(bounds);
+        setFailure("");
       },
       (reason: unknown) =>
-        current && setFailure(`Could not read runs at once: ${String(reason)}`),
+        current && setFailure(describeFailure(reason, "read runs at once")),
     );
     return () => {
       current = false;
     };
-  }, []);
+  }, [readRound]);
   const outOfRange = `Enter a whole number from 1 to ${limits.most}.`;
   async function save(text: string) {
     const runs = Number(text);
@@ -72,7 +79,7 @@ function RunsAtOnce() {
       setSaved(runs);
       setConfirmed(true);
     } catch (reason) {
-      setFailure(`Could not save runs at once: ${String(reason)}`);
+      setFailure(describeFailure(reason, "save runs at once"));
     }
   }
   const invalid = failure === outOfRange;
@@ -128,11 +135,20 @@ function RunsAtOnce() {
             </div>
           }
         >
-          {failure && (
-            <span role="alert" className="settings-failure attachments-error">
-              {failure}
-            </span>
-          )}
+          {failure &&
+            (typeof failure === "string" ? (
+              <span role="alert" className="settings-failure attachments-error">
+                {failure}
+              </span>
+            ) : (
+              <FailureAlert
+                size="compact"
+                failure={failure}
+                onRetry={() =>
+                  saved === null ? setReadRound((n) => n + 1) : void save(value)
+                }
+              />
+            ))}
         </SettingsRow>
       </SettingsList>
     </SettingsSection>
@@ -142,29 +158,48 @@ function RunsAtOnce() {
 function InTheBackground() {
   /** null until the system has answered. */
   const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<{
+    description: FailureDescription;
+    retry: () => void;
+  } | null>(null);
+  const [readRound, setReadRound] = useState(0);
   useEffect(() => {
     let current = true;
     automationsClient.startsAtLogin().then(
-      (starts) => current && setEnabled(starts),
+      (starts) => {
+        if (current) {
+          setEnabled(starts);
+          setFailure(null);
+        }
+      },
       (reason: unknown) =>
         current &&
-        setFailure(`Could not read whether ticketd starts: ${String(reason)}`),
+        setFailure({
+          description: describeFailure(
+            reason,
+            "read the start-at-login setting",
+          ),
+          retry: () => setReadRound((n) => n + 1),
+        }),
     );
     return () => {
       current = false;
     };
-  }, []);
+  }, [readRound]);
   const change = (starts: boolean) =>
     automationsClient.setStartsAtLogin(starts).then(
       () => {
         setEnabled(starts);
-        setFailure("");
+        setFailure(null);
       },
       (reason: unknown) =>
-        setFailure(
-          `Could not turn starting at sign-in ${starts ? "on" : "off"}: ${reason instanceof Error ? reason.message : String(reason)}`,
-        ),
+        setFailure({
+          description: describeFailure(
+            reason,
+            `turn starting at sign-in ${starts ? "on" : "off"}`,
+          ),
+          retry: () => void change(starts),
+        }),
     );
   return (
     <SettingsSection title="In the background">
@@ -184,9 +219,11 @@ function InTheBackground() {
           }
         >
           {failure && (
-            <span role="alert" className="settings-failure attachments-error">
-              {failure}
-            </span>
+            <FailureAlert
+              size="compact"
+              failure={failure.description}
+              onRetry={failure.retry}
+            />
           )}
         </SettingsRow>
         <SettingsListFooter>

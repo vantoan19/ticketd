@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-description.css";
+
 /* The state line keeps its place while controls float outside the prose. */
 .ticket-state-row {
   display: flex;
@@ -30,14 +32,9 @@
   margin: 0;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
 }
 .editor-save-state {
   flex: none;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
 }
 .editor-save-state:empty {
   display: none;
@@ -46,21 +43,12 @@
   display: block;
   margin-top: 0;
   min-height: 48px;
-  text-align: left;
-  color: var(--foreground);
-  line-height: normal;
   overflow-wrap: anywhere;
 }
 .editor-body {
   --text-editor: var(--text-doc);
   --text-editor-line: var(--text-doc-line);
   margin-top: 16px;
-}
-.editor-body:focus {
-  outline: none;
-}
-.editor-body:focus-visible {
-  outline: 2px solid var(--ring);
 }
 /* Editing in place: the frame sits where the reading card sits, 12px
    outside the text, and reads at the same size, so no line moves (DS-01). */
@@ -78,45 +66,21 @@
   margin-bottom: 0;
 }
 /* The followed passage flashes once, as any arrival does (detA TT-04). */
-.description-document [data-mention-target] {
-  border-radius: var(--radius);
-  animation: arrival-flash var(--dur-arrival) var(--ease-out) var(--dur-3) both;
-}
-.description-document [data-mention-target]:focus {
-  outline: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .description-document [data-mention-target] {
-    animation: none;
-  }
-}
 .mention-missing {
   margin-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .editor-conflict {
   margin-top: 16px;
 }
 .editor-conflict-question {
   margin-right: auto;
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .conflict-block {
   margin-top: 12px;
 }
-.conflict-block-label {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  font-weight: 500;
-  line-height: 16px;
-}
 /* The draft beside the saved text: a neutral rule, not the focus colour (CO-03). */
 .conflict-draft {
   padding-left: 12px;
-  border-left: 2px solid var(--border);
 }
 
 .ticket-save-error {
@@ -133,7 +97,6 @@
   margin: -4px -12px -12px;
   padding: 12px;
   min-height: 48px;
-  border-radius: var(--radius);
 }
 .ticket-detail[data-expanded] .description-reading .description-document {
   margin-top: -4px;
@@ -150,22 +113,6 @@
   height: 40px;
   margin: -4px -12px 0;
   padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--disabled-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  text-align: start;
-  cursor: text;
-}
-.description-add:hover {
-  background: var(--hover);
-  color: var(--muted-foreground);
-}
-.description-add:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 
 .description-edit-control {

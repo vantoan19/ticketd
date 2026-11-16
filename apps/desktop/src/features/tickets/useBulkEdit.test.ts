@@ -15,7 +15,7 @@ test("a retry of the same bulk change reuses its request ID", async () => {
   const { result } = renderHook(() => useBulkEdit(async () => {}));
   act(() => result.current.toggle("T-KQ1"));
   await act(() => result.current.applyStatus("Done", "Updated"));
-  expect(result.current.failure?.message).toContain("offline");
+  expect(result.current.failure?.description.details).toContain("offline");
   expect(result.current.selection).toEqual(["T-KQ1"]);
   await act(async () => {
     await result.current.retry();
@@ -35,12 +35,12 @@ test("a rejected batch names the ticket that prevented it and keeps the selectio
   await act(() => result.current.applyOrganization({ plan_id: "e1" }, "ok"));
   expect(result.current.failure).toMatchObject({
     reference: "T-KQ2",
-    message: "T-KQ2: ticket is trashed. Nothing changed.",
     // The core refused the change itself, so sending it again cannot succeed.
     retryable: false,
     description: {
       title: "Couldn't change T-KQ2",
-      sentence: "Ticket is trashed. Nothing changed.",
+      sentence:
+        "The batch was rejected. Nothing changed. Open Details to review the reason.",
       action: null,
     },
   });
