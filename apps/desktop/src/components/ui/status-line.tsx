@@ -12,6 +12,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
+import { FailureDetails } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
 import {
   STATUS_LINE_TIMINGS,
@@ -208,6 +209,7 @@ function FloatingLine({
       show({
         tone: "error",
         message: `${failure.title}. ${failure.sentence}`,
+        details: failure.details,
         ...(failure.action === "retry" && {
           action: { label: "Retry", run: action.run },
         }),
@@ -241,6 +243,13 @@ function FloatingLine({
           setFocused(false);
       }}
       onKeyDown={(event) => {
+        // A portaled Details popover owns its keys, even though React bubbles
+        // them through this line. Only keys from the line itself dismiss it.
+        if (
+          event.defaultPrevented ||
+          !event.currentTarget.contains(event.target as Node)
+        )
+          return;
         if (event.key === "Escape") {
           event.stopPropagation();
           close();
@@ -253,6 +262,9 @@ function FloatingLine({
         </span>
       )}
       <span className="ui-status-line-message">{shown.message}</span>
+      {shown.details && (
+        <FailureDetails details={shown.details} variant="popover" />
+      )}
       {action && (
         <Button
           ref={actionRef}

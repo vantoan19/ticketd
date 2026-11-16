@@ -21,7 +21,7 @@ const succeed = () =>
     await structured(Promise.resolve(1));
   });
 
-test("a workspace-level failure raises one band; a lock ends with the next success", async () => {
+test("workspace failures remain visible across successful reads until recovery", async () => {
   render(<WorkspaceBand onRetry={() => {}} />);
   await fail("workspace_locked");
   expect(
@@ -30,7 +30,9 @@ test("a workspace-level failure raises one band; a lock ends with the next succe
   // The raw text waits under Details.
   expect(screen.queryByText("raw workspace_locked")).toBeNull();
   await succeed();
-  expect(screen.queryByRole("status")).toBeNull();
+  expect(
+    screen.getByText(/Another ticketd operation is using this workspace/),
+  ).toBeTruthy();
 
   // Reads still succeed on a read-only workspace, so only Retry ends it.
   await fail("workspace_read_only");

@@ -1,0 +1,10 @@
+@import "../../components/ui/surface-roles/tickets-status-glyph.css";
+
+.status-glyph {
+  flex: none;
+}
+
+.status-glyph-sweep-disc {
+  visibility: hidden;
+  /* Opaque mask paint controls geometry, without adding a visible colour. */
+}

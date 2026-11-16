@@ -23,6 +23,7 @@ import {
   type MockChatClient,
 } from "@/features/chats/mock-client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { selectAutomationView } from "@/test/automation-navigation";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: never) =>
@@ -33,6 +34,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         : bridgeDefault(command, args),
 }));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
+Element.prototype.scrollIntoView = () => {};
 window.ResizeObserver = class {
   observe() {}
   unobserve() {}
@@ -243,29 +245,25 @@ test("with Chat off, nothing about Chat is in the workspace", async () => {
   await screen.findByRole("button", { name: /All tickets/ });
   expect(screen.queryByRole("button", { name: /^Chats/ })).toBeNull();
   expect(screen.queryByRole("button", { name: "Automations" })).toBeNull();
-  // With Chat off, Capture is a direct action beside New ticket.
+  // Capture moved from the header to the shared palette.
   expect(
-    screen.getByRole("button", { name: "Capture a thought" }),
-  ).toBeTruthy();
+    screen.queryByRole("button", { name: "Capture a thought" }),
+  ).toBeNull();
   expect(
     screen.queryByRole("button", { name: "More ways to create" }),
   ).toBeNull();
 });
 
-test("with Chat on, Automations follows Chats in the sidebar and opens its page", async () => {
+test("with Chat on, Automations opens from the sidebar", async () => {
   app(createMockChatClient({ enabled: true }));
-  const chats = await screen.findByRole("button", { name: "Chats" });
-  const entry = screen.getByRole("button", { name: "Automations" });
-  expect(
-    chats.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-
+  await screen.findByRole("button", { name: "Chats" });
+  const entry = await screen.findByRole("button", { name: "Automations" });
   fireEvent.click(entry);
-
   expect(entry.getAttribute("aria-current")).toBe("page");
-  const tabs = within(await screen.findByRole("radiogroup", { name: "Show" }));
-  expect(tabs.getByRole("radio", { name: /^Automations/ })).toBeTruthy();
-  fireEvent.click(tabs.getByRole("radio", { name: /^Agents/ }));
+  expect(
+    await screen.findByRole("region", { name: "Automation list" }),
+  ).toBeTruthy();
+  await selectAutomationView("Agents");
   expect(await screen.findByRole("list", { name: "Agents" })).toBeTruthy();
 });
 
@@ -290,11 +288,8 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
     ).findByRole("button", { name: "Chats" }),
   ).toBeTruthy();
 
-  fireEvent.keyDown(
-    screen.getByRole("button", { name: "More ways to create" }),
-    { key: "Enter" },
-  );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "New Chat" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+  fireEvent.click(await screen.findByRole("option", { name: "New Chat" }));
   expect(
     await screen.findByRole("heading", { name: "What should we work on?" }),
   ).toBeTruthy();

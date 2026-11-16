@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/sync-review-sync-review.css";
+
 /* Sync review: layout only. Every colour, radius, shadow and font size is an
    existing token from styles.css. */
 
@@ -12,21 +14,9 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  color: var(--muted-foreground);
-}
-.sync-compare-head strong {
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
-  color: var(--foreground);
 }
 .sync-compare-field {
   padding-top: 12px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
 }
 /* The radio group spans both value columns so its choices sit under their heads. */
 .sync-compare-choices {
@@ -37,9 +27,6 @@
   min-width: 0;
 }
 /* A value is the tile's title: long text reads at body weight. */
-.sync-compare-choices .sync-body {
-  font-weight: 400;
-}
 .sync-value {
   display: flex;
   align-items: center;
@@ -55,25 +42,15 @@
   display: block;
   max-height: 240px;
   overflow: auto;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 /* Changed text: underline or strikethrough on the accent fill. */
 .sync-body ins,
 .sync-body del {
   padding: 0 2px;
-  border-radius: var(--radius-segment);
-  background: var(--accent);
 }
 .sync-body ins {
-  text-decoration: underline;
   text-underline-offset: 3px;
-}
-.sync-body del {
-  text-decoration: line-through;
-  color: var(--muted-foreground);
 }
 .sync-result {
   grid-column: 1 / -1;
@@ -83,9 +60,17 @@
 }
 .sync-result textarea {
   min-height: 132px;
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
   resize: vertical;
+}
+
+/* Reserve recovery feedback before any read or restore result arrives. */
+.sync-history-feedback {
+  flex: none;
+  height: 24px;
+  min-width: 0;
+}
+.sync-history-feedback .ui-failure-inline {
+  height: 100%;
 }
 
 /* History: versions on the left, the selected one compared with now on the right. */
@@ -95,7 +80,6 @@
   min-height: 420px;
   max-height: 60vh;
   margin: 0 -24px -24px;
-  box-shadow: 0 -1px 0 0 var(--border);
 }
 .sync-history-list {
   display: flex;
@@ -103,15 +87,10 @@
   gap: 4px;
   padding: 12px 8px;
   overflow: auto;
-  box-shadow: 1px 0 0 0 var(--border);
 }
 .sync-history-list h3,
 .sync-history-list p {
   margin: 8px 8px 4px;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 400;
-  color: var(--muted-foreground);
 }
 .sync-history-list ul {
   display: flex;
@@ -119,7 +98,6 @@
   gap: 2px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .sync-version {
   display: flex;
@@ -128,25 +106,6 @@
   gap: 2px;
   width: 100%;
   padding: 8px;
-  border-radius: var(--radius);
-  text-align: left;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.sync-version:hover {
-  background: var(--hover);
-}
-.sync-version[aria-current="true"] {
-  background: var(--accent);
-}
-.sync-version:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.sync-version small {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  color: var(--muted-foreground);
 }
 .sync-history-detail {
   display: flex;
@@ -155,26 +114,15 @@
   min-width: 0;
   padding: 16px 24px 24px;
   overflow: auto;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .sync-changes {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px 12px;
 }
-.sync-changes > .sync-col {
-  font-size: var(--text-caption);
-  color: var(--muted-foreground);
-}
-.sync-changes > .sync-key {
-  color: var(--muted-foreground);
-}
 .sync-changes > .sync-pane {
   min-width: 0;
   padding: 8px 12px;
-  border-radius: var(--radius);
-  background: var(--recessed);
 }
 .sync-history-empty {
   grid-column: 1 / -1;
@@ -193,6 +141,16 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Preserve readable comparison columns on the narrow dialog. */
+@media (max-width: 600px) {
+  .sync-history {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 128px minmax(0, 1fr);
+    min-height: 320px;
+    max-height: none;
+  }
 }
 
 /* Attachment availability. */

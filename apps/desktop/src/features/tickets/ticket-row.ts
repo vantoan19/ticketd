@@ -50,12 +50,13 @@ export type RowContextKind = "duplicate" | "subticket" | "plan" | "project";
 export function rowContextItem(
   ticket: Ticket,
   scope: RowScope,
+  includeDuplicate = true,
 ): { kind: RowContextKind; label: string } | null {
-  if (ticket.duplicate_of)
+  if (includeDuplicate && ticket.duplicate_of)
     return { kind: "duplicate", label: `Duplicate of ${ticket.duplicate_of}` };
   // An externally closed duplicate names the source's canonical issue, or says it is unknown.
   const target = externalDuplicateTarget(ticket);
-  if (target)
+  if (includeDuplicate && target)
     return {
       kind: "duplicate",
       label:

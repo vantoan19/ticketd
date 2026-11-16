@@ -1,3 +1,4 @@
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -200,6 +201,7 @@ export function RestoreDialog({
   /** Reloads open views from the restored workspace. */
   onRestored: () => Promise<void>;
 }) {
+  const presence = useDialogPresence(onClose);
   const [file, setFile] = useState(path);
   const [phase, setPhase] = useState<Phase>({ name: "checking" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
@@ -208,6 +210,7 @@ export function RestoreDialog({
   );
   const latest = useRef(0);
   const recovery = useDraftRecovery();
+  const attachmentDetails = useRef<HTMLDivElement>(null);
 
   const check = useCallback(async (next: string) => {
     const request = ++latest.current;
@@ -305,13 +308,17 @@ export function RestoreDialog({
   const invalid = phase.name === "unreadable" || issue !== null;
   return (
     <DialogShell
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
+      {...presence.dialog}
       size="lg"
       busy={phase.name === "restoring"}
-      title={done ? "Workspace restored" : "Replace this workspace?"}
+      title={
+        done
+          ? "Workspace restored"
+          : invalid
+            ? "Review backup"
+            : "Replace this workspace?"
+      }
+      bodyBoundary="divider"
       description={
         done
           ? "The workspace now matches the backup."
@@ -422,8 +429,17 @@ export function RestoreDialog({
       )}
 
       {valid && attachments && (
-        <Disclosure label="Attachment details">
+        <Disclosure
+          label="Attachment details"
+          onOpenChange={(open) => {
+            if (open)
+              requestAnimationFrame(() =>
+                attachmentDetails.current?.scrollIntoView({ block: "nearest" }),
+              );
+          }}
+        >
           <div
+            ref={attachmentDetails}
             className="restore-attachments"
             aria-label="Attachment completeness"
           >

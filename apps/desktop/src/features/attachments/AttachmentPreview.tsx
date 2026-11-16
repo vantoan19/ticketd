@@ -2,11 +2,13 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { Download, Ellipsis, Link, X } from "lucide-react";
+import { ArrowLeft, Download, Ellipsis, Link, X } from "lucide-react";
 import {
   Alert,
   AlertActions,
@@ -14,6 +16,7 @@ import {
   AlertDescription,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { CopyButton } from "@/components/ui/copy-button";
 import {
   Dialog,
@@ -31,6 +34,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import { PaneHeader } from "@/components/ui/list-header";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
 import { IconButton } from "@/components/ui/icon-button";
 import { RecordLink } from "@/components/ui/record-link";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,6 +73,10 @@ import { fileType, purged } from "./file-words";
 import { formatSize } from "./format-size";
 import "./attachment-preview.css";
 
+export type AttachmentPreviewCommands = {
+  open: (() => void) | null;
+  more: (() => void) | null;
+};
 export type PreviewTarget =
   { uri: string } | { id: string; initial?: Attachment };
 export type ReferenceReplacement = (
@@ -325,6 +338,8 @@ function PreviewHeader({
   menuItems,
   renaming,
   onRenamingChange,
+  pane = false,
+  onCommandsChange,
 }: {
   preview: Preview;
   /** The heading element: the dialog's title, or the pane's h2. */
@@ -335,6 +350,9 @@ function PreviewHeader({
   onReplace: (() => void) | undefined;
   onChanged: (() => void) | undefined;
   menuItems: ReactNode;
+  pane?: boolean;
+  onCommandsChange?:
+    ((commands: AttachmentPreviewCommands | null) => void) | undefined;
   renaming: boolean;
   onRenamingChange: (renaming: boolean) => void;
 }) {
@@ -346,135 +364,201 @@ function PreviewHeader({
   const blocked = openBlocked(preview);
   const canRestore = Boolean(file?.quarantined) && !preview.gone;
   const notDownloaded = preview.stored?.state === "not_downloaded";
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreTrigger = useRef<HTMLButtonElement>(null);
+  const wasRenaming = useRef(renaming);
+  useLayoutEffect(() => {
+    if (
+      wasRenaming.current &&
+      !renaming &&
+      document.activeElement === document.body
+    )
+      moreTrigger.current?.focus({ preventScroll: true });
+    wasRenaming.current = renaming;
+  }, [renaming]);
+  const open = useCallback(() => {
+    if (file && !busy && blocked === null)
+      void preview.action("open the file", () => attachments.open(file.id));
+  }, [file, busy, blocked, preview]);
+  const openRef = useRef(open);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+  const canOpen = Boolean(file) && !busy && blocked === null;
+  const callbacks = useMemo<AttachmentPreviewCommands>(
+    () => ({
+      open: canOpen ? () => openRef.current() : null,
+      more: file && !busy ? () => setMoreOpen(true) : null,
+    }),
+    [canOpen, file, busy],
+  );
+  useEffect(() => {
+    onCommandsChange?.(callbacks);
+    return () => onCommandsChange?.(null);
+  }, [callbacks, onCommandsChange]);
   const openButton = file && (
     <Button
+      variant="outline"
       size="sm"
+      aria-keyshortcuts={ariaKeyShortcuts("attachments-open")}
       disabled={busy || blocked !== null}
       // The visible "Open" names what it opens for assistive technology.
-      {...(!external && { "aria-label": "Open file" })}
-      onClick={() =>
-        void preview.action("open the file", () => attachments.open(file.id))
-      }
+      aria-label={external ? "Open in Drive" : "Open file"}
+      onClick={open}
     >
       {external ? "Open in Drive" : "Open"}
     </Button>
   );
   return (
-    <header
-      className="attachment-preview-header"
-      data-renaming={renaming || undefined}
-    >
-      <FileIcon family={family} className="attachment-preview-glyph" />
-      {renaming && file ? (
-        <RenameAttachment
-          file={file}
-          onClose={() => onRenamingChange(false)}
-          onRenamed={(next) => {
-            preview.renamed(next);
-            onChanged?.();
-          }}
-        />
-      ) : (
-        <span className="attachment-preview-title">
-          {title(file?.display_name ?? "Attachment")}
-        </span>
-      )}
-      {!renaming && (
-        <span className="attachment-preview-actions">
-          {openButton &&
-            (blocked ? (
-              <Tooltip content={blocked}>
-                {/* A disabled button takes no pointer events; its wrapper keeps the reason. */}
-                <span tabIndex={0} className="inline-flex">
+    <PaneHeader
+      title={file?.display_name ?? "Attachment"}
+      titleLevel={2}
+      icon={<FileIcon family={family} />}
+      leading={
+        pane ? (
+          <IconButton
+            label="Back to Attachments"
+            shortcut={shortcutLabel("attachments-back")}
+            aria-keyshortcuts={ariaKeyShortcuts("attachments-back")}
+            onClick={onClose}
+          >
+            <ArrowLeft />
+          </IconButton>
+        ) : undefined
+      }
+      titleEditor={
+        renaming && file ? (
+          <RenameAttachment
+            file={file}
+            onClose={() => onRenamingChange(false)}
+            onRenamed={(next) => {
+              preview.renamed(next);
+              onChanged?.();
+            }}
+          />
+        ) : (
+          <span className="attachment-preview-title">
+            {title(file?.display_name ?? "Attachment")}
+          </span>
+        )
+      }
+      actions={
+        !renaming && (
+          <span className="attachment-preview-actions">
+            {openButton &&
+              (blocked ? (
+                <Tooltip content={blocked}>
+                  {/* A disabled button takes no pointer events; its wrapper keeps the reason. */}
+                  <span tabIndex={0} className="inline-flex">
+                    {openButton}
+                  </span>
+                </Tooltip>
+              ) : (
+                <Tooltip
+                  content={external ? "Open in Drive" : "Open file"}
+                  shortcut={shortcutLabel("attachments-open")}
+                >
                   {openButton}
-                </span>
-              </Tooltip>
-            ) : (
-              openButton
-            ))}
-          {file && external && workspace && (
-            <ExportMarkdownButton
-              compact
-              label={uploadedCopy ? "Export" : "Export link"}
-              source={{
-                kind: "markdown",
-                body: `<ticketd://attachment/${workspace}/${file.id}>`,
-              }}
-            />
-          )}
-          {file && !external && (
-            <IconButton
-              label="Export file"
-              disabled={busy || preview.gone}
-              onClick={() =>
-                void preview.action("export the file", () =>
-                  attachments.export(file),
-                )
-              }
-            >
-              <Download />
-            </IconButton>
-          )}
-          {preview.link && !preview.gone && !file?.quarantined && (
-            <CopyButton text={preview.link} label="Copy link" icon={<Link />} />
-          )}
-          {file && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton label="More actions" disabled={busy}>
-                  <Ellipsis />
-                </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => onRenamingChange(true)}>
-                  Rename…
-                </DropdownMenuItem>
-                {onReplace && (
-                  <DropdownMenuItem onSelect={onReplace}>
-                    Replace…
-                  </DropdownMenuItem>
-                )}
-                {notDownloaded && (
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      void preview.action("download the file", () =>
-                        preview.availability.download(file.id),
-                      )
-                    }
+                </Tooltip>
+              ))}
+            {file && external && workspace && (
+              <ExportMarkdownButton
+                compact
+                label={uploadedCopy ? "Export" : "Export link"}
+                source={{
+                  kind: "markdown",
+                  body: `<ticketd://attachment/${workspace}/${file.id}>`,
+                }}
+              />
+            )}
+            {file && !external && (
+              <IconButton
+                label="Export file"
+                disabled={busy || preview.gone}
+                onClick={() =>
+                  void preview.action("export the file", () =>
+                    attachments.export(file),
+                  )
+                }
+              >
+                <Download />
+              </IconButton>
+            )}
+            {preview.link && !preview.gone && !file?.quarantined && (
+              <CopyButton
+                text={preview.link}
+                label="Copy link"
+                icon={<Link />}
+              />
+            )}
+            {file && (
+              <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    ref={moreTrigger}
+                    label="More actions"
+                    shortcut={shortcutLabel("attachments-more")}
+                    aria-keyshortcuts={ariaKeyShortcuts("attachments-more")}
+                    disabled={busy}
                   >
-                    Download
+                    <Ellipsis />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onRenamingChange(true)}>
+                    Rename…
                   </DropdownMenuItem>
-                )}
-                {canRestore && (
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      void preview.action("restore the file", async () => {
-                        await attachments.restore(file.id, crypto.randomUUID());
-                        preview.retry();
-                        onChanged?.();
-                      })
-                    }
-                  >
-                    Restore
-                  </DropdownMenuItem>
-                )}
-                {menuItems && (
-                  <>
-                    <DropdownMenuSeparator />
-                    {menuItems}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {close(
-            <IconButton label="Close" onClick={onClose}>
-              <X />
-            </IconButton>,
-          )}
-        </span>
-      )}
-    </header>
+                  {onReplace && (
+                    <DropdownMenuItem onSelect={onReplace}>
+                      Replace…
+                    </DropdownMenuItem>
+                  )}
+                  {notDownloaded && (
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        void preview.action("download the file", () =>
+                          preview.availability.download(file.id),
+                        )
+                      }
+                    >
+                      Download
+                    </DropdownMenuItem>
+                  )}
+                  {canRestore && (
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        void preview.action("restore the file", async () => {
+                          await attachments.restore(
+                            file.id,
+                            crypto.randomUUID(),
+                          );
+                          preview.retry();
+                          onChanged?.();
+                        })
+                      }
+                    >
+                      Restore
+                    </DropdownMenuItem>
+                  )}
+                  {menuItems && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {menuItems}
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {!pane &&
+              close(
+                <IconButton label="Close" onClick={onClose}>
+                  <X />
+                </IconButton>,
+              )}
+          </span>
+        )
+      }
+    />
   );
 }
 
@@ -687,7 +771,17 @@ function PreviewStage({
       </div>
     );
   return (
-    <div className="attachment-preview-stage">
+    <div
+      className="attachment-preview-stage"
+      data-image={
+        type.family === "image" &&
+        !preview.missing &&
+        !preview.gone &&
+        !external
+          ? ""
+          : undefined
+      }
+    >
       {notice}
       <div className="attachment-preview-canvas">{body}</div>
     </div>
@@ -724,12 +818,12 @@ function PreviewFacts({
             <dd>{storedWord(preview)}</dd>
             <dt>Type</dt>
             <dd>{type.word}</dd>
-            {file.size_bytes != null && (
-              <>
-                <dt>Size</dt>
-                <dd>{formatSize(file.size_bytes)}</dd>
-              </>
-            )}
+            <dt>Size</dt>
+            <dd>
+              {file.size_bytes != null
+                ? formatSize(file.size_bytes)
+                : "Not recorded"}
+            </dd>
           </>
         )}
         <dt>Added</dt>
@@ -828,6 +922,7 @@ export function AttachmentPreview({
   actions?: ReactNode;
 }) {
   const preview = usePreview(target);
+  const presence = useDialogPresence(onClose);
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const replacementRequest = useRef<AbortController | null>(null);
@@ -835,7 +930,7 @@ export function AttachmentPreview({
   useEffect(() => () => replacementRequest.current?.abort(), []);
   function close() {
     replacementRequest.current?.abort();
-    onClose();
+    presence.close();
   }
   const replace = onReplace
     ? () => {
@@ -872,12 +967,20 @@ export function AttachmentPreview({
     );
   return (
     <Dialog
-      open
+      open={presence.dialog.open}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
-      <DialogContent variant="flush" size="viewer" showCloseButton={false}>
+      <DialogContent
+        variant="flush"
+        size="viewer"
+        showCloseButton={false}
+        inert={!presence.dialog.open || undefined}
+        onCloseAutoFocus={() => {
+          if (!presence.dialog.open) presence.dialog.onExitComplete();
+        }}
+      >
         <div className="attachment-preview" data-layout="viewer">
           <PreviewHeader
             preview={preview}
@@ -895,7 +998,6 @@ export function AttachmentPreview({
               ? `${fileType(file.original_filename).word} preview`
               : "Preview"}
           </DialogDescription>
-          <PreviewFailure preview={preview} />
           <div className="attachment-preview-body">
             <PreviewStage
               preview={preview}
@@ -915,6 +1017,7 @@ export function AttachmentPreview({
               onNavigate={close}
               actions={actions}
             />
+            <PreviewFailure preview={preview} />
           </div>
         </div>
       </DialogContent>
@@ -934,6 +1037,7 @@ export function AttachmentPreviewPane({
   onChanged,
   menuItems,
   renameRequest = 0,
+  onCommandsChange,
 }: {
   file: Attachment;
   onClose: () => void;
@@ -941,6 +1045,7 @@ export function AttachmentPreviewPane({
   menuItems?: ReactNode;
   /** Bumped by the list's "Rename…" to start renaming in the header. */
   renameRequest?: number;
+  onCommandsChange?: (commands: AttachmentPreviewCommands | null) => void;
 }) {
   const preview = usePreview({ id: initial.id, initial });
   const [renaming, setRenaming] = useState(renameRequest > 0);
@@ -951,15 +1056,51 @@ export function AttachmentPreviewPane({
   }
   const openSettings = useContext(SettingsNavigation);
   const titleId = `attachment-preview-${initial.id}`;
+  const paneRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    paneRef.current?.querySelector<HTMLElement>("h2")?.focus();
+  }, []);
   return (
     <section
+      ref={paneRef}
       className="attachment-preview"
       data-layout="pane"
       aria-labelledby={titleId}
+      onKeyDown={(event) => {
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest(
+            "input, textarea, [contenteditable], [role='menu']",
+          )
+        )
+          return;
+        if (matchesShortcut(event, "attachments-open")) {
+          event.preventDefault();
+          event.currentTarget
+            .querySelector<HTMLButtonElement>(
+              "[aria-label='Open file'], [aria-label='Open in Drive']",
+            )
+            ?.click();
+        }
+        if (matchesShortcut(event, "attachments-more")) {
+          event.preventDefault();
+          event.currentTarget
+            .querySelector<HTMLButtonElement>("[aria-label='More actions']")
+            ?.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+            );
+        }
+      }}
     >
       <PreviewHeader
+        pane
+        onCommandsChange={onCommandsChange}
         preview={preview}
-        title={(name) => <h2 id={titleId}>{name}</h2>}
+        title={(name) => (
+          <h2 tabIndex={-1} id={titleId}>
+            {name}
+          </h2>
+        )}
         onClose={onClose}
         close={(button) => button}
         onReplace={undefined}
@@ -968,7 +1109,6 @@ export function AttachmentPreviewPane({
         renaming={renaming}
         onRenamingChange={setRenaming}
       />
-      <PreviewFailure preview={preview} />
       <div className="attachment-preview-body">
         <PreviewStage
           preview={preview}
@@ -979,6 +1119,7 @@ export function AttachmentPreviewPane({
           onChanged={onChanged}
         />
         <PreviewFacts preview={preview} onNavigate={() => {}} actions={null} />
+        <PreviewFailure preview={preview} />
       </div>
     </section>
   );

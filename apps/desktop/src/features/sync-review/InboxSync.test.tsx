@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 
 import {
@@ -149,7 +150,7 @@ test("a replaced file and a record too large to sync are worded as what they are
   ).toBeTruthy();
 });
 
-test("sync entries sit among the others by time and follow the Unread filter", async () => {
+test("sync entries sit among Updates by time and mark only shown unread entries", async () => {
   ordinary = [
     {
       id: 1,
@@ -174,12 +175,8 @@ test("sync entries sit among the others by time and follow the Unread filter", a
     "Rate-limit failed login attempts",
     "A Drive file could not be read",
   ]);
-  fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
-  await waitFor(() =>
-    expect(screen.queryByText("A Drive file could not be read")).toBeNull(),
-  );
   expect(screen.getByText(/^Needs review/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Mark shown as read" }));
+  fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
   await waitFor(() =>
     expect(syncReview.setRead).toHaveBeenCalledWith(
       ["notice-1", "guid-12"],
@@ -228,8 +225,6 @@ test("a failed mark as read says what the host reported", async () => {
       name: /Mark .* unread/,
     }),
   );
-  // The host's words, made a sentence; the raw text waits under Details.
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't mark as unread. The Workspace is busy.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByText(/the Workspace is busy/)).toBeTruthy();
 });

@@ -107,6 +107,7 @@ function bridgeAnswers(
 ) {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_sources") return [githubEntry];
+    if (command === "show_ticket") return ticket();
     if (command === "preview_publication") return preview;
     if (command === "publish_ticket") {
       if (publish) throw { ...publish.reject, fields: [] };
@@ -530,7 +531,13 @@ test("a refusal says nothing was created and allows another try", async () => {
     await within(dialog).findByRole("button", { name: "Publish issue" }),
   );
   const alert = await within(dialog).findByRole("alert");
-  expect(alert.textContent).toContain("no permission");
+  expect(alert.textContent).not.toContain("no permission");
+  fireEvent.click(within(alert).getByRole("button", { name: "Details" }));
+  expect(
+    screen.getByText(
+      "T-KQ1 was not published and remains a local ticket: no permission",
+    ),
+  ).toBeTruthy();
   expect(alert.textContent?.toLowerCase()).toContain("nothing was created");
   expect(
     (
@@ -775,7 +782,7 @@ test("an issue whose text differs is attached only after the person confirms it"
   fireEvent.click(
     within(dialog).getByRole("button", { name: "This is acme/api#22" }),
   );
-  await within(dialog).findByText(/does not hold what ticketd sent/);
+  await within(dialog).findByText(/has different content/);
   expect(confirmed).toBe(false);
   expect(refresh).not.toHaveBeenCalled();
   fireEvent.click(

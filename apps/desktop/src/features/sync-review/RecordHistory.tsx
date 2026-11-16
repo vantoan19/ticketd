@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useDialogPresence } from "@/components/ui/use-dialog-presence";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -6,7 +7,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSyncStatus } from "@/features/sync/sync-status";
 import { formatTime } from "@/lib/format";
-import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { FailureState } from "@/components/ui/failure-alert";
 import {
   syncReview,
   type Version,
@@ -79,6 +84,7 @@ export function RecordHistory({
   onClose: () => void;
   onRestored?: () => void;
 }) {
+  const presence = useDialogPresence(onClose);
   const connected = useSyncStatus().status?.connection === "connected";
   const [local, setLocal] = useState<Entry[] | null>(null);
   /** `null` until Drive was asked and answered. */
@@ -89,7 +95,15 @@ export function RecordHistory({
     version: Chosen;
     fields: VersionDetail["fields"];
   } | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{
+    failure: FailureDescription;
+    retry: () => void;
+  } | null>(null);
+  const [readAttempt, setReadAttempt] = useState(0);
+  const reload = useCallback(() => {
+    setError(null);
+    setReadAttempt((attempt) => attempt + 1);
+  }, []);
   const [busy, setBusy] = useState(false);
   // Set at once, where `busy` waits for a render: a second submit finds it.
   const restoring = useRef(false);
@@ -104,7 +118,11 @@ export function RecordHistory({
           await syncReview.versions({ kind, id, source: "local" }),
         );
       } catch (reason) {
-        if (active) setError(toFailure(reason).message);
+        if (active)
+          setError({
+            failure: describeFailure(reason, "load versions"),
+            retry: reload,
+          });
         return;
       }
       if (!active) return;
@@ -123,22 +141,29 @@ export function RecordHistory({
         setDrive(older);
         setSelected(older[0] ?? null);
       } catch (reason) {
-        if (active) setError(toFailure(reason).message);
+        if (active)
+          setError({
+            failure: describeFailure(reason, "load versions"),
+            retry: reload,
+          });
       }
     })();
     return () => {
       active = false;
     };
-  }, [kind, id]);
+  }, [kind, id, readAttempt, reload]);
   async function older() {
     setAsking(true);
-    setError("");
+    setError(null);
     try {
       setDrive(
         from("drive", await syncReview.versions({ kind, id, source: "drive" })),
       );
     } catch (reason) {
-      setError(toFailure(reason).message);
+      setError({
+        failure: describeFailure(reason, "load older versions"),
+        retry: () => void older(),
+      });
     }
     setAsking(false);
   }
@@ -152,18 +177,22 @@ export function RecordHistory({
         if (active) setDetail({ version: { source, id: version }, fields });
       },
       (reason: unknown) => {
-        if (active) setError(toFailure(reason).message);
+        if (active)
+          setError({
+            failure: describeFailure(reason, "load this version"),
+            retry: reload,
+          });
       },
     );
     return () => {
       active = false;
     };
-  }, [kind, id, source, version]);
+  }, [kind, id, source, version, readAttempt, reload]);
   async function restore() {
     if (!selected || restoring.current) return;
     restoring.current = true;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await syncReview.restore(
         { kind, id, source: selected.source },
@@ -171,9 +200,12 @@ export function RecordHistory({
         requestId([selected.source, selected.id]),
       );
       onRestored?.();
-      onClose();
+      presence.close();
     } catch (reason) {
-      setError(toFailure(reason).message);
+      setError({
+        failure: describeFailure(reason, "restore this version"),
+        retry: () => void restore(),
+      });
       restoring.current = false;
       setBusy(false);
     }
@@ -201,10 +233,7 @@ export function RecordHistory({
         : null;
   return (
     <DialogShell
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
+      {...presence.dialog}
       title="History"
       description={subtitle}
       primaryLabel="Restore"
@@ -219,7 +248,16 @@ export function RecordHistory({
       size="lg"
       busy={busy}
     >
-      {error && <p role="alert">{error}</p>}
+      <div className="sync-history-feedback">
+        {error && (
+          <FailureState
+            failure={error.failure}
+            onRetry={error.retry}
+            size="inline"
+            detailsVariant="popover"
+          />
+        )}
+      </div>
       <div className="sync-history">
         {!loaded ? (
           !error && (

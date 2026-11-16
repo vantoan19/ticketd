@@ -101,6 +101,7 @@ beforeEach(() => {
       command: string,
       args?: {
         filter?: FindFilter;
+        projection?: string;
         reference?: string;
         id?: string;
         archived?: boolean | null;
@@ -162,9 +163,9 @@ beforeEach(() => {
         if (override) return override;
         const { offset, limit } = args.filter;
         if (limit > 50) throw new Error("Search batches must remain bounded");
-        return matching(args.filter)
-          .slice(offset, offset + limit)
-          .map((ticket) => ({ ticket, latest_update: null }));
+        const items = matching(args.filter).slice(offset, offset + limit);
+        if (args.projection) return { items, omitted: false };
+        return items.map((ticket) => ({ ticket, latest_update: null }));
       }
       if (command === "count_tickets" && args?.filter)
         return counts(matching(args.filter));
@@ -281,7 +282,7 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   expect(
     screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
   ).toBe("true");
-  expect(screen.queryByRole("button", { name: "Add to Plan…" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
   expect(screen.queryByRole("button", { name: /^Edit purpose/ })).toBeNull();
   expect(
     screen.queryByRole("button", { name: "Actions for Release specification" }),
@@ -314,10 +315,10 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   expect(
     screen.queryByText("Archived", { selector: '[data-slot="badge"]' }),
   ).toBeNull();
-  expect(screen.getByRole("button", { name: "Add to Plan…" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
 });
 
-test("Plan ticket details retain their draft and return to the same Board position and card focus after Dependencies", async () => {
+test("Plan ticket details retain their draft and return to the same Board position and card focus after Flow", async () => {
   render(<App />);
   await settle();
   await openPlan();
@@ -332,9 +333,9 @@ test("Plan ticket details retain their draft and return to the same Board positi
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Keep my Plan ticket draft" },
   });
-  chooseView("Dependencies");
+  chooseView("Flow");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "See all Plan tickets" }));
+  chooseView("Board");
   await settle();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
@@ -376,7 +377,7 @@ function chooseView(name: string) {
   );
 }
 
-test("Plans remember List and Board independently of Dependencies while preserving their header and context", async () => {
+test("Plans remember List and Board independently of Flow while preserving their header and context", async () => {
   render(<App />);
   await settle();
   await openPlan();
@@ -393,8 +394,8 @@ test("Plans remember List and Board independently of Dependencies while preservi
     screen.getByRole("button", { name: "Spec: Release specification" }),
   ).toBeTruthy();
   expect(screen.getByText("1 of 2 done")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Add to Plan…" })).toBeTruthy();
-  chooseView("Dependencies");
+  expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
+  chooseView("Flow");
   await settle();
   expect(
     screen.queryByRole("region", { name: "Ticket status board" }),
@@ -402,12 +403,12 @@ test("Plans remember List and Board independently of Dependencies while preservi
   expect(
     JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketLayout,
   ).toBe("board");
-  fireEvent.click(screen.getByRole("button", { name: "See all Plan tickets" }));
+  chooseView("Board");
   await settle();
   expect(
     screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
   ).toBe("true");
-  chooseView("Dependencies");
+  chooseView("Flow");
   await settle();
   await openPlan("Next release");
   expect(
@@ -422,7 +423,7 @@ test("a Plan's chosen ticket layout survives restarting the desktop", async () =
   await openPlan();
   chooseView("Board");
   await settle();
-  chooseView("Dependencies");
+  chooseView("Flow");
   await settle();
   first.unmount();
   render(<App />);
@@ -433,9 +434,9 @@ test("a Plan's chosen ticket layout survives restarting the desktop", async () =
   ).toBe("true");
   chooseView("List");
   await settle();
-  chooseView("Dependencies");
+  chooseView("Flow");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "See all Plan tickets" }));
+  chooseView("List");
   await settle();
   expect(
     screen.getByRole("radio", { name: "List" }).getAttribute("aria-checked"),
@@ -493,14 +494,9 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   expect(
     todo.queryByRole("button", { name: /^Show \d+ more Todo$/ }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "Ticket 2" },
-  });
-  await settle();
   await chooseFilter("Status", "Todo");
   await settle();
-  expect(todo.getByLabelText("11 matching tickets")).toBeTruthy();
+  expect(todo.getByLabelText("55 matching tickets")).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByLabelText(
       "0 matching tickets",
@@ -514,8 +510,5 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   expect(
     screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: "Remove Search: Ticket 2" }),
-  ).toBeTruthy();
-  expect(todo.getByLabelText("11 matching tickets")).toBeTruthy();
+  expect(todo.getByLabelText("55 matching tickets")).toBeTruthy();
 });

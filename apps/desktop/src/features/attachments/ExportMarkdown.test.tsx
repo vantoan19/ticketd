@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -184,7 +185,8 @@ test("file-manager failures are announced inside the export result", async () =>
   fireEvent.click(
     within(result).getByRole("button", { name: "Show manifest" }),
   );
-  expect((await within(result).findByRole("alert")).textContent).toContain(
+  await revealFailureDetails(result);
+  expect(within(result).getByRole("alert").textContent).toContain(
     "File manager unavailable",
   );
 });

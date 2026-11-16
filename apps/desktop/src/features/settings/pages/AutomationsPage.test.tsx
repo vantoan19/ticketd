@@ -111,8 +111,10 @@ test("the switch starts ticketd at sign-in and says so when the system refuses",
 
   refuse = "set_start_at_login";
   fireEvent.click(loginSwitch());
-  expect((await screen.findByRole("alert")).textContent).toContain(
+  expect((await screen.findByRole("alert")).textContent).not.toContain(
     "not allowed here",
   );
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
+  expect(screen.getByText("not allowed here")).toBeTruthy();
   expect(loginSwitch().getAttribute("aria-checked")).toBe("true");
 });

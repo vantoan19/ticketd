@@ -3,7 +3,10 @@ import { pathFor, type Route } from "./edge-routing";
 
 /** An edge drawn along a route computed around the cards, with its label placed clear of them. */
 export function RoutedEdge({ id, markerEnd, style, data, label }: EdgeProps) {
-  const route = (data as { route?: Route } | undefined)?.route;
+  const appearance = data as
+    | { route?: Route; workspace?: boolean; hot?: boolean; kind?: string }
+    | undefined;
+  const route = appearance?.route;
   if (!route) return null;
   return (
     <>
@@ -11,7 +14,15 @@ export function RoutedEdge({ id, markerEnd, style, data, label }: EdgeProps) {
         id={id}
         path={pathFor(route.points)}
         {...(markerEnd ? { markerEnd } : {})}
-        {...(style ? { style } : {})}
+        {...(appearance?.workspace
+          ? {
+              className: "ui-graph-workspace-edge",
+              "data-kind": appearance.kind,
+              "data-hot": appearance.hot || undefined,
+            }
+          : style
+            ? { style }
+            : {})}
       />
       {typeof label === "string" && label && (
         <EdgeLabelRenderer>

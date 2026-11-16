@@ -1,4 +1,6 @@
-import { Menu } from "lucide-react";
+import { Menu, Search } from "lucide-react";
+import { IconButton } from "@/components/ui/icon-button";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -11,10 +13,12 @@ import { Tooltip } from "@/components/ui/tooltip";
  * then unread Inbox items.
  */
 export function NarrowNav({
+  onOpenPalette,
   waitingChats,
   waitingRuns = 0,
   unreadInbox,
 }: {
+  onOpenPalette: (origin: HTMLButtonElement) => void;
   waitingChats: number;
   /** Automation runs that ended needing the person. */
   waitingRuns?: number;
@@ -34,14 +38,28 @@ export function NarrowNav({
     .join(", ");
   return (
     <span className="shell-nav">
-      <Tooltip content="Open navigation" side="bottom">
-        <SidebarTrigger aria-label={name}>
-          <Menu aria-hidden="true" />
-        </SidebarTrigger>
-      </Tooltip>
-      {(waiting || unread) && (
-        <StatusDot tone={waiting ? "attention" : "unread"} />
-      )}
+      <span className="shell-nav-button">
+        <Tooltip content="Open navigation" side="bottom">
+          <SidebarTrigger
+            aria-label={name}
+            data-responsive-navigation="navigation"
+          >
+            <Menu aria-hidden="true" />
+          </SidebarTrigger>
+        </Tooltip>
+        {(waiting || unread) && (
+          <StatusDot tone={waiting ? "attention" : "unread"} />
+        )}
+      </span>
+      <IconButton
+        label="Search"
+        data-responsive-navigation="search"
+        shortcut={shortcutLabel("command-palette")}
+        aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
+        onClick={(event) => onOpenPalette(event.currentTarget)}
+      >
+        <Search aria-hidden="true" />
+      </IconButton>
     </span>
   );
 }

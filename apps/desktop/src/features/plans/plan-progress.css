@@ -1,0 +1,14 @@
+@import "../../components/ui/surface-roles/plans-plan-progress.css";
+
+.plan-ring {
+  flex: none;
+  transform: rotate(-90deg);
+}
+
+.plan-split-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  min-width: 0;
+  overflow: hidden;
+}

@@ -17,6 +17,8 @@ export type StatusLineAction = {
  */
 export type StatusLineMessage = {
   message: string;
+  /** Raw diagnostics shown only in the anchored Details popover. */
+  details?: string;
   tone?: "default" | "error";
   icon?: ReactNode;
   action?: StatusLineAction;

@@ -19,5 +19,17 @@ export const ProjectNavigation = createContext<((id: string) => void) | null>(
  * `dependencies` opens a ticket's graph on its dependencies.
  */
 export const ContextGraphNavigation = createContext<
-  ((id: string, options?: { dependencies?: boolean }) => void) | null
+  | ((
+      id: string,
+      options?: { dependencies?: boolean; workspacePlan?: string },
+    ) => void)
+  | null
 >(null);
+
+/** Commands from the palette target the mounted, active Workspace graph. */
+export const WORKSPACE_GRAPH_COMMAND = "ticketd:workspace-graph-command";
+export function workspaceGraphCommand(command: "filter" | "view") {
+  window.dispatchEvent(
+    new CustomEvent(WORKSPACE_GRAPH_COMMAND, { detail: command }),
+  );
+}

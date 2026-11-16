@@ -1,4 +1,6 @@
 import * as React from "react";
+import { preserveNewerFocus } from "@/components/ui/use-focus-return";
+import { useClosingOverlayRef } from "@/components/ui/use-closing-overlay-ref";
 import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
@@ -78,18 +80,22 @@ function SelectTrigger({
  */
 function SelectContent({
   className,
+  ref,
   children,
   position = "popper",
   align = "start",
   sideOffset = 4,
   collisionPadding = 16,
   collisionBoundary,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
+        ref={contentRef}
         data-slot="select-content"
         className={cn(
           "ui-menu relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto",
@@ -103,6 +109,10 @@ function SelectContent({
         })}
         collisionPadding={collisionPadding}
         {...props}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (!event.defaultPrevented) preserveNewerFocus(event);
+        }}
       >
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport

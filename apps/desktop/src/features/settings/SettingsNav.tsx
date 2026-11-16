@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import {
   Sheet,
@@ -77,11 +79,13 @@ function useSettingsNavItems() {
  */
 export function SettingsNav({
   onBack,
+  resolveReturnFocus,
   origin = "tickets",
   selected = "appearance",
   onSelect,
 }: {
   onBack: () => void;
+  resolveReturnFocus?: () => HTMLElement | null;
   /** Where Back returns, by name ("tickets", "Attachments"): shell SH-21. */
   origin?: string;
   selected?: SettingsPageId;
@@ -90,6 +94,9 @@ export function SettingsNav({
   const { items, indicator } = useSettingsNavItems();
   const { query, navOpen = false, setNavOpen = () => {} } = useSettingsState();
   const mobile = useIsMobile();
+  useEffect(() => {
+    if (!mobile && navOpen) setNavOpen(false);
+  }, [mobile, navOpen, setNavOpen]);
   const modifier = modifierKeyLabel();
   const findHint = modifier === "Ctrl" ? "Ctrl+F" : `${modifier}F`;
   const shown = query.trim();
@@ -102,6 +109,7 @@ export function SettingsNav({
       <button
         type="button"
         className="settings-back"
+        data-responsive-navigation="settings-back"
         onClick={() => {
           setNavOpen(false);
           onBack();
@@ -114,6 +122,7 @@ export function SettingsNav({
         <button
           type="button"
           className="settings-nav-row settings-search-entry"
+          data-responsive-navigation="settings-section:search"
           aria-current={selected === "search" ? "page" : undefined}
           onClick={() => open("search")}
         >
@@ -146,11 +155,15 @@ export function SettingsNav({
                       <button
                         type="button"
                         className="settings-nav-row"
+                        data-responsive-navigation={`settings-section:${item.id}`}
                         aria-current={selected === item.id ? "page" : undefined}
                         onClick={() => open(item.id)}
                       >
                         <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
+                        {item.id === "chat" && (
+                          <Badge variant="experimental">Experimental</Badge>
+                        )}
                         {dot && (
                           <Tooltip content={dot.label} side="right">
                             <span
@@ -177,6 +190,7 @@ export function SettingsNav({
     return (
       <Sheet open={navOpen} onOpenChange={setNavOpen}>
         <SheetContent
+          {...(resolveReturnFocus && { resolveReturnFocus })}
           side="left"
           showCloseButton={false}
           size="nav"

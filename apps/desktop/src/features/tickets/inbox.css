@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-inbox.css";
+
 /* The Inbox is the list half of a triage split (S6): rows in the ticket
    row's anatomy, full width of the pane, the detail opening beside it. */
 .inbox {
@@ -14,82 +16,70 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding-bottom: 24px;
+  padding: 4px 0 64px;
   overflow-y: auto;
 }
-/* Day groups: the list's 32px recessed band, sticky like status groups. */
+/* Attention groups use quiet headings above inset rows (S08). */
 .inbox section h2 {
   position: sticky;
-  top: 0;
+  /* Cancel the scroll container’s initial list inset at the sticky edge. */
+  top: -4px;
   z-index: 1;
   display: flex;
   align-items: center;
-  height: 32px;
-  padding: 0 16px;
-  background: var(--recessed);
-  box-shadow:
-    0 1px 0 0 var(--group-hairline),
-    0 -1px 0 0 var(--group-hairline);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: var(--text-ui-line);
-  letter-spacing: -0.28px;
+  height: 36px;
+  gap: 8px;
+  margin: 6px 8px 0;
+  padding: 0 10px 0 12px;
+}
+.inbox section h2[data-stuck] {
+  margin-inline: 0;
+  padding-inline: 20px 18px;
+}
+.inbox section:first-of-type h2 {
+  margin-top: 0;
 }
 .inbox-entries {
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .inbox-entry {
   position: relative;
   display: flex;
   align-items: flex-start;
   min-width: 0;
-  padding: 0 8px 0 0;
-}
-.inbox-entry:hover {
-  background: var(--hover);
-}
-.inbox-entry[aria-current="true"] {
-  background: var(--accent);
-}
-.inbox-entry:has(.inbox-ticket:focus-visible) {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
+  margin: 0 8px;
+  gap: 8px;
+  padding: 10px 10px 10px 8px;
 }
 .inbox-dot {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 36px;
+  width: 10px;
+  height: 20px;
 }
 .inbox-ticket {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
-  min-height: 52px;
-  padding: 8px 0 6px;
-  text-align: left;
-  color: var(--foreground);
-}
-.inbox-ticket:focus-visible {
-  outline: none;
+  padding: 0;
 }
 .inbox-title-line {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .inbox-icon {
   display: flex;
   flex: none;
-  color: var(--muted-foreground);
+  width: 22px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
 }
 .inbox-icon svg {
   width: 16px;
@@ -99,21 +89,13 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* Unread: weight 500 and the dot (list I-02). */
-.inbox-entry[data-read="false"] .inbox-title {
-  font-weight: 500;
-}
 .inbox-summary {
   display: block;
-  padding-left: 22px;
+  padding-left: 30px;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* The time sits on the trailing edge; actions overlay it (list I-06). */
 .inbox-trailing {
@@ -123,41 +105,78 @@
   align-items: center;
   justify-content: flex-end;
   min-width: 40px;
-  height: 36px;
+  height: 20px;
   padding-left: 8px;
-}
-.inbox-trailing time {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  white-space: nowrap;
 }
 .inbox-actions {
   position: absolute;
-  top: 2px;
+  top: -6px;
   right: 0;
   display: flex;
   gap: 2px;
 }
-@media (hover: hover) and (pointer: fine) {
-  .inbox-actions {
-    opacity: 0;
-  }
-  .inbox-entry:hover .inbox-actions,
-  .inbox-entry:focus-within .inbox-actions,
-  .inbox-actions:has([data-state="open"]) {
-    opacity: 1;
-  }
-  .inbox-entry:hover time,
-  .inbox-entry:focus-within time,
-  .inbox-entry:has(.inbox-actions [data-state="open"]) time {
-    opacity: 0;
-  }
-}
 .inbox-snooze-time {
   margin-left: auto;
   padding-left: 16px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
+}
+
+.inbox-triage-document {
+  max-width: 680px;
+  width: 100%;
+  margin-inline: auto;
+  align-self: center;
+  padding: 24px 40px 0;
+}
+.inbox-triage-card {
+  padding: 14px 16px 12px;
+}
+.inbox-triage-context,
+.inbox-triage-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.inbox-triage-context svg {
+  width: 16px;
+  height: 16px;
+}
+.inbox-triage-actions {
+  margin-top: 12px;
+}
+.inbox-triage-spacer {
+  flex: 1;
+}
+.inbox-chat-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.ticket-detail[hidden] {
+  display: none;
+}
+.inbox-triage-evidence {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.inbox-triage-evidence > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-loading {
+  pointer-events: none;
+}
+.inbox-loading-summary {
+  display: flex;
+  align-items: center;
+  height: var(--text-preview-line);
+}
+
+.ticket-detail[data-expanded] .inbox-triage-document {
+  max-width: 760px;
 }

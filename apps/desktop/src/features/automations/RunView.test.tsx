@@ -197,8 +197,8 @@ const openRun = async () => {
   const view = render(page(0));
   const rows = await screen.findByRole("list", { name: "Automations" });
   fireEvent.click(await within(rows).findByRole("button"));
-  // The list header has a Runs view too; the second is the Automation's own.
-  fireEvent.click((await screen.findAllByRole("radio", { name: "Runs" }))[1]!);
+  // The Automation's Steps/Runs control opens its history.
+  fireEvent.click(await screen.findByRole("radio", { name: "Runs" }));
   const today = await screen.findByRole("list", { name: "Runs, Today" });
   fireEvent.click(within(today).getAllByRole("button")[0]!);
   const steps = await screen.findByRole("application", { name: "Steps" });

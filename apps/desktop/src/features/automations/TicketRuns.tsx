@@ -5,6 +5,11 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import {
   automationsClient,
@@ -38,23 +43,52 @@ export function RunNotices({
   chatOn,
 }: ReturnType<typeof useTicketRuns>) {
   const openRun = useContext(RunNavigation);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<{
+    description: FailureDescription;
+    retry?: () => void;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [needsCheck, setNeedsCheck] = useState(false);
   const [all, setAll] = useState(false);
   const waiting = runs.filter((run) => run.needs_you);
   const folded = all ? 0 : Math.max(0, waiting.length - SHOWN);
-  const act = (action: Promise<unknown>) => {
+  const act = (
+    action: () => Promise<unknown>,
+    verb: string,
+    retryable = true,
+  ) => {
     setBusy(true);
-    void action
-      .then(
-        () => setFailure(""),
-        (reason: unknown) => setFailure(String(reason)),
-      )
-      .finally(() => {
-        setBusy(false);
-        reload();
-      });
+    void (async () => {
+      let failed = false;
+      try {
+        await action();
+        setFailure(null);
+      } catch (reason) {
+        failed = true;
+        if (!retryable) setNeedsCheck(true);
+        setFailure({
+          description: describeFailure(reason, verb),
+          ...(retryable && { retry: () => act(action, verb) }),
+        });
+      }
+      // Run again queues a new identity. Keep its old button locked while a
+      // read establishes whether the earlier request already queued that run.
+      const known = await reload();
+      if (known && !retryable) setNeedsCheck(false);
+      if (known && failed && !retryable) setFailure(null);
+      setBusy(false);
+    })();
   };
+  const checkRuns = async () => {
+    setChecking(true);
+    if (await reload()) {
+      setNeedsCheck(false);
+      setFailure(null);
+    }
+    setChecking(false);
+  };
+
   return (
     <>
       {waiting.slice(0, waiting.length - folded).map((run) => (
@@ -93,8 +127,14 @@ export function RunNotices({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busy}
-                onClick={() => act(automationsClient.runAgain(run.id))}
+                disabled={busy || needsCheck}
+                onClick={() =>
+                  act(
+                    () => automationsClient.runAgain(run.id),
+                    "run this Automation again",
+                    false,
+                  )
+                }
               >
                 Run again
               </Button>
@@ -103,7 +143,12 @@ export function RunNotices({
               variant="ghost"
               size="sm"
               disabled={busy}
-              onClick={() => act(automationsClient.dismissRun(run.id))}
+              onClick={() =>
+                act(
+                  () => automationsClient.dismissRun(run.id),
+                  "dismiss this run",
+                )
+              }
             >
               Dismiss
             </Button>
@@ -122,10 +167,23 @@ export function RunNotices({
             : `Show ${folded} more runs that need attention`}
         </Button>
       )}
-      {(failure || error) && (
-        <p role="alert" className="mb-6">
-          {failure || error}
-        </p>
+      {failure && (
+        <FailureAlert
+          failure={failure.description}
+          {...(failure.retry && { onRetry: failure.retry })}
+          className="mb-6"
+        />
+      )}
+      {error && <FailureAlert failure={error} className="mb-6" />}
+      {(needsCheck || error) && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || checking}
+          onClick={() => void checkRuns()}
+        >
+          {checking ? "Checking saved runs…" : "Check saved runs"}
+        </Button>
       )}
     </>
   );

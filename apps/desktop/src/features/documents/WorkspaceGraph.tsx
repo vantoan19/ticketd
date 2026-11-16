@@ -1,3 +1,10 @@
+import { PlanRing } from "@/features/plans/PlanProgress";
+import type { PlanCounts } from "@/lib/api/plans";
+import { WORKSPACE_GRAPH_COMMAND } from "./navigation";
+import {
+  workspacePlanIslands,
+  planWorkspaceGraph,
+} from "@/features/plans/plan-workspace-graph";
 import { emptyCopy } from "@/lib/empty-copy";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -8,7 +15,7 @@ import {
 } from "@/components/ui/graph-kit";
 import { Reference } from "@/components/ui/reference";
 import { SearchInput } from "@/components/ui/search-input";
-import { Network, SearchX } from "lucide-react";
+import { Filter, Network, SearchX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -23,7 +30,6 @@ import {
   kindNames,
   openLabel,
   passageBetween,
-  opensAsMap,
   statusOf,
   stateLine,
 } from "./graph-text";
@@ -39,21 +45,42 @@ import { PaneHeader } from "@/components/ui/list-header";
 import { Count } from "@/components/ui/count";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Tooltip } from "@/components/ui/tooltip";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
 import { Switch } from "@/components/ui/switch";
 import {
   client,
-  type WorkspaceGraph as Graph,
+  type WorkspaceGraph,
   type WorkspaceGraphRequest,
+  type TicketMetadata,
 } from "@/lib/api/client";
 import "@xyflow/react/dist/style.css";
 import "./context-graph.css";
 
+type Graph = WorkspaceGraph & {
+  structuralPlans?: WorkspaceGraph["nodes"];
+  planMembership?: Record<string, string[]>;
+  planCounts?: Record<string, PlanCounts>;
+  availability?: Record<string, string | null>;
+  partialTotal?: boolean;
+  windowCursor?: string | null;
+  ticketMetadata?: Record<string, TicketMetadata>;
+};
+
 // Radix Select items cannot have an empty value.
 const ALL = "__all__";
-/** Most cards the map draws, so their text stays readable at the zoom it opens on. */
-const MAP_CARDS = 12;
 const RELATIONSHIPS = [
   "blocks",
+  "spec",
   "membership",
   "document",
   "mention",
@@ -64,14 +91,6 @@ const RELATIONSHIPS = [
   "related",
   "discovered",
 ];
-const NO_POSITIONS: Record<string, Point> = {};
-/** Ticket reference to project name ("" when it has none), shared by every mount. */
-const projectOf = new Map<string, string>();
-
-function projectName(node: { ticket_reference?: string | null | undefined }) {
-  return (node.ticket_reference && projectOf.get(node.ticket_reference)) || "";
-}
-
 /** Connections among the shown items, or the item's own total when only one is shown. */
 function connectionSummary(graph: Graph): string {
   const count = (n: number) => `${n} ${n === 1 ? "connection" : "connections"}`;
@@ -81,12 +100,16 @@ function connectionSummary(graph: Graph): string {
 }
 
 export function WorkspaceGraph({
+  planId = null,
+  projects = [],
   active,
   revision,
   onBack,
   onFocus,
   onOpen,
 }: {
+  planId?: string | null;
+  projects?: readonly { id: string; name: string }[];
   active: boolean;
   revision: number;
   /** Leaves the graph for All tickets (the empty state's way out). */
@@ -103,9 +126,20 @@ export function WorkspaceGraph({
   const cursors = useRef<(string | null)[]>([null]);
   const [pagesLoaded, setPagesLoaded] = useState(1);
   const [graph, setGraph] = useState<Graph | null>(null);
+  const [centerOn, setCenterOn] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  // A crowded workspace opens as a list; the map is one click away.
-  const [mapChoice, setMapChoice] = useState<boolean | null>(null);
+  const [mapChoice, setMapChoice] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const command = (event: Event) => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (detail === "filter") setFiltersOpen(true);
+      if (detail === "view") setMapChoice((value) => !value);
+    };
+    window.addEventListener(WORKSPACE_GRAPH_COMMAND, command);
+    return () => window.removeEventListener(WORKSPACE_GRAPH_COMMAND, command);
+  }, [active]);
   const [error, setError] = useState<{
     failure: FailureDescription;
     retry: () => void;
@@ -119,8 +153,6 @@ export function WorkspaceGraph({
   };
   const [loadingPage, setLoadingPage] = useState(false);
   const [fit, setFit] = useState(true);
-  // Bumped when more ticket projects are known, so cards and the panel redraw.
-  const [projectsVersion, setProjectsVersion] = useState(0);
   const [viewport, setViewport] = useState<Viewport>({
     x: 100,
     y: 100,
@@ -140,22 +172,17 @@ export function WorkspaceGraph({
     }),
     [search, kind, tag, relationship, includeDetails],
   );
-  // A new search or filter is a new map, not a continuation of the old one, so
-  // positions only count for the request they were laid out for.
-  const [placed, setPlaced] = useState<{
-    request: WorkspaceGraphRequest;
-    points: Record<string, Point>;
-  }>({ request, points: {} });
-  const positions = placed.request === request ? placed.points : NO_POSITIONS;
-  const setPositions = (points: Record<string, Point>) =>
-    setPlaced({ request, points });
+  const setPositions = () => {};
   const currentRequest = useRef(request);
   useEffect(() => {
     currentRequest.current = request;
     cursors.current = [null];
     let active = true;
-    void client
-      .workspaceGraph(request)
+    void (
+      planId
+        ? planWorkspaceGraph(planId, request)
+        : workspacePlanIslands(request)
+    )
       .then((value) => {
         if (active) {
           setGraph(value);
@@ -174,7 +201,7 @@ export function WorkspaceGraph({
       active = false;
     };
     // `attempt` reloads after Retry.
-  }, [request, attempt]);
+  }, [request, attempt, planId]);
   const currentGraph = useRef(graph);
   // Bumped whenever the shown pages change, so a slower refresh can tell its
   // snapshot of them is stale and must not overwrite newer pages.
@@ -194,12 +221,16 @@ export function WorkspaceGraph({
       if (!previous) return;
       const version = graphVersion.current;
       try {
-        const value = await client.workspaceGraph({
+        const refreshRequest = {
           ...request,
+          cursor: previous.windowCursor ?? null,
           adjacency_limit: adjacencyLimit,
           visible_ids: previous.nodes.map((node) => node.id),
           hydrate_only: true,
-        });
+        };
+        const value = await (planId
+          ? planWorkspaceGraph(planId, refreshRequest)
+          : workspacePlanIslands(refreshRequest));
         if (!current || currentRequest.current !== request) return;
         if (graphVersion.current !== version) {
           // Pages were loaded meanwhile; refresh those instead of replacing them.
@@ -211,13 +242,15 @@ export function WorkspaceGraph({
         // added meanwhile (the total is unaffected by a relationship filter, so
         // that case is left alone): load the first page again around what is shown.
         if (
+          !planId &&
           !request.relationship &&
           previous.next_cursor === null &&
           previous.nodes.length < 100 &&
           value.total > value.nodes.length
         ) {
-          const page = await client.workspaceGraph({
+          const page = await workspacePlanIslands({
             ...request,
+            cursor: previous.windowCursor ?? null,
             adjacency_limit: adjacencyLimit,
             visible_ids: previous.nodes.map((node) => node.id),
             hydrate_only: false,
@@ -232,7 +265,7 @@ export function WorkspaceGraph({
         }
         setGraph({
           ...value,
-          next_cursor: previous.next_cursor,
+          next_cursor: planId ? value.next_cursor : previous.next_cursor,
           omitted: value.omitted || previous.next_cursor !== null,
         });
       } catch (reason: unknown) {
@@ -247,47 +280,145 @@ export function WorkspaceGraph({
     return () => {
       current = false;
     };
-  }, [active, revision, request, adjacencyLimit]);
-  // A map of more than a couple of dozen cards cannot be read; it shows the newest.
-  const mapNodes = useMemo(
-    () => (graph?.nodes ?? []).slice(0, MAP_CARDS),
-    [graph],
-  );
-  const shownEdges = useMemo(() => {
-    const shown = new Set(mapNodes.map((node) => node.id));
-    return (graph?.edges ?? []).filter(
-      (edge) => shown.has(edge.source) && shown.has(edge.target),
+  }, [active, revision, request, adjacencyLimit, planId]);
+  // Every loaded item has the same representation in Graph and List. Plan
+  // identities are the island labels; membership is independent of edge caps.
+  const mapNodes = useMemo(() => graph?.nodes ?? [], [graph]);
+  const shownEdges = useMemo(() => graph?.edges ?? [], [graph]);
+  const planCounts = graph?.planCounts;
+  const planMembership = graph?.planMembership;
+  const islandLayout = useMemo(() => {
+    const points: Record<string, Point> = {};
+    const islands: import("./ContextGraphCanvas").WorkspaceIsland[] = [];
+    const plans =
+      graph?.structuralPlans ?? mapNodes.filter((node) => node.kind === "plan");
+    const membership = new Map<string, string[]>(
+      Object.entries(planMembership ?? {}),
     );
-  }, [graph, mapNodes]);
-  // Items with no relationship among the shown ones would only take canvas
-  // space; they are listed beside the map instead.
-  const [connected, unconnected] = useMemo(() => {
-    const linked = new Set(shownEdges.flatMap((e) => [e.source, e.target]));
-    return [
-      mapNodes.filter((node) => linked.has(node.id)),
-      mapNodes.filter((node) => !linked.has(node.id)),
-    ];
-  }, [mapNodes, shownEdges]);
+    for (const edge of shownEdges) {
+      if (
+        ["membership", "document", "spec"].includes(edge.kind) &&
+        plans.some((plan) => plan.id === edge.source)
+      ) {
+        const owners = membership.get(edge.target) ?? [];
+        owners.push(edge.source);
+        membership.set(edge.target, owners);
+      }
+    }
+    let top = 24;
+    const placed = new Set<string>();
+    for (const plan of plans) {
+      const members = mapNodes.filter((node) =>
+        membership.get(node.id)?.includes(plan.id),
+      );
+      if (!members.length && !mapNodes.some((node) => node.id === plan.id))
+        continue;
+      const tickets = members.filter((node) => node.kind === "ticket").length;
+      const documents = members.filter(
+        (node) => node.kind === "document",
+      ).length;
+      const height = Math.max(124, 48 + Math.ceil(members.length / 3) * 96);
+      islands.push({
+        id: plan.id,
+        title: plan.label,
+        ...(planCounts?.[plan.id] && {
+          icon: (
+            <PlanRing
+              name={plan.label}
+              counts={planCounts[plan.id]!}
+              decorative
+            />
+          ),
+        }),
+        caption: `${tickets} ${tickets === 1 ? "ticket" : "tickets"}, ${documents} ${documents === 1 ? "Document" : "Documents"}`,
+        x: 24,
+        y: top,
+        width: 760,
+        height,
+      });
+      points[plan.id] = { x: 40, y: top + 12 };
+      members.forEach((node, index) => {
+        // Documents can belong to more than one Plan. Draw one identity and
+        // retain all its membership connections in the side panel.
+        if (!placed.has(node.id))
+          points[node.id] = {
+            x: 48 + (index % 3) * 248,
+            y: top + 48 + Math.floor(index / 3) * 96,
+          };
+        placed.add(node.id);
+      });
+      top += height + 24;
+    }
+    const loose = mapNodes.filter(
+      (node) => node.kind !== "plan" && !placed.has(node.id),
+    );
+    if (loose.length) {
+      islands.push({
+        id: "__unplanned__",
+        title: `${loose.some((node) => planMembership?.[node.id] === undefined || (planMembership[node.id]?.length ?? 0) > 0) ? "Plan membership not loaded" : "Not in a Plan"} · ${loose.length}`,
+        caption: "",
+        x: 24,
+        y: top,
+        width: 760,
+        height: 48 + Math.ceil(loose.length / 3) * 40,
+      });
+      loose.forEach((node, index) => {
+        points[node.id] = {
+          x: 48 + (index % 3) * 248,
+          y: top + 40 + Math.floor(index / 3) * 40,
+        };
+      });
+    }
+    return { islands, points, loose: new Set(loose.map((node) => node.id)) };
+  }, [
+    mapNodes,
+    shownEdges,
+    planCounts,
+    graph?.structuralPlans,
+    planMembership,
+  ]);
+  const availability = graph?.availability;
   const nodes = useMemo(
     () =>
-      connected.map((node) => {
-        const parts = cardParts(node);
-        return {
-          id: node.id,
-          label: nodeAriaLabel(node),
-          ...parts,
-          caption: [parts.caption, projectName(node)]
-            .filter(Boolean)
-            .join(" · "),
-          kind: node.kind,
-          status: statusOf(node),
-        };
-      }),
-    // projectName reads projectOf, which projectsVersion tracks.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [connected, projectsVersion],
+      mapNodes
+        .filter((node) => node.kind !== "plan")
+        .map((node) => {
+          const parts = cardParts(node);
+          return {
+            id: node.id,
+            label: nodeAriaLabel(node),
+            ...parts,
+            caption:
+              node.kind === "document"
+                ? shownEdges.some(
+                    (edge) => edge.kind === "spec" && edge.target === node.id,
+                  )
+                  ? "Spec of the Plan"
+                  : "Document"
+                : node.state === "Todo"
+                  ? ""
+                  : (node.state ?? ""),
+            kind: node.kind,
+            status: statusOf(node),
+            availability: availability?.[node.id] ?? "",
+            variant: islandLayout.loose.has(node.id)
+              ? ("chip" as const)
+              : ("workspace" as const),
+          };
+        }),
+    [mapNodes, islandLayout, availability, shownEdges],
   );
-  const edges = useMemo(() => flowEdges(shownEdges), [shownEdges]);
+  // Plan wells express membership and linked Documents without a web of
+  // structural lines; every relationship remains named in the selection panel.
+  const edges = useMemo(
+    () =>
+      flowEdges(
+        shownEdges.filter(
+          (edge) => !["membership", "document"].includes(edge.kind),
+        ),
+      ),
+    [shownEdges],
+  );
   const [knownTags, setKnownTags] = useState<string[]>([]);
   useEffect(() => {
     let current = true;
@@ -302,55 +433,14 @@ export function WorkspaceGraph({
     };
   }, [revision]);
   const preview = graph?.nodes.find((node) => node.id === selected);
-  // The graph carries no project, so each shown ticket's project is looked up
-  // once from the existing ticket and project lists.
-  const wanted = useMemo(
-    () => [
-      ...new Set(
-        [...mapNodes, ...(preview ? [preview] : [])].flatMap((node) =>
-          node.kind === "ticket" && node.ticket_reference
-            ? [node.ticket_reference]
-            : [],
-        ),
-      ),
-    ],
-    [mapNodes, preview],
+  const projectNames = new Map(
+    projects.map((project) => [project.id, project.name]),
   );
-  useEffect(() => {
-    const missing = wanted.filter((reference) => !projectOf.has(reference));
-    if (!missing.length) return;
-    let current = true;
-    void (async () => {
-      try {
-        const names = new Map(
-          ((await client.listProjects()) ?? []).map((item) => [
-            item.id,
-            item.name,
-          ]),
-        );
-        await Promise.all(
-          missing.map(async (reference) => {
-            try {
-              const ticket = await client.showTicket(reference);
-              projectOf.set(
-                reference,
-                (ticket.project_id && names.get(ticket.project_id)) || "",
-              );
-            } catch {
-              // A card without a project is still a card.
-            }
-          }),
-        );
-      } catch {
-        return;
-      }
-      if (current) setProjectsVersion((n) => n + 1);
-    })();
-    return () => {
-      current = false;
-    };
-  }, [wanted]);
-  const showMap = opensAsMap(graph?.nodes.length ?? 0, mapChoice, Infinity);
+  const projectName = (node: { id: string }) => {
+    const id = graph?.ticketMetadata?.[node.id]?.project_id;
+    return (id && projectNames.get(id)) || "";
+  };
+  const showMap = mapChoice;
   const filtered = !!(search || kind || tag || relationship);
   function refine(change: () => void) {
     change();
@@ -370,12 +460,19 @@ export function WorkspaceGraph({
     setLoadingPage(true);
     const advance = pagesLoaded >= 4 || graph.nodes.length >= 100;
     try {
-      const page = await client.workspaceGraph({
-        ...request,
-        cursor: graph.next_cursor,
-        adjacency_limit: adjacencyLimit,
-        visible_ids: advance ? [] : graph.nodes.map((node) => node.id),
-      });
+      const page = await (planId
+        ? planWorkspaceGraph(planId, {
+            ...request,
+            cursor: graph.next_cursor,
+            adjacency_limit: adjacencyLimit,
+            visible_ids: [],
+          })
+        : workspacePlanIslands({
+            ...request,
+            cursor: graph.next_cursor,
+            adjacency_limit: adjacencyLimit,
+            visible_ids: advance ? [] : graph.nodes.map((node) => node.id),
+          }));
       if (currentRequest.current !== request) return;
       if (advance) {
         cursors.current = [graph.next_cursor];
@@ -399,12 +496,16 @@ export function WorkspaceGraph({
     const limit = Math.min(adjacencyLimit * 2, 12);
     setLoadingPage(true);
     try {
-      const page = await client.workspaceGraph({
+      const expansion = {
         ...request,
+        cursor: graph.windowCursor ?? null,
         adjacency_limit: limit,
         visible_ids: graph.nodes.map((node) => node.id),
         hydrate_only: true,
-      });
+      };
+      const page = await (planId
+        ? planWorkspaceGraph(planId, expansion)
+        : workspacePlanIslands(expansion));
       if (currentRequest.current !== request) return;
       setGraph({
         ...page,
@@ -428,31 +529,71 @@ export function WorkspaceGraph({
   const empty = !!graph && graph.nodes.length === 0 && !graph.next_cursor;
   const statusText = graph && (
     <>
-      {relationship && graph.nodes.length === 0
-        ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
-        : relationship
-          ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
-          : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
+      {graph.partialTotal
+        ? `Showing ${graph.nodes.length} loaded items`
+        : relationship && graph.nodes.length === 0
+          ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
+          : relationship
+            ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
+            : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
       · {connectionSummary(graph)}
-      {showMap && graph.nodes.length > MAP_CARDS
-        ? ` · The map shows the newest ${MAP_CARDS}`
-        : ""}
-      {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
+      {graph.omitted_groups.includes("Plan island window") && (
+        <> · Some Plan islands are not loaded; Load more shows another window</>
+      )}
+      {graph.omitted_groups.includes("Plan member window") && (
         <>
-          {" · "}
-          <Button
-            variant="link"
-            size="sm"
-            disabled={loadingPage}
-            onClick={() => void expandConnections()}
-          >
-            Show more connections
-          </Button>
+          {" "}
+          · Some Plan tickets or Documents are not loaded; Load more shows
+          another window
         </>
       )}
-      {graph.omitted_groups.length > 0 && adjacencyLimit >= 12 && (
-        <> · Some connections are hidden; open an item to see all</>
+      {graph.omitted_groups.includes("Plan filter window") && (
+        <>
+          {" "}
+          · Some matching items are outside this search window; Load more
+          searches the rest
+        </>
       )}
+      {graph.omitted_groups.includes("Workspace node window") && (
+        <>
+          {" "}
+          · Some items are outside the 250-item window; Load more shows the rest
+        </>
+      )}
+      {graph.omitted_groups.some(
+        (group) =>
+          ![
+            "Plan island window",
+            "Plan member window",
+            "Plan filter window",
+            "Workspace node window",
+          ].includes(group),
+      ) &&
+        adjacencyLimit < 12 && (
+          <>
+            {" · "}
+            <Button
+              variant="link"
+              size="sm"
+              disabled={loadingPage}
+              onClick={() => void expandConnections()}
+            >
+              Show more connections
+            </Button>
+          </>
+        )}
+      {graph.omitted_groups.some(
+        (group) =>
+          ![
+            "Plan island window",
+            "Plan member window",
+            "Plan filter window",
+            "Workspace node window",
+          ].includes(group),
+      ) &&
+        adjacencyLimit >= 12 && (
+          <> · Some connections are hidden; open an item to see all</>
+        )}
       {graph.next_cursor && (
         <>
           {" · "}
@@ -507,9 +648,10 @@ export function WorkspaceGraph({
           <GraphPanelActions
             openLabel={openLabel(preview)}
             onOpen={() => onOpen(preview)}
-            {...(linked(preview.id) && {
-              onCenter: () => onFocus(preview.id),
-            })}
+            onCenter={() => {
+              setMapChoice(true);
+              setCenterOn(preview.id);
+            }}
           />
         )
       }
@@ -528,6 +670,16 @@ export function WorkspaceGraph({
             title={previewParts.title}
             caption={[
               stateLine(preview),
+              ...(graph?.edges ?? [])
+                .filter(
+                  (edge) =>
+                    edge.target === preview.id &&
+                    ["membership", "document", "spec"].includes(edge.kind),
+                )
+                .map(
+                  (edge) =>
+                    graph?.nodes.find((node) => node.id === edge.source)?.label,
+                ),
               projectName(preview),
               graph?.node_tags[preview.id],
             ]
@@ -586,112 +738,153 @@ export function WorkspaceGraph({
           Select an item to see its connections.
         </p>
       )}
-      {showMap && unconnected.length > 0 && (
-        <GraphPanelSection
-          title="No links to other items"
-          count={unconnected.length}
-        >
-          <ul className="cgraph-rows" aria-label="Not connected">
-            {unconnected.map((node) => (
-              <li key={node.id}>
-                <GraphItemRow
-                  node={node}
-                  current={selected === node.id}
-                  onSelect={() => setSelected(node.id)}
-                />
-              </li>
-            ))}
-          </ul>
-        </GraphPanelSection>
-      )}
     </GraphPanel>
   );
   const tagOptions = [...new Set([...(tag ? [tag] : []), ...knownTags])].map(
     (value) => ({ value, label: value }),
   );
+  const filterControls = (
+    <>
+      <SearchInput
+        className="w-60 max-w-full"
+        aria-label="Search"
+        placeholder="Search items…"
+        value={search}
+        onValueChange={(value) => refine(() => setSearch(value))}
+      />
+      <Picker
+        label="Type"
+        value={kind || ALL}
+        onValueChange={(value) =>
+          refine(() => setKind(value === ALL ? "" : value))
+        }
+        options={[
+          { value: ALL, label: "All" },
+          { value: "ticket", label: "Tickets" },
+          { value: "document", label: "Documents" },
+          { value: "plan", label: "Plans" },
+        ]}
+      />
+      <Picker
+        label="Relationship"
+        value={relationship || ALL}
+        onValueChange={(value) =>
+          refine(() => setRelationship(value === ALL ? "" : value))
+        }
+        options={[
+          { value: ALL, label: "All" },
+          ...RELATIONSHIPS.map((value) => ({
+            value,
+            label: edgeLabels[value] ?? value,
+          })),
+        ]}
+      />
+      <Picker
+        label="Tag"
+        value={tag || ALL}
+        onValueChange={(value) =>
+          refine(() => setTag(value === ALL ? "" : value))
+        }
+        options={[{ value: ALL, label: "Any" }, ...tagOptions]}
+      />
+      {/* The empty state carries its own Clear filters; one is enough. */}
+      {filtered && !empty && (
+        <Button variant="ghost" size="sm" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      )}
+      <label className="cgraph-switch">
+        <Switch
+          aria-label="Include update details"
+          checked={includeDetails}
+          onCheckedChange={(checked) =>
+            refine(() => setIncludeDetails(checked))
+          }
+        />
+        Update details
+      </label>
+    </>
+  );
   return (
-    <section className="cgraph-page" aria-label="Workspace graph">
+    <section
+      className="cgraph-page"
+      aria-label="Workspace graph"
+      aria-busy={!graph && !error}
+      onKeyDown={(event) => {
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest("input, textarea, [contenteditable=true]")
+        )
+          return;
+        if (matchesShortcut(event, "workspace-graph-filter")) {
+          event.preventDefault();
+          setFiltersOpen((value) => !value);
+        }
+        if (matchesShortcut(event, "workspace-graph-view")) {
+          event.preventDefault();
+          setMapChoice((value) => !value);
+        }
+      }}
+    >
       <PaneHeader
+        variant="responsive"
         title="Workspace graph"
         count={
           graph && (
             <Count>
-              {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"}
+              {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"}{" "}
+              · {graph.edges.length}{" "}
+              {graph.edges.length === 1 ? "connection" : "connections"}
             </Count>
           )
         }
         actions={
-          <SegmentedControl
-            aria-label="View"
-            value={showMap ? "graph" : "list"}
-            onValueChange={(value) => setMapChoice(value === "graph")}
-            options={[
-              { value: "graph", label: "Graph", disabled: empty },
-              { value: "list", label: "List", disabled: empty },
-            ]}
-          />
+          <>
+            <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <Tooltip
+                content={`Filter · ${shortcutLabel("workspace-graph-filter")}`}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-keyshortcuts={ariaKeyShortcuts(
+                      "workspace-graph-filter",
+                    )}
+                  >
+                    <Filter aria-hidden="true" />
+                    Filter
+                  </Button>
+                </PopoverTrigger>
+              </Tooltip>
+              <PopoverContent align="end" className="w-80">
+                <div className="cgraph-workspace-filters">{filterControls}</div>
+              </PopoverContent>
+            </Popover>
+            <Tooltip
+              content={`Switch Graph / List · ${shortcutLabel("workspace-graph-view")}`}
+            >
+              <div>
+                <SegmentedControl
+                  aria-label="View"
+                  value={showMap ? "graph" : "list"}
+                  onValueChange={(value) => setMapChoice(value === "graph")}
+                  options={[
+                    { value: "graph", label: "Graph", disabled: empty },
+                    { value: "list", label: "List", disabled: empty },
+                  ]}
+                />
+              </div>
+            </Tooltip>
+          </>
         }
       />
-      <div className="cgraph-filters" data-wrap="">
-        <SearchInput
-          className="w-60 max-w-full"
-          aria-label="Search"
-          placeholder="Search items…"
-          value={search}
-          onValueChange={(value) => refine(() => setSearch(value))}
-        />
-        <Picker
-          label="Type"
-          value={kind || ALL}
-          onValueChange={(value) =>
-            refine(() => setKind(value === ALL ? "" : value))
-          }
-          options={[
-            { value: ALL, label: "All" },
-            { value: "ticket", label: "Tickets" },
-            { value: "document", label: "Documents" },
-            { value: "plan", label: "Plans" },
-          ]}
-        />
-        <Picker
-          label="Relationship"
-          value={relationship || ALL}
-          onValueChange={(value) =>
-            refine(() => setRelationship(value === ALL ? "" : value))
-          }
-          options={[
-            { value: ALL, label: "All" },
-            ...RELATIONSHIPS.map((value) => ({
-              value,
-              label: edgeLabels[value] ?? value,
-            })),
-          ]}
-        />
-        <Picker
-          label="Tag"
-          value={tag || ALL}
-          onValueChange={(value) =>
-            refine(() => setTag(value === ALL ? "" : value))
-          }
-          options={[{ value: ALL, label: "Any" }, ...tagOptions]}
-        />
-        {/* The empty state carries its own Clear filters; one is enough. */}
-        {filtered && !empty && (
-          <Button variant="ghost" size="sm" onClick={clearFilters}>
-            Clear filters
-          </Button>
-        )}
-        <label className="cgraph-switch">
-          <Switch
-            aria-label="Include update details"
-            checked={includeDetails}
-            onCheckedChange={(checked) =>
-              refine(() => setIncludeDetails(checked))
-            }
-          />
-          Update details
-        </label>
-      </div>
+      {planId && (
+        <p className="cgraph-scope ui-graph-panel-caption">
+          Filtered to this Plan
+        </p>
+      )}
+
       {error && (
         <FailureAlert
           size="compact"
@@ -709,7 +902,8 @@ export function WorkspaceGraph({
               edges={edges}
               loading={!graph}
               selected={selected}
-              positions={positions}
+              islands={islandLayout.islands}
+              positions={islandLayout.points}
               onPositions={setPositions}
               viewport={viewport}
               onViewport={setViewport}
@@ -724,8 +918,20 @@ export function WorkspaceGraph({
                 })
               }
               fit={fit}
-              onFitted={() => setFit(false)}
-              notice={emptyState}
+              centerOn={centerOn}
+              onFitted={() => {
+                setFit(false);
+                setCenterOn(null);
+              }}
+              notice={
+                !graph && !error ? (
+                  <p role="status" className="ui-graph-panel-caption">
+                    Loading workspace graph…
+                  </p>
+                ) : (
+                  emptyState
+                )
+              }
               footnote={!empty && statusText}
             />
           )

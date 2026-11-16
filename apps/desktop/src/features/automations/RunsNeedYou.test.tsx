@@ -98,6 +98,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
+Element.prototype.scrollIntoView = () => {};
 window.ResizeObserver = class {
   observe() {}
   unobserve() {}
@@ -133,14 +134,17 @@ test.each([
   [1, "Automations, 1 run needs you"],
   [3, "Automations, 3 runs need you"],
 ])(
-  "with %i runs needing attention the sidebar entry is named %s",
+  "with %i runs needing attention the sidebar and palette destinations are named %s",
   async (count, name) => {
     waiting = count;
     app();
-    const entry = await screen.findByRole("button", { name });
-    // The count sits beside the entry, as it does on Chats.
-    expect(entry.textContent?.trim()).toBe(
-      count ? `Automations${count}` : "Automations",
+    expect(await screen.findByRole("button", { name })).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    const entry = await screen.findByRole("option", { name });
+    expect(entry.textContent).toContain(
+      count
+        ? `${count} ${count === 1 ? "run needs" : "runs need"} you`
+        : "Automations",
     );
   },
 );
@@ -158,15 +162,11 @@ test("an Inbox entry for a run that needs attention says which Automation and wh
   expect(
     (await screen.findByRole("heading", { name: /Run on T-ZB8$/ })).textContent,
   ).toBe("Triage new tickets › Run on T-ZB8");
-  // Reading the entry and opening the run is not acting on it.
+  // Reading and opening the run leaves its attention count intact in Go to.
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
   expect(
-    screen.getByRole("button", { name: "Automations, 1 run needs you" }),
+    await screen.findByRole("option", { name: "Automations, 1 run needs you" }),
   ).toBeTruthy();
-  expect(
-    screen
-      .getByRole("button", { name: /^Automations/ })
-      .getAttribute("aria-current"),
-  ).toBe("page");
 });
 
 test("an Inbox entry for a run without a reason or a name still reads as a sentence", () => {

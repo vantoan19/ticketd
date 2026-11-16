@@ -1,5 +1,13 @@
 /* The Automations page reuses the Chats panes and rows (chats.css). */
 
+.auto-list-pane[data-empty] > .chat-rows {
+  flex: none;
+  padding: 0;
+}
+.auto-detail-pane > [data-size="hint"] {
+  flex: 1;
+}
+
 /* --- The agent editor: one reading column of fields. --- */
 .agent-form {
   flex: 1;
@@ -137,14 +145,18 @@
   justify-content: center;
   padding: 24px;
 }
-/* The empty page: New Automation, then the examples to start from. */
+/* Examples sit in the detail pane, or below the empty list at narrow widths. */
 .auto-start {
   flex-direction: column;
+  justify-content: flex-start;
   gap: 32px;
+  min-height: 0;
+  padding-top: 0;
   overflow-y: auto;
 }
 .auto-start > [data-slot="empty-state"] {
   flex: none;
+  padding-bottom: 0;
 }
 .auto-starters {
   display: flex;

@@ -157,6 +157,36 @@ pub struct TicketSource {
     pub duplicate_target: Option<DuplicateTarget>,
 }
 
+/// Existing source availability fields, without the rest of a source payload.
+#[derive(Debug, Serialize)]
+pub struct SourceAvailability {
+    pub unavailable: Option<SourceUnavailable>,
+}
+fn unavailable(
+    authority: &str,
+    code: Option<&str>,
+    message: Option<&str>,
+    since: Option<&str>,
+    attempted: Option<&str>,
+) -> Option<SourceUnavailable> {
+    code.filter(|code| {
+        authority == "external" && FailureCode::parse(code).is_some_and(FailureCode::is_unavailable)
+    })
+    .map(|code| SourceUnavailable {
+        code: code.to_owned(),
+        message: message.unwrap_or_default().to_owned(),
+        since: since.or(attempted).unwrap_or_default().to_owned(),
+    })
+}
+pub(crate) fn availability_projection(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<SourceAvailability>, Error> {
+    Ok(connection.query_row("SELECT o.authority, s.last_error_code, s.last_error_message, s.failing_since, s.last_attempt_at FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1", [ticket_id], |row| {
+        Ok(SourceAvailability { unavailable: unavailable(&row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?.as_deref(), row.get::<_, Option<String>>(2)?.as_deref(), row.get::<_, Option<String>>(3)?.as_deref(), row.get::<_, Option<String>>(4)?.as_deref()) })
+    }).optional()?)
+}
+
 /// Restricts a ticket list to externally owned or local tickets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceFilter {
@@ -494,22 +524,13 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     };
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
     let closed_at = conversation::closed_at(connection, &ticket.id)?;
-    let unavailable = match &row.error_code {
-        Some(code)
-            if external && FailureCode::parse(code).is_some_and(FailureCode::is_unavailable) =>
-        {
-            Some(SourceUnavailable {
-                code: code.clone(),
-                message: row.error_message.clone().unwrap_or_default(),
-                since: row
-                    .failing_since
-                    .clone()
-                    .or_else(|| row.attempted.clone())
-                    .unwrap_or_default(),
-            })
-        }
-        _ => None,
-    };
+    let unavailable = unavailable(
+        &row.authority,
+        row.error_code.as_deref(),
+        row.error_message.as_deref(),
+        row.failing_since.as_deref(),
+        row.attempted.as_deref(),
+    );
     let (provider_name, place, number) =
         super::display_parts(&row.provider, &row.locator, &row.display);
     ticket.source = Some(TicketSource {

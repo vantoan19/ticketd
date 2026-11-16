@@ -59,11 +59,12 @@
     both;
 }
 @keyframes skeleton-appear {
+  /* Keep a hidden layout reserve hidden when its skeletons finish loading. */
   from {
-    visibility: hidden;
+    opacity: 0;
   }
   to {
-    visibility: visible;
+    opacity: 1;
   }
 }
 
@@ -146,10 +147,10 @@
   flex: none;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 48px;
   min-width: 0;
-  padding: 0 8px 0 16px;
+  padding: 0 10px 0 20px;
   box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .ui-pane-header[data-leading] {
@@ -159,8 +160,11 @@
   display: flex;
   flex: 0 1 auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+}
+.ui-pane-header-title > [data-slot="count"] {
+  margin-left: 2px;
 }
 .ui-pane-header-title > h1,
 .ui-pane-header-title > h2 {
@@ -170,7 +174,7 @@
   font-size: var(--text-ui);
   font-weight: 500;
   line-height: var(--text-ui-line);
-  letter-spacing: -0.28px;
+  letter-spacing: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -213,14 +217,35 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin-inline-start: auto;
 }
+/* Dense Plan and workspace graph headers keep the name above their actions. */
+.ui-pane-header-responsive {
+  /* The header and its children must measure the same containing pane. */
+  container-type: normal;
+}
+@container (max-width: 640px) {
+  .ui-pane-header-responsive {
+    flex-wrap: wrap;
+    height: 88px;
+    padding-block: 8px;
+  }
+  .ui-pane-header-responsive > .ui-pane-header-title {
+    flex: 1;
+  }
+  .ui-pane-header-responsive > .ui-pane-header-actions {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
 /* Search expands in place: the title gives way, Filters and Display stay. */
-.ui-pane-header:has([data-slot="pane-search"]) .ui-pane-header-title {
+.ui-pane-header:not([data-title-editor]):has([data-slot="pane-search"])
+  .ui-pane-header-title {
   display: none;
 }
-.ui-pane-header:has([data-slot="pane-search"]) .ui-pane-header-actions {
+.ui-pane-header:not([data-title-editor]):has([data-slot="pane-search"])
+  .ui-pane-header-actions {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -517,6 +542,27 @@
 .ui-record-link .ui-reference {
   color: inherit;
 }
+.ui-record-link[data-variant="row"] {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  text-decoration: none;
+  font-size: var(--text-ui);
+  font-weight: 400;
+  line-height: var(--text-ui-line);
+}
+.ui-record-link[data-variant="row"] .ui-reference {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-code);
+}
+.ui-record-link[data-variant="row"] [data-slot="record-title"] {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .ui-record-link[data-gone] {
   color: var(--muted-foreground);
   text-decoration: none;
@@ -540,8 +586,11 @@
   max-width: 280px;
 }
 .ui-badge.ui-badge-filter {
+  height: 26px;
   gap: 4px;
-  padding-inline: 8px 2px;
+  padding-inline: 9px 4px;
+  font-size: var(--text-code);
+  line-height: var(--text-ui-line);
 }
 .ui-badge-filter [data-slot="badge-edit"] {
   display: inline-flex;
@@ -601,5 +650,270 @@
 @media (prefers-reduced-motion: reduce) {
   .ui-arrived {
     animation: none;
+  }
+}
+
+/* Centered management pages, with cards under a single header row. */
+.ui-management-page-centered {
+  gap: 28px;
+  max-width: 860px;
+  margin-inline: auto;
+  padding: 44px 40px;
+}
+.ui-management-page-centered .ui-page-header-actions {
+  align-self: flex-end;
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .ui-management-page-centered .ui-page-header {
+    flex-wrap: wrap;
+  }
+  .ui-management-page-centered .ui-page-header-text {
+    flex-basis: 100%;
+  }
+  .ui-management-page-centered .ui-page-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .ui-management-page-centered {
+    padding: 24px 16px;
+  }
+}
+
+/* Floating action failures replace the controls that failed, with wrapping copy. */
+.ui-notice.ui-notice-floating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+.ui-notice-floating [data-slot="alert-description"] {
+  flex-basis: 180px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* Plan summary roles: shared pane typography and boundary, feature CSS owns geometry. */
+.ui-plan-summary {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  box-shadow: 0 1px 0 0 var(--group-hairline);
+}
+.ui-plan-purpose {
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+}
+.ui-plan-progress {
+  color: var(--foreground);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-pane-header[data-title-editor]:has([data-slot="pane-search"])
+  .ui-pane-header-title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.ui-pane-header[data-title-editor]
+  .ui-pane-header-title
+  > [data-slot="pane-search"] {
+  flex: 1;
+  min-width: 0;
+}
+.ui-pane-header[data-title-editor]
+  [data-slot="pane-search"]
+  [data-slot="search-input"] {
+  width: 100%;
+  min-width: 0;
+}
+.ui-pane-header-title > .attachment-preview-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* First-run page typography and setting-row variant of the shared Steps. */
+.ui-guide-title {
+  font-size: var(--text-section);
+  line-height: var(--text-section-line);
+  letter-spacing: var(--text-section-tracking);
+  font-weight: 600;
+}
+.ui-guide-lede {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  color: var(--muted-foreground);
+}
+.ui-guide-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.ui-guide-optional {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+[data-slot="steps"][data-variant="settings"] {
+  flex: none;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-border-base);
+  overflow: hidden;
+}
+[data-slot="steps"][data-variant="settings"] > [data-slot="step"] {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  padding: 12px 16px;
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+[data-slot="steps"][data-variant="settings"] > [data-slot="step"]:last-child {
+  box-shadow: none;
+}
+[data-slot="steps"][data-variant="settings"] [data-slot="step-number"] {
+  width: 22px;
+  height: 22px;
+  background: var(--accent);
+  color: var(--foreground);
+  box-shadow: none;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-state="current"]
+  [data-slot="step-number"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-slot="step-number"] svg {
+  width: 14px;
+  height: 14px;
+}
+[data-slot="steps"][data-variant="settings"] [data-state="done"] {
+  color: var(--muted-foreground);
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  > span:last-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 16px;
+  padding: 0;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  > span:last-child
+  > span:first-child {
+  display: contents;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  > span:last-child
+  > span:last-child {
+  grid-column: 1;
+}
+[data-slot="steps"][data-variant="settings"] [data-slot="step"] button {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-self: end;
+}
+@media (max-width: 640px) {
+  [data-slot="steps"][data-variant="settings"]
+    [data-slot="step"]
+    > span:last-child {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-slot="steps"][data-variant="settings"] [data-slot="step"] button {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: start;
+    margin-top: 8px;
+  }
+}
+
+/* An inline attachment rename shares the title slot without wrapping the header. */
+.ui-pane-header:has(.attachment-rename) .ui-pane-header-title {
+  flex: 1;
+}
+.ui-pane-header-title > .attachment-rename {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A pane edge owns its divider; the keyboard separator and its pointer area
+   overlay that edge so 360px + 520px still fits an 880px panel. */
+[data-slot="resizable-handle"][data-overlay] {
+  width: 0;
+  background: transparent;
+  z-index: 1;
+}
+[data-slot="resizable-handle"][data-overlay]::before {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+  content: "";
+}
+[data-slot="resizable-handle"][data-overlay]::after {
+  width: 8px;
+}
+[data-slot="resizable-handle"][data-overlay]:focus-visible::after {
+  outline: 2px solid var(--ring);
+}
+
+/* Touch uses real, non-overlapping control boxes; parent recipes may grow to
+   accommodate them. Fine-pointer sizes remain the specified compact roles. */
+@media (pointer: coarse) {
+  :root
+    body
+    :is(
+      button,
+      [role="button"],
+      [role="menuitem"],
+      [role="menuitemradio"],
+      [role="menuitemcheckbox"],
+      [role="option"],
+      [role="tab"],
+      [role="radio"],
+      [role="combobox"],
+      select,
+      input:not(
+        [type="checkbox"],
+        [type="radio"],
+        [type="range"],
+        [type="file"]
+      )
+    ) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .ui-pane-header-title > [data-control] {
+    margin-inline-start: 0;
+  }
+  [data-slot="command"] {
+    --choice-row-height: 44px;
+  }
+  [data-slot="segmented-control"] {
+    height: auto;
+    min-height: 48px;
+  }
+  [data-slot="command-input-wrapper"] {
+    height: auto;
+    min-height: 44px;
+  }
+  .ui-status-line {
+    height: 48px;
   }
 }

@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -93,9 +94,8 @@ test("a failed export says why and keeps the button usable", async () => {
   vi.mocked(client.exportWorkspace).mockRejectedValue("disk full");
   renderPage();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't save the export. Disk full.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("disk full");
   expect(screen.queryByText(/Export saved to/)).toBeNull();
   expect(
     screen.getByRole("button", { name: "Export…" }).hasAttribute("disabled"),
@@ -106,9 +106,8 @@ test("a save dialog that cannot open is reported", async () => {
   vi.mocked(workspaceClient.chooseSavePath).mockRejectedValue("no window");
   renderPage();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't open the save dialog. No window.",
-  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("no window");
 });
 
 test("a file manager that cannot show the file is reported", async () => {
@@ -120,7 +119,8 @@ test("a file manager that cannot show the file is reported", async () => {
       name: `Show in ${fileManagerName()}`,
     }),
   );
-  expect((await screen.findByRole("alert")).textContent).toContain("Gone.");
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("gone");
 });
 
 test("each command can be copied with its placeholders in place", async () => {

@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-ticket-filters.css";
+
 /* Search and Filters (DESIGN.md section 6, S3). Layout only: the menu, its
    rows and the chips are shared components. */
 .list-controls {
@@ -5,39 +7,6 @@
   align-items: center;
   gap: 4px;
 }
-.list-controls:has(.header-search) {
-  flex: 1;
-  min-width: 0;
-}
-/* Search expands in place inside the header's right cluster, up to 360px. */
-.header-search {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  min-width: 0;
-  color: var(--muted-foreground);
-}
-.header-search-count {
-  flex: none;
-  white-space: nowrap;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
-/* Narrow list: the result count stays for screen readers only, so Filters
-   and Display always keep their place. The pane header is the container. */
-@container (max-width: 420px) {
-  .header-search-count {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-}
-
 /* One line of chips under the header: they never wrap; what does not fit
    becomes "+N more". Clear filters ends the line. */
 .filter-chips {
@@ -47,14 +16,12 @@
   align-items: center;
   gap: 6px;
   height: 44px;
-  padding: 0 8px 0 16px;
+  padding: 0 16px 0 20px;
   overflow: hidden;
-  white-space: nowrap;
-  box-shadow: inset 0 -1px 0 var(--group-hairline);
 }
 .filter-chips > [data-filter-chip] {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .filter-chips-tail {
@@ -70,18 +37,13 @@
   max-width: 120px;
   margin-left: auto;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .filters-menu-value {
   padding-left: 16px;
 }
 .filters-menu-count {
   padding-left: 16px;
-  font-variant-numeric: tabular-nums;
 }
 .filters-menu-dot {
   display: flex;
@@ -94,8 +56,4 @@
 .filters-menu-caption {
   max-width: 240px;
   padding: 4px 8px 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  white-space: normal;
 }

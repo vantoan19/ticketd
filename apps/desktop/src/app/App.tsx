@@ -1,3 +1,20 @@
+import { requestInboxAction } from "@/features/tickets/inbox-commands";
+import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
+import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
+import { requestTicketUpdate } from "@/features/tickets/activity-composer-request";
+import { FirstRunGuide } from "@/features/tickets/FirstRunGuide";
+import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
+import {
+  TicketCommandContext,
+  ticketCommandActions,
+  type TicketCommandScope,
+} from "@/lib/ticket-command-actions";
+import { keepWebviewInStep } from "@/lib/webview-scale";
+import { usePageZoom } from "./use-page-zoom";
+import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
+import { PageZoomStatus } from "./PageZoomStatus";
+import { CommandPalette } from "./CommandPalette";
+import { useCommandKeys, type GoTo } from "./use-command-keys";
 import {
   ContextGraphNavigation,
   DocumentNavigation,
@@ -6,12 +23,19 @@ import {
 } from "@/features/documents/navigation";
 import { ContextGraph } from "@/features/documents/ContextGraph";
 import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
-import { Documents } from "@/features/documents/Documents";
-import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
+import {
+  Documents,
+  type DocumentCommands,
+} from "@/features/documents/Documents";
+import {
+  AttachmentLibrary,
+  type AttachmentCommands,
+} from "@/features/attachments/AttachmentLibrary";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
-import { type ContextGraph as GraphData } from "@/lib/api/client";
+import { client, type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
+import { InboxAttentionProvider } from "@/features/tickets/inbox-attention";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -33,6 +57,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { StatusLineRegion } from "@/components/ui/status-line";
+import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import {
@@ -60,8 +85,16 @@ import {
   useDraftRecoveryNotices,
 } from "@/lib/draft-recovery-context";
 import { useStatusLine } from "@/components/ui/use-status-line";
+import { WorkspaceNotice } from "./WorkspaceNotice";
+import { useBandContinuity } from "./use-band-continuity";
 import { WorkspaceBand } from "./WorkspaceBand";
-import { useWorkspaceState } from "@/lib/workspace-state";
+import { workspaceMessages } from "./workspace-messages";
+import {
+  clearWorkspaceFailure,
+  getWorkspaceFailure,
+  editingBlockedReason,
+  useWorkspaceState,
+} from "@/lib/workspace-state";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { AutomationsView } from "@/features/automations/AutomationsView";
 import { RunNavigation } from "@/features/automations/navigation";
@@ -90,7 +123,9 @@ export function App() {
       <TooltipProvider>
         <SyncStatusProvider>
           <ChatProvider>
-            <AppContent />
+            <InboxAttentionProvider>
+              <AppContent />
+            </InboxAttentionProvider>
           </ChatProvider>
           <ExitDialog />
         </SyncStatusProvider>
@@ -100,9 +135,15 @@ export function App() {
 }
 
 function AppContent() {
+  const pageZoom = usePageZoom();
+  useEffect(keepWebviewInStep, []);
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
   const workspaceProblem = useWorkspaceState();
+  const createDisabledReason =
+    workspaceProblem?.problem === "workspace_read_only"
+      ? "The workspace is read-only"
+      : editingBlockedReason(workspaceProblem);
   const recovery = useDraftRecovery();
   const [view, setViewState] = useState<View>("tickets");
   const chat = useChatFeature();
@@ -151,7 +192,12 @@ function AppContent() {
       return release;
     }
   }, [view]);
+  const [attachmentCommands, setAttachmentCommands] =
+    useState<AttachmentCommands | null>(null);
+  const [documentCommands, setDocumentCommands] =
+    useState<DocumentCommands | null>(null);
   const [documentListRequest, setDocumentListRequest] = useState(0);
+  const [creatingPlan, setCreatingPlan] = useState(false);
   const openView = (next: typeof view) => {
     if (next === "documents") {
       // Sidebar "Documents" returns to the list, not to where a reader came from.
@@ -174,6 +220,9 @@ function AppContent() {
     // A record that needs review has an Inbox entry that opens its comparison.
     openReview: () => openView("inbox"),
   });
+  const [inboxSelection, setInboxSelection] = useState<TriageSelection | null>(
+    null,
+  );
   const [inboxTarget, setInboxTarget] = useState<{
     reference: string;
     id: string;
@@ -200,6 +249,9 @@ function AppContent() {
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   // A ticket's graph opened from its header or rail starts on its dependencies.
   const [graphDependencies, setGraphDependencies] = useState(false);
+  const [workspaceGraphPlan, setWorkspaceGraphPlan] = useState<string | null>(
+    null,
+  );
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   // Once opened it stays mounted (hidden), so coming back restores its filters,
   // selection and viewport exactly as Back does.
@@ -227,6 +279,12 @@ function AppContent() {
   const keepGraph = useRef(false);
   const setView = (next: typeof view) =>
     navigate({ view: next, keepGraph: keepGraph.current });
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteReference, setPaletteReference] = useState<string | null>(null);
+  const [paletteScope, setPaletteScope] = useState<TicketCommandScope | null>(
+    null,
+  );
+  const paletteReturn = useRef<HTMLElement | null>(null);
   const [capture, setCapture] = useState(false);
   // Capture has no trigger of its own, so closing it returns focus to whatever opened it.
   const captureReturn = useRef<HTMLElement | null>(null);
@@ -242,9 +300,13 @@ function AppContent() {
     setCapture(false);
     const target = captureReturn.current;
     captureReturn.current = null;
-    window.setTimeout(() => {
-      if (target?.isConnected) target.focus();
-    }, 0);
+    const active = document.activeElement;
+    if (
+      (!active || active === document.body) &&
+      target?.isConnected &&
+      !target.closest("[hidden], [inert]")
+    )
+      target.focus({ preventScroll: true });
   };
   // Capture is reachable from anywhere: Mod+Shift+N opens it without leaving the current view.
   useEffect(() => {
@@ -292,6 +354,7 @@ function AppContent() {
       )
         return;
       event.preventDefault();
+      if (editingBlockedReason(workspaceProblem)) return;
       const focused = document.activeElement;
       createTriggerRef.current =
         focused instanceof HTMLButtonElement ? focused : null;
@@ -300,7 +363,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [workspaceProblem]);
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
     projects,
@@ -319,6 +382,123 @@ function AppContent() {
     scope,
     navigation,
   } = workspace;
+  // Workspace info excludes Trash. Join the existing Trash read before
+  // treating an empty filtered list as a brand-new Workspace.
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void workspaceClient
+      .info()
+      .then(async (info) => {
+        if (info.tickets === 0 && (await client.listTrash()).length > 0)
+          return null;
+        return info;
+      })
+      .then(
+        (info) => {
+          if (live) setWorkspaceInfo(info);
+        },
+        () => {
+          if (live) setWorkspaceInfo(null);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [revision]);
+  const firstRun =
+    workspace.listKnown &&
+    workspace.plansKnown &&
+    !workspace.queryError &&
+    !workspace.plansFailure &&
+    workspaceInfo?.tickets === 0 &&
+    workspaceInfo.documents === 0 &&
+    workspaceInfo.projects === 0 &&
+    workspaceInfo.active_plans === 0 &&
+    projects.length === 0 &&
+    plans.length === 0 &&
+    !loading &&
+    !error &&
+    workspace.tickets.length === 0 &&
+    Object.keys(workspace.details).length === 0 &&
+    (counts?.total ?? 0) === 0 &&
+    (workspace.counts?.total ?? 0) === 0 &&
+    navigation.kind === "all" &&
+    navigation.project === "all" &&
+    !navigation.plan &&
+    !workspace.query &&
+    !workspace.status &&
+    !workspace.tags.length &&
+    !workspace.availability &&
+    workspace.source === "all";
+  const goTo = (target: GoTo) => {
+    if ((target === "chats" || target === "automations") && !chat.enabled)
+      return;
+    if (target === "all" || target === "ready" || target === "trash") {
+      scope(target);
+      setView("tickets");
+    } else openView(target);
+  };
+  function actionReference() {
+    const focused =
+      document.activeElement instanceof Element
+        ? document.activeElement.closest<HTMLElement>(
+            "[data-ticket-reference], [data-board-reference]",
+          )
+        : null;
+    return (
+      focused?.dataset.ticketReference ??
+      focused?.dataset.boardReference ??
+      (view === "tickets" ? workspace.selected : null)
+    );
+  }
+  function openPalette(
+    scope: TicketCommandScope | null = null,
+    origin?: HTMLElement,
+  ) {
+    paletteReturn.current =
+      origin ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    setPaletteReference(actionReference());
+    setPaletteScope(scope);
+    setPaletteOpen(true);
+  }
+  function openTicketUpdate() {
+    if (workspace.selected) requestTicketUpdate(workspace.selected);
+  }
+  useCommandKeys(
+    () => openPalette(),
+    goTo,
+    (event) => {
+      const reference = actionReference();
+      if (!reference) return false;
+      const action = ticketCommandActions.find((action) =>
+        matchesShortcut(event, action.shortcut),
+      );
+      if (action) {
+        openPalette(action.scope);
+        return true;
+      }
+      if (matchesShortcut(event, "ticket-copy-reference")) {
+        void navigator.clipboard.writeText(reference);
+        return true;
+      }
+      if (
+        matchesShortcut(event, "ticket-update") &&
+        editingBlockedReason(workspaceProblem) === null &&
+        view === "tickets" &&
+        workspace.selected === reference
+      ) {
+        openTicketUpdate();
+        return true;
+      }
+      return false;
+    },
+  );
   useEffect(() => loadCounts.current(), [revision]);
   const openGraphItem = (node: GraphData["nodes"][number]) => {
     keepGraph.current = true;
@@ -349,6 +529,8 @@ function AppContent() {
   };
   useReminderNotifications(openNotifiedTicket);
   const isMobile = useIsMobile();
+  const { resolvePaletteFocus, resolveSettingsFocus } =
+    useResponsiveNavigationFocus(isMobile, paletteReturn);
   /**
    * The run a ticket, the Inbox or a notification asked to see, opened by the
    * Automations page.
@@ -362,6 +544,59 @@ function AppContent() {
     setView("automations");
   };
   useAutomationNotifications(chat.enabled, openNotifiedTicket, openRun);
+  const hasWorkspaceBand = Boolean(workspaceProblem || recoveryNotices);
+  const bandReserved = useBandContinuity(
+    hasWorkspaceBand,
+    contentPanel,
+    JSON.stringify([
+      view,
+      workspace.selected,
+      settingsSection,
+      graphOrigin,
+      navigation,
+    ]),
+  );
+  const workspaceRetry = useRef<Promise<void> | null>(null);
+  const retryWorkspace = () => {
+    if (workspaceRetry.current) return workspaceRetry.current;
+    const failed = getWorkspaceFailure();
+    const attempt = (async () => {
+      await recovery.flush();
+      // sidebar_counts delivers due reminders in a write transaction: reads alone cannot prove recovery.
+      setCounts(await countsClient.sidebar());
+      clearWorkspaceFailure(failed);
+      await refresh({ reportFailure: true });
+    })();
+    workspaceRetry.current = attempt;
+    void attempt
+      .finally(() => {
+        if (workspaceRetry.current === attempt) workspaceRetry.current = null;
+      })
+      .catch(() => {});
+    return attempt;
+  };
+  const workspaceBand = workspaceProblem ? (
+    <WorkspaceBand onRetry={retryWorkspace} />
+  ) : (
+    recoveryNotices
+  );
+  const deferredWorkspaceLabel =
+    !bandReserved && hasWorkspaceBand
+      ? workspaceProblem
+        ? workspaceMessages[workspaceProblem.problem]
+        : "Legacy drafts need review. Files stay protected."
+      : null;
+  const showWorkspaceNotice = () => {
+    const triggers = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        "[data-workspace-notice]",
+      ),
+    ];
+    (
+      triggers.find((trigger) => trigger.getClientRects().length > 0) ??
+      triggers.find((trigger) => !trigger.closest("[hidden]"))
+    )?.click();
+  };
   return (
     // Runs open in the Automations page, which is there only while Chat is on.
     // Without it a run's Inbox entry opens its ticket instead.
@@ -371,7 +606,8 @@ function AppContent() {
           // A ticket's graph opened from its header or rail starts on its
           // dependencies; anything else shows all connections.
           setGraphDependencies(options?.dependencies ?? false);
-          navigate({ graph: id });
+          setWorkspaceGraphPlan(options?.workspacePlan ?? null);
+          navigate({ graph: options?.workspacePlan ? "__workspace__" : id });
         }}
         settings={(page) => {
           // Opening Settings starts on Appearance, so choose the page after.
@@ -446,6 +682,197 @@ function AppContent() {
                         Skip to content
                       </a>
                       <WindowBar />
+                      <StatusLineRegion host={{ current: contentPanel }}>
+                        <PageZoomStatus zoom={pageZoom} />
+                        <NewPlanDialog
+                          open={creatingPlan}
+                          onOpenChange={setCreatingPlan}
+                          refresh={refresh}
+                          onCreated={(id) => scope("all", "all", id)}
+                        />
+                        <CommandPalette
+                          pageZoom={pageZoom}
+                          inboxCommands={
+                            view === "inbox" && inboxSelection
+                              ? (() => {
+                                  const entry =
+                                    inboxSelection.kind === "entry"
+                                      ? inboxSelection.entry
+                                      : null;
+                                  const chat =
+                                    inboxSelection.kind === "approval"
+                                      ? inboxSelection.chat
+                                      : null;
+                                  const reference =
+                                    entry?.reference ??
+                                    chat?.tickets[0]?.reference ??
+                                    chat?.first_ticket;
+                                  const ticketReason =
+                                    editingBlockedReason(workspaceProblem) ??
+                                    (!reference
+                                      ? "This Chat has no linked Ticket."
+                                      : null);
+                                  const blocked =
+                                    editingBlockedReason(workspaceProblem);
+                                  const activeTicket = reference
+                                    ? workspace.details[reference]
+                                    : undefined;
+                                  const ticketActionReason =
+                                    ticketReason ??
+                                    (!activeTicket
+                                      ? "The Ticket is still loading."
+                                      : activeTicket.trashed
+                                        ? "Restore the Ticket before changing it."
+                                        : null);
+                                  const isReview =
+                                    entry?.kind === "status" &&
+                                    entry.to_value === "In review";
+                                  const primaryReason = isReview
+                                    ? (ticketActionReason ??
+                                      (activeTicket?.status !== "In review"
+                                        ? "This review is already resolved."
+                                        : activeTicket.source?.ownership ===
+                                              "external" &&
+                                            (activeTicket.source
+                                              .status_locked ||
+                                              !activeTicket.source.status_choices.includes(
+                                                "Done",
+                                              ))
+                                          ? "The source does not allow moving this Ticket to Done."
+                                          : null))
+                                    : entry?.kind === "reminder"
+                                      ? ticketActionReason
+                                      : blocked;
+                                  const primaryLabel = chat
+                                    ? "Review in Chat"
+                                    : entry?.kind === "reminder"
+                                      ? "Clear reminder"
+                                      : entry?.kind === "status" &&
+                                          entry.to_value === "In review"
+                                        ? "Move to Done"
+                                        : "Mark read";
+                                  return [
+                                    {
+                                      id: "inbox-primary" as const,
+                                      label: primaryLabel,
+                                      disabledReason: chat
+                                        ? null
+                                        : primaryReason,
+                                      run: () => requestInboxAction("primary"),
+                                    },
+                                    {
+                                      id: "inbox-reply" as const,
+                                      label: "Reply on this Ticket",
+                                      disabledReason: ticketActionReason,
+                                      run: () => requestInboxAction("reply"),
+                                    },
+                                    {
+                                      id: "inbox-remind" as const,
+                                      label:
+                                        entry?.kind === "reminder"
+                                          ? "Snooze reminder"
+                                          : "Remind me on this Ticket",
+                                      disabledReason: ticketActionReason,
+                                      run: () => requestInboxAction("remind"),
+                                    },
+                                    {
+                                      id: "inbox-read" as const,
+                                      label: "Toggle Inbox read state",
+                                      disabledReason: blocked,
+                                      run: () => requestInboxAction("read"),
+                                    },
+                                    {
+                                      id: "inbox-next" as const,
+                                      label: "Next Inbox entry",
+                                      disabledReason: null,
+                                      run: () => requestInboxAction("next"),
+                                    },
+                                    {
+                                      id: "inbox-previous" as const,
+                                      label: "Previous Inbox entry",
+                                      disabledReason: null,
+                                      run: () => requestInboxAction("previous"),
+                                    },
+                                  ];
+                                })()
+                              : null
+                          }
+                          writeUpdate={
+                            view === "tickets" &&
+                            workspace.selected === paletteReference &&
+                            editingBlockedReason(workspaceProblem) === null
+                              ? openTicketUpdate
+                              : null
+                          }
+                          memoryTickets={workspace.tickets}
+                          readyCount={counts?.ready ?? null}
+                          automationCount={counts?.runs_needing_you ?? null}
+                          {...{
+                            attachmentCommands:
+                              view === "attachments" && graphOrigin === null
+                                ? attachmentCommands
+                                : null,
+                            documentCommands:
+                              view === "documents" && graphOrigin === null
+                                ? documentCommands
+                                : null,
+                          }}
+                          currentPlan={navigation.plan || null}
+                          workspaceGraphActive={graphOrigin === "__workspace__"}
+                          createDisabledReason={createDisabledReason}
+                          create={(kind) => {
+                            if (editingBlockedReason(workspaceProblem)) return;
+                            if (kind === "ticket") {
+                              createTriggerRef.current =
+                                paletteReturn.current instanceof
+                                HTMLButtonElement
+                                  ? paletteReturn.current
+                                  : null;
+                              setCreateStatus(undefined);
+                              setCreating(true);
+                            } else if (kind === "plan") {
+                              setCreatingPlan(true);
+                            } else if (kind === "capture")
+                              openCapture(paletteReturn.current);
+                            else {
+                              setNewChatRequest((count) => count + 1);
+                              openView("chats");
+                            }
+                          }}
+                          initialTicket={
+                            workspace.details[paletteReference ?? ""] ??
+                            workspace.tickets.find(
+                              (ticket) => ticket.reference === paletteReference,
+                            ) ??
+                            null
+                          }
+                          reference={paletteReference}
+                          initialScope={paletteScope}
+                          projects={projects}
+                          plans={plans}
+                          refresh={async () => {
+                            await refresh();
+                          }}
+                          open={paletteOpen}
+                          returnFocus={paletteReturn}
+                          resolveReturnFocus={resolvePaletteFocus}
+                          onOpenChange={setPaletteOpen}
+                          go={goTo}
+                          chatsEnabled={chat.enabled}
+                          workspaceNotice={
+                            deferredWorkspaceLabel
+                              ? {
+                                  label: "Review workspace notice",
+                                  run: showWorkspaceNotice,
+                                }
+                              : null
+                          }
+                          ticket={(reference) => {
+                            setSelected(reference);
+                            setView("tickets");
+                          }}
+                        />
+                      </StatusLineRegion>
                       <div
                         className={
                           view === "settings"
@@ -455,6 +882,7 @@ function AppContent() {
                       >
                         {view === "settings" ? (
                           <SettingsNav
+                            resolveReturnFocus={resolveSettingsFocus}
                             selected={settingsSection}
                             onSelect={setSettingsSection}
                             origin={VIEW_NAMES[viewBeforeSettings]}
@@ -465,12 +893,15 @@ function AppContent() {
                           />
                         ) : (
                           <WorkspaceSidebar
-                            onCapture={openCapture}
-                            onNewChat={() => {
-                              setNewChatRequest((count) => count + 1);
-                              openView("chats");
-                            }}
+                            onOpenPalette={(origin) =>
+                              openPalette(null, origin)
+                            }
+                            createDisabledReason={createDisabledReason}
                             counts={counts}
+                            hasTickets={
+                              workspace.tickets.length > 0 ||
+                              (counts?.total ?? 0) > 0
+                            }
                             view={view}
                             workspaceGraphOpen={graphOrigin === "__workspace__"}
                             setView={openView}
@@ -497,22 +928,35 @@ function AppContent() {
                           ref={setContentPanel}
                         >
                           <OverlayBoundary element={contentPanel}>
-                            <WorkspaceBand
-                              onRetry={() => {
-                                recovery.retry();
-                                void refresh({ reportFailure: true });
-                              }}
-                            />
-                            {/* At most one band: a workspace failure outranks
-                              the legacy-draft review. */}
-                            {!workspaceProblem && recoveryNotices}
+                            {bandReserved && (
+                              <div className="workspace-band-slot">
+                                {workspaceBand}
+                              </div>
+                            )}
+                            {deferredWorkspaceLabel && (
+                              <span role="status" className="sr-only">
+                                {deferredWorkspaceLabel}
+                              </span>
+                            )}
                             {/* Views without a pane of their own post here. */}
                             <StatusLineRegion>
                               <ShellSlotProvider
+                                notice={
+                                  deferredWorkspaceLabel ? (
+                                    <WorkspaceNotice
+                                      label={deferredWorkspaceLabel}
+                                    >
+                                      {workspaceBand}
+                                    </WorkspaceNotice>
+                                  ) : null
+                                }
                                 nav={
                                   isMobile &&
                                   view !== "settings" && (
                                     <NarrowNav
+                                      onOpenPalette={(origin) =>
+                                        openPalette(null, origin)
+                                      }
                                       waitingChats={chat.overview.needs_you}
                                       waitingRuns={
                                         chat.enabled
@@ -583,7 +1027,11 @@ function AppContent() {
                                     />
                                   )}
                                 {view === "attachments" &&
-                                  graphOrigin === null && <AttachmentLibrary />}
+                                  graphOrigin === null && (
+                                    <AttachmentLibrary
+                                      onCommandsChange={setAttachmentCommands}
+                                    />
+                                  )}
                                 {
                                   <div
                                     className="management-host"
@@ -612,6 +1060,14 @@ function AppContent() {
                                   graphOrigin === null && (
                                     <PlanList
                                       plans={plans}
+                                      known={workspace.plansKnown}
+                                      failure={workspace.plansFailure}
+                                      retry={workspace.refreshPlans}
+                                      projects={projects}
+                                      onTicket={(reference) => {
+                                        setSelected(reference);
+                                        setView("tickets");
+                                      }}
                                       archived={view === "archived-plans"}
                                       onOpen={(id) => scope("all", "all", id)}
                                       onArchivedChange={(archived) =>
@@ -629,6 +1085,7 @@ function AppContent() {
                                   }
                                 >
                                   <Documents
+                                    onCommandsChange={setDocumentCommands}
                                     key={`documents:${recoveryGeneration}`}
                                     active={view === "documents"}
                                     listRequest={documentListRequest}
@@ -670,6 +1127,8 @@ function AppContent() {
                                     hidden={graphOrigin !== "__workspace__"}
                                   >
                                     <WorkspaceGraph
+                                      projects={projects}
+                                      planId={workspaceGraphPlan}
                                       active={graphOrigin === "__workspace__"}
                                       revision={revision}
                                       onBack={() => {
@@ -746,44 +1205,76 @@ function AppContent() {
                                     />
                                   </div>
                                 )}
-                                <TicketWorkspaceView
-                                  key={`tickets:${recoveryGeneration}`}
-                                  workspace={workspace}
-                                  bulk={bulk}
-                                  hidden={
-                                    (view !== "tickets" && view !== "inbox") ||
-                                    graphOrigin !== null
-                                  }
-                                  inboxTarget={inboxTarget}
-                                  // The Inbox is a triage split: entries open
-                                  // beside it, without leaving the view (S6).
-                                  {...(view === "inbox" && {
-                                    inbox: (
-                                      <Inbox
-                                        revision={revision}
-                                        selected={workspace.selected}
-                                        onBrowse={() => setView("tickets")}
-                                        select={(reference, noteId) => {
-                                          setInboxTarget(
-                                            noteId
-                                              ? {
-                                                  reference,
-                                                  id: noteId,
-                                                  key: Date.now(),
-                                                }
-                                              : null,
-                                          );
-                                          setSelected(reference);
+                                <TicketCommandContext.Provider
+                                  value={(scope, reference) => {
+                                    paletteReturn.current =
+                                      document.activeElement instanceof
+                                      HTMLElement
+                                        ? document.activeElement
+                                        : null;
+                                    setPaletteReference(reference);
+                                    setPaletteScope(scope);
+                                    setPaletteOpen(true);
+                                  }}
+                                >
+                                  {firstRun &&
+                                    view === "tickets" &&
+                                    graphOrigin === null && (
+                                      <FirstRunGuide
+                                        disabledReason={createDisabledReason}
+                                        onCreate={(trigger) => {
+                                          createTriggerRef.current = trigger;
+                                          setCreateStatus(undefined);
+                                          setCreating(true);
                                         }}
                                       />
-                                    ),
-                                  })}
-                                  onCreate={(trigger, status) => {
-                                    createTriggerRef.current = trigger;
-                                    setCreateStatus(status);
-                                    setCreating(true);
-                                  }}
-                                />
+                                    )}
+                                  <InboxTriageProvider
+                                    active={view === "inbox"}
+                                    onSelectionChange={setInboxSelection}
+                                  >
+                                    <TicketWorkspaceView
+                                      key={`tickets:${recoveryGeneration}`}
+                                      workspace={workspace}
+                                      bulk={bulk}
+                                      hidden={
+                                        (firstRun && view === "tickets") ||
+                                        (view !== "tickets" &&
+                                          view !== "inbox") ||
+                                        graphOrigin !== null
+                                      }
+                                      inboxTarget={inboxTarget}
+                                      // The Inbox is a triage split: entries open
+                                      // beside it, without leaving the view (S6).
+                                      {...(view === "inbox" && {
+                                        inbox: (
+                                          <Inbox
+                                            revision={revision}
+                                            selected={workspace.selected}
+                                            onBrowse={() => setView("tickets")}
+                                            select={(reference, noteId) => {
+                                              setInboxTarget(
+                                                noteId && reference
+                                                  ? {
+                                                      reference,
+                                                      id: noteId,
+                                                      key: Date.now(),
+                                                    }
+                                                  : null,
+                                              );
+                                              setSelected(reference);
+                                            }}
+                                          />
+                                        ),
+                                      })}
+                                      onCreate={(trigger, status) => {
+                                        createTriggerRef.current = trigger;
+                                        setCreateStatus(status);
+                                        setCreating(true);
+                                      }}
+                                    />
+                                  </InboxTriageProvider>
+                                </TicketCommandContext.Provider>
                               </ShellSlotProvider>
                             </StatusLineRegion>
                           </OverlayBoundary>

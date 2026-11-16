@@ -61,7 +61,7 @@ test("labels code blocks and copies their source without changing document conte
   render(
     <MarkdownDocument source={'```typescript\nconst title = "Ticket";\n```'} />,
   );
-  expect(screen.getByText("typescript")).toBeTruthy();
+  expect(screen.getByText("TypeScript")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
   await waitFor(() =>
     expect(writeText).toHaveBeenCalledWith('const title = "Ticket";\n'),

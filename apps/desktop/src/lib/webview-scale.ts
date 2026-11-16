@@ -1,3 +1,4 @@
+import { pageZoomFactor } from "@/lib/page-zoom";
 import { PhysicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -49,20 +50,26 @@ export function keepWebviewInStep() {
   if (!("__TAURI_INTERNALS__" in window)) return;
   const win = getCurrentWindow();
   let busy = false;
+  let disposed = false;
+  const timers = new Set<number>();
   const check = async () => {
-    if (busy || document.visibilityState !== "visible") return;
+    if (disposed || busy || document.visibilityState !== "visible") return;
     busy = true;
     try {
       const [scale, size] = await Promise.all([
         win.scaleFactor(),
         win.innerSize(),
       ]);
+      const zoom = pageZoomFactor();
+      // WebView2 and WebKit include native page zoom in DPR.
+      // Compare the unzoomed page so accessible zoom is not mistaken for the
+      // wake-from-sleep display-scale failure this repair addresses.
       const page = {
-        dpr: window.devicePixelRatio,
-        width: window.innerWidth,
-        height: window.innerHeight,
+        dpr: window.devicePixelRatio / zoom,
+        width: window.innerWidth * zoom,
+        height: window.innerHeight * zoom,
       };
-      if (outOfStep(page, { scale, ...size })) await repair(win);
+      if (!disposed && outOfStep(page, { scale, ...size })) await repair(win);
     } catch {
       // Best effort: a window that cannot be read or resized is left alone.
     } finally {
@@ -70,9 +77,22 @@ export function keepWebviewInStep() {
     }
   };
   // Let a scale change or a wake settle before reading the sizes.
-  const soon = () => window.setTimeout(() => void check(), 500);
+  const soon = () => {
+    const timer = window.setTimeout(() => {
+      timers.delete(timer);
+      void check();
+    }, 500);
+    timers.add(timer);
+  };
   window.addEventListener("focus", soon);
   document.addEventListener("visibilitychange", soon);
-  void win.onScaleChanged(soon);
+  const unlisten = win.onScaleChanged(soon).catch(() => undefined);
   soon();
+  return () => {
+    disposed = true;
+    timers.forEach((timer) => window.clearTimeout(timer));
+    window.removeEventListener("focus", soon);
+    document.removeEventListener("visibilitychange", soon);
+    void unlisten.then((stop) => stop?.());
+  };
 }

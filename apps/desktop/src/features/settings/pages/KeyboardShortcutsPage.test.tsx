@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
+import { SHORTCUTS } from "@/lib/shortcuts";
 import { isMacPlatform } from "@/lib/platform";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 
@@ -25,20 +26,16 @@ const ALL = [
   "Plans",
   "Chat",
   "Dialogs and menus",
+  "First run",
 ];
 
 test("every real shortcut is listed under its scope", () => {
   render(<KeyboardShortcutsPage />);
   expect(groupNames()).toEqual(ALL);
-  // Keys that work but were missing before the registry (list R-08, P18).
-  for (const label of [
-    "Edit the description",
-    "Add the selected text to a Chat",
-    "Choose the harness, model and effort",
-    "Select the focused ticket for bulk changes",
-    "Rename the Plan",
-  ])
-    expect(screen.getByText(label)).toBeTruthy();
+  for (const shortcut of SHORTCUTS) {
+    const scope = screen.getByRole("region", { name: shortcut.scope });
+    expect(within(scope).getByText(shortcut.label)).toBeTruthy();
+  }
   expect(screen.getByText("Focus the divider first.")).toBeTruthy();
 });
 
@@ -80,4 +77,13 @@ test("no match says so and Clear search brings everything back", () => {
   fireEvent.click(screen.getAllByRole("button", { name: "Clear search" })[0]!);
   expect((filter() as HTMLInputElement).value).toBe("");
   expect(groupNames()).toEqual(ALL);
+});
+
+test("navigation sequences are spoken as ordered keys from the registry", () => {
+  render(<KeyboardShortcutsPage />);
+  for (const key of ["I", "A", "R", "C", "D"])
+    expect(screen.getByRole("img", { name: `G then ${key}` })).toBeTruthy();
+  fireEvent.change(filter(), { target: { value: "G then D" } });
+  expect(screen.getByText("Go to Documents")).toBeTruthy();
+  expect(screen.queryByText("Go to Inbox")).toBeNull();
 });

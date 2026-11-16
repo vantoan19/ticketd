@@ -1,6 +1,7 @@
+import { Item } from "@/components/ui/item";
 import { EmptyState } from "@/components/ui/empty-state";
 import { emptyCopy } from "@/lib/empty-copy";
-import { useContext, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useContext, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   BellOff,
@@ -16,6 +17,7 @@ import type { TicketStart } from "@/features/chats/ticket-chat";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import type { ChatFailureNotice } from "@/features/chats/failure";
 import { Count } from "@/components/ui/count";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,8 +58,8 @@ const EMPTY = {
   archived: "chats-archived",
   trashed: "chats-trash",
 } as const;
-/** The list pane's 360px plus the detail pane's 480px: below this one pane shows. */
-const STACK_MIN_WIDTH = 840;
+/** The list pane's 300px plus the detail pane's 480px: below this one pane shows. */
+const STACK_MIN_WIDTH = 780;
 const PANEL_STYLE = {
   display: "flex",
   flexDirection: "column",
@@ -147,54 +149,57 @@ function ChatRow({
   });
   return (
     <li className="chat-row-item" onKeyDown={moveInList}>
-      <button
-        ref={row}
-        type="button"
-        className="chat-row"
-        data-chat-id={chat.id}
-        tabIndex={tabStop ? 0 : -1}
-        aria-current={active ? "true" : undefined}
-        data-attention={strong ? "" : undefined}
-        onClick={onOpen}
-        onKeyDown={(event) => {
-          // The standard keys for a context menu open the row's actions.
-          if (
-            event.key === "ContextMenu" ||
-            (event.shiftKey && event.key === "F10")
-          ) {
-            event.preventDefault();
-            setMenu(true);
-          }
-        }}
-      >
-        {/* Said after the title: a row reads title, harness, status, context, time. */}
-        <HarnessMark
-          harness={chat.harness_id}
-          name={chat.harness_name}
-          className="chat-row-mark"
-          decorative
-        />
-        <span className="chat-row-title">
-          {chat.title}
-          <span className="sr-only">, {chat.harness_name},</span>
-        </span>
-        <span className="chat-row-time">
-          {chat.muted && <BellOff size={14} aria-hidden="true" />}
-          {chatTime(chat.updated_at, now)}
-        </span>
-        <span className="chat-row-sub">
-          <ChatStatus status={chat.status} activity={chat.activity} />
-          <RowContext chat={chat} />
-        </span>
-        {chat.status.unseen && <span className="sr-only">, unread</span>}
-        {chat.muted && <span className="sr-only">, muted</span>}
-      </button>
+      <Item asChild variant="navigator">
+        <button
+          ref={row}
+          type="button"
+          className="chat-row"
+          data-chat-id={chat.id}
+          tabIndex={tabStop ? 0 : -1}
+          aria-current={active ? "true" : undefined}
+          data-attention={strong ? "" : undefined}
+          onClick={onOpen}
+          onKeyDown={(event) => {
+            // The standard keys for a context menu open the row's actions.
+            if (
+              event.key === "ContextMenu" ||
+              (event.shiftKey && event.key === "F10")
+            ) {
+              event.preventDefault();
+              setMenu(true);
+            }
+          }}
+        >
+          {/* Said after the title: a row reads title, harness, status, context, time. */}
+          <HarnessMark
+            harness={chat.harness_id}
+            name={chat.harness_name}
+            className="chat-row-mark"
+            decorative
+          />
+          <span className="chat-row-title">
+            {chat.title}
+            <span className="sr-only">, {chat.harness_name},</span>
+          </span>
+          <span className="chat-row-time">
+            {chat.muted && <BellOff size={14} aria-hidden="true" />}
+            {chatTime(chat.updated_at, now)}
+          </span>
+          <span className="chat-row-sub">
+            <ChatStatus status={chat.status} activity={chat.activity} />
+            <RowContext chat={chat} />
+          </span>
+          {chat.status.unseen && <span className="sr-only">, unread</span>}
+          {chat.muted && <span className="sr-only">, muted</span>}
+        </button>
+      </Item>
       <span
         ref={more}
         className="chat-row-more"
         data-open={menu ? "" : undefined}
       >
         <ChatActionsMenu
+          rowAction
           chat={{ ...chat, unseen: chat.status.unseen }}
           label={`Actions for ${chat.title}`}
           open={menu}
@@ -367,7 +372,7 @@ export function ChatsView({
           </DropdownMenu>
         )}
         count={
-          list && (
+          list?.known && (
             <Count>
               {list.chats.length}
               <span className="sr-only"> chats</span>
@@ -389,30 +394,83 @@ export function ChatsView({
           />
         </div>
       )}
-      {list?.error && (
+      {!list && (
+        <div role="status" aria-label="Loading Chats" aria-busy="true">
+          <ul className="chat-rows" aria-hidden="true">
+            {scope === "active" && (
+              <li className="chat-list-group">
+                <Skeleton className="h-4 w-16" />
+              </li>
+            )}
+            {[0, 1, 2].map((index) => (
+              <li key={index} className="chat-row-item">
+                <Item asChild variant="navigator">
+                  <div className="chat-row">
+                    <Skeleton className="size-4" shape="circle" />
+                    <Skeleton className="h-5 w-32 max-w-full" />
+                    <Skeleton className="h-4 w-8" />
+                    <span className="chat-row-sub">
+                      <Skeleton className="h-4 w-24" />
+                    </span>
+                  </div>
+                </Item>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {list?.error && list.known && (
+        <div className="chat-list-alert">
+          <FailureAlert
+            size="compact"
+            failure={list.error}
+            onRetry={list.retry}
+          />
+        </div>
+      )}
+      {list?.error && !list.known && (
         <FailureState failure={list.error} onRetry={list.retry} />
       )}
       {list && !list.error && list.chats.length === 0 && (
         <ChatListEmpty scope={scope} />
       )}
       <ul className="chat-rows" aria-label="Chats">
-        {list?.chats.map((chat, index) => (
-          <ChatRow
-            key={chat.id}
-            chat={chat}
-            now={now}
-            active={open?.kind === "chat" && open.id === chat.id}
-            tabStop={
-              list.chats.some(
-                (one) => open?.kind === "chat" && open.id === one.id,
-              )
-                ? open?.kind === "chat" && open.id === chat.id
-                : index === 0
-            }
-            onOpen={() => show({ kind: "chat", id: chat.id })}
-            onResult={setFailure}
-          />
-        ))}
+        {list?.chats
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(b.status.rank === "approval") -
+              Number(a.status.rank === "approval"),
+          )
+          .map((chat, index, chats) => (
+            <Fragment key={chat.id}>
+              {scope === "active" &&
+                (index === 0 ||
+                  (chats[index - 1]?.status.rank === "approval") !==
+                    (chat.status.rank === "approval")) && (
+                  <li
+                    className="chat-list-group text-xs text-muted-foreground"
+                    role="presentation"
+                  >
+                    {chat.status.rank === "approval" ? "Needs you" : "Recent"}
+                  </li>
+                )}
+              <ChatRow
+                chat={chat}
+                now={now}
+                active={open?.kind === "chat" && open.id === chat.id}
+                tabStop={
+                  list.chats.some(
+                    (one) => open?.kind === "chat" && open.id === one.id,
+                  )
+                    ? open?.kind === "chat" && open.id === chat.id
+                    : index === 0
+                }
+                onOpen={() => show({ kind: "chat", id: chat.id })}
+                onResult={setFailure}
+              />
+            </Fragment>
+          ))}
       </ul>
     </section>
   );
@@ -474,7 +532,7 @@ export function ChatsView({
           // library would still claim presses near it.
           disabled={single}
         >
-          <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
+          <ResizablePanel id="chat-list" minSize={300} defaultSize={300}>
             {listPane}
           </ResizablePanel>
           <ResizableHandle aria-label="Resize Chat list" />

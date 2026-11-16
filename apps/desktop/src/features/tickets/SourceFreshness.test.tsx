@@ -278,7 +278,9 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   });
   // A failed retry does not claim success.
   expect(
-    await within(notice).findByText(/Still unavailable. Network is down\./),
+    await within(notice).findByText(
+      /Still unavailable. ticketd can't reach the service/,
+    ),
   ).toBeTruthy();
 });
 

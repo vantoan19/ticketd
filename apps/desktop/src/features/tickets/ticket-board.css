@@ -1,3 +1,5 @@
+@import "../../components/ui/surface-roles/tickets-ticket-board.css";
+
 .ticket-list:has(.ticket-board) {
   display: flex;
   flex-direction: column;
@@ -13,39 +15,33 @@
   min-height: 32px;
   margin: 0;
   padding: 0 16px;
-  box-shadow: inset 0 1px 0 var(--group-hairline);
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* Columns share the width between 220 and 320px (S5); the board scrolls
    sideways only below that. */
 .ticket-board {
   display: flex;
   flex: 1;
-  gap: 8px;
+  gap: 10px;
   min-height: 0;
-  padding: 8px;
+  padding: 12px 12px 12px 16px;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
 }
 .board-column {
+  padding: 4px 4px 8px;
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
   min-width: 220px;
   max-width: 320px;
   min-height: 0;
-  border-radius: var(--radius);
 }
 /* A folded terminal column: a 40px vertical header that opens it. */
 .board-column[data-folded] {
   flex: 0 0 40px;
   min-width: 40px;
   max-width: 40px;
-  background: var(--recessed);
-  box-shadow: inset 0 0 0 1px var(--group-hairline);
 }
 .board-column-fold {
   display: flex;
@@ -55,19 +51,8 @@
   gap: 8px;
   width: 100%;
   padding: 12px 0;
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-}
-.board-column-fold:hover {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.board-column-fold:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 .board-column-fold-label {
-  font-weight: 500;
   writing-mode: vertical-rl;
 }
 .board-column-header {
@@ -75,110 +60,42 @@
   flex: none;
   align-items: center;
   gap: 8px;
-  height: 32px;
+  height: 36px;
   padding: 0 4px 0 8px;
-  color: var(--muted-foreground);
 }
 .board-column-header h2 {
   margin: 0;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 500;
-  letter-spacing: -0.28px;
-}
-.board-column-header > span {
-  font-size: var(--text-caption);
 }
 .board-column-actions {
   display: flex;
   margin-left: auto;
 }
 /* Add and Fold are revealed on the header's hover or focus (P12). */
-@media (hover: hover) and (pointer: fine) {
-  .board-column-actions {
-    opacity: 0;
-  }
-  .board-column:hover .board-column-actions,
-  .board-column-actions:focus-within {
-    opacity: 1;
-  }
-}
-.board-column-refused {
-  white-space: nowrap;
-}
 .board-column-body {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 6px;
   min-height: 0;
-  padding: 2px 2px 8px;
+  padding: 6px 0 8px;
   overflow-y: auto;
-  border-radius: var(--radius);
 }
 .board-column-note {
   padding: 4px 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* Drag feedback: allowed columns take a hairline, the target the ring; a
    refused column says so in its header. */
-.board-column[data-drop-allowed="true"] .board-column-body {
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-.board-column[data-drop-target] .board-column-body {
-  background: var(--accent);
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.board-column[data-drop-target][data-folded] {
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.board-column[data-drop-allowed="false"] .board-column-header h2 {
-  color: var(--muted-foreground);
-}
-.ui-button.board-card {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 4px;
-  width: 100%;
-  height: auto;
-  padding: 8px 10px;
-  white-space: normal;
-  text-align: left;
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  user-select: none;
-}
-.ui-button.board-card:hover {
-  background: var(--hover);
-}
-.ui-button.board-card[aria-pressed="true"] {
-  background: var(--accent);
-}
-.ui-button.board-card:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
 .board-card-container {
   position: relative;
 }
 /* The card being dragged leaves a dashed slot; so does a card that moved
    at once, until the core confirms it. */
-.board-card-container[data-dragging] .board-card {
+.board-card-container[data-dragging] > * {
   visibility: hidden;
 }
-.board-card-container[data-dragging],
-.board-card-slot {
-  border-radius: var(--radius);
-  outline: 1px dashed var(--control-boundary);
-  outline-offset: -1px;
-}
-.board-card-slot {
+[data-board-slot] {
   flex: none;
-  min-height: 64px;
+  min-height: 0;
 }
 .board-card-top {
   display: flex;
@@ -186,15 +103,12 @@
   gap: 6px;
   min-width: 0;
   padding-right: 28px;
-  color: var(--muted-foreground);
 }
 .board-card-pending {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin-left: auto;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .board-card-pending svg {
   width: 12px;
@@ -206,20 +120,13 @@
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 400;
-  line-height: 20px;
 }
 .board-card-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   min-width: 0;
-  overflow: clip;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .board-card-meta:empty {
   display: none;
@@ -231,7 +138,6 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
-  white-space: nowrap;
 }
 .board-card-context > span {
   min-width: 0;
@@ -255,36 +161,27 @@
   width: 24px;
   height: 24px;
 }
-@media (hover: hover) and (pointer: fine) {
-  .board-card-status {
-    opacity: 0;
-  }
-  .board-card-container:hover .board-card-status,
-  .board-card-container:focus-within .board-card-status,
-  .board-card-status:has([data-state="open"]) {
-    opacity: 1;
-  }
-}
 .board-card-failure {
+  position: absolute;
+  top: 4px;
+  left: 10px;
+  right: 36px;
+  height: 32px;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 4px;
-  color: var(--foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
-.board-drag-preview {
+.board-card-failure > .ui-failure-inline {
+  flex-wrap: nowrap;
+}
+[data-board-drag-preview] {
   position: fixed;
   z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-menu);
+  padding: 0;
+
+  transform: scale(1.02) rotate(-1.2deg);
   pointer-events: none;
 }
 .board-read-error {
@@ -293,9 +190,6 @@
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 /* With nothing open, the list or board takes the full width rather than
    cutting titles beside an empty detail pane (list R-04); an open card shows
@@ -315,22 +209,77 @@
   position: relative;
 }
 .ticket-workspace[data-peek] #detail {
+  /* The panel library supplies flex inline; an overlay owns its own width. */
+  display: flex;
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   z-index: 20;
-  width: min(520px, 100%);
-  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-modal);
+  width: min(520px, 100%) !important;
+  flex: none !important;
 }
-@container plan-workspace (max-width: 839px) {
-  /* !important: beats the panel library's inline flex. */
-  .ticket-workspace.board-layout #list {
-    flex: 1 1 0 !important;
+/* Card status glyphs keep the 14px specimen size inside shared buttons. */
+.board-card-top > .status-glyph,
+.board-card-status .status-glyph {
+  width: 14px;
+  height: 14px;
+}
+
+.board-card-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.board-column[data-folded] {
+  position: relative;
+}
+[data-board-saving] {
+  position: absolute;
+  z-index: 2;
+  top: 40px;
+  right: 0;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 11px;
+}
+.board-fold-refused {
+  position: absolute;
+  top: 0;
+  right: 40px;
+}
+
+[data-board-slot][data-collapsing] {
+  overflow: hidden;
+}
+
+/* Touch reserves a 44px metadata row and status lane from first paint. Pending
+   and failure replace that row rather than changing a card's geometry. */
+@media (pointer: coarse) {
+  .board-card-top {
+    min-height: 44px;
+    padding-right: 48px;
   }
-  .ticket-workspace.board-layout.narrow-detail #detail {
-    flex: 1 1 0 !important;
+  .board-card-status [data-slot="button"] {
+    width: 44px;
+    height: 44px;
+  }
+  .board-card-failure {
+    left: 4px;
+    right: 50px;
+    height: 44px;
+  }
+  .board-card-failure > .ui-failure-inline {
+    gap: 2px;
+  }
+  .board-card-pending {
+    position: absolute;
+    top: 4px;
+    left: 12px;
+    height: 44px;
   }
 }

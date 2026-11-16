@@ -1,6 +1,6 @@
 //! Shared ticket workflows for the desktop and CLI.
 pub mod agent_skills;
-pub use search::TicketWithUpdate;
+pub use search::{TicketMetadata, TicketMetadataPage, TicketWithUpdate};
 mod backlinks;
 pub use backlinks::Backlink;
 mod backup;

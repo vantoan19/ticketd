@@ -1,17 +1,30 @@
 import { useNow } from "@/lib/use-now";
 import { useRef, useState, type ReactNode } from "react";
-import { Cloud, CornerDownRight, Folder, Layers, Plus } from "lucide-react";
+import {
+  AlarmClock,
+  Bot,
+  Cloud,
+  CornerDownRight,
+  Folder,
+  Layers,
+  LoaderCircle,
+  Plus,
+} from "lucide-react";
+import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
+import { HarnessMark } from "@/features/chats/HarnessMark";
+import { editingHarness } from "@/features/chats/editing-harness";
+import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
+import { useStickyRows } from "./use-sticky-rows";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
   readinessLabel,
-  readinessShortLabel,
   rowContextItem,
   type RowContextKind,
   type RowScope,
@@ -22,6 +35,8 @@ import "./ticket-list.css";
 import { Badge } from "@/components/ui/badge";
 import { Count } from "@/components/ui/count";
 import { Reference } from "@/components/ui/reference";
+import { useInboxAttention } from "./use-inbox-attention";
+import type { ChatSummary } from "@/features/chats/client";
 import { useConflicts } from "@/features/sync-review/use-conflicts";
 
 export function TicketList({
@@ -37,10 +52,15 @@ export function TicketList({
   rowAction,
   grouping,
   singleStatus = false,
-  readyView = false,
-  simple = false,
+  simple = true,
+  empty,
+  scopeKey = "",
+  details = {},
 }: {
   tickets: Ticket[];
+  empty?: ReactNode;
+  scopeKey?: string;
+  details?: Record<string, Ticket>;
   selected: string | null;
   onOpen: (reference: string) => void;
   bulkSelection: string[];
@@ -75,6 +95,24 @@ export function TicketList({
   /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
   simple?: boolean;
 }) {
+  const navigator = selected !== null;
+  const attention = useInboxAttention();
+  const ticketChats = new Map<string, ChatSummary>();
+  for (const chat of attention?.chats ?? []) {
+    if (chat.status.rank !== "working" && chat.status.rank !== "approval")
+      continue;
+    for (const { reference } of chat.tickets) {
+      if (ticketChats.get(reference)?.status.rank !== "approval")
+        ticketChats.set(reference, chat);
+    }
+  }
+  const sticky = useStickyRows(
+    tickets,
+    selected,
+    details,
+    bulkSelection,
+    scopeKey,
+  );
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
@@ -89,11 +127,13 @@ export function TicketList({
     { header: ReturnType<typeof groupTickets>[number] } | { ticket: Ticket }
   )[] =
     grouping && !singleStatus
-      ? groupTickets(tickets, grouping.counts).flatMap((group) => [
-          { header: group },
-          ...group.tickets.map((ticket) => ({ ticket })),
-        ])
-      : tickets.map((ticket) => ({ ticket }));
+      ? groupTickets(sticky.tickets, grouping.counts, sticky.status).flatMap(
+          (group) => [
+            { header: group },
+            ...group.tickets.map((ticket) => ({ ticket })),
+          ],
+        )
+      : sticky.tickets.map((ticket) => ({ ticket }));
   const ordered = entries.flatMap((entry) =>
     "ticket" in entry ? [entry.ticket] : [],
   );
@@ -116,6 +156,7 @@ export function TicketList({
     return ordered.slice(low, high + 1).map((item) => item.reference);
   };
   const canSelect = selectable && !selectionDisabled;
+  if (sticky.tickets.length === 0 && empty) return empty;
   return (
     <ul className="ticket-rows">
       {entries.map((entry) => {
@@ -129,190 +170,213 @@ export function TicketList({
                   .length
               : 0;
           return (
-            <li
-              key={`group-${status}`}
-              className="ticket-group-header"
-              data-status={status}
-            >
-              <StatusIcon status={status} decorative />
-              <h2>{status}</h2>
-              {/* Always the group's total, never the part shown (list R-09). */}
-              <Count>
-                {count}
-                <span className="sr-only">
-                  {" "}
-                  {count === 1 ? "ticket" : "tickets"}
-                </span>
-              </Count>
-              {ready > 0 && (
-                <span className="ticket-group-meta">· {ready} ready</span>
-              )}
-              {grouping?.onAdd && (
-                // Revealed on header hover or focus; it stays in the tab order.
-                <span className="ticket-group-add">
-                  <IconButton
-                    // The Duplicate group's action names what it opens (R-03).
-                    label={
-                      status === "Duplicate"
-                        ? "Mark a ticket as duplicate…"
-                        : `Add ${status} ticket`
-                    }
-                    onClick={(event) =>
-                      grouping.onAdd?.(status, event.currentTarget)
-                    }
-                  >
-                    <Plus aria-hidden="true" />
-                  </IconButton>
-                </span>
-              )}
-            </li>
+            <Item key={`group-${status}`} variant="ledger-group" asChild>
+              <li className="ticket-group-header" data-status={status}>
+                <StatusIcon status={status} decorative />
+                <h2>{status}</h2>
+                {/* Always the group's total, never the part shown (list R-09). */}
+                <Count>
+                  {count}
+                  <span className="sr-only">
+                    {" "}
+                    {count === 1 ? "ticket" : "tickets"}
+                  </span>
+                </Count>
+                {status === "Todo" && shown.length === count && (
+                  <span className="ticket-group-meta">· {ready} ready</span>
+                )}
+                {grouping?.onAdd && (
+                  // Revealed on header hover or focus; it stays in the tab order.
+                  <span className="ticket-group-add">
+                    <IconButton
+                      // The Duplicate group's action names what it opens (R-03).
+                      label={
+                        status === "Duplicate"
+                          ? "Mark a ticket as duplicate…"
+                          : `Add ${status} ticket`
+                      }
+                      onClick={(event) =>
+                        grouping.onAdd?.(status, event.currentTarget)
+                      }
+                    >
+                      <Plus aria-hidden="true" />
+                    </IconButton>
+                  </span>
+                )}
+              </li>
+            </Item>
           );
         }
         const { ticket } = entry;
         const index = ordered.indexOf(ticket);
         return (
-          <li key={ticket.id}>
-            {!selectable && (
-              // Keeps rows aligned with lists that have a selection column.
-              <span className="ticket-select" aria-hidden="true" />
-            )}
-            {selectable && (
-              <label className="ticket-select">
-                <input
-                  type="checkbox"
-                  tabIndex={-1}
-                  aria-label={`Select ${ticket.reference}`}
-                  checked={bulkSelection.includes(ticket.reference)}
-                  disabled={selectionDisabled}
-                  onClick={(event) => {
-                    // Shift-click selects the range from the last ticket toggled.
-                    if (event.shiftKey && anchor.current && onSelectMany) {
-                      event.preventDefault();
-                      ranged.current = true;
-                      window.setTimeout(() => (ranged.current = false), 0);
-                      onSelectMany(range(ticket));
-                    }
-                  }}
-                  onChange={() => {
-                    if (ranged.current) {
-                      ranged.current = false;
-                      return;
-                    }
+          <Item
+            key={ticket.id}
+            variant={navigator ? "navigator" : "ledger"}
+            asChild
+          >
+            <li
+              data-arriving={sticky.arrivals.has(ticket.id) || undefined}
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget)
+                  sticky.onArrivalEnd(ticket.id);
+              }}
+              onPointerEnter={() => sticky.onPointerEnter(ticket.id)}
+              onPointerLeave={sticky.onPointerLeave}
+            >
+              {!selectable && (
+                // Keeps rows aligned with lists that have a selection column.
+                <span className="ticket-select" aria-hidden="true" />
+              )}
+              {selectable && (
+                <label className="ticket-select">
+                  <input
+                    type="checkbox"
+                    tabIndex={-1}
+                    aria-label={`Select ${ticket.reference}`}
+                    checked={bulkSelection.includes(ticket.reference)}
+                    disabled={selectionDisabled}
+                    onClick={(event) => {
+                      // Shift-click selects the range from the last ticket toggled.
+                      if (event.shiftKey && anchor.current && onSelectMany) {
+                        event.preventDefault();
+                        ranged.current = true;
+                        window.setTimeout(() => (ranged.current = false), 0);
+                        onSelectMany(range(ticket));
+                      }
+                    }}
+                    onChange={() => {
+                      if (ranged.current) {
+                        ranged.current = false;
+                        return;
+                      }
+                      anchor.current = ticket.reference;
+                      onToggle(ticket.reference);
+                    }}
+                  />
+                </label>
+              )}
+              <button
+                ref={(node) => {
+                  if (node) rows.current.set(ticket.id, node);
+                  else rows.current.delete(ticket.id);
+                }}
+                type="button"
+                className="ticket-row"
+                data-ticket-reference={ticket.reference}
+                data-rows={simple ? "simple" : "detailed"}
+                data-status={ticket.status}
+                aria-pressed={ticket.reference === selected}
+                tabIndex={ticket.id === tabStop ? 0 : -1}
+                onClick={(event) => {
+                  if (event.detail <= 1) onOpen(ticket.reference);
+                }}
+                onFocus={(event) => {
+                  setFocusedRow(ticket.id);
+                  event.currentTarget.scrollIntoView?.({ block: "nearest" });
+                }}
+                onKeyDown={(event) => {
+                  const plain =
+                    !event.metaKey && !event.ctrlKey && !event.altKey;
+                  if (
+                    canSelect &&
+                    onSelectMany &&
+                    event.shiftKey &&
+                    (event.key === "ArrowDown" || event.key === "ArrowUp")
+                  ) {
+                    // Shift+↑/↓ extends the selection as focus moves.
+                    event.preventDefault();
+                    const next =
+                      ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
+                    if (!next) return;
+                    anchor.current ??= ticket.reference;
+                    onSelectMany(range(next));
+                    focusRow(next);
+                  } else if (
+                    canSelect &&
+                    onSelectMany &&
+                    (event.metaKey || event.ctrlKey) &&
+                    !event.altKey &&
+                    event.key.toLowerCase() === "a"
+                  ) {
+                    // Mod+A selects every listed ticket.
+                    event.preventDefault();
+                    onSelectMany(ordered.map((item) => item.reference));
+                  } else if (
+                    event.key === "ArrowDown" ||
+                    event.key === "ArrowUp" ||
+                    (plain && (event.key === "j" || event.key === "k"))
+                  ) {
+                    event.preventDefault();
+                    const down = event.key === "ArrowDown" || event.key === "j";
+                    const next = ordered[index + (down ? 1 : -1)];
+                    focusRow(next);
+                    if (selected && next) onOpen(next.reference);
+                  } else if (event.key === "Home" || event.key === "End") {
+                    event.preventDefault();
+                    focusRow(
+                      event.key === "Home" ? ordered[0] : ordered.at(-1),
+                    );
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    onOpen(ticket.reference);
+                  } else if (
+                    event.key === " " &&
+                    selectable &&
+                    !selectionDisabled
+                  ) {
+                    // Space selects for bulk actions; Enter opens.
+                    event.preventDefault();
                     anchor.current = ticket.reference;
                     onToggle(ticket.reference);
-                  }}
-                />
-              </label>
-            )}
-            <button
-              ref={(node) => {
-                if (node) rows.current.set(ticket.id, node);
-                else rows.current.delete(ticket.id);
-              }}
-              type="button"
-              className="ticket-row"
-              data-ticket-reference={ticket.reference}
-              data-rows={simple ? "simple" : undefined}
-              aria-pressed={ticket.reference === selected}
-              tabIndex={ticket.id === tabStop ? 0 : -1}
-              onClick={() => onOpen(ticket.reference)}
-              onFocus={(event) => {
-                setFocusedRow(ticket.id);
-                event.currentTarget.scrollIntoView?.({ block: "nearest" });
-              }}
-              onKeyDown={(event) => {
-                const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
-                if (
-                  canSelect &&
-                  onSelectMany &&
-                  event.shiftKey &&
-                  (event.key === "ArrowDown" || event.key === "ArrowUp")
-                ) {
-                  // Shift+↑/↓ extends the selection as focus moves.
-                  event.preventDefault();
-                  const next =
-                    ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
-                  if (!next) return;
-                  anchor.current ??= ticket.reference;
-                  onSelectMany(range(next));
-                  focusRow(next);
-                } else if (
-                  canSelect &&
-                  onSelectMany &&
-                  (event.metaKey || event.ctrlKey) &&
-                  !event.altKey &&
-                  event.key.toLowerCase() === "a"
-                ) {
-                  // Mod+A selects every listed ticket.
-                  event.preventDefault();
-                  onSelectMany(ordered.map((item) => item.reference));
-                } else if (
-                  event.key === "ArrowDown" ||
-                  event.key === "ArrowUp" ||
-                  (plain && (event.key === "j" || event.key === "k"))
-                ) {
-                  event.preventDefault();
-                  const down = event.key === "ArrowDown" || event.key === "j";
-                  focusRow(ordered[index + (down ? 1 : -1)]);
-                } else if (event.key === "Home" || event.key === "End") {
-                  event.preventDefault();
-                  focusRow(event.key === "Home" ? ordered[0] : ordered.at(-1));
-                } else if (event.key === "Enter") {
-                  event.preventDefault();
-                  onOpen(ticket.reference);
-                } else if (
-                  event.key === " " &&
-                  selectable &&
-                  !selectionDisabled
-                ) {
-                  // Space selects for bulk actions; Enter opens.
-                  event.preventDefault();
-                  anchor.current = ticket.reference;
-                  onToggle(ticket.reference);
+                  }
+                }}
+                onKeyUp={(event) => {
+                  // Stop the native Space-click that would open the ticket.
+                  if (event.key === " " && selectable && !selectionDisabled)
+                    event.preventDefault();
+                }}
+                aria-keyshortcuts={
+                  selectable
+                    ? "Space Enter Shift+ArrowDown Shift+ArrowUp Meta+A Control+A"
+                    : undefined
                 }
-              }}
-              onKeyUp={(event) => {
-                // Stop the native Space-click that would open the ticket.
-                if (event.key === " " && selectable && !selectionDisabled)
-                  event.preventDefault();
-              }}
-              aria-keyshortcuts={
-                selectable
-                  ? "Space Enter Shift+ArrowDown Shift+ArrowUp Meta+A Control+A"
-                  : undefined
-              }
-            >
-              {grouping && !singleStatus ? (
-                // The group header already names the status (list R-02).
-                <span className="ticket-row-status">
-                  <StatusIcon status={ticket.status} />
-                </span>
-              ) : (
-                <Tooltip content={ticket.status}>
+              >
+                {grouping && !singleStatus ? (
+                  // The group header already names the status (list R-02).
                   <span className="ticket-row-status">
                     <StatusIcon status={ticket.status} />
                   </span>
-                </Tooltip>
+                ) : (
+                  <Tooltip content={ticket.status}>
+                    <span className="ticket-row-status">
+                      <StatusIcon status={ticket.status} />
+                    </span>
+                  </Tooltip>
+                )}
+                {!navigator && <Reference>{ticket.reference}</Reference>}
+
+                <span className="ticket-title-lane">
+                  <Tooltip content={ticket.title} overflowOnly>
+                    <span className="ticket-title">{ticket.title}</span>
+                  </Tooltip>
+                  <SourcePill ticket={ticket} />
+                </span>
+                <RowDetails
+                  ticket={ticket}
+                  scope={scope}
+                  simple={simple}
+                  navigator={navigator}
+                  needsReview={needsReview.has(ticket.id)}
+                  chat={ticketChats.get(ticket.reference)}
+                  reminder={attention?.reminders.get(ticket.reference)}
+                />
+              </button>
+              {rowAction && (
+                <span className="ticket-row-action">{rowAction(ticket)}</span>
               )}
-              <Reference>{ticket.reference}</Reference>
-              <Tooltip content={ticket.title} overflowOnly>
-                <span className="ticket-title">{ticket.title}</span>
-              </Tooltip>
-              <SourcePill ticket={ticket} />
-              <RowDetails
-                ticket={ticket}
-                scope={scope}
-                grouped={grouping !== undefined}
-                singleStatus={singleStatus}
-                readyView={readyView}
-                simple={simple}
-                needsReview={needsReview.has(ticket.id)}
-              />
-            </button>
-            {rowAction && (
-              <span className="ticket-row-action">{rowAction(ticket)}</span>
-            )}
-          </li>
+            </li>
+          </Item>
         );
       })}
     </ul>
@@ -340,125 +404,142 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
   );
 }
 
-function ContextIcon({ kind }: { kind: RowContextKind }) {
+function ContextIcon({ kind }: { kind: RowContextKind | "unlinked" }) {
   const props = { "aria-hidden": true } as const;
   // The Duplicate status glyph, never a copy icon (list R-06).
   if (kind === "duplicate")
     return <StatusIcon status="Duplicate" size={12} decorative />;
   if (kind === "subticket") return <CornerDownRight {...props} />;
+  if (kind === "unlinked") return <Folder {...props} strokeDasharray="2 3" />;
   return kind === "plan" ? <Layers {...props} /> : <Folder {...props} />;
 }
 
-/** Line two, always in the same order: availability, context, tags, time. */
+/** Each mode renders only its own caption or lanes, with shared state labels. */
 function RowDetails({
   ticket,
   scope,
-  grouped,
-  singleStatus,
-  readyView,
   simple,
+  navigator,
   needsReview,
+  chat,
+  reminder,
 }: {
-  /** Changed on two desktops and waiting for a choice; said in place of readiness. */
-  needsReview: boolean;
   ticket: Ticket;
   scope: RowScope;
-  grouped: boolean;
-  singleStatus: boolean;
-  readyView: boolean;
   simple: boolean;
+  navigator: boolean;
+  needsReview: boolean;
+  chat: ChatSummary | undefined;
+  reminder: string | null | undefined;
 }) {
   const now = useNow();
   const state = readiness(ticket);
-  const context = rowContextItem(ticket, scope);
+  const context = rowContextItem(ticket, scope, false);
+  const duplicate = rowContextItem(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
-  const showState =
-    // The Ready view already says Ready, and a status view says its status;
-    // Blocked is still news. In a grouped list the Todo header summarises
-    // Ready ("Todo 51 · 50 ready"), so only Blocked is flagged (list R-10).
-    state.kind === "blocked" ||
-    (state.kind === "ready" && !readyView && !grouped) ||
-    (state.kind === "status" &&
-      !singleStatus &&
-      !grouped &&
-      !context?.label.startsWith("Duplicate"));
-  const simpleTone = unavailable
-    ? "attention"
-    : state.kind === "blocked"
-      ? "blocked"
-      : state.kind === "ready" && !readyView && !grouped
-        ? "ready"
-        : null;
+  const contextLabel =
+    context?.label ?? (ticket.project_id ? "" : "No project");
+  const update = ticket.progress_summary;
+  const harness = editingHarness(update?.editing_agent);
+  const due = reminder && Date.parse(reminder) <= now;
+  const live = chat?.status.rank;
+  const label = needsReview
+    ? "Needs review"
+    : unavailable
+      ? "Source unavailable"
+      : live === "approval"
+        ? "Approval needed"
+        : live === "working"
+          ? "Working"
+          : state.kind === "blocked"
+            ? readinessLabel(state)
+            : due
+              ? "Reminder due"
+              : ticket.status === "In review" && update?.editing_agent
+                ? "Ready for review"
+                : duplicate?.kind === "duplicate"
+                  ? duplicate.label
+                  : "";
   return (
-    <span className="ticket-row-meta">
-      <span className="ticket-row-contextual">
-        {needsReview ? (
-          <span className="ticket-row-state">
-            <StatusDot tone="attention" size={10} />
-            <span className={simple ? "sr-only" : "ticket-row-state-label"}>
-              Needs review
-            </span>
+    <>
+      {navigator ? (
+        <span className="ticket-navigator-caption">
+          <Reference>{ticket.reference}</Reference>
+          <span>·</span>
+          {label === "Working" && chat ? (
+            <HarnessMark harness={chat.harness_id} name={chat.harness_name} />
+          ) : (!label || label === "Ready for review") && harness ? (
+            <HarnessMark
+              harness={harness}
+              name={update?.editing_agent ?? harness}
+            />
+          ) : null}
+          <span aria-label={label || undefined}>
+            {label ||
+              (update
+                ? `${update.editing_agent ?? "You"} · ${progressBrief(update.brief.text)}`
+                : contextLabel)}
           </span>
-        ) : simple ? (
-          // One line: a dot says Ready or Blocked, or that the source is
-          // unavailable. A dot never stands alone, so the words are its name and
-          // its tooltip. The Ready view omits the per-row Ready dot.
-          simpleTone && (
-            <Tooltip
-              content={
-                unavailable ? "Source unavailable" : readinessLabel(state)
-              }
-            >
-              <span className="ticket-row-state">
-                <StatusDot tone={simpleTone} size={10} />
-                <span className="sr-only">
-                  {unavailable ? "Source unavailable" : readinessLabel(state)}
+        </span>
+      ) : (
+        <>
+          <span className="ticket-row-state" aria-label={label || undefined}>
+            {label && (
+              <Tooltip content={label}>
+                <span
+                  className={`ticket-row-state-content ${label === "Working" ? "text-foreground" : label === "Approval needed" || state.kind === "blocked" ? "text-status-blocked" : ""}`}
+                >
+                  {label === "Working" && chat ? (
+                    <HarnessMark
+                      harness={chat.harness_id}
+                      name={chat.harness_name}
+                    />
+                  ) : label === "Ready for review" ? (
+                    harness ? (
+                      <HarnessMark
+                        harness={harness}
+                        name={update?.editing_agent ?? ""}
+                      />
+                    ) : (
+                      <Bot size={12} aria-hidden="true" />
+                    )
+                  ) : label === "Reminder due" ? (
+                    <AlarmClock size={12} aria-hidden="true" />
+                  ) : label === duplicate?.label &&
+                    duplicate?.kind === "duplicate" &&
+                    !needsReview &&
+                    !unavailable ? (
+                    <StatusIcon status="Duplicate" size={12} decorative />
+                  ) : (
+                    <StatusDot tone="attention" size={6} />
+                  )}
+                  <span className="ticket-row-state-label">{label}</span>
+                  {label === "Working" && (
+                    <LoaderCircle
+                      size={12}
+                      className="chat-spin"
+                      aria-hidden="true"
+                    />
+                  )}
                 </span>
-              </span>
-            </Tooltip>
-          )
-        ) : unavailable ? (
-          // The source cannot be read: say so in place of Ready or Blocked, which
-          // would describe content that may no longer be current.
-          <span className="ticket-row-state">
-            <StatusDot tone="attention" size={10} />
-            {state.kind === "status" && !grouped && !singleStatus
-              ? `${state.status} · Source unavailable`
-              : "Source unavailable"}
+              </Tooltip>
+            )}
           </span>
-        ) : (
-          showState && (
-            <span className="ticket-row-state">
-              {state.kind !== "status" && (
-                <StatusDot tone={state.kind} size={10} />
-              )}
-              {readinessShortLabel(state) === readinessLabel(state) ? (
-                <span className="ticket-row-state-label">
-                  {readinessLabel(state)}
-                </span>
-              ) : (
-                // The short word is cut from the full one, which the tooltip shows.
-                <Tooltip content={readinessLabel(state)}>
-                  <span className="ticket-row-state-label">
-                    <span aria-hidden="true">{readinessShortLabel(state)}</span>
-                    <span className="sr-only">{readinessLabel(state)}</span>
-                  </span>
-                </Tooltip>
-              )}
-            </span>
-          )
-        )}
-        {!simple && context && (
-          <span className="ticket-row-context" data-kind={context.kind}>
-            <ContextIcon kind={context.kind} />
-            <span className="ticket-row-context-label">{context.label}</span>
+          <span className="ticket-row-tags-lane">
+            <RowTags tags={ticket.tags} ledger />
           </span>
-        )}
-        {!simple && <RowTags tags={ticket.tags} />}
-      </span>
+          <span className="ticket-row-context" data-kind={context?.kind}>
+            {contextLabel && (
+              <>
+                <ContextIcon kind={context?.kind ?? "unlinked"} />
+                <span className="ticket-row-context-label">{contextLabel}</span>
+              </>
+            )}
+          </span>
+        </>
+      )}
       <span className="ticket-row-time">
         {ticket.updated_at ? (
-          // Inside the row's button, so the exact time shows on hover only.
           <Tooltip content={formatDateTime(ticket.updated_at)}>
             <time dateTime={ticket.updated_at}>
               <span className="sr-only">
@@ -466,16 +547,39 @@ function RowDetails({
                 {ago(ticket.updated_at, now)}
               </span>
               <span aria-hidden="true">
-                {/* A trashed row says so (list R-07). */}
                 {ticket.trashed ? "Trashed " : ""}
                 {compactAgo(ticket.updated_at, now)}
               </span>
             </time>
           </Tooltip>
         ) : (
-          "Update time unknown"
+          <span aria-label="Update time unknown">—</span>
         )}
       </span>
-    </span>
+      {!navigator && !simple && (
+        <span className="ticket-row-update">
+          {update?.editing_agent ? (
+            <>
+              {harness ? (
+                <HarnessMark
+                  harness={harness}
+                  name={update.editing_agent}
+                  decorative
+                />
+              ) : (
+                <Bot size={12} aria-hidden="true" />
+              )}
+              <span>{update.editing_agent}:</span>
+              <span className="ticket-row-update-brief">
+                {progressBrief(update.brief.text)}
+                {update.brief.truncated ? "…" : ""}
+              </span>
+            </>
+          ) : (
+            contextLabel
+          )}
+        </span>
+      )}
+    </>
   );
 }

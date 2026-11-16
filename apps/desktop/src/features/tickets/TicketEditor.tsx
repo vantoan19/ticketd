@@ -1,3 +1,6 @@
+import { Check, LoaderCircle, Circle } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
@@ -19,7 +22,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { Kbd } from "@/components/ui/kbd";
+import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
 import { revealInDetail } from "./detail-scroll";
@@ -111,6 +114,7 @@ function restore(
 }
 export function TicketEditor({
   ticket,
+  readOnly = false,
   onSaved,
   stateLine,
   children,
@@ -119,11 +123,11 @@ export function TicketEditor({
   mention = null,
 }: {
   ticket: Ticket;
+  /** Keep the saved copy's geometry while a fresh read is pending. */
+  readOnly?: boolean;
   onSaved: (ticket: Ticket) => void;
   /**
-   * The ticket's state line ("Updated 5 h ago"). It shares one 32px row with
-   * the save state and Edit · E; while the description is edited that row is
-   * the session row (save state, formatting, Done), so nothing moves (P16).
+   * The ticket's stable state line. Editor controls float outside the prose.
    */
   stateLine?: ReactNode;
   /** Under the state row: the folded property strip. */
@@ -135,6 +139,10 @@ export function TicketEditor({
 }) {
   const recovery = useDraftRecovery();
   const recoveryOwner = `ticket:${ticket.id}`;
+  const workspaceBlockedReason = editingBlockedReason(useWorkspaceState());
+  const blockedReason = readOnly
+    ? "Loading the latest ticket."
+    : workspaceBlockedReason;
   const [restored] = useState(() =>
     restore(
       ticket,
@@ -215,7 +223,7 @@ export function TicketEditor({
     const timer = window.setTimeout(() => setState("idle"), 3000);
     return () => window.clearTimeout(timer);
   }, [state]);
-  // The session row's middle, where the editor puts its formatting.
+  // The floating bar hosts the editor's existing formatting controls.
   const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   // "Keep my draft" saves at once instead of waiting out the typing delay.
   const immediate = useRef(false);
@@ -232,7 +240,7 @@ export function TicketEditor({
       const detail = (
         event as CustomEvent<{ reference: string; documentId?: string }>
       ).detail;
-      if (detail.reference === reference) {
+      if (detail.reference === reference && !blockedReason) {
         setBodyCaret(detail.documentId);
         setBodyMode("editing");
         setBodyFocus((count) => count + 1);
@@ -240,8 +248,8 @@ export function TicketEditor({
     };
     window.addEventListener("ticketd:edit-description", edit);
     return () => window.removeEventListener("ticketd:edit-description", edit);
-  }, [reference]);
-  const editButton = useRef<HTMLButtonElement>(null);
+  }, [reference, blockedReason]);
+  const editButton = useRef<HTMLElement>(null);
   // E edits the description of the ticket in view, unless typing or another dialog has focus.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -259,11 +267,11 @@ export function TicketEditor({
       )
         return;
       event.preventDefault();
-      button.click();
+      if (!blockedReason) setBodyMode("editing");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [blockedReason]);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
   // Which field the last save carried, so the status line names it.
@@ -359,7 +367,13 @@ export function TicketEditor({
   }
 
   useEffect(() => {
-    if (!unsent || externalChange || inFlight.current || state === "failed")
+    if (
+      blockedReason ||
+      !unsent ||
+      externalChange ||
+      inFlight.current ||
+      state === "failed"
+    )
       return;
     const delay = immediate.current ? 0 : 500;
     const timer = window.setTimeout(() => {
@@ -440,6 +454,7 @@ export function TicketEditor({
     return () => window.clearTimeout(timer);
     // `saving` re-arms the save a conflict choice made while another was still in flight.
   }, [
+    blockedReason,
     draft,
     saved,
     unsent,
@@ -580,8 +595,17 @@ export function TicketEditor({
     setState("pending");
   }
   function finishEditing() {
+    const previousFocus = document.activeElement;
     setBodyMode("reading");
-    window.requestAnimationFrame(() => editButton.current?.focus());
+    window.requestAnimationFrame(() => {
+      // Closing hides the editor and can leave focus on the body. Respect any
+      // newer focus choice, and keep the pane at its current reading position.
+      if (
+        document.activeElement === document.body ||
+        document.activeElement === previousFocus
+      )
+        editButton.current?.focus({ preventScroll: true });
+    });
   }
   const saveState = saving
     ? "Saving…"
@@ -601,6 +625,7 @@ export function TicketEditor({
         <textarea
           ref={titleRef}
           aria-label="Title"
+          disabled={Boolean(blockedReason)}
           rows={1}
           value={draft.title}
           aria-invalid={titleInvalid || undefined}
@@ -618,46 +643,59 @@ export function TicketEditor({
         </div>
       )}
       {titleConflict && !bodyConflict && notice}
-      {/* One 32px row: the state line and Edit · E, or, while editing, the
-          session row. Its height never changes, so the text never moves. */}
-      <div className="ticket-state-row" data-session={editingBody || undefined}>
-        {editingBody ? (
-          <span ref={setSessionHost} className="ticket-session-tools" />
-        ) : (
-          <span className="ticket-state-text">{stateLine}</span>
-        )}
-        <span role="status" className="editor-save-state">
-          {saveState}
-        </span>
-        {editingBody ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            aria-label="Done editing"
-            onClick={finishEditing}
-          >
-            Done
-            <Kbd aria-hidden="true">Esc</Kbd>
-          </Button>
-        ) : (
-          draft.body && (
-            <Button
-              ref={editButton}
-              variant="ghost"
-              size="sm"
-              type="button"
-              aria-label="Edit description"
-              aria-keyshortcuts="E"
-              onClick={() => setBodyMode("editing")}
-            >
-              Edit
-              <Kbd aria-hidden="true">E</Kbd>
-            </Button>
-          )
+      {children}
+      <div className="ticket-state-row" data-floating={!stateLine || undefined}>
+        <span className="ticket-state-text">{stateLine}</span>
+        {!editingBody && state !== "failed" && (
+          <span role="status" className="editor-save-state">
+            {saveState}
+          </span>
         )}
       </div>
-      {children}
+      {(editingBody || state === "failed") && (
+        <FloatingEditBar
+          controlsRef={setSessionHost}
+          onDone={finishEditing}
+          status={
+            <span role="status" data-save={state}>
+              {state === "failed" ? (
+                <Circle
+                  className="size-2 fill-current text-status-blocked"
+                  aria-hidden="true"
+                />
+              ) : !conflict && (saving || unsent) ? (
+                <LoaderCircle
+                  className="size-3 animate-spin"
+                  aria-hidden="true"
+                />
+              ) : state === "saved" ? (
+                <Check className="size-3" aria-hidden="true" />
+              ) : null}
+              {state === "failed"
+                ? "Not saved"
+                : conflict
+                  ? "Choose a version"
+                  : saving || unsent
+                    ? "Saving…"
+                    : state === "saved"
+                      ? "Saved"
+                      : ""}
+              {state === "failed" && (
+                <Button
+                  variant="link"
+                  size="inline"
+                  onClick={() => {
+                    setState("pending");
+                    setRetry((value) => value + 1);
+                  }}
+                >
+                  Retry
+                </Button>
+              )}
+            </span>
+          }
+        />
+      )}
       <div
         className="editor-body"
         ref={bodyRef}
@@ -702,12 +740,13 @@ export function TicketEditor({
           <div hidden={!editingBody}>
             <LazyMarkdownEditor
               value={draft.body}
+              readOnly={Boolean(blockedReason)}
               recoveryOwner={recoveryOwner}
               attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
               label="Description"
               placeholder="Add a description — type / for blocks"
-              chrome="session"
+              chrome="floating"
               chromeHost={editingBody ? sessionHost : null}
               onEscape={finishEditing}
               autoFocus={editingBody}
@@ -718,54 +757,94 @@ export function TicketEditor({
         )}
         {!editingBody &&
           (draft.body ? (
-            <div className="description-reading">
+            <Tooltip content={blockedReason ?? "Edit description"} shortcut="E">
               <div
-                ref={documentRef}
-                className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
-                {...chatSource(`${ticket.reference} · Description`, {
-                  kind: "ticket",
-                  id: ticket.id,
-                })}
-              >
-                <MarkdownDocument
-                  source={rendered}
-                  onChange={(body) =>
-                    edit({
-                      ...draft,
-                      body: draft.body.startsWith("\uFEFF")
-                        ? `\uFEFF${body}`
-                        : body,
-                    })
+                className="description-reading"
+                ref={(element) => {
+                  editButton.current = element;
+                }}
+                role="group"
+                tabIndex={0}
+                aria-label="Read description"
+                aria-keyshortcuts="E"
+                aria-disabled={Boolean(blockedReason)}
+                onKeyDown={(event) => {
+                  if (
+                    event.target === event.currentTarget &&
+                    (event.key === "Enter" || event.key === " ")
+                  ) {
+                    event.preventDefault();
+                    if (!blockedReason) setBodyMode("editing");
                   }
-                  select={select}
-                  revision={revision}
-                  mention={mark}
-                />
+                }}
+                onClick={(event) => {
+                  if (
+                    blockedReason ||
+                    !event.currentTarget.contains(event.target as Node) ||
+                    window.getSelection()?.toString()
+                  )
+                    return;
+                  if (
+                    event.target instanceof Element &&
+                    event.target.closest("a, button, input")
+                  )
+                    return;
+                  setBodyMode("editing");
+                }}
+              >
+                <div
+                  ref={documentRef}
+                  className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
+                  {...chatSource(`${ticket.reference} · Description`, {
+                    kind: "ticket",
+                    id: ticket.id,
+                  })}
+                >
+                  <MarkdownDocument
+                    source={rendered}
+                    {...(!blockedReason && {
+                      onChange: (body: string) =>
+                        edit({
+                          ...draft,
+                          body: draft.body.startsWith("\uFEFF")
+                            ? `\uFEFF${body}`
+                            : body,
+                        }),
+                    })}
+                    select={select}
+                    revision={revision}
+                    mention={mark}
+                  />
+                </div>
               </div>
-            </div>
+            </Tooltip>
           ) : (
             // One quiet line that becomes the editor in place (detA DS-06).
-            <button
-              type="button"
-              ref={editButton}
-              className="description-add"
-              aria-keyshortcuts="E"
-              onClick={() => setBodyMode("editing")}
-            >
-              Add a description…
-            </button>
+            <Tooltip content={blockedReason ?? "Edit description (E)"}>
+              <span
+                className="description-edit-control"
+                tabIndex={blockedReason ? 0 : undefined}
+                aria-disabled={blockedReason ? true : undefined}
+              >
+                <button
+                  disabled={Boolean(blockedReason)}
+                  type="button"
+                  ref={(element) => {
+                    editButton.current = element;
+                  }}
+                  className="description-add"
+                  aria-keyshortcuts="E"
+                  onClick={() => setBodyMode("editing")}
+                >
+                  Add a description…
+                </button>
+              </span>
+            </Tooltip>
           ))}
       </div>
       {state === "failed" && error && (
         <div className="ticket-save-error">
-          <FailureAlert
-            size="compact"
-            failure={error}
-            onRetry={() => {
-              setState("pending");
-              setRetry((value) => value + 1);
-            }}
-          />
+          <FailureAlert size="compact" failure={error} />
         </div>
       )}
     </div>

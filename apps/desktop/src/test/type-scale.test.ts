@@ -59,6 +59,8 @@ describe("type scale", () => {
       "--text-caption: 12px",
       "--text-ui: 14px",
       "--text-code: 13px",
+      "--text-preview: var(--text-code)",
+      "--text-preview-line: 18px",
       "--text-reading: 16px",
       "--text-reading-line: 26px",
       "--text-doc: 15px",

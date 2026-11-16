@@ -1,0 +1,30 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.mini {
+  border-radius: var(--radius-card);
+}
+.mini-screen {
+  background: var(--background);
+}
+.mini-side i,
+.mini-pane b {
+  border-radius: var(--radius-segment);
+  background: var(--track);
+}
+.mini-side i[data-on] {
+  background: var(--accent);
+}
+.mini-pane {
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+}
+.mini-pane b[data-head] {
+  background: var(--foreground);
+}
+.mini[data-system] .mini-screen:first-child .mini-pane {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.mini[data-system] .mini-screen:last-child .mini-pane {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}

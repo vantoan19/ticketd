@@ -1,4 +1,6 @@
 import * as React from "react";
+import { preserveNewerFocus } from "@/components/ui/use-focus-return";
+import { useClosingOverlayRef } from "@/components/ui/use-closing-overlay-ref";
 import { cn } from "cn";
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
@@ -37,15 +39,19 @@ function DropdownMenuTrigger({
  */
 function DropdownMenuContent({
   className,
+  ref,
   sideOffset = 4,
   collisionPadding = 16,
   collisionBoundary,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
+        ref={contentRef}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
@@ -55,6 +61,10 @@ function DropdownMenuContent({
           className,
         )}
         {...props}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (!event.defaultPrevented) preserveNewerFocus(event);
+        }}
       />
     </DropdownMenuPrimitive.Portal>
   );
@@ -262,19 +272,30 @@ function DropdownMenuSubTrigger({
   );
 }
 
+/** Submenus escape the parent's scroll clip and share its pane boundaries. */
 function DropdownMenuSubContent({
   className,
+  ref,
+  collisionPadding = 16,
+  collisionBoundary,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+  const contentRef = useClosingOverlayRef(ref);
+  const boundary = useOverlayBoundary();
   return (
-    <DropdownMenuPrimitive.SubContent
-      data-slot="dropdown-menu-sub-content"
-      className={cn(
-        "ui-menu z-50 min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden p-1",
-        className,
-      )}
-      {...props}
-    />
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        ref={contentRef}
+        data-slot="dropdown-menu-sub-content"
+        collisionPadding={collisionPadding}
+        collisionBoundary={collisionBoundary ?? boundary}
+        className={cn(
+          "ui-menu z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-32 max-w-(--radix-dropdown-menu-content-available-width) origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto p-1",
+          className,
+        )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
   );
 }
 

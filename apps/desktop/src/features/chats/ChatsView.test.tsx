@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   act,
@@ -9,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import {
   ChatClientContext,
   type Step,
@@ -34,6 +36,7 @@ window.ResizeObserver = class {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   // What was typed in one test is not a draft in the next.
   drafts.clear();
 });
@@ -865,10 +868,12 @@ test("a row's actions mark it unread or read and mute it, and say a refusal", as
   fireEvent.click(
     await screen.findByRole("menuitem", { name: "Mark as unread" }),
   );
+  await revealFailureDetails();
   expect(await screen.findByText("The workspace is read-only.")).toBeTruthy();
 });
 
-test("a clicked notification about a request focuses that request's title", async () => {
+test("a clicked notification focuses the request title and accepts its numbered answer", async () => {
+  const user = userEvent.setup();
   const client = await open([
     ...one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
     ...one({ id: "c2", title: "Other" }),
@@ -877,6 +882,17 @@ test("a clicked notification about a request focuses that request's title", asyn
   act(() => client.requestOpen({ chat_id: "c1", retention: "active" }));
   const title = await screen.findByRole("heading", { name: /wants to run/ });
   await waitFor(() => expect(document.activeElement).toBe(title));
+  await user.keyboard("2");
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull(),
+  );
+  expect((await client.openChat("c1")).items).toContainEqual(
+    expect.objectContaining({
+      id: "req-1",
+      state: "answered",
+      outcome: 'You chose "Allow for this session"',
+    }),
+  );
 });
 
 test("a clicked notification opens its Chat under its own list", async () => {
@@ -1095,6 +1111,9 @@ test("a failure message without a full stop still ends its sentence", async () =
 });
 
 test("while a turn runs its steps show as they start, and the working line only between steps", async () => {
+  // The elapsed label tests the supplied timestamps, not time spent rendering.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-10T10:00:12Z"));
   const client = await open(
     one(
       {

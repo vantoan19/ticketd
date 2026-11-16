@@ -28,9 +28,14 @@ const Collapsed = createContext(false);
 export function ShellSlotProvider({
   nav,
   crumb,
+  notice,
   children,
 }: ShellSlot & { children: ReactNode }) {
-  return <ShellSlotContext value={{ nav, crumb }}>{children}</ShellSlotContext>;
+  return (
+    <ShellSlotContext value={{ nav, crumb, notice }}>
+      {children}
+    </ShellSlotContext>
+  );
 }
 
 /**
@@ -51,13 +56,15 @@ export function ShellLeading({ navOnly = false }: { navOnly?: boolean }) {
 
 /**
  * The 48px header of every pane: lists, detail, graph, Chats, Inbox. It never
- * wraps. Its leading slot starts with the shell's controls (ShellSlotProvider:
+ * wraps by default. The responsive variant reserves two rows below a 640px
+ * pane, keeping the name above a dense action cluster. Its leading slot starts
+ * with the shell's controls (ShellSlotProvider:
  * the narrow-nav button, the way back to the graph), then `leading`, such as
  * the pane's own `ReturnCrumb`; the title
- * (14/20/500) truncates, with `count` 8px after it (a `Count`, or a summary in
+ * (14/20/500) truncates, with `count` effectively 8px after it (6px gap plus 2px optical spacing) (a `Count`, or a summary in
  * that slot) and optional `children` as inline meta (a SegmentedControl).
- * `actions` is the right cluster of 32px controls in a fixed order: Refresh,
- * Search, Filters, Display; use `PaneHeaderButton` for labelled ones so they
+ * `actions` is the right cluster of the view’s 28px controls. Ticket lists
+ * have Filter and Display; use `PaneHeaderButton` for labelled ones so they
  * collapse to icons with tooltips below a 420px pane. A search field marked
  * `data-slot="pane-search"` expands in place over the title. `caption` adds
  * one fixed 28px line under the header ("Todo tickets with nothing left to
@@ -81,8 +88,11 @@ export function PaneHeader({
   caption,
   className,
   titleControl,
+  variant = "default",
 }: {
   title: string;
+  /** Ticket headers supply their reference heading and shell controls in leading. */
+  variant?: "default" | "ticket" | "responsive";
   /** Renders the title as a control inside the heading (a menu trigger). */
   titleControl?: (title: string) => ReactNode;
   /** The heading's id, for `aria-labelledby` and focus after a change. */
@@ -113,48 +123,67 @@ export function PaneHeader({
   }, []);
   const Heading = titleLevel === 1 ? "h1" : "h2";
   const shell = useShellLeading();
+  const { notice } = useShellSlot();
   return (
     <Collapsed value={collapsed}>
       <header
         ref={header}
         data-slot="pane-header"
+        data-title-editor={titleEditor ? "" : undefined}
         data-leading={leading || shell ? "" : undefined}
         data-collapsed={collapsed || undefined}
-        className={cn("ui-pane-header", className)}
+        className={cn(
+          "ui-pane-header",
+          variant === "ticket" && "detail-header",
+          variant === "responsive" && "ui-pane-header-responsive",
+          className,
+        )}
       >
-        {shell && <ShellLeading />}
+        {shell && variant !== "ticket" && <ShellLeading />}
         {leading}
-        <span className="ui-pane-header-title">
-          {icon && (
-            <span aria-hidden="true" className="ui-pane-header-icon">
-              {icon}
-            </span>
-          )}
-          {titleEditor ??
-            (hideTitle ? (
-              <Heading id={titleId} className="sr-only">
-                {title}
-              </Heading>
-            ) : titleControl ? (
-              <Heading
-                id={titleId}
-                tabIndex={titleId ? -1 : undefined}
-                data-control=""
-              >
-                {titleControl(title)}
-              </Heading>
-            ) : (
-              // The full title while it is cut, below the header.
-              <Tooltip content={title} side="bottom" overflowOnly>
-                <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
-                  {title}
-                </Heading>
-              </Tooltip>
-            ))}
-          {count}
-          {children}
-        </span>
-        {actions && <span className="ui-pane-header-actions">{actions}</span>}
+        {(variant !== "ticket" ||
+          icon != null ||
+          count != null ||
+          children != null) && (
+          <span className="ui-pane-header-title">
+            {icon && (
+              <span aria-hidden="true" className="ui-pane-header-icon">
+                {icon}
+              </span>
+            )}
+            {variant === "ticket"
+              ? null
+              : (titleEditor ??
+                (hideTitle ? (
+                  <Heading id={titleId} className="sr-only">
+                    {title}
+                  </Heading>
+                ) : titleControl ? (
+                  <Heading
+                    id={titleId}
+                    tabIndex={titleId ? -1 : undefined}
+                    data-control=""
+                  >
+                    {titleControl(title)}
+                  </Heading>
+                ) : (
+                  // The full title while it is cut, below the header.
+                  <Tooltip content={title} side="bottom" overflowOnly>
+                    <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                      {title}
+                    </Heading>
+                  </Tooltip>
+                )))}
+            {count}
+            {children}
+          </span>
+        )}
+        {(actions || notice !== undefined) && (
+          <span className="ui-pane-header-actions">
+            <ShellNoticeSlot />
+            {actions}
+          </span>
+        )}
       </header>
       {caption && <p className="ui-pane-header-caption">{caption}</p>}
     </Collapsed>
@@ -216,5 +245,13 @@ export function ReturnCrumb({
       </Button>
       <span aria-hidden="true">/</span>
     </span>
+  );
+}
+
+/** Kept in the header from its first frame, so failure controls cannot displace actions. */
+export function ShellNoticeSlot() {
+  const { notice } = useShellSlot();
+  return notice === undefined ? null : (
+    <span className="ui-shell-notice-slot">{notice}</span>
   );
 }

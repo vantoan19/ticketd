@@ -1,0 +1,201 @@
+/* Ledger variants of Item own row typography, surfaces and interaction treatment.
+   Ticket features supply lane geometry and responsive collapse. */
+[data-slot="item"][data-variant="ledger"],
+[data-slot="item"][data-variant="ledger-group"] {
+  border-radius: var(--radius-card);
+}
+.ui-item-ledger:hover,
+.ui-item-ledger:focus-within {
+  background: var(--hover);
+}
+.ui-item-ledger:has(.ticket-row[aria-pressed="true"]) {
+  background: var(--accent);
+}
+.ticket-list .ticket-row {
+  background: transparent;
+  border-radius: var(--radius-card);
+}
+.ticket-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ticket-row[data-status="Done"] .ticket-title,
+.ticket-row[data-status="Canceled"] .ticket-title,
+.ticket-row[data-status="Duplicate"] .ticket-title {
+  color: var(--muted-foreground);
+}
+.ticket-row-state,
+.ticket-row-context,
+.ticket-row-time,
+.ticket-row-update {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ticket-row-time {
+  font-variant-numeric: tabular-nums;
+}
+.ticket-rows input[type="checkbox"] {
+  accent-color: var(--foreground);
+}
+.ticket-rows input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ticket-list .ticket-row:focus-visible {
+  outline: none;
+}
+.ui-item-ledger:has(.ticket-row:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ui-item-ledger-group,
+.ui-item-ledger-group:hover {
+  background: var(--surface);
+}
+.ticket-group-header h2 {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.ticket-group-header svg {
+  color: var(--muted-foreground);
+}
+.ticket-group-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ticket-skeleton-icon {
+  border-radius: var(--radius-pill);
+}
+
+.ui-item-ledger .ui-reference {
+  font-weight: 400;
+  line-height: var(--text-ui-line);
+}
+
+/* Companion ledger controls share the same surface and type roles. */
+.bulk-controls {
+  color: var(--foreground);
+}
+.bulk-bar {
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+.bulk-menu-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.bulk-count {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.bulk-menu-count {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+/* The tag choice list sits in the dialog body inside a control outline. */
+.bulk-tag-choices {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-border-base);
+}
+
+.source-refresh {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.refresh-failed {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+/* The note starts at the header title's x. */
+.ticket-list > .list-description {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+/* One line of chips under the header: they never wrap; what does not fit
+   becomes "+N more". Clear filters ends the line. */
+.filter-chips {
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--header-boundary);
+}
+/* Menu rows: the current value after the dimension, a count, a dot slot. */
+.filters-menu-value,
+.filters-menu-count {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.filters-menu-count {
+  font-variant-numeric: tabular-nums;
+}
+.filters-menu-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+/* Ticket navigator: the same list identity and keyboard model at 52px. */
+.ui-item-navigator {
+  border-radius: var(--radius-card);
+}
+.ui-item-navigator:hover,
+.ui-item-navigator:focus-within {
+  background: var(--hover);
+}
+.ui-item-navigator:has(.ticket-row[aria-pressed="true"]) {
+  background: var(--accent);
+}
+.ui-item-navigator .ticket-row {
+  border-radius: var(--radius-card);
+}
+.ui-item-navigator:has(.ticket-row:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ui-item-navigator .ticket-navigator-caption,
+.ui-item-navigator .ticket-row-time,
+.ui-item-navigator .ticket-navigator-caption [data-slot="reference"] {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+
+.latest-update-line {
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--well);
+  color: var(--foreground);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.latest-update-line:hover {
+  background: var(--accent);
+}
+.latest-update-line:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Regrouping is instant; only the arrival surface fades. */
+:is(.ui-item-ledger, .ui-item-navigator)[data-arriving] {
+  animation: ledger-arrival var(--dur-arrival) var(--ease-out);
+}
+@keyframes ledger-arrival {
+  from {
+    background-color: var(--hover);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.ui-item-ledger, .ui-item-navigator)[data-arriving] {
+    animation: none;
+  }
+}

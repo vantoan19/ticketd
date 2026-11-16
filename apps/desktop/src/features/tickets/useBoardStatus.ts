@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { client, type Ticket } from "@/lib/api/client";
-import { failureText } from "@/lib/api/describe-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import type { useTicketBoard } from "./useTicketBoard";
 import { ticketStatusChoices } from "./ticket-source";
 
 type Attempt = { ticket: Ticket; status: string; id: string };
 type Review = { ticket: Ticket; status: string };
 /** Where a card was before it moved at once, so a failure can put it back. */
-export type BoardMove = { status: string; index: number };
+export type BoardMove = { status: string; index: number; height?: number };
 type Notice = { message: string; undo?: () => unknown };
 
 /**
@@ -31,7 +34,9 @@ export function useBoardStatus(workspace: {
   const intents = useRef(new Map<string, Review>());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [moves, setMoves] = useState<ReadonlyMap<string, BoardMove>>(new Map());
-  const [failures, setFailures] = useState<Record<string, string>>({});
+  const [failures, setFailures] = useState<
+    Record<string, FailureDescription | null>
+  >({});
   const [notice, setNotice] = useState<{ scope: string } & Notice>({
     scope: workspace.board.key,
     message: "",
@@ -60,7 +65,15 @@ export function useBoardStatus(workspace: {
   }
   /** Shows the move at once; null when the card was not on the board. */
   function moveAtOnce(ticket: Ticket, status: string): BoardMove | null {
-    const from = latest.current.board.placeTicket({ ...ticket, status });
+    const height = document
+      .querySelector<HTMLElement>(
+        `[data-ticket-reference="${ticket.reference}"]`,
+      )
+      ?.getBoundingClientRect().height;
+    const from = {
+      ...latest.current.board.placeTicket({ ...ticket, status }),
+      ...(height && { height }),
+    };
     if (from.index < 0) return null;
     trackMove(ticket.reference, from);
     return from;
@@ -76,7 +89,7 @@ export function useBoardStatus(workspace: {
         '[aria-label="Ticket status board"]',
       );
       const trigger = board?.querySelector<HTMLElement>(
-        `[aria-label="Change status of ${reference}"]`,
+        `[aria-label="Retry status change for ${reference}"], [data-board-status-reference="${reference}"]`,
       );
       const active = document.activeElement;
       if (
@@ -119,7 +132,7 @@ export function useBoardStatus(workspace: {
   async function submit(attempt: Attempt, from: BoardMove | null) {
     const reference = attempt.ticket.reference;
     lock(reference, true);
-    setFailures((old) => ({ ...old, [reference]: "" }));
+    setFailures((old) => ({ ...old, [reference]: null }));
     clearNotice();
     attempts.current.set(reference, attempt);
     const move = from ?? moveAtOnce(attempt.ticket, attempt.status);
@@ -145,9 +158,16 @@ export function useBoardStatus(workspace: {
       } catch {
         putBack(attempt.ticket, move);
       }
+      const failure = describeFailure(
+        reason,
+        `move ${reference} to ${attempt.status}`,
+      );
       setFailures((old) => ({
         ...old,
-        [reference]: `${failureText(reason, `move ${reference} to ${attempt.status}`)} ${placement}`,
+        [reference]: {
+          ...failure,
+          sentence: `${failure.sentence} ${placement}`,
+        },
       }));
       return false;
     } finally {
@@ -172,11 +192,11 @@ export function useBoardStatus(workspace: {
     }
     attempts.current.delete(reference);
     returnFocus.current = document.querySelector<HTMLElement>(
-      `button[aria-label="Change status of ${reference}"]`,
+      `button[data-board-status-reference="${reference}"]`,
     );
     lock(reference, true);
     clearNotice();
-    setFailures((old) => ({ ...old, [reference]: "" }));
+    setFailures((old) => ({ ...old, [reference]: null }));
     // A move that needs a review (to or from Duplicate) waits for it.
     const reviewed =
       status === "Duplicate" ||
@@ -216,7 +236,10 @@ export function useBoardStatus(workspace: {
       putBack(ticket, from);
       setFailures((old) => ({
         ...old,
-        [reference]: failureText(reason, `change the status of ${reference}`),
+        [reference]: describeFailure(
+          reason,
+          `change the status of ${reference}`,
+        ),
       }));
     } finally {
       trackMove(reference, null);
@@ -259,7 +282,7 @@ export function useBoardStatus(workspace: {
     },
     /** Hides a card's failure once read (its × or a later success). */
     dismissFailure(reference: string) {
-      setFailures((old) => ({ ...old, [reference]: "" }));
+      setFailures((old) => ({ ...old, [reference]: null }));
     },
   };
 }

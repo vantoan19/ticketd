@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
@@ -45,9 +46,9 @@ async function bar(status: SyncStatus) {
     </SyncStatusProvider>,
   );
   await waitFor(() => expect(syncApi.status).toHaveBeenCalled());
-  // The save state shows while editing, in the session row (plans DR-09).
+  // Sync remains in the metadata row while local save feedback floats.
   fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-  return screen.findByRole("status");
+  return screen.findByRole("status", { name: "Document sync status" });
 }
 
 test("a Document without sync is saved on this computer", async () => {
@@ -56,7 +57,7 @@ test("a Document without sync is saved on this computer", async () => {
   );
 });
 
-test("an uploaded Document's bar says Synced to Drive", async () => {
+test("an uploaded Document's metadata says Synced to Drive", async () => {
   await bar(syncStatus());
   expect(
     (await screen.findByText("Synced to Drive")).getAttribute("role"),
@@ -86,6 +87,13 @@ test("a Document changed on two desktops says Needs review", async () => {
     }),
   );
   expect(await screen.findByText("Needs review")).toBeTruthy();
+  expect(screen.getAllByText("Needs review")).toHaveLength(1);
+  expect(
+    within(screen.getByRole("group", { name: "Edit controls" })).getByRole(
+      "status",
+      { name: "Document save status" },
+    ).textContent,
+  ).toBe("Saved");
 });
 
 test("a Document that may be among changes not listed is not called synced", async () => {

@@ -1,4 +1,13 @@
-import { useContext, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import {
   Ellipsis,
   ListFilter,
@@ -6,7 +15,7 @@ import {
   Plus,
   Search,
   SearchX,
-  X,
+  UploadCloud,
 } from "lucide-react";
 import { Badge, FilterChip } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,12 +30,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureState } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader, PaneHeaderButton } from "@/components/ui/list-header";
 import { Pager } from "@/components/ui/pager";
 import { Progress } from "@/components/ui/progress";
-import { SearchInput } from "@/components/ui/search-input";
+import { NavigatorSearch } from "@/components/ui/navigator";
+import { focusNavigatorRow } from "@/lib/navigator";
+import { Item } from "@/components/ui/item";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
+import type { AttachmentPreviewCommands } from "./AttachmentPreview";
 import { StatusLabel } from "@/components/ui/status-label";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { useStatusLine } from "@/components/ui/use-status-line";
@@ -67,17 +85,32 @@ const STATE_NAMES: Record<AttachmentState, string> = {
  * with a state word where needed and one "…" revealed on hover. The chosen
  * file opens in the detail pane beside it. Outcomes go to the status line.
  */
-export function AttachmentLibrary() {
+export type AttachmentCommands = {
+  search: (() => void) | null;
+  add: (() => void) | null;
+  open: (() => void) | null;
+  more: (() => void) | null;
+  back: (() => void) | null;
+};
+export function AttachmentLibrary({
+  onCommandsChange,
+}: {
+  onCommandsChange?: (commands: AttachmentCommands | null) => void;
+}) {
   return (
     <div className="attachment-library-host">
       <StatusLineRegion>
-        <Library />
+        <Library onCommandsChange={onCommandsChange} />
       </StatusLineRegion>
     </div>
   );
 }
 
-function Library() {
+function Library({
+  onCommandsChange,
+}: {
+  onCommandsChange: ((commands: AttachmentCommands | null) => void) | undefined;
+}) {
   const statusLine = useStatusLine();
   const openSettings = useContext(SettingsNavigation);
   const [search, setSearch] = useState("");
@@ -93,9 +126,60 @@ function Library() {
   const [renameRequest, setRenameRequest] = useState(0);
   const addTrigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const [previewCommands, setPreviewCommands] =
+    useState<AttachmentPreviewCommands | null>(null);
+  const returnRow = useRef<string | null>(null);
+  const closePreview = useCallback(() => {
+    if (!selected) return;
+    returnRow.current = selected.id;
+    setSelected(null);
+  }, [selected]);
+  useLayoutEffect(() => {
+    if (selected || !returnRow.current) return;
+    const id = returnRow.current;
+    returnRow.current = null;
+    const rows = [
+      ...(list.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-slot='attachment-row']",
+      ) ?? []),
+    ];
+    (
+      rows.find((row) => row.dataset.id === id) ?? searchTrigger.current
+    )?.focus();
+  }, [selected]);
+  const closeSearch = () => {
+    setSearch("");
+    setSearching(false);
+    requestAnimationFrame(() => searchTrigger.current?.focus());
+  };
+  const commands = useMemo<AttachmentCommands>(
+    () => ({
+      search: () => setSearching(true),
+      add: () => setPicker(true),
+      open: previewCommands?.open ?? null,
+      more: previewCommands?.more ?? null,
+      back: selected ? closePreview : null,
+    }),
+    [previewCommands, selected, closePreview],
+  );
+  useEffect(() => {
+    onCommandsChange?.(commands);
+    return () => onCommandsChange?.(null);
+  }, [commands, onCommandsChange]);
+  const [hovered, setHovered] = useState(false);
+  const [listFocused, setListFocused] = useState(false);
   const changed = () => setRefresh((value) => value + 1);
-  const { files, loading, pending, error, answered, more } =
-    useAttachmentSearch(search, state, null, limit, refresh);
+  const { files, loading, pending, error, answered, more, known } =
+    useAttachmentSearch(
+      search,
+      state,
+      null,
+      limit,
+      refresh,
+      hovered || listFocused,
+    );
   // Nothing at all in the workspace: no search, filters, Clean up or preview.
   const libraryEmpty =
     !loading &&
@@ -126,6 +210,7 @@ function Library() {
         statusLine.show({
           tone: "error",
           message: `${failure.title}. ${failure.sentence}`,
+          details: failure.details,
           ...(failure.action === "retry" && {
             action: { label: "Retry", run: () => restore(file) },
           }),
@@ -138,6 +223,7 @@ function Library() {
       statusLine.show({
         tone: "error",
         message: `${failure.title}. ${failure.sentence}`,
+        details: failure.details,
         ...(failure.action === "retry" && {
           action: { label: "Retry", run: () => download(file) },
         }),
@@ -196,35 +282,17 @@ function Library() {
       </>
     );
   }
-  function focusRow(index: number) {
-    const rows = list.current?.querySelectorAll<HTMLButtonElement>(
-      "[data-slot='attachment-row']",
-    );
-    const row = rows?.[Math.max(0, Math.min(index, (rows?.length ?? 1) - 1))];
-    row?.focus();
-    row?.click();
-  }
   function onListKey(event: KeyboardEvent<HTMLUListElement>) {
+    if (!matchesShortcut(event, "attachments-move")) return;
     const rows = Array.from(
       list.current?.querySelectorAll<HTMLButtonElement>(
         "[data-slot='attachment-row']",
       ) ?? [],
     );
-    const at = rows.indexOf(document.activeElement as HTMLButtonElement);
-    if (at < 0) return;
-    const next =
-      event.key === "ArrowDown" || event.key === "j"
-        ? at + 1
-        : event.key === "ArrowUp" || event.key === "k"
-          ? at - 1
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? rows.length - 1
-              : null;
-    if (next === null) return;
+    if (!rows.includes(document.activeElement as HTMLButtonElement)) return;
     event.preventDefault();
-    focusRow(next);
+    event.stopPropagation();
+    focusNavigatorRow(rows, document.activeElement, event.key);
   }
   const query = answered.search.trim();
   const showAll = () => {
@@ -238,51 +306,33 @@ function Library() {
         !query &&
         state === "all" &&
         !more &&
-        !loading && { count: <Count>{files.length}</Count> })}
+        known && { count: <Count>{files.length}</Count> })}
+      titleEditor={
+        searching ? (
+          <NavigatorSearch
+            aria-label="Search files"
+            placeholder="Search files…"
+            value={search}
+            onValueChange={(value) => {
+              setSearch(value);
+              setLimit(ATTACHMENT_PAGE);
+            }}
+          />
+        ) : undefined
+      }
       actions={
         <>
-          {!libraryEmpty &&
-            (searching || search ? (
-              <span
-                data-slot="pane-search"
-                role="search"
-                className="attachment-search"
-              >
-                <SearchInput
-                  fill
-                  autoFocus
-                  aria-label="Search files"
-                  placeholder="Search files…"
-                  value={search}
-                  onValueChange={(value) => {
-                    setSearch(value);
-                    setLimit(ATTACHMENT_PAGE);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      event.stopPropagation();
-                      setSearching(false);
-                    }
-                  }}
-                />
-                <IconButton
-                  label="Close search"
-                  onClick={() => {
-                    setSearch("");
-                    setSearching(false);
-                  }}
-                >
-                  <X />
-                </IconButton>
-              </span>
-            ) : (
-              <IconButton
-                label="Search files"
-                onClick={() => setSearching(true)}
-              >
-                <Search />
-              </IconButton>
-            ))}
+          {!libraryEmpty && !searching && (
+            <IconButton
+              ref={searchTrigger}
+              label="Search files"
+              shortcut={shortcutLabel("attachments-search")}
+              aria-keyshortcuts={ariaKeyShortcuts("attachments-search")}
+              onClick={() => setSearching(true)}
+            >
+              <Search />
+            </IconButton>
+          )}
           {!libraryEmpty && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -333,23 +383,27 @@ function Library() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <Button
+          <IconButton
+            label="Add files"
+            shortcut={shortcutLabel("attachments-add")}
             ref={addTrigger}
-            variant="outline"
-            size="sm"
             className="ml-1"
+            aria-keyshortcuts={ariaKeyShortcuts("attachments-add")}
             onClick={() => setPicker(true)}
           >
             <Plus aria-hidden="true" />
-            Add files
-          </Button>
+          </IconButton>
         </>
       }
     />
   );
   let body;
-  if (error) body = <FailureState failure={error} onRetry={changed} />;
-  else if (loading) body = null;
+  if (error && !known)
+    body = <FailureState failure={error} onRetry={changed} />;
+  else if (loading)
+    body = (
+      <EmptyState size="inline" role="status" description="Loading files…" />
+    );
   else if (libraryEmpty)
     body = (
       <EmptyState
@@ -372,8 +426,9 @@ function Library() {
     );
   else {
     const focusable =
-      files.find(({ attachment }) => attachment.id === selected?.id)?.attachment
-        .id ?? files[0]?.attachment.id;
+      files.find(
+        ({ attachment }) => attachment.id === (focused ?? selected?.id),
+      )?.attachment.id ?? files[0]?.attachment.id;
     body = (
       <>
         <ul
@@ -391,6 +446,7 @@ function Library() {
               availabilityKnown={availability.known}
               open={selected?.id === row.attachment.id}
               tabbable={focusable === row.attachment.id}
+              onFocus={() => setFocused(row.attachment.id)}
               onOpen={() => setSelected(row.attachment)}
               menu={fileActions(row.attachment, false)}
             />
@@ -412,8 +468,62 @@ function Library() {
       className="attachment-workspace"
       data-open={selected ? "" : undefined}
       data-empty={libraryEmpty ? "" : undefined}
+      onKeyDownCapture={(event) => {
+        if (
+          event.key === "Escape" &&
+          searching &&
+          !(
+            event.target instanceof HTMLElement &&
+            event.target.closest("[role='dialog'], [role='menu']")
+          )
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          closeSearch();
+        }
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest("[role='dialog'], [role='menu']")
+        )
+          return;
+        if (event.key === "Escape" && searching) {
+          event.preventDefault();
+          event.stopPropagation();
+          closeSearch();
+          return;
+        }
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest("input, textarea, [contenteditable]")
+        )
+          return;
+        if (matchesShortcut(event, "attachments-search")) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSearching(true);
+        } else if (matchesShortcut(event, "attachments-add")) {
+          event.preventDefault();
+          setPicker(true);
+        } else if (event.key === "Escape" && selected) {
+          event.preventDefault();
+          event.stopPropagation();
+          closePreview();
+        }
+      }}
     >
-      <section className="attachment-list-pane" aria-label="Attachments">
+      <section
+        className="attachment-list-pane"
+        aria-label="Attachments"
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+        onFocusCapture={() => setListFocused(true)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget))
+            setListFocused(false);
+        }}
+      >
         {header}
         {state !== "all" && !libraryEmpty && (
           <div className="attachment-chip-row">
@@ -425,7 +535,23 @@ function Library() {
             />
           </div>
         )}
-        <div className="attachment-list-scroll">{body}</div>
+        <div className="attachment-list-scroll">
+          {error && known && (
+            <FailureAlert failure={error} onRetry={changed} size="compact" />
+          )}
+          {body}
+          {!loading && !error && !libraryEmpty && (
+            <div className="attachment-drop-hint">
+              <Alert role="note" presentation="hint">
+                <UploadCloud aria-hidden="true" />
+                <AlertDescription>
+                  Drop files anywhere on a ticket or Document to attach them.
+                  They are kept on this computer.
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
+        </div>
       </section>
       {!libraryEmpty && (
         <section className="attachment-detail-pane" aria-label="File preview">
@@ -434,15 +560,8 @@ function Library() {
               key={selected.id}
               file={selected}
               renameRequest={renameRequest}
-              onClose={() => {
-                const id = selected.id;
-                setSelected(null);
-                list.current
-                  ?.querySelector<HTMLButtonElement>(
-                    `[data-slot='attachment-row'][data-id='${CSS.escape(id)}']`,
-                  )
-                  ?.focus();
-              }}
+              onClose={closePreview}
+              onCommandsChange={setPreviewCommands}
               onChanged={changed}
               menuItems={fileActions(selected, true)}
             />
@@ -528,6 +647,7 @@ function FileRow({
   open,
   tabbable,
   onOpen,
+  onFocus,
   menu,
 }: {
   row: AttachmentSearchResult;
@@ -537,6 +657,7 @@ function FileRow({
   open: boolean;
   tabbable: boolean;
   onOpen: () => void;
+  onFocus: () => void;
   menu: React.ReactNode;
 }) {
   const { attachment: file, usage } = row;
@@ -559,61 +680,71 @@ function FileRow({
     file.size_bytes !== null && formatSize(file.size_bytes),
     usageWord(usage),
     storage,
-    age,
   ]
     .filter(Boolean)
     .join(" · ");
   const captionId = `attachment-row-${file.id}`;
   return (
-    <li className="attachment-mrow" data-open={open || undefined}>
-      <button
-        type="button"
-        data-slot="attachment-row"
-        data-id={file.id}
-        className="attachment-mrow-main"
-        aria-label={file.display_name}
-        aria-describedby={captionId}
-        aria-current={open || undefined}
-        tabIndex={tabbable ? 0 : -1}
-        onClick={onOpen}
-      >
-        <AttachmentThumbnail file={file} size="row" />
-        <span className="attachment-mrow-text">
-          <span className="attachment-mrow-name">{file.display_name}</span>
-          <span className="attachment-mrow-caption" id={captionId}>
-            {state === "Missing" ? (
-              <StatusLabel tone="attention" size="caption">
-                Missing
-              </StatusLabel>
-            ) : (
-              state && <Badge size="sm">{state}</Badge>
-            )}
-            {downloading && (
-              <Progress
-                aria-label={`Downloading ${file.display_name}`}
-                value={availability.progress ?? 0}
-              />
-            )}
-            <span className="attachment-mrow-caption-text">
-              {downloading ? "Downloading…" : caption}
+    <Item asChild variant="navigator">
+      <li className="attachment-mrow" data-open={open || undefined}>
+        <button
+          type="button"
+          data-slot="attachment-row"
+          data-id={file.id}
+          className="attachment-mrow-main"
+          aria-label={file.display_name}
+          aria-describedby={captionId}
+          aria-current={open || undefined}
+          tabIndex={tabbable ? 0 : -1}
+          onClick={onOpen}
+          onFocus={onFocus}
+          aria-keyshortcuts={ariaKeyShortcuts("attachments-move") + " Enter"}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onOpen();
+            }
+          }}
+        >
+          <AttachmentThumbnail file={file} size="navigator" />
+          <span className="attachment-mrow-text">
+            <span className="attachment-mrow-name">{file.display_name}</span>
+            <span className="attachment-mrow-caption" id={captionId}>
+              {state === "Missing" ? (
+                <StatusLabel tone="attention" size="caption">
+                  Missing
+                </StatusLabel>
+              ) : (
+                state && <Badge size="sm">{state}</Badge>
+              )}
+              {downloading && (
+                <Progress
+                  aria-label={`Downloading ${file.display_name}`}
+                  value={availability.progress ?? 0}
+                />
+              )}
+              <span className="attachment-mrow-caption-text">
+                {downloading ? "Downloading…" : caption}
+              </span>
             </span>
           </span>
+          <span className="attachment-mrow-time">{age}</span>
+        </button>
+        <span className="attachment-mrow-actions">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                label={`More actions for ${file.display_name}`}
+                tooltipSide="top"
+              >
+                <Ellipsis />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">{menu}</DropdownMenuContent>
+          </DropdownMenu>
         </span>
-      </button>
-      <span className="attachment-mrow-actions">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              label={`More actions for ${file.display_name}`}
-              tooltipSide="top"
-            >
-              <Ellipsis />
-            </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">{menu}</DropdownMenuContent>
-        </DropdownMenu>
-      </span>
-    </li>
+      </li>
+    </Item>
   );
 }
 

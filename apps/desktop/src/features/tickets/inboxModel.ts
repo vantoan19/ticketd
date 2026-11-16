@@ -1,3 +1,4 @@
+import type { Entry as HistoryEntry } from "@/lib/api/history";
 import { startOfLocalDay } from "@/lib/format";
 import { describeChange } from "./history-sentence";
 import { providerName } from "./ticket-source";
@@ -88,4 +89,73 @@ export function snoozeInstant(choice: SnoozeChoice, now: Date): string {
     9,
     0,
   ).toISOString();
+}
+
+export type AttentionContext = {
+  statuses: ReadonlyMap<string, string>;
+  /** Explicit device-local Undo restores one original review against an exact host transition. */
+  restoredReviews?: ReadonlyMap<number, HistoryEntry>;
+  reminders: ReadonlyMap<string, string | null>;
+  latestStatusChanges: ReadonlyMap<string, HistoryEntry>;
+};
+export type AttentionGroup = "Needs you" | "Updates" | "Earlier";
+
+/** Attribution names an agent only when supplied; absence never establishes a human. */
+export function needsYou(
+  entry: Entry,
+  context: AttentionContext,
+  now: Date,
+): boolean {
+  if (entry.kind === "status") {
+    // Local changes stay in history even when they do not notify the Inbox.
+    // An old review must not become urgent again in a later review cycle.
+    const latest = context.latestStatusChanges.get(entry.reference);
+    return (
+      entry.to_value === "In review" &&
+      entry.editing_agent !== null &&
+      entry.editing_agent !== "local-person" &&
+      context.statuses.get(entry.reference) === "In review" &&
+      latest?.to_value === "In review" &&
+      ((latest.editing_agent === entry.editing_agent &&
+        new Date(entry.timestamp).getTime() >=
+          new Date(latest.timestamp).getTime()) ||
+        (!!context.restoredReviews?.get(entry.id) &&
+          sameTransition(latest, context.restoredReviews.get(entry.id)!)))
+    );
+  }
+  if (entry.kind === "reminder") {
+    const due = context.reminders.get(entry.reference);
+    return (
+      !!due &&
+      due === entry.to_value &&
+      new Date(due).getTime() <= now.getTime()
+    );
+  }
+  return false;
+}
+
+export function attentionGroup(
+  entry: { read: boolean; timestamp: string },
+  now: Date,
+): AttentionGroup {
+  return entry.read && dayGroup(entry.timestamp, now) !== "Today"
+    ? "Earlier"
+    : "Updates";
+}
+
+export function approvalChats<
+  T extends { status: { rank: string }; tickets: { reference: string }[] },
+>(chats: T[]): T[] {
+  return chats.filter((chat) => chat.status.rank === "approval");
+}
+
+/** Exact host transition identity for an explicitly restored review, without rewriting attribution. */
+export function sameTransition(first: HistoryEntry, second: HistoryEntry) {
+  return (
+    first.kind === second.kind &&
+    first.from_value === second.from_value &&
+    first.to_value === second.to_value &&
+    first.timestamp === second.timestamp &&
+    first.editing_agent === second.editing_agent
+  );
 }

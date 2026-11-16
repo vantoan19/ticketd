@@ -28,14 +28,14 @@ afterEach(() => {
 
 test("System says what the operating system is doing right now", () => {
   const { unmount } = render(<AppearancePage />);
-  expect(screen.getByRole("radio", { name: /^System/ }).textContent).toContain(
-    "Light right now",
+  expect(screen.getByRole("region", { name: "Theme" }).textContent).toContain(
+    "is light right now",
   );
   unmount();
   stubSystemTheme(true);
   render(<AppearancePage />);
-  expect(screen.getByRole("radio", { name: /^System/ }).textContent).toContain(
-    "Dark right now",
+  expect(screen.getByRole("region", { name: "Theme" }).textContent).toContain(
+    "is dark right now",
   );
 });
 
@@ -46,18 +46,8 @@ test("System keeps reporting the operating system after Light or Dark is chosen"
   // then reports the choice, not the operating system.
   stubSystemTheme(false);
   fireEvent.click(screen.getByRole("radio", { name: /^Light/ }));
-  expect(screen.getByRole("radio", { name: /^System/ }).textContent).toContain(
-    "Dark right now",
-  );
-});
-
-test("Light and Dark say they are always that theme", () => {
-  render(<AppearancePage />);
-  expect(screen.getByRole("radio", { name: /^Light/ }).textContent).toContain(
-    "Always light",
-  );
-  expect(screen.getByRole("radio", { name: /^Dark/ }).textContent).toContain(
-    "Always dark",
+  expect(screen.getByRole("region", { name: "Theme" }).textContent).toContain(
+    "is dark right now",
   );
 });
 
@@ -80,21 +70,29 @@ test("the two groups are labelled by their headings", () => {
   expect(screen.getByRole("radiogroup", { name: "Open tickets" })).toBeTruthy();
 });
 
-test("Open tickets previews follow the resolved theme", () => {
-  localStorage.setItem(
-    "ticketd.preferences",
-    JSON.stringify({ theme: "dark" }),
-  );
-  const { container } = render(<AppearancePage />);
-  const split = screen.getByRole("radio", { name: /Beside the list/ });
+test("Open tickets explains each layout and stores the choice for the next ticket", () => {
+  render(<AppearancePage />);
+  const beside = screen.getByRole("radio", {
+    name: /^Beside the list/,
+  });
   expect(
-    split
-      .querySelector("[data-theme-preview]")
-      ?.getAttribute("data-theme-preview"),
-  ).toBe("dark");
+    within(beside).getByText(
+      "The list narrows so you can move with J and K while you read.",
+    ),
+  ).toBeTruthy();
+  expect(beside.getAttribute("aria-checked")).toBe("true");
+  const full = screen.getByRole("radio", {
+    name: /^Full width/,
+  });
   expect(
-    container.querySelectorAll('[data-theme-preview="dark"]').length,
-  ).toBeGreaterThan(2);
+    within(full).getByText(
+      "The ticket takes the whole panel; Esc returns to the list.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(full);
+  expect(loadPreferences().openTickets).toBe("expanded");
+  fireEvent.click(beside);
+  expect(loadPreferences().openTickets).toBe("split");
 });
 
 test("the System preview shows both themes", () => {

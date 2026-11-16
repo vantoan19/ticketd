@@ -4831,3 +4831,23 @@ fn a_checkout_folder_belongs_to_one_project() {
         .unwrap();
     assert_eq!(workspace.list_projects().unwrap().len(), 2);
 }
+
+#[test]
+fn search_finds_partial_references_beyond_the_visible_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let first = workspace.create_ticket("An older ticket").unwrap();
+    for _ in 0..60 {
+        workspace.create_ticket("Recent ticket").unwrap();
+    }
+    let found = workspace.search_tickets("kq1", None, false, 50, 0).unwrap();
+    assert!(
+        found
+            .iter()
+            .any(|ticket| ticket.reference == first.reference)
+    );
+    let exact = workspace
+        .search_tickets("t-kq1", None, false, 1, 0)
+        .unwrap();
+    assert_eq!(exact[0].reference, first.reference);
+}

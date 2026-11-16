@@ -1,6 +1,13 @@
-import { useId, useRef, type ReactNode, type RefObject } from "react";
-import { XIcon } from "lucide-react";
+import {
+  useId,
+  useRef,
+  type ReactNode,
+  type RefObject,
+  type KeyboardEventHandler,
+} from "react";
+import { XIcon, FilePlus2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +43,7 @@ import { Kbd } from "@/components/ui/kbd";
 export function DialogShell({
   open,
   onOpenChange,
+  onExitComplete,
   title,
   description,
   size = "md",
@@ -46,6 +54,7 @@ export function DialogShell({
   onSubmit,
   onCancel,
   returnFocus,
+  resolveReturnFocus,
   footerLeading,
   footerNote,
   error,
@@ -56,9 +65,20 @@ export function DialogShell({
   children,
   busy = false,
   tabs,
+  bodyBoundary = "none",
+  variant = "default",
+  expanded = false,
+  headerActions,
+  onKeyDownCapture,
 }: {
+  variant?: "default" | "create" | "capture";
+  expanded?: boolean;
+  headerActions?: ReactNode;
+  onKeyDownCapture?: KeyboardEventHandler<HTMLFormElement>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called after the closing content has left Radix Presence. */
+  onExitComplete?: () => void;
   title: string;
   description?: string;
   size?: "sm" | "md" | "lg";
@@ -78,6 +98,7 @@ export function DialogShell({
   onCancel?: () => void;
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: RefObject<HTMLElement | null>;
+  resolveReturnFocus?: () => HTMLElement | null;
   /** One persistent control at the footer's left edge (the Create more switch). */
   footerLeading?: ReactNode;
   /** The note slot while the primary is available: a count, a result, a consequence. */
@@ -107,6 +128,8 @@ export function DialogShell({
    * SegmentedControl that stays put while the body below it changes.
    */
   tabs?: ReactNode;
+  /** Separate a long review from its fixed header while its body scrolls. */
+  bodyBoundary?: "none" | "divider";
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
@@ -115,11 +138,19 @@ export function DialogShell({
   const focus =
     initialFocus ?? (primaryVariant === "destructive" ? "cancel" : "first");
   const note = blockedReason ?? footerNote;
+  const compact = variant !== "default";
   const header = (
     <div
-      className={`flex flex-col gap-1 pt-6 pr-16 pl-6 ${children || tabs ? "" : "pb-5"}`}
+      className={
+        compact
+          ? "dialog-shell-compact-header"
+          : `flex flex-col gap-1 pt-6 pr-16 pl-6 ${children || tabs ? "" : "pb-5"}`
+      }
     >
-      <DialogTitle>{title}</DialogTitle>
+      <DialogTitle>
+        {variant === "capture" && <FilePlus2 aria-hidden="true" />}
+        {title}
+      </DialogTitle>
       <DialogDescription className={description ? "" : "sr-only"}>
         {description ?? title}
       </DialogDescription>
@@ -168,6 +199,7 @@ export function DialogShell({
   );
   return (
     <Dialog
+      modal={variant !== "capture"}
       open={open}
       onOpenChange={(next) => {
         if (!busy) onOpenChange(next);
@@ -175,14 +207,22 @@ export function DialogShell({
     >
       <DialogContent
         size={size}
+        surface={variant}
+        expanded={expanded}
+        overlay={variant !== "capture"}
         variant="flush"
         showCloseButton={false}
+        inert={!open || undefined}
+        onCloseAutoFocus={() => {
+          if (!open) onExitComplete?.();
+        }}
         // Escape that confirms an IME candidate belongs to the field, not the dialog.
         onEscapeKeyDown={(event) => {
           if (event.isComposing || event.keyCode === 229)
             event.preventDefault();
         }}
         {...(returnFocus && { returnFocus })}
+        {...(resolveReturnFocus && { resolveReturnFocus })}
         {...(focus !== "first" && {
           onOpenAutoFocus: (event: Event) => {
             event.preventDefault();
@@ -199,6 +239,7 @@ export function DialogShell({
           </>
         )}
         <form
+          onKeyDownCapture={onKeyDownCapture}
           className={`dialog-shell-form min-w-0 ${tabs ? "" : "relative"}`}
           onSubmit={(event) => {
             event.preventDefault();
@@ -210,7 +251,10 @@ export function DialogShell({
         >
           {!tabs && header}
           {children && (
-            <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
+            <div
+              className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6"
+              data-boundary={bodyBoundary}
+            >
               {children}
             </div>
           )}
@@ -230,22 +274,30 @@ export function DialogShell({
             <p id={reasonId} className="dialog-shell-note min-w-40 flex-1">
               {note}
             </p>
-            {primaryFirst ? [submit, cancel] : [cancel, submit]}
+            {variant !== "capture" &&
+              (primaryFirst ? [submit, cancel] : [cancel, submit])}
           </div>
           {/* Last in the tab order, drawn on the title line. */}
           {showClose && (
-            <div className="absolute top-6 right-4">
+            <div
+              className={
+                compact
+                  ? "dialog-shell-compact-actions"
+                  : "absolute top-6 right-4"
+              }
+            >
+              {headerActions}
               <DialogClose asChild>
-                <Button
+                <IconButton
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Close"
+                  label="Close"
                   {...(onCancel && { onClick: onCancel })}
                   disabled={busy}
                 >
                   <XIcon />
-                </Button>
+                </IconButton>
               </DialogClose>
             </div>
           )}

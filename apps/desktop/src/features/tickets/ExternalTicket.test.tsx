@@ -359,7 +359,7 @@ test("a failed refresh keeps the content and says the last attempt failed", asyn
   expect(screen.getByText(/The last refresh failed/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Couldn't refresh T-KQ1. GitHub is down. Saved content is unchanged.",
+    "Couldn't refresh T-KQ1. ticketd can't reach the service. Check the connection. Saved content is unchanged.",
   );
 });
 
@@ -392,10 +392,10 @@ test("an externally owned description is a read-only source card without editing
     screen.getByText("Open on GitHub").closest(".ticket-state-line")
       ?.textContent,
   ).toContain("#98");
-  // The detail header and the rail's Source section both link to the issue.
-  expect(screen.getAllByRole("link", { name: /acme.*api.*#98/ })).toHaveLength(
-    2,
-  );
+  // The document's source state line replaces the old duplicate rail link.
+  expect(
+    screen.getByRole("link", { name: /acme.*api.*#98/ }).getAttribute("href"),
+  ).toBe("https://github.com/acme/api/issues/98");
   expect(
     screen.getByText(/Only in ticketd · never sent to GitHub/),
   ).toBeTruthy();

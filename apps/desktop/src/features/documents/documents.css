@@ -1,3 +1,6 @@
+@import "../../components/ui/surface-roles/documents-documents.css";
+
+/* Documents share the navigator/reader arrangement at every panel width. */
 .context-view-wrapper:not([hidden]) {
   display: flex;
   flex: 1 1 0;
@@ -10,308 +13,283 @@
   min-width: 0;
   min-height: 0;
 }
-.documents-page {
-  padding: 24px var(--page-gutter);
-  overflow: auto;
+.context-view-wrapper {
+  container-type: inline-size;
 }
 .documents-page {
-  display: flex;
-  flex-direction: column;
-}
-/* List-page typography stays here so rendered Markdown keeps its own list and heading styles. */
-.documents-list-view {
-  width: 100%;
-  max-width: 936px;
-}
-.documents-list-view h1 {
-  font-size: var(--text-title);
-  line-height: 32px;
-  font-weight: 600;
-  letter-spacing: -0.6px;
-  margin-bottom: 24px;
-}
-.documents-list-view h2 {
-  font-size: var(--text-ui);
-  margin-bottom: 8px;
-}
-.documents-list-view ul {
-  list-style: none;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
   padding: 0;
 }
-
-.document-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 272px;
-  gap: 0 48px;
-  padding: 12px 0 32px;
-  align-items: start;
-}
-.document-main {
+.documents-list-view {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  width: 340px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.documents-list-view > [data-slot="pane-header"] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: none;
+  margin: 0;
+}
+.documents-list-view [data-slot="pane-search"] {
+  display: flex;
+  flex: 1;
   min-width: 0;
 }
-.document-main > header {
+.documents-list-view [data-slot="search-input"] {
+  width: 100%;
+  min-width: 0;
+}
+.documents-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.document-main > header h1 {
+  align-items: center;
+  height: 48px;
+  flex: none;
+  padding: 0 16px;
   margin: 0;
-  font-size: var(--text-title);
-  overflow-wrap: anywhere;
 }
-.document-eyebrow {
+.documents-toolbar > * {
+  width: 100%;
+}
+.documents-list-view section {
+  margin: 0;
+}
+.documents-list-view ul {
+  margin: 0;
+  padding: 0;
+}
+.documents-list-view h2.documents-group {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  height: 36px;
+  margin: 6px 8px 0;
+  padding: 0 12px;
+}
+.documents-group svg {
+  width: 14px;
+  height: 14px;
+}
+.documents-list-view .document-list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 0 10px;
+  height: 52px;
+  margin: 0 8px;
+  padding: 8px 10px;
+}
+.document-list-kind {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+.document-list-content {
+  min-width: 0;
+}
+.documents-page .document-list-open {
+  display: flex;
+  width: 100%;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.document-list-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 16px;
+  margin: 0;
+  overflow: hidden;
+}
+.document-list-date {
+  align-self: end;
+}
+.document-list-pin,
+.document-list li > [data-restore] {
+  position: absolute;
+  right: 4px;
+  top: 2px;
+}
+.document-list-pin {
+  pointer-events: none;
+}
+.document-list li:hover .document-list-pin,
+.document-list li:focus-within .document-list-pin {
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .document-list-pin {
+    pointer-events: auto;
+  }
+}
+.document-list .document-snippet {
+  display: none;
+}
+.documents-include {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  margin-top: auto;
+}
+.documents-include[data-hidden] {
+  visibility: hidden;
+}
+.documents-filters,
+.documents-restored {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.document-pagination {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.document-workspace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.document-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 0 8px 0 12px;
+}
+.document-crumb-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .document-actions {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   margin-left: auto;
 }
-.document-main > .document-mode {
+.document-main {
+  position: relative;
   display: flex;
-  gap: 8px;
+  flex: 1;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 44px max(40px, calc((100% - 640px) / 2)) 96px;
+}
+.document-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.document-title [data-slot="input"] {
+  height: 40px;
+  padding: 0;
+  margin: 0;
+}
+.document-state-row {
+  display: flex;
+  flex: none;
   align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: -16px 0 8px;
+  min-width: 0;
+}
+.document-subtitle {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-state-row .document-status {
+  flex: none;
+  margin-left: auto;
 }
 .document-status {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .document-status svg {
   width: 14px;
   height: 14px;
 }
-/* A Document reads at 16/24, and edits at the same size (P16). */
-.document-main > .document-body {
-  --text-editor: var(--text-reading);
-  --text-editor-line: 24px;
+.document-body {
   min-width: 0;
-  font-size: var(--text-reading);
-  line-height: 24px;
 }
-.document-main > .document-body .markdown-document {
-  font-size: var(--text-reading);
-  line-height: 24px;
-}
-/* Headings are never smaller than the text around them (plans DR-14). */
-.document-main > .document-body .markdown-document :is(h2, h3, h4, h5, h6) {
-  font-size: var(--text-reading);
-  font-weight: 600;
-  line-height: 24px;
-}
-.document-main > footer {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+.document-trash-notice {
+  position: absolute;
+  top: 4px;
+  right: 24px;
+  left: 24px;
+  min-height: 32px;
 }
 .document-rail {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  margin-top: 20px;
 }
-.document-rail dt {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  margin-top: 12px;
+.document-linked-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
 }
-.document-rail dd {
-  margin: 2px 0 0;
-  overflow-wrap: anywhere;
-}
-.document-rail ul {
-  list-style: none;
-  padding: 0;
-}
-.document-rail li {
-  margin-bottom: 8px;
-}
-.document-rail li button {
-  text-align: left;
-  white-space: normal;
-  height: auto;
-}
-.document-rail li p {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
-.document-rail .document-direction {
+.document-rail h2 {
   margin: 0 0 4px;
 }
-/* Connected items line up with their section label; long titles stop at two lines. */
-.document-rail [aria-label="Connections"] li > button {
-  justify-content: flex-start;
+.document-rail ul {
+  padding: 0;
+  margin: 0;
+}
+.document-rail li {
+  margin: 0 0 4px;
+}
+.document-rail li > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  height: auto;
+  margin-left: -8px;
+  padding: 6px 8px;
+}
+.document-rail li > button svg {
+  flex: none;
+  margin-top: 2px;
 }
 .document-rail .connected-label {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 20px;
 }
-
-.documents-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin: 24px 0 32px;
-}
-.documents-tabs {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
-.documents-include {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-.documents-search {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  max-width: 420px;
-}
-.documents-search-field {
-  position: relative;
-  flex: 1 1 200px;
-}
-.documents-search-field svg {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  width: 16px;
-  height: 16px;
-  transform: translateY(-50%);
-  color: var(--muted-foreground);
-  pointer-events: none;
-}
-.documents-search-field input {
-  width: 100%;
-  padding-left: 32px;
-}
-.documents-tag-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.documents-count {
-  margin: 0 0 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
-.documents-list-view section {
-  margin-bottom: 24px;
-}
-.documents-list-view .document-list {
-  margin: 0;
-}
-.document-list li {
-  display: flex;
-  align-items: start;
-  gap: 12px;
-  padding: 8px 0;
-}
-.document-list-content {
-  flex: 1;
-  min-width: 0;
-}
-.documents-page .document-list-open {
-  display: block;
-  width: 100%;
-  height: auto;
-  min-height: 32px;
-  padding-inline: 0;
-  text-align: left;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  font-weight: 600;
-  color: var(--foreground);
-}
-.document-list-content p {
-  margin: 0 0 4px;
-  font-size: var(--text-ui);
-  line-height: 20px;
-  color: var(--muted-foreground);
-  overflow-wrap: anywhere;
-}
-.document-list-content .document-snippet {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.document-list-content .document-origin,
-.document-list-content .document-list-tags {
-  font-size: var(--text-caption);
-}
-.document-list-tags {
-  display: flex;
-  flex-wrap: wrap;
-}
-.document-list-tags button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-.document-list-tags button:hover,
-.document-list-tags button:focus-visible {
-  color: var(--foreground);
-  text-decoration: underline;
-}
-.document-list-tags button + button::before {
-  content: "·";
-  margin: 0 6px;
-  display: inline-block;
-  text-decoration: none;
-}
-.document-list-kind {
-  flex: none;
-  margin-top: 8px;
-  width: 16px;
-  height: 16px;
-  color: var(--muted-foreground);
-}
-.document-list mark {
-  background: color-mix(in srgb, var(--primary) 20%, transparent);
-  color: inherit;
-  border-radius: var(--radius-segment);
-}
-.document-list-date {
-  flex: none;
-  margin-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  white-space: nowrap;
-}
-.document-list > li > button {
-  flex: none;
-  margin: 2px;
-}
-.document-pagination {
-  display: flex;
-  gap: 8px;
+.document-rail dt {
   margin-top: 12px;
+}
+.document-rail dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.document-rail p {
+  margin: 4px 0 0;
 }
 .document-rail .document-tags {
   display: flex;
@@ -319,19 +297,16 @@
   gap: 6px;
   margin: 8px 0;
 }
+.document-rail .document-tags:empty {
+  display: none;
+}
 .document-rail .document-tags li {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   margin: 0;
   padding-left: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow-wrap: anywhere;
   max-width: 100%;
-}
-.document-rail .document-tags button {
-  flex: none;
 }
 .document-tag-form,
 .document-create-ticket {
@@ -342,429 +317,67 @@
 .document-create-ticket[hidden] {
   display: none;
 }
-.document-passage {
-  overflow-wrap: anywhere;
-}
-.document-rail .document-passage p {
-  margin: 4px 0 12px;
-}
-
-/* The one header: breadcrumb back, save status, Read/Edit, pin and actions. */
-.document-bar {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 48px;
-  margin-bottom: 24px;
-  box-shadow: 0 1px 0 0 var(--border);
-}
-.document-bar .document-crumb {
-  color: var(--muted-foreground);
-}
-.document-crumb-sep {
-  color: var(--disabled-foreground);
-}
-.document-crumb-title {
-  min-width: 0;
-  padding-left: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.document-bar .document-actions {
-  gap: 8px;
-}
-.document-bar .document-status {
-  margin-left: 0;
-  font-size: var(--text-caption);
-}
-.document-title {
-  margin: 0;
-  font-size: var(--text-section);
-  line-height: 40px;
-  font-weight: 600;
-  letter-spacing: -1.28px;
-  overflow-wrap: anywhere;
-}
-/* The title edits in place: the heading's size and position, no box. */
-.document-title .document-title-input {
-  height: 40px;
-  margin: 0;
-  padding: 0;
-  line-height: 40px;
-  font-size: var(--text-section);
-  font-weight: 600;
-  letter-spacing: -1.28px;
-}
-/* Stacked under the text, the rail is a quiet recessed band; beside it, it
-   sits on the panel surface behind a 1px rule, like the ticket rail. */
-.document-rail {
-  background: var(--recessed);
-  border-radius: var(--radius);
-  padding: 24px 20px;
-  gap: 20px;
-}
-.document-rail h2 {
-  margin: 0 0 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-  font-weight: 400;
-}
-.document-rail li > button {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-left: -8px;
-  padding: 6px 8px;
-}
-.document-rail li > button svg {
-  flex: none;
-  margin-top: 2px;
-  color: var(--muted-foreground);
-}
 .document-rail-actions {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-top: 4px;
-  box-shadow: 0 -1px 0 0 var(--border);
 }
 .document-rail-actions > button {
   justify-content: flex-start;
   margin-left: -8px;
-  color: var(--muted-foreground);
 }
-.document-shared-passage > p {
-  margin: 4px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
+.document-passage {
+  overflow-wrap: anywhere;
 }
-@media (max-width: 767px) {
-  .documents-page {
-    padding: 20px 16px;
-  }
-}
-/* The row under the title: "Updated 2 h ago" while reading, the session
-   row while editing. 32px either way, so the body never moves (DR-01). */
-.document-state-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  margin: -16px 0 0;
-  min-width: 0;
-}
-.document-subtitle {
-  margin: 0;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.document-state-row .document-status {
-  flex: none;
-  margin: 0;
-}
-.document-session-tools {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  min-width: 0;
-}
-.document-state-row > .ui-button:last-child {
-  flex: none;
-  margin-right: -8px;
-}
-.document-title .document-title-input {
-  background: transparent;
-  box-shadow: none;
-}
-
-/* Board F: the open Document fills the pane. The header rule sits 48px from
-   the top, the body scrolls on the left, and a flat 272px rail (250px of
-   content once its 20px padding is taken) hangs off a hairline on the right. */
-.documents-page:has(> .document-workspace) {
-  padding: 0;
-  overflow: hidden;
-}
-.document-workspace {
-  flex: 1;
-  min-height: 0;
-  grid-template-columns: minmax(0, 1fr) 272px;
-  grid-template-rows: 48px minmax(0, 1fr);
-  gap: 0;
-  padding: 0;
-  align-items: stretch;
-}
-.document-bar {
-  margin-bottom: 0;
-  padding: 0 8px 0 12px;
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.document-workspace > .document-main {
-  padding: 40px 48px;
-  overflow-y: auto;
-}
-.document-workspace > .document-rail {
-  min-height: 0;
-  overflow-y: auto;
-  border-radius: 0;
-  background: var(--surface);
-  box-shadow: inset 1px 0 0 0 var(--border);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-/* Narrow window: the rail drops below the text and the pane scrolls as one.
-   This follows the two-column rule above so it wins at equal specificity. */
-@media (max-width: 767px) {
-  .document-workspace {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 48px auto auto;
-    overflow-y: auto;
-  }
-  .document-workspace > .document-main {
-    padding: 24px 16px;
-    overflow-y: visible;
-  }
-  .document-workspace > .document-rail {
-    overflow-y: visible;
-    box-shadow: inset 0 1px 0 0 var(--border);
-  }
-}
-.document-rail h2 {
-  line-height: 16px;
-}
-.document-rail dd {
-  font-size: var(--text-ui);
-}
-.document-rail .document-timestamps {
-  margin: 4px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-/* One quoted line: Both from “See T-KQ1 and T-KQ3.” */
-.document-rail .document-passage-caption {
-  margin: 4px 0 0;
-  display: block;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-/* The Document's body is plain text, not a bordered card. */
-/* Edit and read put every line in the same place: no frame, no inset. */
-.document-workspace .document-body .markdown-editor,
-.document-workspace .document-body .markdown-editor[data-chrome="session"] {
-  margin: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.document-workspace .document-body .rich-document,
-.document-workspace
-  .document-body
-  .markdown-editor[data-chrome="session"]
-  .rich-document {
-  min-height: 0;
-  padding: 0;
-}
-.document-workspace
-  .document-body
-  .markdown-editor:has(.rich-document:focus-visible) {
-  outline: none;
-}
-/* Read mode: a grey header bar, no outer border, white boxes. */
-.document-workspace .document-body .mermaid-block {
-  box-shadow: none;
-}
-
-.document-rail .document-tags:empty {
-  display: none;
-}
-
 .document-rail .document-passage-caption .document-passage,
 .document-rail .document-passage-caption .document-passage * {
   display: inline;
   margin: 0;
   padding: 0;
-  font-size: inherit;
-  line-height: inherit;
 }
-/* Rail rows sit 4px apart, as the label sits 4px above its first row (frame F). */
-.document-workspace .document-rail ul {
-  margin: 0;
-}
-.document-workspace .document-rail li {
-  margin: 0 0 4px;
-}
-.document-workspace .document-rail li:last-child {
-  margin-bottom: 0;
-}
-
-/* The list (S14): a pane header, one fixed toolbar, rows at ticket density. */
-.documents-list-view > [data-slot="pane-header"] {
-  margin: 0 -8px;
-}
-.documents-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 48px;
-  min-width: 0;
-}
-.documents-toolbar [data-slot="search-input"] {
-  flex: 0 1 240px;
-  min-width: 140px;
-}
-.documents-include {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  white-space: nowrap;
-}
-/* In Trash the switch keeps its place, so nothing in the toolbar moves. */
-.documents-include[data-hidden] {
-  visibility: hidden;
-}
-.documents-filters {
-  display: flex;
-  gap: 8px;
-  padding-bottom: 8px;
-}
-.documents-restored {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.documents-list-view h2.documents-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  margin: 8px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  font-weight: 500;
-  line-height: 16px;
-}
-.documents-group svg {
-  width: 14px;
-  height: 14px;
-}
-.documents-list-view .document-list li {
-  align-items: center;
-  gap: 8px;
-  margin: 0 -8px;
-  padding: 4px 4px 4px 8px;
-  border-radius: var(--radius);
-}
-.documents-list-view .document-list li:hover {
-  background: var(--hover);
-}
-.documents-list-view .document-list li[data-open] {
-  background: var(--accent);
-}
-.documents-list-view .document-list-kind {
-  align-self: flex-start;
-  margin-top: 4px;
-}
-.documents-page .documents-list-view .document-list-open {
-  display: flex;
-  max-width: 100%;
-  height: 20px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  text-align: start;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.documents-page .documents-list-view .document-list-open:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.document-list-meta {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
-}
-.documents-list-view .document-list-content .document-list-meta {
-  margin: 2px 0 0;
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.document-list-meta .document-list-date {
-  margin: 0;
-}
-.document-list-meta .ui-badge {
-  cursor: pointer;
-}
-/* The pin waits in its slot unless the Document is pinned (DL-06). */
-.document-list li:not([data-pinned]) .document-list-pin {
-  visibility: hidden;
-}
-.document-list li:hover .document-list-pin,
-.document-list li:focus-within .document-list-pin {
-  visibility: visible;
-}
-@media (hover: none) {
-  .document-list li .document-list-pin {
-    visibility: visible;
-  }
-}
-
-/* A Document opens beside the list, like a ticket (R3.9); a pane too narrow
-   for both shows the reader alone, with Back to Documents. */
-.context-view-wrapper {
-  container-type: inline-size;
-}
-.documents-page[data-reading] {
-  display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  padding: 0;
-  overflow: hidden;
-}
-.documents-page[data-reading] > .documents-list-view {
-  min-height: 0;
-  padding: 0 16px 16px;
-  overflow-y: auto;
-  box-shadow: inset -1px 0 0 0 var(--border);
-}
-.documents-page[data-reading] > .documents-list-view .documents-include {
-  display: none;
-}
-.documents-page[data-reading] > .document-workspace {
-  min-width: 0;
-}
-@container (max-width: 1040px) {
-  .documents-page[data-reading] {
+@container (max-width: 879px) {
+  .documents-page {
     grid-template-columns: minmax(0, 1fr);
   }
+  .documents-list-view {
+    width: 100%;
+  }
   .documents-page[data-reading] > .documents-list-view {
+    display: none;
+  }
+  .document-main {
+    padding: 44px 24px 96px;
+  }
+}
+@container (max-width: 479px) {
+  .document-main {
+    padding-inline: 16px;
+  }
+  .document-state-row {
+    gap: 4px;
+  }
+  .document-actions {
+    gap: 2px;
+  }
+}
+
+.document-return {
+  display: flex;
+  min-width: 0;
+}
+.document-plan-crumb {
+  display: flex;
+  min-width: 0;
+}
+.document-bar:has(.document-plan-crumb) .document-return {
+  display: none;
+}
+@container (max-width: 879px) {
+  .document-bar:has(.document-plan-crumb) .document-return {
+    display: flex;
+  }
+  .document-plan-crumb {
     display: none;
   }
 }

@@ -1,5 +1,6 @@
-/* The Attachments library: a 380px list pane and the detail pane beside it,
-   like tickets (S17). Below a 760px window one pane shows at a time. */
+@import "../../components/ui/surface-roles/attachments-attachment-library.css";
+
+/* S14: a fixed navigator and a preview; narrow panels take turns. */
 .attachment-library-host {
   display: flex;
   flex: 1 1 0;
@@ -16,18 +17,16 @@
 }
 .attachment-list-pane {
   position: relative;
-  z-index: 1;
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 380px;
+  width: 360px;
   min-height: 0;
-  box-shadow: 1px 0 0 var(--border);
+  min-width: 0;
 }
 .attachment-workspace[data-empty] .attachment-list-pane {
   flex: 1 1 auto;
   width: auto;
-  box-shadow: none;
 }
 .attachment-detail-pane {
   display: flex;
@@ -36,24 +35,19 @@
   min-width: 0;
   min-height: 0;
 }
-.attachment-detail-hint {
-  flex: 1 1 auto;
-  padding: 24px;
-}
 .attachment-list-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
 }
-.attachment-search {
+.attachment-list-pane [data-slot="pane-search"] {
   display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 4px;
+  flex: 1;
   min-width: 0;
 }
-.attachment-add {
-  margin-inline-start: 4px;
+.attachment-list-pane [data-slot="search-input"] {
+  width: 100%;
+  min-width: 0;
 }
 .attachment-chip-row {
   display: flex;
@@ -61,55 +55,33 @@
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  box-shadow: inset 0 -1px 0 var(--group-hairline);
 }
-
-/* Management rows (P12): 48px, two lines, full-row hover with an 8px inset;
-   the "…" sits in a reserved trailing slot, shown on hover, focus and the
-   open row. */
 .attachment-rows {
   display: flex;
   flex-direction: column;
   margin: 0;
-  padding: 8px;
-  list-style: none;
+  padding: 6px 8px 0;
 }
 .attachment-mrow {
   position: relative;
-  border-radius: var(--radius);
-}
-.attachment-mrow:hover {
-  background: var(--hover);
-}
-.attachment-mrow[data-open] {
-  background: var(--accent);
 }
 .attachment-mrow-main {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  min-height: 48px;
-  padding: 6px 44px 6px 8px;
-  border-radius: var(--radius);
-  text-align: start;
-}
-.attachment-mrow-main:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
+  height: 56px;
+  padding: 8px 10px;
 }
 .attachment-mrow-text {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
 }
 .attachment-mrow-name {
   overflow: hidden;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .attachment-mrow-caption {
   display: flex;
@@ -117,9 +89,6 @@
   gap: 6px;
   min-width: 0;
   height: 16px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .attachment-mrow-caption > * {
   flex: none;
@@ -129,47 +98,62 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.attachment-mrow-time {
+  flex: none;
+  align-self: end;
+  min-width: 28px;
 }
 .attachment-mrow-actions {
   position: absolute;
-  top: 50%;
-  right: 8px;
-  translate: 0 -50%;
+  top: 4px;
+  right: 4px;
   visibility: hidden;
 }
 .attachment-mrow:hover .attachment-mrow-actions,
 .attachment-mrow:focus-within .attachment-mrow-actions,
-.attachment-mrow[data-open] .attachment-mrow-actions,
 .attachment-mrow-actions:has([data-state="open"]) {
   visibility: visible;
+}
+.attachment-drop-hint {
+  margin: 18px 20px 0;
+}
+.attachment-drop-hint > [data-slot="alert"] > svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
 }
 @media (hover: none) {
   .attachment-mrow-actions {
     visibility: visible;
   }
 }
-
+@container attachment-workspace (max-width:879px) {
+  .attachment-list-pane {
+    flex: 1 1 auto;
+    width: auto;
+  }
+  .attachment-workspace[data-open] .attachment-list-pane,
+  .attachment-workspace:not([data-open]) .attachment-detail-pane {
+    display: none;
+  }
+}
 /* Clean up: one list with the choice on the left. */
 .attachment-cleanup-files {
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 .attachment-cleanup-files > li {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 8px 0;
-  box-shadow: inset 0 -1px 0 var(--group-hairline);
 }
 .attachment-cleanup-files label {
   display: grid;
   grid-template-columns: 16px 24px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 .attachment-cleanup-files label > span {
   display: flex;
@@ -178,9 +162,6 @@
 }
 .attachment-cleanup-files small,
 .attachment-cleanup-reason {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
 .attachment-cleanup-reason,
@@ -189,29 +170,10 @@
 }
 .attachment-cleanup-files input {
   margin: 0;
-  accent-color: var(--primary);
-}
-.attachment-cleanup-files input:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 3px;
 }
 .attachment-cleanup-all {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 4px 0 8px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-
-@container attachment-workspace (max-width: 759px) {
-  .attachment-list-pane {
-    flex: 1 1 auto;
-    width: auto;
-    box-shadow: none;
-  }
-  .attachment-workspace[data-open] .attachment-list-pane,
-  .attachment-workspace:not([data-open]) .attachment-detail-pane {
-    display: none;
-  }
 }

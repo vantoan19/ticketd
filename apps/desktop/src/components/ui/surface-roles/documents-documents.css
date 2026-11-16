@@ -1,0 +1,40 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.documents-list-view ul {
+  list-style: none;
+}
+.documents-page .document-list-open {
+  white-space: nowrap;
+  text-align: start;
+}
+.document-list-meta {
+  white-space: nowrap;
+}
+.document-list-date {
+  white-space: nowrap;
+}
+.document-list-pin {
+  opacity: 0;
+}
+.document-list li:hover .document-list-pin,
+.document-list li:focus-within .document-list-pin {
+  opacity: 1;
+}
+@media (hover: none) {
+  .document-list-pin {
+    opacity: 1;
+  }
+}
+.document-crumb-title {
+  white-space: nowrap;
+}
+.document-subtitle {
+  white-space: nowrap;
+}
+.document-rail ul {
+  list-style: none;
+}
+.document-rail li > button {
+  white-space: normal;
+  text-align: left;
+}

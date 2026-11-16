@@ -1,3 +1,4 @@
+import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -555,7 +556,8 @@ test("a failed evaluate clears the earlier lines and Apply waits for each answer
     message: "database is locked",
   };
   choose("T-KQ1 blocks T-KQ3", "retain");
-  expect(await screen.findByText(/Database is locked\./)).toBeTruthy();
+  await revealFailureDetails();
+  expect(screen.getByText(/database is locked/)).toBeTruthy();
   expect(screen.queryByText(/becomes Ready/)).toBeNull();
   expect(
     screen.getByText("T-KQ3 keeps waiting on a duplicate ticket"),

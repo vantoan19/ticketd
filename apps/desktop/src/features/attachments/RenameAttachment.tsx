@@ -62,6 +62,23 @@ export function RenameAttachment({
   return (
     <form
       className="attachment-rename"
+      onKeyDown={(event) => {
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing ||
+          event.keyCode === 229
+        )
+          return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-slot="popover-content"]')
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) onClose();
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         void save();
@@ -76,13 +93,6 @@ export function RenameAttachment({
         aria-invalid={blocked ? true : undefined}
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => setName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            onClose();
-          }
-        }}
       />
       {blocked ? (
         <Tooltip content={blocked}>

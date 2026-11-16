@@ -8,6 +8,7 @@ import { emptyCopy } from "@/lib/empty-copy";
 import {
   SCOPE_CAPTIONS,
   SHORTCUTS,
+  SHORTCUT_SCOPES,
   spokenKeys,
   type Shortcut,
   type ShortcutScope,
@@ -25,7 +26,7 @@ function matches(shortcut: Shortcut, query: string) {
   return [
     shortcut.label,
     shortcut.note ?? "",
-    spokenKeys(shortcut.keys),
+    spokenKeys(shortcut.keys, undefined, shortcut.sequences),
     shortcut.scope,
   ]
     .join(" ")
@@ -37,15 +38,12 @@ function matches(shortcut: Shortcut, query: string) {
 export function KeyboardShortcutsPage() {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
-  const scopes = [...new Set(SHORTCUTS.map((item) => item.scope))];
-  const visible = scopes
-    .map((scope: ShortcutScope) => ({
-      scope,
-      shortcuts: (SHORTCUTS as readonly Shortcut[]).filter(
-        (item) => item.scope === scope && (!needle || matches(item, needle)),
-      ),
-    }))
-    .filter((group) => group.shortcuts.length > 0);
+  const visible = SHORTCUT_SCOPES.map((scope: ShortcutScope) => ({
+    scope,
+    shortcuts: (SHORTCUTS as readonly Shortcut[]).filter(
+      (item) => item.scope === scope && (!needle || matches(item, needle)),
+    ),
+  })).filter((group) => group.shortcuts.length > 0);
   const none = emptyCopy("settings-shortcuts-search", { query: query.trim() });
   return (
     <SettingsPage
@@ -77,7 +75,7 @@ export function KeyboardShortcutsPage() {
                 {...(item.note ? { description: item.note } : {})}
                 trailing={
                   <span className="shortcut-keys">
-                    <KeyChords keys={item.keys} />
+                    <KeyChords keys={item.keys} sequences={item.sequences} />
                   </span>
                 }
               />

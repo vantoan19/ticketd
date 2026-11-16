@@ -36,7 +36,9 @@ export function ChatActionsMenu({
   onCloseAutoFocus,
   onResult,
   onLink,
+  rowAction = false,
 }: {
+  rowAction?: boolean;
   chat: ActionTarget;
   /** Where the menu can link a record: the Chat header, whose Chat may have no chip row. */
   onLink?: () => void;
@@ -71,7 +73,10 @@ export function ChatActionsMenu({
       {...(onOpenChange && { onOpenChange })}
     >
       <DropdownMenuTrigger asChild>
-        <IconButton label={label}>
+        <IconButton
+          label={label}
+          size={rowAction ? "icon-row-action" : "icon-sm"}
+        >
           <Ellipsis aria-hidden />
         </IconButton>
       </DropdownMenuTrigger>

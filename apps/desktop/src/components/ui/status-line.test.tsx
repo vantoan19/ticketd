@@ -80,7 +80,7 @@ test("Undo runs the undo; a failed undo turns into the failure with Retry", asyn
   });
   expect(undo).toHaveBeenCalledOnce();
   expect(screen.getByRole("alert").textContent).toContain(
-    "Couldn't undo. Workspace is read-only.",
+    "Couldn't undo. The result couldn't be confirmed.",
   );
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));

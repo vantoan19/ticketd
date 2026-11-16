@@ -1,0 +1,159 @@
+/* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
+
+.ticket-properties {
+  background: var(--surface);
+}
+@container ticket-detail (min-width: 760px) {
+  .ticket-properties {
+    box-shadow: inset 1px 0 0 0 var(--header-boundary);
+  }
+}
+.rail-label {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line);
+}
+.rail-row,
+.rail-status > [data-slot="select-trigger"] {
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: start;
+  cursor: pointer;
+}
+.rail-row[data-muted] {
+  color: var(--muted-foreground);
+}
+.rail-row:hover,
+.rail-row[data-state="open"],
+.rail-status > [data-slot="select-trigger"]:hover,
+.rail-status > [data-slot="select-trigger"][data-state="open"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.rail-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.rail-row svg,
+.rail-status [data-slot="select-trigger"] svg {
+  color: var(--muted-foreground);
+}
+.rail-row-value {
+  white-space: nowrap;
+}
+.rail-row-trailing {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.rail-row:disabled,
+.rail-row[data-readonly],
+.rail-status > [data-slot="select-trigger"][data-disabled] {
+  opacity: 1;
+  color: var(--foreground);
+  background: transparent;
+  cursor: default;
+}
+.rail-row[data-muted]:disabled {
+  color: var(--muted-foreground);
+}
+.rail-tags {
+  white-space: normal;
+}
+.rail-status-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.rail-status-note .ui-record-link {
+  color: var(--foreground);
+}
+.status-menu [data-slot="select-label"],
+.status-menu-caption {
+  white-space: normal;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+}
+.rail-value {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.rail-value svg {
+  color: var(--muted-foreground);
+}
+.rail-section small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.rail-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.rail-source-identity .source-link {
+  white-space: nowrap;
+}
+.latest-update {
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-ui);
+  white-space: normal;
+  text-align: start;
+  cursor: pointer;
+}
+.latest-update:hover {
+  background: var(--accent);
+}
+.latest-update:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.latest-update-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.latest-update-meta > span {
+  white-space: nowrap;
+}
+.latest-update-text {
+  line-height: var(--text-ui-line);
+  white-space: pre-wrap;
+}
+.property-strip .rail-row,
+.property-strip .rail-status > [data-slot="select-trigger"],
+.property-strip > .ui-button {
+  background: transparent;
+  box-shadow: none;
+}
+.property-strip .rail-row:hover,
+.property-strip > .ui-button:hover,
+.property-strip .rail-status > [data-slot="select-trigger"]:hover {
+  background: var(--accent);
+}
+.property-strip .latest-update-line {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.latest-update-line > span:last-child {
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.ticket-agent-copy > span {
+  white-space: nowrap;
+}

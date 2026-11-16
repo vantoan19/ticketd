@@ -1,5 +1,12 @@
+import { TicketCommandPicker } from "./TicketCommandPicker";
+import { TicketAgentStrip } from "./TicketAgent";
+import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
+import {
+  TicketCommandContext,
+  ticketCommandActions,
+} from "@/lib/ticket-command-actions";
 import { LatestUpdate } from "./LatestUpdate";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChoiceList, type Choice } from "@/components/ui/choice-list";
 import { Folder, Layers, type LucideIcon } from "lucide-react";
 import { SourceRail } from "./SourceRail";
@@ -115,6 +122,11 @@ export function PropertyPicker({
           readOnly={readOnly}
           disabled={disabled}
           aria-label={`${label}: ${value}`}
+          title={`${label} (${shortcutLabel(ticketCommandActions.find((action) => action.scope === label)?.shortcut ?? "ticket-tags")})`}
+          aria-keyshortcuts={ariaKeyShortcuts(
+            ticketCommandActions.find((action) => action.scope === label)
+              ?.shortcut ?? "ticket-tags",
+          )}
           trailing={trailing}
         >
           {display ?? value}
@@ -192,6 +204,7 @@ export function TicketProperties({
   onOpenTicket?: (reference: string) => void;
 }) {
   const strip = layout === "strip";
+  const openCommand = useContext(TicketCommandContext);
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [duplicateOpen, setDuplicateOpen] = useState(false);
@@ -429,6 +442,8 @@ export function TicketProperties({
             variant="ghost"
             readOnly={readOnly}
             aria-label={`Status: ${ticket.status}`}
+            title={`Change status (${shortcutLabel("ticket-status")})`}
+            aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
           >
             <StatusIcon status={ticket.status} decorative />
             <SelectValue>{ticket.status}</SelectValue>
@@ -630,23 +645,114 @@ export function TicketProperties({
   );
   if (strip)
     return (
-      <div
-        ref={propertiesRef}
-        className="property-strip"
-        role="group"
-        aria-label="Ticket properties"
-        data-trashed={readOnly || undefined}
-      >
-        {status}
-        {projectRow}
-        {planRow}
-        {tagsRow}
-        {chats}
-        {source}
-        {attention}
-        {dialogs}
-        {latestUpdate}
-      </div>
+      <>
+        <div
+          ref={propertiesRef}
+          className="property-strip"
+          role="group"
+          aria-label="Ticket properties"
+          data-trashed={readOnly || undefined}
+        >
+          {openCommand ? (
+            <>
+              <TicketCommandPicker
+                ticket={ticket}
+                projects={projects}
+                plans={plans}
+                refresh={refresh}
+                scope="Status"
+                trigger={
+                  <RailRow
+                    disabled={disabled}
+                    icon={<StatusIcon status={ticket.status} decorative />}
+                    aria-label={`Status: ${ticket.status}`}
+
+                    aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
+                    title={`Change status (${shortcutLabel("ticket-status")})`}
+                  >
+                    {ticket.status}
+                  </RailRow>
+                }
+              />
+              <TicketCommandPicker
+                ticket={ticket}
+                projects={projects}
+                plans={plans}
+                refresh={refresh}
+                scope="Project"
+                trigger={
+                  <RailRow
+                    disabled={disabled}
+                    muted={!ticket.project_id}
+                    icon={<Folder />}
+                    aria-label={`Project: ${projectName}`}
+
+                    aria-keyshortcuts={ariaKeyShortcuts("ticket-project")}
+                    title={`Change project (${shortcutLabel("ticket-project")})`}
+                  >
+                    {projectName}
+                  </RailRow>
+                }
+              />
+              <TicketCommandPicker
+                ticket={ticket}
+                projects={projects}
+                plans={plans}
+                refresh={refresh}
+                scope="Plan"
+                trigger={
+                  <RailRow
+                    disabled={disabled}
+                    muted={!ticket.plan_id}
+                    icon={<Layers />}
+                    aria-label={`Plan: ${planName}`}
+
+                    aria-keyshortcuts={ariaKeyShortcuts("ticket-plan")}
+                    title={`Move to Plan (${shortcutLabel("ticket-plan")})`}
+                  >
+                    {planName}
+                  </RailRow>
+                }
+              />
+              <TicketCommandPicker
+                ticket={ticket}
+                projects={projects}
+                plans={plans}
+                refresh={refresh}
+                scope="Tags"
+                trigger={
+                  <RailRow
+                    disabled={disabled}
+                    muted={!ticket.tags.length}
+                    aria-label={`Tags: ${ticket.tags.join(", ") || "No tags"}`}
+
+                    aria-keyshortcuts={ariaKeyShortcuts("ticket-tags")}
+                    title={`Edit tags (${shortcutLabel("ticket-tags")})`}
+                  >
+                    {pills || "No tags"}
+                  </RailRow>
+                }
+              />
+            </>
+          ) : (
+            <>
+              {status}
+              {projectRow}
+              {planRow}
+              {tagsRow}
+            </>
+          )}
+          {chats}
+          {source}
+          {attention}
+          {children}
+          {dialogs}
+        </div>
+        <TicketAgentStrip
+          reference={ticket.reference}
+          onOpenUpdate={onOpenNote}
+        />
+      </>
     );
   return (
     <aside

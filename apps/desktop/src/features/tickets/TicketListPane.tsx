@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
 import {
-  Layers,
-  RefreshCw,
-  SearchX,
-  Ticket as TicketIcon,
-  Trash2,
-  X,
-} from "lucide-react";
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+  type ReactNode,
+} from "react";
+import { Layers, SearchX, Ticket as TicketIcon, Trash2, X } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
@@ -17,6 +17,7 @@ import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
 import { StatusLineRegion } from "@/components/ui/status-line";
+import { useStatusLineInset } from "@/components/ui/use-status-line";
 import { emptyCopy } from "@/lib/empty-copy";
 import { noun, ofTotal } from "@/lib/format";
 import {
@@ -99,7 +100,6 @@ function TicketListBody({
     sourceCounts,
     configuredSources,
     sourceRefresh,
-    refreshSources,
     trash,
     tickets,
     counts,
@@ -116,6 +116,17 @@ function TicketListBody({
     listFailure,
     refreshFailed,
   } = workspace;
+  // Complete well counts are an independent, authoritative total while the
+  // shared list read is unavailable; a failed well retains its own Retry.
+  const boardTotal =
+    workspace.layout === "board" &&
+    workspace.board.columns.every((column) => column.total !== null)
+      ? workspace.board.columns.reduce(
+          (sum, column) => sum + (column.total ?? 0),
+          0,
+        )
+      : null;
+  const headerTotal = boardTotal ?? total;
   // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const planAction = usePlanAction(planState);
@@ -135,23 +146,21 @@ function TicketListBody({
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
     Boolean(query || tags || family) ||
     source !== "all";
-  const filterCount =
-    [plan, status, availability, family].filter(Boolean).length +
-    tags.split(",").filter((tag) => tag.trim()).length;
-  // Chrome rule (P9): Search, Filters and Display act on nothing in an empty
-  // workspace or an empty Trash. A narrower view that is empty keeps them,
-  // since its tickets may only be elsewhere in the workspace.
+  const filterCount = [
+    navigation.plan !== plan ? plan : "",
+    navigation.kind !== "progress" ? status : "",
+    navigation.kind !== "ready" ? availability : "",
+    family,
+    tags,
+  ].filter(Boolean).length;
+  // Empty unfiltered scopes share one rule; filtered empty scopes keep a way back.
   const bare =
     !loading &&
     !queryError &&
     !refreshFailed &&
     total === 0 &&
     tickets.length === 0 &&
-    !filtered &&
-    (trash ||
-      (navigation.kind === "all" &&
-        navigation.project === "all" &&
-        !navigation.plan));
+    !filtered;
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -212,12 +221,6 @@ function TicketListBody({
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
-  const singleStatusNote =
-    navigation.kind === "ready"
-      ? "Todo tickets with nothing left to wait on."
-      : navigation.kind === "progress"
-        ? "Tickets someone is working on right now."
-        : null;
   const filterProps = { ...filterPropsOf(workspace), menu: filtersMenu };
   // What an empty list or board says (P9): one state for the whole view.
   const emptyView = trash ? (
@@ -347,16 +350,19 @@ function TicketListBody({
         <PaneHeader
           title={scopeName}
           titleId="tickets-heading"
-          caption={singleStatusNote}
           count={
             // First run (S20): the title alone over an empty workspace.
+            (workspace.listKnown || boardTotal !== null) &&
             !bare && (
               <Count>
                 {filtered && scopeTotal != null
-                  ? ofTotal(total, scopeTotal)
-                  : total}
+                  ? ofTotal(headerTotal, scopeTotal)
+                  : headerTotal}
                 {!(filtered && scopeTotal != null) && (
-                  <span className="sr-only"> {noun(total, "ticket")}</span>
+                  <span className="sr-only">
+                    {" "}
+                    {noun(headerTotal, "ticket")}
+                  </span>
                 )}
               </Count>
             )
@@ -369,22 +375,6 @@ function TicketListBody({
                   state={sourceRefresh}
                   tickets={tickets}
                 />
-              )}
-              {/* Refresh keeps its slot while there is anything to refresh,
-                  so the header never shifts (P10); over an empty workspace
-                  with no source it would act on nothing (S20). */}
-              {!(bare && !selected && configuredSources.length === 0) && (
-                <IconButton
-                  label="Refresh"
-                  disabled={sourceRefresh.running}
-                  onClick={() =>
-                    void (configuredSources.length > 0
-                      ? refreshSources()
-                      : refresh({ reportFailure: true }))
-                  }
-                >
-                  <RefreshCw />
-                </IconButton>
               )}
               {!trash && !bare && (
                 <TicketFilters part="controls" {...filterProps} />
@@ -399,6 +389,7 @@ function TicketListBody({
           }
         />
       )}
+      {!trash && <TicketFilters part="chips" {...filterProps} />}
       {
         <>
           {!trash && (configuredSources.length > 0 || source !== "all") && (
@@ -411,7 +402,6 @@ function TicketListBody({
               />
             </>
           )}
-          {!trash && <TicketFilters part="chips" {...filterProps} />}
 
           {refreshFailed && !queryError && (
             <div role="status" className="refresh-failed">
@@ -461,9 +451,7 @@ function TicketListBody({
                   onRetry={() => void refresh({ reportFailure: true })}
                 />
               ) : loading && tickets.length === 0 ? (
-                <TicketRowsSkeleton />
-              ) : tickets.length === 0 ? (
-                emptyView
+                <TicketRowsSkeleton detailed={ticketRows === "detailed"} />
               ) : (
                 <>
                   {showBulk && bulk.selection.length > 0 && (
@@ -480,7 +468,20 @@ function TicketListBody({
                     </a>
                   )}
                   <TicketList
+                    scopeKey={JSON.stringify([
+                      filter,
+                      plan,
+                      status,
+                      tags,
+                      availability,
+                      family,
+                      source,
+                      query,
+                      trash,
+                    ])}
                     tickets={visibleTickets}
+                    empty={emptyView}
+                    details={workspace.details}
                     scope={{
                       showPlan: !navigation.plan,
                       showProject: navigation.project === "all",
@@ -527,6 +528,7 @@ function TicketListBody({
                           <IconButton
                             disabled={planState.pending}
                             label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                            tooltipSide="top"
                             onClick={() => {
                               // A second click lands on the row that moved up:
                               // ignore clicks for 400ms after a removal (P7).
@@ -582,17 +584,49 @@ function TicketListBody({
         onOpenChange={setMarkingDuplicate}
         refresh={refresh}
       />
-      {showBulk && workspace.layout === "list" && (
-        <BulkControls
-          bulk={bulk}
-          visible={visibleTickets}
-          total={total}
-          matchingReferences={matchingReferences}
-          projects={projects}
-          plans={plans}
-        />
-      )}
+      <ListOverlays>
+        {showBulk && workspace.layout === "list" && (
+          <BulkControls
+            bulk={bulk}
+            visible={visibleTickets}
+            total={total}
+            matchingReferences={matchingReferences}
+            projects={projects}
+            plans={plans}
+          />
+        )}
+      </ListOverlays>
     </section>
+  );
+}
+
+/** Bulk actions float at the bottom; outcomes clear their reserved stack. */
+function ListOverlays({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useStatusLineInset(height > 0 ? height + 8 : 0);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => {
+      const next = element.getBoundingClientRect().height;
+      setHeight(next);
+      element
+        .closest<HTMLElement>(".ticket-list")
+        ?.style.setProperty("--list-overlays-height", `${next}px`);
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  });
+  return (
+    <div className="ticket-list-overlays" ref={ref}>
+      {children}
+    </div>
   );
 }
 
@@ -628,8 +662,8 @@ function filterPropsOf(w: TicketWorkspace) {
 }
 
 /**
- * Search, Filters and Display for a Plan's list and board. They sit in the
- * Plan's header, which spans both panes, instead of a second list header.
+ * Filters and Display for a Plan's list and board, reached through the
+ * Plan header's More menu instead of a second list header.
  */
 export function PlanListControls({
   workspace,

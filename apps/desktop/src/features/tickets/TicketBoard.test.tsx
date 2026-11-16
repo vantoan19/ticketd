@@ -155,8 +155,7 @@ beforeEach(() => {
       if (
         command === "change_ticket" &&
         args?.reference &&
-        args.patch?.status &&
-        args.requestId
+        args.patch?.status
       ) {
         const {
           reference,
@@ -165,7 +164,11 @@ beforeEach(() => {
         } = args;
         if (writeOverride)
           return (
-            await writeOverride({ references: [reference], status, requestId })
+            await writeOverride({
+              references: [reference],
+              status,
+              requestId: requestId ?? "palette",
+            })
           )[0];
         saved = saved.map((item) =>
           item.reference === reference
@@ -246,7 +249,7 @@ async function showBoard() {
 }
 async function chooseStatus(reference: string, status: string) {
   const trigger = screen.getByRole("button", {
-    name: `Change status of ${reference}`,
+    name: new RegExp(`^Change status of ${reference}, current status:`),
   });
   trigger.focus();
   fireEvent.keyDown(trigger, { key: "Enter" });
@@ -261,12 +264,15 @@ test("Display holds Layout and Rows; both persist and the header carries no togg
   expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Display" }));
   expect(layoutRadio("List").getAttribute("aria-checked")).toBe("true");
-  fireEvent.click(screen.getByRole("radio", { name: "Simple" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Detailed" }));
+  fireEvent.click(screen.getByRole("radio", { name: "One line" }));
   expect(
     JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketRows,
   ).toBe("simple");
   expect(
-    screen.getByRole("radio", { name: "Simple" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "One line" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
   chooseLayout("Board");
   await settle();
@@ -515,6 +521,11 @@ test("drag respects external destinations and revalidates source changes made du
   startDrag();
   movePointer(1000);
   expect(screen.queryByText("Drop to change status to Done.")).toBeNull();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByText(
+      "Can't move here",
+    ),
+  ).toBeTruthy();
   releasePointer(1000);
   startDrag();
   movePointer(400);
@@ -528,7 +539,7 @@ test("drag respects external destinations and revalidates source changes made du
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   expect(screen.getByRole("alert").textContent).toContain(
-    "This status is no longer available",
+    "The result couldn't be confirmed",
   );
 });
 
@@ -551,7 +562,9 @@ test("a pending dragged ticket cannot be dragged again or changed through its me
   expect(screen.queryByText("Drop to change status to Done.")).toBeNull();
   releasePointer(1000);
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   ).toHaveProperty("disabled", true);
   expect(
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
@@ -624,13 +637,19 @@ test("choosing the saved status does not write, and a pending card cannot submit
   await chooseStatus("T-KQ1", "Done");
   expect(screen.getByText("Saving…")).toBeTruthy();
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   ).toHaveProperty("disabled", true);
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ2" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ2, current status:/,
+    }),
   ).toHaveProperty("disabled", false);
   fireEvent.keyDown(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
     { key: "Enter" },
   );
   await settle();
@@ -644,7 +663,9 @@ test("choosing the saved status does not write, and a pending card cannot submit
   await settle(20);
   expect(screen.queryByText("Saving…")).toBeNull();
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   );
 });
 
@@ -658,8 +679,14 @@ test("a failed save keeps its saved column and retries with the same request ide
   render(<App />);
   await settle();
   await showBoard();
-  await chooseStatus("T-KQ1", "Canceled");
-  expect(screen.getByRole("alert").textContent).toContain("Database busy");
+  boardGeometry();
+  startDrag();
+  movePointer(1200);
+  releasePointer(1200);
+  await settle();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The result couldn't be confirmed",
+  );
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
       "button",
@@ -746,7 +773,7 @@ test("a successful status save refreshes sidebar counts immediately", async () =
   render(<App />);
   await settle();
   await showBoard();
-  expect(screen.getByRole("button", { name: "In progress 0" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "In progress" })).toBeTruthy();
   await chooseStatus("T-KQ1", "In progress");
   expect(screen.getByRole("button", { name: "In progress 1" })).toBeTruthy();
 });
@@ -768,7 +795,9 @@ test("card menus honor core status choices, source closure exceptions and retain
   await settle();
   await showBoard();
   fireEvent.keyDown(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
     { key: "Enter" },
   );
   await settle();
@@ -814,7 +843,9 @@ test("ownership changes during a card save reconcile the saved state and permitt
     ),
   ).toBeTruthy();
   fireEvent.keyDown(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
     { key: "Enter" },
   );
   await settle();
@@ -836,7 +867,9 @@ test("a failed pre-save read offers a working retry without writing stale card d
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "Done");
-  expect(screen.getByRole("alert").textContent).toContain("Read unavailable");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The result couldn't be confirmed",
+  );
   expect(
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
@@ -860,7 +893,9 @@ test("Duplicate uses the existing review and canceling either duplicate flow pre
   await settle(20);
   expect(saved[0]?.status).toBe("Todo");
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   );
   saved[0] = { ...ticket(1, "Duplicate"), duplicate_of: "T-KQ2" };
   change++;
@@ -910,7 +945,7 @@ test("a lost duplicate review response reconciles its saved placement before ret
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
   await settle();
-  expect(screen.getByText(/Duplicate response lost\./)).toBeTruthy();
+  expect(screen.getByText(/The result couldn't be confirmed/)).toBeTruthy();
   const todo = screen.getByRole("region", {
     name: "Todo column",
     hidden: true,
@@ -994,7 +1029,9 @@ test("a duplicate save stays protected until its reviewed request finishes", asy
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByText("Moved T-KQ1 to Duplicate")).toBeTruthy();
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   );
 });
 
@@ -1012,7 +1049,9 @@ test("switching layouts preserves a pending card request and its protection", as
   await settle();
   await showBoard();
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   ).toHaveProperty("disabled", true);
   expect(screen.getByText("Saving…")).toBeTruthy();
   await act(async () => {
@@ -1090,7 +1129,9 @@ test("a card status action changes only that ticket and leaves the selected deta
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Keep my draft" },
   });
-  const action = screen.getByRole("button", { name: "Change status of T-KQ1" });
+  const action = screen.getByRole("button", {
+    name: /^Change status of T-KQ1, current status:/,
+  });
   fireEvent.keyDown(action, { key: "Enter" });
   await settle();
   fireEvent.click(screen.getByRole("menuitemradio", { name: "In progress" }));
@@ -1353,23 +1394,16 @@ test("closing a ticket followed within Board details returns to its card", async
   );
 });
 
-test("layout preference survives navigation and restart while search and status filters remain visible", async () => {
+test("layout preference survives navigation and restart while status filters remain visible", async () => {
   saved = [ticket(1), ticket(2, "Done")];
   const first = render(<App />);
   await settle();
   await chooseFilter("Status", "Done");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "Ticket 2" },
-  });
   await settle();
   await showBoard();
   expect(
     screen.getByRole("button", { name: "Remove Status filter" }),
-  ).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: "Remove Search: Ticket 2" }),
   ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).queryByRole(
@@ -1496,7 +1530,15 @@ test("cards retain source, project, Plan and core readiness context; project and
   expect(screen.getByRole("button", { name: /T-KQ3.*Ticket 3/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Release plan" }));
   await settle();
-  // A Plan takes its layout from its header, so Display offers only Rows.
+  // A Plan takes its layout from its header; More opens Display for Rows.
+  fireEvent.keyDown(screen.getByRole("button", { name: "Plan actions" }), {
+    key: "Enter",
+  });
+  await settle();
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Filter and display…" }),
+  );
+  await settle();
   fireEvent.click(screen.getByRole("button", { name: "Display" }));
   expect(screen.getByRole("radiogroup", { name: "Rows" })).toBeTruthy();
   expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
@@ -1530,4 +1572,102 @@ test("a board card says Needs review in place of its readiness", async () => {
   // Ready is the Todo column's norm, so a card flags only Blocked.
   expect(card("T-KQ3")?.textContent).not.toContain("Ready");
   expect(card("T-KQ3")?.textContent).not.toContain("Needs review");
+});
+
+test("board cards and their status actions announce the current status once", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  expect(
+    screen.getByRole("button", { name: "T-KQ2 In review Ticket 2 No project" }),
+  ).toBeTruthy();
+  const trigger = screen.getByRole("button", {
+    name: "Change status of T-KQ2, current status: In review",
+  });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await settle();
+  expect(screen.getByRole("menuitemradio", { name: "In review" })).toBeTruthy();
+  expect(within(screen.getByRole("menu")).queryByRole("img")).toBeNull();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Done" }));
+  await settle(20);
+  expect(
+    screen.getByRole("button", { name: "T-KQ2 Done Ticket 2 No project" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", {
+      name: "Change status of T-KQ2, current status: Done",
+    }),
+  ).toBeTruthy();
+});
+
+test("a folded destination stays folded through a deferred save, preserves the measured slot and unfolds only after confirmation", async () => {
+  let resolve!: () => void;
+  writeOverride = async ({ status }) => {
+    await new Promise<void>((done) => {
+      resolve = done;
+    });
+    saved[0] = ticket(1, status);
+    return [saved[0]];
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  const container = document.querySelector<HTMLElement>(
+    '[data-ticket-reference="T-KQ1"]',
+  )!;
+  vi.spyOn(container, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, 0, 240, 126),
+  );
+  startDrag();
+  movePointer(1200);
+  const canceled = screen.getByRole("region", { name: "Canceled column" });
+  expect(canceled.hasAttribute("data-folded")).toBe(true);
+  releasePointer(1200);
+  await settle();
+  expect(canceled.hasAttribute("data-folded")).toBe(true);
+  expect(within(canceled).getByText("Saving…")).toBeTruthy();
+  expect(
+    document.querySelector<HTMLElement>("[data-board-slot]")?.style.height,
+  ).toBe("126px");
+  resolve();
+  await settle();
+  expect(canceled.hasAttribute("data-folded")).toBe(false);
+  await settle(160);
+  expect(document.querySelector("[data-board-slot]")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await settle();
+  resolve();
+  await settle();
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).getByText(
+      "Ticket 1",
+    ),
+  ).toBeTruthy();
+});
+
+test("board arrows reach adjacent cards and S opens the shared status drill for the focused card", async () => {
+  saved.push(ticket(3));
+  render(<App />);
+  await settle();
+  await showBoard();
+  const first = screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(document.activeElement?.textContent).toContain("T-KQ3");
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+  expect(document.activeElement?.textContent).toContain("T-KQ2");
+  fireEvent.keyDown(document.activeElement!, { key: "s" });
+  await settle();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(screen.getByText("Change status")).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: "Done" }));
+  await settle();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByText(
+      "Ticket 2",
+    ),
+  ).toBeTruthy();
 });

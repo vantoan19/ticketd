@@ -5,7 +5,7 @@ import { Step, Steps } from "./steps";
 
 afterEach(cleanup);
 
-test("numbers the steps in order, marks the current one and shows an action", () => {
+test("marks completed steps, numbers the remaining steps and identifies the current action", () => {
   render(
     <Steps>
       <Step title="Get it" description="From the download." state="done" />
@@ -19,10 +19,13 @@ test("numbers the steps in order, marks the current one and shows an action", ()
   );
   const items = screen.getAllByRole("listitem");
   expect(
-    items.map(
-      (item) => item.querySelector("[data-slot=step-number]")?.textContent,
-    ),
-  ).toEqual(["1", "2", "3"]);
+    items
+      .slice(1)
+      .map(
+        (item) => item.querySelector("[data-slot=step-number]")?.textContent,
+      ),
+  ).toEqual(["2", "3"]);
+  expect(items[0]?.textContent).toContain("Completed: Get it");
   expect(items[1]?.getAttribute("aria-current")).toBe("step");
   expect(items[0]?.getAttribute("aria-current")).toBeNull();
   expect(items[1]?.contains(screen.getByRole("link", { name: "Guide" }))).toBe(

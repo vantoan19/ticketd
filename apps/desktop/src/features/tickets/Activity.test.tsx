@@ -91,7 +91,9 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   );
   rejectSave(new Error("Database busy"));
   await waitFor(() =>
-    expect(screen.getByRole("alert").textContent).toContain("Database busy"),
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The result couldn't be confirmed",
+    ),
   );
   expect(composer).toHaveProperty("value", "A **draft**");
   expect(
@@ -462,7 +464,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
     expect(screen.getByRole("heading", { name: "Finding" })).toBeTruthy(),
   );
   expect(saved[0]?.brief).toBe("## Finding\n\n- [x] Done");
-  expect(screen.queryByRole("textbox")).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
 });
 
@@ -514,7 +516,9 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   ).toHaveProperty("value", "My edited **draft**");
   fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await waitFor(() =>
-    expect(screen.getByRole("alert").textContent).toContain("Disk full"),
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The result couldn't be confirmed",
+    ),
   );
   expect(
     screen.getByRole("textbox", { name: "Edit update source" }),
@@ -639,24 +643,30 @@ test("restores unpublished details after remount", async () => {
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Add details" }));
   expect(await screen.findByText("Details")).toBeTruthy();
-  fireEvent.click(
-    within(screen.getByRole("region", { name: "Details" })).getByRole(
-      "button",
-      { name: "Edit Markdown source" },
+  fireEvent.focus(
+    within(await screen.findByRole("region", { name: "Details" })).getByRole(
+      "textbox",
     ),
   );
+  expect(
+    screen.getAllByRole("button", { name: "Edit Markdown source" }),
+  ).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Details source" }), {
     target: { value: "Evidence **draft**" },
   });
   view.unmount();
   render(<Activity {...props} />);
   expect(await screen.findByText("Details")).toBeTruthy();
-  fireEvent.click(
+  fireEvent.focus(
     within(await screen.findByRole("region", { name: "Details" })).getByRole(
-      "button",
-      { name: "Edit Markdown source" },
+      "textbox",
     ),
   );
+  expect(
+    screen.getAllByRole("button", { name: "Edit Markdown source" }),
+  ).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
     screen.getByRole("textbox", { name: "Details source" }),
   ).toHaveProperty("value", "Evidence **draft**");

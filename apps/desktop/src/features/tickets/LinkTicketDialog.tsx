@@ -95,6 +95,7 @@ export function LinkTicketDialog({
       onOpenChange={change}
       // Neutral: the sentence below says which relationship, and it can change.
       title="Link a ticket"
+      size="sm"
       primaryLabel={pending ? "Linking…" : "Link ticket"}
       blockedReason={
         pending ? "Linking…" : chosen ? null : "Choose a ticket to link"
@@ -134,6 +135,7 @@ export function LinkTicketDialog({
         <div className="flex flex-col gap-2">
           <TicketPicker
             label="Ticket"
+            rows={3}
             query={query}
             onQueryChange={setQuery}
             autoFocus
