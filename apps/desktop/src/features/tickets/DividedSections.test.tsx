@@ -4,6 +4,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
 import { Backlinks } from "./Backlinks";
 import { Evidence } from "./Evidence";
+import { TestOpenTicket } from "./open-ticket/testing";
+import type { Ticket } from "@/lib/api/client";
 import { Subtickets } from "./Subtickets";
 import type { LinkedWorkState } from "./useLinkedWork";
 
@@ -54,7 +56,11 @@ test("each major ticket section opens with its heading row, set apart by space a
         trashed={false}
         refresh={async () => {}}
       />
-      <Backlinks reference="T-KQ1" revision={0} select={() => {}} />
+      <TestOpenTicket
+        ticket={{ id: "t1", reference: "T-KQ1", trashed: false } as Ticket}
+      >
+        <Backlinks select={() => {}} />
+      </TestOpenTicket>
       <Activity
         reference="T-KQ1"
         status="Todo"

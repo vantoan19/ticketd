@@ -40,14 +40,19 @@ function resizePane(width: number) {
 Element.prototype.scrollIntoView = () => {};
 
 const changes: object[] = [];
+let following = false;
 beforeEach(() => {
   callbacks = [];
+  following = false;
   changes.length = 0;
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "show_ticket") return ticket;
-    if (command === "is_following") return false;
+    if (command === "is_following") return following;
     if (command === "reminder") return null;
-    if (command === "set_following") return null;
+    if (command === "set_following") {
+      following = (args as { following: boolean }).following;
+      return null;
+    }
     if (command === "change_ticket") {
       changes.push(args as object);
       return { ...ticket, project_id: "p1" };

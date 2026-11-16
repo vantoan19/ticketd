@@ -32,6 +32,8 @@ beforeEach(() => {
   reminder = null;
   children = [];
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    // A reported change reads the open Ticket again.
+    if (command === "show_ticket") return ticket;
     if (command === "is_following") return following;
     if (command === "set_following")
       following = (args as { following: boolean }).following;

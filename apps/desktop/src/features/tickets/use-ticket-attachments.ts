@@ -1,67 +1,26 @@
-import { useEffect, useState } from "react";
-import {
-  describeFailure,
-  type FailureDescription,
-} from "@/lib/api/describe-failure";
-import { attachments, type Attachment } from "@/lib/api/attachments";
-import type { Ticket } from "@/lib/api/client";
+import { useState } from "react";
+import type { FailureDescription } from "@/lib/api/describe-failure";
+import { useOpenTicket } from "./open-ticket";
 
 /**
- * The files attached directly to a ticket, read again on a new workspace
- * revision and when the window comes back.
+ * The files attached directly to a ticket, read through the Open Ticket: they
+ * are read again when the workspace changes or after a write reported here,
+ * and not when the window comes back.
  */
-export function useTicketAttachments({
-  ticket,
-  revision,
-  refresh,
-}: {
-  ticket: Ticket;
-  revision: number;
-  refresh: () => Promise<void>;
-}) {
-  // Null until the first read answers: an unread section never claims "no files".
-  const [found, setFound] = useState<Attachment[] | null>(null);
-  const [visits, setVisits] = useState(0);
-  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
-    null,
-  );
+export function useTicketAttachments() {
+  const { changed: report } = useOpenTicket();
+  const read = useOpenTicket("attachments");
   const [error, setError] = useState<FailureDescription | null>(null);
-  useEffect(() => {
-    const again = () => setVisits((value) => value + 1);
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
-  }, []);
-  useEffect(() => {
-    let current = true;
-    void attachments
-      .forTicket(ticket.reference)
-      .then((list) => {
-        if (current) {
-          setFound(list);
-          setLoadFailure(null);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (current)
-          setLoadFailure(describeFailure(reason, "load attachments"));
-      });
-    return () => {
-      current = false;
-    };
-  }, [ticket.reference, revision, visits]);
-  function changed() {
-    setVisits((value) => value + 1);
-    void refresh().catch((reason: unknown) =>
-      setError(describeFailure(reason, "refresh the ticket")),
-    );
-  }
   return {
-    found,
-    loadFailure,
+    // Undefined until the first read answers: an unread section never claims
+    // "no files".
+    found: read.value ?? null,
+    loadFailure: read.failure,
     error,
     setError,
-    changed,
-    retry: () => setVisits((value) => value + 1),
+    /** Reports that a file was attached, detached or replaced. */
+    changed: () => void report(),
+    retry: read.retry,
   };
 }
 

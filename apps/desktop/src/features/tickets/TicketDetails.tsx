@@ -131,7 +131,6 @@ export function TicketDetails({
               <TicketHeader
                 selected={selected}
                 ticket={ticket}
-                revision={revision}
                 scrolled={selected !== null && scrolledReference === selected}
                 expanded={expanded}
                 onExpand={onExpand}

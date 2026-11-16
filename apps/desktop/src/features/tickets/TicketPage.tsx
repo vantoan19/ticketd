@@ -226,34 +226,22 @@ export function TicketPage({
       <>
         <Reminder
           key={`reminder-${ticket.reference}`}
-          reference={ticket.reference}
-          revision={revision}
           variant={variant}
-          ticket={ticket}
           projects={projects}
           plans={plans}
-          refresh={refresh}
         />
       </>
     );
   const files = active && (
     <TicketFiles
       key={ticket.reference}
-      ticket={ticket}
-      revision={revision}
-      refresh={refresh}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
       emptyTarget={fileAddTarget}
     />
   );
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
-      <Backlinks
-        ticketId={ticket.id}
-        reference={ticket.reference}
-        revision={revision}
-        select={onMention}
-      />
+      <Backlinks select={onMention} />
     </LinkedWork>
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;

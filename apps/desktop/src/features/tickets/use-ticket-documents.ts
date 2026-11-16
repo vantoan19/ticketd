@@ -1,81 +1,39 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { documents, type DocumentSummary } from "@/features/documents/api";
-import {
-  describeFailure,
-  type FailureDescription,
-} from "@/lib/api/describe-failure";
+import { describeFailure } from "@/lib/api/describe-failure";
+import type { FailureDescription } from "@/lib/api/describe-failure";
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { type Ticket } from "@/lib/api/client";
+import { useOpenTicket } from "./open-ticket";
 
 export type DocumentLink = Awaited<
   ReturnType<typeof documents.links>
 >[0][number];
 
-const sourceRank = (link: DocumentLink) =>
-  link.explicit ? 0 : link.activity_id ? 2 : 1;
-
 /**
  * The Documents a ticket links to, one per Document by its strongest source
- * (attached, then mentioned in the description, then in an update). It reads
- * again on a new workspace revision and when the window comes back, since
- * trashing a Document elsewhere does not change the ticket.
+ * (attached, then mentioned in the description, then in an update), read
+ * through the Open Ticket. Trashing a Document elsewhere does not change the
+ * ticket, but it does change the workspace, which reads them again.
  */
-export function useTicketDocuments({
-  ticket,
-  revision,
-  refresh,
-}: {
-  ticket: Ticket;
-  revision: number;
-  refresh: () => Promise<void>;
-}) {
-  // Null until the first read answers: an unread list never reads as empty.
-  const [links, setLinks] = useState<DocumentLink[] | null>(null);
+export function useTicketDocuments() {
+  const { reference, changed } = useOpenTicket();
+  const read = useOpenTicket("documents");
   const [error, setError] = useState<FailureDescription | null>(null);
-  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
-    null,
-  );
   const statusLine = useStatusLine();
-  const [visits, setVisits] = useState(0);
-  useEffect(() => {
-    const again = () => setVisits((value) => value + 1);
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
-  }, []);
-  useEffect(() => {
-    let current = true;
-    void documents
-      .links(ticket.id)
-      .then(([outgoing]) => {
-        if (!current) return;
-        const byDocument = new Map<string, DocumentLink>();
-        for (const link of outgoing) {
-          if (link.target_kind !== "document") continue;
-          const known = byDocument.get(link.target_id);
-          if (!known || sourceRank(link) < sourceRank(known))
-            byDocument.set(link.target_id, link);
-        }
-        // Attached Documents list first, like the CLI's context.
-        setLinks(
-          [...byDocument.values()].sort(
-            (a, b) => sourceRank(a) - sourceRank(b),
-          ),
-        );
-        setLoadFailure(null);
-      })
-      .catch((reason: unknown) => {
-        if (current) setLoadFailure(describeFailure(reason, "load Documents"));
-      });
-    return () => {
-      current = false;
-    };
-  }, [ticket.id, ticket.body, revision, visits]);
+  // A removed link leaves at once; the next authoritative read replaces this.
+  const [removed, setRemoved] = useState<{
+    base: DocumentLink[] | undefined;
+    ids: string[];
+  }>({ base: undefined, ids: [] });
+  const ids = removed.base === read.links ? removed.ids : [];
+  // Null until the first read answers: an unread list never reads as empty.
+  const links =
+    read.links?.filter((link) => !ids.includes(link.target_id)) ?? null;
   async function change(id: string, present: boolean) {
     setError(null);
     try {
-      await documents.setTicketDocument(ticket.reference, id, present);
-      setVisits((value) => value + 1);
-      await refresh();
+      await documents.setTicketDocument(reference, id, present);
+      await changed();
       return true;
     } catch (reason) {
       setError(
@@ -89,24 +47,17 @@ export function useTicketDocuments({
   }
   /** Removes the link at once; the pane's status line offers Undo (P7). */
   async function unlink(link: DocumentLink) {
-    setLinks(
-      (current) =>
-        current?.filter((item) => item.target_id !== link.target_id) ?? null,
-    );
+    setRemoved({ base: read.links, ids: [...ids, link.target_id] });
     if (!(await change(link.target_id, false))) {
-      setVisits((value) => value + 1);
+      setRemoved({ base: undefined, ids: [] });
+      read.retry();
       return;
     }
     statusLine.show({
-      message: `Removed ${link.target_label} from ${ticket.reference}`,
+      message: `Removed ${link.target_label} from ${reference}`,
       undo: async () => {
-        await documents.setTicketDocument(
-          ticket.reference,
-          link.target_id,
-          true,
-        );
-        setVisits((value) => value + 1);
-        await refresh();
+        await documents.setTicketDocument(reference, link.target_id, true);
+        await changed();
       },
     });
   }
@@ -116,8 +67,8 @@ export function useTicketDocuments({
   return {
     links,
     error,
-    loadFailure,
-    retry: () => setVisits((value) => value + 1),
+    loadFailure: read.failure,
+    retry: read.retry,
     unlink,
     add,
   };

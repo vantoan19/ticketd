@@ -16,6 +16,7 @@ import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
 import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { TicketFiles } from "@/features/tickets/TicketFiles";
 import type { Ticket } from "@/lib/api/client";
+import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
@@ -123,11 +124,11 @@ test("the library's rows say what is on this desktop and offer Download", async 
 
 test("a ticket's attached files say whether they are downloaded", async () => {
   render(
-    <TicketFiles
+    <TestOpenTicket
       ticket={{ id: "t", reference: "T-KQ12", trashed: false } as Ticket}
-      revision={0}
-      refresh={async () => {}}
-    />,
+    >
+      <TicketFiles />
+    </TestOpenTicket>,
   );
   expect(await screen.findByText("193 B · Not downloaded")).toBeTruthy();
   expect(screen.getByText("193 B · Downloading…")).toBeTruthy();
@@ -189,7 +190,9 @@ test("availability that cannot be read again keeps what was last known", async (
   const ticket = { id: "t", reference: "T-KQ12", trashed: false } as Ticket;
   const view = (change: number) => (
     <WorkspaceChangeProvider value={change}>
-      <TicketFiles ticket={ticket} revision={0} refresh={async () => {}} />
+      <TestOpenTicket ticket={ticket}>
+        <TicketFiles />
+      </TestOpenTicket>
     </WorkspaceChangeProvider>
   );
   const { rerender } = render(view(0));

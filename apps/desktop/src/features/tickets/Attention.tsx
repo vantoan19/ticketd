@@ -1,5 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useEffect, useEffectEvent, useState } from "react";
+import { useTicket, useTicketChanged } from "./open-ticket";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -19,50 +20,31 @@ import { inboxClient } from "@/lib/api/inbox";
  */
 export function FollowToggle({
   reference,
-  revision,
   variant = "rail",
 }: {
   reference: string;
-  revision: number;
   variant?: "rail" | "strip";
 }) {
   const blocked = editingBlockedReason(useWorkspaceState()) !== null;
   const line = useStatusLine();
-  const [readAttempt, setReadAttempt] = useState(0);
-  const [readFailed, setReadFailed] = useState(false);
-  const [following, setFollowing] = useState(false);
-  const [error, setError] = useState<FailureDescription | null>(null);
+  const read = useTicket(reference, "following");
+  const changed = useTicketChanged();
+  const following = read.value ?? false;
+  // Reading and changing Follow fail separately; a failed change wins until
+  // the next try.
+  const [changeError, setChangeError] = useState<FailureDescription | null>(
+    null,
+  );
   const [pending, setPending] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void inboxClient
-      .isFollowing(reference)
-      .then((value) => {
-        if (active) {
-          setReadFailed(false);
-          setFollowing(value);
-          setError(null);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setReadFailed(true);
-          setError(describeFailure(reason, "check Follow"));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [reference, revision, readAttempt]);
+  const error = changeError ?? read.failure;
   async function toggle() {
-    setReadFailed(false);
     setPending(true);
     try {
       await inboxClient.setFollowing(reference, !following);
-      setFollowing(!following);
-      setError(null);
+      setChangeError(null);
+      await changed();
     } catch (reason) {
-      setError(
+      setChangeError(
         describeFailure(
           reason,
           following ? `unfollow ${reference}` : `follow ${reference}`,
@@ -73,7 +55,7 @@ export function FollowToggle({
     }
   }
   const retry = useEffectEvent(() =>
-    readFailed ? setReadAttempt((n) => n + 1) : void toggle(),
+    changeError ? void toggle() : read.retry(),
   );
   useEffect(() => {
     if (variant !== "strip" || !error) return;

@@ -72,12 +72,10 @@ export function TicketHeader({
   projects = [],
   returnLabel = "All tickets",
   scrolled = false,
-  revision = 0,
 }: {
   /** The name of the list the ticket was opened from, for the return crumb. */
   returnLabel?: string;
   scrolled?: boolean;
-  revision?: number;
   /** For the Project folder a Chat about the ticket is offered. */
   projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
@@ -292,11 +290,7 @@ export function TicketHeader({
                   </div>
                 )}
                 {!ticket.trashed && (
-                  <FollowToggle
-                    reference={ticket.reference}
-                    revision={revision}
-                    variant="strip"
-                  />
+                  <FollowToggle reference={ticket.reference} variant="strip" />
                 )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

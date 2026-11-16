@@ -1,7 +1,7 @@
 import { useReminderTime } from "./use-reminder-time";
 import { RailRow } from "./RailSection";
 import { TicketCommandPicker } from "./TicketCommandPicker";
-import type { Ticket, Project } from "@/lib/api/client";
+import type { Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { TicketCommandContext } from "@/lib/ticket-command-actions";
 import { localValue } from "./reminder-time";
@@ -17,7 +17,7 @@ import {
   PopoverDescription,
 } from "@/components/ui/popover";
 import { inboxClient } from "@/lib/api/inbox";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ChoiceList } from "@/components/ui/choice-list";
@@ -26,6 +26,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { useOpenTicket } from "./open-ticket";
 import { formatDateTime } from "@/lib/format";
 import { reminderSummary } from "@/features/tickets/reminder-summary";
 import { reminderPresets } from "./reminder-presets";
@@ -38,24 +39,18 @@ import { reminderPresets } from "./reminder-presets";
  * scheduled reminder offers Snooze 1 hour and Dismiss.
  */
 export function Reminder({
-  reference,
-  revision,
   variant = "rail",
-  ticket,
   projects = [],
   plans = [],
-  refresh,
 }: {
-  ticket?: Ticket;
   projects?: Project[];
   plans?: Plan[];
-  refresh?: () => Promise<void>;
-  reference: string;
-  revision: number;
   variant?: "rail" | "strip";
 }) {
+  const { record: ticket, reference, changed } = useOpenTicket();
   const openCommand = useContext(TicketCommandContext);
-  const [due, setDue] = useState<string | null>(null);
+  const reminder = useOpenTicket("reminder");
+  const due = reminder.value ?? null;
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
   const [occurrence, setOccurrence] = useState("");
@@ -63,11 +58,8 @@ export function Reminder({
   const options = time.instants;
   // Reading and changing the reminder fail separately: a failed read names
   // the trigger, a failed change shows under the actions until the next try.
-  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
-    null,
-  );
+  const loadFailure = reminder.failure;
   const [error, setError] = useState<FailureDescription | null>(null);
-  const [reads, setReads] = useState(0);
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const busy = useRef(false);
@@ -76,24 +68,6 @@ export function Reminder({
     id: string;
     dueAt: string | null;
   } | null>(null);
-  useEffect(() => {
-    let active = true;
-    void inboxClient
-      .reminder(reference)
-      .then((value) => {
-        if (active) {
-          setDue(value);
-          setLoadFailure(null);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active)
-          setLoadFailure(describeFailure(reason, "load the reminder"));
-      });
-    return () => {
-      active = false;
-    };
-  }, [reference, revision, reads]);
   async function save(
     key: string,
     makeDue: () => string | null,
@@ -113,16 +87,14 @@ export function Reminder({
     const request = attempt.current;
     try {
       await inboxClient.snooze(reference, request.dueAt, request.id);
-      const value = await inboxClient.reminder(reference);
-      setDue(value);
       attempt.current = null;
       setError(null);
-      setLoadFailure(null);
       // The time was used; nothing typed is left to explain.
       setDraft("");
       setOccurrence("");
       setCustom(false);
       if (closeAfter) setOpen(false);
+      await changed();
     } catch (reason) {
       setError(
         describeFailure(
@@ -159,13 +131,13 @@ export function Reminder({
     setOccurrence("");
   }
   const presets = reminderPresets(now);
-  if (variant === "strip" && openCommand && ticket && refresh)
+  if (variant === "strip" && openCommand)
     return due ? (
       <TicketCommandPicker
         ticket={ticket}
         projects={projects}
         plans={plans}
-        refresh={refresh}
+        refresh={() => changed()}
         scope="Reminder"
         trigger={
           <RailRow
@@ -318,7 +290,7 @@ export function Reminder({
           <FailureAlert
             size="compact"
             failure={loadFailure}
-            onRetry={() => setReads((value) => value + 1)}
+            onRetry={reminder.retry}
           />
         )}
         {error && <FailureAlert size="compact" failure={error} />}

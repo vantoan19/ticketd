@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { TicketFiles as TicketAttachments } from "./TicketFiles";
 import type { Ticket } from "@/lib/api/client";
+import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -59,11 +60,9 @@ test.each(["close", "navigate"])(
               : [],
     );
     const view = render(
-      <TicketAttachments
-        ticket={ticket}
-        revision={0}
-        refresh={async () => {}}
-      />,
+      <TestOpenTicket ticket={ticket}>
+        <TicketAttachments />
+      </TestOpenTicket>,
     );
     await attachFile();
     fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
@@ -102,7 +101,9 @@ test("the direct attachment rail distinguishes uploaded copies", async () => {
     return [];
   });
   render(
-    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
   );
   await screen.findByRole("button", { name: "Trace" });
   expect(screen.getByText("Google Drive · Uploaded copy")).toBeTruthy();
@@ -147,7 +148,9 @@ test("a direct preview replaces only its selected ticket association through the
     return null;
   });
   render(
-    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
   await screen.findByText("This file is missing from this computer");
@@ -188,7 +191,9 @@ test("the rail uploads through the native picker, then associates the stored sna
     return [];
   });
   render(
-    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
   );
   await attachFile();
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
@@ -229,7 +234,9 @@ test("a failed association retains the completed upload and retry links the same
     return [];
   });
   render(
-    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
   );
   await attachFile();
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
@@ -256,7 +263,9 @@ test("metadata offers explicit native open, byte export and reference-only detac
         : null,
   );
   render(
-    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
   expect(screen.getByText("trace.log")).toBeTruthy();
