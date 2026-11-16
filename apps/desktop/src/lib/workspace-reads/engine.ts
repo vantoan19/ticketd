@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import type { ChangeSignal } from "./change-signal";
 import { seedsFor, type Returned } from "./catalog";
+// Declared reads fill from returned Tickets only once they are declared.
+import "./reads";
 
 /**
  * The cache and the rules for when it goes stale. A read is stale only after the
@@ -12,6 +14,8 @@ export type Reads = {
   changed(): void;
   /** The desktop's own write succeeded; see `useWrote`. */
   wrote(returned?: Returned): Promise<void>;
+  /** Fills reads from returned Tickets as if they had just been read, for tests. */
+  prime(returned: Returned): void;
 };
 
 export function createReads(signal: ChangeSignal, moved: () => void): Reads {
@@ -50,6 +54,11 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
 
   return {
     client,
+    prime(returned) {
+      for (const seed of seedsFor(returned)) {
+        client.setQueryData(seed.key, seed.value);
+      }
+    },
     changed() {
       void supersede();
       void makeStale();

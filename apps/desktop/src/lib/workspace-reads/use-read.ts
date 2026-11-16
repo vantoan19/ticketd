@@ -38,5 +38,8 @@ export function useRead<A, V>(
     failure,
     retry,
     status: statusOf(query.data !== undefined, query.error !== null, enabled),
+    get current() {
+      return query.data !== undefined && !query.isStale;
+    },
   };
 }

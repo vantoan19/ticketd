@@ -58,6 +58,9 @@ export function usePagedRead<A, V, P>(
     failure,
     retry,
     status: statusOf(value !== undefined, query.error !== null, enabled),
+    get current() {
+      return query.data !== undefined && !query.isStale;
+    },
     more: query.hasNextPage,
     showMore,
     loadingMore,

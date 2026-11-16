@@ -14,6 +14,13 @@ export type ReadState<V> = {
   /** Reads again now; for a paged read, every page loaded so far. */
   retry(): void;
   status: ReadStatus;
+  /**
+   * Whether `value` is as current as the last change: false while a change
+   * has made it stale and its re-read is not back, and while hidden after one.
+   * It is read when asked for, so a view that never asks does not re-render
+   * when it moves.
+   */
+  readonly current: boolean;
 };
 
 export function statusOf(

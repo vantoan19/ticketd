@@ -10,5 +10,6 @@ export { usePagedRead } from "./use-paged-read";
 export type { PagedState } from "./use-paged-read";
 export type { ReadState, ReadStatus } from "./read-state";
 export { useWrote } from "./use-wrote";
+export { ticketRead } from "./reads";
 export { pollWorkspaceChanges } from "./change-signal";
 export type { ChangeSignal } from "./change-signal";

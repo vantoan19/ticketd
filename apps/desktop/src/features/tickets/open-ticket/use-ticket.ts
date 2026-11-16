@@ -1,0 +1,43 @@
+import type { Ticket } from "@/lib/api/client";
+import type { FailureDescription } from "@/lib/api/describe-failure";
+import { skip, ticketRead, useRead } from "@/lib/workspace-reads";
+import { usePart, type PartArgs, type PartName, type PartState } from "./parts";
+
+export type TicketState = {
+  /** The Ticket; null when it no longer exists; undefined until it is known. */
+  value: Ticket | null | undefined;
+  failure: FailureDescription | null;
+  retry(): void;
+  /** Whether `value` is as current as the last change. */
+  readonly current: boolean;
+};
+
+/**
+ * One Ticket by reference, for chips and the header outside a page. Every
+ * caller naming the same Ticket shares one read; with no reference it reads
+ * nothing. `useTicket(reference, part, ...args)` serves a part of the Ticket.
+ */
+export function useTicket(reference: string | null): TicketState;
+export function useTicket<Name extends PartName>(
+  reference: string | null,
+  part: Name,
+  ...args: PartArgs<Name>
+): PartState<Name>;
+export function useTicket(
+  reference: string | null,
+  part?: PartName,
+  ...args: unknown[]
+): unknown {
+  const state = useRead(ticketRead, reference ?? skip);
+  const served = usePart(state.value, part, args);
+  if (part) return served;
+  return {
+    value:
+      state.value ?? (state.failure?.code === "not_found" ? null : undefined),
+    failure: state.failure,
+    retry: state.retry,
+    get current() {
+      return state.current;
+    },
+  };
+}
