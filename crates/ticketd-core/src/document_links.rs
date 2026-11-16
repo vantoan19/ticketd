@@ -398,6 +398,7 @@ impl Workspace {
             .execute_batch("SAVEPOINT create_ticket_from_document")?;
         let result = (|| {
             crate::transaction_write_lock(&self.connection)?;
+            let logged = crate::events::head(&self.connection)?;
             let source = self.show_document(id)?;
             if source.trashed {
                 return Err(Error::DocumentTrashed(id.to_owned()));
@@ -406,7 +407,7 @@ impl Workspace {
             if follow {
                 crate::inbox::follow(&self.connection, &ticket.id)?;
             }
-            self.change_ticket(
+            let ticket = self.change_ticket(
                 &ticket.reference,
                 TicketPatch {
                     body: Some(format!(
@@ -415,7 +416,9 @@ impl Workspace {
                     )),
                     ..Default::default()
                 },
-            )
+            )?;
+            crate::events::fold_into_creation(&self.connection, logged)?;
+            Ok(ticket)
         })();
         match result {
             Ok(ticket) => {
