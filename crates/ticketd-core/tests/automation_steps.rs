@@ -1,8 +1,11 @@
-//! What the Change ticket and Notify me steps of a run do, through the Workspace.
+//! What the Change ticket, Notify me and If steps of a run do. The core runs them
+//! itself as a run reaches them, so each test advances a run and looks at the ticket
+//! and at what comes back.
 
 use ticketd_core::{
-    Automation, AutomationDefinition, AutomationRun, Check, NotifyTarget, Status, Step, StepAction,
-    StepChange, StepOutcome, Ticket, TicketPatch, Trigger, Workspace, WorkspaceActor,
+    Automation, AutomationDefinition, AutomationRun, AutomationRunStatus, AutomationStepStatus,
+    Check, NotifyTarget, RunAction, RunEnd, Status, Step, StepAction, StepChange, StepOutcome,
+    Ticket, TicketPatch, Trigger, Workspace, WorkspaceActor,
 };
 
 const TAG: &str = "ready-for-testing";
@@ -86,15 +89,14 @@ fn adding_a_tag_is_logged_as_the_automations_and_starts_no_automation() {
     workspace.remove_tag(&ticket.reference, TAG).unwrap();
     workspace.queue_automation_runs().unwrap();
 
-    workspace.apply_automation_change(&run.id, "tag").unwrap();
+    assert_eq!(
+        workspace.advance_automation_run(&run.id, None).unwrap(),
+        RunAction::End(RunEnd::Completed)
+    );
 
     let ticket = workspace.show_ticket(&ticket.reference).unwrap();
     assert_eq!(ticket.tags, [TAG]);
     assert_eq!(last_actor(&workspace), WorkspaceActor::Automation);
-    workspace
-        .advance_automation_run(&run.id, None)
-        .and_then(|_| workspace.advance_automation_run(&run.id, Some(StepOutcome::Completed)))
-        .unwrap();
     assert_eq!(workspace.queue_automation_runs().unwrap(), 0);
     assert_eq!(workspace.automation_runs(&automation.id).unwrap().len(), 1);
 
@@ -113,7 +115,7 @@ fn removing_a_tag_takes_only_that_tag_off_the_ticket() {
     let (ticket, run) = started(&mut workspace, "Fix login");
     workspace.add_tag(&ticket.reference, "backend").unwrap();
 
-    workspace.apply_automation_change(&run.id, "untag").unwrap();
+    workspace.advance_automation_run(&run.id, None).unwrap();
 
     let ticket = workspace.show_ticket(&ticket.reference).unwrap();
     assert_eq!(ticket.tags, ["backend"]);
@@ -134,7 +136,7 @@ fn setting_the_status_is_attributed_to_the_automation_by_name() {
     );
     let (ticket, run) = started(&mut workspace, "Fix login");
 
-    workspace.apply_automation_change(&run.id, "done").unwrap();
+    workspace.advance_automation_run(&run.id, None).unwrap();
 
     let ticket = workspace.show_ticket(&ticket.reference).unwrap();
     assert_eq!(ticket.status, Status::Done);
@@ -172,9 +174,7 @@ fn a_posted_update_is_signed_with_the_automations_name_and_fills_in_its_fields()
         )
         .unwrap();
 
-    workspace
-        .apply_automation_change(&run.id, "update")
-        .unwrap();
+    workspace.advance_automation_run(&run.id, None).unwrap();
 
     let updates = workspace.activities(&ticket.reference, 10, 0).unwrap();
     assert_eq!(updates.len(), 1);
@@ -191,7 +191,7 @@ fn a_posted_update_is_signed_with_the_automations_name_and_fills_in_its_fields()
 }
 
 #[test]
-fn a_change_the_workspace_refuses_is_an_error_and_leaves_the_connection_a_persons() {
+fn a_change_the_workspace_refuses_fails_the_step_and_leaves_the_connection_a_persons() {
     let (_dir, mut workspace) = workspace();
     automation_on(
         &mut workspace,
@@ -202,9 +202,18 @@ fn a_change_the_workspace_refuses_is_an_error_and_leaves_the_connection_a_person
         .set_trashed(&ticket.reference, true, None)
         .unwrap();
 
-    let refused = workspace.apply_automation_change(&run.id, "tag");
+    let action = workspace.advance_automation_run(&run.id, None).unwrap();
 
-    assert!(refused.is_err(), "a trashed ticket takes no tag");
+    // The Workspace's words are the step's reason, and with no failure path the run
+    // needs attention.
+    let RunAction::End(RunEnd::NeedsAttention { reason }) = action else {
+        panic!("the run needs attention, got {action:?}");
+    };
+    assert!(reason.contains("trash"), "{reason}");
+    let ended = workspace.automation_run(&run.id).unwrap();
+    assert_eq!(ended.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(ended.steps[0].status, AutomationStepStatus::Failed);
+    assert_eq!(ended.steps[0].reason.as_deref(), Some(reason.as_str()));
     workspace
         .set_trashed(&ticket.reference, false, None)
         .unwrap();
@@ -212,6 +221,32 @@ fn a_change_the_workspace_refuses_is_an_error_and_leaves_the_connection_a_person
     assert_eq!(last_actor(&workspace), WorkspaceActor::Person);
     let ticket = workspace.show_ticket(&ticket.reference).unwrap();
     assert_eq!(ticket.tags, ["by-hand", TAG]);
+}
+
+#[test]
+fn a_change_is_not_made_once_the_run_has_ended_elsewhere() {
+    let (_dir, mut workspace) = workspace();
+    automation_on(
+        &mut workspace,
+        vec![
+            notify("wait", "Hello", NotifyTarget::Ticket),
+            change("tag", StepChange::AddTag { tag: "seen".into() }),
+        ],
+    );
+    let (ticket, run) = started(&mut workspace, "Fix login");
+    workspace.advance_automation_run(&run.id, None).unwrap();
+    workspace.stop_automation_run(&run.id).unwrap();
+
+    // The executor reports the step it was on, after the person stopped the run.
+    assert_eq!(
+        workspace
+            .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+            .unwrap(),
+        RunAction::Ended
+    );
+
+    let ticket = workspace.show_ticket(&ticket.reference).unwrap();
+    assert_eq!(ticket.tags, [TAG]);
 }
 
 #[test]
@@ -230,8 +265,15 @@ fn a_notification_carries_the_automations_name_the_filled_in_text_and_what_it_op
     );
     let (ticket, run) = started(&mut workspace, "Fix login");
 
-    let notification = workspace.automation_notification(&run.id, "tell").unwrap();
+    let RunAction::Notify {
+        step_id,
+        notification,
+    } = workspace.advance_automation_run(&run.id, None).unwrap()
+    else {
+        panic!("the run asks for a notification");
+    };
 
+    assert_eq!(step_id, "tell");
     assert_eq!(notification.title, NAME);
     assert_eq!(
         notification.body,
@@ -244,9 +286,15 @@ fn a_notification_carries_the_automations_name_the_filled_in_text_and_what_it_op
     );
     assert_eq!(notification.automation_id, automation.id);
     assert_eq!(notification.run_id, run.id);
-    let to_run = workspace
-        .automation_notification(&run.id, "tell-run")
-        .unwrap();
+    let RunAction::Notify {
+        notification: to_run,
+        ..
+    } = workspace
+        .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap()
+    else {
+        panic!("the run asks for a second notification");
+    };
     assert_eq!(to_run.opens, NotifyTarget::Run);
 }
 
@@ -309,42 +357,73 @@ fn a_preview_for_an_automation_without_a_ticket_leaves_every_field_empty() {
     assert_eq!(preview.as_deref(), Some("Week of  is up"));
 }
 
+/// An If with a notification on each path, so the path taken is the one handed back.
 fn branch(id: &str, checks: Vec<Check>) -> Step {
     Step {
         id: id.into(),
         action: StepAction::If {
             checks,
-            yes: Vec::new(),
-            no: Vec::new(),
+            yes: vec![notify("yes", "Yes", NotifyTarget::Ticket)],
+            no: vec![notify("no", "No", NotifyTarget::Ticket)],
         },
     }
 }
 
+/// Runs an Automation's newest run (a fresh one when it has ended) to the path its If
+/// chose, on the ticket as it is now: whether that was Yes.
+#[allow(clippy::unwrap_used, clippy::panic)] // Setup that fails fails the test.
+fn chose_yes(workspace: &mut Workspace, automation: &Automation) -> bool {
+    let mut run = workspace.automation_runs(&automation.id).unwrap().remove(0);
+    if run.status == AutomationRunStatus::Completed {
+        run = workspace.run_automation_again(&run.id).unwrap();
+    }
+    workspace.start_automation_runs(10).unwrap();
+    let mut outcome = None;
+    let chosen = loop {
+        let action = workspace.advance_automation_run(&run.id, outcome).unwrap();
+        let RunAction::Notify { step_id, .. } = action else {
+            panic!("the If hands over the notification on its path, got {action:?}");
+        };
+        // A step before the If is only waited for.
+        if step_id == "wait" {
+            outcome = Some(StepOutcome::Completed);
+        } else {
+            break step_id;
+        }
+    };
+    workspace
+        .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap();
+    chosen == "yes"
+}
+
 #[test]
-fn an_if_tests_the_ticket_as_it_is_when_asked_and_passes_when_every_check_does() {
+fn an_if_tests_the_ticket_as_it_is_when_reached_and_passes_when_every_check_does() {
     let (_dir, mut workspace) = workspace();
-    automation_on(
+    let automation = automation_on(
         &mut workspace,
-        vec![branch(
-            "passed",
-            vec![
-                Check::Tag {
-                    tag: "verified".into(),
-                    has: true,
-                },
-                Check::Status {
-                    status: Some(Status::Done),
-                    is: true,
-                },
-            ],
-        )],
+        vec![
+            notify("wait", "Waiting", NotifyTarget::Ticket),
+            branch(
+                "passed",
+                vec![
+                    Check::Tag {
+                        tag: "verified".into(),
+                        has: true,
+                    },
+                    Check::Status {
+                        status: Some(Status::Done),
+                        is: true,
+                    },
+                ],
+            ),
+        ],
     );
     let (ticket, run) = started(&mut workspace, "Fix login");
-    assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
+    workspace.advance_automation_run(&run.id, None).unwrap();
 
     // What an agent records after the run started is what the If reads.
     workspace.add_tag(&ticket.reference, "verified").unwrap();
-    assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
     workspace
         .change_ticket(
             &ticket.reference,
@@ -354,10 +433,17 @@ fn an_if_tests_the_ticket_as_it_is_when_asked_and_passes_when_every_check_does()
             },
         )
         .unwrap();
-    assert!(workspace.automation_if_passes(&run.id, "passed").unwrap());
+    let action = workspace
+        .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap();
+    assert!(matches!(&action, RunAction::Notify { step_id, .. } if step_id == "yes"));
+    workspace
+        .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap();
 
+    // Another run reads the ticket as it is then: one check no longer holds.
     workspace.remove_tag(&ticket.reference, "verified").unwrap();
-    assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
+    assert!(!chose_yes(&mut workspace, &automation));
 }
 
 #[test]
@@ -370,38 +456,37 @@ fn an_if_checks_for_a_project_no_project_and_what_the_ticket_is_not() {
         project_id: Some(Some(project.id.clone())),
         is,
     };
-    automation_on(
-        &mut workspace,
+    let checks = [
+        vec![in_project(true)],
+        vec![in_project(false)],
+        vec![Check::Project {
+            project_id: Some(None),
+            is: true,
+        }],
         vec![
-            branch("in", vec![in_project(true)]),
-            branch("out", vec![in_project(false)]),
-            branch(
-                "none",
-                vec![Check::Project {
-                    project_id: Some(None),
-                    is: true,
-                }],
-            ),
-            branch(
-                "open",
-                vec![
-                    Check::Status {
-                        status: Some(Status::Done),
-                        is: false,
-                    },
-                    Check::Tag {
-                        tag: "blocked".into(),
-                        has: false,
-                    },
-                ],
-            ),
+            Check::Status {
+                status: Some(Status::Done),
+                is: false,
+            },
+            Check::Tag {
+                tag: "blocked".into(),
+                has: false,
+            },
         ],
-    );
-    let (ticket, run) = started(&mut workspace, "Fix login");
-    let passes = |workspace: &Workspace| {
-        ["in", "out", "none", "open"].map(|id| workspace.automation_if_passes(&run.id, id).unwrap())
+    ];
+    // One Automation for each question, all started by the same tag.
+    let automations =
+        checks.map(|checks| automation_on(&mut workspace, vec![branch("if", checks)]));
+    let ticket = workspace.create_ticket("Fix login").unwrap();
+    workspace.add_tag(&ticket.reference, TAG).unwrap();
+    workspace.queue_automation_runs().unwrap();
+    let passes = |workspace: &mut Workspace| {
+        automations
+            .iter()
+            .map(|automation| chose_yes(workspace, automation))
+            .collect::<Vec<_>>()
     };
-    assert_eq!(passes(&workspace), [false, true, true, true]);
+    assert_eq!(passes(&mut workspace), [false, true, true, true]);
 
     workspace
         .change_ticket(
@@ -413,17 +498,5 @@ fn an_if_checks_for_a_project_no_project_and_what_the_ticket_is_not() {
         )
         .unwrap();
     workspace.add_tag(&ticket.reference, "blocked").unwrap();
-    assert_eq!(passes(&workspace), [true, false, false, false]);
-}
-
-#[test]
-fn only_an_if_step_of_a_run_can_be_asked() {
-    let (_dir, mut workspace) = workspace();
-    automation_on(
-        &mut workspace,
-        vec![notify("tell", "Hello", NotifyTarget::Ticket)],
-    );
-    let (_, run) = started(&mut workspace, "Fix login");
-    assert!(workspace.automation_if_passes(&run.id, "tell").is_err());
-    assert!(workspace.automation_if_passes(&run.id, "gone").is_err());
+    assert_eq!(passes(&mut workspace), [true, false, false, false]);
 }

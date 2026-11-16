@@ -1057,6 +1057,37 @@ fn add_link(connection: &Connection, chat_id: &str, link: &ChatLink) -> Result<(
 
 /// Runs `create` once per command ID and returns the ID of the record it created.
 /// A command ID deduplicates this ticketd write only; it promises nothing about the harness.
+/// Creates a Chat in the caller's transaction. Repeating `command_id` with the same
+/// content returns the first Chat.
+pub(crate) fn create_chat_in(
+    connection: &Connection,
+    command_id: Option<&str>,
+    chat: NewChat,
+) -> Result<Chat, Error> {
+    if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
+        return Err(invalid("a Chat needs a harness and an execution folder"));
+    }
+    let request = json!({"operation": "create_chat", "chat": &chat});
+    let id = once(connection, command_id, request, || {
+        let id = Uuid::new_v4().to_string();
+        let title = chat
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        connection.execute(
+            "INSERT INTO chats (id, title, harness, execution_folder, folder_managed) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, title, chat.harness, chat.execution_folder, chat.folder_managed],
+        )?;
+        for link in &chat.links {
+            add_link(connection, &id, link)?;
+        }
+        log(connection, &id, "chat", &id)?;
+        Ok(id)
+    })?;
+    read_chat(connection, &id)
+}
+
 fn once(
     connection: &Connection,
     command_id: Option<&str>,
@@ -1566,38 +1597,7 @@ impl Workspace {
 
     /// Create a Chat. Repeating `command_id` with the same content returns the first Chat.
     pub fn create_chat(&mut self, command_id: Option<&str>, chat: NewChat) -> Result<Chat, Error> {
-        self.create_chat_with(command_id, chat, |_, _| Ok(()))
-    }
-
-    /// Creates a Chat and, in the same transaction, runs `also` with its id: when
-    /// `also` refuses, no Chat is left behind.
-    pub(crate) fn create_chat_with(
-        &mut self,
-        command_id: Option<&str>,
-        chat: NewChat,
-        also: impl FnOnce(&Connection, &str) -> Result<(), Error>,
-    ) -> Result<Chat, Error> {
-        if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
-            return Err(invalid("a Chat needs a harness and an execution folder"));
-        }
-        self.chat_write(|connection| {
-            let request = json!({"operation": "create_chat", "chat": &chat});
-            let id = once(connection, command_id, request, || {
-                let id = Uuid::new_v4().to_string();
-                let title = chat.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
-                connection.execute(
-                    "INSERT INTO chats (id, title, harness, execution_folder, folder_managed) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![id, title, chat.harness, chat.execution_folder, chat.folder_managed],
-                )?;
-                for link in &chat.links {
-                    add_link(connection, &id, link)?;
-                }
-                log(connection, &id, "chat", &id)?;
-                Ok(id)
-            })?;
-            also(connection, &id)?;
-            read_chat(connection, &id)
-        })
+        self.chat_write(|connection| create_chat_in(connection, command_id, chat))
     }
 
     pub fn chat(&self, id: &str) -> Result<Chat, Error> {

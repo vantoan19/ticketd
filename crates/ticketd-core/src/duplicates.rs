@@ -1,5 +1,5 @@
+use crate::readiness::{self, Readiness, unresolved_blockers};
 use crate::{Error, Status, Ticket, Workspace, history, relationships};
-use history::{Readiness, readiness, unresolved_blockers};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -26,7 +26,7 @@ impl std::fmt::Display for ReviewMode {
 ///
 /// `mode`, `basis` and `replacement_basis` are stamped by the preview and must be submitted
 /// unchanged. `basis` is an opaque fingerprint of the readiness inputs of Remove and Keep:
-/// the edges, and the status and trash state of each dependent and of its blockers.
+/// the edges, and the status, trash state and hold of each dependent and of its blockers.
 /// `replacement_basis` fingerprints what only Replace depends on: the status and trash
 /// state of the replacement endpoints and the blockers of the replacement dependent. It is
 /// compared only for Replace decisions, so a Remove-only review does not go stale when the
@@ -376,6 +376,8 @@ struct Snapshot {
 struct Facts {
     status: Status,
     trashed: bool,
+    /// Closed at the source for an unrecognized reason: neither Ready nor Blocked.
+    held: bool,
 }
 
 /// Orders references by device code, then by counter (`T-KQ9` before `T-KQ10`).
@@ -477,7 +479,7 @@ impl Snapshot {
                 .or_default();
             needed.insert(edge.replacement_blocker.clone());
         }
-        let mut blocker_stmt = connection.prepare("SELECT b.reference, b.status, b.trashed FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.reference = ?1")?;
+        let mut blocker_stmt = connection.prepare(&format!("SELECT b.reference, b.status, b.trashed, {} FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.reference = ?1", crate::source::held_sql("b.id")))?;
         for (waiting, set) in &mut blockers {
             let rows = blocker_stmt
                 .query_map([waiting], |r| {
@@ -485,29 +487,33 @@ impl Snapshot {
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, bool>(2)?,
+                        r.get::<_, bool>(3)?,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
-            for (reference, status, trashed) in rows {
+            for (reference, status, trashed, held) in rows {
                 facts.insert(
                     reference.clone(),
                     Facts {
                         status: status.parse()?,
                         trashed,
+                        held,
                     },
                 );
                 set.insert(reference);
             }
         }
         drop(blocker_stmt);
-        let mut fact_stmt =
-            connection.prepare("SELECT status, trashed FROM tickets WHERE reference = ?1")?;
+        let mut fact_stmt = connection.prepare(&format!(
+            "SELECT status, trashed, {} FROM tickets WHERE reference = ?1",
+            crate::source::held_sql("tickets.id")
+        ))?;
         for reference in needed.iter().chain(blockers.keys()) {
             if facts.contains_key(reference) {
                 continue;
             }
-            let (status, trashed): (String, bool) = fact_stmt
-                .query_row([reference], |r| Ok((r.get(0)?, r.get(1)?)))
+            let (status, trashed, held): (String, bool, bool) = fact_stmt
+                .query_row([reference], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                 .optional()?
                 .ok_or_else(|| Error::NotFound(reference.clone()))?;
             facts.insert(
@@ -515,6 +521,7 @@ impl Snapshot {
                 Facts {
                     status: status.parse()?,
                     trashed,
+                    held,
                 },
             );
         }
@@ -554,9 +561,10 @@ impl Snapshot {
     fn fact_text(&self, reference: &str) -> Result<String, Error> {
         let facts = self.fact(reference)?;
         Ok(format!(
-            "{reference}:{}:{}",
+            "{reference}:{}:{}:{}",
             facts.status,
-            u8::from(facts.trashed)
+            u8::from(facts.trashed),
+            u8::from(facts.held)
         ))
     }
 
@@ -628,9 +636,10 @@ impl Snapshot {
                     .map(|b| Ok((b.clone(), self.fact(b)?.status)))
                     .collect::<Result<Vec<_>, Error>>()?;
                 Ok(WaitingTicket {
-                    readiness: readiness(
+                    readiness: readiness::judge(
                         facts.status,
                         facts.trashed,
+                        facts.held,
                         blockers.iter().map(|(_, status)| *status),
                     ),
                     unresolved: by_number(unresolved_blockers(blockers)),
@@ -676,15 +685,16 @@ impl Snapshot {
                      blockers: &BTreeSet<String>,
                      status: &dyn Fn(&str) -> Result<Status, Error>|
          -> Result<(Readiness, Vec<String>), Error> {
-            let trashed = self.fact(waiting)?.trashed;
+            let facts = self.fact(waiting)?;
             let statuses = blockers
                 .iter()
                 .map(|b| Ok((b.clone(), status(b)?)))
                 .collect::<Result<Vec<(String, Status)>, Error>>()?;
             Ok((
-                readiness(
+                readiness::judge(
                     status(waiting)?,
-                    trashed,
+                    facts.trashed,
+                    facts.held,
                     statuses.iter().map(|(_, status)| *status),
                 ),
                 unresolved_blockers(statuses),

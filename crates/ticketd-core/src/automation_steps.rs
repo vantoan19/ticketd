@@ -1,4 +1,5 @@
-//! What a run's Change ticket, Notify me and If steps do. A Change ticket step writes
+//! What a run's Change ticket, Notify me and If steps do, for `automation_advance`,
+//! which runs them as the run reaches them. A Change ticket step writes
 //! as the Automation, so its change starts no Automation; text is stored with field
 //! references and they are resolved here, when the step runs; an If reads the ticket
 //! when it runs.
@@ -7,7 +8,7 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::automation_runs::AutomationRun;
-use crate::automations::{Check, NotifyTarget, StepAction, StepChange};
+use crate::automations::{Check, NotifyTarget, Step, StepAction, StepChange};
 use crate::events::{Acting, WorkspaceEventType};
 use crate::{Error, TicketPatch, Workspace};
 
@@ -94,16 +95,15 @@ impl Workspace {
         })
     }
 
-    /// Makes the change of the Change ticket step `step_id` of a run to the run's
-    /// ticket. The write is logged with actor `automation`, and one that carries
-    /// attribution (a status, a posted update) is signed with the Automation's name.
-    /// A change the Workspace refuses is the error.
-    pub fn apply_automation_change(&mut self, run_id: &str, step_id: &str) -> Result<(), Error> {
-        let run = self.automation_run(run_id)?;
-        let Some(StepAction::ChangeTicket {
+    /// Makes the change of the Change ticket `step` of `run` to the run's ticket. The
+    /// write is logged with actor `automation`, and one that carries attribution (a
+    /// status, a posted update) is signed with the Automation's name. A change the
+    /// Workspace refuses is the error.
+    pub(crate) fn apply_change(&mut self, run: &AutomationRun, step: &Step) -> Result<(), Error> {
+        let StepAction::ChangeTicket {
             change: Some(change),
             ..
-        }) = run.step(step_id).map(|step| &step.action)
+        } = &step.action
         else {
             return Err(Error::AutomationRun(
                 "the step has no change to make".into(),
@@ -129,7 +129,7 @@ impl Workspace {
                 )
                 .map(drop),
             StepChange::PostUpdate { text } => self
-                .run_fields(&run)
+                .run_fields(run)
                 .and_then(|fields| {
                     self.add_activity(reference, &resolve(text, &fields), Some(name))
                 })
@@ -139,11 +139,10 @@ impl Workspace {
         changed
     }
 
-    /// Whether the run's ticket, as it is now, passes every check of the If step
-    /// `step_id`: Yes when it does, No otherwise.
-    pub fn automation_if_passes(&self, run_id: &str, step_id: &str) -> Result<bool, Error> {
-        let run = self.automation_run(run_id)?;
-        let Some(StepAction::If { checks, .. }) = run.step(step_id).map(|step| &step.action) else {
+    /// Whether the run's ticket, as it is now, passes every check of the If `step`:
+    /// Yes when it does, No otherwise.
+    pub(crate) fn if_passes(&self, run: &AutomationRun, step: &Step) -> Result<bool, Error> {
+        let StepAction::If { checks, .. } = &step.action else {
             return Err(Error::AutomationRun("the step is not an If".into()));
         };
         let Some(ticket) = &run.ticket else {
@@ -163,22 +162,19 @@ impl Workspace {
         }))
     }
 
-    /// The notification the Notify me step `step_id` of a run shows, with the fields
-    /// in its text filled in from the ticket as it is now.
-    pub fn automation_notification(
+    /// The notification the Notify me `step` of `run` shows, with the fields in its
+    /// text filled in from the ticket as it is now.
+    pub(crate) fn notification(
         &self,
-        run_id: &str,
-        step_id: &str,
+        run: &AutomationRun,
+        step: &Step,
     ) -> Result<AutomationNotification, Error> {
-        let run = self.automation_run(run_id)?;
-        let Some(StepAction::Notify { text, opens, .. }) =
-            run.step(step_id).map(|step| &step.action)
-        else {
+        let StepAction::Notify { text, opens, .. } = &step.action else {
             return Err(Error::AutomationRun("the step notifies no one".into()));
         };
         Ok(AutomationNotification {
             title: run.definition.name.clone(),
-            body: resolve(text, &self.run_fields(&run)?),
+            body: resolve(text, &self.run_fields(run)?),
             opens: if run.ticket.is_some() {
                 *opens
             } else {

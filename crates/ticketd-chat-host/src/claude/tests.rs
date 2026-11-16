@@ -7,20 +7,23 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, candidates, locate, verdict};
+use crate::conformance::{NewTurn, Provider};
 use crate::install::{LaunchEnvironment, Os};
+use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::stdio::{Line, read_line, spawn};
 use crate::{
-    ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
-    HarnessRuntime, Inspection, InteractionAnswer, InteractionResponse, InterruptOutcome,
-    InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, OpenRequest,
-    OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
+    ApprovalDecision, Capability, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
+    EventStream, HarnessRuntime, Inspection, InteractionAnswer, InteractionResponse,
+    InterruptOutcome, InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
     RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
 };
 
@@ -311,7 +314,10 @@ async fn cancellation_invalidates_answers_even_when_one_is_already_on_its_way() 
         seen(&mut events).await,
         [
             "session sess-1",
-            "turn-ended local-turn-1 Interrupted [\"sub-1\"]"
+            // Claude Code ends an interrupted turn with an unsuccessful result; that an
+            // interrupt was written is evidence, and the supervisor reads the turn.
+            "turn-evidence local-turn-1 interrupt-written",
+            "turn-ended local-turn-1 Failed(Other) [\"sub-1\"]"
         ]
     );
 }
@@ -354,44 +360,6 @@ async fn a_result_resolves_the_inputs_it_names_and_no_others() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn losing_the_bridge_after_a_write_leaves_the_submission_unknown() {
-    let (mut peer, runtime, mut events) = open().await;
-    peer.load(fixture!("process_loss"));
-
-    let (outcome, ()) = tokio::join!(runtime.submit(start_turn("sub-1", "Deploy it")), async {
-        peer.play().await;
-        let stderr = b"warning: noisy\nfatal: connection reset\n";
-        peer.stderr.write_all(stderr).await.expect("stderr");
-        sleep(Duration::from_millis(1)).await;
-        peer.exit(1);
-    });
-
-    assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
-    let lost = drain(&mut events).await;
-    let [
-        EventKind::RuntimeLost {
-            exit_code: Some(1),
-            diagnostics,
-        },
-    ] = lost.as_slice()
-    else {
-        panic!("only the loss, got {lost:?}");
-    };
-    assert!(diagnostics.ends_with("fatal: connection reset"));
-    assert_eq!(events.recv().await, None);
-
-    let closed = Refusal::RuntimeClosed;
-    let submitted = runtime.submit(start_turn("sub-1", "Deploy it")).await;
-    let responded = runtime
-        .respond(approve("7-1", ApprovalDecision::Allow))
-        .await;
-    let interrupted = runtime.interrupt(interrupt("local-turn-1")).await;
-    assert_eq!(submitted, DispatchOutcome::NotSent(closed.clone()));
-    assert_eq!(responded, RespondOutcome::NotSent(closed.clone()));
-    assert_eq!(interrupted, InterruptOutcome::NotSent(closed));
-}
-
-#[tokio::test(start_paused = true)]
 async fn a_session_that_ends_on_its_own_is_a_loss_and_unread_input_was_not_sent() {
     let (mut peer, runtime, mut events) = open().await;
     peer.load(fixture!("session_loss"));
@@ -418,25 +386,6 @@ async fn a_session_that_ends_on_its_own_is_a_loss_and_unread_input_was_not_sent(
     assert_eq!(
         runtime.close().await,
         CloseOutcome::Confirmed { exit_code: Some(0) }
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_refusal_after_the_wait_ran_out_is_late_evidence() {
-    let (mut peer, runtime, mut events) = open().await;
-    peer.load(fixture!("late_rejection"));
-
-    // Nothing was heard in time: the input may have been handed over.
-    let outcome = runtime.submit(start_turn("sub-1", "Hello")).await;
-    assert_eq!(outcome, DispatchOutcome::Written);
-
-    peer.play().await;
-    assert_eq!(
-        seen(&mut events).await,
-        [
-            "evidence sub-1 Rejected { reason: \"duplicate_submission: submission is \
-             unresolved\" }"
-        ]
     );
 }
 
@@ -512,54 +461,10 @@ async fn structured_failures_end_the_turn_and_thrown_ones_do_not() {
         seen(&mut events).await,
         [
             "notice Warning local-turn-2 \"Claude Code reported a failure: late failure\"",
+            "turn-evidence local-turn-2 interrupt-written",
             "turn-ended local-turn-2 Completed [\"sub-2\"]",
         ]
     );
-}
-
-#[tokio::test(start_paused = true)]
-async fn stale_generations_requests_and_turns_write_nothing() {
-    let (mut peer, runtime, _events) = open().await;
-    let old = RuntimeGeneration(6);
-    let stale = Refusal::StaleGeneration {
-        current: GENERATION,
-    };
-
-    let submitted = runtime
-        .submit(Submission {
-            generation: old,
-            ..start_turn("sub-1", "Hello")
-        })
-        .await;
-    let responded = runtime
-        .respond(InteractionResponse {
-            generation: old,
-            ..approve("7-1", ApprovalDecision::Allow)
-        })
-        .await;
-    let interrupted = runtime
-        .interrupt(InterruptRequest {
-            generation: old,
-            ..interrupt("local-turn-1")
-        })
-        .await;
-    let never_asked = runtime
-        .respond(approve("7-1", ApprovalDecision::Allow))
-        .await;
-    let no_turn = runtime.interrupt(interrupt("local-turn-1")).await;
-
-    assert_eq!(submitted, DispatchOutcome::NotSent(stale.clone()));
-    assert_eq!(responded, RespondOutcome::NotSent(stale.clone()));
-    assert_eq!(interrupted, InterruptOutcome::NotSent(stale));
-    assert_eq!(
-        never_asked,
-        RespondOutcome::NotSent(Refusal::UnknownRequest)
-    );
-    assert_eq!(
-        no_turn,
-        InterruptOutcome::NotSent(Refusal::TurnMismatch { active: None })
-    );
-    peer.assert_nothing_written().await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -1083,11 +988,8 @@ async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_
             start_turn(id, if id == "sub-1" { "Go" } else { "Again" }),
         )
         .await;
-        match drain(&mut opened.events).await.pop() {
-            Some(EventKind::TurnEnded {
-                outcome: crate::TurnOutcome::Failed(problem),
-                ..
-            }) => (problem.kind, problem.message),
+        match read_end(&drain(&mut opened.events).await) {
+            Some(crate::TurnOutcome::Failed(problem)) => (problem.kind, problem.message),
             other => panic!("a failed turn, got {other:?}"),
         }
     };
@@ -1151,7 +1053,7 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
 /// user doesn't want to proceed with this tool use", seen in live transcripts). It
 /// is left unfinished, which the turn then shows as "not finished", not failed.
 #[test]
-fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
+fn a_tool_that_failed_after_a_stop_is_reported_as_such() {
     use super::session::Session;
     use crate::ToolStatus;
     let mut session = Session::default();
@@ -1165,10 +1067,10 @@ fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
         .expect("modeled");
 
     assert!(
-        !events.iter().any(|event| matches!(
+        events.iter().any(|event| matches!(
             event,
             EventKind::ToolUpdated {
-                status: ToolStatus::Failed,
+                status: ToolStatus::FailedAfterInterrupt,
                 ..
             }
         )),
@@ -1438,4 +1340,149 @@ fn a_question_names_the_tool_use_it_was_asked_from() {
         _ => None,
     });
     assert_eq!(item, Some(Some(crate::NativeItemId::new("toolu_ask"))));
+}
+
+/// The Claude bridge as the conformance suite's provider: it plays the bridge's side
+/// of each scenario.
+pub(crate) struct Bridge {
+    peer: Peer,
+    runtime: Arc<dyn HarnessRuntime>,
+    events: EventStream,
+    /// The id of the next command the adapter writes.
+    next_command: u32,
+}
+
+pub(crate) async fn provider() -> Box<dyn Provider> {
+    let (peer, runtime, events) = open().await;
+    Box::new(Bridge {
+        peer,
+        runtime,
+        events,
+        next_command: 4,
+    })
+}
+
+impl Bridge {
+    fn command(&mut self) -> u32 {
+        self.next_command += 1;
+        self.next_command - 1
+    }
+
+    /// The `submit` command the adapter writes for `id`.
+    fn submitted(&mut self, id: &str) -> String {
+        let command = self.command();
+        format!(
+            r#"{{"client":{{"id":"c{command}","cmd":"submit","generation":7,"submission_id":"{id}","text":"hello"}}}}"#
+        )
+    }
+}
+
+#[async_trait]
+impl Provider for Bridge {
+    fn new_turn(&self) -> NewTurn {
+        NewTurn::WrittenThenProcessing
+    }
+
+    fn loss(&self) -> (Option<i32>, &'static str) {
+        (Some(1), "fatal: connection reset")
+    }
+
+    fn runtime(&self) -> Arc<dyn HarnessRuntime> {
+        Arc::clone(&self.runtime)
+    }
+
+    fn events(&mut self) -> &mut EventStream {
+        &mut self.events
+    }
+
+    async fn start_turn(&mut self, id: &str) -> DispatchOutcome {
+        let client = self.submitted(id);
+        let handed = format!(
+            r#"{{"server":{{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"{id}"}}}}"#
+        );
+        self.peer.load(&format!("{client}\n{handed}\n"));
+        submit(&mut self.peer, &self.runtime, start_turn(id, "hello")).await
+    }
+
+    async fn show_processing(&mut self, id: &str) -> NativeTurnId {
+        self.peer.load(&format!(
+            r#"{{"server":{{"v":1,"event":"input_processing","generation":7,"submission_ids":["{id}"]}}}}"#
+        ));
+        self.peer.play().await;
+        let shown = drain(&mut self.events).await;
+        shown
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::SubmissionEvidence {
+                    submission,
+                    evidence: DeliveryEvidence::Processing { turn },
+                } if submission == SubmissionId::new(id) => Some(turn),
+                _ => None,
+            })
+            .expect("the bridge showed the input processing")
+    }
+
+    async fn submit_unanswered(&mut self, id: &str) -> DispatchOutcome {
+        let client = self.submitted(id);
+        self.peer.load(&client);
+        submit(&mut self.peer, &self.runtime, start_turn(id, "hello")).await
+    }
+
+    async fn refuse_late(&mut self, _id: &str) {
+        // The refusal answers the command that carried the input: the last one.
+        let command = self.next_command - 1;
+        self.peer.load(&format!(
+            r#"{{"server":{{"v":1,"event":"command_rejected","id":"c{command}","code":"duplicate_submission","message":"submission is unresolved"}}}}"#
+        ));
+        self.peer.play().await;
+    }
+
+    async fn submit_and_lose_process(&mut self, id: &str) -> DispatchOutcome {
+        let client = self.submitted(id);
+        self.peer.load(&client);
+        let (outcome, ()) = tokio::join!(self.runtime.submit(start_turn(id, "hello")), async {
+            self.peer.play().await;
+            let stderr = b"warning: noisy\nfatal: connection reset\n";
+            self.peer.stderr.write_all(stderr).await.expect("stderr");
+            sleep(Duration::from_millis(1)).await;
+            self.peer.exit(1);
+        });
+        outcome
+    }
+
+    async fn request_approval(&mut self) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-1","tool_name":"Bash","tool_use_id":"toolu_1","input":{"command":"npm test"},"title":null,"display_name":"Bash","description":null,"decision_reason":null,"blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":true}}"#,
+        );
+        self.peer.play().await;
+        drain(&mut self.events)
+            .await
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => Some(request.request),
+                _ => None,
+            })
+            .expect("the bridge asked for approval")
+    }
+
+    async fn respond(&mut self, response: InteractionResponse) -> RespondOutcome {
+        let request = response.request.0.clone();
+        let (outcome, frame) = tokio::join!(
+            self.runtime.respond(response),
+            timeout(Duration::from_millis(100), self.peer.written())
+        );
+        if outcome == RespondOutcome::Sent {
+            let command = self.command();
+            let expected = json!({"id": format!("c{command}"), "cmd": "respond", "generation": 7,
+                "request_id": request, "decision": {"kind": "allow"}});
+            assert_eq!(frame.expect("the answer was written"), expected);
+        } else {
+            assert!(frame.is_err(), "a refused answer wrote {frame:?}");
+        }
+        outcome
+    }
+
+    async fn assert_nothing_else_written(&mut self) {
+        self.peer.assert_nothing_written().await;
+    }
 }

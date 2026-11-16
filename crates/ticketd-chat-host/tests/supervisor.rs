@@ -60,7 +60,11 @@ impl Fixture {
     fn new(fake: FakeAdapter) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
-        let chat = new_chat(&mut Workspace::open(&path).unwrap(), "codex");
+        let harness = match fake.harness() {
+            Harness::ClaudeCode => "claude-code",
+            Harness::Codex => "codex",
+        };
+        let chat = new_chat(&mut Workspace::open(&path).unwrap(), harness);
         let storage_up = Arc::new(AtomicBool::new(true));
         let host = start_host(&path, &storage_up, &fake);
         Self {
@@ -355,6 +359,41 @@ async fn a_late_acknowledgment_settles_the_same_attempt_and_the_queue_then_conti
     assert_eq!(submits.len(), 2);
     assert_eq!(submits[1].text, "second");
     assert_eq!(submits[1].kind, SubmissionKind::StartTurn);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_claude_like_harness_never_acknowledges_a_new_turn_so_it_stays_unconfirmed_until_processed()
+ {
+    let f = Fixture::new(FakeAdapter::claude());
+    let input = f.send("first").await;
+    f.queue("second").await;
+
+    // The harness took the input and said nothing more: possibly delivered, not
+    // acknowledged, and nothing else is sent while it is unconfirmed.
+    let attempt = f.message(&input.id).attempts[0].clone();
+    assert_eq!(attempt.delivery, ChatDelivery::Possible);
+    assert!(f.live().await.delivery_unconfirmed);
+    assert_eq!(f.submits().len(), 1);
+
+    // Processing correlates the input with a turn, which is only known now. It is
+    // evidence the input arrived, not an acknowledgment.
+    f.emit(EventKind::TurnStarted { turn: turn_1() }).await;
+    f.emit(EventKind::SubmissionEvidence {
+        submission: SubmissionId(attempt.id),
+        evidence: DeliveryEvidence::Processing { turn: turn_1() },
+    })
+    .await;
+    let attempts = f.message(&input.id).attempts;
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].delivery, ChatDelivery::Possible);
+    assert!(attempts[0].turn_id.is_some());
+    assert!(!f.live().await.delivery_unconfirmed);
+    assert_eq!(f.submits().len(), 1);
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submits = f.submits();
+    assert_eq!(submits.len(), 2);
+    assert_eq!(submits[1].text, "second");
 }
 
 #[tokio::test(start_paused = true)]
@@ -1971,4 +2010,128 @@ async fn a_turn_records_how_the_harness_or_the_person_ended_it() {
         TurnEnding::of(&f.turns()[3]),
         Some(TurnEnding::ContactLost(reason)) if reason.starts_with("the harness process ended")
     ));
+}
+
+/// What the adapter reported about how a turn ended is read by the supervisor's rules
+/// alone, so every harness's turns read the same way and are stored as before.
+mod evidence {
+    use super::*;
+    use ticketd_chat_host::TurnEvidence;
+
+    async fn ended_with(
+        evidence: TurnEvidence,
+        outcome: TurnOutcome,
+    ) -> (Fixture, Option<TurnEnding>) {
+        let f = Fixture::new(FakeAdapter::codex());
+        f.send("first").await;
+        f.emit(EventKind::TurnEvidence {
+            turn: turn_1(),
+            evidence,
+        })
+        .await;
+        f.emit(turn_ended(turn_1(), outcome)).await;
+        let ending = f.first_ending();
+        (f, ending)
+    }
+
+    fn failed(kind: ProblemKind, message: &str) -> TurnOutcome {
+        TurnOutcome::Failed(Problem {
+            kind,
+            message: message.to_owned(),
+            detail: None,
+            resets_at: None,
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_denial_fails_a_turn_the_harness_called_completed_and_names_it() {
+        let evidence = TurnEvidence {
+            denied: Some("Claude Code was denied: Write.".to_owned()),
+            ..TurnEvidence::default()
+        };
+
+        let (f, ending) = ended_with(evidence, TurnOutcome::Completed).await;
+
+        assert_eq!(
+            ending,
+            Some(TurnEnding::Failed {
+                kind: ProblemKind::ToolDenied,
+                message: Some("Claude Code was denied: Write.".to_owned()),
+                resets_at: None,
+            })
+        );
+        assert_eq!(f.turns()[0].state, ChatTurnState::Failed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failure_after_an_interrupt_was_written_is_a_stop_not_a_failure() {
+        let evidence = TurnEvidence {
+            interrupt_written: true,
+            ..TurnEvidence::default()
+        };
+
+        let (f, ending) = ended_with(evidence, failed(ProblemKind::Other, "aborted")).await;
+
+        assert_eq!(ending, Some(TurnEnding::StoppedByPerson));
+        assert_eq!(f.turns()[0].state, ChatTurnState::Interrupted);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failure_without_that_evidence_stays_a_failure() {
+        let (_, ending) = ended_with(
+            TurnEvidence::default(),
+            failed(ProblemKind::Other, "it broke"),
+        )
+        .await;
+
+        assert!(
+            matches!(ending, Some(TurnEnding::Failed { .. })),
+            "{ending:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn evidence_belongs_to_the_turn_it_names() {
+        let f = Fixture::new(FakeAdapter::codex());
+        f.send("first").await;
+        f.emit(EventKind::TurnEvidence {
+            turn: NativeTurnId::new("another-turn"),
+            evidence: TurnEvidence {
+                denied: Some("Write was denied.".to_owned()),
+                ..TurnEvidence::default()
+            },
+        })
+        .await;
+
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+        assert_eq!(f.first_ending(), Some(TurnEnding::Completed));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tool_that_failed_after_an_interrupt_is_stored_unfinished() {
+        let f = Fixture::new(FakeAdapter::codex());
+        f.send("first").await;
+        let tool = |item: &str, status| EventKind::ToolUpdated {
+            turn: turn_1(),
+            item: NativeItemId::new(item),
+            title: "ticketd list".to_owned(),
+            status,
+            output: None,
+            detail: None,
+        };
+
+        f.emit(tool("cut", ToolStatus::FailedAfterInterrupt)).await;
+        f.emit(tool("broken", ToolStatus::Failed)).await;
+
+        let states: Vec<ChatToolState> = f
+            .items()
+            .into_iter()
+            .filter_map(|item| match item {
+                ChatItem::Tool(tool) => Some(tool.state),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(states, [ChatToolState::Running, ChatToolState::Failed]);
+    }
 }

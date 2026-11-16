@@ -186,9 +186,7 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
     Ok(())
 }
 
-pub(crate) use tracking::{
-    availability_projection, closure_held, guard_change, guard_duplicate, held_sql,
-};
+pub(crate) use tracking::{availability_projection, guard_change, guard_duplicate, held_sql};
 
 /// Fills the ticket's external side and any blocking publication attempt.
 pub(crate) fn populate(

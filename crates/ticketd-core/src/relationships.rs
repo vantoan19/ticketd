@@ -53,7 +53,7 @@ pub(crate) fn prerequisites(
                         reference: row.get::<_, String>(0)?,
                         title: row.get(1)?,
                         trashed: row.get(3)?,
-                        unresolved: !status.satisfies_dependency(),
+                        unresolved: crate::readiness::unresolved(status),
                         status,
                     },
                     row.get::<_, i64>(4)?,
@@ -70,17 +70,7 @@ pub(crate) fn prerequisites(
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
     ticket.prerequisites = prerequisites(connection, &ticket.id, None)?;
-    ticket.availability = match history::readiness(
-        ticket.status,
-        ticket.trashed,
-        ticket.prerequisites.iter().map(|p| p.status),
-    ) {
-        // Awaiting a local decision on an unrecognized closure: not Ready, not Blocked.
-        _ if crate::source::closure_held(connection, &ticket.id)? => None,
-        history::Readiness::Ready => Some("Ready".into()),
-        history::Readiness::Blocked => Some("Blocked".into()),
-        history::Readiness::NoReadyState => None,
-    };
+    ticket.availability = crate::readiness::indicator(connection, &ticket.id)?;
     Ok(())
 }
 

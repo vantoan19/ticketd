@@ -9,11 +9,14 @@ mod claude;
 pub mod cli;
 mod codex;
 pub mod conditions;
+#[cfg(test)]
+mod conformance;
 pub mod context;
 mod contract;
 pub mod diffstat;
 mod host;
 mod install;
+mod outcome;
 pub mod records;
 #[cfg(test)]
 mod scripted;

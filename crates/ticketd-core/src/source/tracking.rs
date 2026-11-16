@@ -341,15 +341,6 @@ pub(crate) fn held_sql(id_expr: &str) -> String {
     )
 }
 
-/// [`held_sql`] for one ticket.
-pub(crate) fn closure_held(connection: &Connection, id: &str) -> Result<bool, Error> {
-    Ok(
-        connection.query_row(&format!("SELECT {}", held_sql("?1")), [id], |row| {
-            row.get(0)
-        })?,
-    )
-}
-
 /// Whether a ticket is currently externally owned. Call inside the write
 /// transaction that depends on the answer.
 pub(crate) fn authority(connection: &Connection, id: &str) -> Result<Authority, Error> {
