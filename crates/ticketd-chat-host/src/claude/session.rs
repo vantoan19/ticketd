@@ -11,7 +11,7 @@ use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
     InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
     NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question,
-    Refusal, SubmissionId, ToolStatus, TurnOutcome, reset_time,
+    Refusal, SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
@@ -369,9 +369,10 @@ impl Session {
             event["truncated"] == true,
         );
         let detail = with_line_counts(detail, &event["outcome"]);
-        // Claude Code answers the tool a Stop cuts off with an error result; it is
-        // left unfinished, and the turn shows it as not finished (#387 3B3).
-        let cut_off = self
+        // Claude Code answers the tool a Stop cuts off with an error result. That the
+        // interrupt was written is reported; what it means for the tool is not decided
+        // here (#387 3B3).
+        let after_interrupt = self
             .turn
             .as_ref()
             .is_some_and(|turn| turn.interrupt_written);
@@ -381,7 +382,7 @@ impl Session {
             title: title.clone(),
             status: match (failed, declined) {
                 (true, true) => ToolStatus::Declined,
-                (true, false) if cut_off => ToolStatus::Running,
+                (true, false) if after_interrupt => ToolStatus::FailedAfterInterrupt,
                 (true, false) => ToolStatus::Failed,
                 (false, _) => ToolStatus::Succeeded,
             },
@@ -612,24 +613,23 @@ impl Session {
                 resets_at: None,
             })
         };
-        // ponytail: how Claude Code reports an interrupted turn is unverified; any
-        // unsuccessful result after an interrupt was written counts as interrupted.
+        // What the harness said happened. Whether an interrupt or a denial changes how
+        // the turn reads is the supervisor's to decide; the evidence is reported below.
+        let evidence = TurnEvidence {
+            interrupt_written: turn.as_ref().is_some_and(|turn| turn.interrupt_written),
+            // The agent may have gone on after a denial and ended its turn normally, but
+            // it did not do what it set out to do with that tool.
+            denied: (self.unattended && !denied.is_empty())
+                .then(|| format!("Claude Code was denied: {}.", denied.join("; "))),
+            not_started: None,
+        };
         let outcome = if subtype == "error_max_turns" {
             ended_by(
                 ProblemKind::TurnLimitReached,
                 "Claude Code reached the turn limit before finishing.".to_owned(),
             )
-        } else if self.unattended && !denied.is_empty() {
-            // The agent went on after the denial and may have ended its turn normally,
-            // but it did not do what it set out to do with that tool.
-            ended_by(
-                ProblemKind::ToolDenied,
-                format!("Claude Code was denied: {}.", denied.join("; ")),
-            )
         } else if !failed {
             TurnOutcome::Completed
-        } else if turn.as_ref().is_some_and(|turn| turn.interrupt_written) {
-            TurnOutcome::Interrupted
         } else {
             let errors = strings(event, "errors");
             let detail = json!({
@@ -657,6 +657,12 @@ impl Session {
                     .filter(|_| kind == ProblemKind::QuotaExhausted),
             })
         };
+        if !evidence.is_empty() {
+            events.push(EventKind::TurnEvidence {
+                turn: id.clone(),
+                evidence,
+            });
+        }
         events.push(EventKind::TurnEnded {
             turn: id,
             outcome,

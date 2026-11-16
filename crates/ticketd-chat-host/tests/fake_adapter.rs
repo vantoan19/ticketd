@@ -1,15 +1,14 @@
-//! Contract-level behavior every adapter must show, exercised through the fake adapter.
+//! What the fake adapter does beyond the properties every adapter shares (see the
+//! conformance suite in `src/conformance.rs`), which the supervisor's tests rely on.
 #![allow(clippy::unwrap_used, clippy::panic)] // test setup and assertions
 
 use std::path::PathBuf;
 
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, DeliveryEvidence, DispatchOutcome, EventKind, HarnessAdapter,
-    InteractionAnswer, InteractionKind, InteractionRequest, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeRequestId, NativeTurnId, OpenRequest, OpenedRuntime, Refusal,
-    RespondOutcome, RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId,
-    SubmissionKind, TurnOutcome,
+    DispatchOutcome, EventKind, HarnessAdapter, NativeTurnId, OpenRequest, OpenedRuntime, Refusal,
+    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    TurnOutcome,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(1);
@@ -76,32 +75,6 @@ async fn acknowledgment_names_the_turn_and_completion_arrives_separately() {
 }
 
 #[tokio::test]
-async fn a_command_from_another_generation_is_refused_before_any_write() {
-    let fake = FakeAdapter::codex();
-    let replacement = RuntimeGeneration(2);
-    let opened = open(&fake, replacement).await;
-    let refused = Refusal::StaleGeneration {
-        current: replacement,
-    };
-
-    assert_eq!(
-        opened.runtime.submit(start("s1", GENERATION)).await,
-        DispatchOutcome::NotSent(refused.clone())
-    );
-    assert_eq!(
-        opened
-            .runtime
-            .interrupt(InterruptRequest {
-                generation: GENERATION,
-                expected_turn: NativeTurnId::new("turn-1"),
-            })
-            .await,
-        InterruptOutcome::NotSent(refused)
-    );
-    assert_eq!(fake.written(), vec![]);
-}
-
-#[tokio::test]
 async fn an_explicit_rejection_is_distinct_from_a_local_refusal() {
     let fake = FakeAdapter::codex();
     let opened = open(&fake, GENERATION).await;
@@ -116,48 +89,6 @@ async fn an_explicit_rejection_is_distinct_from_a_local_refusal() {
     assert_eq!(
         fake.written(),
         vec![Written::Submit(start("s1", GENERATION))]
-    );
-}
-
-#[tokio::test]
-async fn a_missing_reply_leaves_the_submission_written_until_late_evidence_arrives() {
-    let fake = FakeAdapter::codex();
-    let mut opened = open(&fake, GENERATION).await;
-    fake.script_submit(SubmitReply::Timeout);
-
-    assert_eq!(
-        opened.runtime.submit(start("s1", GENERATION)).await,
-        DispatchOutcome::Written
-    );
-
-    let evidence = EventKind::SubmissionEvidence {
-        submission: SubmissionId::new("s1"),
-        evidence: DeliveryEvidence::Acknowledged {
-            turn: NativeTurnId::new("turn-late"),
-        },
-    };
-    assert!(fake.emit(evidence.clone()).await);
-    assert_eq!(opened.events.recv().await.unwrap().kind, evidence);
-}
-
-#[tokio::test]
-async fn process_loss_after_the_write_is_unknown_and_ends_the_stream() {
-    let fake = FakeAdapter::codex();
-    let mut opened = open(&fake, GENERATION).await;
-    fake.script_submit(SubmitReply::LoseProcess);
-
-    assert_eq!(
-        opened.runtime.submit(start("s1", GENERATION)).await,
-        DispatchOutcome::UnknownAfterLoss
-    );
-    assert!(matches!(
-        opened.events.recv().await.unwrap().kind,
-        EventKind::RuntimeLost { .. }
-    ));
-    assert_eq!(opened.events.recv().await, None);
-    assert_eq!(
-        opened.runtime.submit(start("s2", GENERATION)).await,
-        DispatchOutcome::NotSent(Refusal::RuntimeClosed)
     );
 }
 
@@ -211,59 +142,6 @@ async fn steering_is_refused_when_the_harness_does_not_support_it() {
     assert_eq!(
         opened.runtime.submit(steer("s2", &turn)).await,
         DispatchOutcome::NotSent(Refusal::Unsupported)
-    );
-}
-
-#[tokio::test]
-async fn a_live_request_accepts_one_answer_from_its_own_generation() {
-    let fake = FakeAdapter::codex();
-    let mut opened = open(&fake, GENERATION).await;
-    let request = NativeRequestId::new("approval-1");
-    fake.emit(EventKind::InteractionRequested(InteractionRequest {
-        request: request.clone(),
-        turn: None,
-        item: None,
-        kind: InteractionKind::Approval {
-            description: "Run cargo test".to_owned(),
-            reason: None,
-            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
-        },
-        detail: None,
-    }))
-    .await;
-    opened.events.recv().await.unwrap();
-    let answer = |generation, decision| InteractionResponse {
-        generation,
-        request: request.clone(),
-        answer: InteractionAnswer::Approval(decision),
-    };
-
-    assert_eq!(
-        opened
-            .runtime
-            .respond(answer(RuntimeGeneration(0), ApprovalDecision::Allow))
-            .await,
-        RespondOutcome::NotSent(Refusal::StaleGeneration {
-            current: GENERATION
-        })
-    );
-    assert_eq!(
-        opened
-            .runtime
-            .respond(answer(GENERATION, ApprovalDecision::Deny))
-            .await,
-        RespondOutcome::Sent
-    );
-    assert_eq!(
-        opened
-            .runtime
-            .respond(answer(GENERATION, ApprovalDecision::Allow))
-            .await,
-        RespondOutcome::NotSent(Refusal::UnknownRequest)
-    );
-    assert_eq!(
-        fake.written(),
-        vec![Written::Respond(answer(GENERATION, ApprovalDecision::Deny))]
     );
 }
 

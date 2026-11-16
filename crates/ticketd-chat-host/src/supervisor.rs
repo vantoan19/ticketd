@@ -42,6 +42,7 @@ fn now_millis() -> i64 {
             i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
         })
 }
+use crate::outcome::{settle, tool_state};
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::{
     ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
@@ -49,7 +50,7 @@ use crate::{
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
     Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, ToolStatus, TurnOutcome, Unattended,
+    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome, Unattended,
 };
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
@@ -213,6 +214,9 @@ pub(crate) struct Supervisor {
     dispatching: Option<Dispatch>,
     /// A new turn that was written with no acknowledgment or turn seen yet.
     unconfirmed_start: Option<String>,
+    /// What the adapter reported about how the turn it names is ending, until its
+    /// `TurnEnded` arrives.
+    turn_evidence: Option<(NativeTurnId, TurnEvidence)>,
     /// When an unconfirmed start stops counting as work in progress.
     unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
@@ -300,6 +304,7 @@ impl Supervisor {
             opening: None,
             dispatching: None,
             unconfirmed_start: None,
+            turn_evidence: None,
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
@@ -1070,6 +1075,7 @@ impl Supervisor {
         });
         self.active = None;
         self.unconfirmed_start = None;
+        self.turn_evidence = None;
         self.unconfirmed_deadline = None;
         self.interactions.clear();
         self.text.clear();
@@ -1736,17 +1742,13 @@ impl Supervisor {
                     return;
                 };
                 let tool_id = format!("{run}:{}", item.0);
+                let state = tool_state(status);
                 let tool = ChatObservation::Tool {
                     tool_id: tool_id.clone(),
                     turn_id,
                     name: title,
                     input: detail.map(|d| d.payload().to_owned()).unwrap_or_default(),
-                    state: match status {
-                        ToolStatus::Running => ChatToolState::Running,
-                        ToolStatus::Succeeded => ChatToolState::Completed,
-                        ToolStatus::Failed => ChatToolState::Failed,
-                        ToolStatus::Declined => ChatToolState::Declined,
-                    },
+                    state,
                     output,
                 };
                 self.pending_tools.retain(|(id, _)| *id != tool_id);
@@ -1754,7 +1756,7 @@ impl Supervisor {
                     .runtime
                     .as_mut()
                     .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
-                if first || status != ToolStatus::Running {
+                if first || state != ChatToolState::Running {
                     observations.push(tool);
                     self.record(observations);
                 } else {
@@ -1789,11 +1791,19 @@ impl Supervisor {
                     response,
                 }]);
             }
+            EventKind::TurnEvidence { turn, evidence } => {
+                self.turn_evidence = Some((turn, evidence));
+            }
             EventKind::TurnEnded {
                 turn,
                 outcome,
                 submissions,
             } => {
+                let evidence = match self.turn_evidence.take() {
+                    Some((evidenced, evidence)) if evidenced == turn => evidence,
+                    _ => TurnEvidence::default(),
+                };
+                let outcome = settle(outcome, &evidence);
                 let Some(turn_id) = self.turn(&turn, &mut observations) else {
                     return;
                 };
