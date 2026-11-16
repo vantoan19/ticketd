@@ -1017,6 +1017,16 @@ store, under `ticketd.google-drive.v1`, keyed by the opaque connection handle.
 Windows uses Credential Manager, macOS Keychain, and Linux encrypted Secret
 Service. There is no plaintext fallback. Cross-process file locks outside the
 workspace serialize refresh-token rotation; access tokens stay in memory.
+
+Every Drive request, from Attachments and from Workspace sync alike, goes through
+one crate-private Drive client over the transport interface. It caches the access
+token and renews it once when Drive refuses it, using the credential stored at that
+moment, so a later sign-in needs no cache reset. It also owns the classification of
+Google's errors, `generateIds`, resumable sessions, ranged reads that require an
+exact `Content-Range`, pagination, and retry with backoff for the requests that opt
+in. Only Workspace sync opts in; an uploaded copy is never retried automatically.
+The Attachment providers and the sync adapter translate its answers into their own
+results: per-file guidance on one side, recovery states on the other.
 Transport diagnostics omit URLs, headers and bodies, and Google redirects are
 not followed. Workspace backups/JSON export contain reference metadata, never
 credentials or remote bytes. The standalone CLI uses the same core/vault namespace;

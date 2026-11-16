@@ -48,10 +48,11 @@ fn drive(connection_id: &str) -> Arc<DriveRemote<'static>> {
     {
         return Arc::clone(remote);
     }
-    // ponytail: the adapter borrows its connection id, so the id is kept for the
-    // life of the app: one short string per account signed in to.
-    let id: &'static str = Box::leak(connection_id.to_owned().into_boxed_str());
-    let remote = Arc::new(DriveRemote::new(id, &PlatformCredentialStore, transport()));
+    let remote = Arc::new(DriveRemote::new(
+        connection_id,
+        &PlatformCredentialStore,
+        transport(),
+    ));
     *kept = Some((connection_id.to_owned(), Arc::clone(&remote)));
     remote
 }
@@ -837,8 +838,8 @@ fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
             &AtomicBool::new(false),
         )
         .map_err(failed)?;
-    // A kept adapter holds the previous sign-in's access token.
-    *DRIVE.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    // A kept adapter needs no reset: when Drive refuses its access token, it
+    // renews with the credential this sign-in stored.
     Ok((
         signed_in.connection_id,
         signed_in.account.unwrap_or_default(),
