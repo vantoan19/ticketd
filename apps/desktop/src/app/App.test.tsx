@@ -12,6 +12,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  waitFor,
   screen,
   within,
 } from "@testing-library/react";
@@ -9302,3 +9303,236 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
     ).toBeGreaterThan(0);
   },
 );
+
+function installNativeZoomBridge() {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {
+      invoke: (command: string, args: unknown) => bridge.invoke(command, args),
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { label: "main" },
+      },
+    },
+  });
+  return () => Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+}
+
+const nativeZoomCalls = () =>
+  bridge.invoke.mock.calls.filter(
+    ([command]) => command === "plugin:webview|set_webview_zoom",
+  );
+
+test.each([
+  { platform: "MacIntel", modifiers: { metaKey: true } },
+  { platform: "Win32", modifiers: { ctrlKey: true } },
+])(
+  "page zoom reaches exactly 200% with $platform shortcuts and resets while typing",
+  async ({ platform, modifiers }) => {
+    const platformStub = vi
+      .spyOn(navigator, "platform", "get")
+      .mockReturnValue(platform);
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(<App />);
+    await screen.findByRole("button", { name: "Settings" });
+    // Exercise the real Tauri SDK over the existing fake native IPC boundary.
+    const uninstall = installNativeZoomBridge();
+    try {
+      for (const [index, key] of ["=", "+", "+", "=", "="].entries()) {
+        fireEvent.keyDown(document.body, {
+          key,
+          ...modifiers,
+          shiftKey: key === "+" && index === 1,
+        });
+        await act(async () => {});
+      }
+      expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+        { label: "main", value: 1.1 },
+        { label: "main", value: 1.25 },
+        { label: "main", value: 1.5 },
+        { label: "main", value: 1.75 },
+        { label: "main", value: 2 },
+      ]);
+      expect(await screen.findByText("Zoom 200%")).toBeTruthy();
+      // At the bound, another alias (a plus without Shift) cannot overshoot.
+      fireEvent.keyDown(document.body, { key: "+", ...modifiers });
+      await act(async () => {});
+      expect(nativeZoomCalls()).toHaveLength(5);
+      fireEvent.click(sidebarNewTicket());
+      const title = await screen.findByRole("textbox", { name: "Title" });
+      title.focus();
+      fireEvent.keyDown(title, { key: "-", ...modifiers });
+      await waitFor(() =>
+        expect(bridge.invoke).toHaveBeenCalledWith(
+          "plugin:webview|set_webview_zoom",
+          { label: "main", value: 1.75 },
+        ),
+      );
+      fireEvent.keyDown(title, { key: "0", ...modifiers });
+      expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+      expect(document.activeElement).toBe(title);
+      for (let step = 0; step < 6; step += 1) {
+        fireEvent.keyDown(title, { key: "-", ...modifiers });
+        await act(async () => {});
+      }
+      expect(await screen.findByText("Zoom 50%")).toBeTruthy();
+      expect(
+        nativeZoomCalls()
+          .slice(-4)
+          .map(([, args]) => args),
+      ).toEqual([
+        { label: "main", value: 0.9 },
+        { label: "main", value: 0.75 },
+        { label: "main", value: 0.67 },
+        { label: "main", value: 0.5 },
+      ]);
+      fireEvent.keyDown(title, { key: "0", ...modifiers });
+      expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+      const calls = nativeZoomCalls().length;
+      fireEvent.keyDown(title, { key: "+" });
+      fireEvent.keyDown(title, { key: "=", ...modifiers, isComposing: true });
+      fireEvent.keyDown(title, { key: "=", ...modifiers, altKey: true });
+      await act(async () => {});
+      expect(nativeZoomCalls()).toHaveLength(calls);
+    } finally {
+      uninstall();
+      platformStub.mockRestore();
+    }
+  },
+);
+
+test("page zoom palette actions share keyboard operations, current values and registry hints", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await screen.findByRole("button", { name: "Settings" });
+  const uninstall = installNativeZoomBridge();
+  try {
+    for (const [label, percent] of [
+      ["Zoom in", 110],
+      ["Zoom out", 100],
+      ["Reset zoom", 100],
+    ] as const) {
+      if (label === "Reset zoom") {
+        fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
+        expect(await screen.findByText("Zoom 110%")).toBeTruthy();
+      }
+      fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+      const input = await screen.findByRole("combobox", {
+        name: "Search tickets and destinations",
+      });
+      fireEvent.change(input, { target: { value: `> ${label}` } });
+      const option = await screen.findByRole("option", {
+        name: new RegExp(label),
+      });
+      expect(option.textContent).toContain(
+        label === "Zoom in" ? "100%" : "110%",
+      );
+      expect(option.getAttribute("aria-keyshortcuts")).toContain("Control+");
+      fireEvent.click(option);
+      expect(await screen.findByText(`Zoom ${percent}%`)).toBeTruthy();
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        "plugin:webview|set_webview_zoom",
+        { label: "main", value: percent / 100 },
+      );
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Keyboard shortcuts" }),
+    );
+    const filter = await screen.findByRole("searchbox", {
+      name: "Filter shortcuts",
+    });
+    fireEvent.change(filter, { target: { value: "zoom" } });
+    expect(await screen.findByText("Zoom in")).toBeTruthy();
+    expect(screen.getByText("Zoom out")).toBeTruthy();
+    expect(screen.getByText("Reset zoom")).toBeTruthy();
+  } finally {
+    uninstall();
+  }
+});
+
+test("page zoom serializes rapid keys and a pending reset wins over stale targets", async () => {
+  let finish: (() => void) | undefined;
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "plugin:webview|set_webview_zoom" && !finish)
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: "Settings" });
+  const uninstall = installNativeZoomBridge();
+  try {
+    for (let step = 0; step < 5; step += 1)
+      fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
+    expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+      { label: "main", value: 1.1 },
+    ]);
+    expect(screen.queryByText("Zoom 110%")).toBeNull();
+    expect(screen.queryByText("Zoom 200%")).toBeNull();
+    await act(async () => finish?.());
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+    expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+      { label: "main", value: 1.1 },
+      { label: "main", value: 1 },
+    ]);
+  } finally {
+    uninstall();
+  }
+});
+
+test("page zoom keeps the applied value on native failure, exposes raw Details and retries the failed action", async () => {
+  let fail = false;
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "plugin:webview|set_webview_zoom" && fail)
+      return Promise.reject(
+        new Error("Webview zoom permission rejected: native diagnostic"),
+      );
+    return bridgeDefault(command, args as Parameters<typeof bridgeDefault>[1]);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: "Settings" });
+  const uninstall = installNativeZoomBridge();
+  try {
+    fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
+    expect(await screen.findByText("Zoom 110%")).toBeTruthy();
+    fail = true;
+    fireEvent.keyDown(document.body, { key: "=", ctrlKey: true });
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent).toContain(
+      "Couldn't change zoom. Your previous zoom is kept. Try again.",
+    );
+    expect(screen.queryByText("Zoom 125%")).toBeNull();
+    expect(screen.queryByText(/native diagnostic/)).toBeNull();
+    fireEvent.click(within(failure).getByRole("button", { name: "Details" }));
+    expect(
+      await screen.findByText(
+        "Webview zoom permission rejected: native diagnostic",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(failure).getByRole("button", { name: "Details" }));
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.change(input, { target: { value: "> Zoom in" } });
+    expect(
+      (await screen.findByRole("option", { name: /Zoom in/ })).textContent,
+    ).toContain("110%");
+    fireEvent.keyDown(input, { key: "Escape" });
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Zoom 125%")).toBeTruthy();
+    expect(nativeZoomCalls().map(([, args]) => args)).toEqual([
+      { label: "main", value: 1.1 },
+      { label: "main", value: 1.25 },
+      { label: "main", value: 1.25 },
+    ]);
+    fireEvent.keyDown(document.body, { key: "0", ctrlKey: true });
+    expect(await screen.findByText("Zoom 100%")).toBeTruthy();
+  } finally {
+    uninstall();
+  }
+});

@@ -9,6 +9,8 @@ import {
   ticketCommandActions,
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
+import { usePageZoom } from "./use-page-zoom";
+import { PageZoomStatus } from "./PageZoomStatus";
 import { CommandPalette } from "./CommandPalette";
 import { useCommandKeys, type GoTo } from "./use-command-keys";
 import {
@@ -128,6 +130,7 @@ export function App() {
 }
 
 function AppContent() {
+  const pageZoom = usePageZoom();
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
   const workspaceProblem = useWorkspaceState();
@@ -611,6 +614,7 @@ function AppContent() {
                       </a>
                       <WindowBar />
                       <StatusLineRegion host={{ current: contentPanel }}>
+                        <PageZoomStatus zoom={pageZoom} />
                         <NewPlanDialog
                           open={creatingPlan}
                           onOpenChange={setCreatingPlan}
@@ -618,6 +622,7 @@ function AppContent() {
                           onCreated={(id) => scope("all", "all", id)}
                         />
                         <CommandPalette
+                          pageZoom={pageZoom}
                           inboxCommands={
                             view === "inbox" && inboxSelection
                               ? (() => {
