@@ -1,5 +1,6 @@
 use super::*;
-use crate::LiveInteraction;
+use crate::turn_ending::recorded_turn;
+use crate::{LiveInteraction, ProblemKind, StopReason};
 
 fn idle() -> ChatLive {
     ChatLive::idle()
@@ -27,17 +28,15 @@ fn chat(seen_through: i64) -> Chat {
     }
 }
 
-fn turn(position: i64, state: ChatTurnState) -> ChatTurn {
-    ChatTurn {
-        id: format!("t{position}"),
-        position,
-        native_turn_id: None,
-        state,
-        detail: None,
-        started_at: String::new(),
-        ended_at: None,
-        problem: None,
-        problem_resets_at: None,
+fn turn(position: i64, ending: TurnEnding) -> ChatTurn {
+    recorded_turn(position, &ending)
+}
+
+fn failed() -> TurnEnding {
+    TurnEnding::Failed {
+        kind: ProblemKind::Other,
+        message: None,
+        resets_at: None,
     }
 }
 
@@ -60,7 +59,7 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
 #[test]
 fn a_finished_turn_is_done_until_seen_then_idle_in_words() {
     let live = idle();
-    let ended = turn(5, ChatTurnState::Completed);
+    let ended = turn(5, TurnEnding::Completed);
     let unseen = status(&facts(&chat(4), &live, Some(&ended)));
     assert_eq!(
         (unseen.rank, unseen.line().as_str()),
@@ -114,14 +113,17 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     );
 
     let live = idle();
-    let failed = turn(3, ChatTurnState::Failed);
+    let failed = turn(3, failed());
     let unseen = status(&facts(&chat(2), &live, Some(&failed)));
     assert_eq!(unseen.line(), "Failed · Codex stopped with an error");
     assert!(unseen.rank.needs_you());
     let seen = status(&facts(&chat(3), &live, Some(&failed)));
     assert_eq!((seen.rank, seen.word.as_str()), (Rank::Idle, "Failed"));
 
-    let lost = turn(3, ChatTurnState::Unknown);
+    let lost = turn(
+        3,
+        TurnEnding::ContactLost("the harness process ended".to_owned()),
+    );
     let interrupted = status(&facts(&chat(2), &live, Some(&lost)));
     assert_eq!(interrupted.line(), "Interrupted · Codex stopped mid-turn");
     assert_eq!(interrupted.rank, Rank::Failed);
@@ -130,14 +132,14 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
 #[test]
 fn marked_unread_is_the_blue_dot_on_the_seen_words_and_never_notifies() {
     let live = idle();
-    let failed = turn(3, ChatTurnState::Failed);
+    let failed = turn(3, failed());
     let mut marked = chat(3);
     marked.marked_unread = true;
     let status = status(&facts(&marked, &live, Some(&failed)));
     // Not Failed again: the words it had once seen, with the blue dot.
     assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, "Failed"));
     assert!(status.unread());
-    let done = turn(3, ChatTurnState::Completed);
+    let done = turn(3, TurnEnding::Completed);
     let status_done = super::status(&facts(&marked, &live, Some(&done)));
     assert_eq!(status_done.rank, Rank::Idle);
     assert!(status_done.unread());
@@ -159,7 +161,7 @@ fn marked_unread_is_the_blue_dot_on_the_seen_words_and_never_notifies() {
 #[test]
 fn a_turn_the_person_stopped_is_idle_and_a_setup_step_is_words_only() {
     let live = idle();
-    let stopped = turn(3, ChatTurnState::Interrupted);
+    let stopped = turn(3, TurnEnding::StoppedByPerson);
     let unseen = status(&facts(&chat(2), &live, Some(&stopped)));
     assert_eq!(
         (unseen.rank, unseen.word.as_str()),
@@ -303,4 +305,42 @@ fn the_app_icon_count_stops_at_99() {
     assert_eq!(badge_text(0), None);
     assert_eq!(badge_text(3).as_deref(), Some("3"));
     assert_eq!(badge_text(120).as_deref(), Some("99+"));
+}
+
+/// Every reason ticketd stops a Chat for reads as ticketd's stop: idle, in its own words,
+/// and never as the harness failing mid-turn (whether or not the harness reported it).
+#[test]
+fn a_turn_ticketd_stopped_is_idle_in_its_own_words_for_every_reason() {
+    let live = idle();
+    for (reason, words) in [
+        (StopReason::Quit, "Stopped when ticketd quit"),
+        (StopReason::TurnedOff, "Stopped when Chat was turned off"),
+        (StopReason::Restore, "Stopped when a backup was restored"),
+        (StopReason::TakenOver, "You took this run over"),
+        (StopReason::TimeLimit, "Stopped at the run's time limit"),
+        (StopReason::RunEnded, "Stopped when its run step ended"),
+        (
+            StopReason::Trashed,
+            "Stopped when the Chat was moved to the trash",
+        ),
+        (
+            StopReason::ExplicitResume,
+            "Stopped when the Chat was resumed",
+        ),
+        (
+            StopReason::StorageFailed,
+            "Stopped when Chat storage failed",
+        ),
+    ] {
+        let stopped = turn(3, TurnEnding::StoppedByTicketd(reason));
+        let status = status(&facts(&chat(2), &live, Some(&stopped)));
+        assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, words));
+        // Settled by lost contact instead of the harness's report, it reads the same.
+        let unreported = ChatTurn {
+            state: ChatTurnState::Unknown,
+            ..stopped
+        };
+        let status = super::status(&facts(&chat(2), &live, Some(&unreported)));
+        assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, words));
+    }
 }
