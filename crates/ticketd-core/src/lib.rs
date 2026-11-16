@@ -147,7 +147,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 82;
+pub const FORMAT_VERSION: i64 = 83;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -1029,6 +1029,9 @@ impl Workspace {
         }
         if version < 82 {
             source::migrate_read_partitions(&transaction)?;
+        }
+        if version < 83 {
+            chats::migrate_turn_ending(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

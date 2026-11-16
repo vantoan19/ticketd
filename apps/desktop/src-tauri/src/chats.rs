@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use ticketd_chat_host::{
     Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, HarnessAdapter,
     HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, ProblemKind,
-    QuestionAnswer, ResumeMode, SendMode, SettingKey, StartSettings, Subscription,
-    UnconfirmedCleanup, WorkspaceOpener, harness_key, problem_kind,
+    QuestionAnswer, ResumeMode, SendMode, SettingKey, StartSettings, StopReason, Subscription,
+    TurnEnding, UnconfirmedCleanup, WorkspaceOpener, harness_key,
 };
 use ticketd_core::{
     AutomationRunStatus, BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding,
@@ -41,8 +41,6 @@ const SUMMARY_ITEMS: usize = 50;
 const HISTORY_ITEMS: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_LAST_MESSAGES: usize = 200;
-/// The detail recorded on work that was in progress in a backup when it was restored.
-const RESTORED_FROM_BACKUP: &str = "the workspace was restored from a backup";
 
 /// A refused request. `stale` means the request, turn or runtime it named is no longer
 /// current; the message is shown to the person as it is.
@@ -972,7 +970,12 @@ impl Chats {
     /// every queue with input in it is paused, so restored input waits for the person.
     pub fn finish_restore(&self) -> Outcome<()> {
         let reconciled = self.workspace().and_then(|mut workspace| {
-            workspace.mark_chat_contact_lost(None, RESTORED_FROM_BACKUP)?;
+            let restored = TurnEnding::StoppedByTicketd(StopReason::Restore);
+            workspace.mark_chat_contact_lost(
+                None,
+                &restored.detail().unwrap_or_default(),
+                &restored.key(),
+            )?;
             let filters = [
                 ChatListFilter::Active,
                 ChatListFilter::Archived,
@@ -1818,8 +1821,13 @@ impl Chats {
         }
         if let Some(turn) = Tracker::from_items(&items).failed_turn() {
             // A sign-in the probe cannot see is not shown to be in order by it.
-            let signed_out =
-                turn.problem.as_deref().map(problem_kind) == Some(ProblemKind::LoginRequired);
+            let signed_out = matches!(
+                TurnEnding::of(turn),
+                Some(TurnEnding::Failed {
+                    kind: ProblemKind::LoginRequired,
+                    ..
+                })
+            );
             if signed_out && status.status == HarnessState::SignInUnknown {
                 return Err(failed(status.message.unwrap_or_default()));
             }

@@ -295,6 +295,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                     detail: None,
                     problem: None,
                     problem_resets_at: None,
+                    ending: None,
                 },
             ],
         )
@@ -467,7 +468,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
     let queued = workspace.save_chat_input(None, &chat.id, "Later").unwrap();
 
     let affected = workspace
-        .mark_chat_contact_lost(None, "the harness process exited")
+        .mark_chat_contact_lost(None, "the harness process exited", "contact_lost")
         .unwrap();
     assert_eq!(affected, vec![chat.id.clone()]);
     assert_eq!(workspace.chat(&chat.id).unwrap().active_turn, None);
@@ -477,6 +478,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
             ChatItem::Turn(turn) => {
                 assert_eq!(turn.state, ChatTurnState::Unknown);
                 assert_eq!(turn.detail.as_deref(), Some("the harness process exited"));
+                assert_eq!(turn.ending.as_deref(), Some("contact_lost"));
             }
             ChatItem::Tool(tool) => assert_eq!(tool.state, ChatToolState::Unknown),
             ChatItem::Interaction(interaction) => {
@@ -513,7 +515,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
     // Nothing is left to reconcile the second time.
     assert!(
         workspace
-            .mark_chat_contact_lost(None, "again")
+            .mark_chat_contact_lost(None, "again", "contact_lost")
             .unwrap()
             .is_empty()
     );
@@ -541,6 +543,7 @@ fn a_failed_observation_rolls_back_the_whole_batch_and_its_change_entries() {
                 detail: None,
                 problem: None,
                 problem_resets_at: None,
+                ending: None,
             },
         ],
     );
@@ -760,6 +763,7 @@ fn archive_and_trash_keep_identity_history_queue_and_links() {
                 detail: None,
                 problem: None,
                 problem_resets_at: None,
+                ending: None,
             }],
         )
         .unwrap();
@@ -860,7 +864,9 @@ fn chat_state_survives_backup_and_restore_without_resuming_work() {
     );
     // The restored turn has no process behind it; the host reconciles before anything runs.
     assert_eq!(
-        workspace.mark_chat_contact_lost(None, "restored").unwrap(),
+        workspace
+            .mark_chat_contact_lost(None, "restored", "contact_lost")
+            .unwrap(),
         vec![chat.id.clone()]
     );
     assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
@@ -1017,13 +1023,14 @@ fn a_submission_its_turn_processed_stays_received_when_contact_is_lost() {
                     detail: None,
                     problem: None,
                     problem_resets_at: None,
+                    ending: None,
                 },
             ],
         )
         .unwrap();
 
     let affected = workspace
-        .mark_chat_contact_lost(None, "ticketd was restarted")
+        .mark_chat_contact_lost(None, "ticketd was restarted", "contact_lost")
         .unwrap();
 
     let attempt = message(&workspace, &chat, &input.id).attempts[0].clone();
@@ -1042,7 +1049,9 @@ fn a_person_closes_uncertain_delivery_without_rewriting_what_was_observed() {
         workspace
             .record_chat_submission(&chat.id, &input.id, attempt, ChatSubmissionIntent::NewTurn)
             .unwrap();
-        workspace.mark_chat_contact_lost(None, "lost").unwrap();
+        workspace
+            .mark_chat_contact_lost(None, "lost", "contact_lost")
+            .unwrap();
         input
     };
     let discarded = uncertain(&mut workspace, "first", "a1");
@@ -1116,6 +1125,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
                     detail: Some("usage limit reached".into()),
                     problem: Some("quota_exhausted".into()),
                     problem_resets_at: Some(1_730_948_100),
+                    ending: Some("failed".into()),
                 },
             ],
         )
@@ -1132,6 +1142,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
     });
     assert_eq!(turn.unwrap().problem.as_deref(), Some("quota_exhausted"));
     assert_eq!(turn.unwrap().problem_resets_at, Some(1_730_948_100));
+    assert_eq!(turn.unwrap().ending.as_deref(), Some("failed"));
     let notice = items.iter().find_map(|item| match item {
         ChatItem::Notice(notice) => Some(notice),
         _ => None,
@@ -1207,6 +1218,7 @@ fn what_a_harness_reports_is_stored_within_bounds() {
             detail: None,
             problem: Some("quota_exhausted".into()),
             problem_resets_at: Some(reported),
+            ending: None,
         };
         workspace
             .record_chat_observations(&chat.id, vec![ended])
@@ -1358,7 +1370,7 @@ fn every_combination_of_delivery_decision_and_later_observation_has_one_standing
                 }
                 LoseContact => {
                     workspace
-                        .mark_chat_contact_lost(Some(&chat.id), "lost")
+                        .mark_chat_contact_lost(Some(&chat.id), "lost", "contact_lost")
                         .unwrap();
                 }
                 Resend(attempt) => {
@@ -1511,6 +1523,7 @@ fn end_turn(workspace: &mut Workspace, chat: &Chat, turn: &str) {
                 detail: None,
                 problem: None,
                 problem_resets_at: None,
+                ending: None,
             }],
         )
         .unwrap();
@@ -1657,4 +1670,38 @@ fn upgrading_counts_every_existing_turn_as_seen() {
     let upgraded = workspace.chat(&chat.id).unwrap();
     assert!(!upgraded.unseen(&last_turn(&workspace, &chat)));
     assert!(!upgraded.muted);
+}
+
+/// Format 83 adds the column that records how a turn ended; turns recorded before it keep
+/// everything else and have no ending.
+#[test]
+fn a_format_82_workspace_gains_the_turn_ending_column_and_keeps_its_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "go", "t1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnEnded {
+                turn_id: "t1".into(),
+                state: ChatTurnState::Completed,
+                detail: None,
+                problem: None,
+                problem_resets_at: None,
+                ending: None,
+            }],
+        )
+        .unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("ALTER TABLE chat_turns DROP COLUMN ending; PRAGMA user_version = 82;")
+        .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+
+    let turn = last_turn(&workspace, &chat);
+    assert_eq!(turn.state, ChatTurnState::Completed);
+    assert_eq!(turn.ending, None);
 }
