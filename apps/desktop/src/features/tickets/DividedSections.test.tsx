@@ -2,10 +2,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
+import { OpenTicketFor } from "@/features/tickets/open-ticket/parts/activity-testing";
 import { Backlinks } from "./Backlinks";
 import { Evidence } from "./Evidence";
-import { TestOpenTicket } from "./open-ticket/testing";
-import type { Ticket } from "@/lib/api/client";
 import { Subtickets } from "./Subtickets";
 import type { LinkedWorkState } from "./useLinkedWork";
 
@@ -56,19 +55,10 @@ test("each major ticket section opens with its heading row, set apart by space a
         trashed={false}
         refresh={async () => {}}
       />
-      <TestOpenTicket
-        ticket={{ id: "t1", reference: "T-KQ1", trashed: false } as Ticket}
-      >
+      <OpenTicketFor reference="T-KQ1">
         <Backlinks select={() => {}} />
-      </TestOpenTicket>
-      <Activity
-        reference="T-KQ1"
-        status="Todo"
-        revision={0}
-        projects={[]}
-        active
-        trashed={false}
-      />
+        <Activity reference="T-KQ1" projects={[]} active trashed={false} />
+      </OpenTicketFor>
     </>,
   );
   await screen.findByText("Cache layer");

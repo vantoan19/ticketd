@@ -260,7 +260,6 @@ export function TicketPage({
       attention={attentionFor("strip")}
       ticket={ticket}
       active={active && !opening}
-      revision={revision}
       projects={projects}
       plans={plans}
       onSaved={changed}
@@ -454,15 +453,12 @@ export function TicketPage({
           }
           projects={projects}
           plans={plans}
-          status={ticket.status}
-          revision={revision}
           active={active}
           trashed={ticket.trashed}
           select={select}
           foldEmpty
           latestNoteId={ticket.latest_update?.activity_id}
           sourceName={source?.provider_name}
-          onChanged={refresh}
         />
       </div>
     </div>

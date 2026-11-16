@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { LatestUpdate } from "./LatestUpdate";
+import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -23,7 +24,11 @@ test("shows the reported brief and opens its exact Activity", async () => {
     supporting_document_id: null,
   });
   const open = vi.fn();
-  render(<LatestUpdate reference="T-KQ1" active revision={0} onOpen={open} />);
+  render(
+    <OpenTicketFor reference="T-KQ1">
+      <LatestUpdate active onOpen={open} />
+    </OpenTicketFor>,
+  );
   await screen.findByText("Review complete: details");
   expect(screen.getByText(/Agent/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /^Go to update/ }));
@@ -34,7 +39,11 @@ test("distinguishes an absent update from a failed read and allows retry", async
   bridge.invoke
     .mockRejectedValueOnce(new Error("Database unavailable"))
     .mockResolvedValueOnce(null);
-  render(<LatestUpdate reference="T-KQ1" active revision={0} />);
+  render(
+    <OpenTicketFor reference="T-KQ1">
+      <LatestUpdate active />
+    </OpenTicketFor>,
+  );
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Couldn't load the latest update",
   );
@@ -42,21 +51,20 @@ test("distinguishes an absent update from a failed read and allows retry", async
   await screen.findByText("No update reported");
 });
 
-test("refreshes the preview when the workspace revision changes", async () => {
-  const report = {
-    activity_id: "a-1",
-    brief: { text: "First report", truncated: false },
-    reported_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    editing_agent: null,
-    supporting_document_id: null,
-  };
-  bridge.invoke.mockResolvedValueOnce(report).mockResolvedValueOnce({
-    ...report,
-    brief: { text: "Corrected report", truncated: true },
-  });
-  const view = render(<LatestUpdate reference="T-KQ1" active revision={0} />);
-  await screen.findByText("First report");
-  view.rerender(<LatestUpdate reference="T-KQ1" active revision={1} />);
-  await screen.findByText("Corrected report…");
+test("a hidden page reads nothing until it is shown", async () => {
+  bridge.invoke.mockResolvedValue(null);
+  const view = render(
+    <OpenTicketFor reference="T-KQ1" hidden>
+      <LatestUpdate active />
+    </OpenTicketFor>,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(bridge.invoke).not.toHaveBeenCalled();
+  view.rerender(
+    <OpenTicketFor reference="T-KQ1">
+      <LatestUpdate active />
+    </OpenTicketFor>,
+  );
+  await screen.findByText("No update reported");
+  expect(bridge.invoke).toHaveBeenCalledTimes(1);
 });

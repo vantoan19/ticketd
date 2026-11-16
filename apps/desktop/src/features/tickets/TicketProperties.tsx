@@ -182,7 +182,6 @@ export function TicketProperties({
   chats,
   attention,
   active = true,
-  revision = 0,
   layout = "rail",
 }: {
   /** The ticket's Chats, after Status and Latest update. */
@@ -191,7 +190,6 @@ export function TicketProperties({
   attention?: ReactNode;
   layout?: "rail" | "strip";
   active?: boolean;
-  revision?: number;
   ticket: Ticket;
   projects: Project[];
   plans: Plan[];
@@ -364,9 +362,7 @@ export function TicketProperties({
     ticket.status === "In progress" || ticket.status === "In review";
   const latestUpdate = reportsProgress && (
     <LatestUpdate
-      reference={ticket.reference}
       active={active}
-      revision={revision}
       onOpen={onOpenNote}
       variant={strip ? "line" : "rail"}
     />

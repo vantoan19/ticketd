@@ -1,16 +1,13 @@
 import { progressBrief } from "./progress-brief";
-import { useEffect, useState } from "react";
 import { Bot, User } from "lucide-react";
 import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  describeFailure,
-  type FailureDescription,
-} from "@/lib/api/describe-failure";
-import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
+import type { FailureDescription } from "@/lib/api/describe-failure";
+import type { LatestUpdate as Update } from "@/lib/api/progress";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { RailSection } from "./RailSection";
+import { useOpenTicket } from "./open-ticket";
 
 /**
  * The latest authored update of an In progress or In review ticket. In the
@@ -19,45 +16,65 @@ import { RailSection } from "./RailSection";
  * "codex · 5 h ago  Drafted a fix…".
  */
 export function LatestUpdate({
-  reference,
   active,
-  revision,
   onOpen,
   variant = "rail",
 }: {
-  reference: string;
+  /** False while the page is only a saved copy: the update is not asked for yet. */
   active: boolean;
-  revision: number;
   onOpen?: ((id: string) => void) | undefined;
   variant?: "rail" | "line";
 }) {
+  return active ? (
+    <Reported onOpen={onOpen} variant={variant} />
+  ) : (
+    <Preview
+      update={null}
+      error={null}
+      loading
+      retry={() => {}}
+      onOpen={onOpen}
+      variant={variant}
+    />
+  );
+}
+
+function Reported({
+  onOpen,
+  variant,
+}: {
+  onOpen: ((id: string) => void) | undefined;
+  variant: "rail" | "line";
+}) {
+  const { value, failure, retry } = useOpenTicket("latestUpdate");
+  return (
+    <Preview
+      update={value ?? null}
+      error={value === undefined ? failure : null}
+      loading={value === undefined && failure === null}
+      retry={retry}
+      onOpen={onOpen}
+      variant={variant}
+    />
+  );
+}
+
+function Preview({
+  update,
+  error,
+  loading,
+  retry,
+  onOpen,
+  variant,
+}: {
+  update: Update | null;
+  error: FailureDescription | null;
+  loading: boolean;
+  retry: () => void;
+  onOpen: ((id: string) => void) | undefined;
+  variant: "rail" | "line";
+}) {
   const now = useNow();
-  const [state, setState] = useState<{
-    update: Update | null;
-    error: FailureDescription | null;
-    loading: boolean;
-  }>({ update: null, error: null, loading: true });
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    let current = true;
-    void latestUpdate(reference)
-      .then((update) => {
-        if (current) setState({ update, error: null, loading: false });
-      })
-      .catch((error: unknown) => {
-        if (current)
-          setState({
-            update: null,
-            error: describeFailure(error, "load the latest update"),
-            loading: false,
-          });
-      });
-    return () => {
-      current = false;
-    };
-  }, [active, reference, revision, retry]);
-  const { update, error, loading } = state;
   const who = update?.editing_agent ?? "You";
   const Icon = update?.editing_agent ? Bot : User;
   const when = update && (
@@ -79,13 +96,7 @@ export function LatestUpdate({
   if (variant === "line") {
     if (loading) return <Skeleton className="h-7 w-full" />;
     if (error)
-      return (
-        <FailureState
-          size="inline"
-          failure={error}
-          onRetry={() => setRetry((n) => n + 1)}
-        />
-      );
+      return <FailureState size="inline" failure={error} onRetry={retry} />;
     if (!update) return null;
     return (
       <button
@@ -107,11 +118,7 @@ export function LatestUpdate({
       {loading ? (
         <Skeleton className="h-8" />
       ) : error ? (
-        <FailureState
-          size="inline"
-          failure={error}
-          onRetry={() => setRetry((n) => n + 1)}
-        />
+        <FailureState size="inline" failure={error} onRetry={retry} />
       ) : update ? (
         <button
           type="button"

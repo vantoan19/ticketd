@@ -9,7 +9,11 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { Activity } from "./Activity";
+import type { ComponentProps } from "react";
+import type { ChangeSignal } from "@/lib/workspace-reads";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { Activity as ActivitySection } from "./Activity";
+import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { DocumentNavigation } from "@/features/documents/navigation";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -46,6 +50,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Activity as a section of the open Ticket, as on the page. */
+function Activity({
+  signal,
+  hidden,
+  ...props
+}: ComponentProps<typeof ActivitySection> & {
+  signal?: ChangeSignal;
+  hidden?: boolean;
+}) {
+  return (
+    <OpenTicketFor
+      reference={props.reference}
+      {...(signal && { signal })}
+      {...(hidden !== undefined && { hidden })}
+    >
+      <ActivitySection {...props} />
+    </OpenTicketFor>
+  );
+}
+
 test("preserves a note draft on a failed save and prevents repeated submissions", async () => {
   let rejectSave: (reason: Error) => void = () => {};
   bridge.invoke.mockImplementation((command: string) => {
@@ -55,16 +79,7 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
       rejectSave = reject;
     });
   });
-  render(
-    <Activity
-      reference="T-KQ1"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ1" projects={[]} active trashed={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole(
@@ -125,8 +140,6 @@ test("opens the selected note even when it is outside the loaded page", async ()
   render(
     <Activity
       reference="T-KQ1"
-      status="Todo"
-      revision={0}
       projects={[]}
       active
       trashed={false}
@@ -177,8 +190,6 @@ test("reveals the existing chronological note without scrolling the workspace", 
   render(
     <Activity
       reference="T-KQ1"
-      status="In progress"
-      revision={0}
       projects={[]}
       active
       trashed={false}
@@ -229,8 +240,6 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
   render(
     <Activity
       reference="T-KQ1"
-      status="Todo"
-      revision={0}
       projects={[]}
       active
       trashed={false}
@@ -288,14 +297,13 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   );
   const targetProps = {
     reference: "T-KQ1",
-    status: "Todo",
-    revision: 0,
     projects: [],
     active: true,
     trashed: false,
     target: { id: "older", key: 1 },
   };
-  const view = render(<Activity {...targetProps} />);
+  const signal = fakeChangeSignal();
+  render(<Activity {...targetProps} signal={signal} />);
   await screen.findByText("Earlier update");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: /Actions for update from/ }),
@@ -316,7 +324,7 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
     },
   );
   saved = { ...saved!, brief: "Changed externally" };
-  view.rerender(<Activity {...targetProps} revision={1} />);
+  await act(async () => signal.change());
   await screen.findByText(/The saved update changed/);
   expect(
     screen.getByRole("textbox", { name: "Edit update source" }),
@@ -365,8 +373,6 @@ test("finishing a note edit does not discard a newer note navigation", async () 
   );
   const targetProps = {
     reference: "T-KQ1",
-    status: "Todo",
-    revision: 0,
     projects: [],
     active: true,
     trashed: false,
@@ -391,15 +397,15 @@ test("finishing a note edit does not discard a newer note navigation", async () 
     }),
   );
   await act(async () => finishSave({ ...first, brief: "Saved first" }));
-  await waitFor(() => expect(screen.queryByText("Saving…")).toBeNull());
+  // The save reports the change, which reads the update now asked for too.
   await act(async () => finishSecond(second));
+  await waitFor(() => expect(screen.queryByText("Saving…")).toBeNull());
   expect(await screen.findByText("Second target")).toBeTruthy();
+  expect(screen.queryByText("Saved first")).toBeNull();
 });
 
 const props = {
   reference: "T-KQ1",
-  status: "Todo",
-  revision: 0,
   projects: [],
   active: true,
   trashed: false,
@@ -478,7 +484,8 @@ test("preserves new and edited drafts across hidden navigation, external refresh
     if (command === "edit_activity") throw new Error("Disk full");
     throw new Error(`Unexpected ${command}`);
   });
-  const view = render(<Activity {...scoped} />);
+  const signal = fakeChangeSignal();
+  const view = render(<Activity {...scoped} signal={signal} />);
   await screen.findByText("cli-agent");
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
@@ -507,9 +514,10 @@ test("preserves new and edited drafts across hidden navigation, external refresh
       target: { value: "My edited **draft**" },
     },
   );
-  view.rerender(<Activity {...scoped} active={false} />);
+  view.rerender(<Activity {...scoped} signal={signal} hidden active={false} />);
   saved = { ...saved, brief: "An external update" };
-  view.rerender(<Activity {...scoped} revision={1} />);
+  await act(async () => signal.change());
+  view.rerender(<Activity {...scoped} signal={signal} />);
   await screen.findByText(/The saved update changed while you were editing/);
   expect(
     screen.getByRole("textbox", { name: "Edit update source" }),
@@ -528,7 +536,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   expect(
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Unsubmitted new draft");
-  view.rerender(<Activity {...scoped} revision={1} trashed />);
+  view.rerender(<Activity {...scoped} signal={signal} trashed />);
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Post update" })).toBeNull();
 });
@@ -580,16 +588,7 @@ test("recovers an unpublished brief after the desktop restarts", async () => {
     "A recovered **brief**",
   );
   bridge.invoke.mockResolvedValue([]);
-  render(
-    <Activity
-      reference="T-KQ987"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ987" projects={[]} active trashed={false} />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -629,8 +628,6 @@ test("restores unpublished details after remount", async () => {
   bridge.invoke.mockResolvedValue([]);
   const props = {
     reference: "T-KQ990",
-    status: "Todo",
-    revision: 0,
     projects: [],
     active: true,
     trashed: false,
@@ -684,16 +681,7 @@ test("retries a failed details post with the same request identity and draft", a
   });
   localStorage.setItem("ticketd:activity-draft:T-KQ991", "Brief");
   localStorage.setItem("ticketd:activity-details:T-KQ991", "Evidence");
-  render(
-    <Activity
-      reference="T-KQ991"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ991" projects={[]} active trashed={false} />);
   fireEvent.click(await screen.findByRole("button", { name: "Post update" }));
   await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button", { name: "Post update" }));
@@ -715,16 +703,7 @@ test("retries a brief-only post with the same request identity", async () => {
     return Promise.resolve([]);
   });
   localStorage.setItem("ticketd:activity-draft:T-KQ993", "Brief");
-  render(
-    <Activity
-      reference="T-KQ993"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ993" projects={[]} active trashed={false} />);
   fireEvent.click(await screen.findByRole("button", { name: "Post update" }));
   await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button", { name: "Post update" }));
@@ -763,8 +742,6 @@ test("restores a selected supporting Document after navigation", async () => {
   });
   const props = {
     reference: "T-KQ992",
-    status: "Todo",
-    revision: 0,
     projects: [],
     active: true,
     trashed: false,
@@ -798,16 +775,7 @@ test("restores a selected supporting Document after navigation", async () => {
 });
 
 test("a brief of only whitespace entities cannot be posted", async () => {
-  render(
-    <Activity
-      reference="T-KQ993"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ993" projects={[]} active trashed={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   expect(screen.getByRole("button", { name: "Post update" })).toHaveProperty(
     "disabled",
@@ -847,14 +815,7 @@ test("opens the exact supporting Document from its update", async () => {
   const open = vi.fn();
   render(
     <DocumentNavigation.Provider value={open}>
-      <Activity
-        reference="T-KQ993"
-        status="Todo"
-        revision={0}
-        projects={[]}
-        active
-        trashed={false}
-      />
+      <Activity reference="T-KQ993" projects={[]} active trashed={false} />
     </DocumentNavigation.Provider>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Open details" }));
@@ -862,7 +823,6 @@ test("opens the exact supporting Document from its update", async () => {
 });
 
 test("offers refresh when the requested update was removed", async () => {
-  const refresh = vi.fn().mockResolvedValue(undefined);
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "get_activity") return Promise.resolve(null);
     if (command === "activity_feed") return Promise.resolve([]);
@@ -871,18 +831,19 @@ test("offers refresh when the requested update was removed", async () => {
   render(
     <Activity
       reference="T-KQ1"
-      status="Todo"
-      revision={0}
       projects={[]}
       active
       trashed={false}
       target={{ id: "removed", key: 1 }}
-      onChanged={refresh}
     />,
   );
   await screen.findByText(/update is no longer available/i);
+  const lookups = () =>
+    bridge.invoke.mock.calls.filter(([command]) => command === "get_activity")
+      .length;
+  expect(lookups()).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Refresh updates" }));
-  expect(refresh).toHaveBeenCalled();
+  await waitFor(() => expect(lookups()).toBe(2));
 });
 
 test("restores the whole draft, brief, details and attached Document, from one object", async () => {
@@ -902,16 +863,7 @@ test("restores the whole draft, brief, details and attached Document, from one o
     "ticketd:activity-draft:T-KQ994",
     JSON.stringify({ brief: "Brief", details: "More", support: "doc-1" }),
   );
-  render(
-    <Activity
-      reference="T-KQ994"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ994" projects={[]} active trashed={false} />);
   expect(await screen.findByText("Investigation")).toBeTruthy();
   expect(await screen.findByText("Brief")).toBeTruthy();
   expect(screen.getByText("Draft saved")).toBeTruthy();
@@ -919,16 +871,7 @@ test("restores the whole draft, brief, details and attached Document, from one o
 
 test("opening the composer puts the caret in the update editor", async () => {
   bridge.invoke.mockImplementation(() => Promise.resolve([]));
-  render(
-    <Activity
-      reference="T-KQ77"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  render(<Activity reference="T-KQ77" projects={[]} active trashed={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   await screen.findByRole(
     "button",
@@ -940,4 +883,68 @@ test("opening the composer puts the caret in the update editor", async () => {
       document.activeElement?.closest(".activity-composer"),
     ).not.toBeNull(),
   );
+});
+
+function page(from: number, count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    type: "authored",
+    activity: {
+      ...original,
+      id: `n-${from + index}`,
+      brief: `Update ${from + index}`,
+    },
+  }));
+}
+
+test("shows more activity a page at a time, and a change re-reads every page shown", async () => {
+  const signal = fakeChangeSignal();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { offset: number }) => {
+      if (command === "activity_feed")
+        return args!.offset === 0 ? page(0, 50) : page(50, 3);
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(<Activity {...props} reference="T-KQ90" signal={signal} />);
+  await screen.findByText("Update 0");
+  fireEvent.click(screen.getByRole("button", { name: "Show more activity" }));
+  await screen.findByText("Update 52");
+  expect(
+    screen.queryByRole("button", { name: "Show more activity" }),
+  ).toBeNull();
+  const offsets = () =>
+    bridge.invoke.mock.calls
+      .filter(([command]) => command === "activity_feed")
+      .map(([, args]) => (args as { offset: number }).offset);
+  expect(offsets()).toEqual([0, 50]);
+  await act(async () => signal.change());
+  await waitFor(() => expect(offsets()).toEqual([0, 50, 0, 50]));
+  expect(screen.getByText("Update 52")).toBeTruthy();
+});
+
+test("posting an update reads the feed again once", async () => {
+  let saved: ReturnType<typeof page> = [];
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "activity_feed") return saved;
+    if (command === "add_activity_with_details") {
+      saved = page(0, 1);
+      return saved[0]!.activity;
+    }
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<Activity {...props} reference="T-KQ91" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Write an update…" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "New update source" }), {
+    target: { value: "Posted" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Post update" }));
+  await screen.findByText("Update 0");
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "activity_feed"),
+  ).toHaveLength(2);
 });

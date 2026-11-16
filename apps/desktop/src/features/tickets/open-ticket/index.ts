@@ -1,5 +1,6 @@
 // The interface of the Open Ticket module (ADR 0013, GLOSSARY "Open Ticket").
 // Test helpers are in "./testing" and are imported by tests only.
+import "./parts/activity";
 export { OpenTicket } from "./OpenTicket";
 export { useOpenTicket } from "./open-ticket-context";
 export type { OpenTicketState } from "./open-ticket-context";
