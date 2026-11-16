@@ -49,6 +49,7 @@ function SheetContent({
   size = "default",
   showCloseButton = true,
   returnFocus,
+  resolveReturnFocus,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
@@ -62,12 +63,19 @@ function SheetContent({
   showCloseButton?: boolean;
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
+  /** The visible logical opener after responsive navigation changes. */
+  resolveReturnFocus?: () => HTMLElement | null;
 }) {
   const contentRef = useClosingOverlayRef(ref);
-  const focus = useFocusReturn(returnFocus, {
-    ...(onOpenAutoFocus && { onOpenAutoFocus }),
-    ...(onCloseAutoFocus && { onCloseAutoFocus }),
-  });
+  const focus = useFocusReturn(
+    returnFocus,
+    {
+      ...(onOpenAutoFocus && { onOpenAutoFocus }),
+      ...(onCloseAutoFocus && { onCloseAutoFocus }),
+    },
+    undefined,
+    resolveReturnFocus,
+  );
   return (
     <SheetPortal>
       <SheetOverlay />
