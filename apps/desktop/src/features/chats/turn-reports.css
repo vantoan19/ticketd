@@ -103,16 +103,17 @@
 
 /* The plan's recessed 28px pill in the dock. */
 .chat-plan-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  max-width: 100%;
   min-width: 0;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 10px;
   border-radius: var(--radius-pill);
   background: var(--recessed);
   color: var(--muted-foreground);
+  font-size: var(--text-code);
   text-align: left;
 }
 .chat-plan-pill:hover,
@@ -134,13 +135,29 @@
 }
 .chat-plan-pill-now {
   min-width: 0;
-  margin-left: -4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-plan-pill .chat-chevron {
-  margin-left: auto;
+.chat-plan-pill-icon {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.chat-plan-pill-icon > svg {
+  position: absolute;
+  inset: 0;
+  width: 14px;
+  height: 14px;
+}
+.chat-plan-pill:hover .chat-plan-pill-mark,
+.chat-plan-pill:focus-visible .chat-plan-pill-mark,
+.chat-plan-pill[aria-expanded="true"] .chat-plan-pill-mark {
+  visibility: hidden;
+}
+.chat-plan-pill-separator {
+  color: var(--faint);
 }
 
 /* Changed files: the row below the response, and its 32px file rows. */

@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
 } from "react";
 import {
   CircleDashed,
@@ -170,6 +171,7 @@ function FiltersMenu(
   applied: Props & { menu: FiltersMenuState; filterCount: number },
 ) {
   const { menu, filterCount } = applied;
+  const parentMenu = useRef<HTMLDivElement>(null);
   const current = {
     status: applied.status,
     availability: applied.availability,
@@ -253,6 +255,16 @@ function FiltersMenu(
   });
   const valueMeta = (value: string | undefined) =>
     value ? <span className="filters-menu-value">{value}</span> : null;
+  const keepSubmenuOnParentFocus: ComponentProps<
+    typeof DropdownMenuSubContent
+  >["onFocusOutside"] = (event) => {
+    // Radix returns focus to the parent menu as the pointer leaves its trigger.
+    // A direct move into a left-opening submenu can reach that focus event
+    // before Radix updates its pointer direction. Keep the choices mounted for
+    // the following pointerdown; another dimension, Escape or dismissal still
+    // closes them through the controlled menu state.
+    if (event.target === parentMenu.current) event.preventDefault();
+  };
   return (
     <DropdownMenu open={menu.open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -266,7 +278,7 @@ function FiltersMenu(
           {filterCount > 0 && <Count aria-hidden="true">{filterCount}</Count>}
         </PaneHeaderButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent ref={parentMenu} align="end">
         {shown.Status && (
           <DropdownMenuSub {...sub("Status")}>
             <DropdownMenuSubTrigger>
@@ -274,7 +286,10 @@ function FiltersMenu(
               Status
               {valueMeta(p.status)}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent aria-label="Status">
+            <DropdownMenuSubContent
+              aria-label="Status"
+              onFocusOutside={keepSubmenuOnParentFocus}
+            >
               <DropdownMenuRadioGroup
                 value={p.status}
                 onValueChange={(value) => update(p.setStatus, value)}
@@ -306,7 +321,10 @@ function FiltersMenu(
               Availability
               {valueMeta(p.availability)}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent aria-label="Availability">
+            <DropdownMenuSubContent
+              aria-label="Availability"
+              onFocusOutside={keepSubmenuOnParentFocus}
+            >
               <DropdownMenuRadioGroup
                 value={p.availability}
                 onValueChange={(value) => update(p.setAvailability, value)}
@@ -349,7 +367,10 @@ function FiltersMenu(
                   : undefined,
               )}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent aria-label="Plan">
+            <DropdownMenuSubContent
+              aria-label="Plan"
+              onFocusOutside={keepSubmenuOnParentFocus}
+            >
               {p.plans.length === 0 && (
                 <DropdownMenuItem disabled>No Plans yet</DropdownMenuItem>
               )}
@@ -395,7 +416,11 @@ function FiltersMenu(
             Tags
             {valueMeta(tagList.length ? String(tagList.length) : undefined)}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Tags" className="max-h-80">
+          <DropdownMenuSubContent
+            aria-label="Tags"
+            className="max-h-80"
+            onFocusOutside={keepSubmenuOnParentFocus}
+          >
             {allTags.length === 0 && (
               <DropdownMenuItem disabled>No tags yet</DropdownMenuItem>
             )}
@@ -433,7 +458,11 @@ function FiltersMenu(
             Parent
             {valueMeta(p.family || undefined)}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Parent" className="w-80">
+          <DropdownMenuSubContent
+            aria-label="Parent"
+            className="w-80"
+            onFocusOutside={keepSubmenuOnParentFocus}
+          >
             {/* The picker owns its keys: arrows move its rows and typing
                 searches, rather than closing the submenu or jumping rows. */}
             <div

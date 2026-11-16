@@ -67,6 +67,7 @@ export function FirstRunGuide({
                 shortcut={shortcutLabel("new-ticket")}
               >
                 <Button
+                  size="compact"
                   aria-disabled={!!disabledReason}
                   aria-description={disabledReason ?? undefined}
                   aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
@@ -95,6 +96,7 @@ export function FirstRunGuide({
                 shortcut={shortcutLabel("go-agent-skills")}
               >
                 <Button
+                  size="compact"
                   variant="outline"
                   aria-keyshortcuts={ariaKeyShortcuts("go-agent-skills")}
                   onClick={() => settings?.("agent-skills")}
@@ -124,6 +126,7 @@ export function FirstRunGuide({
                 shortcut={shortcutLabel("go-sync")}
               >
                 <Button
+                  size="compact"
                   variant="ghost"
                   aria-keyshortcuts={ariaKeyShortcuts("go-sync")}
                   onClick={() => settings?.("google-drive")}

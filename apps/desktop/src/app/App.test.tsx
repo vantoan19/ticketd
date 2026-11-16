@@ -2958,6 +2958,19 @@ test.each(["Todo", "Duplicate"])(
   },
 );
 
+test("Copy reference exposes its shortcut in the header tooltip and accessible metadata", async () => {
+  const user = userEvent.setup();
+  paletteTickets();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  const copy = await screen.findByRole("button", { name: "Copy reference" });
+  expect(copy.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+C");
+  await user.hover(copy);
+  const tooltip = await screen.findByRole("tooltip");
+  expect(tooltip.textContent).toContain("Copy reference");
+  expect(tooltip.textContent).toContain("Ctrl+Shift+C");
+});
+
 test("copy reference prefers the focused row over the open Ticket", async () => {
   paletteTickets();
   const writeText = vi.fn().mockResolvedValue(undefined);
@@ -5563,6 +5576,161 @@ test("palette opens a named active Plan through the workspace navigation", async
   );
   expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
 });
+
+test.each(["All tickets", "Plan"])(
+  "pointer Status filter in %s commits after close and returns focus",
+  async (scope) => {
+    const user = userEvent.setup();
+    const tickets = [
+      bulkTicket(1, { title: "Todo pointer row", status: "Todo" }),
+      bulkTicket(2, { title: "Done pointer row", status: "Done" }),
+    ];
+    bridge.invoke.mockImplementation((command: string, args?: object) => {
+      if (command === "list_plans")
+        return [{ id: "pointer-plan", name: "Pointer Plan", archived: false }];
+      if (command === "show_plan") {
+        const view = bridgeDefault(command, args) as { plan: object };
+        return {
+          ...view,
+          plan: { ...view.plan, id: "pointer-plan", name: "Pointer Plan" },
+          members: tickets,
+        };
+      }
+      if (command === "find_tickets") {
+        const status = (args as { filter: { status: string | null } }).filter
+          .status;
+        return status
+          ? tickets.filter((ticket) => ticket.status === status)
+          : tickets;
+      }
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /Done pointer row/ });
+    if (scope === "Plan") {
+      await user.click(screen.getByRole("button", { name: "Pointer Plan" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Plan actions" }),
+      );
+      await user.click(
+        await screen.findByRole("menuitem", { name: "Filter and display…" }),
+      );
+    }
+    const trigger = await screen.findByRole("button", { name: "Filters" });
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name: /^Status/ }));
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: /^Todo/ }),
+    );
+    const bar = await screen.findByLabelText("Active filters");
+    expect(bar.textContent).toContain("StatusTodo");
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Done pointer row/ }),
+      ).toBeNull();
+      expect(screen.queryAllByRole("menu")).toHaveLength(0);
+      expect(document.activeElement).toBe(trigger);
+    });
+    expect(bridge.invoke).toHaveBeenCalledWith("find_tickets", {
+      filter: expect.objectContaining({ status: "Todo" }),
+    });
+  },
+);
+
+test.each(["All tickets", "Plan"])(
+  "pointer Tags filter in %s keeps multiple checks staged until dismissal",
+  async (scope) => {
+    const user = userEvent.setup();
+    const tickets = [
+      bulkTicket(1, { title: "Both pointer tags", tags: ["board", "ui"] }),
+      bulkTicket(2, { title: "Other pointer row", tags: [] }),
+    ];
+    bridge.invoke.mockImplementation((command: string, args?: object) => {
+      if (command === "list_plans")
+        return [{ id: "pointer-plan", name: "Pointer Plan", archived: false }];
+      if (command === "show_plan") {
+        const view = bridgeDefault(command, args) as { plan: object };
+        return {
+          ...view,
+          plan: { ...view.plan, id: "pointer-plan", name: "Pointer Plan" },
+          members: tickets,
+        };
+      }
+      if (command === "search_tags") return ["board", "ui"];
+      if (command === "find_tickets") {
+        const tags = (args as { filter: { tags: string[] } }).filter.tags;
+        return tags.length ? tickets.slice(0, 1) : tickets;
+      }
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /Other pointer row/ });
+    if (scope === "Plan") {
+      await user.click(screen.getByRole("button", { name: "Pointer Plan" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Plan actions" }),
+      );
+      await user.click(
+        await screen.findByRole("menuitem", { name: "Filter and display…" }),
+      );
+    }
+    const retained = await screen.findByRole("button", {
+      name: /Other pointer row/,
+    });
+    const trigger = await screen.findByRole("button", { name: "Filters" });
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name: /^Tags/ }));
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "board" }),
+    );
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "ui" }));
+    expect(
+      screen
+        .getByRole("menuitemcheckbox", { name: "board" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("menuitemcheckbox", { name: "ui" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.queryByLabelText("Active filters")).toBeNull();
+    expect(retained.isConnected).toBe(true);
+    expect(
+      bridge.invoke.mock.calls
+        .filter(([name]) => name === "find_tickets")
+        .at(-1)?.[1],
+    ).toEqual(
+      expect.objectContaining({
+        filter: expect.objectContaining({ tags: [] }),
+      }),
+    );
+    await user.keyboard("{Escape}");
+    const bar = await screen.findByLabelText("Active filters");
+    expect(bar.textContent).toContain("Tagsboard, ui");
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Other pointer row/ }),
+      ).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+    expect(bridge.invoke).toHaveBeenCalledWith("find_tickets", {
+      filter: expect.objectContaining({ tags: ["board", "ui"] }),
+    });
+    await user.click(trigger);
+    await user.click(screen.getByRole("menuitem", { name: /^Tags/ }));
+    expect(
+      screen
+        .getByRole("menuitemcheckbox", { name: "board" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("menuitemcheckbox", { name: "ui" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  },
+);
 
 test("filter checks stay staged until the menu closes, then the bar follows the header", async () => {
   const tickets = [

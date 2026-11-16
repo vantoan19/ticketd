@@ -12,14 +12,17 @@ import { isMacPlatform } from "@/lib/platform";
  * ("N", "Enter", "↑", "F2", "1–9").
  */
 
-export type ShortcutScope =
-  | "Everywhere"
-  | "Lists"
-  | "Ticket"
-  | "Plans"
-  | "Chat"
-  | "First run"
-  | "Dialogs and menus";
+/** Stable documentation order, independent of action and palette priority. */
+export const SHORTCUT_SCOPES = [
+  "Everywhere",
+  "Lists",
+  "Ticket",
+  "Plans",
+  "Chat",
+  "Dialogs and menus",
+  "First run",
+] as const;
+export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number];
 
 export type Shortcut = {
   id: string;

@@ -198,7 +198,13 @@ export function TicketHeader({
             >
               {selected ?? "Ticket details"}
             </h1>
-            {selected && <CopyButton label="Copy reference" text={selected} />}
+            {selected && (
+              <CopyButton
+                label="Copy reference"
+                text={selected}
+                shortcutId="ticket-copy-reference"
+              />
+            )}
             {scrolled && ticket && (
               <Tooltip content={ticket.title}>
                 <span className="ticket-header-title">
