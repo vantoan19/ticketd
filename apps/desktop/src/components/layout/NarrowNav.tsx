@@ -18,7 +18,7 @@ export function NarrowNav({
   waitingRuns = 0,
   unreadInbox,
 }: {
-  onOpenPalette: () => void;
+  onOpenPalette: (origin: HTMLButtonElement) => void;
   waitingChats: number;
   /** Automation runs that ended needing the person. */
   waitingRuns?: number;
@@ -56,7 +56,7 @@ export function NarrowNav({
         data-responsive-navigation="search"
         shortcut={shortcutLabel("command-palette")}
         aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
-        onClick={onOpenPalette}
+        onClick={(event) => onOpenPalette(event.currentTarget)}
       >
         <Search aria-hidden="true" />
       </IconButton>

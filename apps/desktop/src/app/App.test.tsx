@@ -10582,7 +10582,7 @@ test("palette Reset zoom restores the visible Search equivalent when native zoom
       screen.getByRole("button", { name: "Open navigation" }),
     );
     const search = screen.getByRole("button", { name: "Search" });
-    search.focus();
+    // A pointer invocation does not have to focus the button first.
     fireEvent.click(search);
     const filter = await screen.findByRole("combobox", {
       name: "Search tickets and destinations",

@@ -452,11 +452,15 @@ function AppContent() {
       (view === "tickets" ? workspace.selected : null)
     );
   }
-  function openPalette(scope: TicketCommandScope | null = null) {
+  function openPalette(
+    scope: TicketCommandScope | null = null,
+    origin?: HTMLElement,
+  ) {
     paletteReturn.current =
-      document.activeElement instanceof HTMLElement
+      origin ??
+      (document.activeElement instanceof HTMLElement
         ? document.activeElement
-        : null;
+        : null);
     setPaletteReference(actionReference());
     setPaletteScope(scope);
     setPaletteOpen(true);
@@ -888,7 +892,9 @@ function AppContent() {
                           />
                         ) : (
                           <WorkspaceSidebar
-                            onOpenPalette={() => openPalette()}
+                            onOpenPalette={(origin) =>
+                              openPalette(null, origin)
+                            }
                             createDisabledReason={createDisabledReason}
                             counts={counts}
                             hasTickets={
@@ -947,7 +953,9 @@ function AppContent() {
                                   isMobile &&
                                   view !== "settings" && (
                                     <NarrowNav
-                                      onOpenPalette={() => openPalette()}
+                                      onOpenPalette={(origin) =>
+                                        openPalette(null, origin)
+                                      }
                                       waitingChats={chat.overview.needs_you}
                                       waitingRuns={
                                         chat.enabled

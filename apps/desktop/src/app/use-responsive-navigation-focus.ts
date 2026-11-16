@@ -25,7 +25,9 @@ export function useResponsiveNavigationFocus(
   const replacement = useCallback(
     (origin: HTMLElement | null) => {
       if (!origin || origin.isConnected) return origin;
-      const action = navigationActions.current.get(origin);
+      const action =
+        navigationActions.current.get(origin) ??
+        origin.dataset.responsiveNavigation;
       if (!action) return null;
       const find = (selector: string) =>
         [...document.querySelectorAll<HTMLElement>(selector)].find(

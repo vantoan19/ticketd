@@ -214,7 +214,7 @@ export function WorkspaceSidebar({
   view: View;
   /** The workspace graph covers the current view; only its entry is active. */
   workspaceGraphOpen?: boolean;
-  onOpenPalette: () => void;
+  onOpenPalette: (origin: HTMLButtonElement) => void;
   createDisabledReason: string | null;
   /** Work-view counts; Projects and Plans carry none (DESIGN.md section 6). */
   counts: SidebarCounts | null;
@@ -384,7 +384,7 @@ export function WorkspaceSidebar({
             aria-label="Search or jump to…"
             data-responsive-navigation="search"
             aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
-            onClick={onOpenPalette}
+            onClick={(event) => onOpenPalette(event.currentTarget)}
           >
             <Search aria-hidden="true" />
             <span>Search or jump to…</span>
