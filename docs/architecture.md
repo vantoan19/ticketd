@@ -1176,6 +1176,16 @@ Sync runs only in the desktop process, while the app is open. The CLI stays
 independent: it writes locally, its changes are captured with the write, and they
 upload when the desktop next runs. No background service is involved.
 
+`Workspace::sync_now` is the one way to run sync, and the engine and its tests
+use no other. The first run of a Workspace file in a process begins the app
+session itself (the run token, the downloads cut off when the app last stopped,
+files held back as from a newer ticketd), so the host has nothing to call at
+launch. A run does not overlap another run of the same Workspace file in the
+process: it returns at once with the status marked `run_in_progress` and makes no
+call to the storage. The host keeps two rules of its own: hold runs while
+`sync_download_workspace` replaces the Workspace file, and read `retry_after`
+from the status a run returns, since it is not stored.
+
 [ADR 0003](adr/0003-defer-record-versioning.md) continues to govern local edits.
 The last-synced copy is internal to sync and is not a record version in the
 workflow interface.
