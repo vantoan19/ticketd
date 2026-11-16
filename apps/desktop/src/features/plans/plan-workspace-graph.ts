@@ -26,11 +26,12 @@ export type PlanIslandGraph = WorkspaceGraph & {
   ticketMetadata: Record<string, TicketMetadata>;
 };
 type Source = Awaited<ReturnType<typeof planSource>>;
-type Matches = { ids: Set<string>; omitted: boolean } | null;
+type Matches = { ids: Set<string>; nextCursor: string | null } | null;
 type Continuation = {
   planOffset: number;
   memberOffset: number;
   workspaceCursor: string | null;
+  filterCursor: string | null;
 };
 const prefix = "plan-window:";
 function continuation(cursor: string | null): Continuation {
@@ -39,13 +40,19 @@ function continuation(cursor: string | null): Continuation {
     return {
       planOffset: Number(values[0]) || 0,
       memberOffset: Number(values[1]) || 0,
-      workspaceCursor: decodeURIComponent(values.slice(2).join(":")) || null,
+      workspaceCursor: decodeURIComponent(values[2] ?? "") || null,
+      filterCursor: decodeURIComponent(values[3] ?? "") || null,
     };
   }
-  return { planOffset: 0, memberOffset: 0, workspaceCursor: cursor };
+  return {
+    planOffset: 0,
+    memberOffset: 0,
+    workspaceCursor: cursor,
+    filterCursor: null,
+  };
 }
 function cursor(value: Continuation) {
-  return `${prefix}${value.planOffset}:${value.memberOffset}:${encodeURIComponent(value.workspaceCursor ?? "")}`;
+  return `${prefix}${value.planOffset}:${value.memberOffset}:${encodeURIComponent(value.workspaceCursor ?? "")}:${encodeURIComponent(value.filterCursor ?? "")}`;
 }
 async function planSource(id: string, limit: number, offset: number) {
   // The extra metadata row detects Document pagination without adding a DTO.
@@ -86,14 +93,11 @@ async function planSource(id: string, limit: number, offset: number) {
     limit,
   };
 }
-async function filterMatches(
-  request: WorkspaceGraphRequest,
-  first?: WorkspaceGraph,
-): Promise<Matches> {
+async function filterMatches(request: WorkspaceGraphRequest): Promise<Matches> {
   if (!request.search && !request.tag) return null;
   const ids = new Set<string>();
-  let next: string | null = null;
-  let page = first;
+  let next = continuation(request.cursor).filterCursor;
+  let page: WorkspaceGraph | undefined;
   for (let count = 0; count < MATCH_PAGES; count++) {
     page ??= await client.workspaceGraph({
       ...request,
@@ -104,10 +108,10 @@ async function filterMatches(
     });
     page.nodes.forEach((node) => ids.add(node.id));
     next = page.next_cursor;
-    if (!next) return { ids, omitted: false };
+    if (!next) return { ids, nextCursor: null };
     page = undefined;
   }
-  return { ids, omitted: true };
+  return { ids, nextCursor: next };
 }
 /** Hydrate one bounded, authoritative Plan window, reusing one filter search. */
 export async function planWorkspaceGraph(
@@ -231,7 +235,7 @@ export async function planWorkspaceGraph(
     for (const id of nodes.keys()) if (!connected.has(id)) nodes.delete(id);
   }
   if (current.omitted) groups.add("Plan member window");
-  if (matches?.omitted) groups.add("Plan filter window");
+  if (matches?.nextCursor) groups.add("Plan filter window");
   return {
     windowCursor: request.cursor,
     ticketMetadata: Object.fromEntries(
@@ -250,11 +254,17 @@ export async function planWorkspaceGraph(
     node_tags: tags,
     omitted: groups.size > 0,
     omitted_groups: [...groups],
-    next_cursor: current.omitted
-      ? cursor({ ...state, memberOffset: current.offset + current.limit })
-      : null,
+    next_cursor: matches?.nextCursor
+      ? cursor({ ...state, filterCursor: matches.nextCursor })
+      : current.omitted
+        ? cursor({
+            ...state,
+            memberOffset: current.offset + current.limit,
+            filterCursor: null,
+          })
+        : null,
     total: nodes.size,
-    partialTotal: current.omitted || !!matches?.omitted,
+    partialTotal: current.omitted || !!matches?.nextCursor,
   };
 }
 
@@ -267,7 +277,13 @@ export async function workspacePlanIslands(
     client.workspaceGraph({
       ...request,
       cursor: state.workspaceCursor,
-      visible_ids: request.visible_ids.slice(0, 100),
+      // Refresh every identity in the current bounded window, including the
+      // workspace candidates outside its Plan member slice.
+      ...(request.hydrate_only && { node_limit: NODE_LIMIT }),
+      visible_ids: request.visible_ids.slice(
+        0,
+        request.hydrate_only ? NODE_LIMIT : 100,
+      ),
     }),
     client.listPlans(PLAN_WINDOW + 1, state.planOffset),
   ]);
@@ -281,10 +297,7 @@ export async function workspacePlanIslands(
   const sources = await Promise.all(
     plans.map((plan) => planSource(plan.id, limit, state.memberOffset)),
   );
-  const matches = await filterMatches(
-    request,
-    request.relationship ? undefined : page,
-  );
+  const matches = await filterMatches(request);
   const islands = await Promise.all(
     plans.map((plan, index) =>
       planWorkspaceGraph(plan.id, request, sources[index], matches),
@@ -406,19 +419,31 @@ export async function workspacePlanIslands(
   const moreMembers = sources.some((source) => source.omitted);
   const morePlans = planPage.length > PLAN_WINDOW;
   if (morePlans || state.planOffset > 0) groups.add("Plan island window");
-  const next = moreMembers
-    ? cursor({
-        ...state,
-        memberOffset: state.memberOffset + limit,
-        workspaceCursor: page.next_cursor,
-      })
-    : morePlans
-      ? cursor({
-          planOffset: state.planOffset + PLAN_WINDOW,
-          memberOffset: 0,
-          workspaceCursor: page.next_cursor,
-        })
-      : page.next_cursor;
+  const next =
+    matches?.nextCursor && plans.length
+      ? cursor({ ...state, filterCursor: matches.nextCursor })
+      : moreMembers
+        ? cursor({
+            ...state,
+            memberOffset: state.memberOffset + limit,
+            filterCursor: null,
+            workspaceCursor: page.next_cursor,
+          })
+        : morePlans
+          ? cursor({
+              planOffset: state.planOffset + PLAN_WINDOW,
+              memberOffset: 0,
+              filterCursor: null,
+              workspaceCursor: page.next_cursor,
+            })
+          : page.next_cursor
+            ? cursor({
+                planOffset: state.planOffset + plans.length,
+                memberOffset: 0,
+                filterCursor: null,
+                workspaceCursor: page.next_cursor,
+              })
+            : null;
   return {
     ...page,
     windowCursor: request.cursor,

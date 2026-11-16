@@ -213,28 +213,6 @@ export function WorkspaceGraph({
   const observedRevision = useRef(revision);
   useEffect(() => {
     if (!active || revision === observedRevision.current) return;
-    if (planId) {
-      observedRevision.current = revision;
-      let current = true;
-      void planWorkspaceGraph(planId, {
-        ...request,
-        adjacency_limit: adjacencyLimit,
-      }).then(
-        (value) => {
-          if (current) setGraph(value);
-        },
-        (reason: unknown) => {
-          if (current)
-            setError({
-              failure: describeFailure(reason, "load the Plan graph"),
-              retry: reload,
-            });
-        },
-      );
-      return () => {
-        current = false;
-      };
-    }
     observedRevision.current = revision;
     if (!currentGraph.current) return;
     let current = true;
@@ -243,12 +221,16 @@ export function WorkspaceGraph({
       if (!previous) return;
       const version = graphVersion.current;
       try {
-        const value = await workspacePlanIslands({
+        const refreshRequest = {
           ...request,
+          cursor: previous.windowCursor ?? null,
           adjacency_limit: adjacencyLimit,
           visible_ids: previous.nodes.map((node) => node.id),
           hydrate_only: true,
-        });
+        };
+        const value = await (planId
+          ? planWorkspaceGraph(planId, refreshRequest)
+          : workspacePlanIslands(refreshRequest));
         if (!current || currentRequest.current !== request) return;
         if (graphVersion.current !== version) {
           // Pages were loaded meanwhile; refresh those instead of replacing them.
@@ -260,6 +242,7 @@ export function WorkspaceGraph({
         // added meanwhile (the total is unaffected by a relationship filter, so
         // that case is left alone): load the first page again around what is shown.
         if (
+          !planId &&
           !request.relationship &&
           previous.next_cursor === null &&
           previous.nodes.length < 100 &&
@@ -267,6 +250,7 @@ export function WorkspaceGraph({
         ) {
           const page = await workspacePlanIslands({
             ...request,
+            cursor: previous.windowCursor ?? null,
             adjacency_limit: adjacencyLimit,
             visible_ids: previous.nodes.map((node) => node.id),
             hydrate_only: false,
@@ -281,7 +265,7 @@ export function WorkspaceGraph({
         }
         setGraph({
           ...value,
-          next_cursor: previous.next_cursor,
+          next_cursor: planId ? value.next_cursor : previous.next_cursor,
           omitted: value.omitted || previous.next_cursor !== null,
         });
       } catch (reason: unknown) {
@@ -564,7 +548,11 @@ export function WorkspaceGraph({
         </>
       )}
       {graph.omitted_groups.includes("Plan filter window") && (
-        <> · Some matching items are outside this search window</>
+        <>
+          {" "}
+          · Some matching items are outside this search window; Load more
+          searches the rest
+        </>
       )}
       {graph.omitted_groups.includes("Workspace node window") && (
         <> · Some items are outside the 250-item window</>

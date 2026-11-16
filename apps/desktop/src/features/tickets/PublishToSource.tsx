@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { StatusDot } from "@/components/ui/status-dot";
-import type { Ticket } from "@/lib/api/client";
+import { client, type Ticket } from "@/lib/api/client";
 import {
   sourcesClient,
   toSourceFailure,
@@ -179,6 +179,7 @@ type Phase =
   | { kind: "ready"; preview: PublicationPreview }
   | { kind: "publishing"; preview: PublicationPreview }
   | { kind: "blocked"; preview: PublicationPreview; message: string }
+  | { kind: "confirmed" }
   | { kind: "unresolved"; message: string; details: string }
   | { kind: "unavailable"; message: string; details?: string };
 
@@ -200,6 +201,7 @@ export function PublishDialog({
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [destination, setDestination] = useState<string | undefined>();
   const [error, setError] = useState<FailureDescription | null>(null);
+  const [checking, setChecking] = useState(false);
   const [reloads, setReloads] = useState(0);
   const descriptionTarget = useRef<HTMLElement | null>(null);
 
@@ -249,6 +251,22 @@ export function PublishDialog({
   const publishing = phase.kind === "publishing";
   const chosen = destination ?? preview?.destination ?? "";
 
+  async function checkSavedState() {
+    setChecking(true);
+    setError(null);
+    try {
+      // The workspace refresh may retain a cached list on read failure. Read the
+      // ticket itself before treating recovery as complete.
+      await client.showTicket(ticket.reference);
+      await refresh();
+      onOpenChange(false);
+    } catch (reason) {
+      setError(describeFailure(reason, "check the saved publication state"));
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function publish() {
     if (phase.kind !== "ready" || !preview || !chosen) return;
     setError(null);
@@ -260,22 +278,29 @@ export function PublishDialog({
         chosen,
         preview.fingerprint,
       );
-      await refresh();
-      onOpenChange(false);
     } catch (reason) {
       const failure = toSourceFailure(reason);
-      if (failure.code === "publication_unresolved") {
-        const described = describeFailure(failure, "publish this ticket");
+      // Only these Core refusals prove that no issue was created. A lost or
+      // unclassified reply is not permission to send another publication.
+      if (
+        ![
+          "publication_failed",
+          "publication_changed",
+          "publication_ineligible",
+        ].includes(failure.code)
+      ) {
+        const described = describeFailure(
+          { code: "publication_unresolved", message: failure.message },
+          "publish this ticket",
+        );
         setPhase({
           kind: "unresolved",
           message: described.sentence,
           details: described.details,
         });
-        await refresh().catch(() => {});
+        void refresh().catch(() => {});
         return;
       }
-      // A refusal proves nothing was created, so trying again is safe. A ticket
-      // that changed since the preview sent nothing: show what it holds now.
       setError(describeFailure(failure, "publish this ticket"));
       if (
         failure.code === "publication_changed" ||
@@ -284,11 +309,17 @@ export function PublishDialog({
         setPhase({ kind: "loading" });
         setReloads((count) => count + 1);
       } else setPhase({ kind: "ready", preview });
+      return;
     }
+    // Publication already succeeded. A subsequent read can only be retried as
+    // a read; it must never restore the write button.
+    setPhase({ kind: "confirmed" });
+    await checkSavedState();
   }
 
   const name = preview?.provider_name ?? providerName(provider);
   const blocked = phase.kind === "blocked";
+  const recovering = phase.kind === "unresolved" || phase.kind === "confirmed";
   return (
     <DialogShell
       open
@@ -303,30 +334,38 @@ export function PublishDialog({
           : `Publish ${ticket.reference} to ${name}`
       }
       description={`Creates an ordinary open issue. Afterwards ${name} owns the title and description, and they become read-only here.`}
-      cancelLabel={phase.kind === "unresolved" ? "Close" : "Cancel"}
+      cancelLabel={recovering ? "Close" : "Cancel"}
       primaryLabel={
         blocked
           ? "Review description"
-          : publishing
-            ? "Publishing…"
-            : "Publish issue"
+          : phase.kind === "confirmed"
+            ? "Published"
+            : publishing
+              ? "Publishing…"
+              : "Publish issue"
       }
       blockedReason={
         blocked
           ? null
           : publishing
             ? `Publishing to ${name}…`
-            : phase.kind === "unresolved"
-              ? "It can’t be published again until the outcome is known."
-              : phase.kind === "unavailable"
-                ? "Publishing is unavailable."
-                : phase.kind === "loading" || !preview
-                  ? "Preparing preview…"
-                  : chosen
-                    ? null
-                    : "Choose a repository."
+            : phase.kind === "confirmed"
+              ? "Publication is confirmed; check the saved state to refresh this ticket."
+              : phase.kind === "unresolved"
+                ? "It can’t be published again until the outcome is known."
+                : phase.kind === "unavailable"
+                  ? "Publishing is unavailable."
+                  : phase.kind === "loading" || !preview
+                    ? "Preparing preview…"
+                    : chosen
+                      ? null
+                      : "Choose a repository."
       }
-      footerNote="Nothing is sent until you publish."
+      footerNote={
+        recovering
+          ? "Checking saved state sends no issue."
+          : "Nothing is sent until you publish."
+      }
       // Review description returns to the ticket's description, not the menu.
       returnFocus={descriptionTarget}
       {...(blocked && {
@@ -394,16 +433,34 @@ export function PublishDialog({
           )}
         </p>
       )}
-      {phase.kind === "unresolved" && (
+      {recovering && (
         <div className="publication-error" role="alert">
-          <p>
-            <strong>The outcome is not known.</strong> {phase.message}
-          </p>
-          <FailureDetails variant="popover" details={phase.details} />
-          <p>
-            {ticket.reference} stays local and cannot be published again until
-            this is resolved. Check {name} before doing anything by hand.
-          </p>
+          {phase.kind === "confirmed" ? (
+            <p>
+              <strong>Publication confirmed.</strong> The saved ticket could not
+              be refreshed.
+            </p>
+          ) : (
+            <>
+              <p>
+                <strong>The outcome is not known.</strong> {phase.message}
+              </p>
+              <FailureDetails variant="popover" details={phase.details} />
+              <p>
+                Check {name} and the saved ticket before doing anything by hand.
+                This ticket cannot be published again until the outcome is
+                known.
+              </p>
+            </>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={checking}
+            onClick={() => void checkSavedState()}
+          >
+            {checking ? "Checking saved state…" : "Check saved state"}
+          </Button>
         </div>
       )}
       {preview && phase.kind !== "blocked" && (
