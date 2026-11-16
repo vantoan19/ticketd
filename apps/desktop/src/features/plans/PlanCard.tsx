@@ -202,7 +202,7 @@ export function PlanCard({
                 <span className="plan-card-caption">Next up</span>
               </CardCaption>
               {next ? (
-                <>
+                <div className="plan-card-next-ticket">
                   <StatusIcon status={next.status} decorative />
                   <Tooltip
                     content="Open ticket"
@@ -222,7 +222,7 @@ export function PlanCard({
                       Ready
                     </span>
                   </CardCaption>
-                </>
+                </div>
               ) : (
                 <CardCaption asChild>
                   <span className="plan-card-caption">
