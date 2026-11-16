@@ -23,6 +23,7 @@ import {
   type MockChatClient,
 } from "@/features/chats/mock-client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { selectAutomationView } from "@/test/automation-navigation";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: never) =>
@@ -259,9 +260,10 @@ test("with Chat on, Automations opens from the sidebar", async () => {
   const entry = await screen.findByRole("button", { name: "Automations" });
   fireEvent.click(entry);
   expect(entry.getAttribute("aria-current")).toBe("page");
-  const tabs = within(await screen.findByRole("radiogroup", { name: "Show" }));
-  expect(tabs.getByRole("radio", { name: /^Automations/ })).toBeTruthy();
-  fireEvent.click(tabs.getByRole("radio", { name: /^Agents/ }));
+  expect(
+    await screen.findByRole("region", { name: "Automation list" }),
+  ).toBeTruthy();
+  await selectAutomationView("Agents");
   expect(await screen.findByRole("list", { name: "Agents" })).toBeTruthy();
 });
 

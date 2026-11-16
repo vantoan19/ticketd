@@ -10,25 +10,35 @@ import {
   ArrowRight,
   Bot,
   CalendarClock,
+  ChevronDown,
   FlaskConical,
   History,
   Play,
-  Plus,
+  SquarePen,
   Tag,
   Workflow,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Count } from "@/components/ui/count";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
+import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
+import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { AgentForm } from "@/features/automations/AgentForm";
 import { AutomationEditor } from "@/features/automations/AutomationEditor";
 import {
@@ -51,6 +61,7 @@ import { chatTime } from "@/features/chats/model";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
+import { emptyCopy } from "@/lib/empty-copy";
 import "@/features/chats/chats.css";
 import "@/features/automations/automations.css";
 
@@ -83,8 +94,8 @@ const EXAMPLES = [
   },
 ] as const satisfies { example: AutomationExample; [key: string]: unknown }[];
 
-/** The list pane's 360px plus the detail pane's 480px: below this one pane shows. */
-const STACK_MIN_WIDTH = 840;
+/** The list pane's 300px plus the detail pane's 480px, as in Chats. */
+const STACK_MIN_WIDTH = 780;
 const PANEL_STYLE = {
   display: "flex",
   flexDirection: "column",
@@ -426,67 +437,47 @@ export function AutomationsView({
       failed("delete", "The Automation could not be deleted."),
     );
 
-  const empty =
-    (tab === "automations" && automations?.length === 0) ||
-    (tab === "agents" && agents?.length === 0) ||
-    (tab === "runs" && runs?.length === 0);
-  const loading = automations === null || agents === null || runs === null;
-  const emptyContent =
-    tab === "automations" ? (
-      <div className="auto-empty auto-start">
-        <EmptyState
-          icon={<Workflow />}
-          title="Let agents act on tickets for you"
-          description="Run a sequence of steps when a ticket changes, on a schedule, or whenever you choose."
-          action={
-            <Button size="sm" onClick={() => void createAutomation()}>
-              <Plus aria-hidden />
-              New Automation
-            </Button>
-          }
-        />
-        <div
-          className="auto-starters"
-          role="group"
-          aria-label="Start from an example"
+  const count = { automations, agents, runs }[tab]?.length;
+  const empty = count === 0;
+  const needsYou = runs?.some((run) => run.needs_you);
+  const copy = emptyCopy(tab === "runs" ? "automation-runs" : tab);
+  const emptyList = (
+    <EmptyState
+      icon={
+        tab === "automations" ? (
+          <Workflow />
+        ) : tab === "agents" ? (
+          <Bot />
+        ) : (
+          <History />
+        )
+      }
+      title={copy.title}
+      description={copy.sentence}
+    />
+  );
+  const examples = (
+    <div
+      className="auto-starters"
+      role="group"
+      aria-label="Start from an example"
+    >
+      <p className="auto-starters-label">Start from an example</p>
+      {EXAMPLES.map(({ example, icon: Icon, title, sub }) => (
+        <button
+          key={example}
+          type="button"
+          className="auto-starter"
+          onClick={() => void added(automationsClient.createExample(example))}
         >
-          <p className="auto-starters-label">Or start from an example</p>
-          {EXAMPLES.map(({ example, icon: Icon, title, sub }) => (
-            <button
-              key={example}
-              type="button"
-              className="auto-starter"
-              onClick={() =>
-                void added(automationsClient.createExample(example))
-              }
-            >
-              <Icon size={16} aria-hidden />
-              <span className="auto-starter-title">{title}</span>
-              <span className="auto-starter-sub">{sub}</span>
-              <ArrowRight size={16} aria-hidden />
-            </button>
-          ))}
-        </div>
-      </div>
-    ) : tab === "agents" ? (
-      <EmptyState
-        icon={<Bot />}
-        title="An agent is who a step runs"
-        description="Choose its harness, instructions, and tools. Make one, then use it in any Automation."
-        action={
-          <Button size="sm" onClick={() => void createAgent()}>
-            <Plus aria-hidden />
-            New agent
-          </Button>
-        }
-      />
-    ) : (
-      <EmptyState
-        icon={<History />}
-        title="No runs yet"
-        description="Run an Automation to see its progress and history here."
-      />
-    );
+          <Icon size={16} aria-hidden />
+          <span className="auto-starter-title">{title}</span>
+          <span className="auto-starter-sub">{sub}</span>
+          <ArrowRight size={16} aria-hidden />
+        </button>
+      ))}
+    </div>
+  );
   const listPane = (
     <section
       className="ticket-list chat-pane auto-list-pane"
@@ -495,67 +486,86 @@ export function AutomationsView({
     >
       <PaneHeader
         title={TAB_NAMES[tab].title}
-        icon={
-          tab === "automations" ? (
-            <Workflow />
-          ) : tab === "agents" ? (
-            <Bot />
-          ) : (
-            <History />
+        titleControl={(title) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm">
+                <span className="truncate">{title}</span>
+                <ChevronDown aria-hidden />
+                {needsYou && (
+                  <>
+                    <StatusDot tone="attention" size={6} />
+                    <span className="sr-only">, a run needs you</span>
+                  </>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup
+                value={tab}
+                onValueChange={(next) => {
+                  setTab(next as Tab);
+                  setRun(null);
+                  setExpanded(false);
+                }}
+              >
+                {Object.entries(TAB_NAMES).map(([value, { title }]) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    {title}
+                    {value === "runs" && needsYou && (
+                      <>
+                        <StatusDot tone="attention" size={6} />
+                        <span className="sr-only">, a run needs you</span>
+                      </>
+                    )}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        count={
+          count !== undefined && (
+            <Count>
+              {count}
+              <span className="sr-only">
+                {" "}
+                {TAB_NAMES[tab].title.toLowerCase()}
+              </span>
+            </Count>
           )
         }
         actions={
-          empty || loading ? null : tab === "agents" ? (
-            <Button size="sm" onClick={() => void createAgent()}>
-              <Plus aria-hidden />
-              New agent
-            </Button>
+          tab === "agents" ? (
+            <IconButton label="New agent" onClick={() => void createAgent()}>
+              <SquarePen aria-hidden />
+            </IconButton>
           ) : (
             tab === "automations" && (
-              <Button size="sm" onClick={() => void createAutomation()}>
-                <Plus aria-hidden />
-                New Automation
-              </Button>
+              <IconButton
+                label="New Automation"
+                onClick={() => void createAutomation()}
+              >
+                <SquarePen aria-hidden />
+              </IconButton>
             )
           )
         }
       />
-      <div className="auto-view-tabs">
-        <SegmentedControl
-          aria-label="Show"
-          value={tab}
-          onValueChange={(next) => {
-            setTab(next);
-            setRun(null);
-            setExpanded(false);
-          }}
-          options={[
-            {
-              value: "automations",
-              label: "Automations",
-              ...(automations?.length && { count: automations.length }),
-            },
-            {
-              value: "agents",
-              label: "Agents",
-              ...(agents?.length && { count: agents.length }),
-            },
-            {
-              value: "runs",
-              label: "Runs",
-              ...(runs?.some((run) => run.needs_you) && {
-                attention: "a run needs you",
-              }),
-            },
-          ]}
-        />
-      </div>
       {error && (
         <p className="chat-list-empty" role="alert">
           {error}
         </p>
       )}
-      {empty && emptyContent}
+      {empty &&
+        (tab === "automations" && narrow ? (
+          <div className="auto-empty auto-start">
+            {emptyList}
+            {examples}
+          </div>
+        ) : (
+          emptyList
+        ))}
       {tab === "runs" ? (
         !empty &&
         runs && (
@@ -718,20 +728,30 @@ export function AutomationsView({
             : "No Automation open"
       }
     >
-      <EmptyState
-        size="hint"
-        title={
-          tab === "runs"
-            ? "Open a run to see its steps."
-            : tab === "agents"
-              ? "Open an agent, or make a new one."
-              : "Open an Automation, or make a new one."
-        }
-      />
+      {empty && tab === "automations" ? (
+        <div className="auto-empty auto-start">
+          <EmptyState
+            icon={<Workflow />}
+            title="Let agents act on tickets for you"
+            description="Run a sequence of steps when a ticket changes, on a schedule, or whenever you choose."
+          />
+          {!narrow && examples}
+        </div>
+      ) : (
+        <EmptyState
+          size="hint"
+          title={
+            tab === "runs"
+              ? "Open a run to see its steps."
+              : tab === "agents"
+                ? "Open an agent, or make a new one."
+                : "Open an Automation, or make a new one."
+          }
+        />
+      )}
     </section>
   );
   const open = openAgent ?? openAutomation ?? listedRun;
-  const onePane = single || (!open && (empty || loading));
   return (
     <div ref={workspaceRef} className="plan-workspace">
       {failure && (
@@ -752,26 +772,26 @@ export function AutomationsView({
       )}
       <div
         className="ticket-workspace chats-workspace"
-        data-single={onePane ? (open ? "detail" : "list") : undefined}
+        data-single={single ? (open ? "detail" : "list") : undefined}
       >
-        <ResizablePanelGroup orientation="horizontal" disabled={onePane}>
+        <ResizablePanelGroup orientation="horizontal" disabled={single}>
           <ResizablePanel
             id="chat-list"
-            minSize={360}
-            defaultSize={384}
-            aria-hidden={onePane && !!open ? true : undefined}
+            minSize={300}
+            defaultSize={300}
+            aria-hidden={single && !!open ? true : undefined}
           >
             {listPane}
           </ResizablePanel>
           <ResizableHandle
             aria-label="Resize list"
-            aria-hidden={onePane || undefined}
+            aria-hidden={single || undefined}
           />
           <ResizablePanel
             id="chat-detail"
             minSize={480}
             style={PANEL_STYLE}
-            aria-hidden={onePane && !open ? true : undefined}
+            aria-hidden={single && !open ? true : undefined}
           >
             {detailPane}
           </ResizablePanel>

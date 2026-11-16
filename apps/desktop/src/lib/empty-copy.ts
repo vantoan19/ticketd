@@ -152,6 +152,19 @@ const COPY = {
     title: "Archived Chats wait here until you unarchive them.",
     sentence: "",
   },
+  automations: {
+    title: "No Automations yet",
+    sentence: "An Automation runs steps on your tickets for you.",
+  },
+  agents: {
+    title: "No agents yet",
+    sentence:
+      "An agent supplies the instructions and tools for an Automation step.",
+  },
+  "automation-runs": {
+    title: "No runs yet",
+    sentence: "Run an Automation to see its progress and history here.",
+  },
   "settings-search": {
     title: "No settings match “{query}”",
     sentence: "Try another word, or open a section below.",

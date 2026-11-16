@@ -662,9 +662,9 @@ the nav's setup dot, whose update never starts another page check.
 
 Plan Add tickets submits the selected tickets through one atomic bulk membership change and retains its request ID after an unconfirmed result. Success offers Undo to each ticket’s original Plan. When originals differ, Undo uses one atomic request per original Plan; completed groups are retired immediately, and a failure states the confirmed restored count and retries only the remaining groups with their existing IDs. No compensating writes undo concurrent external changes.
 
-Automations uses a 48px pane header with the current view's icon and name. Automations, Agents and Runs sit in a separate segmented row below it; zero counts are omitted. A populated list has a labelled New Automation or New agent action in the header. An empty view fills the available width with the shared EmptyState and one create action. Automations offers its three starter examples below that action, including at narrow widths; Agents explains what an agent supplies, and Runs explains where progress and history will appear.
+Automations follows Chats: a 48px pane header with the current view's name as a dropdown for Automations, Agents and Runs, its count (including zero), and a pencil icon for New Automation or New agent. A run that needs the person marks the title menu and its Runs option with the attention dot and spoken words. Empty lists use the shared icon, title and sentence pattern. Automations offers its three starter examples in the detail pane, or below its empty list at narrow widths.
 
-Automations keeps its list and detail panes mounted across loading, empty, narrow and expanded layouts, using the same single-pane behavior as Chats. The inactive pane and resize handle leave keyboard and accessibility navigation. Once there are items, the normal list-and-detail split returns at wide widths.
+Automations keeps its list and detail panes mounted across loading, empty, narrow and expanded layouts. At wide widths, the 300px list and detail remain side by side, including when empty. Below 780px or when expanded, it uses the same single-pane behavior as Chats: the inactive pane and resize handle leave keyboard and accessibility navigation.
 
 ## 11. Design system and shared components
 

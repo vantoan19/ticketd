@@ -20,6 +20,7 @@ import { RunNavigation } from "@/features/automations/navigation";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
+import { selectAutomationView } from "@/test/automation-navigation";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 window.ResizeObserver = class {
@@ -198,13 +199,17 @@ const open = async (
       <AutomationsView />
     </ChatClientContext>,
   );
-  fireEvent.click(screen.getByRole("radio", { name: /^Agents/ }));
+  await selectAutomationView("Agents");
   await screen.findByRole("list", { name: "Agents" });
 };
 
 test("the Agents list starts empty, explains what an agent is, and New agent opens one with the defaults", async () => {
   await open();
-  expect(screen.getByText("An agent is who a step runs")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "An agent supplies the instructions and tools for an Automation step.",
+    ),
+  ).toBeTruthy();
 
   fireEvent.click(screen.getAllByRole("button", { name: "New agent" })[0]!);
 
@@ -443,7 +448,7 @@ test("deleting an agent asks first, then removes it from the list", async () => 
   await waitFor(() =>
     expect(screen.queryByRole("region", { name: "Triage" })).toBeNull(),
   );
-  expect(screen.getByText("An agent is who a step runs")).toBeTruthy();
+  expect(screen.getByText("No agents yet")).toBeTruthy();
 });
 
 test("cancelling or dismissing the agent delete dialog returns focus to Agent actions", async () => {
@@ -535,10 +540,16 @@ test("the Runs view lists every run under Now, Needs you and Earlier, naming its
   ];
   show();
 
-  // The tab says a run needs the person before it is opened.
-  const tab = await screen.findByRole("radio", { name: /^Runs/ });
-  await waitFor(() => expect(tab.textContent).toContain("needs you"));
-  fireEvent.click(tab);
+  // The closed title menu says a run needs the person before Runs is opened.
+  await screen.findByRole("button", { name: /Automations.*a run needs you/ });
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: /Automations.*a run needs you/ }),
+    { key: "Enter" },
+  );
+  const runsOption = await screen.findByRole("menuitemradio", {
+    name: /Runs.*a run needs you/,
+  });
+  fireEvent.click(runsOption);
 
   const group = (name: string) =>
     screen.getByRole("list", { name: `Runs, ${name}` }).textContent;
@@ -561,11 +572,11 @@ test("a run the person dismissed is listed under Earlier and leaves the Runs tab
     },
   ];
   show();
-  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+  await selectAutomationView("Runs");
 
   await screen.findByRole("list", { name: "Runs, Earlier" });
   expect(
-    screen.getByRole("radio", { name: /^Runs/ }).textContent,
+    screen.getByRole("button", { name: /^Runs/ }).textContent,
   ).not.toContain("needs you");
 });
 
@@ -588,15 +599,14 @@ test("the empty page offers New Automation and three examples, and choosing one 
     screen.getAllByRole("button", { name: "New Automation" }),
   ).toHaveLength(1);
   expect(
-    within(screen.getByRole("region", { name: "Automation list" })).getByRole(
-      "group",
-      { name: "Start from an example" },
-    ),
+    within(
+      screen.getByRole("region", { name: "No Automation open" }),
+    ).getByRole("group", { name: "Start from an example" }),
   ).toBe(examples);
-  expect(
-    screen.getByRole("radio", { name: "Automations" }).textContent,
-  ).not.toContain("0");
-  expect(screen.queryByRole("separator", { name: "Resize list" })).toBeNull();
+  const list = screen.getByRole("region", { name: "Automation list" });
+  expect(within(list).getByText("0").textContent).toBe("0 automations");
+  expect(within(list).getByText("No Automations yet")).toBeTruthy();
+  expect(screen.getByRole("separator", { name: "Resize list" })).toBeTruthy();
 
   fireEvent.click(
     within(examples).getByRole("button", { name: /Weekly summary/ }),
@@ -645,7 +655,7 @@ test("a run chosen in the Runs view goes through the page's run navigation and o
     </RunNavigation>
   );
   const { rerender } = render(page(null));
-  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+  await selectAutomationView("Runs");
 
   fireEvent.click(
     await screen.findByRole("button", { name: /Login flickers/ }),
@@ -654,9 +664,7 @@ test("a run chosen in the Runs view goes through the page's run navigation and o
   rerender(page({ id: "2", key: 1 }));
 
   await screen.findByRole("heading", { name: /Run on T-2/ });
-  expect(
-    screen.getByRole("radio", { name: /^Runs/ }).getAttribute("aria-checked"),
-  ).toBe("true");
+  expect(screen.getByRole("region", { name: "Run list" })).toBeTruthy();
 });
 
 test("a list row says how the Automation's latest run stands, and Off for one that is off", async () => {
@@ -693,9 +701,7 @@ test("a run asked for from elsewhere is opened once, and one whose Automation wa
   );
 
   await screen.findByRole("heading", { name: /Run on T-2/ });
-  expect(
-    screen.getByRole("radio", { name: /^Runs/ }).getAttribute("aria-checked"),
-  ).toBe("true");
+  expect(screen.getByRole("region", { name: "Run list" })).toBeTruthy();
   // The asker is told, so it forgets the run and a later visit shows the list.
   await waitFor(() => expect(opened).toHaveBeenCalledTimes(1));
 });
@@ -724,7 +730,7 @@ test("a read of the open run that fails says so only until that read works again
   automations = [TRIAGE];
   runs = [listed("2", "needs_attention", "Login flickers")];
   const workspaceChanged = showChanging();
-  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+  await selectAutomationView("Runs");
   fireEvent.click(
     await screen.findByRole("button", { name: /Login flickers/ }),
   );
@@ -791,7 +797,7 @@ const ANY_COMMAND = {
 
 /** Opens the one agent the fake Workspace holds; answers with its form. */
 const openAgent = async () => {
-  fireEvent.click(await screen.findByRole("radio", { name: /^Agents/ }));
+  await selectAutomationView("Agents");
   fireEvent.click(await screen.findByRole("button", { name: /Triage/ }));
   return screen.findByRole("region", { name: "Triage" });
 };
@@ -986,13 +992,13 @@ test("a list row names a status trigger with what changes, and gives every name 
   );
   expect(row.querySelector(".auto-row-start svg")).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("radio", { name: /^Agents/ }));
+  await selectAutomationView("Agents");
   const agent = await within(
     await screen.findByRole("list", { name: "Agents" }),
   ).findByRole("button");
   expect(agent.querySelector(".chat-row-title")?.textContent).toBe("Verifier");
 
-  fireEvent.click(screen.getByRole("radio", { name: /^Runs/ }));
+  await selectAutomationView("Runs");
   const run = await screen.findByRole("button", { name: /Login flickers/ });
   expect(run.querySelector(".chat-row-title")?.textContent).toBe(
     "T-2 Login flickers",
