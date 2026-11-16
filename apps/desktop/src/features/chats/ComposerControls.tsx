@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tooltip } from "@/components/ui/tooltip";
+import { shortcutLabel } from "@/lib/shortcuts";
 import type {
   ChatState,
   HarnessOptions,
@@ -346,6 +347,7 @@ export function HarnessPicker({
       }}
     >
       <Tooltip
+        shortcut={shortcutLabel("chat-model")}
         content={
           held
             ? `${modelLabel} · ${effortLabel || "Default"} from your next message`
@@ -356,7 +358,7 @@ export function HarnessPicker({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="compact"
             data-control="model"
             aria-label={held ? `${name}, from your next message` : name}
             aria-keyshortcuts="Meta+Shift+M Control+Shift+M"
@@ -563,7 +565,7 @@ function ReadOnly({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="compact"
         data-control="permission"
         readOnly
         aria-disabled="true"
@@ -639,7 +641,7 @@ function PermissionPicker({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="compact"
             data-control="permission"
             aria-label={
               held
@@ -798,7 +800,7 @@ function CheckingHarnesses() {
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           data-control="model"
           aria-disabled="true"
           aria-label="Checking which harnesses are installed…"

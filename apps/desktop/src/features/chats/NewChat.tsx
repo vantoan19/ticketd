@@ -231,6 +231,7 @@ export function NewChat({
    * change to the message, harness, folder or links is a new request.
    */
   const attempt = useRef({ id: crypto.randomUUID(), request: "" });
+  const retrySend = useRef<(() => void) | null>(null);
   useEffect(() => {
     let current = true;
     client.harnesses().then(
@@ -445,6 +446,7 @@ export function NewChat({
                     inputRef={input}
                   />
                 }
+                retryRef={retrySend}
                 onSend={async (typed, mentioned) => {
                   if (!harness) return;
                   const message = quotedMessage(quotes, typed);
@@ -500,7 +502,11 @@ export function NewChat({
                     onCreated(created.chat_id);
                   } catch (reason) {
                     // Sending again repeats this same request safely.
-                    setFailure(chatFailure(reason, "start the Chat"));
+                    setFailure(
+                      chatFailure(reason, "start the Chat", () =>
+                        retrySend.current?.(),
+                      ),
+                    );
                     throw reason;
                   }
                 }}

@@ -103,6 +103,19 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
+.cli-status-slot {
+  display: grid;
+}
+.cli-status-slot > * {
+  grid-area: 1 / 1;
+}
+.cli-status-reserve {
+  visibility: hidden;
+}
+.cli-check-feedback {
+  min-height: 40px;
+  padding-top: 8px;
+}
 .cli-details dt,
 .cli-details dd {
   margin: 0;

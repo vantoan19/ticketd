@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureState } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { PathText } from "@/components/ui/path-text";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -116,6 +116,10 @@ export function AgentSkillsCard({
 }) {
   const { openPage } = useSettingsState();
   const [load, setLoad] = useState<Load>({ phase: "loading" });
+  const [checking, setChecking] = useState(true);
+  const [checkFailure, setCheckFailure] = useState<FailureDescription | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<Record<string, FailureDescription>>(
     {},
@@ -125,18 +129,25 @@ export function AgentSkillsCard({
   // An action just finished; its button may be gone, so focus moves to the status.
   const focusAfterLoad = useRef(false);
 
-  const refresh = () =>
-    agentSkillsClient.list().then(
+  const refresh = () => {
+    setChecking(true);
+    setCheckFailure(null);
+    return agentSkillsClient.list().then(
       (agents) => {
         setLoad({ phase: "done", agents });
+        setChecking(false);
         onChanged?.();
       },
-      (error: unknown) =>
-        setLoad({
-          phase: "failed",
-          failure: describeFailure(error, "check agent skills"),
-        }),
+      (error: unknown) => {
+        const failure = describeFailure(error, "check agent skills");
+        setLoad((previous) =>
+          previous.phase === "done" ? previous : { phase: "failed", failure },
+        );
+        setCheckFailure(failure);
+        setChecking(false);
+      },
     );
+  };
   // Read the folders on first show; each action and Check again reads them again.
   // Reporting the result to the nav is not a reason to start another reading.
   const firstRead = useEffectEvent(() => void refresh());
@@ -186,7 +197,6 @@ export function AgentSkillsCard({
   const checkAgain = () => {
     setFailures({});
     setResult(null);
-    setLoad({ phase: "loading" });
     void refresh();
   };
 
@@ -212,16 +222,13 @@ export function AgentSkillsCard({
         ) : (
           <SettingsList>
             {load.phase === "loading" ? (
-              <div
-                role="status"
-                aria-label="Checking agent skills"
-                className="flex items-center gap-6 px-5 py-4"
-              >
-                <Skeleton className="size-10" />
-                <div className="flex flex-col gap-2">
-                  <Skeleton className="h-2.5 w-30" />
-                  <Skeleton className="h-2 w-75" />
-                </div>
+              <div role="status" aria-label="Checking agent skills">
+                <SettingsRow
+                  leading={<Skeleton className="size-10" />}
+                  title={<Skeleton className="h-5 w-30" />}
+                  description={<Skeleton className="h-4 w-75 max-w-full" />}
+                  trailing={<Skeleton className="h-8 w-40" />}
+                />
               </div>
             ) : (
               <SettingsRow
@@ -265,6 +272,13 @@ export function AgentSkillsCard({
           </SettingsList>
         )}
       </SettingsSection>
+      {load.phase === "done" && checkFailure && (
+        <FailureAlert
+          size="compact"
+          failure={checkFailure}
+          onRetry={checkAgain}
+        />
+      )}
       {load.phase !== "failed" && (
         <SettingsSection
           title="Agents on this computer"
@@ -274,11 +288,11 @@ export function AgentSkillsCard({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={busy || load.phase === "loading"}
+              disabled={busy || checking}
               onClick={checkAgain}
             >
               <RefreshCw aria-hidden="true" />
-              Check again
+              {checking ? "Checking…" : "Check again"}
             </Button>
           }
         >
