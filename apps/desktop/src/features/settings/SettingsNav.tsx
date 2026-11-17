@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
+import { Glide } from "@/components/ui/motion";
 import {
   Sheet,
   SheetContent,
@@ -126,6 +127,9 @@ export function SettingsNav({
           aria-current={selected === "search" ? "page" : undefined}
           onClick={() => open("search")}
         >
+          {selected === "search" && (
+            <Glide id="settings-nav" className="settings-nav-glide" />
+          )}
           <Search size={16} aria-hidden="true" />
           <span className="settings-nav-label">
             {shown ? (
@@ -159,6 +163,12 @@ export function SettingsNav({
                         aria-current={selected === item.id ? "page" : undefined}
                         onClick={() => open(item.id)}
                       >
+                        {selected === item.id && (
+                          <Glide
+                            id="settings-nav"
+                            className="settings-nav-glide"
+                          />
+                        )}
                         <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
                         {item.id === "chat" && (

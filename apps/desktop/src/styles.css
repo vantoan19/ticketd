@@ -2852,6 +2852,12 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 /* !important is the point: reduced motion must beat every component's own
    transition and animation timing. */
+/* Changing the theme: the whole window crossfades (lib/preferences). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-theme);
+  animation-timing-function: var(--ease-in-out);
+}
 @media (prefers-reduced-motion: reduce) {
   :root,
   [data-theme-preview] {

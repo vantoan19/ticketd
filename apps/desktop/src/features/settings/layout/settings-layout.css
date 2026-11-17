@@ -192,3 +192,20 @@
   padding: 0;
   text-underline-offset: 2px;
 }
+
+/* A page arrives from a soft blur, its header first. This runs when a page
+   mounts and when a kept-mounted source page is shown again (display none to
+   shown replays it). The page before it fades out first (SettingsView). */
+.settings-shell:not([hidden]) > .settings-page-column > * {
+  animation: settings-page-enter var(--dur-enter) var(--ease-out) both;
+}
+.settings-shell:not([hidden]) > .settings-page-column > :not(header) {
+  animation-delay: var(--dur-1);
+}
+@keyframes settings-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise));
+    filter: blur(var(--motion-blur-in));
+  }
+}

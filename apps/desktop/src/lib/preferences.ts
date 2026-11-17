@@ -76,6 +76,28 @@ export function applyTheme(resolved: "light" | "dark") {
   root.classList.toggle("dark", resolved === "dark");
 }
 
+/**
+ * Moves the window to another theme: a crossfade of the whole page, title bar
+ * included (the `--dur-theme` of styles.css). Where the webview cannot do that,
+ * or reduced motion or a held key has zeroed the token, the theme changes in
+ * one frame. Launch uses `applyTheme` and never fades.
+ */
+export function changeTheme(resolved: "light" | "dark") {
+  const root = document.documentElement;
+  const fade = Number.parseFloat(
+    getComputedStyle(root).getPropertyValue("--dur-theme"),
+  );
+  if (
+    root.dataset.theme === resolved ||
+    !fade ||
+    typeof document.startViewTransition !== "function"
+  ) {
+    applyTheme(resolved);
+    return;
+  }
+  document.startViewTransition(() => applyTheme(resolved));
+}
+
 function systemPrefersDark(): boolean {
   return window.matchMedia(DARK_QUERY).matches;
 }
@@ -181,7 +203,7 @@ export function useThemeSync() {
   const dark = useDarkTheme();
   const { theme } = usePreferences();
   // main.tsx applies the stored theme before the first paint.
-  useEffect(() => applyTheme(dark ? "dark" : "light"), [dark]);
+  useEffect(() => changeTheme(dark ? "dark" : "light"), [dark]);
   useEffect(() => syncWindowTheme(theme), [theme]);
   useEffect(() => syncWindowColor(dark ? "dark" : "light"), [dark]);
 }

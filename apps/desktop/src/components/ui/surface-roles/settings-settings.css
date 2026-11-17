@@ -11,8 +11,11 @@
   color: var(--muted-foreground);
 }
 .settings-nav-row[aria-current="page"] {
-  background: var(--accent);
   color: var(--foreground);
+}
+/* The open page's fill is the Glide that travels between rows. */
+.settings-nav-glide {
+  background: var(--accent);
 }
 .settings-back:hover,
 .settings-nav-row:hover:not([aria-current="page"]) {
