@@ -5,8 +5,14 @@ import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
+import { scrollHost } from "@/components/ui/scroll-host";
 import { HighlightGroup } from "@/components/ui/highlight-group";
 import { RowHighlight } from "@/components/ui/row-highlight";
+
+// Select scrolls in its content and its viewport; both are `layoutScroll` hosts
+// so the highlight Glide measures its old row against the scroll.
+const ScrollingContent = scrollHost(SelectPrimitive.Content);
+const ScrollingViewport = scrollHost(SelectPrimitive.Viewport);
 
 function Select({
   ...props
@@ -97,7 +103,8 @@ function SelectContent({
   const group = React.useId();
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content
+      <ScrollingContent
+        layoutScroll
         ref={contentRef}
         data-slot="select-content"
         className={cn(
@@ -118,7 +125,8 @@ function SelectContent({
         }}
       >
         <SelectScrollUpButton />
-        <SelectPrimitive.Viewport
+        <ScrollingViewport
+          layoutScroll
           className={cn(
             "p-1",
             position === "popper" &&
@@ -126,9 +134,9 @@ function SelectContent({
           )}
         >
           <HighlightGroup value={group}>{children}</HighlightGroup>
-        </SelectPrimitive.Viewport>
+        </ScrollingViewport>
         <SelectScrollDownButton />
-      </SelectPrimitive.Content>
+      </ScrollingContent>
     </SelectPrimitive.Portal>
   );
 }

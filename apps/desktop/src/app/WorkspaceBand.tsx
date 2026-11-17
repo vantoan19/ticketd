@@ -1,7 +1,7 @@
 import { workspaceMessages } from "./workspace-messages";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Expand } from "@/components/ui/motion";
-import { spring } from "@/lib/motion-tokens";
+import { useHeldExpand } from "@/components/ui/use-held-expand";
 import { Button } from "@/components/ui/button";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -23,31 +23,13 @@ export function BandSlot({
   open: boolean;
   children: ReactNode;
 }) {
-  const [phase, setPhase] = useState({ open, held: open, settled: open });
-  // A change of `open` is applied while rendering, so the first frame of an
-  // opening is already mounted (closed) and a closing starts at once.
-  if (phase.open !== open)
-    setPhase({ open, held: open || phase.held, settled: false });
-  useEffect(() => {
-    if (!open) return;
-    const frame = requestAnimationFrame(() =>
-      setPhase((now) => ({ ...now, settled: true })),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [open]);
-  useEffect(() => {
-    if (open) return;
-    const closed = setTimeout(
-      () => setPhase((now) => ({ ...now, held: false })),
-      spring("smooth").duration * 1000,
-    );
-    return () => clearTimeout(closed);
-  }, [open]);
-  if (!open && !phase.held) return null;
-  const expanded = open && phase.settled;
+  const { mounted, expanded } = useHeldExpand(open);
+  if (!mounted) return null;
   return (
     <div className="workspace-band-slot" data-open={expanded}>
-      <Expand open={expanded}>{children}</Expand>
+      <Expand open={expanded}>
+        <div className="workspace-band-reserve">{children}</div>
+      </Expand>
     </div>
   );
 }

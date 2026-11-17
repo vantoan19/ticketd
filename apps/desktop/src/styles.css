@@ -191,7 +191,6 @@
   --overlay-slide: 4px;
   --overlay-scale: 0.98;
   --dialog-scale: 0.985;
-  --sheet-scale: 0.96;
   --dur-lift: 120ms;
   --dur-settle: 160ms;
   --dur-arrival: 1200ms;
@@ -1001,7 +1000,7 @@ body:has([data-slot="dialog-overlay"])
   animation: sheet-scrim-in var(--dur-4) var(--ease-out) both;
 }
 [data-slot="sheet-overlay"][data-state="closed"] {
-  animation: sheet-scrim-out var(--dur-3) var(--ease-in) both;
+  animation: sheet-scrim-out var(--dur-exit) var(--ease-in) both;
 }
 @keyframes sheet-in {
   from {
@@ -1082,16 +1081,6 @@ body:has([data-slot="dialog-overlay"])
     opacity: 0;
     transform: scale(var(--dialog-scale));
     filter: blur(var(--motion-blur-out));
-  }
-}
-@keyframes overlay-enter {
-  from {
-    opacity: 0;
-    transform: scale(var(--sheet-scale));
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
   }
 }
 .ui-select[data-variant="ghost"] {
@@ -2068,11 +2057,23 @@ html[data-window-bar] {
 .ui-button-jump kbd {
   margin-left: auto;
 }
+/* Settings and Trash sit at explicit places, like the top row, so the rail's
+   column and the row's pair are one transition on the smooth spring. */
 .sidebar-footer-actions {
-  display: flex;
-  align-items: center;
+  position: relative;
   height: 48px;
-  padding: 0 0 4px 10px;
+  transition: height var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-footer-actions > button {
+  position: absolute;
+  top: calc((44px - var(--header-control-height)) / 2);
+  left: 10px;
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    left var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-footer-actions > button:last-child {
+  left: calc(10px + var(--header-control-height));
 }
 .sidebar-footer-actions [aria-current="page"] {
   background: var(--accent);
@@ -2089,9 +2090,14 @@ html[data-window-bar] {
   top: calc(10px + var(--header-control-height) + 4px);
 }
 .sidebar[data-collapsed] .sidebar-footer-actions {
-  padding-inline: 0;
-  height: auto;
-  flex-direction: column;
+  height: calc(2 * var(--header-control-height) + 4px);
+}
+.sidebar[data-collapsed] .sidebar-footer-actions > button {
+  top: 0;
+  left: calc(50% - var(--header-control-height) / 2);
+}
+.sidebar[data-collapsed] .sidebar-footer-actions > button:last-child {
+  top: var(--header-control-height);
 }
 .sidebar-nav {
   display: grid;
@@ -4338,9 +4344,16 @@ kbd,
   width: min(560px, calc(100vw - 32px));
   background: var(--popover);
 }
-.ui-dialog[data-surface="create"] {
-  /* Widening glides; the top anchor stays, so it never re-centres vertically. */
-  transition: width var(--spring-smooth-t) var(--spring-smooth);
+.ui-dialog[data-surface="create"][data-resizing] {
+  /* Expand and collapse glide, and only then: a window resize must not (the
+     dialog sets data-resizing for the length of the spring). The top anchor
+     stays, so it never re-centres vertically. Height between auto and a length
+     interpolates where the webview supports interpolate-size; elsewhere it
+     snaps, as it did. */
+  interpolate-size: allow-keywords;
+  transition:
+    width var(--spring-smooth-t) var(--spring-smooth),
+    height var(--spring-smooth-t) var(--spring-smooth);
 }
 .ui-dialog[data-surface="create"][data-expanded] {
   width: min(760px, calc(100vw - 32px));
@@ -4486,12 +4499,14 @@ kbd,
 .ui-button-attention svg {
   color: var(--status-blocked);
 }
-/* The slot opens by height (Expand); an open slot holds 40px even when the
-   condition has cleared, so nothing moves under the pointer. */
+/* The slot opens by height (Expand). The 40px is held by a block inside the
+   Expand body, not by the body's own min-height, which would start the track
+   at 40px and leave nothing to animate. The block stays when the condition
+   has cleared, so nothing moves under the pointer. */
 .workspace-band-slot {
   flex: none;
 }
-.workspace-band-slot[data-open="true"] .ui-expand-body {
+.workspace-band-reserve {
   min-height: 40px;
 }
 .workspace-band-slot .workspace-band {

@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useFocusReturn } from "@/components/ui/use-focus-return";
+import { spring } from "@/lib/motion-tokens";
 
 // The opener, which focus returns to when the dialog closes.
 const DialogInvocation = React.createContext<HTMLElement | null>(null);
@@ -76,6 +77,30 @@ function DialogOverlay({
   );
 }
 
+/**
+ * True while the dialog's size changes because `expanded` did, and for the
+ * spring that follows. The size transition (styles.css) is declared only for
+ * that moment, so resizing the window never animates the dialog.
+ */
+function useResizing(expanded: boolean): boolean {
+  const [seen, setSeen] = React.useState(expanded);
+  const [resizing, setResizing] = React.useState(false);
+  // Set while rendering, so the first frame of the change already carries it.
+  if (seen !== expanded) {
+    setSeen(expanded);
+    setResizing(true);
+  }
+  React.useEffect(() => {
+    if (!resizing) return;
+    const done = setTimeout(
+      () => setResizing(false),
+      spring("smooth").duration * 1000,
+    );
+    return () => clearTimeout(done);
+  }, [resizing, seen]);
+  return resizing;
+}
+
 function DialogContent({
   className,
   children,
@@ -114,6 +139,7 @@ function DialogContent({
   resolveReturnFocus?: () => HTMLElement | null;
 }) {
   const opener = React.useContext(DialogInvocation);
+  const resizing = useResizing(expanded);
   const focus = useFocusReturn(
     returnFocus,
     {
@@ -131,6 +157,7 @@ function DialogContent({
         data-size={size ?? "default"}
         data-surface={surface}
         data-expanded={expanded || undefined}
+        data-resizing={resizing || undefined}
         className={cn(
           // Position and width come from data-size in styles.css.
           "ui-dialog fixed z-50 grid outline-none",

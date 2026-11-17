@@ -1,3 +1,4 @@
+import { FoldingGroup } from "./FoldingGroup";
 import { useInboxAttention } from "@/features/tickets/use-inbox-attention";
 import {
   Inbox,
@@ -536,103 +537,101 @@ export function WorkspaceSidebar({
         <div className="sidebar-scroll">
           {(projects.length > 0 || hasTickets) && (
             <SidebarGroup className="sidebar-group">
-              {collapsed ? (
-                <nav aria-label="Projects" className="sidebar-nav">
-                  <SidebarMenu>
-                    <GroupMenu
-                      label="Projects"
-                      icon={Folder}
-                      entries={projectEntries}
-                      manage={{
-                        label: "All projects",
-                        current: view === "projects",
-                        onSelect: () => setView("projects"),
-                      }}
-                    />
-                  </SidebarMenu>
-                </nav>
-              ) : (
-                <>
-                  <GroupHeading
-                    label="Projects"
-                    current={view === "projects"}
-                    onOpen={() => setView("projects")}
-                  />
-                  <nav aria-label="Project scopes" className="sidebar-nav">
+              <FoldingGroup
+                collapsed={collapsed}
+                rail={
+                  <nav aria-label="Projects" className="sidebar-nav">
                     <SidebarMenu>
-                      {projectEntries.map((entry) => (
-                        <SidebarMenuItem key={entry.key}>
-                          <SidebarMenuButton
-                            isActive={entry.active}
-                            onClick={entry.onSelect}
-                          >
-                            {entry.icon}{" "}
-                            <Tooltip content={entry.label} overflowOnly>
-                              <span>{entry.label}</span>
-                            </Tooltip>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
+                      <GroupMenu
+                        label="Projects"
+                        icon={Folder}
+                        entries={projectEntries}
+                        manage={{
+                          label: "All projects",
+                          current: view === "projects",
+                          onSelect: () => setView("projects"),
+                        }}
+                      />
                     </SidebarMenu>
                   </nav>
-                </>
-              )}
+                }
+              >
+                <GroupHeading
+                  label="Projects"
+                  current={view === "projects"}
+                  onOpen={() => setView("projects")}
+                />
+                <nav aria-label="Project scopes" className="sidebar-nav">
+                  <SidebarMenu>
+                    {projectEntries.map((entry) => (
+                      <SidebarMenuItem key={entry.key}>
+                        <SidebarMenuButton
+                          isActive={entry.active}
+                          onClick={entry.onSelect}
+                        >
+                          {entry.icon}{" "}
+                          <Tooltip content={entry.label} overflowOnly>
+                            <span>{entry.label}</span>
+                          </Tooltip>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </nav>
+              </FoldingGroup>
             </SidebarGroup>
           )}
           {(plans.length > 0 || hasTickets) && (
             <SidebarGroup className="sidebar-group">
-              {collapsed ? (
-                <nav aria-label="Plans" className="sidebar-nav">
-                  <SidebarMenu>
-                    <GroupMenu
-                      label="Plans"
-                      icon={Layers}
-                      entries={planEntries}
-                      manage={{
-                        label: "All Plans",
-                        current: view === "plans",
-                        onSelect: () => setView("plans"),
-                      }}
-                    />
-                  </SidebarMenu>
-                </nav>
-              ) : (
-                <>
-                  <GroupHeading
-                    label="Plans"
-                    current={view === "plans"}
-                    onOpen={() => setView("plans")}
-                  />
-                  <nav aria-label="Plan scopes" className="sidebar-nav">
+              <FoldingGroup
+                collapsed={collapsed}
+                rail={
+                  <nav aria-label="Plans" className="sidebar-nav">
                     <SidebarMenu>
-                      {planEntries.map((entry) => (
-                        <SidebarMenuItem key={entry.key}>
-                          <SidebarMenuButton
-                            isActive={entry.active}
-                            aria-label={entry.label}
-                            aria-description={
-                              entry.count
-                                ? `${entry.count} completed`
-                                : undefined
-                            }
-                            onClick={entry.onSelect}
-                          >
-                            {entry.icon}{" "}
-                            <Tooltip content={entry.label} overflowOnly>
-                              <span>{entry.label}</span>
-                            </Tooltip>
-                            {entry.count && (
-                              <span className="sidebar-count">
-                                {entry.count}
-                              </span>
-                            )}
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
+                      <GroupMenu
+                        label="Plans"
+                        icon={Layers}
+                        entries={planEntries}
+                        manage={{
+                          label: "All Plans",
+                          current: view === "plans",
+                          onSelect: () => setView("plans"),
+                        }}
+                      />
                     </SidebarMenu>
                   </nav>
-                </>
-              )}
+                }
+              >
+                <GroupHeading
+                  label="Plans"
+                  current={view === "plans"}
+                  onOpen={() => setView("plans")}
+                />
+                <nav aria-label="Plan scopes" className="sidebar-nav">
+                  <SidebarMenu>
+                    {planEntries.map((entry) => (
+                      <SidebarMenuItem key={entry.key}>
+                        <SidebarMenuButton
+                          isActive={entry.active}
+                          aria-label={entry.label}
+                          aria-description={
+                            entry.count ? `${entry.count} completed` : undefined
+                          }
+                          onClick={entry.onSelect}
+                        >
+                          {entry.icon}{" "}
+                          <Tooltip content={entry.label} overflowOnly>
+                            <span>{entry.label}</span>
+                          </Tooltip>
+                          {entry.count && (
+                            <span className="sidebar-count">{entry.count}</span>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </nav>
+              </FoldingGroup>
             </SidebarGroup>
           )}
           <SidebarGroup className="sidebar-group">

@@ -6,6 +6,7 @@ import * as React from "react";
 import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { cn } from "cn";
 import { SearchIcon } from "lucide-react";
+import { scrollHost } from "@/components/ui/scroll-host";
 import { Kbd } from "@/components/ui/kbd";
 import { HighlightGroup } from "@/components/ui/highlight-group";
 import { RowHighlight } from "@/components/ui/row-highlight";
@@ -118,12 +119,16 @@ function CommandInput({
   );
 }
 
+// The list scrolls its rows, so it is a `layoutScroll` host for the highlight Glide.
+const ScrollingList = scrollHost(CommandPrimitive.List);
+
 function CommandList({
   className,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.List>) {
   return (
-    <CommandPrimitive.List
+    <ScrollingList
+      layoutScroll
       data-slot="command-list"
       className={cn(
         "max-h-80 scroll-py-1 overflow-x-hidden overflow-y-auto",
