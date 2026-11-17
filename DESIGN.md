@@ -327,6 +327,18 @@ The drawing describes hierarchy, not additional duplicate search fields. Search 
 
 With nothing open, the list (or board) takes the full width of the panel; the detail pane appears only when a ticket opens. List and detail scroll independently, and the window itself never scrolls. In the list pane only the rows (and paging) scroll: the title, toolbar, source tabs and filter chips stay fixed above them. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty update editor must not push the title down.
 
+### Opening, closing and full width
+
+The layout always changes at once; the motion plays on top of it (section 12 holds the tokens and the language). Everything here is instant under reduced motion and while a key repeats or clicks come in rapid succession.
+
+- **Opening a ticket.** The list narrows at once. The document glides in 16px from the right and comes into focus from a soft blur, on the smooth spring.
+- **Closing.** The list takes the width at once. The document stays where it was, still showing the ticket, and fades out to a slight blur while drifting 8px right over `--dur-exit`. It takes no input while it leaves. On the board the peek fades out the same way.
+- **J and K between tickets.** The open document fades out where it was over `--dur-exit`; the next fades up 6px from a soft blur over `--dur-enter`, after the first has gone. The header changes at once. Choosing another row is the same swap. A held J or K swaps instantly on every repeat.
+- **Full width.** The list slides 12px left as it fades over `--dur-exit`, over the document, which re-centres with a 24px glide from the right, fading up from a soft blur on the smooth spring. Back reverses it: the list slides in from the left and the document glides 24px from the left.
+- **Narrow windows** use the same open and close; the document fades out over the list that replaces it.
+
+Both the glide and the exit end on their own, so returning to the Tickets view never replays them.
+
 ### Responsive rules
 
 Measure the available content panel width after navigation, not just the screen width. Preserve readable minimums rather than squeezing three panes together.
