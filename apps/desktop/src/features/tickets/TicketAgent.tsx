@@ -56,13 +56,24 @@ export function TicketAgentSession({
       action: { label: "Retry", run: retry },
     });
   }, [failure, retry, show]);
-  // Answered since the last change, or failed: a cached answer a change has
-  // made stale (an update posted while this Ticket was away) does not decide
-  // the once-per-opening slot, and a failed read leaves the line without one.
-  const answered =
-    (latest.value !== undefined && latest.current) || failure !== null;
   const update = latest.value ?? null;
   const attention = useInboxAttention();
+  const [opening, setOpening] = useState<{
+    reference: string | undefined;
+    answered: boolean;
+    reserved: boolean | null;
+  }>({ reference: ticket?.reference, answered: false, reserved: null });
+  // Whether this opening has its answer: a latest update read since the last
+  // change (a cached one a change has made stale, such as an update posted
+  // while this Ticket was away, does not count), or a failure, which leaves the
+  // line without one. Decided once: later re-reads keep the cached update, so
+  // the badge, the strip and the announcement stay as they are.
+  const opened = opening.reference === ticket?.reference;
+  const answered =
+    opened &&
+    (opening.answered ||
+      failure !== null ||
+      (latest.value !== undefined && latest.current));
   const ready = Boolean(ticket && answered && (!enabled || list));
   const chats = list?.chats ?? [];
   const projected =
@@ -78,18 +89,20 @@ export function TicketAgentSession({
     ]) ??
     projected[0] ??
     chats[0];
-  const [opening, setOpening] = useState<{
-    reference: string | undefined;
-    reserved: boolean | null;
-  }>({ reference: ticket?.reference, reserved: null });
-  if (opening.reference !== ticket?.reference) {
-    setOpening({ reference: ticket?.reference, reserved: null });
+  if (!opened) {
+    setOpening({
+      reference: ticket?.reference,
+      answered: false,
+      reserved: null,
+    });
+  } else if (answered && !opening.answered) {
+    setOpening({ ...opening, answered: true });
   } else if (
     opening.reserved === null &&
     (ready || chat || ticket?.progress_summary?.editing_agent)
   )
     setOpening({
-      reference: ticket?.reference,
+      ...opening,
       reserved:
         chats.length > 0 ||
         projected.length > 0 ||
@@ -101,8 +114,7 @@ export function TicketAgentSession({
     <AgentContext
       value={{
         ready,
-        reserved:
-          opening.reference === ticket?.reference && Boolean(opening.reserved),
+        reserved: opened && Boolean(opening.reserved),
         chat,
         update: ready ? update : (ticket?.progress_summary ?? null),
       }}

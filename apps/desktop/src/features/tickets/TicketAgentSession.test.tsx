@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { LatestUpdate } from "./LatestUpdate";
+import { AgentContext } from "./ticket-agent-context";
 import { TicketAgentSession, TicketAgentStrip } from "./TicketAgent";
 import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { ticketFor } from "./open-ticket/parts/ticket-fixture";
@@ -106,6 +108,85 @@ describe("the slot is decided from a read made since the opening", () => {
     expect(
       await screen.findByRole("status", { name: "Ticket agent" }),
     ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Go to update: Drafted a fix" }),
+    ).toBeTruthy();
+  });
+});
+
+describe("the slot stays steady while the same Ticket stays open", () => {
+  /** What the header badge decides from: the session's `ready`. */
+  const seen: boolean[] = [];
+  function Ready() {
+    const ready = useContext(AgentContext)?.ready ?? false;
+    seen.push(ready);
+    return <output aria-label="agent ready">{String(ready)}</output>;
+  }
+  function Open() {
+    return (
+      <TicketAgentSession ticket={ticketFor("T-5")}>
+        {(loading) => (
+          <>
+            <output aria-label="agent state">
+              {loading ? "loading" : "ready"}
+            </output>
+            <Ready />
+            <TicketAgentStrip reference="T-5" />
+          </>
+        )}
+      </TicketAgentSession>
+    );
+  }
+
+  test("a change's held re-read keeps the strip, its button and the ready state", async () => {
+    let release: () => void = () => {};
+    let hold = false;
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command !== "latest_update") throw new Error(`unexpected ${command}`);
+      if (!hold) return report;
+      return new Promise((resolve) => {
+        release = () => resolve(report);
+      });
+    });
+    const signal = fakeChangeSignal();
+    render(
+      <TestReads signal={signal}>
+        <Open />
+      </TestReads>,
+    );
+    await screen.findByRole("button", { name: "Go to update: Drafted a fix" });
+    expect(screen.getByLabelText("agent state").textContent).toBe("ready");
+
+    hold = true;
+    seen.length = 0;
+    await act(async () => signal.change());
+    expect(screen.getByLabelText("agent state").textContent).toBe("ready");
+    expect(screen.getByLabelText("agent ready").textContent).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "Go to update: Drafted a fix" }),
+    ).toBeTruthy();
+    await act(async () => release());
+    expect(seen).not.toContain(false);
+    expect(screen.getByLabelText("agent ready").textContent).toBe("true");
+  });
+
+  test("a failed re-read keeps the cached update in the strip", async () => {
+    let fail = false;
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command !== "latest_update") throw new Error(`unexpected ${command}`);
+      if (fail) throw new Error("Database unavailable");
+      return report;
+    });
+    const signal = fakeChangeSignal();
+    render(
+      <TestReads signal={signal}>
+        <Open />
+      </TestReads>,
+    );
+    await screen.findByRole("button", { name: "Go to update: Drafted a fix" });
+    fail = true;
+    await act(async () => signal.change());
+    expect(screen.getByLabelText("agent state").textContent).toBe("ready");
     expect(
       screen.getByRole("button", { name: "Go to update: Drafted a fix" }),
     ).toBeTruthy();
