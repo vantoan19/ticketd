@@ -9,7 +9,7 @@ use std::{
 };
 
 use ticketd_core::{
-    Error, Workspace,
+    Error, Workspace, WorkspaceGuard,
     sync::{MIN_POLL_INTERVAL_SECS, SyncItem, SyncRecovery, SyncStatus, remote::RemoteStorage},
 };
 
@@ -36,7 +36,7 @@ pub struct Binding {
     pub remote: Arc<dyn RemoteStorage>,
 }
 
-type Open = dyn Fn() -> Result<Workspace, Error> + Send + Sync;
+type Open = dyn Fn() -> Result<WorkspaceGuard, Error> + Send + Sync;
 /// `None` while the Workspace is not connected to a folder.
 type Bound = dyn Fn(&Workspace) -> Result<Option<Binding>, Error> + Send + Sync;
 /// What the Workspace needs now and then whether or not it syncs, such as
@@ -103,7 +103,7 @@ impl Scheduler {
     }
 
     pub fn binding(&self) -> Result<Option<Binding>, Error> {
-        (self.binding)(&(self.open)()?)
+        (self.binding)(&*(self.open)()?)
     }
 
     /// Keeps sync away from the Workspace while the caller replaces its file:
@@ -208,7 +208,7 @@ impl Scheduler {
     /// the network.
     fn run(
         &self,
-        workspace: Result<Workspace, Error>,
+        workspace: Result<WorkspaceGuard, Error>,
         binding: &Binding,
         now: Duration,
         run: Run,
@@ -419,7 +419,7 @@ mod tests {
         let scheduler = Arc::new(Scheduler::new(
             Box::new(move || {
                 counted.fetch_add(1, Ordering::SeqCst);
-                Workspace::open(&open_path)
+                ticketd_core::WorkspaceSession::for_file(&open_path)?.workspace()
             }),
             Box::new(move |_| Ok(lock(&source).clone())),
             Box::new(move |_| {
@@ -562,10 +562,11 @@ mod tests {
     fn a_failed_upkeep_runs_again_after_a_minute() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workspace.sqlite3");
+        drop(Workspace::open(&path).unwrap());
         let attempts = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&attempts);
         let scheduler = Scheduler::new(
-            Box::new(move || Workspace::open(&path)),
+            Box::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
             Box::new(|_| Ok(None)),
             Box::new(move |_| match counted.fetch_add(1, Ordering::SeqCst) {
                 0 => Err(Error::NotFound("a busy Workspace".into())),

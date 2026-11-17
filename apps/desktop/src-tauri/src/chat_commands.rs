@@ -690,9 +690,14 @@ pub async fn restore_workspace(
     let scheduler = std::sync::Arc::clone(&sync.scheduler);
     let restored = chats
         .restore(PathBuf::from(path), move |backup| {
-            // Sync is held off while the Workspace file is replaced.
+            // Sync is held off while the Workspace file is replaced, and the desktop's
+            // session lets go of it.
             let _no_run = scheduler.hold();
-            ticketd_core::Workspace::restore_default(backup).map_err(|error| error.to_string())
+            crate::workspace_session()
+                .and_then(|session| {
+                    session.exclusive(|path| ticketd_core::Workspace::restore(path, backup))
+                })
+                .map_err(|error| error.to_string())
         })
         .await;
     if let Ok(overview) = chats.overview() {

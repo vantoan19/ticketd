@@ -29,7 +29,7 @@ use ticketd_chat_host::{
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
     ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurn,
-    ChatTurnState, Error, NewChat, Workspace,
+    ChatTurnState, Error, NewChat, Workspace, WorkspaceSession,
 };
 
 struct Fixture {
@@ -179,7 +179,7 @@ fn start_host(
     let (path, storage_up) = (path.to_owned(), storage_up.clone());
     let opener: WorkspaceOpener = Arc::new(move || {
         if storage_up.load(Ordering::SeqCst) {
-            Workspace::open(&path)
+            WorkspaceSession::for_file(&path)?.workspace()
         } else {
             Err(Error::NoDataDirectory)
         }
@@ -957,7 +957,7 @@ async fn chats_run_at_the_same_time_each_in_its_own_runtime() {
     );
     let opener: WorkspaceOpener = {
         let path = path.clone();
-        Arc::new(move || Workspace::open(&path))
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
     };
     let adapters: Vec<Arc<dyn HarnessAdapter>> =
         vec![Arc::new(codex.clone()), Arc::new(claude.clone())];
@@ -984,7 +984,7 @@ async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_t
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();
     f.host = ChatHost::with_context(
-        Arc::new(move || Workspace::open(&path)),
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
         vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
         Some(Arc::new(|chat_id| {
             Ok(Some(format!("context for {chat_id}")))
@@ -1206,7 +1206,7 @@ async fn a_context_that_cannot_be_read_is_said_and_the_session_starts_without_it
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();
     f.host = ChatHost::with_context(
-        Arc::new(move || Workspace::open(&path)),
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
         vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
         Some(Arc::new(|_| {
             Err("the workspace could not be opened".to_owned())
@@ -1459,7 +1459,7 @@ async fn streamed_text_does_not_read_the_workspace_for_every_fragment() {
     let host = ChatHost::new(
         Arc::new(move || {
             counted.fetch_add(1, Ordering::SeqCst);
-            Workspace::open(&path)
+            WorkspaceSession::for_file(&path)?.workspace()
         }),
         vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
     )
@@ -1545,7 +1545,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     let context = Arc::new(std::sync::Mutex::new("links: none".to_owned()));
     let source = context.clone();
     f.host = ChatHost::with_context(
-        Arc::new(move || Workspace::open(&path)),
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
         vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
         Some(Arc::new(move |_| Ok(Some(source.lock().unwrap().clone())))),
     )

@@ -57,6 +57,8 @@ pub use search::{Availability, TicketFilter, TicketOrder};
 mod sync_files;
 pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
 mod read_scope;
+mod session;
+pub use session::{WorkspaceGuard, WorkspaceSession};
 mod tags;
 mod ticket_documents;
 mod write_scope;
@@ -552,6 +554,9 @@ impl Workspace {
         // Starts when exclusive use is first refused, and anew after each
         // wait for a migration: that one was not an open Workspace.
         let mut open_elsewhere: Option<Instant> = None;
+        // While this open waits for exclusive use, warm sessions elsewhere are asked to
+        // let go (ADR 0016).
+        let mut release: Option<session::ReleaseRequest> = None;
         loop {
             let lock = backup::lock_file(path)?;
             if let Err(error) = FileExt::try_lock_shared(&lock) {
@@ -563,6 +568,13 @@ impl Workspace {
                 wait_for_migration_lock(migrating)?;
                 continue;
             }
+            // Another process waits for warm sessions to let go; opening now would
+            // hold it off.
+            if release.is_none() && session::release_requested(path) {
+                drop(lock);
+                wait_for_migration_lock(migrating)?;
+                continue;
+            }
             if restore::pending(path) {
                 drop(lock);
                 let recovery_lock = backup::lock_file(path)?;
@@ -570,12 +582,16 @@ impl Workspace {
                     if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                         return Err(error.into());
                     }
+                    if release.is_none() {
+                        release = Some(session::ReleaseRequest::new(path)?);
+                    }
                     wait_for_migration_lock(
                         *open_elsewhere
                             .get_or_insert_with(|| Instant::now() + open_workspaces_wait),
                     )?;
                     continue;
                 }
+                release = None;
                 restore::recover(path)?;
                 continue;
             }
@@ -585,8 +601,7 @@ impl Workspace {
             {
                 return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings > Restore from backup".into()));
             }
-            document_links::register_heading_function(&connection)?;
-            connection.busy_timeout(Duration::from_secs(10))?;
+            session::configure(&connection)?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
             let legacy: bool = connection.query_row(
@@ -601,9 +616,6 @@ impl Workspace {
             }
             if version == FORMAT_VERSION {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
-                // Room for every statement hydrating a ticket at once (the default is 16),
-                // so a list does not evict and re-prepare them per ticket.
-                connection.set_prepared_statement_cache_capacity(64);
                 return Ok(Self {
                     connection,
                     _lock: lock,
@@ -616,14 +628,17 @@ impl Workspace {
                 if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                     return Err(error.into());
                 }
+                if release.is_none() {
+                    release = Some(session::ReleaseRequest::new(path)?);
+                }
                 wait_for_migration_lock(
                     *open_elsewhere.get_or_insert_with(|| Instant::now() + open_workspaces_wait),
                 )?;
                 continue;
             }
+            release = None;
             let mut connection = Connection::open_with_flags(path, flags)?;
-            document_links::register_heading_function(&connection)?;
-            connection.busy_timeout(Duration::from_secs(10))?;
+            session::configure(&connection)?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
             let legacy: bool = connection.query_row(

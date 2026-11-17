@@ -133,10 +133,18 @@ impl From<ticketd_core::Error> for BridgeFailure {
     }
 }
 
-/// Opens the workspace as the person using the desktop: their own changes do not notify them.
-fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
-    static SESSION: workspace_session::Session = workspace_session::Session::new();
+static SESSION: workspace_session::Session = workspace_session::Session::new();
+
+/// The workspace for one command, as the person using the desktop: their own changes
+/// do not notify them.
+fn open_workspace() -> Result<ticketd_core::WorkspaceGuard, ticketd_core::Error> {
     SESSION.open(Workspace::open_default)
+}
+
+/// The desktop's warm session, for work that replaces the workspace file.
+fn workspace_session() -> Result<std::sync::Arc<ticketd_core::WorkspaceSession>, ticketd_core::Error>
+{
+    SESSION.session(Workspace::open_default)
 }
 
 #[tauri::command]

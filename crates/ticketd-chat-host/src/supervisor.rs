@@ -391,7 +391,8 @@ impl Supervisor {
     // ponytail: SQLite runs on the supervisor task; move to spawn_blocking if a slow
     // disk shows up as stalled Chats.
     fn core<T>(&self, call: impl FnOnce(&mut Workspace) -> Result<T, Error>) -> Result<T, Error> {
-        call(&mut (self.open_workspace)()?)
+        let mut workspace = (self.open_workspace)()?;
+        call(&mut workspace)
     }
 
     /// A core write. A failure that is not a refusal of this one request means history
