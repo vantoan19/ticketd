@@ -347,6 +347,31 @@ fn incomplete_context_schema_cannot_replace_healthy_workspace() {
     }
 }
 
+/// Data safety comes first: a Workspace that earlier builds left without a schema object
+/// of its format version can still be backed up. Inspecting or restoring that backup
+/// still names what is missing, which protects the Workspace a restore would replace.
+#[test]
+fn a_workspace_missing_a_schema_object_can_still_be_backed_up_but_not_restored_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let workspace = populated(&path);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("ALTER TABLE inbox_entries DROP COLUMN editing_agent")
+        .unwrap();
+
+    workspace.backup(&backup).unwrap();
+
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("a backup missing a column was called valid")
+    };
+    assert_eq!(tables, ["inbox_entries.editing_agent"]);
+    assert!(Workspace::restore(&path, &backup).is_err());
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
 #[test]
 fn backup_missing_search_maintenance_trigger_is_rejected() {
     let dir = tempfile::tempdir().unwrap();

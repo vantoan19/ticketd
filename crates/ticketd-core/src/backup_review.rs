@@ -157,9 +157,21 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     })
 }
 
+/// Whether a check holds a file to the schema objects of its format version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ladder {
+    /// Every table, column, trigger and unique index of the version must be there: what a
+    /// backup needs before it may replace a Workspace.
+    Required,
+    /// Only integrity, foreign keys and attachments are checked. Making a backup of the
+    /// live Workspace uses this: a Workspace that earlier builds left without an object is
+    /// still worth saving, and inspecting or restoring the copy reports what is missing.
+    Unchecked,
+}
+
 /// Checks a database file. It must be a ticketd workspace before its format
 /// version means anything, because many unrelated databases use `user_version`.
-pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error> {
+pub(crate) fn check_backup(connection: &Connection, ladder: Ladder) -> Result<BackupCheck, Error> {
     if !table_exists(connection, "tickets")? {
         return Ok(BackupCheck::NotTicketd);
     }
@@ -173,9 +185,11 @@ pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error
     if !(1..=FORMAT_VERSION).contains(&version) {
         return Ok(BackupCheck::NotTicketd);
     }
-    let missing = missing_objects(connection, version)?;
-    if !missing.is_empty() {
-        return Ok(BackupCheck::MissingTables { tables: missing });
+    if ladder == Ladder::Required {
+        let missing = missing_objects(connection, version)?;
+        if !missing.is_empty() {
+            return Ok(BackupCheck::MissingTables { tables: missing });
+        }
     }
     let integrity: String =
         connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
@@ -230,7 +244,7 @@ impl Workspace {
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )?;
             connection.execute_batch("BEGIN")?;
-            let check = match check_backup(&connection) {
+            let check = match check_backup(&connection, Ladder::Required) {
                 // Text or another format entirely, so there is nothing of ours to name.
                 Err(Error::Database(rusqlite::Error::SqliteFailure(failure, _)))
                     if failure.code == rusqlite::ErrorCode::NotADatabase =>

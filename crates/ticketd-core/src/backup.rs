@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, Workspace,
-    backup_review::{BackupCheck, check_backup},
+    backup_review::{BackupCheck, Ladder, check_backup},
 };
 use rusqlite::{Connection, backup::Backup};
 use serde::{Deserialize, Serialize};
@@ -78,11 +78,15 @@ pub(crate) const PRE_MIGRATION_MARKER: &str = ".pre-migration-";
 
 /// Restore accepts exactly the files that inspecting a backup calls valid.
 pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
+    validate_against(connection, Ladder::Required)
+}
+
+fn validate_against(connection: &Connection, ladder: Ladder) -> Result<(), Error> {
     // A backup from before Efforts became Plans gets the legacy-schema message, not a missing table.
     if table_exists(connection, "efforts")? {
         return Err(Error::LegacyEffortWorkspace);
     }
-    match check_backup(connection)? {
+    match check_backup(connection, ladder)? {
         BackupCheck::Valid { .. } => Ok(()),
         BackupCheck::NewerFormat { backup_version, .. } => {
             Err(Error::NewerSchema(i64::from(backup_version)))
@@ -200,7 +204,8 @@ pub(crate) fn save_snapshot(
     drop(barrier);
     crate::backup_archive::pack(&destination, files)?;
     if check_schema {
-        validate(&destination)?;
+        // The ladder is not required of the live Workspace: see `Ladder::Unchecked`.
+        validate_against(&destination, Ladder::Unchecked)?;
     }
     drop(destination);
     staged.as_file().sync_all()?;
