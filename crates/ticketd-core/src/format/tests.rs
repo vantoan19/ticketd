@@ -45,6 +45,28 @@ fn the_ladder_stops_at_the_requested_version() {
 }
 
 #[test]
+fn the_legacy_mention_tables_appear_at_the_versions_that_first_wrote_them() {
+    // The builds that wrote these versions made `numeric_mentions` at 41 and
+    // `activity_graph_numbers`, with its triggers, at 42: a backup saved by one of them
+    // is checked against what it had.
+    let tables = |version| objects_at(version).unwrap().tables;
+    let triggers = |version| objects_at(version).unwrap().triggers;
+    for version in [35, 40] {
+        assert!(!tables(version).contains("numeric_mentions"), "{version}");
+        assert!(
+            !tables(version).contains("activity_graph_numbers"),
+            "{version}"
+        );
+    }
+    assert!(tables(41).contains("numeric_mentions"));
+    assert!(!tables(41).contains("activity_graph_numbers"));
+    assert!(tables(42).contains("activity_graph_numbers"));
+    assert!(triggers(42).contains("activity_graph_numbers_insert"));
+    assert!(triggers(42).contains("activity_graph_numbers_delete"));
+    assert!(!triggers(41).contains("activity_graph_numbers_insert"));
+}
+
+#[test]
 fn migrating_an_existing_workspace_continues_the_ladder() {
     let mut connection = Connection::open_in_memory().unwrap();
     document_links::register_heading_function(&connection).unwrap();

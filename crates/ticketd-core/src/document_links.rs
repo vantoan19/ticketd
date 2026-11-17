@@ -51,13 +51,18 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
 /// an empty passage (there is no text to quote) and `explicit` set.
 const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.reference = n.reference WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
 
-/// The mention index as Workspaces at format versions 35 to 55 had it, keyed by the ticket
-/// number as written. Format version 56 gave tickets device references and replaced it with
-/// [`MENTION_INDEX_SCHEMA`], without carrying the numbers over. The ladder builds the old shape
-/// so that a Workspace of those versions, and a backup of one, is checked against what it had.
-pub(crate) const LEGACY_MENTION_INDEX_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage));
-    CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);
-    CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
+/// The numeric mention index as Workspaces at format versions 41 to 55 had it, keyed by the
+/// ticket number as written. Format version 56 gave tickets device references and replaced it
+/// with [`MENTION_INDEX_SCHEMA`], without carrying the numbers over. The ladder builds the old
+/// shape at step 41, where the builds that wrote that version made it, so that a Workspace of
+/// those versions, and a backup of one, is checked against what it had.
+pub(crate) const LEGACY_NUMERIC_MENTIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage));
+    CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);";
+
+/// The per-ticket Activity projection of [`LEGACY_NUMERIC_MENTIONS_SCHEMA`], with the triggers
+/// that keep it, as Workspaces at format versions 42 to 55 had it. The ladder builds it at
+/// step 42; format version 56 drops it with the index it follows.
+pub(crate) const LEGACY_ACTIVITY_GRAPH_NUMBERS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
     CREATE INDEX IF NOT EXISTS activity_graph_numbers_source ON activity_graph_numbers(activity_id, number, passage);
     CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_insert AFTER INSERT ON numeric_mentions WHEN NEW.activity=1 BEGIN INSERT OR IGNORE INTO activity_graph_numbers SELECT ticket_id, NEW.source_id, NEW.number, NEW.passage FROM activities WHERE id=NEW.source_id; END;
     CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_delete AFTER DELETE ON numeric_mentions WHEN OLD.activity=1 BEGIN DELETE FROM activity_graph_numbers WHERE activity_id=OLD.source_id AND number=OLD.number AND passage=OLD.passage; END;";

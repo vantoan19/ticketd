@@ -289,22 +289,10 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column documents.trashed
 
 ## 35
-+ table activity_graph_numbers
 + table context_mentions
-+ table numeric_mentions
-+ column activity_graph_numbers.activity_id
-+ column activity_graph_numbers.number
-+ column activity_graph_numbers.passage
-+ column activity_graph_numbers.ticket_id
 + column context_mentions.passage
 + column context_mentions.source_id
 + column context_mentions.target_id
-+ column numeric_mentions.activity
-+ column numeric_mentions.number
-+ column numeric_mentions.passage
-+ column numeric_mentions.source_id
-+ trigger activity_graph_numbers_delete
-+ trigger activity_graph_numbers_insert
 + trigger plan_entity_insert
 + trigger ticket_entity_insert
 
@@ -343,14 +331,26 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column activity_mentions.target_id
 
 ## 41
++ table numeric_mentions
++ column numeric_mentions.activity
++ column numeric_mentions.number
++ column numeric_mentions.passage
++ column numeric_mentions.source_id
 + trigger numeric_mentions_activity_delete
 
 ## 42
++ table activity_graph_numbers
 + table activity_graph_targets
++ column activity_graph_numbers.activity_id
++ column activity_graph_numbers.number
++ column activity_graph_numbers.passage
++ column activity_graph_numbers.ticket_id
 + column activity_graph_targets.activity_id
 + column activity_graph_targets.passage
 + column activity_graph_targets.target_id
 + column activity_graph_targets.ticket_id
++ trigger activity_graph_numbers_delete
++ trigger activity_graph_numbers_insert
 + trigger activity_graph_targets_delete
 + trigger activity_graph_targets_insert
 

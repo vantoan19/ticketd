@@ -88,11 +88,7 @@ const LADDER: [(i64, Step); 83] = [
         tx.execute_batch(PLAN_SCOPE_INDEX).map_err(Into::into)
     }),
     (34, document_trashed),
-    (35, |tx, _| {
-        // The mention index the backfill writes into: see `document_links`.
-        tx.execute_batch(document_links::LEGACY_MENTION_INDEX_SCHEMA)?;
-        document_links::migrate(tx)
-    }),
+    (35, |tx, _| document_links::migrate(tx)),
     (36, |tx, _| documents::migrate_search(tx)),
     (37, activity_support),
     (38, document_kept),
@@ -394,7 +390,6 @@ fn plan_documents(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 }
 
 fn activity_mentions(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
-    tx.execute_batch(document_links::LEGACY_MENTION_INDEX_SCHEMA)?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS activity_mentions (activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, target_id TEXT NOT NULL REFERENCES entities(id), passage TEXT NOT NULL, PRIMARY KEY(activity_id, target_id, passage)); CREATE INDEX IF NOT EXISTS activity_mentions_target ON activity_mentions(target_id, activity_id); CREATE INDEX IF NOT EXISTS activities_support_ticket ON activities(ticket_id, supporting_document_id, id); CREATE INDEX IF NOT EXISTS activities_support_document ON activities(supporting_document_id, ticket_id, id);")?;
     let mut statement = tx.prepare("SELECT id, brief FROM activities")?;
     let activities = statement
@@ -410,7 +405,8 @@ fn activity_mentions(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 }
 
 fn mention_triggers(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
-    tx.execute_batch(document_links::LEGACY_MENTION_INDEX_SCHEMA)?;
+    // The builds that wrote version 41 made the numeric mention index here.
+    tx.execute_batch(document_links::LEGACY_NUMERIC_MENTIONS_SCHEMA)?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_identity ON activities(ticket_id, id); CREATE TRIGGER IF NOT EXISTS numeric_mentions_activity_delete AFTER DELETE ON activities BEGIN DELETE FROM numeric_mentions WHERE source_id = OLD.id AND activity = 1; END;")?;
     let mut statement = tx.prepare("SELECT id, body, 0 FROM tickets UNION ALL SELECT id, body, 0 FROM documents UNION ALL SELECT id, brief, 1 FROM activities")?;
     let records = statement
@@ -436,8 +432,10 @@ fn mention_triggers(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 fn activity_graph_projections(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
     // Rebuildable, ordered projections let graph reads stop after a bounded
     // number of Activity mentions without walking unrelated Activities. The projection of
-    // ticket numbers is not filled: the ladder does not backfill them (see
-    // `document_links::LEGACY_MENTION_INDEX_SCHEMA`) and format version 56 drops them.
+    // ticket numbers is made here, as the builds that wrote version 42 made it, but is not
+    // filled: the ladder does not backfill them (see
+    // `document_links::LEGACY_NUMERIC_MENTIONS_SCHEMA`) and format version 56 drops them.
+    tx.execute_batch(document_links::LEGACY_ACTIVITY_GRAPH_NUMBERS_SCHEMA)?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
         INSERT OR IGNORE INTO activity_graph_targets SELECT a.ticket_id, m.activity_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id=m.activity_id;
         CREATE TRIGGER IF NOT EXISTS activity_graph_targets_insert AFTER INSERT ON activity_mentions BEGIN INSERT OR IGNORE INTO activity_graph_targets SELECT ticket_id, NEW.activity_id, NEW.target_id, NEW.passage FROM activities WHERE id=NEW.activity_id; END;
