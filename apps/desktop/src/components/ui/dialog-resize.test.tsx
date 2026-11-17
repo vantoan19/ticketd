@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./dialog";
 
 // The New ticket dialog glides when Expand is pressed, and only then: a window
 // resize moves its edges with the window (nothing animates while a panel is

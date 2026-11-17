@@ -5,7 +5,7 @@ import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
-import { scrollHost } from "@/components/ui/motion";
+import { scrollHost } from "@/components/ui/scroll-host";
 import { HighlightGroup } from "@/components/ui/highlight-group";
 import { RowHighlight } from "@/components/ui/row-highlight";
 

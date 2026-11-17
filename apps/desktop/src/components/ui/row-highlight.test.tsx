@@ -177,7 +177,7 @@ test("every list that scrolls its rows is a layoutScroll host", async () => {
     expect(marksScroll(host), slot).toBe(true);
   }
   // Select scrolls in its viewport.
-  expect(marksScroll(document.querySelector("[data-radix-select-viewport]"))).toBe(
-    true,
-  );
+  expect(
+    marksScroll(document.querySelector("[data-radix-select-viewport]")),
+  ).toBe(true);
 });

@@ -6,7 +6,7 @@ import * as React from "react";
 import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { cn } from "cn";
 import { SearchIcon } from "lucide-react";
-import { scrollHost } from "@/components/ui/motion";
+import { scrollHost } from "@/components/ui/scroll-host";
 import { Kbd } from "@/components/ui/kbd";
 import { HighlightGroup } from "@/components/ui/highlight-group";
 import { RowHighlight } from "@/components/ui/row-highlight";

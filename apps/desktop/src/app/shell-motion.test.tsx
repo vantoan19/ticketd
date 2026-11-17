@@ -204,11 +204,37 @@ it("the narrow navigation sheet glides in from its edge and slides back out", ()
   );
 });
 
+it("the sheet's scrim leaves with the sheet, never after it", () => {
+  const closing = (selector: string) =>
+    new RegExp(
+      `${selector.replace(/[[\]"=.]/g, "\\$&")}\\s*\\{[^}]*animation:\\s*[\\w-]+ (var\\([^)]+\\))`,
+    ).exec(styles)?.[1];
+  expect(closing('[data-slot="sheet-overlay"][data-state="closed"]')).toBe(
+    closing('.ui-sheet[data-state="closed"]'),
+  );
+  // Leftovers of the old overlay motion are gone.
+  expect(styles).not.toContain("--sheet-scale");
+  expect(styles).not.toContain("overlay-enter");
+});
+
 it("the collapsed sidebar fades its labels out and narrows on the smooth spring", () => {
   expect(styles).toMatch(
     /\.sidebar \{[^}]*transition:\s*width var\(--spring-smooth-t\) var\(--spring-smooth\)/,
   );
   expect(styles).toMatch(
     /\.sidebar\[data-collapsed\] :is\(\.sidebar-label[^{]*\{[^}]*opacity: 0;[^}]*var\(--dur-exit\)/,
+  );
+});
+
+it("the rail's footer buttons glide between the row and the column", () => {
+  // Explicit places, so the pair and the column are one transition.
+  expect(styles).toMatch(
+    /\.sidebar-footer-actions > button \{[^}]*transition:[^;]*left var\(--spring-smooth-t\) var\(--spring-smooth\)/,
+  );
+  expect(styles).toMatch(
+    /\.sidebar-footer-actions \{[^}]*transition: height var\(--spring-smooth-t\)/,
+  );
+  expect(styles).toMatch(
+    /\.sidebar\[data-collapsed\] \.sidebar-footer-actions > button:last-child \{[^}]*top: var\(--header-control-height\)/,
   );
 });
