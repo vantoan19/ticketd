@@ -139,6 +139,49 @@ describe("the gate", () => {
   });
 });
 
+describe("a Ticket that stops existing", () => {
+  it("shows the not-found failure when a re-read says a Ticket that was read is gone", async () => {
+    const signal = fakeChangeSignal();
+    bridge.invoke
+      .mockResolvedValueOnce(ticket("Was here"))
+      .mockRejectedValueOnce({ code: "not_found", message: "T-1 not found" });
+    render(
+      <TestReads signal={signal}>
+        <OpenTicket reference="T-1">
+          <Page />
+        </OpenTicket>
+      </TestReads>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Was here" }),
+    ).toBeTruthy();
+
+    act(() => signal.change());
+    expect(await screen.findByText("Couldn't load T-1")).toBeTruthy();
+    expect(screen.getByText("It was deleted or moved.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Was here" })).toBeNull();
+  });
+
+  it("makes a chip plain when a re-read says the Ticket it names is gone", async () => {
+    const signal = fakeChangeSignal();
+    bridge.invoke
+      .mockResolvedValueOnce(ticket("Was here"))
+      .mockRejectedValueOnce({ code: "not_found", message: "T-1 not found" });
+    function Chip() {
+      const { value } = useTicket("T-1");
+      return <span>{value === null ? "plain" : (value?.title ?? "…")}</span>;
+    }
+    render(
+      <TestReads signal={signal}>
+        <Chip />
+      </TestReads>,
+    );
+    expect(await screen.findByText("Was here")).toBeTruthy();
+    act(() => signal.change());
+    expect(await screen.findByText("plain")).toBeTruthy();
+  });
+});
+
 const recordReads = () =>
   bridge.invoke.mock.calls.filter(([command]) => command === "show_ticket");
 

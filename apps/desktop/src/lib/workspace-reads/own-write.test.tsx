@@ -8,7 +8,9 @@ import { fakeChangeSignal } from "./fake-signal";
 import { deferred, settle, wrap } from "./test-support";
 import { TestReads } from "./testing";
 import { useRead } from "./use-read";
+import { useReplaced } from "./use-replaced";
 import { useWrote } from "./use-wrote";
+import { Visibility } from "./Visibility";
 
 const ticket = (title: string) =>
   ({ reference: "T-1", title }) as unknown as Ticket;
@@ -156,5 +158,66 @@ describe("own write", () => {
     });
     expect(result.current.read.value).toBe("Before");
     expect(result.current.read.failure).not.toBeNull();
+  });
+});
+
+describe("a replaced Workspace", () => {
+  it("drops every cached value, reads what is visible again and makes the next poll count as a change", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockResolvedValueOnce("Before")
+      .mockResolvedValue("After");
+    const spec = titleRead(call, "replaced-visible");
+    const { result } = renderHook(
+      () => ({
+        read: useRead(spec, "T-1"),
+        replaced: useReplaced(),
+        version: useWorkspaceChange(),
+      }),
+      { wrapper: wrap(signal) },
+    );
+    await waitFor(() => expect(result.current.read.value).toBe("Before"));
+    const version = result.current.version;
+
+    await act(async () => result.current.replaced());
+    await waitFor(() => expect(result.current.read.value).toBe("After"));
+    expect(signal.forgets).toBe(1);
+    expect(result.current.version).toBe(version + 1);
+  });
+
+  it("does not show a hidden read's old value when it is shown again", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockResolvedValueOnce("Before")
+      .mockResolvedValue("After");
+    const spec = titleRead(call, "replaced-hidden");
+    const seen: (string | undefined)[] = [];
+    function Reader() {
+      const value = useRead(spec, "T-1").value;
+      seen.push(value);
+      return <output>{value}</output>;
+    }
+    function Replace() {
+      const replaced = useReplaced();
+      return <button onClick={() => void replaced()}>replace</button>;
+    }
+    const tree = (hidden: boolean) => (
+      <TestReads signal={signal}>
+        <Replace />
+        <Visibility hidden={hidden}>
+          <Reader />
+        </Visibility>
+      </TestReads>
+    );
+    const { rerender, getByText, findByText } = render(tree(false));
+    await findByText("Before");
+    rerender(tree(true));
+    await act(async () => getByText("replace").click());
+    seen.length = 0;
+    rerender(tree(false));
+    await findByText("After");
+    expect(seen).not.toContain("Before");
   });
 });

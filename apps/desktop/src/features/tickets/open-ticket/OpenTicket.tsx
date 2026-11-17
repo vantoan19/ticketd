@@ -60,7 +60,9 @@ function Gate({
         : null,
     [reference, record, opening, current, failure, retry, changed],
   );
-  if (state.status === "failed" && failure)
+  // A Ticket that was read and is now gone is a failure too, not its old copy.
+  const gone = failure?.code === "not_found";
+  if ((state.status === "failed" || gone) && failure)
     return hidden ? null : <FailureState failure={failure} onRetry={retry} />;
   if (!open) {
     if (hidden) return null;

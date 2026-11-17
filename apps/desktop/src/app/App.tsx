@@ -69,7 +69,7 @@ import {
   type ReactNode,
 } from "react";
 import { matchesShortcut } from "@/lib/shortcuts";
-import { WorkspaceReads } from "@/lib/workspace-reads";
+import { WorkspaceReads, useReplaced } from "@/lib/workspace-reads";
 import {
   TicketListSync,
   useTicket,
@@ -138,6 +138,7 @@ export function App() {
 }
 
 function AppContent() {
+  const workspaceReplaced = useReplaced();
   const pageZoom = usePageZoom();
   useEffect(keepWebviewInStep, []);
   const recoveryGeneration = useDraftRecoveryGeneration();
@@ -1045,6 +1046,7 @@ function AppContent() {
                                         setSelected(null);
                                         clearOpened();
                                         bulk.reset();
+                                        await workspaceReplaced();
                                         await refresh();
                                       }}
                                     />

@@ -23,6 +23,8 @@ export type Reads = {
   changed(): void;
   /** The desktop's own write succeeded; see `useWrote`. */
   wrote(returned?: Returned): Promise<void>;
+  /** The whole Workspace was replaced; see `useReplaced`. */
+  replaced(): Promise<void>;
   /** Fills reads from returned Tickets as if they had just been read, for tests. */
   prime(returned: Returned): void;
 };
@@ -105,6 +107,14 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
       // The poll must see the token this write produced as already seen.
       await signal.catchUp().catch(() => {});
       const settled = makeStale(showingMore);
+      moved();
+      await settled.catch(() => {});
+    },
+    async replaced() {
+      signal.forget();
+      // Resetting drops every value (and the late answer of a call in flight)
+      // and reads again what is visible.
+      const settled = client.resetQueries();
       moved();
       await settled.catch(() => {});
     },

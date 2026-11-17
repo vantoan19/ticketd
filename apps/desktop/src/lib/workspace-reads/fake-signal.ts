@@ -6,6 +6,8 @@ export type FakeChangeSignal = ChangeSignal & {
   change(): void;
   /** How many times `catchUp` was called. */
   readonly catchUps: number;
+  /** How many times `forget` was called. */
+  readonly forgets: number;
 };
 
 /**
@@ -17,6 +19,7 @@ export function fakeChangeSignal(
 ): FakeChangeSignal {
   const listeners = new Set<() => void>();
   let catchUps = 0;
+  let forgets = 0;
   return {
     subscribe(onChange) {
       listeners.add(onChange);
@@ -26,11 +29,17 @@ export function fakeChangeSignal(
       catchUps += 1;
       return catchUp();
     },
+    forget() {
+      forgets += 1;
+    },
     change() {
       for (const listener of [...listeners]) listener();
     },
     get catchUps() {
       return catchUps;
+    },
+    get forgets() {
+      return forgets;
     },
   };
 }

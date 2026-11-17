@@ -25,6 +25,7 @@ import {
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { ago } from "@/features/tickets/ticket-source";
+import { useReplaced } from "@/lib/workspace-reads";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
 import {
@@ -347,6 +348,7 @@ function Choose({
   onDownloaded: (safetyBackup: string) => void;
 }) {
   const now = useNow();
+  const workspaceReplaced = useReplaced();
   const { busy, failure, run } = useCommand();
   const [options, setOptions] = useState<SyncSetupOptions | null>(null);
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
@@ -521,6 +523,7 @@ function Choose({
                 download.folder_id,
               );
               onDownloaded(replaced.safety_backup);
+              void workspaceReplaced();
               return replaced;
             }, "replace this Workspace");
           }}
