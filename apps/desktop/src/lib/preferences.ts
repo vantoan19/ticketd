@@ -1,4 +1,5 @@
 import { windowClient } from "@/lib/api/window";
+import { themeFade } from "@/lib/motion-tokens";
 import { useEffect, useSyncExternalStore } from "react";
 import { z } from "zod";
 
@@ -76,18 +77,20 @@ export function applyTheme(resolved: "light" | "dark") {
   root.classList.toggle("dark", resolved === "dark");
 }
 
+const FADING_ATTRIBUTE = "data-theme-fading";
+let fadeTimer: number | undefined;
+
 /**
  * Moves the window to another theme: every color crossfades over `--dur-theme`
- * (styles.css), title bar included. `data-theme-fading` on the root switches
- * that transition on for the length of the fade only, so launch and ordinary
- * hovers are untouched. Reduced motion or a held key zeroes the token, and the
+ * (styles.css). `data-theme-fading` on the root switches that transition on
+ * for the length of the fade only, so launch and ordinary hovers are untouched.
+ * The window color behind a transparent macOS title bar is set by the window
+ * client at once; CSS cannot fade it. Reduced motion or a held key zeroes the token, and the
  * theme then changes in one frame. Launch uses `applyTheme` and never fades.
  */
 export function changeTheme(resolved: "light" | "dark") {
   const root = document.documentElement;
-  const fade = Number.parseFloat(
-    getComputedStyle(root).getPropertyValue("--dur-theme"),
-  );
+  const fade = themeFade();
   if (root.dataset.theme === resolved || !fade) {
     applyTheme(resolved);
     return;
@@ -97,12 +100,9 @@ export function changeTheme(resolved: "light" | "dark") {
   applyTheme(resolved);
   fadeTimer = window.setTimeout(
     () => root.removeAttribute(FADING_ATTRIBUTE),
-    fade,
+    fade * 1000,
   );
 }
-
-const FADING_ATTRIBUTE = "data-theme-fading";
-let fadeTimer: number | undefined;
 
 function systemPrefersDark(): boolean {
   return window.matchMedia(DARK_QUERY).matches;

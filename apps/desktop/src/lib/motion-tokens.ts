@@ -112,3 +112,13 @@ export function staggerDelay(index: number): number {
 export function loadingDelay(): number {
   return seconds("--dur-loading-delay");
 }
+
+/** Seconds the whole window takes to crossfade to another theme. */
+export function themeFade(): number {
+  return seconds("--dur-theme");
+}
+
+/** Seconds one change leads another: the dot that arrives before its word. */
+export function lead(): number {
+  return seconds("--dur-1");
+}

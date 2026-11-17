@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { Fragment, type ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   ChatClientContext,
@@ -15,8 +16,11 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
+import { MotionProvider } from "@/components/ui/motion";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { drafts } from "@/features/chats/drafts";
+import { freezeMotionClock } from "@/test/motion-clock";
+import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import {
   chatState,
   createMockChatClient,
@@ -71,6 +75,7 @@ const done: Step = { ...running, state: "done", exit_code: 0 };
 async function open(
   over: Parameters<typeof chatState>[0],
   items: TranscriptItem[],
+  Motion: (props: { children: ReactNode }) => ReactNode = Fragment,
 ) {
   const chats: MockChat[] = [{ chat: chatState(over), items }];
   const client = createMockChatClient({ enabled: true, chats, records: [] });
@@ -78,7 +83,9 @@ async function open(
     <ChatClientContext value={client}>
       <ChatProvider>
         <StatusLineRegion>
-          <ChatsView />
+          <Motion>
+            <ChatsView />
+          </Motion>
         </StatusLineRegion>
       </ChatProvider>
     </ChatClientContext>,
@@ -178,10 +185,7 @@ test("an approval request fades up in the tray and leaves once answered", async 
 });
 
 test("queued messages open and close their own space; the queue leaves with its last card", async () => {
-  const client = await open(
-    { id: "c1", title: "Limiter", activity: "working" },
-    [],
-  );
+  await open({ id: "c1", title: "Limiter", activity: "working" }, []);
   expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
   const box = screen.getByLabelText(
     /Steer Codex|Message Codex|Queue for Codex/,
@@ -190,11 +194,73 @@ test("queued messages open and close their own space; the queue leaves with its 
   fireEvent.keyDown(box, { key: "Enter", metaKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(queue.querySelector('[data-slot="appear"]')).toBeTruthy();
-  void client;
   fireEvent.click(screen.getByRole("button", { name: "Remove from queue" }));
   await waitFor(() =>
     expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull(),
   );
+});
+
+// jsdom lays nothing out, so a popLayout exit (which measures the leaving
+// element before lifting it out of the flow) never takes effect. Report a size
+// for every element so that it would.
+function withLayoutSize() {
+  const real = window.getComputedStyle.bind(window);
+  const spy = vi
+    .spyOn(window, "getComputedStyle")
+    .mockImplementation((element, pseudo) => {
+      const style = real(element, pseudo);
+      return new Proxy(style, {
+        get(target, key) {
+          if (key === "width" || key === "height") return "40px";
+          const value: unknown = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+  return () => spy.mockRestore();
+}
+
+test("a removed queue card stays in the flow, out of reach, while it fades; the cards below do not jump", async () => {
+  const restoreTokens = applyTokens(rootTokens);
+  const clock = freezeMotionClock();
+  const restoreLayout = withLayoutSize();
+  try {
+    await open(
+      { id: "c1", title: "Limiter", activity: "working" },
+      [],
+      MotionProvider,
+    );
+    const box = screen.getByLabelText(
+      /Steer Codex|Message Codex|Queue for Codex/,
+    );
+    for (const text of ["first thing", "second thing"]) {
+      fireEvent.change(box, { target: { value: text } });
+      fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+      await screen.findByText(text);
+    }
+    const cards = () => [
+      ...document.querySelectorAll<HTMLElement>(".chat-queue-card"),
+    ];
+    expect(cards()).toHaveLength(2);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Remove from queue" })[0]!,
+    );
+    await clock.advance(10);
+    // Still drawn and still in flow (not lifted out for its neighbours to
+    // close over), but nothing in it can be reached.
+    const leaving = cards().find((card) => card.textContent === "first thing");
+    expect(leaving).toBeTruthy();
+    expect(document.querySelector("[data-motion-pop-id]")).toBeNull();
+    expect(
+      leaving?.querySelector('[data-slot="appear"]')?.hasAttribute("inert"),
+    ).toBe(true);
+    await clock.advance(200);
+    expect(cards().map((card) => card.textContent)).toEqual(["second thing"]);
+  } finally {
+    restoreLayout();
+    clock.restore();
+    restoreTokens();
+  }
 });
 
 test("Jump to latest is a button that fades in only while the reader is away", async () => {

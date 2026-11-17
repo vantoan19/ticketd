@@ -3058,8 +3058,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   }
 }
 /* Changing the theme: `changeTheme` (lib/preferences) holds data-theme-fading
-   on <html> for --dur-theme, so every color moves together. The chosen tile
-   keeps its selection ring instant. */
+   on <html> for --dur-theme, so every color moves together, the tiles'
+   hairlines included. Only a chosen tile's selection ring and radio dot stay
+   instant: choosing is the click that changes the theme. */
 :root[data-theme-fading] *,
 :root[data-theme-fading] *::before,
 :root[data-theme-fading] *::after {
@@ -3068,7 +3069,10 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   transition-duration: var(--dur-theme);
   transition-timing-function: var(--ease-in-out);
 }
-:root[data-theme-fading] [data-slot^="choice-tile"] {
+:root[data-theme-fading] [data-slot="choice-tile"][data-state="checked"],
+:root[data-theme-fading]
+  [data-slot="choice-tile"][data-state="checked"]
+  [data-slot="choice-tile-radio"] {
   transition-property: background-color, color, border-color, fill, stroke;
 }
 /* !important is the point: reduced motion must beat every component's own
