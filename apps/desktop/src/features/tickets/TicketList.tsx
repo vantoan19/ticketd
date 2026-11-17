@@ -1,5 +1,5 @@
 import { useNow } from "@/lib/use-now";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { m } from "motion/react";
 import {
   AlarmClock,
@@ -22,7 +22,12 @@ import {
   Glide,
   Presence,
 } from "@/components/ui/motion";
-import { listMotion } from "./list-motion";
+import {
+  arrival,
+  departure,
+  glide,
+  pageArriving,
+} from "@/components/ui/row-motion";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -65,13 +70,20 @@ export function TicketList({
   simple = true,
   empty,
   scopeKey = "",
-  cascade = false,
+  cascade: cascadeRequested = false,
+  onCascaded,
 }: {
   tickets: Ticket[];
   empty?: ReactNode;
   scopeKey?: string;
-  /** The rows arrive top first, as when the list replaces the board. */
+  /**
+   * The rows present when the list mounts fade up top first, as when it
+   * replaces the board or the placeholders. A page arrival in progress does it
+   * instead.
+   */
   cascade?: boolean;
+  /** Called once the list has mounted with `cascade`, which is one-shot. */
+  onCascaded?: () => void;
   selected: string | null;
   onOpen: (reference: string) => void;
   bulkSelection: string[];
@@ -172,24 +184,35 @@ export function TicketList({
     return ordered.slice(low, high + 1).map((item) => item.reference);
   };
   const canSelect = selectable && !selectionDisabled;
-  const motion = listMotion();
+  const keyOf = (entry: (typeof entries)[number]) =>
+    "header" in entry ? `group-${entry.header.status}` : entry.ticket.id;
   // Rows are measured for a glide only when the order changes, not on every
   // hover or focus.
-  const order = entries
-    .map((entry) => ("header" in entry ? entry.header.status : entry.ticket.id))
-    .join();
+  const order = entries.map(keyOf).join();
+  // The cascade is one-shot: only the rows there at mount take part, and they
+  // fade up in place with no height. A row added later opens its own space.
+  const [cascading] = useState<ReadonlySet<string>>(() =>
+    cascadeRequested && !pageArriving()
+      ? new Set(entries.map(keyOf))
+      : new Set(),
+  );
+  useEffect(() => {
+    if (cascadeRequested) onCascaded?.();
+  }, [cascadeRequested, onCascaded]);
   return (
     <>
       <ul className="ticket-rows">
-        <Presence initial={cascade}>
+        <Presence initial={cascading.size > 0}>
           {entries.map((entry, position) => {
-            const rowMotion = {
-              layout: "position",
-              layoutDependency: order,
-              initial: motion.initial(true),
-              animate: motion.animate(cascade ? position : 0, true),
-              exit: motion.exit,
-            } as const;
+            const cascades = cascading.has(keyOf(entry));
+            const rowMotion = (name: "smooth" | "travel", gap?: number) => {
+              const shape = { space: !cascades, gap };
+              return {
+                ...glide(order, name),
+                ...arrival(cascades ? position : 0, shape),
+                ...departure({ space: true, gap }),
+              };
+            };
             if ("header" in entry) {
               const { status, count, tickets: shown } = entry.header;
               // Ready is summarised here, not repeated on every row (list R-10);
@@ -204,18 +227,18 @@ export function TicketList({
                   <m.li
                     className="ticket-group-header"
                     data-status={status}
-                    {...rowMotion}
+                    // The gap above a group opens and closes with its header.
+                    {...rowMotion("smooth", position === 0 ? 0 : 6)}
                   >
                     <StatusIcon status={status} decorative />
                     <h2>{status}</h2>
                     {/* Always the group's total, never the part shown (list R-09). */}
-                    <Count>
-                      {count}
-                      <span className="sr-only">
-                        {" "}
-                        {count === 1 ? "ticket" : "tickets"}
-                      </span>
-                    </Count>
+                    {/* The noun sits outside Count so the number alone crossfades. */}
+                    <Count>{count}</Count>
+                    <span className="sr-only">
+                      {" "}
+                      {count === 1 ? "ticket" : "tickets"}
+                    </span>
                     {status === "Todo" && shown.length === count && (
                       <span className="ticket-group-meta">
                         <CrossfadeText>{`· ${ready} ready`}</CrossfadeText>
@@ -253,11 +276,9 @@ export function TicketList({
                 asChild
               >
                 <m.li
-                  {...rowMotion}
                   // A row released from its hold travels to its new group.
-                  transition={{
-                    layout: arriving ? motion.travel : motion.smooth,
-                  }}
+                  {...rowMotion(arriving ? "travel" : "smooth")}
+                  data-arrive="row"
                   data-arriving={arriving || undefined}
                   onAnimationEnd={(event) => {
                     if (

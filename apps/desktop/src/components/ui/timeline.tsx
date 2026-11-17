@@ -73,17 +73,24 @@ function EventGroup({
   icon: Icon,
   summary,
   time,
+  layoutDependency,
   children,
 }: {
   icon: LucideIcon;
   summary: string;
   time: React.ReactNode;
+  /** Changes when the timeline's order does: the group is measured then only. */
+  layoutDependency?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
   const id = React.useId();
   return (
-    <m.li data-slot="event-group" className="ui-event-group" {...glide()}>
+    <m.li
+      data-slot="event-group"
+      className="ui-event-group"
+      {...glide(layoutDependency)}
+    >
       <div className="ui-event-group-header">
         <button
           type="button"

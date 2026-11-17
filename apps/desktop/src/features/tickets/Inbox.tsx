@@ -71,7 +71,7 @@ import {
 } from "./inboxModel";
 import "./inbox.css";
 import { EntrySlot, UnreadDot } from "./inbox-motion";
-import { useArrivals } from "./inbox-arrivals";
+import { useNewEntries } from "./inbox-arrivals";
 import { Reference } from "@/components/ui/reference";
 import { ConflictReview } from "@/features/sync-review/ConflictReview";
 import {
@@ -599,7 +599,7 @@ function InboxContent({
     ([group, items]) =>
       items.length || (group === "Needs you" && projection.approvals.length),
   );
-  const arrivals = useArrivals(
+  const arrivals = useNewEntries(
     [
       ...projection.approvals.map((chat) => `chat:${chat.id}`),
       ...groups.flatMap(([, items]) => items.map((item) => String(item.id))),

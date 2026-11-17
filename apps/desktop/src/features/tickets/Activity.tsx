@@ -631,6 +631,10 @@ export function Activity({
     }
     return rows;
   }, []);
+  // Rows glide only when this changes, not on every keystroke in the composer.
+  const order = entries
+    .map((item) => (item.type === "note" ? `n${item.note.id}` : `h${item.id}`))
+    .join();
   // The newest update still in the list, so deleting the latest one moves the label.
   const newestNoteId = displayedNotes.reduce<AuthoredActivity | null>(
     (best, note) =>
@@ -1052,6 +1056,7 @@ export function Activity({
             item.type === "note" ? (
               <CommentRow
                 key={`note-${item.note.id}`}
+                layoutDependency={order}
                 arriving={
                   shownThrough !== null && item.timestamp > shownThrough
                 }
@@ -1178,6 +1183,7 @@ export function Activity({
             ) : (
               <EventGroup
                 key={`history-${item.id}`}
+                layoutDependency={order}
                 icon={History}
                 summary={changeSummary(item.changes)}
                 time={<Time value={item.timestamp} format="compact" />}

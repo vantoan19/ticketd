@@ -142,11 +142,9 @@
   align-items: center;
   gap: 8px;
   height: 36px;
-  margin: 6px 8px 0;
+  /* The 6px above a group is its margin-top, which the header's motion opens and
+     closes with its height (row-motion `gap`); the first header has none. */
   padding: 0 10px 0 12px;
-}
-.ticket-rows li.ticket-group-header:first-child {
-  margin-top: 0;
 }
 .ticket-group-header svg {
   flex: none;
@@ -393,12 +391,12 @@
 }
 
 /* Row motion (DESIGN.md section 12). A row is the containing block for the
-   highlight that glides to it and the fill that fades behind it, and its space
-   closes inside it as it leaves. */
+   highlight that glides to it and the fill that fades behind it. It clips only
+   while its space opens or closes (row-motion sets overflow then), so the
+   highlight can glide in from the row it left. */
 .ticket-rows li {
   position: relative;
   isolation: isolate;
-  overflow: clip;
 }
 .ticket-rows:empty {
   display: none;

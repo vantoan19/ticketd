@@ -51,6 +51,7 @@ import "./properties.css";
 import { Badge } from "@/components/ui/badge";
 import { m } from "motion/react";
 import { CrossfadeText, Presence } from "@/components/ui/motion";
+import { glide } from "@/components/ui/row-motion";
 import {
   blur,
   enterTransition,
@@ -71,7 +72,7 @@ function TagPills({ tags }: { tags: string[] }) {
         {tags.map((tag) => (
           <m.span
             key={tag}
-            layout="position"
+            {...glide(tags.join())}
             initial={{
               opacity: 0,
               scale: 0.94,
@@ -92,7 +93,6 @@ function TagPills({ tags }: { tags: string[] }) {
               filter: `blur(${blur("out")}px)`,
               transition: exitTransition(),
             }}
-            transition={{ layout: spring("smooth") }}
           >
             <Badge>{tag}</Badge>
           </m.span>

@@ -15,7 +15,7 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import { listMotion } from "./list-motion";
+import { arrival } from "@/components/ui/row-motion";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
 import { useInboxAttention } from "./use-inbox-attention";
@@ -237,11 +237,7 @@ export function TicketBoard({
         ?.focus();
   }, [lengthKey, workspace.board.columns, boardRef]);
   // Choosing Board: the columns fade up left to right.
-  const motion = listMotion();
-  const columnEnter = (position: number) => ({
-    initial: motion.initial(false),
-    animate: motion.animate(position, false),
-  });
+  const columnEnter = arrival;
   const scope = {
     showPlan: !workspace.navigation.plan,
     showProject: workspace.navigation.project === "all",

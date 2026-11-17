@@ -92,3 +92,8 @@ export function blur(direction: "in" | "out"): number {
 export function staggerDelay(index: number): number {
   return Math.min(Math.max(index, 0), STAGGER_STEPS) * seconds("--stagger");
 }
+
+/** Seconds a read is given before any placeholder shows, so a fast one never flashes. */
+export function loadingDelay(): number {
+  return seconds("--dur-loading-delay");
+}

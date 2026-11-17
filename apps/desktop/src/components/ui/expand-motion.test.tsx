@@ -1,14 +1,7 @@
 // @vitest-environment jsdom
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { Bell } from "lucide-react";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { Disclosure } from "@/components/ui/disclosure";
 import { MotionProvider } from "@/components/ui/motion";
 import {
@@ -17,51 +10,34 @@ import {
   EventRow,
   Timeline,
 } from "@/components/ui/timeline";
-import { applyTokens, reducedTokens, rootTokens } from "@/test/motion-tokens";
+import { frames } from "@/test/motion-clock";
+import {
+  EXIT_MS,
+  holdKey,
+  motionTestbed,
+  SETTLED_MS,
+} from "@/test/motion-testbed";
 
 // Expanding and collapsing, and a new update arriving (DESIGN.md section 12).
-// Time is real here (see motion.test.tsx): a motion never ends sooner than its
-// duration, which is the bound these tests rely on.
+// Time is the test's own (test/motion-clock), so nothing depends on how fast
+// the machine runs.
 
-const EXIT_MS = 150;
+const STAGGER_MS = 24;
+const testbed = motionTestbed();
+afterEach(() => vi.restoreAllMocks());
 
-let restoreTokens: () => void;
-beforeEach(() => {
-  restoreTokens = applyTokens(rootTokens);
-});
-afterEach(() => {
-  cleanup();
-  restoreTokens();
-});
-
-function useReducedMotion() {
-  restoreTokens();
-  restoreTokens = applyTokens({ ...rootTokens, ...reducedTokens });
-}
-
-function holdKey() {
-  act(() => {
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "j", repeat: true }),
-    );
-  });
-}
-
-async function leaves(text: string): Promise<number> {
-  const start = performance.now();
-  await waitFor(() => expect(screen.queryByText(text)).toBeNull(), {
-    interval: 4,
-  });
-  return performance.now() - start;
-}
-
-function Group() {
+function Group({ extra = 0 }: { extra?: number }) {
   return (
     <MotionProvider>
       <Timeline aria-label="Activity">
         <EventGroup icon={Bell} summary="2 changes" time="now">
           <EventRow icon={Bell}>Status changed</EventRow>
           <EventRow icon={Bell}>Tag added</EventRow>
+          {Array.from({ length: extra }, (_, i) => (
+            <EventRow key={i} icon={Bell}>
+              {`Extra ${i}`}
+            </EventRow>
+          ))}
         </EventGroup>
       </Timeline>
     </MotionProvider>
@@ -71,6 +47,15 @@ function Group() {
 const toggle = () => screen.getByRole("button", { name: /2 changes/ });
 const region = (container: HTMLElement) =>
   container.querySelector('[data-slot="expand"]');
+
+/** Two clicks inside 350ms are rapid and land instantly: space them out. */
+function spaceClicks() {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  return () => {
+    now += 400;
+  };
+}
 
 it("a folded group opens its rows, and its closed region is inert", () => {
   const { container } = render(<Group />);
@@ -94,28 +79,45 @@ it("a group's rows start soft and fade up one after another", () => {
   expect(second.style.opacity).toBe("0");
 });
 
+it("a group's rows wait their stagger step, in every property", async () => {
+  render(<Group extra={6} />);
+  fireEvent.click(toggle());
+  const last = screen.getByText("Extra 5").closest("li")!;
+  const first = screen.getByText("Status changed").closest("li")!;
+  await frames();
+  // The eighth row waits seven steps; short of that it has not started.
+  await testbed.advance(7 * STAGGER_MS - 10);
+  expect(last.style.opacity).toBe("0");
+  expect(last.style.filter).toBe("blur(4px)");
+  expect(Number(first.style.opacity)).toBeGreaterThan(0);
+  await testbed.advance(SETTLED_MS);
+  expect(last.style.opacity).toBe("1");
+});
+
 it("closing a group fades its rows out while the height closes", async () => {
+  const later = spaceClicks();
   const { container } = render(<Group />);
   fireEvent.click(toggle());
-  await waitFor(() =>
-    expect(screen.getByText("Tag added").closest("li")?.style.opacity).toBe(
-      "1",
-    ),
-  );
-  // Two clicks inside 350ms are rapid, and land instantly; wait that out.
-  await new Promise((resolve) => setTimeout(resolve, 380));
+  await frames();
+  await testbed.advance(SETTLED_MS);
+  later();
   fireEvent.click(toggle());
   expect(region(container)?.getAttribute("data-open")).toBe("false");
+  await frames();
   expect(screen.queryByText("Status changed")).not.toBeNull();
-  expect(await leaves("Status changed")).toBeGreaterThanOrEqual(EXIT_MS - 10);
+  await testbed.advance(EXIT_MS - 10);
+  expect(screen.queryByText("Status changed")).not.toBeNull();
+  await testbed.advance(20);
+  expect(screen.queryByText("Status changed")).toBeNull();
 });
 
 it("a group's rows leave at once under reduced motion", async () => {
-  useReducedMotion();
+  testbed.reduceMotion();
   render(<Group />);
   fireEvent.click(toggle());
   fireEvent.click(toggle());
-  expect(await leaves("Status changed")).toBeLessThan(EXIT_MS - 10);
+  await frames();
+  expect(screen.queryByText("Status changed")).toBeNull();
 });
 
 it("a group's rows leave at once while a key repeats", async () => {
@@ -123,7 +125,8 @@ it("a group's rows leave at once while a key repeats", async () => {
   fireEvent.click(toggle());
   holdKey();
   fireEvent.click(toggle());
-  expect(await leaves("Status changed")).toBeLessThan(EXIT_MS - 10);
+  await frames();
+  expect(screen.queryByText("Status changed")).toBeNull();
 });
 
 it("a Disclosure keeps its closed content mounted but inert, and opens it", () => {
@@ -182,5 +185,7 @@ it("an update that is not arriving shows without motion", () => {
 it("an arriving update settles into place", async () => {
   render(<Updates arriving />);
   const added = screen.getByText("New update").closest("li")!;
-  await waitFor(() => expect(added.style.opacity).toBe("1"));
+  await frames();
+  await testbed.advance(SETTLED_MS);
+  expect(added.style.opacity).toBe("1");
 });
