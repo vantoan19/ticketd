@@ -175,7 +175,7 @@ pub(crate) fn edit(
                 .is_some_and(|expected| expected != stored)
     };
     // An editor that sends the values it loaded is refused when someone else has since
-    // changed them (ADR 0014). A caller that omits them overwrites.
+    // changed them (ADR 0015). A caller that omits them overwrites.
     if stale(&patch.title, &patch.expected_title, &ticket.title)
         || stale(&patch.body, &patch.expected_body, &ticket.body)
     {

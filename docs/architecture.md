@@ -561,7 +561,7 @@ upload staging and coordination locks are excluded. Remote records remain
 references and metadata; credentials and implicit remote downloads are excluded.
 
 The format of a Workspace is defined by the migration ladder in
-`crates/ticketd-core/src/format.rs` and nothing else (ADR 0013): a Workspace at
+`crates/ticketd-core/src/format.rs` and nothing else (ADR 0014): a Workspace at
 format version V is what steps 1 through V leave behind. Restore and inspection
 check a backup's tables, columns, triggers and unique indexes against a scratch
 Workspace built at the backup's version.
@@ -715,7 +715,7 @@ Inside the core, every ticket write runs in one write scope (`write_scope.rs`), 
 
 Inside that scope every way of changing a ticket is one ticket change (`ticket_change.rs`): `change_ticket`, the combined `TicketChange`, batches, tag, parent, dependency and Plan changes, ticket creation and the `WriteRequest` that names each. They share the rules (editability, the external owner of a ticket's content, an archived Plan, entering and leaving Duplicate, history and the inbox) and one read back; a combined change or batch makes all its steps in one scope. One rule still depends on the way in, named by the change's mode: a change on its own that leaves Duplicate clears the duplicate link, while a change in a batch, and so the combined single-ticket change, is refused.
 
-Record versions are outside the MVP. An editor may send the title, body or Document `updated_at` it last loaded, and the core rejects its save if that value has since changed ([ADR 0014](adr/0014-optional-expected-values-guard-editor-saves.md)); a caller that omits them, such as the CLI, keeps last-successful-write wins. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
+Record versions are outside the MVP. An editor may send the title, body or Document `updated_at` it last loaded, and the core rejects its save if that value has since changed ([ADR 0015](adr/0015-optional-expected-values-guard-editor-saves.md)); a caller that omits them, such as the CLI, keeps last-successful-write wins. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
 
 Request IDs prevent repeated execution after a lost response; they do not prevent overwrites by different requests. Successful request outcomes are retained indefinitely in the MVP and included in backups. Replays return original results, not current ticket state.
 
@@ -850,7 +850,7 @@ A future server may call the same core workflow interface. Personal sync between
 - [Domain glossary](../GLOSSARY.md)
 - [Atomic writes and retries](adr/0002-atomic-writes-and-retries.md)
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
-- [Optional expected values guard editor saves](adr/0014-optional-expected-values-guard-editor-saves.md)
+- [Optional expected values guard editor saves](adr/0015-optional-expected-values-guard-editor-saves.md)
 - [Shared core and local workspace](adr/0004-shared-core-local-workspace.md)
 - [Workspace sync through Google Drive](adr/0011-markdown-file-sync-through-google-drive.md)
 - [Sync file format](sync-file-format.md)
@@ -1251,6 +1251,6 @@ call to the storage. The host keeps two rules of its own: hold runs while
 `sync_download_workspace` replaces the Workspace file, and read `retry_after`
 from the status a run returns, since it is not stored.
 
-[ADR 0003](adr/0003-defer-record-versioning.md) and [ADR 0014](adr/0014-optional-expected-values-guard-editor-saves.md) govern local edits.
+[ADR 0003](adr/0003-defer-record-versioning.md) and [ADR 0015](adr/0015-optional-expected-values-guard-editor-saves.md) govern local edits.
 The last-synced copy is internal to sync and is not a record version in the
 workflow interface.
