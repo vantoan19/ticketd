@@ -1675,3 +1675,31 @@ test("board arrows reach adjacent cards and S opens the shared status drill for 
     ),
   ).toBeTruthy();
 });
+
+test("opening a folded column marks it to reveal and scrolls it into view; folding marks it to fade", async () => {
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  render(<App />);
+  await settle();
+  await showBoard();
+  const canceled = screen.getByRole("region", { name: "Canceled column" });
+  expect(canceled.getAttribute("data-reveal")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
+  expect(canceled.getAttribute("data-reveal")).toBe("open");
+  expect(canceled.hasAttribute("data-folded")).toBe(false);
+  await settle();
+  expect(scroll).toHaveBeenCalledWith(
+    expect.objectContaining({ inline: "nearest" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Fold Canceled" }));
+  expect(canceled.getAttribute("data-reveal")).toBe("fold");
+  expect(canceled.hasAttribute("data-folded")).toBe(true);
+});
+
+test("column counts are Counts, so the shared Count owns their crossfade", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  const todo = screen.getByRole("region", { name: "Todo column" });
+  const count = within(todo).getByLabelText("1 matching tickets");
+  expect(count.getAttribute("data-slot")).toBe("count");
+});
