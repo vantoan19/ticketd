@@ -86,12 +86,14 @@ export function InboxTriageCard() {
     : entry?.kind === "activity"
       ? entry.to_value
       : (agentContext?.update?.brief.text ?? description);
+  // A Ticket the core says is gone has nothing left to wait for.
+  const gone = reference !== null && record === null;
+  const ready = !entry || gone || agentContext?.ready === true;
   const [bodySnapshot, setBodySnapshot] = useState({
     selection,
-    ready: !entry || agentContext?.ready === true,
+    ready,
     brief: latestBrief,
   });
-  const ready = !entry || agentContext?.ready === true;
   if (bodySnapshot.selection !== selection || (!bodySnapshot.ready && ready))
     setBodySnapshot({ selection, ready, brief: latestBrief });
   const brief =

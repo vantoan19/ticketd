@@ -8430,65 +8430,70 @@ test("Inbox triage reports accepting a review as one write", async () => {
   expect(tokenCalls - before).toBe(1);
 });
 
-test("Inbox triage says a deleted Ticket no longer exists instead of loading for good", async () => {
-  const first = bulkTicket(1, { status: "In review" });
-  const timestamp = "2026-11-15T00:00:00Z";
-  let gone = false;
-  await renderBulk({
-    attachment_workspace_id: () => "triage-gone",
-    latest_update: () => null,
-    is_following: () => false,
-    find_tickets: () => [first],
-    show_ticket: () => {
-      if (gone) throw { code: "not_found", message: "T-KQ1 was not found" };
-      return first;
-    },
-    ticket_history: () => [
-      {
-        kind: "status",
-        from_value: "In progress",
-        to_value: "In review",
-        timestamp,
-        editing_agent: "codex",
+test.each([true, false])(
+  "Inbox triage says a deleted Ticket no longer exists instead of loading for good (still listed: %s)",
+  async (stillListed) => {
+    const first = bulkTicket(1, { status: "In review" });
+    const timestamp = "2026-11-15T00:00:00Z";
+    let gone = false;
+    await renderBulk({
+      attachment_workspace_id: () => "triage-gone",
+      latest_update: () => null,
+      is_following: () => false,
+      find_tickets: () => (gone && !stillListed ? [] : [first]),
+      show_ticket: () => {
+        if (gone) throw { code: "not_found", message: "T-KQ1 was not found" };
+        return first;
       },
-    ],
-    reminder: () => null,
-    inbox: () => [
-      {
-        id: 301,
-        reference: "T-KQ1",
-        title: "First",
-        kind: "status",
-        from_value: "In progress",
-        to_value: "In review",
-        timestamp,
-        editing_agent: "codex",
-        read: false,
-      },
-    ],
-  });
-  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
-  const flush = () =>
-    act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      ticket_history: () => [
+        {
+          kind: "status",
+          from_value: "In progress",
+          to_value: "In review",
+          timestamp,
+          editing_agent: "codex",
+        },
+      ],
+      reminder: () => null,
+      inbox: () => [
+        {
+          id: 301,
+          reference: "T-KQ1",
+          title: "First",
+          kind: "status",
+          from_value: "In progress",
+          to_value: "In review",
+          timestamp,
+          editing_agent: "codex",
+          read: false,
+        },
+      ],
     });
-  await flush();
-  const review = screen.getByRole("button", {
-    name: /T-KQ1.*First.*waiting for you/,
-  });
-  review.focus();
-  fireEvent.keyDown(review, { key: "j" });
-  await flush();
-  const card = screen.getByRole("region", { name: "Inbox triage" });
-  // Deleted elsewhere; the next change reads it as gone.
-  gone = true;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2000);
-  });
-  await flush();
-  expect(within(card).getByText("The Ticket no longer exists.")).toBeTruthy();
-  expect(within(card).queryByText("The Ticket is still loading.")).toBeNull();
-});
+    fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+    const flush = () =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    await flush();
+    const review = screen.getByRole("button", {
+      name: /T-KQ1.*First.*waiting for you/,
+    });
+    review.focus();
+    fireEvent.keyDown(review, { key: "j" });
+    await flush();
+    const card = screen.getByRole("region", { name: "Inbox triage" });
+    // Deleted elsewhere; the next change reads it as gone.
+    gone = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    await flush();
+    expect(within(card).getByText("The Ticket no longer exists.")).toBeTruthy();
+    expect(within(card).queryByText("The Ticket is still loading.")).toBeNull();
+    // Nothing waits on the Ticket any more, so no placeholder stays.
+    expect(card.querySelector('[data-slot="skeleton"]')).toBeNull();
+  },
+);
 
 test("Inbox Retry preserves its operation identity and Undo restores Needs you after reload until a genuine later review", async () => {
   vi.useFakeTimers();
