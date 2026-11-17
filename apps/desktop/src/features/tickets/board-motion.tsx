@@ -72,12 +72,15 @@ export class MoveWatch extends Component<{
     columns: Columns;
     holding: boolean;
   }): Snapshot | null {
+    // A pointer move re-renders the board with the same columns: nothing to see.
+    const letGoNow = previous.holding && !this.props.holding;
+    if (previous.columns === this.props.columns && !letGoNow) return null;
     const board = this.props.board.current;
     if (!board || spring("travel").duration === 0) return null;
     const preview = document.querySelector<HTMLElement>(
       "[data-board-drag-preview]",
     );
-    const letGo = previous.holding && !this.props.holding ? preview : null;
+    const letGo = letGoNow ? preview : null;
     const before = placed(previous.columns);
     const after = placed(this.props.columns);
     const moved = [...before].filter(

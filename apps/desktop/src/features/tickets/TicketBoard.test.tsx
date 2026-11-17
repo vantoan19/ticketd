@@ -12,8 +12,17 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import type { FindFilter, Ticket, TicketSource } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { applyTokens, rootTokens } from "@/test/motion-tokens";
+import { spring } from "@/lib/motion-tokens";
+import { MotionProvider } from "@/components/ui/motion";
+import { freezeMotionClock, frames } from "@/test/motion-clock";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+// Counts reads of the spring tokens; each one still reads the real tokens.
+vi.mock("@/lib/motion-tokens", async (original) => {
+  const actual = await original<typeof import("@/lib/motion-tokens")>();
+  return { ...actual, spring: vi.fn(actual.spring) };
+});
 vi.mock("@tauri-apps/api/core", () => bridge);
 vi.mock("@uiw/react-codemirror", () => ({ default: () => null }));
 window.ResizeObserver = class {
@@ -1702,4 +1711,70 @@ test("column counts are Counts, so the shared Count owns their crossfade", async
   const todo = screen.getByRole("region", { name: "Todo column" });
   const count = within(todo).getByLabelText("1 matching tickets");
   expect(count.getAttribute("data-slot")).toBe("count");
+});
+
+async function springReadsPerPointerMove(cards: number) {
+  saved = Array.from({ length: cards }, (_, index) => ticket(index + 1));
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(150);
+  vi.mocked(spring).mockClear();
+  movePointer(160);
+  const reads = vi.mocked(spring).mock.calls.length;
+  releasePointer(160);
+  cleanup();
+  return reads;
+}
+
+test("a pointer move during a drag reads the spring once, however many cards the board holds", async () => {
+  const one = await springReadsPerPointerMove(1);
+  const many = await springReadsPerPointerMove(8);
+  expect(many).toBe(one);
+});
+
+test("opening a folded column glides the columns to its right", async () => {
+  // Motion reads the real animation frame, so this test runs on real timers
+  // and a clock it owns.
+  vi.useRealTimers();
+  const clock = freezeMotionClock();
+  const restore = applyTokens(rootTokens);
+  render(
+    <MotionProvider>
+      <App />
+    </MotionProvider>,
+  );
+  await frames(8);
+  chooseLayout("Board");
+  await frames(8);
+  const board = screen.getByRole("region", { name: "Ticket status board" });
+  const sections = within(board).getAllByRole("region");
+  const canceled = screen.getByRole("region", { name: "Canceled column" });
+  const duplicate = screen.getByRole("region", { name: "Duplicate column" });
+  // Columns are 280px wide; a folded one is 40px, so what follows it moves 240.
+  for (const [index, section] of sections.entries())
+    vi.spyOn(section, "getBoundingClientRect").mockImplementation(
+      () =>
+        new DOMRect(
+          index * 280 -
+            (index > sections.indexOf(canceled) &&
+            canceled.hasAttribute("data-folded")
+              ? 240
+              : 0),
+          0,
+          280,
+          600,
+        ),
+    );
+  await clock.advance(3000); // the columns have entered
+  expect(duplicate.style.transform).toMatch(/^(none)?$/);
+  fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
+  await clock.advance(50);
+  expect(duplicate.style.transform).toMatch(/translate3d[(]-/);
+  await clock.advance(3000);
+  expect(duplicate.style.transform).toMatch(/^(none)?$/);
+  restore();
+  clock.restore();
 });
