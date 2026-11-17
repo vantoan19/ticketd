@@ -127,7 +127,13 @@ impl ChatHost {
 
     /// How the Chat's turn ended, or `None` while it is still going or has not begun.
     fn turn_end(&self, chat_id: &str) -> Result<Option<TurnEnd>, HostError> {
-        if let Some(end) = self.live().get(chat_id).and_then(live_end) {
+        if let Some(end) = self
+            .live()
+            .get(chat_id)
+            .map(live_end)
+            .transpose()?
+            .flatten()
+        {
             return Ok(Some(end));
         }
         let turn = self.workspace()?.chat_latest_turn(chat_id)?;
@@ -146,35 +152,42 @@ impl ChatHost {
     }
 }
 
-/// What the supervisor's live state says ended the turn, if it does.
-fn live_end(live: &ChatLive) -> Option<TurnEnd> {
+/// What the supervisor's live state says ended the turn, if it does. Chat storage
+/// failing is not the turn ending: what happened to the agent is unknown and nothing
+/// more can be recorded. It is the error the runner treats as storage failing, as when
+/// the Workspace cannot be read, and never a failure of the step.
+fn live_end(live: &ChatLive) -> Result<Option<TurnEnd>, HostError> {
     match &live.problem {
         Some(ChatProblem::RuntimeLost { detail }) => {
-            return Some(TurnEnd::Crashed {
+            return Ok(Some(TurnEnd::Crashed {
                 detail: detail.clone(),
-            });
+            }));
         }
         Some(ChatProblem::OpenFailed { problem, .. }) => {
-            return Some(TurnEnd::Failed {
+            return Ok(Some(TurnEnd::Failed {
                 detail: problem.message.clone(),
-            });
+            }));
+        }
+        Some(ChatProblem::StorageFailed { detail }) => {
+            return Err(HostError::StorageFailed(detail.clone()));
         }
         Some(
             ChatProblem::DispatchRefused { detail }
-            | ChatProblem::StorageFailed { detail }
             | ChatProblem::CleanupUnconfirmed { reason: detail },
         ) => {
-            return Some(TurnEnd::Failed {
+            return Ok(Some(TurnEnd::Failed {
                 detail: detail.clone(),
-            });
+            }));
         }
         None => {}
     }
     // An unattended harness is told never to ask. One that asks anyway would wait
     // for ever, so the question itself ends the turn.
-    (live.activity == Activity::WaitingForYou).then(|| TurnEnd::ToolDenied {
-        detail: "The agent asked for an approval, and nobody is there to give one.".to_owned(),
-    })
+    Ok(
+        (live.activity == Activity::WaitingForYou).then(|| TurnEnd::ToolDenied {
+            detail: "The agent asked for an approval, and nobody is there to give one.".to_owned(),
+        }),
+    )
 }
 
 /// What a recorded turn says about how it ended, if it has.
@@ -202,6 +215,13 @@ fn recorded_end(turn: &ChatTurn) -> Option<TurnEnd> {
             detail: "The turn was stopped.".to_owned(),
         },
         TurnEnding::StoppedByTicketd(StopReason::TakenOver) => TurnEnd::TakenOver,
+        // The Chat was trashed, or the person's resume replaced its harness, while the
+        // agent worked: the agent's turn was cut off, which is the step failing.
+        TurnEnding::StoppedByTicketd(
+            reason @ (StopReason::Trashed | StopReason::ExplicitResume),
+        ) => TurnEnd::Failed {
+            detail: reason.words().to_owned(),
+        },
         TurnEnding::StoppedByTicketd(reason) => TurnEnd::Stopped(Some(reason)),
         TurnEnding::ContactLost(detail) => TurnEnd::Crashed {
             detail: detail.unwrap_or_default(),

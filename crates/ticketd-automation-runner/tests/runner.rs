@@ -10,9 +10,9 @@ use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    InteractionKind, InteractionRequest, NativeRequestId, NativeSessionId, NativeTurnId, Problem,
-    ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey, SettingOutcome,
-    StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
+    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
+    SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -1104,6 +1104,118 @@ async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_p
     assert!(reason.contains("the disk is gone"), "{reason}");
     assert_eq!(run.steps.len(), 1, "no failure path step ran");
     assert_eq!(*told.lock().unwrap(), 0);
+}
+
+impl Fixture {
+    /// Gives the agent step a failure path that notifies, so a step failure is told apart
+    /// from a run that ended some other way.
+    #[allow(clippy::unwrap_used)]
+    fn notify_when_the_agent_fails(&self) {
+        let mut definition = self.automation.definition.clone();
+        if let StepAction::RunAgent { on_failure, .. } = &mut definition.steps[0].action {
+            *on_failure = Some(vec![Step {
+                id: "tell".into(),
+                action: StepAction::Notify {
+                    text: "The agent failed.".into(),
+                    opens: NotifyTarget::Ticket,
+                    on_failure: None,
+                },
+            }]);
+        }
+        self.core()
+            .update_automation(&self.automation.id, definition)
+            .unwrap();
+    }
+
+    /// A runner over `host` that counts the notifications it shows.
+    #[allow(clippy::unwrap_used)]
+    fn counting_runner(&self, host: ChatHost) -> (Runner, Arc<Mutex<usize>>) {
+        let told = Arc::new(Mutex::new(0_usize));
+        let counted = told.clone();
+        let runner = Runner::new(
+            opener(&self.path),
+            Arc::new(move || Some(host.clone())),
+            Arc::new(move |_| {
+                *counted.lock().unwrap() += 1;
+                Ok(())
+            }),
+        )
+        .unwrap();
+        (runner, told)
+    }
+}
+
+/// #422 item 4, mid-turn: Chat storage fails while the agent works. What happened to
+/// the agent is unknown, so the step's failure path must not run; the run ends as Needs
+/// attention with a reason.
+#[tokio::test(start_paused = true)]
+async fn a_storage_failure_while_the_agent_works_ends_the_run_without_its_failure_path() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    f.notify_when_the_agent_fails();
+    // Fails once, at the supervisor's next write, and works again after: the Chat
+    // host's later reads of the Workspace succeed, so what it reports is the Chat's
+    // own storage-failure problem.
+    let broken = Arc::new(AtomicBool::new(false));
+    let (path, flag) = (f.path.clone(), broken.clone());
+    let flaky: WorkspaceOpener = Arc::new(move || {
+        if flag.swap(false, Ordering::SeqCst) {
+            return Err(ticketd_core::Error::AutomationRun(
+                "the disk is gone".into(),
+            ));
+        }
+        Workspace::open(&path)
+    });
+    let host = ChatHost::new(
+        flaky,
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+    )
+    .unwrap();
+    let (runner, told) = f.counting_runner(host);
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+
+    // The agent's next event cannot be recorded.
+    broken.store(true, Ordering::SeqCst);
+    f.fake
+        .emit(EventKind::MessageCompleted {
+            turn: NativeTurnId::new("turn-1"),
+            item: NativeItemId::new("message-1"),
+            text: "lost".to_owned(),
+        })
+        .await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+    let reason = run.reason.unwrap();
+    assert!(reason.contains("ticketd could not keep"), "{reason}");
+    assert_eq!(run.steps.len(), 1, "no failure path step ran");
+    assert_eq!(*told.lock().unwrap(), 0);
+}
+
+/// Trashing the Chat of a working agent stops its turn, which is the step failing, not
+/// the person taking the run over or ticketd closing it: the failure path runs.
+#[tokio::test(start_paused = true)]
+async fn trashing_a_working_agents_chat_fails_the_step_and_runs_its_failure_path() {
+    let f = Fixture::new();
+    f.notify_when_the_agent_fails();
+    let (runner, told) = f.counting_runner(f.host.clone());
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+
+    f.host.trash(&f.chat()).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::Completed, "{run:?}");
+    assert_eq!(run.steps[0].status, AutomationStepStatus::Failed);
+    assert_eq!(*told.lock().unwrap(), 1);
 }
 
 /// #387 M4: a run stopped while its agent's harness is still opening ends that
