@@ -77,26 +77,32 @@ export function applyTheme(resolved: "light" | "dark") {
 }
 
 /**
- * Moves the window to another theme: a crossfade of the whole page, title bar
- * included (the `--dur-theme` of styles.css). Where the webview cannot do that,
- * or reduced motion or a held key has zeroed the token, the theme changes in
- * one frame. Launch uses `applyTheme` and never fades.
+ * Moves the window to another theme: every color crossfades over `--dur-theme`
+ * (styles.css), title bar included. `data-theme-fading` on the root switches
+ * that transition on for the length of the fade only, so launch and ordinary
+ * hovers are untouched. Reduced motion or a held key zeroes the token, and the
+ * theme then changes in one frame. Launch uses `applyTheme` and never fades.
  */
 export function changeTheme(resolved: "light" | "dark") {
   const root = document.documentElement;
   const fade = Number.parseFloat(
     getComputedStyle(root).getPropertyValue("--dur-theme"),
   );
-  if (
-    root.dataset.theme === resolved ||
-    !fade ||
-    typeof document.startViewTransition !== "function"
-  ) {
+  if (root.dataset.theme === resolved || !fade) {
     applyTheme(resolved);
     return;
   }
-  document.startViewTransition(() => applyTheme(resolved));
+  window.clearTimeout(fadeTimer);
+  root.setAttribute(FADING_ATTRIBUTE, "");
+  applyTheme(resolved);
+  fadeTimer = window.setTimeout(
+    () => root.removeAttribute(FADING_ATTRIBUTE),
+    fade,
+  );
 }
+
+const FADING_ATTRIBUTE = "data-theme-fading";
+let fadeTimer: number | undefined;
 
 function systemPrefersDark(): boolean {
   return window.matchMedia(DARK_QUERY).matches;

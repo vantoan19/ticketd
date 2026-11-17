@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { changeTheme } from "@/lib/preferences";
 import {
@@ -8,37 +10,52 @@ import {
   rootTokens,
 } from "@/test/motion-tokens";
 
-// Changing the theme crossfades the whole window (DESIGN.md section 12); with
-// reduced motion, a held key, or no View Transitions API, it is one frame.
+// Changing the theme crossfades the whole window (DESIGN.md section 12) with
+// a transition on <html>, not the View Transitions API; with reduced motion
+// or a held key it is one frame.
 
-type Document_ = { startViewTransition?: unknown };
-const doc = document as unknown as Document_;
+const root = document.documentElement;
+const fading = () => root.hasAttribute("data-theme-fading");
 
 let restoreTokens: () => void;
-let start: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  vi.useFakeTimers();
   restoreTokens = applyTokens(rootTokens);
-  document.documentElement.dataset.theme = "light";
-  start = vi.fn((update: () => void) => update());
-  doc.startViewTransition = start;
+  root.dataset.theme = "light";
 });
 afterEach(() => {
+  vi.useRealTimers();
   restoreTokens();
-  delete doc.startViewTransition;
-  delete document.documentElement.dataset.theme;
-  document.documentElement.classList.remove("dark");
+  delete root.dataset.theme;
+  root.removeAttribute("data-theme-fading");
+  root.classList.remove("dark");
 });
 
-test("a theme change runs inside a view transition, which is what crossfades", () => {
+test("a theme change fades while --dur-theme runs, then settles", () => {
   changeTheme("dark");
-  expect(start).toHaveBeenCalledOnce();
-  expect(document.documentElement.dataset.theme).toBe("dark");
-  expect(document.documentElement.classList.contains("dark")).toBe(true);
+  expect(root.dataset.theme).toBe("dark");
+  expect(root.classList.contains("dark")).toBe(true);
+  expect(fading()).toBe(true);
+
+  vi.advanceTimersByTime(279);
+  expect(fading()).toBe(true);
+  vi.advanceTimersByTime(1);
+  expect(fading()).toBe(false);
+});
+
+test("a second change restarts the fade instead of ending it early", () => {
+  changeTheme("dark");
+  vi.advanceTimersByTime(200);
+  changeTheme("light");
+  vi.advanceTimersByTime(200);
+  expect(fading()).toBe(true);
+  vi.advanceTimersByTime(80);
+  expect(fading()).toBe(false);
 });
 
 test("choosing the theme already shown does not fade", () => {
   changeTheme("light");
-  expect(start).not.toHaveBeenCalled();
+  expect(fading()).toBe(false);
 });
 
 test.each([
@@ -48,12 +65,24 @@ test.each([
   restoreTokens();
   restoreTokens = applyTokens({ ...rootTokens, ...tokens });
   changeTheme("dark");
-  expect(start).not.toHaveBeenCalled();
-  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(fading()).toBe(false);
+  expect(root.dataset.theme).toBe("dark");
 });
 
-test("a webview without view transitions still changes theme", () => {
-  delete doc.startViewTransition;
-  changeTheme("dark");
-  expect(document.documentElement.dataset.theme).toBe("dark");
+test("the fade is plain CSS transitions, not view transitions", () => {
+  const css = readFileSync(join(__dirname, "..", "styles.css"), "utf8");
+  expect(css).not.toContain("view-transition");
+  const rule = css.match(/:root\[data-theme-fading\]\s*\*[^{]*\{([^}]*)\}/)?.[1];
+  expect(rule).toContain("var(--dur-theme)");
+  expect(rule).toContain("var(--ease-in-out)");
+  for (const property of [
+    "background-color",
+    "color",
+    "border-color",
+    "fill",
+    "stroke",
+    "box-shadow",
+  ]) {
+    expect(rule).toContain(property);
+  }
 });
