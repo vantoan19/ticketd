@@ -49,6 +49,59 @@ import type { Plan } from "@/lib/api/plans";
 import { useSourcesConfigured } from "./use-publication-preview";
 import "./properties.css";
 import { Badge } from "@/components/ui/badge";
+import { m } from "motion/react";
+import { CrossfadeText, Presence } from "@/components/ui/motion";
+import {
+  blur,
+  enterTransition,
+  exitTransition,
+  spring,
+} from "@/lib/motion-tokens";
+
+/**
+ * The tags as pills. A new pill fades up from a soft blur at 94% scale while
+ * its neighbours glide aside; a removed pill fades out and they close the gap
+ * (popLayout takes it out of the flow at once, so both happen together). The
+ * pills present when the row appears do not animate.
+ */
+function TagPills({ tags }: { tags: string[] }) {
+  return (
+    <span className="rail-tags">
+      <Presence initial={false} mode="popLayout">
+        {tags.map((tag) => (
+          <m.span
+            key={tag}
+            layout="position"
+            initial={{
+              opacity: 0,
+              scale: 0.94,
+              filter: `blur(${blur("in")}px)`,
+            }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              filter: "blur(0px)",
+              transitionEnd: { filter: "none" },
+              transition: {
+                default: enterTransition(),
+                scale: spring("smooth"),
+              },
+            }}
+            exit={{
+              opacity: 0,
+              filter: `blur(${blur("out")}px)`,
+              transition: exitTransition(),
+            }}
+            transition={{ layout: spring("smooth") }}
+          >
+            <Badge>{tag}</Badge>
+          </m.span>
+        ))}
+      </Presence>
+      {tags.length === 0 && "No tags"}
+    </span>
+  );
+}
 
 /** The Status choice that opens the duplicate review instead of setting a status. */
 const DUPLICATE_ACTION = "mark-duplicate";
@@ -432,7 +485,9 @@ export function TicketProperties({
             aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
           >
             <StatusIcon status={ticket.status} decorative />
-            <SelectValue>{ticket.status}</SelectValue>
+            <SelectValue>
+              <CrossfadeText>{ticket.status}</CrossfadeText>
+            </SelectValue>
             {saving("Status") && (
               <span className="rail-row-trailing">{saving("Status")}</span>
             )}
@@ -518,6 +573,7 @@ export function TicketProperties({
       label="Project"
       things="projects"
       value={projectName}
+      display={<CrossfadeText>{projectName}</CrossfadeText>}
       empty={!project && !ticket.project_id}
       selected={ticket.project_id ?? ""}
       disabled={disabled}
@@ -541,6 +597,7 @@ export function TicketProperties({
       label="Plan"
       things="Plans"
       value={planName}
+      display={<CrossfadeText>{planName}</CrossfadeText>}
       empty={!plan && !ticket.plan_id}
       selected={ticket.plan_id ?? ""}
       disabled={disabled}
@@ -554,19 +611,13 @@ export function TicketProperties({
       }
     />,
   );
-  const pills = ticket.tags.length > 0 && (
-    <span className="rail-tags">
-      {ticket.tags.map((tag) => (
-        <Badge key={tag}>{tag}</Badge>
-      ))}
-    </span>
-  );
+  const pills = <TagPills tags={ticket.tags} />;
   const tagsRow = property(
     "Tags",
     <PropertyPicker
       readOnly={readOnly}
       // The pills are the value: no icon, so they start on the label's edge.
-      display={pills || "No tags"}
+      display={pills}
       label="Tags"
       things="tags"
       value={ticket.tags.length ? ticket.tags.join(", ") : "No tags"}
@@ -656,7 +707,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
                     title={`Change status (${shortcutLabel("ticket-status")})`}
                   >
-                    {ticket.status}
+                    <CrossfadeText>{ticket.status}</CrossfadeText>
                   </RailRow>
                 }
               />
@@ -676,7 +727,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-project")}
                     title={`Change project (${shortcutLabel("ticket-project")})`}
                   >
-                    {projectName}
+                    <CrossfadeText>{projectName}</CrossfadeText>
                   </RailRow>
                 }
               />
@@ -696,7 +747,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-plan")}
                     title={`Move to Plan (${shortcutLabel("ticket-plan")})`}
                   >
-                    {planName}
+                    <CrossfadeText>{planName}</CrossfadeText>
                   </RailRow>
                 }
               />
@@ -715,7 +766,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-tags")}
                     title={`Edit tags (${shortcutLabel("ticket-tags")})`}
                   >
-                    {pills || "No tags"}
+                    {pills}
                   </RailRow>
                 }
               />

@@ -1,0 +1,41 @@
+/* Disclosure rows (DESIGN.md section 12). Opening: the rows fade in from a soft
+   blur one after another, the first seven a stagger step apart and later rows
+   with the seventh. Closing: they fade out with the height. These are
+   transitions, so a section already open at mount stays still. --dur-row is a
+   multiple of --stagger, which reduced motion and a held key zero. */
+.ui-disclosure-body > * {
+  --dur-row: 0ms;
+  opacity: 0;
+  filter: blur(var(--motion-blur-out));
+  transition:
+    opacity var(--dur-exit) var(--ease-in),
+    filter var(--dur-exit) var(--ease-in);
+}
+.ui-expand[data-open="true"] > .ui-expand-body > .ui-disclosure-body > * {
+  opacity: 1;
+  filter: none;
+  transition:
+    opacity var(--dur-enter) var(--ease-out) var(--dur-row),
+    filter var(--dur-enter) var(--ease-out) var(--dur-row);
+}
+.ui-disclosure-body > :nth-child(2) {
+  --dur-row: calc(var(--stagger) * 1);
+}
+.ui-disclosure-body > :nth-child(3) {
+  --dur-row: calc(var(--stagger) * 2);
+}
+.ui-disclosure-body > :nth-child(4) {
+  --dur-row: calc(var(--stagger) * 3);
+}
+.ui-disclosure-body > :nth-child(5) {
+  --dur-row: calc(var(--stagger) * 4);
+}
+.ui-disclosure-body > :nth-child(6) {
+  --dur-row: calc(var(--stagger) * 5);
+}
+.ui-disclosure-body > :nth-child(7) {
+  --dur-row: calc(var(--stagger) * 6);
+}
+.ui-disclosure-body > :nth-child(n + 8) {
+  --dur-row: calc(var(--stagger) * 7);
+}

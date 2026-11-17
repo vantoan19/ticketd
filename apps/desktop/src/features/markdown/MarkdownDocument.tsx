@@ -362,7 +362,7 @@ function CheckGlyph({
       role="img"
       aria-label={checked ? "Done" : "Not done"}
     >
-      {checked && <Check aria-hidden="true" />}
+      <Check aria-hidden="true" />
     </span>
   );
 }
