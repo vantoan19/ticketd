@@ -4338,9 +4338,16 @@ kbd,
   width: min(560px, calc(100vw - 32px));
   background: var(--popover);
 }
-.ui-dialog[data-surface="create"] {
-  /* Widening glides; the top anchor stays, so it never re-centres vertically. */
-  transition: width var(--spring-smooth-t) var(--spring-smooth);
+.ui-dialog[data-surface="create"][data-resizing] {
+  /* Expand and collapse glide, and only then: a window resize must not (the
+     dialog sets data-resizing for the length of the spring). The top anchor
+     stays, so it never re-centres vertically. Height between auto and a length
+     interpolates where the webview supports interpolate-size; elsewhere it
+     snaps, as it did. */
+  interpolate-size: allow-keywords;
+  transition:
+    width var(--spring-smooth-t) var(--spring-smooth),
+    height var(--spring-smooth-t) var(--spring-smooth);
 }
 .ui-dialog[data-surface="create"][data-expanded] {
   width: min(760px, calc(100vw - 32px));
