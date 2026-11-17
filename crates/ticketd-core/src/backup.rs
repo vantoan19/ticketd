@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, Workspace,
-    backup_review::{BackupCheck, check_backup},
+    backup_review::{BackupCheck, Ladder, check_backup},
 };
 use rusqlite::{Connection, backup::Backup};
 use serde::{Deserialize, Serialize};
@@ -51,92 +51,6 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
     Ok(())
 }
 
-/// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 82] = [
-    ("automation_settings", 78),
-    ("automation_run_steps", 77),
-    ("automation_runs", 77),
-    ("automation_arrivals", 76),
-    ("automation_device_state", 75),
-    ("automations", 75),
-    ("automation_agents", 74),
-    ("workspace_events", 73),
-    ("chat_record_writes", 66),
-    ("chat_notices", 66),
-    ("chats", 66),
-    ("chat_links", 66),
-    ("chat_sessions", 66),
-    ("chat_turns", 66),
-    ("chat_messages", 66),
-    ("chat_submission_attempts", 66),
-    ("chat_tools", 66),
-    ("chat_interactions", 66),
-    ("chat_changes", 66),
-    ("attachment_upload_destinations", 55),
-    ("attachment_upload_destination", 55),
-    ("drive_upload_operations", 52),
-    ("drive_references", 51),
-    ("attachment_draft_cutover", 50),
-    ("attachment_drafts", 50),
-    ("attachment_draft_references", 50),
-    ("attachment_workspace", 48),
-    ("embedded_attachments", 48),
-    ("attachment_upload_settings", 49),
-    ("attachments", 47),
-    ("ticket_attachments", 47),
-    ("entities", 31),
-    ("documents", 31),
-    ("document_opens", 31),
-    ("context_mentions", 35),
-    ("document_pins", 36),
-    ("document_tags", 36),
-    ("document_fts", 36),
-    ("activity_mentions", 40),
-    ("ticket_graph_fts", 43),
-    ("plan_graph_fts", 43),
-    ("numeric_mentions", 41),
-    ("activity_graph_numbers", 42),
-    ("activity_graph_targets", 42),
-    ("tickets", 1),
-    ("ticket_history", 3),
-    ("tags", 4),
-    ("ticket_tags", 4),
-    ("notes", 5),
-    ("dependencies", 6),
-    ("contextual_relationships", 19),
-    ("projects", 7),
-    ("plans", 8),
-    ("plan_documents", 39),
-    ("ticket_parents", 9),
-    ("project_checkouts", 10),
-    ("request_outcomes", 12),
-    ("ticket_follows", 14),
-    ("inbox_entries", 14),
-    ("duplicate_tickets", 15),
-    ("evidence", 16),
-    ("ticket_reminders", 18),
-    ("last_backup", 20),
-    ("source_configurations", 22),
-    ("external_identities", 23),
-    ("external_ownership", 23),
-    ("source_sync", 23),
-    ("external_duplicate_targets", 23),
-    ("source_conversation", 24),
-    ("source_status", 25),
-    ("publication_attempts", 26),
-    ("workspace_changes", 45),
-    ("ticket_documents", 46),
-    ("device", 56),
-    ("record_versions", 57),
-    ("sync_dirty", 58),
-    ("sync_capture", 58),
-    ("sync_files", 58),
-    ("sync_conflicts", 58),
-    ("sync_notices", 58),
-    ("sync_state", 59),
-    ("sync_attachments", 59),
-];
-
 pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool, Error> {
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
@@ -145,106 +59,16 @@ pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool,
     )?)
 }
 
-/// The tables a workspace of this format version should have but does not.
-pub(crate) fn missing_tables(
-    connection: &Connection,
-    version: i64,
-) -> Result<Vec<&'static str>, Error> {
-    let mut missing = Vec::new();
-    for (table, introduced) in TABLES {
-        if version >= introduced
-            && !(table == "notes" && version >= 32)
-            && !table_exists(connection, table)?
-        {
-            missing.push(table);
-        }
-    }
-    if version >= 53 && table_exists(connection, "attachments")? {
-        for (column, object) in [
-            ("quarantined", "attachments.quarantined"),
-            ("added_at", "attachments.added_at"),
-        ] {
-            let exists: bool = connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachments') WHERE name=?1)",
-                [column],
-                |row| row.get(0),
-            )?;
-            if !exists {
-                missing.push(object);
-            }
-        }
-    }
-    if version >= 54 && table_exists(connection, "attachments")? {
-        let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachments') WHERE name='purge_state')", [], |row| row.get(0))?;
-        if !exists {
-            missing.push("attachments.purge_state");
-        }
-    }
-    // Context identities and derived indexes need their maintenance triggers;
-    // missing triggers silently corrupt subsequent writes after a restore.
-    for (trigger, introduced) in [
-        ("ticket_entity_insert", 35),
-        ("plan_entity_insert", 35),
-        ("numeric_mentions_activity_delete", 41),
-        ("activity_graph_numbers_insert", 42),
-        ("activity_graph_numbers_delete", 42),
-        ("activity_graph_targets_insert", 42),
-        ("activity_graph_targets_delete", 42),
-        ("document_heading_insert", 43),
-        ("document_heading_update", 43),
-        ("document_fts_insert", 36),
-        ("document_fts_delete", 36),
-        ("document_fts_update", 36),
-        ("ticket_graph_fts_insert", 43),
-        ("ticket_graph_fts_delete", 43),
-        ("ticket_graph_fts_update", 43),
-        ("plan_graph_fts_insert", 43),
-        ("plan_graph_fts_delete", 43),
-        ("plan_graph_fts_update", 43),
-        ("embedded_activity_delete", 48),
-        ("drive_upload_request_namespace", 52),
-        ("write_drive_request_namespace", 52),
-        ("record_version_ticket", 57),
-        ("record_version_document", 57),
-        ("workspace_event_ticket_created", 73),
-        ("workspace_event_ticket_updated", 73),
-        ("workspace_event_ticket_status_changed", 73),
-        ("workspace_event_ticket_tag_added", 73),
-        ("workspace_event_ticket_tag_removed", 73),
-        ("workspace_event_activity_created", 73),
-    ] {
-        let exists: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
-            [trigger],
-            |row| row.get(0),
-        )?;
-        if version >= introduced && !exists {
-            missing.push(trigger);
-        }
-    }
-    // Without its capture triggers a restored Workspace would silently stop uploading edits.
-    if version >= 58 {
-        let triggers = crate::sync::captured_tables()
-            .filter(|(_, since)| version >= *since)
-            .flat_map(|(table, _)| {
-                crate::sync::TRIGGER_EVENTS.map(|event| format!("sync_capture_{table}_{event}"))
-            });
-        for trigger in triggers {
-            let exists: bool = connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
-                [trigger],
-                |row| row.get(0),
-            )?;
-            if !exists {
-                missing.push("sync capture triggers");
-                break;
-            }
-        }
-    }
-    if version >= 32 && !table_exists(connection, "activities")? {
-        missing.push("activities");
-    }
-    Ok(missing)
+/// The schema objects a Workspace of this format version has but `connection` lacks:
+/// tables, `table.column`s, triggers and unique indexes, by name. The Workspace format
+/// module builds the version in memory, so no list here can drift from the migrations.
+///
+/// Context identities, derived indexes and capture triggers are all part of that check:
+/// missing triggers silently corrupt subsequent writes after a restore, and without its
+/// sync capture triggers a restored Workspace would silently stop uploading edits.
+pub(crate) fn missing_objects(connection: &Connection, version: i64) -> Result<Vec<String>, Error> {
+    let expected = crate::format::objects_at(version)?;
+    Ok(expected.missing_from(&crate::format::Objects::read(connection)?))
 }
 
 /// The marker in the file name of a copy saved before a restore replaced the workspace.
@@ -254,11 +78,15 @@ pub(crate) const PRE_MIGRATION_MARKER: &str = ".pre-migration-";
 
 /// Restore accepts exactly the files that inspecting a backup calls valid.
 pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
+    validate_against(connection, Ladder::Required)
+}
+
+fn validate_against(connection: &Connection, ladder: Ladder) -> Result<(), Error> {
     // A backup from before Efforts became Plans gets the legacy-schema message, not a missing table.
     if table_exists(connection, "efforts")? {
         return Err(Error::LegacyEffortWorkspace);
     }
-    match check_backup(connection)? {
+    match check_backup(connection, ladder)? {
         BackupCheck::Valid { .. } => Ok(()),
         BackupCheck::NewerFormat { backup_version, .. } => {
             Err(Error::NewerSchema(i64::from(backup_version)))
@@ -376,7 +204,8 @@ pub(crate) fn save_snapshot(
     drop(barrier);
     crate::backup_archive::pack(&destination, files)?;
     if check_schema {
-        validate(&destination)?;
+        // The ladder is not required of the live Workspace: see `Ladder::Unchecked`.
+        validate_against(&destination, Ladder::Unchecked)?;
     }
     drop(destination);
     staged.as_file().sync_all()?;

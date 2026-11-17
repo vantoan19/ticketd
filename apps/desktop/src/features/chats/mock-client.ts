@@ -209,7 +209,7 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
   const marker = items.at(-1)?.kind === "marker" ? items.at(-1) : undefined;
   const reason = marker?.kind === "marker" ? marker.reason : undefined;
   if (reason === "stopped") return make("idle", "You stopped it");
-  if (reason === "quit") return make("idle", "Stopped when ticketd quit");
+  if (reason === "quit") return make("idle", "Stopped", "ticketd quit");
   // A failure observed now waits for the person while it holds.
   if (problem?.kind === "failed" && !problem.past)
     return make(

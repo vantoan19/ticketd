@@ -1,5 +1,5 @@
+use crate::readiness::{self, Readiness, unresolved_blockers};
 use crate::{Error, Status, Ticket, Workspace, history, relationships};
-use history::{Readiness, readiness, unresolved_blockers};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -26,7 +26,7 @@ impl std::fmt::Display for ReviewMode {
 ///
 /// `mode`, `basis` and `replacement_basis` are stamped by the preview and must be submitted
 /// unchanged. `basis` is an opaque fingerprint of the readiness inputs of Remove and Keep:
-/// the edges, and the status and trash state of each dependent and of its blockers.
+/// the edges, and the status, trash state and hold of each dependent and of its blockers.
 /// `replacement_basis` fingerprints what only Replace depends on: the status and trash
 /// state of the replacement endpoints and the blockers of the replacement dependent. It is
 /// compared only for Replace decisions, so a Remove-only review does not go stale when the
@@ -108,7 +108,7 @@ pub struct DuplicateDependencyPreview {
 }
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
-    conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT); PRAGMA user_version = 15;")?;
+    conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT);")?;
     Ok(())
 }
 
@@ -139,8 +139,10 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
             conn.execute("UPDATE duplicate_tickets SET restore_status = COALESCE(restore_status, 'Canceled') WHERE source_id = ?1", [&source])?;
             conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'status', 'Canceled', 'Duplicate')", [&source])?;
         } else {
+            // Step 21 runs on a version-20 Workspace, where a Ticket is known by its
+            // number: references arrive at step 56, and history keeps this one.
             let reference: String = conn.query_row(
-                "SELECT reference FROM tickets WHERE id = ?1",
+                "SELECT 'T-' || number FROM tickets WHERE id = ?1",
                 [&canonical],
                 |r| r.get(0),
             )?;
@@ -151,7 +153,6 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
             conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'relationship:duplicate', ?2, '')", params![source, reference])?;
         }
     }
-    conn.execute_batch("PRAGMA user_version = 21;")?;
     Ok(())
 }
 
@@ -271,93 +272,90 @@ impl Workspace {
         agent: Option<&str>,
         reviewed: bool,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let source_id = relationships::id(&tx, source)?;
-        let canonical_id = relationships::id(&tx, canonical)?;
-        crate::ensure_editable(&tx, &source_id)?;
-        crate::source::guard_duplicate(&tx, &source_id, source)?;
-        crate::ensure_editable(&tx, &canonical_id)?;
-        let destination = final_canonical(&tx, &canonical_id)?;
-        crate::ensure_editable(&tx, &destination)?;
-        if source_id == canonical_id || source_id == destination {
-            return Err(Error::DuplicateCycle);
-        }
-        let incident: bool = tx.query_row(
+        crate::write_scope::run(&self.connection, |tx| {
+            let source_id = tx.even_if_trashed(source)?;
+            let canonical_id = tx.even_if_trashed(canonical)?;
+            tx.ensure_editable(&source_id)?;
+            crate::source::guard_duplicate(tx, &source_id, source)?;
+            tx.ensure_editable(&canonical_id)?;
+            let destination = final_canonical(tx, &canonical_id)?;
+            tx.ensure_editable(&destination)?;
+            if source_id == canonical_id || source_id == destination {
+                return Err(Error::DuplicateCycle);
+            }
+            let incident: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM dependencies WHERE blocker_id = ?1 OR dependent_id = ?1)",
             [&source_id],
             |r| r.get(0),
         )?;
-        if incident && !reviewed {
-            return Err(Error::DuplicateDependencies);
-        }
-        let status: String = tx.query_row(
-            "SELECT status FROM tickets WHERE id = ?1",
-            [&source_id],
-            |r| r.get(0),
-        )?;
-        let previous: Option<String> = tx.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&source_id], |r| r.get(0)).optional()?;
-        let target: String = tx.query_row(
-            "SELECT reference FROM tickets WHERE id = ?1",
-            [&destination],
-            |r| r.get(0),
-        )?;
-        if previous.as_deref() != Some(&target) {
-            let mut stmt = tx.prepare("SELECT t.id, t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1")?;
-            let children = stmt
-                .query_map([&source_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(stmt);
-            tx.execute(
-                "UPDATE duplicate_tickets SET canonical_id = ?1 WHERE canonical_id = ?2",
-                params![destination, source_id],
-            )?;
-            for (id, _) in children {
-                history::record(&tx, &id, "relationship:duplicate", source, &target, agent)?;
+            if incident && !reviewed {
+                return Err(Error::DuplicateDependencies);
             }
-            tx.execute("INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(source_id) DO UPDATE SET canonical_id = excluded.canonical_id", params![source_id, destination, status])?;
-            history::record(
-                &tx,
-                &source_id,
-                "relationship:duplicate",
-                previous.as_deref().unwrap_or(""),
-                &target,
-                agent,
-            )?;
-        }
-        if status != "Duplicate" {
-            tx.execute(
-                "UPDATE tickets SET status = 'Duplicate' WHERE id = ?1",
+            let status: String = tx.query_row(
+                "SELECT status FROM tickets WHERE id = ?1",
                 [&source_id],
+                |r| r.get(0),
             )?;
-            history::record(&tx, &source_id, "status", &status, "Duplicate", agent)?;
-        }
-        tx.commit()?;
-        self.show_ticket(source)
+            let previous: Option<String> = tx.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&source_id], |r| r.get(0)).optional()?;
+            let target: String = tx.query_row(
+                "SELECT reference FROM tickets WHERE id = ?1",
+                [&destination],
+                |r| r.get(0),
+            )?;
+            if previous.as_deref() != Some(&target) {
+                let mut stmt = tx.prepare("SELECT t.id, t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1")?;
+                let children = stmt
+                    .query_map([&source_id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(stmt);
+                tx.execute(
+                    "UPDATE duplicate_tickets SET canonical_id = ?1 WHERE canonical_id = ?2",
+                    params![destination, source_id],
+                )?;
+                for (id, _) in children {
+                    history::record(tx, &id, "relationship:duplicate", source, &target, agent)?;
+                }
+                tx.execute("INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(source_id) DO UPDATE SET canonical_id = excluded.canonical_id", params![source_id, destination, status])?;
+                history::record(
+                    tx,
+                    &source_id,
+                    "relationship:duplicate",
+                    previous.as_deref().unwrap_or(""),
+                    &target,
+                    agent,
+                )?;
+            }
+            if status != "Duplicate" {
+                tx.execute(
+                    "UPDATE tickets SET status = 'Duplicate' WHERE id = ?1",
+                    [&source_id],
+                )?;
+                history::record(tx, &source_id, "status", &status, "Duplicate", agent)?;
+            }
+            crate::read_ticket(tx, source)
+        })
     }
 
     pub fn remove_duplicate(&mut self, source: &str, agent: Option<&str>) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let id = relationships::id(&tx, source)?;
-        crate::ensure_editable(&tx, &id)?;
-        crate::source::guard_duplicate(&tx, &id, source)?;
-        let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, c.reference, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
-        if let Some((restore, canonical, status)) = existing {
-            tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;
-            history::record(&tx, &id, "relationship:duplicate", &canonical, "", agent)?;
-            if let Some(restore) = restore.filter(|r| r != &status) {
-                tx.execute(
-                    "UPDATE tickets SET status = ?1 WHERE id = ?2",
-                    params![restore, id],
-                )?;
-                history::record(&tx, &id, "status", &status, &restore, agent)?;
+        crate::write_scope::run(&self.connection, |tx| {
+            let id = tx.editable(source)?;
+            crate::source::guard_duplicate(tx, &id, source)?;
+            let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, c.reference, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+            if let Some((restore, canonical, status)) = existing {
+                tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;
+                history::record(tx, &id, "relationship:duplicate", &canonical, "", agent)?;
+                if let Some(restore) = restore.filter(|r| r != &status) {
+                    tx.execute(
+                        "UPDATE tickets SET status = ?1 WHERE id = ?2",
+                        params![restore, id],
+                    )?;
+                    history::record(tx, &id, "status", &status, &restore, agent)?;
+                }
             }
-        }
-        tx.commit()?;
-        self.show_ticket(source)
+            crate::read_ticket(tx, source)
+        })
     }
 }
 
@@ -377,6 +375,8 @@ struct Snapshot {
 struct Facts {
     status: Status,
     trashed: bool,
+    /// Closed at the source for an unrecognized reason: neither Ready nor Blocked.
+    held: bool,
 }
 
 /// Orders references by device code, then by counter (`T-KQ9` before `T-KQ10`).
@@ -431,7 +431,7 @@ impl Snapshot {
                 return Err(Error::DuplicateCycle);
             }
             for id in [&source_id, &canonical_id, &destination_id] {
-                crate::ensure_editable(connection, id)?;
+                crate::write_scope::ensure_editable(connection, id)?;
             }
         }
         // The cap is checked before any further work, so a huge review is cheap to refuse.
@@ -478,7 +478,7 @@ impl Snapshot {
                 .or_default();
             needed.insert(edge.replacement_blocker.clone());
         }
-        let mut blocker_stmt = connection.prepare("SELECT b.reference, b.status, b.trashed FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.reference = ?1")?;
+        let mut blocker_stmt = connection.prepare(&format!("SELECT b.reference, b.status, b.trashed, {} FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.reference = ?1", crate::source::held_sql("b.id")))?;
         for (waiting, set) in &mut blockers {
             let rows = blocker_stmt
                 .query_map([waiting], |r| {
@@ -486,29 +486,33 @@ impl Snapshot {
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, bool>(2)?,
+                        r.get::<_, bool>(3)?,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
-            for (reference, status, trashed) in rows {
+            for (reference, status, trashed, held) in rows {
                 facts.insert(
                     reference.clone(),
                     Facts {
                         status: status.parse()?,
                         trashed,
+                        held,
                     },
                 );
                 set.insert(reference);
             }
         }
         drop(blocker_stmt);
-        let mut fact_stmt =
-            connection.prepare("SELECT status, trashed FROM tickets WHERE reference = ?1")?;
+        let mut fact_stmt = connection.prepare(&format!(
+            "SELECT status, trashed, {} FROM tickets WHERE reference = ?1",
+            crate::source::held_sql("tickets.id")
+        ))?;
         for reference in needed.iter().chain(blockers.keys()) {
             if facts.contains_key(reference) {
                 continue;
             }
-            let (status, trashed): (String, bool) = fact_stmt
-                .query_row([reference], |r| Ok((r.get(0)?, r.get(1)?)))
+            let (status, trashed, held): (String, bool, bool) = fact_stmt
+                .query_row([reference], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                 .optional()?
                 .ok_or_else(|| Error::NotFound(reference.clone()))?;
             facts.insert(
@@ -516,6 +520,7 @@ impl Snapshot {
                 Facts {
                     status: status.parse()?,
                     trashed,
+                    held,
                 },
             );
         }
@@ -555,9 +560,10 @@ impl Snapshot {
     fn fact_text(&self, reference: &str) -> Result<String, Error> {
         let facts = self.fact(reference)?;
         Ok(format!(
-            "{reference}:{}:{}",
+            "{reference}:{}:{}:{}",
             facts.status,
-            u8::from(facts.trashed)
+            u8::from(facts.trashed),
+            u8::from(facts.held)
         ))
     }
 
@@ -629,9 +635,10 @@ impl Snapshot {
                     .map(|b| Ok((b.clone(), self.fact(b)?.status)))
                     .collect::<Result<Vec<_>, Error>>()?;
                 Ok(WaitingTicket {
-                    readiness: readiness(
+                    readiness: readiness::judge(
                         facts.status,
                         facts.trashed,
+                        facts.held,
                         blockers.iter().map(|(_, status)| *status),
                     ),
                     unresolved: by_number(unresolved_blockers(blockers)),
@@ -677,15 +684,16 @@ impl Snapshot {
                      blockers: &BTreeSet<String>,
                      status: &dyn Fn(&str) -> Result<Status, Error>|
          -> Result<(Readiness, Vec<String>), Error> {
-            let trashed = self.fact(waiting)?.trashed;
+            let facts = self.fact(waiting)?;
             let statuses = blockers
                 .iter()
                 .map(|b| Ok((b.clone(), status(b)?)))
                 .collect::<Result<Vec<(String, Status)>, Error>>()?;
             Ok((
-                readiness(
+                readiness::judge(
                     status(waiting)?,
-                    trashed,
+                    facts.trashed,
+                    facts.held,
                     statuses.iter().map(|(_, status)| *status),
                 ),
                 unresolved_blockers(statuses),
@@ -834,11 +842,8 @@ impl Workspace {
     ) -> Result<Ticket, Error> {
         // A savepoint composes with retryable writes, while acquiring the write lock before
         // reading ensures that the reviewed graph cannot change before commit.
-        self.connection
-            .execute_batch("SAVEPOINT duplicate_review")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            self.apply_dependency_review(
+        self.in_write_scope(|workspace| {
+            workspace.apply_dependency_review(
                 source,
                 canonical,
                 expected_canonical,
@@ -846,19 +851,8 @@ impl Workspace {
                 ReviewMode::Duplicate,
                 agent,
             )?;
-            self.mark_duplicate_internal(source, canonical, agent, true)
-        })();
-        match result {
-            Ok(ticket) => {
-                self.connection.execute_batch("RELEASE duplicate_review")?;
-                Ok(ticket)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO duplicate_review; RELEASE duplicate_review")?;
-                Err(error)
-            }
-        }
+            workspace.mark_duplicate_internal(source, canonical, agent, true)
+        })
     }
     pub fn edit_dependencies_reviewed(
         &mut self,
@@ -868,11 +862,8 @@ impl Workspace {
         decisions: Vec<DependencyDecision>,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        self.connection
-            .execute_batch("SAVEPOINT dependency_review")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            self.apply_dependency_review(
+        self.in_write_scope(|workspace| {
+            workspace.apply_dependency_review(
                 source,
                 canonical,
                 expected_canonical,
@@ -880,19 +871,8 @@ impl Workspace {
                 ReviewMode::Separate,
                 agent,
             )?;
-            self.show_ticket(source)
-        })();
-        match result {
-            Ok(ticket) => {
-                self.connection.execute_batch("RELEASE dependency_review")?;
-                Ok(ticket)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO dependency_review; RELEASE dependency_review")?;
-                Err(error)
-            }
-        }
+            workspace.show_ticket(source)
+        })
     }
 
     fn apply_dependency_review(

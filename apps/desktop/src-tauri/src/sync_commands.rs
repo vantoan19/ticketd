@@ -48,10 +48,11 @@ fn drive(connection_id: &str) -> Arc<DriveRemote<'static>> {
     {
         return Arc::clone(remote);
     }
-    // ponytail: the adapter borrows its connection id, so the id is kept for the
-    // life of the app: one short string per account signed in to.
-    let id: &'static str = Box::leak(connection_id.to_owned().into_boxed_str());
-    let remote = Arc::new(DriveRemote::new(id, &PlatformCredentialStore, transport()));
+    let remote = Arc::new(DriveRemote::new(
+        connection_id,
+        &PlatformCredentialStore,
+        transport(),
+    ));
     *kept = Some((connection_id.to_owned(), Arc::clone(&remote)));
     remote
 }
@@ -116,12 +117,11 @@ pub fn upkeep(workspace: &mut Workspace) -> Result<(), Error> {
     workspace.upkeep(None)
 }
 
-/// What the desktop does once when it starts, before the first sync run.
+/// What the desktop does once when it starts, before the first sync run. The
+/// run itself begins the app session: downloads the last session left cut
+/// off are fetched again, and this desktop's run token is renewed.
 pub fn at_launch() {
     let prepared = open_workspace().and_then(|mut workspace| {
-        // No download survives the app closing: what the last session left
-        // as downloading is fetched again by the next run.
-        workspace.start_sync_session()?;
         if cfg!(target_os = "macos") {
             name_this_desktop(&mut workspace, mac_computer_name)?;
         }
@@ -837,8 +837,8 @@ fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
             &AtomicBool::new(false),
         )
         .map_err(failed)?;
-    // A kept adapter holds the previous sign-in's access token.
-    *DRIVE.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    // A kept adapter needs no reset: when Drive refuses its access token, it
+    // renews with the credential this sign-in stored.
     Ok((
         signed_in.connection_id,
         signed_in.account.unwrap_or_default(),
@@ -1034,8 +1034,6 @@ mod tests {
         remote::{FakeRemote, RemoteOp},
     };
 
-    const FOLDER: &str = "workspace";
-
     /// Two desktops syncing one folder; `here` is the one the commands serve.
     struct Desks {
         _directory: tempfile::TempDir,
@@ -1047,22 +1045,37 @@ mod tests {
 
     impl Desks {
         fn sync_there(&mut self) {
-            self.there.sync(&self.remote, FOLDER, "Desk A").unwrap();
+            self.there.sync_now(&self.remote).unwrap();
         }
         fn sync_here(&mut self) {
-            self.here.sync(&self.remote, FOLDER, "Desk B").unwrap();
+            self.here.sync_now(&self.remote).unwrap();
         }
     }
 
     fn desks() -> Desks {
         let directory = tempfile::tempdir().unwrap();
         let remote = FakeRemote::new();
-        remote.ensure_folder(FOLDER, "Test").unwrap();
-        let there = Workspace::open(directory.path().join("there.sqlite3")).unwrap();
-        let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
+        // As the app sets them up: signed in, `there` uploaded its Workspace
+        // and `here` replaced its own with it.
+        let desk = |name: &str, file: &str| {
+            let mut workspace = Workspace::open(directory.path().join(file)).unwrap();
+            workspace
+                .set_sync_settings(name, 60, AttachmentDownload::Automatic)
+                .unwrap();
+            workspace
+                .sync_connect("connection", "mina@example.com")
+                .unwrap();
+            workspace
+        };
+        let mut there = desk("Desk A", "there.sqlite3");
+        there.sync_upload_workspace(&remote, "Test").unwrap();
+        let folder = remote.folders().unwrap()[0].id.clone();
+        let (mut here, _) = desk("Desk B", "here.sqlite3")
+            .sync_download_workspace(&remote, &folder)
+            .unwrap();
         here.renew_device_code().unwrap();
         let bound = Binding {
-            folder: FOLDER.into(),
+            folder,
             device: "Desk B".into(),
             poll: Duration::from_secs(60),
             remote: Arc::new(remote.clone()),
@@ -1239,7 +1252,7 @@ mod tests {
         desks
             .remote
             .write(
-                FOLDER,
+                &desks.bound.folder,
                 &stray,
                 "T-MW21.md",
                 None,
@@ -1462,13 +1475,13 @@ mod tests {
         desks.sync_there();
         desks.sync_here();
         let key = RemoteKey::new(RemoteKind::Ticket, ticket.id.clone());
-        let current = desks.remote.list(FOLDER).unwrap();
+        let current = desks.remote.list(&desks.bound.folder).unwrap();
         let current = current.iter().find(|file| file.key == key).unwrap();
         let huge = vec![b'x'; 8 * 1024 * 1024 + 1];
         desks
             .remote
             .write(
-                FOLDER,
+                &desks.bound.folder,
                 &key,
                 "T.md",
                 Some(&current.version),
@@ -1568,35 +1581,29 @@ mod tests {
 
     #[test]
     fn the_binding_follows_what_the_workspace_stores() {
-        let mut desks = desks();
-        let fake = desks.remote.clone();
+        // A Workspace that was never connected.
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
         let bound = |workspace: &Workspace| {
             let fake = fake.clone();
             binding_of(workspace, move |_| Arc::new(fake)).unwrap()
         };
-        assert!(bound(&desks.here).is_none());
-        desks
-            .here
-            .sync_connect("connection", "mina@example.com")
-            .unwrap();
+        assert!(bound(&here).is_none());
+        here.sync_connect("connection", "mina@example.com").unwrap();
         // Signed in, but no folder chosen: nothing to sync with yet.
-        assert!(bound(&desks.here).is_none());
+        assert!(bound(&here).is_none());
 
-        let status = desks
-            .here
-            .sync_upload_workspace(&desks.remote, "Test")
+        let status = here.sync_upload_workspace(&fake, "Test").unwrap();
+        here.set_sync_settings("Laptop", 90, AttachmentDownload::OnOpen)
             .unwrap();
-        desks
-            .here
-            .set_sync_settings("Laptop", 90, AttachmentDownload::OnOpen)
-            .unwrap();
-        let binding = bound(&desks.here).unwrap();
+        let binding = bound(&here).unwrap();
         assert_eq!(binding.folder, status.folder.unwrap().id);
         assert_eq!(binding.device, "Laptop");
         assert_eq!(binding.poll, Duration::from_secs(90));
 
-        desks.here.sync_disconnect().unwrap();
-        assert!(bound(&desks.here).is_none());
+        here.sync_disconnect().unwrap();
+        assert!(bound(&here).is_none());
     }
 
     #[test]

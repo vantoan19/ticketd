@@ -14,11 +14,9 @@ mod setup;
 pub use crate::sync_files::MAX_FILE_BYTES;
 pub use attachments::{AttachmentAvailability, AttachmentAvailabilityState, AttachmentDownloads};
 pub use capture::{DirtyRecord, RecordKind};
-pub(crate) use capture::{TRIGGER_EVENTS, captured_tables};
 pub(crate) use engine::removed_by_sync;
 pub use engine::{
-    SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncReport,
-    SyncResolution,
+    SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncResolution,
 };
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, SetupOptions,

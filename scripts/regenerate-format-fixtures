@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Regenerates the Workspace backups in crates/ticketd-core/tests/fixtures/format/.
+#
+# Each fixture is a backup saved by the code that shipped a format version, so it
+# keeps the exact shape and data of that version however the current migration
+# ladder changes. They are made through that commit's own `ticketd` CLI:
+#
+#   v55  dbf9154c  attachments (#214)
+#   v65  7b65e8e1  personal sync through Google Drive (#284)
+#   v72  20efcc73  Chat experience (#375)
+#
+# For each commit the script checks it out in a temporary git worktree outside this
+# repository, builds `ticketd-cli` there with its own target directory, seeds a new
+# Workspace with synthetic data, saves a backup, and deletes the worktree and its
+# target. Plan for a few GB of free disk and a few minutes. Cargo runs with your
+# environment, so export any toolchain variables your machine needs first.
+#
+#   scripts/regenerate-format-fixtures            # all three
+#   scripts/regenerate-format-fixtures v55        # one
+#   scripts/regenerate-format-fixtures seed BINARY OUTPUT   # seed with a built CLI
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out_dir="$root/crates/ticketd-core/tests/fixtures/format"
+
+# Everything to remove when the script ends, however it ends. One EXIT trap owns the
+# cleanup: a RETURN trap is a single handler for the whole script, so a function that sets
+# its own replaces its caller's, and in bash 4.4 and later it runs after the function's
+# locals are gone. The `${array[@]+...}` form keeps an empty array legal under `set -u`
+# in bash 3.2, which macOS ships.
+worktrees=()
+temp_dirs=()
+discard() {
+  local path
+  for path in ${worktrees[@]+"${worktrees[@]}"}; do
+    git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
+  done
+  for path in ${temp_dirs[@]+"${temp_dirs[@]}"}; do
+    rm -rf "$path"
+  done
+  worktrees=()
+  temp_dirs=()
+}
+trap discard EXIT
+
+commits() {
+  case "$1" in
+    v55) echo dbf9154c ;;
+    v65) echo 7b65e8e1 ;;
+    v72) echo 20efcc73 ;;
+    *) echo "unknown fixture: $1 (expected v55, v65 or v72)" >&2; return 1 ;;
+  esac
+}
+
+# Seed a new Workspace through the CLI at $1, then save a backup of it at $2.
+seed() {
+  local ticketd="$1" output="$2" scratch
+  scratch="$(mktemp -d)"
+  temp_dirs+=("$scratch")
+  export TICKETD_TEST_WORKSPACE="$scratch/workspace.sqlite3"
+  # A command's JSON result, then one field of it.
+  field() { jq -r "$1"; }
+
+  local first second third plan document
+  first="$("$ticketd" create "Ship the importer" | field .reference)"
+  second="$("$ticketd" create "Review the parser" | field .reference)"
+  third="$("$ticketd" create "Retire the old exporter" | field .reference)"
+
+  "$ticketd" change "$first" --body "Imports the legacy file. Depends on $second." >/dev/null
+  "$ticketd" change "$second" --status "In progress" >/dev/null
+  "$ticketd" add-tag "$first" importer >/dev/null
+  "$ticketd" add-tag "$second" importer >/dev/null
+  "$ticketd" add-dependency "$second" "$first" >/dev/null
+  "$ticketd" add-relationship "$first" "$third" related >/dev/null
+  "$ticketd" set-parent "$third" --parent "$first" >/dev/null
+  "$ticketd" reminder set "$first" 2030-01-31T09:00:00+00:00 >/dev/null
+  "$ticketd" activity add "$first" --brief "Started on the importer." >/dev/null
+  printf 'Fixture notes for %s.\n' "$second" >"$scratch/details.md"
+  "$ticketd" activity add "$second" --brief "Parser reviewed." \
+    --details-file "$scratch/details.md" >/dev/null
+  "$ticketd" evidence add "$first" --kind verification --name Tests --value passed >/dev/null
+
+  plan="$("$ticketd" plan create Release | field .id)"
+  "$ticketd" plan add "$plan" "$first" >/dev/null
+  "$ticketd" project create App /tmp/fixture-app >/dev/null
+  document="$("$ticketd" document create --title "Importer notes" \
+    --body "Background for $first." | field .id)"
+  "$ticketd" document tag "$document" importer >/dev/null
+  "$ticketd" document pin "$document" >/dev/null
+  "$ticketd" document link-ticket "$document" "$second" >/dev/null
+
+  printf 'fixture attachment\n' >"$scratch/attachment.txt"
+  "$ticketd" attachment add "$scratch/attachment.txt" --ticket "$first" \
+    --name "attachment.txt" --local >/dev/null
+
+  "$ticketd" trash "$third" >/dev/null
+  mkdir -p "$(dirname "$output")"
+  rm -f "$output"
+  "$ticketd" backup "$output" >/dev/null
+}
+
+build_and_seed() {
+  local version="$1" commit work
+  commit="$(commits "$version")"
+  work="$(mktemp -d)"
+  temp_dirs+=("$work")
+  worktrees+=("$work/tree")
+  git -C "$root" worktree add --detach "$work/tree" "$commit" >/dev/null
+  (cd "$work/tree" && CARGO_TARGET_DIR="$work/tree/target" cargo build -p ticketd-cli --locked)
+  seed "$work/tree/target/debug/ticketd" "$out_dir/$version.sqlite3"
+  echo "wrote $out_dir/$version.sqlite3"
+  # Free this version's build before the next one starts.
+  discard
+}
+
+if [[ "${1:-}" == seed ]]; then
+  seed "$2" "$3"
+  exit
+fi
+
+for version in "${@:-v55 v65 v72}"; do
+  for each in $version; do
+    build_and_seed "$each"
+  done
+done

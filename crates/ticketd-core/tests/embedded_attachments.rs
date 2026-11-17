@@ -1,3 +1,6 @@
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use ticketd_core::{DocumentPatch, TicketPatch, Workspace};
 
 #[test]
@@ -377,30 +380,32 @@ fn restore_review_requires_the_workspace_identity_and_reference_index() {
 fn schema_47_upgrade_keeps_retained_files_and_a_complete_pre_migration_backup() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let source = dir.path().join("existing.txt");
-    std::fs::write(&source, b"existing schema47 snapshot").unwrap();
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Existing attachment").unwrap();
-    let file = workspace
-        .import_attachment("existing-upload", &source, None)
+    let id = old_workspace::workspace_with_attachment(
+        &path,
+        47,
+        "existing.txt",
+        b"existing schema47 snapshot",
+    );
+    old_workspace::add_ticket(
+        &path,
+        "10000000-0000-4000-8000-000000000001",
+        "Existing attachment",
+    );
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO ticket_attachments (ticket_id, attachment_id) VALUES ('10000000-0000-4000-8000-000000000001', ?1)",
+            [&id],
+        )
         .unwrap();
-    workspace
-        .set_ticket_attachment(&ticket.reference, &file.id, true)
-        .unwrap();
-    drop(workspace);
-    // Reconstruct the prior schema at the system boundary, preserving its actual file layout.
-    let previous = rusqlite::Connection::open(&path).unwrap();
-    previous.execute_batch("DROP TRIGGER embedded_activity_delete; DROP TABLE embedded_attachments; DROP TABLE attachment_workspace; PRAGMA user_version=47;").unwrap();
-    drop(previous);
-    std::fs::remove_file(source).unwrap();
     let workspace = Workspace::open(&path).unwrap();
-    // The reconstructed old table has no evidence of first registration time.
-    let file = ticketd_core::Attachment {
-        added_at: None,
-        ..file
-    };
-    let uri = workspace.attachment_uri(&file.id).unwrap();
-    assert_eq!(workspace.resolve_attachment_uri(&uri).unwrap(), file);
+    // The old table has no evidence of first registration time.
+    let uri = workspace.attachment_uri(&id).unwrap();
+    let file = workspace.resolve_attachment_uri(&uri).unwrap();
+    assert_eq!(
+        (file.id.as_str(), file.added_at.clone()),
+        (id.as_str(), None)
+    );
     let backups = workspace.safety_backups().unwrap();
     assert_eq!(backups.len(), 1);
     assert!(matches!(
@@ -415,7 +420,7 @@ fn schema_47_upgrade_keeps_retained_files_and_a_complete_pre_migration_backup() 
     Workspace::restore(&restored, &backups[0].path).unwrap();
     let restored = Workspace::open(&restored).unwrap();
     assert_eq!(
-        restored.ticket_attachments(&ticket.reference).unwrap(),
+        restored.ticket_attachments("T-KQ1").unwrap(),
         std::slice::from_ref(&file)
     );
     let export = dir.path().join("restored.txt");

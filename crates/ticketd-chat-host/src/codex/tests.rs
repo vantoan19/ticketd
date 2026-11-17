@@ -6,12 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
+use crate::conformance::{NewTurn, Provider};
+use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
@@ -219,15 +222,6 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     assert_eq!(
         seen(&mut events).await,
         ["turn-ended turn_1 Interrupted [\"sub-1\"]"]
-    );
-
-    // A refusal that arrives late is evidence too.
-    let outcome = submit(&mut peer, &runtime, start_turn("sub-2", "Again")).await;
-    assert_eq!(outcome, DispatchOutcome::Written);
-    peer.play().await;
-    assert_eq!(
-        seen(&mut events).await,
-        ["evidence sub-2 Rejected { reason: \"server is shutting down (code -32600)\" }"]
     );
     peer.assert_nothing_written().await;
 }
@@ -523,75 +517,6 @@ fn terminal_errors_keep_their_provider_meaning() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn losing_the_process_after_a_write_leaves_the_submission_unknown() {
-    let (mut peer, runtime, mut events) = open().await;
-    peer.load(fixture!("process_loss"));
-
-    let (outcome, ()) = tokio::join!(runtime.submit(start_turn("sub-1", "Deploy it")), async {
-        peer.play().await;
-        let stderr = b"warning: noisy\nfatal: connection reset\n";
-        peer.stderr.write_all(stderr).await.expect("stderr");
-        sleep(Duration::from_millis(1)).await;
-        peer.exit(1);
-    });
-
-    assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
-    let lost = drain(&mut events).await;
-    let [
-        EventKind::RuntimeLost {
-            exit_code: Some(1),
-            diagnostics,
-        },
-    ] = lost.as_slice()
-    else {
-        panic!("only the loss, got {lost:?}");
-    };
-    assert!(diagnostics.ends_with("fatal: connection reset"));
-    assert_eq!(events.recv().await, None);
-
-    let closed = Refusal::RuntimeClosed;
-    let submitted = runtime.submit(start_turn("sub-1", "Deploy it")).await;
-    let responded = runtime.respond(approve("0", ApprovalDecision::Allow)).await;
-    let interrupted = runtime.interrupt(interrupt("turn_1")).await;
-    assert_eq!(submitted, DispatchOutcome::NotSent(closed.clone()));
-    assert_eq!(responded, RespondOutcome::NotSent(closed.clone()));
-    assert_eq!(interrupted, InterruptOutcome::NotSent(closed));
-}
-
-#[tokio::test(start_paused = true)]
-async fn commands_from_another_generation_write_nothing() {
-    let (mut peer, runtime, _events) = open().await;
-    let old = RuntimeGeneration(6);
-    let stale = Refusal::StaleGeneration {
-        current: GENERATION,
-    };
-
-    let submitted = runtime
-        .submit(Submission {
-            generation: old,
-            ..start_turn("sub-1", "Hello")
-        })
-        .await;
-    let responded = runtime
-        .respond(InteractionResponse {
-            generation: old,
-            ..approve("0", ApprovalDecision::Allow)
-        })
-        .await;
-    let interrupted = runtime
-        .interrupt(InterruptRequest {
-            generation: old,
-            ..interrupt("turn_1")
-        })
-        .await;
-
-    assert_eq!(submitted, DispatchOutcome::NotSent(stale.clone()));
-    assert_eq!(responded, RespondOutcome::NotSent(stale.clone()));
-    assert_eq!(interrupted, InterruptOutcome::NotSent(stale));
-    peer.assert_nothing_written().await;
-}
-
-#[tokio::test(start_paused = true)]
 async fn closing_ends_the_stream_without_reporting_a_loss() {
     let (mut peer, runtime, mut events) = open().await;
 
@@ -862,7 +787,7 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
 /// #387 3B3: a command a Stop cuts off completes as failed before the turn ends
 /// interrupted; it stays unfinished, which the turn then shows as "not finished".
 #[test]
-fn a_command_cut_off_by_a_stop_is_not_reported_as_failed() {
+fn a_command_that_failed_after_a_stop_is_reported_as_such() {
     let mut session = Session::default();
     session.notification("turn/started", &json!({"turn": {"id": "turn_1"}}));
     let command = |status: &str| json!({"turnId": "turn_1", "item": {"id": "cmd_1", "type": "commandExecution", "command": "ticketd list", "status": status, "processId": "42", "exitCode": null}});
@@ -875,7 +800,7 @@ fn a_command_cut_off_by_a_stop_is_not_reported_as_failed() {
         events.iter().any(|event| matches!(
             event,
             EventKind::ToolUpdated {
-                status: crate::ToolStatus::Running,
+                status: crate::ToolStatus::FailedAfterInterrupt,
                 ..
             }
         )),
@@ -998,11 +923,8 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
 
     submit(&mut peer, &opened.runtime, start_turn("sub-1", "Go")).await;
 
-    match drain(&mut opened.events).await.pop() {
-        Some(EventKind::TurnEnded {
-            outcome: TurnOutcome::Failed(problem),
-            ..
-        }) => {
+    match read_end(&drain(&mut opened.events).await) {
+        Some(TurnOutcome::Failed(problem)) => {
             assert_eq!(problem.kind, ProblemKind::ToolDenied);
             assert!(problem.message.contains("curl example.com"), "{problem:?}");
         }
@@ -1178,9 +1100,9 @@ fn a_command_codex_could_not_start_fails_an_unattended_turn() {
         let params = json!({"turnId": "turn_1", "item": item});
         session.notification("item/completed", &params);
         let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-        match session.notification("turn/completed", &turn).pop() {
-            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
-            other => panic!("the turn ended, got {other:?}"),
+        match read_end(&session.notification("turn/completed", &turn)) {
+            Some(outcome) => outcome,
+            None => panic!("the turn ended"),
         }
     };
 
@@ -1199,6 +1121,30 @@ fn a_command_codex_could_not_start_fails_an_unattended_turn() {
     assert_eq!(outcome(&not_started, false), TurnOutcome::Completed);
 }
 
+/// The adapter reports what Codex said and what it saw; it does not decide that the
+/// turn failed. That is the supervisor's rule (see `outcome`).
+#[test]
+fn a_declined_tool_is_reported_as_evidence_and_the_outcome_stays_codexs() {
+    let mut session = Session::default();
+    session.turn_overrides = Some(json!({}));
+    let item = json!({"type": "commandExecution", "id": "c_1", "command": "curl example.com",
+        "status": "declined"});
+    session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
+
+    let events = session.notification(
+        "turn/completed",
+        &json!({"turn": {"id": "turn_1", "status": "completed"}}),
+    );
+
+    assert_eq!(
+        events.iter().map(brief).collect::<Vec<_>>(),
+        [
+            "turn-evidence turn_1 denied \"Codex could not run curl example.com.\"",
+            "turn-ended turn_1 Completed []"
+        ]
+    );
+}
+
 /// 4B1: a file change Codex declined (outside the writable folders) or failed to write
 /// fails an unattended turn naming the file, though the agent then ended its turn. In
 /// a person's Chat the same items fail nothing.
@@ -1214,9 +1160,9 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
         let params = json!({"turnId": "turn_1", "item": item(status)});
         session.notification("item/completed", &params);
         let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-        match session.notification("turn/completed", &turn).pop() {
-            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
-            other => panic!("the turn ended, got {other:?}"),
+        match read_end(&session.notification("turn/completed", &turn)) {
+            Some(outcome) => outcome,
+            None => panic!("the turn ended"),
         }
     };
     for (status, message) in [
@@ -1259,11 +1205,8 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
             session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
         }
         let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-        match session.notification("turn/completed", &turn).pop() {
-            Some(EventKind::TurnEnded {
-                outcome: TurnOutcome::Failed(problem),
-                ..
-            }) => problem.message,
+        match read_end(&session.notification("turn/completed", &turn)) {
+            Some(TurnOutcome::Failed(problem)) => problem.message,
             other => panic!("a failed turn, got {other:?}"),
         }
     };
@@ -1561,4 +1504,136 @@ fn open_refuses_a_codex_below_the_floor_with_the_picker_reason() {
     );
     assert!(super::too_old("codex-cli 0.163.0").is_none());
     assert!(super::too_old("codex-cli unknown").is_none());
+}
+
+/// Codex app-server as the conformance suite's provider: it plays app-server's side
+/// of each scenario.
+pub(crate) struct AppServer {
+    peer: Peer,
+    runtime: Arc<dyn HarnessRuntime>,
+    events: EventStream,
+    /// The id of the next request the adapter writes.
+    next_request: u32,
+}
+
+pub(crate) async fn provider() -> Box<dyn Provider> {
+    let (peer, runtime, events) = open().await;
+    Box::new(AppServer {
+        peer,
+        runtime,
+        events,
+        next_request: 3,
+    })
+}
+
+impl AppServer {
+    fn request(&mut self) -> u32 {
+        self.next_request += 1;
+        self.next_request - 1
+    }
+
+    /// The `turn/start` request the adapter writes for `id`, as a transcript line.
+    fn started(&mut self, id: &str) -> (u32, String) {
+        let request = self.request();
+        let line = format!(
+            r#"{{"client":{{"id":{request},"method":"turn/start","params":{{"threadId":"thr_1","clientUserMessageId":"{id}","input":[{{"type":"text","text":"hello","text_elements":[]}}]}}}}}}"#
+        );
+        (request, line)
+    }
+}
+
+#[async_trait]
+impl Provider for AppServer {
+    fn new_turn(&self) -> NewTurn {
+        NewTurn::Acknowledged
+    }
+
+    fn loss(&self) -> (Option<i32>, &'static str) {
+        (Some(1), "fatal: connection reset")
+    }
+
+    fn runtime(&self) -> Arc<dyn HarnessRuntime> {
+        Arc::clone(&self.runtime)
+    }
+
+    fn events(&mut self) -> &mut EventStream {
+        &mut self.events
+    }
+
+    async fn start_turn(&mut self, id: &str) -> DispatchOutcome {
+        let (request, client) = self.started(id);
+        let turn = r#"{"id":"turn_1","status":"inProgress","items":[],"error":null}"#;
+        self.peer.load(&format!(
+            r#"{client}
+{{"server":{{"method":"turn/started","params":{{"threadId":"thr_1","turn":{turn}}}}}}}
+{{"server":{{"id":{request},"result":{{"turn":{turn}}}}}}}
+"#
+        ));
+        submit(&mut self.peer, &self.runtime, start_turn(id, "hello")).await
+    }
+
+    async fn show_processing(&mut self, _id: &str) -> NativeTurnId {
+        unreachable!("Codex acknowledges a new turn")
+    }
+
+    async fn submit_unanswered(&mut self, id: &str) -> DispatchOutcome {
+        let (_, client) = self.started(id);
+        self.peer.load(&client);
+        submit(&mut self.peer, &self.runtime, start_turn(id, "hello")).await
+    }
+
+    async fn refuse_late(&mut self, _id: &str) {
+        // The refusal answers the request that carried the input: the last one.
+        let request = self.next_request - 1;
+        self.peer.load(&format!(
+            r#"{{"server":{{"id":{request},"error":{{"code":-32600,"message":"server is shutting down","data":{{"reason":"serverShuttingDown"}}}}}}}}"#
+        ));
+        self.peer.play().await;
+    }
+
+    async fn submit_and_lose_process(&mut self, id: &str) -> DispatchOutcome {
+        let (_, client) = self.started(id);
+        self.peer.load(&client);
+        let (outcome, ()) = tokio::join!(self.runtime.submit(start_turn(id, "hello")), async {
+            self.peer.play().await;
+            let stderr = b"warning: noisy\nfatal: connection reset\n";
+            self.peer.stderr.write_all(stderr).await.expect("stderr");
+            sleep(Duration::from_millis(1)).await;
+            self.peer.exit(1);
+        });
+        outcome
+    }
+
+    async fn request_approval(&mut self) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_2","startedAtMs":2,"command":"ls","cwd":"/work/chat-1","reason":"Needs approval"}}}"#,
+        );
+        self.peer.play().await;
+        drain(&mut self.events)
+            .await
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => Some(request.request),
+                _ => None,
+            })
+            .expect("app-server asked for approval")
+    }
+
+    async fn respond(&mut self, response: InteractionResponse) -> RespondOutcome {
+        let (outcome, frame) = tokio::join!(
+            self.runtime.respond(response),
+            timeout(Duration::from_millis(100), self.peer.written())
+        );
+        if outcome == RespondOutcome::Sent {
+            let expected = json!({"id": 0, "result": {"decision": "accept"}});
+            assert_eq!(frame.expect("the answer was written"), expected);
+        } else {
+            assert!(frame.is_err(), "a refused answer wrote {frame:?}");
+        }
+        outcome
+    }
+
+    async fn assert_nothing_else_written(&mut self) {
+        self.peer.assert_nothing_written().await;
+    }
 }

@@ -1,7 +1,8 @@
 //! The Automation runner: the loop that makes Automations happen. Each tick matches
 //! new Workspace events into Queued runs and starts queued runs up to the limit; a
-//! started run executes its steps one at a time, handing each outcome to the core's
-//! run state machine, which says what comes next.
+//! started run is executed by asking the core what to do next and reporting how it
+//! went. The core runs the steps that are its own (Change ticket, If) and every
+//! ending; this runs only what needs a process: an agent's turn and a notification.
 //!
 //! The core owns every rule and record; the Chat host runs agents. This crate only
 //! connects them, and depends on nothing else, so it runs without the desktop.
@@ -9,17 +10,16 @@
 mod first_message;
 
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_chat_host::{ChatHost, StopCause, TurnEnd, Unattended, WorkspaceOpener};
+use ticketd_chat_host::{ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
-    AutomationAgent, AutomationNotification, AutomationRun, ChatLink, ChatLinkKind, Error, NewChat,
-    RunAction, StepAction, StepOutcome,
+    AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
+    RunAction, StepOutcome,
 };
 
-pub use first_message::first_message;
+use first_message::first_message;
 
 /// Why runs left Running by an earlier process ended.
 const RESTARTED: &str = "ticketd closed while this run was going.";
@@ -27,12 +27,22 @@ const RESTARTED: &str = "ticketd closed while this run was going.";
 /// backup brought it back, or its executor could not record how it ended.
 const ABANDONED: &str = "This run was still marked as going, but nothing was running it.";
 /// Why a run ended when ticketd closed its agent's harness (#387 M17).
-fn agent_stopped(cause: StopCause) -> &'static str {
-    match cause {
-        StopCause::Quit => "ticketd quit while this run was going.",
-        StopCause::TurnedOff => "Chat was turned off while this run was going.",
-        StopCause::Restore => "A backup was restored while this run was going.",
-        StopCause::Unknown => "ticketd stopped this run's agent before it finished.",
+fn agent_stopped(reason: Option<StopReason>) -> &'static str {
+    match reason {
+        Some(StopReason::Quit) => "ticketd quit while this run was going.",
+        Some(StopReason::TurnedOff) => "Chat was turned off while this run was going.",
+        Some(StopReason::Restore) => "A backup was restored while this run was going.",
+        // Reasons that end a run's agent by other means, which end the run themselves or
+        // are not known: the general words.
+        Some(
+            StopReason::TakenOver
+            | StopReason::TimeLimit
+            | StopReason::RunEnded
+            | StopReason::Trashed
+            | StopReason::ExplicitResume
+            | StopReason::StorageFailed,
+        )
+        | None => "ticketd stopped this run's agent before it finished.",
     }
 }
 
@@ -43,8 +53,18 @@ enum Ran {
     TakenOver,
     /// ticketd closed the agent's harness, or would not start it, so the run
     /// cannot go on.
-    AgentStopped(StopCause),
+    AgentStopped(Option<StopReason>),
+    /// Storage failed starting or following the agent, so what happened to it is
+    /// unknown. Not the step's failure: no failure path follows it. The words say why.
+    StorageFailed(String),
 }
+
+/// The Chat host, while there is one to run agents on. The host answers why not
+/// while nothing may run: Chat is off (`HostError::TurnedOff`), a backup is being
+/// restored (`HostError::Restoring`), or it could not start. A run whose agent cannot
+/// start for that reason ends saying so. Asked each time it is needed, so the runner
+/// follows Chat being switched off and on.
+pub type HostSource = Arc<dyn Fn() -> Result<ChatHost, HostError> + Send + Sync>;
 
 /// Shows a desktop notification, or says why it could not. The host supplies it: the
 /// runner knows what to say, not how a desktop shows it.
@@ -57,7 +77,7 @@ pub struct Runner {
 
 struct Inner {
     open_workspace: WorkspaceOpener,
-    host: ChatHost,
+    host: HostSource,
     notifier: Notifier,
     /// The runs this runner is executing. A run that is Running in the Workspace
     /// and not here has nothing behind it.
@@ -78,7 +98,7 @@ impl Runner {
     /// end as Needs attention before anything new starts. Nothing retries by itself.
     pub fn new(
         open_workspace: WorkspaceOpener,
-        host: ChatHost,
+        host: HostSource,
         notifier: Notifier,
     ) -> Result<Self, Error> {
         open_workspace()?.end_running_automation_runs(&[], RESTARTED)?;
@@ -109,10 +129,27 @@ impl Runner {
     /// Every part is tried, so one that fails does not hold up the others; the
     /// first failure is returned for the host to report.
     pub fn tick(&self) -> Result<(), Error> {
+        // Chat off or a restore under way: nothing is matched, and each cursor holds.
+        if (self.inner.host)().is_err() {
+            return Ok(());
+        }
         let recovered = self.recover();
+        let deleted = self.end_deleted();
         let queued = self.queue();
         let started = self.start_queued();
-        recovered.and(queued).and(started)
+        recovered.and(deleted).and(queued).and(started)
+    }
+
+    /// Ends the runs of Automations deleted on another desktop and brought here by
+    /// Workspace sync, as deleting one here does: its Queued runs never start, and
+    /// the agents of its Running runs are closed.
+    fn end_deleted(&self) -> Result<(), Error> {
+        let chats = (self.inner.open_workspace)()?.end_runs_of_deleted_automations()?;
+        if !chats.is_empty() {
+            let runner = self.clone();
+            tokio::spawn(async move { runner.interrupt(&chats).await });
+        }
+        Ok(())
     }
 
     /// Ends every Running run this runner is not executing as Needs attention.
@@ -135,8 +172,9 @@ impl Runner {
     /// Starts queued runs up to the limit, and none while Chat is not served (off,
     /// quitting, restoring): they wait until it is again (#387 M3).
     fn start_queued(&self) -> Result<(), Error> {
-        if self.inner.host.serving().is_err() {
-            return Ok(());
+        match (self.inner.host)() {
+            Ok(host) if host.serving().is_ok() => {}
+            _ => return Ok(()),
         }
         let started = {
             let mut going = self.going();
@@ -180,9 +218,10 @@ impl Runner {
         }
     }
 
-    /// Executes a started run to its end: the core says which step is next, this
-    /// runs it and reports how it ended. The error is why the run cannot go on, in
-    /// words for the person.
+    /// Executes a started run to its end: the core says what to do next, this does
+    /// it and reports how it went. The error is why the run cannot go on, in words
+    /// for the person: the core could not keep the run's record, which is not any
+    /// step's failure, so no failure path follows it.
     async fn execute(&self, run: &AutomationRun) -> Result<(), String> {
         let lost = |error: Error| format!("ticketd could not keep this run's record. {error}");
         let mut outcome = None;
@@ -190,124 +229,56 @@ impl Runner {
             let action = (self.inner.open_workspace)()
                 .and_then(|mut workspace| workspace.advance_automation_run(&run.id, outcome))
                 .map_err(lost)?;
-            let step_id = match action {
-                RunAction::RunStep { step_id } => step_id,
-                RunAction::End(_) => return Ok(()),
-            };
-            outcome = Some(match self.run_step(run, &step_id).await {
-                Ok(Ran::Step(outcome)) => outcome,
-                Ok(Ran::TakenOver) => return Ok(()),
-                Ok(Ran::AgentStopped(cause)) => return Err(agent_stopped(cause).to_owned()),
-                // A step the core refused has failed; the reason is the core's.
-                Err(error) => StepOutcome::Failed {
-                    reason: error.to_string(),
+            outcome = Some(match action {
+                RunAction::RunAgent(start) => match self.run_agent(&run.id, &start).await {
+                    Ran::Step(outcome) => outcome,
+                    Ran::TakenOver => return Ok(()),
+                    Ran::AgentStopped(reason) => return Err(agent_stopped(reason).to_owned()),
+                    Ran::StorageFailed(why) => return Err(why),
                 },
+                RunAction::Notify { notification, .. } => self.notify(notification),
+                // Ended, here or elsewhere (the person stopped it or took it over):
+                // nothing more is left to do for it.
+                RunAction::End(_) | RunAction::Ended => return Ok(()),
             });
         }
     }
 
-    async fn run_step(&self, run: &AutomationRun, step_id: &str) -> Result<Ran, Error> {
-        let failed = |reason: &str| {
-            Ok(Ran::Step(StepOutcome::Failed {
-                reason: reason.to_owned(),
-            }))
-        };
-        let Some(step) = run.step(step_id) else {
-            return failed("This step is no longer part of the run.");
-        };
-        match &step.action {
-            StepAction::RunAgent {
-                agent_id: Some(agent_id),
-                execution_folder: Some(folder),
-                ..
-            } => self.run_agent(run, step_id, agent_id, folder).await,
-            StepAction::RunAgent { .. } => failed("This step has no agent or no folder."),
-            // A change the core refuses is the step's failure, in the core's words.
-            StepAction::ChangeTicket { .. } => (self.inner.open_workspace)()?
-                .apply_automation_change(&run.id, step_id)
-                .map(|()| Ran::Step(StepOutcome::Completed)),
-            StepAction::Notify { .. } => {
-                let notification =
-                    (self.inner.open_workspace)()?.automation_notification(&run.id, step_id)?;
-                match (self.inner.notifier)(notification) {
-                    Ok(()) => Ok(Ran::Step(StepOutcome::Completed)),
-                    Err(reason) => {
-                        failed(&format!("The notification could not be shown. {reason}"))
-                    }
-                }
-            }
-            // The core reads the ticket now, so the answer follows what earlier steps did.
-            StepAction::If { .. } => (self.inner.open_workspace)()?
-                .automation_if_passes(&run.id, step_id)
-                .map(|yes| Ran::Step(StepOutcome::Branched { yes })),
+    fn notify(&self, notification: AutomationNotification) -> StepOutcome {
+        match (self.inner.notifier)(notification) {
+            Ok(()) => StepOutcome::Completed,
+            Err(reason) => StepOutcome::Failed {
+                reason: format!("The notification could not be shown. {reason}"),
+            },
         }
     }
 
-    /// Runs the step's agent as a Chat in the step's folder: linked to the ticket,
-    /// owned by the run, with no approval prompts and only the agent's tools.
-    async fn run_agent(
-        &self,
-        run: &AutomationRun,
-        step_id: &str,
-        agent_id: &str,
-        folder: &str,
-    ) -> Result<Ran, Error> {
-        let mut workspace = (self.inner.open_workspace)()?;
-        let agent = match workspace.automation_agent(agent_id) {
-            Ok(agent) => agent,
-            Err(Error::AutomationAgentNotFound(_)) => {
-                return Ok(Ran::Step(StepOutcome::Failed {
-                    reason: "The agent this step runs was deleted.".to_owned(),
-                }));
-            }
-            Err(error) => return Err(error),
-        };
-        let name = &run.definition.name;
-        let (title, links) = match &run.ticket {
-            Some(ticket) => (
-                format!("{name}: {} {}", ticket.reference, ticket.title),
-                vec![ChatLink {
-                    kind: ChatLinkKind::Ticket,
-                    id: ticket.id.clone(),
-                }],
-            ),
-            None => (name.clone(), Vec::new()),
-        };
-        let chat = workspace.create_automation_run_chat(
-            &run.id,
-            step_id,
-            NewChat {
-                title: Some(title),
-                harness: agent.settings.harness.as_str().to_owned(),
-                execution_folder: folder.to_owned(),
-                folder_managed: false,
-                links,
-            },
-        )?;
-        drop(workspace);
-        // Checked here, not left to the harness, which words a missing folder as
-        // anything from a missing folder to a wrong binary (#387 3C1).
-        if let Some(reason) = unusable_folder(folder) {
-            return Ok(Ran::Step(StepOutcome::Failed { reason }));
-        }
+    /// Runs the step's agent in its Chat, which the core made: with no approval
+    /// prompts and only the agent's tools.
+    async fn run_agent(&self, run_id: &str, start: &AgentStart) -> Ran {
+        let agent = &start.agent;
         let settings = &agent.settings;
         let unattended = Unattended {
-            run_id: run.id.clone(),
+            run_id: run_id.to_owned(),
             model: settings.model.clone(),
             tools: settings.tools.clone(),
             turn_limit: settings.turn_limit,
         };
         let time_limit = Duration::from_secs(u64::from(settings.time_limit_minutes) * 60);
-        let message = first_message(&settings.instructions, run);
-        let ended = self
-            .inner
-            .host
-            .run_unattended(&chat.id, &message, unattended, time_limit)
+        let message = first_message(&settings.instructions, &start.started_by);
+        // Chat went off, or a restore began, between the pass that started the run and
+        // its agent: the run says which.
+        let host = match (self.inner.host)() {
+            Ok(host) => host,
+            Err(why) => return Ran::AgentStopped(StopReason::of(&why)),
+        };
+        let ended = host
+            .run_unattended(&start.chat_id, &message, unattended, time_limit)
             .await;
-        Ok(match ended {
+        match ended {
             Ok(TurnEnd::Finished) => Ran::Step(StepOutcome::Completed),
             Ok(TurnEnd::TakenOver) => Ran::TakenOver,
-            Ok(TurnEnd::Stopped(cause)) => Ran::AgentStopped(cause),
+            Ok(TurnEnd::Stopped(reason)) => Ran::AgentStopped(reason),
             Ok(
                 end @ (TurnEnd::TurnLimitReached
                 | TurnEnd::TimeLimitReached
@@ -316,12 +287,20 @@ impl Runner {
                 | TurnEnd::Crashed { .. }
                 | TurnEnd::Failed { .. }),
             ) => Ran::Step(StepOutcome::Failed {
-                reason: failure_reason(&end, &agent),
+                reason: failure_reason(&end, agent),
             }),
             // Chat went off, ticketd quit or a restore began between the pass
             // that started the run and its agent (#387 M3).
-            Err(error) => match StopCause::of(&error) {
-                Some(cause) => Ran::AgentStopped(cause),
+            Err(error) => match StopReason::of(&error) {
+                Some(reason) => Ran::AgentStopped(Some(reason)),
+                // The Workspace could not be read or written: the run's record is in
+                // doubt, not the agent's work, so the step's failure path must not run.
+                None if matches!(error, HostError::StorageFailed(_)) => {
+                    Ran::StorageFailed(format!(
+                        "ticketd could not keep this run's record. {}",
+                        sentence(&error.to_string())
+                    ))
+                }
                 None => Ran::Step(StepOutcome::Failed {
                     reason: format!(
                         "The agent could not be started. {}",
@@ -329,47 +308,56 @@ impl Runner {
                     ),
                 }),
             },
-        })
+        }
     }
 }
 
-/// "Stop it and turn off": switches an Automation off on this device, ends its
-/// active runs as Needs attention and interrupts the agents they were running. The
-/// core refuses whatever those turns report afterwards, so nothing waits for them.
-pub async fn stop_and_turn_off(
-    open_workspace: &WorkspaceOpener,
-    host: &ChatHost,
-    automation_id: &str,
-) -> Result<(), Error> {
-    let chats = open_workspace()?.stop_and_turn_off_automation(automation_id)?;
-    for chat_id in chats {
-        // ponytail: an interrupt that fails leaves the agent to its turn and time
-        // limits; the run has ended either way.
-        let _ = host.stop(&chat_id).await;
+impl Runner {
+    /// The person's Stop of a Queued or Running run: it ends as Needs attention, and
+    /// the agent it had working is closed. The core ends the run and says which agents
+    /// were working in one transaction, so an agent started meanwhile is closed too;
+    /// the outcome its turn reports afterwards is refused, so nothing waits for it.
+    /// With Chat off there is no agent to close, and only the record changes.
+    pub async fn stop_run(&self, run_id: &str) -> Result<AutomationRun, Error> {
+        let (run, chats) = (self.inner.open_workspace)()?.stop_automation_run(run_id)?;
+        self.interrupt(&chats).await;
+        Ok(run)
     }
-    Ok(())
-}
 
-/// Why the step's folder cannot be an agent's working directory, if it cannot.
-/// Control characters in the path are shown as spaces.
-fn unusable_folder(folder: &str) -> Option<String> {
-    let shown: String = folder
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    let path = Path::new(folder);
-    if !path.is_absolute() || folder.chars().any(char::is_control) {
-        return Some(format!(
-            "The step's folder isn't a full path to a folder: {}.",
-            shown.trim()
-        ));
+    /// Deletes an Automation: its Queued and Running runs end as Needs attention,
+    /// already answered, and the agents they had working are closed.
+    pub async fn delete_automation(&self, automation_id: &str) -> Result<(), Error> {
+        let chats = (self.inner.open_workspace)()?.delete_automation(automation_id)?;
+        self.interrupt(&chats).await;
+        Ok(())
     }
-    match std::fs::metadata(path) {
-        Ok(found) if found.is_dir() => None,
-        Ok(_) => Some(format!(
-            "The step's folder is a file, not a folder: {shown}."
-        )),
-        Err(_) => Some(format!("The step's folder doesn't exist: {shown}.")),
+
+    /// "Stop it and turn off": switches an Automation off on this device, ends its
+    /// active runs as Needs attention and closes the agents they had working. Returns
+    /// the Automation as it is then.
+    pub async fn stop_and_turn_off(&self, automation_id: &str) -> Result<Automation, Error> {
+        let chats = (self.inner.open_workspace)()?.stop_and_turn_off_automation(automation_id)?;
+        self.interrupt(&chats).await;
+        (self.inner.open_workspace)()?.automation(automation_id)
+    }
+
+    /// Closes the agents working in `chats`, whose runs have just ended. A harness
+    /// that cannot be confirmed closed is reported and left to its turn and time
+    /// limits; the run has ended either way.
+    async fn interrupt(&self, chats: &[String]) {
+        if chats.is_empty() {
+            return;
+        }
+        // Chat off: turning it off already stopped every agent.
+        let Ok(host) = (self.inner.host)() else {
+            return;
+        };
+        for unconfirmed in host.end_run_agents(chats).await {
+            eprintln!(
+                "ticketd: the agent in Chat {} may still be running: {}",
+                unconfirmed.chat_id, unconfirmed.reason
+            );
+        }
     }
 }
 

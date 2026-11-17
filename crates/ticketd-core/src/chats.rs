@@ -65,8 +65,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS chat_notices_chat ON chat_notices(chat_id, position);
          CREATE TABLE IF NOT EXISTS chat_record_writes (chat_id TEXT NOT NULL, activity_id TEXT, history_number INTEGER);
          CREATE INDEX IF NOT EXISTS chat_record_writes_activity ON chat_record_writes(activity_id);
-         CREATE INDEX IF NOT EXISTS chat_record_writes_history ON chat_record_writes(history_number);
-         PRAGMA user_version = 66;"
+         CREATE INDEX IF NOT EXISTS chat_record_writes_history ON chat_record_writes(history_number);"
     ))?;
     Ok(())
 }
@@ -88,7 +87,6 @@ pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
              UPDATE chats SET seen_through = COALESCE((SELECT MAX(position) FROM chat_turns WHERE chat_id = chats.id), 0);",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 67;")?;
     Ok(())
 }
 
@@ -104,7 +102,6 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     if !has {
         connection.execute_batch("ALTER TABLE chat_tools ADD COLUMN started_at TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 68;")?;
     Ok(())
 }
 
@@ -130,7 +127,6 @@ pub(crate) fn migrate_request_times(connection: &Connection) -> Result<(), Error
             "ALTER TABLE chat_notices ADD COLUMN from_harness INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 72;")?;
     Ok(())
 }
 
@@ -148,7 +144,6 @@ pub(crate) fn migrate_marked_unread(connection: &Connection) -> Result<(), Error
             "ALTER TABLE chats ADD COLUMN marked_unread INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 71;")?;
     Ok(())
 }
 
@@ -167,7 +162,6 @@ pub(crate) fn migrate_read_through(connection: &Connection) -> Result<(), Error>
              ALTER TABLE chats ADD COLUMN read_through_position INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 70;")?;
     Ok(())
 }
 
@@ -182,7 +176,22 @@ pub(crate) fn migrate_interaction_tool(connection: &Connection) -> Result<(), Er
     if !has {
         connection.execute_batch("ALTER TABLE chat_interactions ADD COLUMN tool_id TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 69;")?;
+    Ok(())
+}
+
+/// Schema 83: how each turn ended, as the host names it, so nothing has to read it back
+/// out of the wording kept in `detail`. Turns recorded before this have none and the
+/// host reads their state, detail and problem as it always did.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_turns') WHERE name = 'ending')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch("ALTER TABLE chat_turns ADD COLUMN ending TEXT;")?;
+    }
     Ok(())
 }
 
@@ -470,6 +479,11 @@ pub struct ChatTurn {
     /// When the provider said the limit behind the failure resets, in seconds since
     /// the Unix epoch. `None` when it did not say.
     pub problem_resets_at: Option<i64>,
+    /// How the turn ended, as the host names it (format 83). The core keeps the key
+    /// and decides nothing from it; `None` on a turn recorded before it existed or
+    /// still active.
+    #[serde(default)]
+    pub ending: Option<String>,
     pub started_at: String,
     pub ended_at: Option<String>,
 }
@@ -628,6 +642,9 @@ pub enum ChatObservation {
         /// since the Unix epoch. Kept only within `0..=CHAT_RESET_TIME_MAX`.
         #[serde(default)]
         problem_resets_at: Option<i64>,
+        /// How the turn ended, as the host names it; kept as given.
+        #[serde(default)]
+        ending: Option<String>,
     },
     /// A checkpoint of an assistant message: `text` replaces what was stored.
     AssistantText {
@@ -790,10 +807,11 @@ fn turn_from_row(row: &Row<'_>) -> rusqlite::Result<ChatTurn> {
         ended_at: row.get(6)?,
         problem: row.get(7)?,
         problem_resets_at: row.get(8)?,
+        ending: row.get(9)?,
     })
 }
 
-const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at FROM chat_turns";
+const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending FROM chat_turns";
 
 fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
@@ -1039,6 +1057,37 @@ fn add_link(connection: &Connection, chat_id: &str, link: &ChatLink) -> Result<(
 
 /// Runs `create` once per command ID and returns the ID of the record it created.
 /// A command ID deduplicates this ticketd write only; it promises nothing about the harness.
+/// Creates a Chat in the caller's transaction. Repeating `command_id` with the same
+/// content returns the first Chat.
+pub(crate) fn create_chat_in(
+    connection: &Connection,
+    command_id: Option<&str>,
+    chat: NewChat,
+) -> Result<Chat, Error> {
+    if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
+        return Err(invalid("a Chat needs a harness and an execution folder"));
+    }
+    let request = json!({"operation": "create_chat", "chat": &chat});
+    let id = once(connection, command_id, request, || {
+        let id = Uuid::new_v4().to_string();
+        let title = chat
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        connection.execute(
+            "INSERT INTO chats (id, title, harness, execution_folder, folder_managed) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, title, chat.harness, chat.execution_folder, chat.folder_managed],
+        )?;
+        for link in &chat.links {
+            add_link(connection, &id, link)?;
+        }
+        log(connection, &id, "chat", &id)?;
+        Ok(id)
+    })?;
+    read_chat(connection, &id)
+}
+
 fn once(
     connection: &Connection,
     command_id: Option<&str>,
@@ -1255,6 +1304,7 @@ fn observe(
             detail,
             problem,
             problem_resets_at,
+            ending,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
             let resets_at = problem_resets_at.filter(|at| (0..=CHAT_RESET_TIME_MAX).contains(at));
@@ -1277,8 +1327,8 @@ fn observe(
                 )));
             }
             connection.execute(
-                &format!("UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4, problem_resets_at = ?5, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
-                params![turn_id, name(state)?, detail, problem, resets_at],
+                &format!("UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4, problem_resets_at = ?5, ending = ?6, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
+                params![turn_id, name(state)?, detail, problem, resets_at, ending],
             )?;
             log(connection, chat_id, "turn", &turn_id)?;
             expire_interactions(connection, chat_id, Some(&turn_id))
@@ -1452,7 +1502,12 @@ fn decide(
 
 /// Records that nothing more will be observed from this Chat's runtime: the active turn's
 /// outcome is unknown, possible submissions are uncertain, and open requests expire.
-fn lose_contact(connection: &Connection, chat_id: &str, detail: &str) -> Result<(), Error> {
+fn lose_contact(
+    connection: &Connection,
+    chat_id: &str,
+    detail: &str,
+    ending: &str,
+) -> Result<(), Error> {
     let ids = |sql: &str| -> Result<Vec<String>, Error> {
         let mut statement = connection.prepare(sql)?;
         let ids = statement
@@ -1462,8 +1517,8 @@ fn lose_contact(connection: &Connection, chat_id: &str, detail: &str) -> Result<
     };
     for id in ids("SELECT id FROM chat_turns WHERE chat_id = ?1 AND state = 'active'")? {
         connection.execute(
-            &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ended_at = {NOW} WHERE id = ?1"),
-            params![id, detail],
+            &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = {NOW} WHERE id = ?1"),
+            params![id, detail, ending],
         )?;
         log(connection, chat_id, "turn", &id)?;
     }
@@ -1542,38 +1597,7 @@ impl Workspace {
 
     /// Create a Chat. Repeating `command_id` with the same content returns the first Chat.
     pub fn create_chat(&mut self, command_id: Option<&str>, chat: NewChat) -> Result<Chat, Error> {
-        self.create_chat_with(command_id, chat, |_, _| Ok(()))
-    }
-
-    /// Creates a Chat and, in the same transaction, runs `also` with its id: when
-    /// `also` refuses, no Chat is left behind.
-    pub(crate) fn create_chat_with(
-        &mut self,
-        command_id: Option<&str>,
-        chat: NewChat,
-        also: impl FnOnce(&Connection, &str) -> Result<(), Error>,
-    ) -> Result<Chat, Error> {
-        if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
-            return Err(invalid("a Chat needs a harness and an execution folder"));
-        }
-        self.chat_write(|connection| {
-            let request = json!({"operation": "create_chat", "chat": &chat});
-            let id = once(connection, command_id, request, || {
-                let id = Uuid::new_v4().to_string();
-                let title = chat.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
-                connection.execute(
-                    "INSERT INTO chats (id, title, harness, execution_folder, folder_managed) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![id, title, chat.harness, chat.execution_folder, chat.folder_managed],
-                )?;
-                for link in &chat.links {
-                    add_link(connection, &id, link)?;
-                }
-                log(connection, &id, "chat", &id)?;
-                Ok(id)
-            })?;
-            also(connection, &id)?;
-            read_chat(connection, &id)
-        })
+        self.chat_write(|connection| create_chat_in(connection, command_id, chat))
     }
 
     pub fn chat(&self, id: &str) -> Result<Chat, Error> {
@@ -2114,11 +2138,13 @@ impl Workspace {
     ///
     /// The host calls this when a harness process is lost and once at startup, before it
     /// runs anything, because stored state from a previous process or a restored backup
-    /// has no runtime behind it.
+    /// has no runtime behind it. `ending` is how the host names what happened to the
+    /// active turn; it is stored with the turn as given.
     pub fn mark_chat_contact_lost(
         &mut self,
         chat_id: Option<&str>,
         detail: &str,
+        ending: &str,
     ) -> Result<Vec<String>, Error> {
         self.chat_write(|connection| {
             if let Some(id) = chat_id {
@@ -2136,7 +2162,7 @@ impl Workspace {
                 .query_map([chat_id], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             for id in &affected {
-                lose_contact(connection, id, detail)?;
+                lose_contact(connection, id, detail, ending)?;
             }
             Ok(affected)
         })

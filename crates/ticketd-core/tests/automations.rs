@@ -832,25 +832,41 @@ fn an_agent_used_by_a_step_cannot_be_deleted_and_names_the_automation() {
 fn a_workspace_in_the_previous_format_gains_automation_storage_quietly() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("automations.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Kept").unwrap();
-    let agent = workspace
-        .create_automation_agent(AutomationAgentSettings::default())
-        .unwrap();
-    let token = workspace.change_token().unwrap();
-    let events = workspace.workspace_event_head().unwrap();
-    drop(workspace);
+    ticketd_core::create_workspace_at_format_version(&path, 74).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "DROP TABLE automation_device_state; DROP TABLE automations; PRAGMA user_version = 74;",
+    db.execute(
+        "INSERT INTO tickets (id, title, status, reference) VALUES ('t-1', 'Kept', 'Todo', 'T-KQ1')",
+        [],
     )
     .unwrap();
+    db.execute(
+        "INSERT INTO automation_agents (id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes) \
+         VALUES ('agent-1', 'Docs', 'claude-code', NULL, 'Keep going.', 1, 0, 0, '[]', 0, 40, 20)",
+        [],
+    )
+    .unwrap();
+    let token: i64 = db
+        .query_row(
+            "SELECT token FROM workspace_changes WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let events: i64 = db
+        .query_row(
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'workspace_events'), 0)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     drop(db);
 
     let mut workspace = Workspace::open(&path).unwrap();
 
-    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
-    assert_eq!(workspace.automation_agents().unwrap(), vec![agent]);
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap().title, "Kept");
+    let agents = workspace.automation_agents().unwrap();
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0].settings.name, "Docs");
     // Migrating changes nothing a view shows and is not a Workspace event.
     assert_eq!(workspace.change_token().unwrap(), token);
     assert_eq!(workspace.workspace_event_head().unwrap(), events);

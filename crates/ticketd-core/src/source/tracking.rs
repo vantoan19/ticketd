@@ -38,7 +38,7 @@ use super::{
     conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
 };
-use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};
+use crate::{Error, Status, Ticket, Workspace, duplicates, history};
 
 /// Who may change a ticket's content now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,8 +297,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             locator TEXT, \
             display TEXT, \
             CHECK ((provider IS NULL) = (external_id IS NULL))); \
-         CREATE INDEX external_duplicate_targets_identity ON external_duplicate_targets(provider, external_id); \
-         PRAGMA user_version = 23;",
+         CREATE INDEX external_duplicate_targets_identity ON external_duplicate_targets(provider, external_id);",
     )?;
     Ok(())
 }
@@ -339,15 +338,6 @@ pub(crate) fn held_sql(id_expr: &str) -> String {
         "EXISTS (SELECT 1 FROM external_ownership ho JOIN source_sync hs ON hs.ticket_id = ho.ticket_id \
          WHERE ho.ticket_id = {id_expr} AND ho.authority = 'external' \
          AND hs.external_state = 'closed' AND hs.closure_reason = 'unknown')"
-    )
-}
-
-/// [`held_sql`] for one ticket.
-pub(crate) fn closure_held(connection: &Connection, id: &str) -> Result<bool, Error> {
-    Ok(
-        connection.query_row(&format!("SELECT {}", held_sql("?1")), [id], |row| {
-            row.get(0)
-        })?,
     )
 }
 
@@ -1142,7 +1132,7 @@ impl Workspace {
         tracked: &[Tracked],
     ) -> Result<RefreshReport, Error> {
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         // Configuration can change while the connector is on the network.
         // Re-read it under the same write lock as the results: old discovery
         // cannot import new tickets or describe the rules saved afterwards.

@@ -9,11 +9,14 @@ mod claude;
 pub mod cli;
 mod codex;
 pub mod conditions;
+#[cfg(test)]
+mod conformance;
 pub mod context;
 mod contract;
 pub mod diffstat;
 mod host;
 mod install;
+mod outcome;
 pub mod records;
 #[cfg(test)]
 mod scripted;
@@ -22,6 +25,7 @@ pub mod step_kind;
 mod subscription;
 mod supervisor;
 pub mod testing;
+mod turn_ending;
 mod unattended;
 mod wire;
 
@@ -32,4 +36,5 @@ pub use host::*;
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };
-pub use unattended::{StopCause, TurnEnd};
+pub use turn_ending::{StopReason, TurnEnding};
+pub use unattended::TurnEnd;

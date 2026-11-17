@@ -14,6 +14,11 @@ fn workspace() -> (tempfile::TempDir, Workspace) {
     (dir, workspace)
 }
 
+/// A folder that exists, as a step's folder must.
+fn folder() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
+
 fn step(id: &str, action: StepAction) -> Step {
     Step {
         id: id.into(),
@@ -26,7 +31,7 @@ fn run_agent(id: &str, agent: &str, on_failure: Option<Vec<Step>>) -> Step {
         id,
         StepAction::RunAgent {
             agent_id: Some(agent.into()),
-            execution_folder: Some("/work/app".into()),
+            execution_folder: Some(folder()),
             on_failure,
         },
     )
@@ -107,8 +112,14 @@ fn started(workspace: &mut Workspace) -> AutomationRun {
     workspace.start_automation_runs(2).unwrap().remove(0)
 }
 
-fn run_step(id: &str) -> RunAction {
-    RunAction::RunStep { step_id: id.into() }
+/// The step an executor is handed to run.
+#[allow(clippy::panic)] // A step that is not handed over fails the test.
+fn handed(action: RunAction) -> String {
+    match action {
+        RunAction::RunAgent(start) => start.step_id,
+        RunAction::Notify { step_id, .. } => step_id,
+        other => panic!("expected a step to run, got {other:?}"),
+    }
 }
 
 fn failed(reason: &str) -> Option<StepOutcome> {
@@ -298,8 +309,8 @@ fn a_run_executes_the_definition_it_was_created_with() {
         automation.definition
     );
     assert_eq!(
-        workspace.advance_automation_run(&run.id, None).unwrap(),
-        run_step("triage")
+        handed(workspace.advance_automation_run(&run.id, None).unwrap()),
+        "triage"
     );
 }
 
@@ -312,18 +323,20 @@ fn a_straight_flow_runs_each_step_in_turn_and_ends_completed() {
     let run = started(&mut workspace);
 
     assert_eq!(
-        workspace.advance_automation_run(&run.id, None).unwrap(),
-        run_step("triage")
+        handed(workspace.advance_automation_run(&run.id, None).unwrap()),
+        "triage"
     );
     let running = workspace.automation_run(&run.id).unwrap();
     assert_eq!(running.steps.len(), 1);
     assert_eq!(running.steps[0].status, AutomationStepStatus::Running);
 
     assert_eq!(
-        workspace
-            .advance_automation_run(&run.id, Some(StepOutcome::Completed))
-            .unwrap(),
-        run_step("tell-me")
+        handed(
+            workspace
+                .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+                .unwrap()
+        ),
+        "tell-me"
     );
     assert_eq!(
         workspace
@@ -347,12 +360,14 @@ fn a_straight_flow_runs_each_step_in_turn_and_ends_completed() {
             ("tell-me", AutomationStepStatus::Completed, true)
         ]
     );
-    // An ended run takes no more outcomes.
-    assert!(
+    // An ended run takes no more outcomes, and keeps what it recorded.
+    assert_eq!(
         workspace
             .advance_automation_run(&run.id, Some(StepOutcome::Completed))
-            .is_err()
+            .unwrap(),
+        RunAction::Ended
     );
+    assert_eq!(workspace.automation_run(&run.id).unwrap(), ended);
 }
 
 #[test]
@@ -395,10 +410,12 @@ fn a_failed_step_with_a_failure_path_follows_it_and_the_run_ends_completed() {
     workspace.advance_automation_run(&run.id, None).unwrap();
 
     assert_eq!(
-        workspace
-            .advance_automation_run(&run.id, failed("The agent's process ended."))
-            .unwrap(),
-        run_step("tell-me-it-failed")
+        handed(
+            workspace
+                .advance_automation_run(&run.id, failed("The agent's process ended."))
+                .unwrap()
+        ),
+        "tell-me-it-failed"
     );
     assert_eq!(
         workspace
@@ -415,9 +432,9 @@ fn a_failed_step_with_a_failure_path_follows_it_and_the_run_ends_completed() {
 #[test]
 fn an_if_continues_down_the_path_it_chose_and_nested_paths_end_the_run() {
     let (_dir, mut workspace) = workspace();
-    let checks = || {
+    let has = |tag: &str| {
         vec![Check::Tag {
-            tag: "needs-fix".into(),
+            tag: tag.into(),
             has: true,
         }]
     };
@@ -426,13 +443,13 @@ fn an_if_continues_down_the_path_it_chose_and_nested_paths_end_the_run() {
             step(
                 "outer",
                 StepAction::If {
-                    checks: checks(),
+                    checks: has("outer-tag"),
                     yes: vec![notify("yes")],
                     no: vec![
                         step(
                             "inner",
                             StepAction::If {
-                                checks: checks(),
+                                checks: has("inner-tag"),
                                 yes: vec![notify("inner-yes")],
                                 no: Vec::new(),
                             },
@@ -444,17 +461,35 @@ fn an_if_continues_down_the_path_it_chose_and_nested_paths_end_the_run() {
             notify("after-outer"),
         ]
     });
-    let run = started(&mut workspace);
-    let mut advance = |outcome| workspace.advance_automation_run(&run.id, outcome).unwrap();
-    let branched = |yes| Some(StepOutcome::Branched { yes });
+    let ticket = tagged(&mut workspace, "Fix login");
+    workspace.add_tag(&ticket.reference, "inner-tag").unwrap();
+    workspace.queue_automation_runs().unwrap();
+    let run = workspace.start_automation_runs(2).unwrap().remove(0);
 
-    assert_eq!(advance(None), run_step("outer"));
-    assert_eq!(advance(branched(false)), run_step("inner"));
-    assert_eq!(advance(branched(true)), run_step("inner-yes"));
+    // The core answers both Ifs from the ticket and hands over the step they reach.
+    assert_eq!(
+        handed(workspace.advance_automation_run(&run.id, None).unwrap()),
+        "inner-yes"
+    );
     // Paths never rejoin: the end of the path taken is the end of the run.
     assert_eq!(
-        advance(Some(StepOutcome::Completed)),
+        workspace
+            .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+            .unwrap(),
         RunAction::End(RunEnd::Completed)
+    );
+    let ended = workspace.automation_run(&run.id).unwrap();
+    assert_eq!(
+        ended
+            .steps
+            .iter()
+            .map(|step| (step.step_id.as_str(), step.status))
+            .collect::<Vec<_>>(),
+        [
+            ("outer", AutomationStepStatus::Completed),
+            ("inner", AutomationStepStatus::Completed),
+            ("inner-yes", AutomationStepStatus::Completed)
+        ]
     );
 }
 
@@ -468,10 +503,16 @@ fn stopping_a_running_run_ends_it_needing_attention_without_its_failure_path() {
         ]
     });
     let run = started(&mut workspace);
-    workspace.advance_automation_run(&run.id, None).unwrap();
+    let RunAction::RunAgent(start) = workspace.advance_automation_run(&run.id, None).unwrap()
+    else {
+        panic!("the first step runs an agent");
+    };
 
-    let stopped = workspace.stop_automation_run(&run.id).unwrap();
+    let (stopped, working) = workspace.stop_automation_run(&run.id).unwrap();
 
+    // The Chat of the agent that was working comes back from the same transaction
+    // that ended the run, for the host to interrupt.
+    assert_eq!(working, [start.chat_id]);
     assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
     assert_eq!(stopped.reason.as_deref(), Some("You stopped this run."));
     assert!(stopped.ended_at.is_some());
@@ -490,14 +531,17 @@ fn stopping_a_running_run_ends_it_needing_attention_without_its_failure_path() {
         )]
     );
     // The agent's turn ends a moment later; its outcome no longer moves the run.
-    assert!(
+    assert_eq!(
         workspace
             .advance_automation_run(&run.id, Some(StepOutcome::Completed))
-            .is_err()
+            .unwrap(),
+        RunAction::Ended
     );
     assert_eq!(workspace.automation_run(&run.id).unwrap(), stopped);
-    // A run that has ended cannot be stopped again.
-    assert!(workspace.stop_automation_run(&run.id).is_err());
+    // Stopping it again is not an error: it is returned as it ended, with no agent
+    // left to close.
+    let (again, working) = workspace.stop_automation_run(&run.id).unwrap();
+    assert_eq!((again, working), (stopped, Vec::new()));
 }
 
 #[test]
@@ -508,8 +552,9 @@ fn stopping_a_queued_run_ends_it_before_any_step_runs() {
     workspace.queue_automation_runs().unwrap();
     let queued = runs(&workspace, &automation).remove(0);
 
-    let stopped = workspace.stop_automation_run(&queued.id).unwrap();
+    let (stopped, working) = workspace.stop_automation_run(&queued.id).unwrap();
 
+    assert_eq!(working, [] as [String; 0]);
     assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
     assert_eq!(stopped.steps, []);
     assert_eq!(workspace.start_automation_runs(2).unwrap(), []);
@@ -556,8 +601,8 @@ fn running_again_queues_a_new_run_from_the_first_step_with_the_same_event() {
     let started = workspace.start_automation_runs(2).unwrap();
     assert_eq!(started.len(), 1);
     assert_eq!(
-        workspace.advance_automation_run(&again.id, None).unwrap(),
-        run_step("triage")
+        handed(workspace.advance_automation_run(&again.id, None).unwrap()),
+        "triage"
     );
 }
 
@@ -566,22 +611,23 @@ fn a_chat_owned_by_a_run_stays_out_of_the_chat_list() {
     let (_dir, mut workspace) = workspace();
     triage(&mut workspace);
     let run = started(&mut workspace);
-    workspace.advance_automation_run(&run.id, None).unwrap();
-    let new_chat = || NewChat {
-        title: Some("Triage".into()),
-        harness: "codex".into(),
-        execution_folder: "/work/app".into(),
-        folder_managed: false,
-        links: vec![ChatLink {
-            kind: ChatLinkKind::Ticket,
-            id: run.ticket.as_ref().unwrap().id.clone(),
-        }],
-    };
-    let mine = workspace.create_chat(None, new_chat()).unwrap();
-
-    let owned = workspace
-        .create_automation_run_chat(&run.id, "triage", new_chat())
+    let mine = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: Some("Triage".into()),
+                harness: "codex".into(),
+                execution_folder: folder(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
         .unwrap();
+
+    let RunAction::RunAgent(start) = workspace.advance_automation_run(&run.id, None).unwrap()
+    else {
+        panic!("the run begins with its agent");
+    };
 
     let listed = workspace.list_chats(ChatListFilter::Active).unwrap();
     assert_eq!(
@@ -592,10 +638,25 @@ fn a_chat_owned_by_a_run_stays_out_of_the_chat_list() {
         workspace.automation_run(&run.id).unwrap().steps[0]
             .chat_id
             .as_deref(),
-        Some(owned.id.as_str())
+        Some(start.chat_id.as_str())
     );
-    // The run reaches its Chat directly.
-    assert_eq!(workspace.chat(&owned.id).unwrap().id, owned.id);
+    // The run reaches its Chat directly. It works in the step's folder, with the
+    // agent's harness, linked to the ticket and named for the Automation and ticket.
+    let chat = workspace.chat(&start.chat_id).unwrap();
+    let ticket = run.ticket.as_ref().unwrap();
+    assert_eq!(chat.execution_folder, folder());
+    assert_eq!(chat.harness, start.agent.settings.harness.as_str());
+    assert_eq!(
+        chat.title.as_deref(),
+        Some(format!("Triage: {} {}", ticket.reference, ticket.title).as_str())
+    );
+    assert_eq!(
+        chat.links,
+        [ChatLink {
+            kind: ChatLinkKind::Ticket,
+            id: ticket.id.clone()
+        }]
+    );
 }
 
 #[test]
@@ -661,24 +722,19 @@ fn a_run_its_executor_cannot_go_on_with_ends_needing_attention_with_the_reason()
 }
 
 #[test]
-fn a_run_stopped_before_its_agents_chat_is_created_leaves_no_chat_behind() {
+fn a_run_stopped_before_its_agent_starts_leaves_no_chat_behind() {
     let (_dir, mut workspace) = workspace();
     triage(&mut workspace);
     let run = started(&mut workspace);
-    workspace.advance_automation_run(&run.id, None).unwrap();
     workspace.stop_automation_run(&run.id).unwrap();
 
-    assert!(
-        workspace
-            .create_automation_run_chat(&run.id, "triage", chat_for(&run))
-            .is_err()
+    assert_eq!(
+        workspace.advance_automation_run(&run.id, None).unwrap(),
+        RunAction::Ended
     );
 
     assert_eq!(listed_chats(&workspace), [] as [String; 0]);
-    assert_eq!(
-        workspace.automation_run(&run.id).unwrap().steps[0].chat_id,
-        None
-    );
+    assert_eq!(workspace.automation_run(&run.id).unwrap().steps, []);
 }
 
 #[test]
@@ -730,12 +786,13 @@ fn deleting_an_automation_ends_its_active_runs_and_asks_nothing_of_the_person() 
     }
     assert_eq!(needing_you(&workspace), 0);
     assert_eq!(workspace.inbox(10, 0).unwrap(), []);
-    // Nothing is left to start, and the agent's outcome is refused.
+    // Nothing is left to start, and the agent's outcome is not recorded.
     assert_eq!(workspace.start_automation_runs(2).unwrap().len(), 0);
-    assert!(
+    assert_eq!(
         workspace
             .advance_automation_run(&running.id, Some(StepOutcome::Completed))
-            .is_err()
+            .unwrap(),
+        RunAction::Ended
     );
 }
 
@@ -744,22 +801,13 @@ fn the_upkeep_removes_finished_runs_older_than_90_days_with_their_chats() {
     let (_dir, mut workspace) = workspace();
     let automation = triage(&mut workspace);
     let run = started(&mut workspace);
-    workspace.advance_automation_run(&run.id, None).unwrap();
-    let chat = workspace
-        .create_automation_run_chat(
-            &run.id,
-            "triage",
-            NewChat {
-                title: None,
-                harness: "codex".into(),
-                execution_folder: "/work/app".into(),
-                folder_managed: false,
-                links: Vec::new(),
-            },
-        )
-        .unwrap();
+    let RunAction::RunAgent(start) = workspace.advance_automation_run(&run.id, None).unwrap()
+    else {
+        panic!("the run begins with its agent");
+    };
+    let chat = start.chat_id;
     workspace
-        .save_chat_input(None, &chat.id, "Triage this")
+        .save_chat_input(None, &chat, "Triage this")
         .unwrap();
     workspace
         .advance_automation_run(&run.id, Some(StepOutcome::Completed))
@@ -782,7 +830,7 @@ fn the_upkeep_removes_finished_runs_older_than_90_days_with_their_chats() {
         kept.iter().map(|run| &run.id).collect::<Vec<_>>(),
         [&active.id]
     );
-    assert!(workspace.chat(&chat.id).is_err());
+    assert!(workspace.chat(&chat).is_err());
 }
 
 #[test]
@@ -898,32 +946,15 @@ fn every_run_is_listed_across_automations_newest_first_naming_its_automation() {
 
 const LIMIT: &str = "The agent reached its limit of 40 turns before finishing.";
 
-fn chat_for(run: &AutomationRun) -> NewChat {
-    NewChat {
-        title: Some("Triage".into()),
-        harness: "codex".into(),
-        execution_folder: "/work/app".into(),
-        folder_managed: false,
-        links: run
-            .ticket
-            .iter()
-            .map(|ticket| ChatLink {
-                kind: ChatLinkKind::Ticket,
-                id: ticket.id.clone(),
-            })
-            .collect(),
-    }
-}
-
 /// A run on its agent step, with that step's Chat.
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 fn on_agent_step(workspace: &mut Workspace) -> (AutomationRun, String) {
     let run = started(workspace);
-    workspace.advance_automation_run(&run.id, None).unwrap();
-    let chat = workspace
-        .create_automation_run_chat(&run.id, "triage", chat_for(&run))
-        .unwrap();
-    (run, chat.id)
+    let RunAction::RunAgent(start) = workspace.advance_automation_run(&run.id, None).unwrap()
+    else {
+        panic!("the run begins with its agent");
+    };
+    (run, start.chat_id)
 }
 
 /// A run whose agent step failed with no failure path, with that step's Chat.
@@ -1157,11 +1188,12 @@ fn replying_in_the_chat_of_a_running_run_ends_it_taken_over_with_the_rest_not_ru
     assert_eq!(listed_chats(&workspace), [chat]);
     assert_eq!(needing_you(&workspace), 0);
     assert_eq!(workspace.inbox(10, 0).unwrap(), []);
-    // What the agent's turn reports afterwards is refused.
-    assert!(
+    // What the agent's turn reports afterwards is not recorded.
+    assert_eq!(
         workspace
             .advance_automation_run(&run.id, Some(StepOutcome::Completed))
-            .is_err()
+            .unwrap(),
+        RunAction::Ended
     );
     assert_eq!(
         workspace.automation_run(&run.id).unwrap().status,

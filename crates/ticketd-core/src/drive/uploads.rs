@@ -80,7 +80,6 @@ pub(crate) fn migrate_uploads(tx: &Connection) -> Result<(), Error> {
         CREATE TRIGGER IF NOT EXISTS drive_upload_request_namespace BEFORE INSERT ON drive_upload_operations WHEN EXISTS(SELECT 1 FROM request_outcomes WHERE id=new.request_id) BEGIN SELECT RAISE(ABORT, 'request ID already used; choose a new upload operation'); END;
         CREATE TRIGGER IF NOT EXISTS write_drive_request_namespace BEFORE INSERT ON request_outcomes WHEN EXISTS(SELECT 1 FROM drive_upload_operations WHERE request_id=new.id) BEGIN SELECT RAISE(ABORT, 'request ID already used by a Drive upload'); END;")?;
     crate::change_token::migrate(tx)?;
-    tx.pragma_update(None, "user_version", 52)?;
     Ok(())
 }
 pub(crate) fn upload_request_claimed(connection: &Connection, id: &str) -> Result<bool, Error> {
@@ -367,7 +366,7 @@ impl Workspace {
         if operation.remote_file_id.is_none() {
             let id = provider.reserve_file_id()?;
             if !valid_file_id(&id) {
-                return Err(super::invalid_response().into());
+                return Err(super::client::invalid_response().into());
             }
             operation.remote_file_id = Some(id);
             self.save_drive_upload(&operation)?;
@@ -387,7 +386,7 @@ impl Workspace {
             operation
                 .remote_file_id
                 .as_deref()
-                .ok_or_else(super::invalid_response)?,
+                .ok_or_else(super::client::invalid_response)?,
         );
         match resolved {
             Ok(Some(file)) => self.complete_drive_upload(operation, file),
@@ -412,7 +411,7 @@ impl Workspace {
         let id = operation
             .remote_file_id
             .as_deref()
-            .ok_or_else(super::invalid_response)?;
+            .ok_or_else(super::client::invalid_response)?;
         validate_metadata(id, &file.metadata)?;
         if file.metadata.size_bytes != Some(operation.request.size_bytes)
             || file.sha256_checksum.as_deref() != Some(&operation.request.sha256)

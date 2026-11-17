@@ -102,7 +102,7 @@ function problem(inspection: BackupInspection) {
     case "missing_tables":
       return {
         title: "This backup is incomplete",
-        detail: `It is missing tables ticketd needs: ${check.tables.join(", ")}.`,
+        detail: `It is missing: ${check.tables.join(", ")}.`,
       };
     case "current_workspace":
       return {
