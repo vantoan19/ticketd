@@ -24,6 +24,11 @@ import { setPreference, usePreferences } from "@/lib/preferences";
 import { PlanFlow } from "@/features/plans/PlanFlow";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
+import {
+  usePaneMotion,
+  type PaneMode,
+} from "@/features/tickets/use-pane-motion";
+import "@/features/tickets/ticket-pane-motion.css";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
 import { useFiltersMenu } from "@/features/tickets/filters-menu";
@@ -191,7 +196,33 @@ export function TicketWorkspaceView({
   });
   // On the board an open card is a peek over its right side; the columns keep
   // their width (S5). Narrow windows stack as before; Expand takes the page.
-  const peek = board && selected !== null && !narrow && !expanded;
+  // The panes' motion (use-pane-motion): the layout changes at once and a pane
+  // that has just left stays on screen for one exit. On the board the document
+  // keeps its peek while it fades out after Escape.
+  const mode: PaneMode = !displayedSelection
+    ? "closed"
+    : expanded
+      ? "expanded"
+      : "split";
+  const { arrival, leaving } = usePaneMotion(mode);
+  const detailLeaving = leaving?.pane === "detail";
+  const peek =
+    board &&
+    !narrow &&
+    !expanded &&
+    (selected !== null || (detailLeaving && leaving.from === "split"));
+  // A pane that stays for its exit is out of the panel library's layout, so it
+  // is placed over the others at the width it had.
+  const detailPanelRef = usePanelRef();
+  useLayoutEffect(() => {
+    if (!leaving || leaving.from !== "split" || narrow || board) return;
+    const panel = leaving.pane === "detail" ? detailPanelRef : listPanelRef;
+    const width = panel.current?.getSize().inPixels;
+    if (width === undefined) return;
+    const host = workspaceRef.current;
+    host?.style.setProperty("--pane-leaving-width", `${width}px`);
+    return () => void host?.style.removeProperty("--pane-leaving-width");
+  }, [leaving, narrow, board, detailPanelRef, listPanelRef]);
   // The document owns J/K and Escape unless editing or an overlay owns them.
   const peekState = useRef({ peek, selected });
   useEffect(() => {
@@ -297,6 +328,8 @@ export function TicketWorkspaceView({
             !displayedSelection && "unselected",
           )}
           data-peek={peek || undefined}
+          data-pane-arrival={arrival ?? undefined}
+          data-pane-leaving={leaving?.pane}
           groupRef={groupRef}
           defaultLayout={
             splitMode === "inbox"
@@ -365,6 +398,7 @@ export function TicketWorkspaceView({
           />
           <ResizablePanel
             id="detail"
+            panelRef={detailPanelRef}
             minSize={520}
             // The panel library makes its content box `overflow: auto` with an
             // auto height, so a percentage-height child never gets a bound and the
@@ -394,6 +428,7 @@ export function TicketWorkspaceView({
             <TicketDetailPane
               workspace={workspace}
               hidden={inboxMode && !!triage?.chatId}
+              leaving={detailLeaving}
               {...(inboxMode && { context: "inbox" as const })}
               expanded={expanded}
               inboxTarget={inboxTarget}

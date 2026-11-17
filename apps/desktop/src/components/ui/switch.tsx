@@ -15,10 +15,13 @@ function Switch({
       )}
       {...props}
     >
-      <span className="pointer-events-none inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-(--recessed) p-0.5 shadow-[0_0_0_1px_var(--control-boundary)] transition-colors group-data-[state=checked]:bg-(--interactive)">
+      <span
+        data-slot="switch-track"
+        className="pointer-events-none inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-(--recessed) p-0.5 shadow-[0_0_0_1px_var(--control-boundary)] group-data-[state=checked]:bg-(--interactive)"
+      >
         <SwitchPrimitive.Thumb
           data-slot="switch-thumb"
-          className="pointer-events-none block size-4 rounded-full bg-(--control-boundary) shadow-(--shadow-small) data-[state=checked]:bg-(--surface) transition-transform data-[state=checked]:translate-x-4"
+          className="pointer-events-none block size-4 rounded-full bg-(--control-boundary) shadow-(--shadow-small) data-[state=checked]:bg-(--surface) data-[state=checked]:translate-x-4"
         />
       </span>
     </SwitchPrimitive.Root>

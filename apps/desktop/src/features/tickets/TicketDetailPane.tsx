@@ -1,4 +1,5 @@
 import { useInboxTriage } from "./inbox-triage-context";
+import { useHeld } from "./use-pane-motion";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
@@ -17,9 +18,15 @@ export function TicketDetailPane({
   onReturn,
   onSelect,
   context = "list",
+  leaving = false,
 }: {
   workspace: TicketWorkspace;
   hidden?: boolean;
+  /**
+   * The ticket was just closed and the pane is fading out. It keeps showing
+   * that ticket, as it was, instead of the empty state it would become.
+   */
+  leaving?: boolean;
   /** Opened from the Inbox: no list position, no "outside the results". */
   context?: "list" | "inbox";
   expanded: boolean;
@@ -30,7 +37,6 @@ export function TicketDetailPane({
 }) {
   const triage = useInboxTriage();
   const {
-    selected,
     mention,
     loading,
     queryError,
@@ -38,9 +44,20 @@ export function TicketDetailPane({
     opened,
     projects,
     plans,
-    position,
     openAdjacent,
   } = workspace;
+  const { selected, position } = useHeld(
+    {
+      selected: workspace.selected,
+      position:
+        context === "inbox"
+          ? (triage?.position ?? null)
+          : workspace.layout === "board"
+            ? null
+            : workspace.position,
+    },
+    leaving,
+  );
   const resultTickets =
     workspace.layout === "board"
       ? workspace.board.columns.flatMap((column) => column.tickets)
@@ -73,13 +90,8 @@ export function TicketDetailPane({
         preview={resultTickets.find((ticket) => ticket.reference === selected)}
         projects={projects}
         plans={plans}
-        position={
-          context === "inbox"
-            ? (triage?.position ?? null)
-            : workspace.layout === "board"
-              ? null
-              : position
-        }
+        position={position}
+        leaving={leaving}
         onAdjacent={
           context === "inbox"
             ? (triage?.adjacent ?? openAdjacent)
