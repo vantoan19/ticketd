@@ -1608,6 +1608,22 @@ fn guard_menu_quit(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// What the startup watchdog has heard from the boot module.
+#[derive(Default)]
+struct StartupProgress {
+    /// The window is shown; from then on its visibility belongs to the person.
+    revealed: std::sync::atomic::AtomicBool,
+    /// The application modules loaded.
+    booted: std::sync::atomic::AtomicBool,
+}
+
+impl StartupProgress {
+    fn finished(&self) -> bool {
+        self.revealed.load(std::sync::atomic::Ordering::SeqCst)
+            && self.booted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     let started = std::time::Instant::now();
     let sync = std::sync::Arc::new(sync_scheduler::Scheduler::new(
@@ -1642,36 +1658,58 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
-            // The theme-first frontend reveal is the fast path. A broken module
-            // or stalled painting IPC must never leave the process invisible.
-            let (revealed, initial_reveal) = tokio::sync::oneshot::channel();
-            let startup_event =
+            // The boot module shows the window first (revealed), then loads the
+            // application modules (booted). A broken module or stalled painting
+            // IPC must never leave the process invisible or blank.
+            let startup = std::sync::Arc::new(StartupProgress::default());
+            let (progressed, mut progress) = tokio::sync::mpsc::unbounded_channel();
+            let reveal_event = {
+                let (startup, progressed) = (startup.clone(), progressed.clone());
                 tauri::Listener::once(app, "ticketd://startup-revealed", move |_| {
-                    let _ = revealed.send(());
-                });
+                    startup
+                        .revealed
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = progressed.send(());
+                })
+            };
+            let boot_event = {
+                let startup = startup.clone();
+                tauri::Listener::once(app, "ticketd://startup-booted", move |_| {
+                    startup
+                        .booted
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = progressed.send(());
+                })
+            };
             let startup_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Once startup succeeds, visibility belongs to the person. In
-                // particular, Cmd+H during these five seconds must stay hidden.
-                if tokio::time::timeout(std::time::Duration::from_secs(5), initial_reveal)
-                    .await
-                    .is_ok()
-                {
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while !startup.finished() && progress.recv().await.is_some() {}
+                })
+                .await;
+                if startup.finished() {
                     return;
                 }
-                tauri::Listener::unlisten(&startup_app, startup_event);
+                tauri::Listener::unlisten(&startup_app, reveal_event);
+                tauri::Listener::unlisten(&startup_app, boot_event);
                 if let Some(window) = tauri::Manager::get_webview_window(&startup_app, "main") {
+                    if !startup.booted.load(std::sync::atomic::Ordering::SeqCst)
+                        && let Err(error) =
+                            window.eval(include_str!("../../public/startup-fallback.js"))
+                    {
+                        eprintln!("Could not display startup guidance: {error}");
+                    }
+                    // Once shown, visibility belongs to the person. In
+                    // particular, Cmd+H during these five seconds must stay hidden.
+                    if startup.revealed.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
                     match window.is_visible() {
                         Ok(true) => return,
                         Ok(false) => {}
                         Err(error) => {
                             eprintln!("Could not check startup window visibility: {error}");
                         }
-                    }
-                    if let Err(error) =
-                        window.eval(include_str!("../../public/startup-fallback.js"))
-                    {
-                        eprintln!("Could not display startup guidance: {error}");
                     }
                     if let Err(error) = window.show() {
                         eprintln!("Could not reveal ticketd after startup: {error}");

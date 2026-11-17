@@ -1,93 +1,104 @@
 import { invoke } from "@/lib/api/bridge-failure";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 
-const workspaceInfoSchema = z.object({
-  path: z.string(),
-  tickets: z.number(),
-  documents: z.number(),
-  projects: z.number(),
-  active_plans: z.number(),
-  size_bytes: z.number(),
-  format_version: z.number(),
-});
-export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
-
-const projectIconSchema = z
-  .object({
-    mime: z.enum([
-      "image/svg+xml",
-      "image/png",
-      "image/x-icon",
-      "image/jpeg",
-      "image/webp",
-      "image/gif",
-    ]),
-    bytes: z.array(z.number().int().min(0).max(255)),
-  })
-  .nullable();
-export type ProjectFavicon = NonNullable<z.infer<typeof projectIconSchema>>;
-
-const lastBackupSchema = z
-  .object({ path: z.string(), completed_at: z.string() })
-  .nullable();
-export type BackupRecord = NonNullable<z.infer<typeof lastBackupSchema>>;
-
-const workspaceSummarySchema = z.object({
-  last_change: z.string().nullable(),
-  tickets: z.number(),
-  documents: z.number(),
-  activities: z.number(),
-  evidence: z.number(),
-  projects: z.number(),
-  plans: z.number(),
-});
-export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
-
-const backupInspectionSchema = z.object({
-  path: z.string(),
-  current: workspaceSummarySchema,
-  attachment_content: z
-    .object({
-      container_version: z.number().nullable(),
-      local_snapshots: z.number(),
-      retained_files: z.number(),
-      retained_bytes: z.number(),
-      remote_references: z.number(),
-      remote_bytes_included: z.boolean().optional(),
-      remote_access_verified: z.boolean().optional(),
-    })
-    .optional(),
-  check: z.discriminatedUnion("status", [
-    z.object({
-      status: z.literal("valid"),
-      format_version: z.number(),
-      summary: workspaceSummarySchema,
-    }),
-    z.object({
-      status: z.literal("newer_format"),
-      backup_version: z.number(),
-      supported_version: z.number(),
-    }),
-    z.object({ status: z.literal("not_ticketd") }),
-    z.object({
-      status: z.literal("missing_tables"),
-      tables: z.array(z.string()),
-    }),
-    z.object({ status: z.literal("current_workspace") }),
-    z.object({ status: z.literal("damaged"), reason: z.string() }),
-  ]),
-});
-export type BackupInspection = z.infer<typeof backupInspectionSchema>;
-
-const safetyBackupsSchema = z.array(
+const workspaceInfoSchema = lazySchema(() =>
   z.object({
     path: z.string(),
-    kind: z.enum(["safety", "pre_migration"]),
-    saved_at: z.string(),
+    tickets: z.number(),
+    documents: z.number(),
+    projects: z.number(),
+    active_plans: z.number(),
     size_bytes: z.number(),
+    format_version: z.number(),
   }),
+);
+export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
+
+const projectIconSchema = lazySchema(() =>
+  z
+    .object({
+      mime: z.enum([
+        "image/svg+xml",
+        "image/png",
+        "image/x-icon",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+      ]),
+      bytes: z.array(z.number().int().min(0).max(255)),
+    })
+    .nullable(),
+);
+export type ProjectFavicon = NonNullable<z.infer<typeof projectIconSchema>>;
+
+const lastBackupSchema = lazySchema(() =>
+  z.object({ path: z.string(), completed_at: z.string() }).nullable(),
+);
+export type BackupRecord = NonNullable<z.infer<typeof lastBackupSchema>>;
+
+const workspaceSummarySchema = lazySchema(() =>
+  z.object({
+    last_change: z.string().nullable(),
+    tickets: z.number(),
+    documents: z.number(),
+    activities: z.number(),
+    evidence: z.number(),
+    projects: z.number(),
+    plans: z.number(),
+  }),
+);
+export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
+
+const backupInspectionSchema = lazySchema(() =>
+  z.object({
+    path: z.string(),
+    current: workspaceSummarySchema,
+    attachment_content: z
+      .object({
+        container_version: z.number().nullable(),
+        local_snapshots: z.number(),
+        retained_files: z.number(),
+        retained_bytes: z.number(),
+        remote_references: z.number(),
+        remote_bytes_included: z.boolean().optional(),
+        remote_access_verified: z.boolean().optional(),
+      })
+      .optional(),
+    check: z.discriminatedUnion("status", [
+      z.object({
+        status: z.literal("valid"),
+        format_version: z.number(),
+        summary: workspaceSummarySchema,
+      }),
+      z.object({
+        status: z.literal("newer_format"),
+        backup_version: z.number(),
+        supported_version: z.number(),
+      }),
+      z.object({ status: z.literal("not_ticketd") }),
+      z.object({
+        status: z.literal("missing_tables"),
+        tables: z.array(z.string()),
+      }),
+      z.object({ status: z.literal("current_workspace") }),
+      z.object({ status: z.literal("damaged"), reason: z.string() }),
+    ]),
+  }),
+);
+export type BackupInspection = z.infer<typeof backupInspectionSchema>;
+
+const safetyBackupsSchema = lazySchema(() =>
+  z.array(
+    z.object({
+      path: z.string(),
+      kind: z.enum(["safety", "pre_migration"]),
+      saved_at: z.string(),
+      size_bytes: z.number(),
+    }),
+  ),
 );
 export type SafetyBackup = z.infer<typeof safetyBackupsSchema>[number];
 

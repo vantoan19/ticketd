@@ -19,6 +19,11 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
+// The views App loads on first visit, loaded up front so a visit renders at once.
+import "@/features/documents/ContextGraph";
+import "@/features/documents/WorkspaceGraph";
+import "@/features/attachments/AttachmentLibrary";
+import "@/features/automations/AutomationsView";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
 

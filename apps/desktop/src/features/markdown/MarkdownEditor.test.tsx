@@ -468,3 +468,14 @@ describe("Editor chrome", () => {
     expect(view.container.querySelector("[data-empty]")).toBeNull();
   });
 });
+
+it("mounts a diagram's source editor only once its Source opens", () => {
+  render(
+    <MarkdownEditor value={"```mermaid\ngraph LR\n```\n"} onChange={vi.fn()} />,
+  );
+  expect(screen.queryByLabelText("Mermaid source")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Source/ }));
+  expect(screen.getByLabelText("Mermaid source").textContent).toContain(
+    "graph LR",
+  );
+});
