@@ -12,21 +12,30 @@ import {
   Presence,
   Shimmer,
 } from "@/components/ui/motion";
+import { frames, freezeMotionClock } from "@/test/motion-clock";
 import { applyTokens, reducedTokens, rootTokens } from "@/test/motion-tokens";
 
 // The shared motion primitives (DESIGN.md section 12). Timing comes from the
-// tokens, so these tests apply the real ones. The motion library takes frames
-// from the real requestAnimationFrame, so time here is real: a motion never
-// finishes sooner than its duration, which is the bound these tests rely on.
+// tokens, so these tests apply the real ones. Motion time is the test's own
+// (test/motion-clock): it moves only when a test advances it, so nothing here
+// depends on how fast the machine runs. A motion that is meant to be instant is
+// done after the next frame without time moving at all; one that is not is
+// still there until time has covered its duration.
 
+// Longer than any entrance, spring included: time is ours, so it costs nothing.
+const SETTLED_MS = 2000;
 const EXIT_MS = 150;
+const STAGGER_MS = 24;
 
 let restoreTokens: () => void;
+let clock: ReturnType<typeof freezeMotionClock>;
 beforeEach(() => {
   restoreTokens = applyTokens(rootTokens);
+  clock = freezeMotionClock();
 });
 afterEach(() => {
   cleanup();
+  clock.restore();
   restoreTokens();
 });
 
@@ -43,27 +52,20 @@ function holdKey() {
   });
 }
 
-/** Milliseconds until the text has left the document. */
-async function leaves(text: string): Promise<number> {
-  const start = performance.now();
-  await waitFor(() => expect(screen.queryByText(text)).toBeNull(), {
-    interval: 4,
-  });
-  return performance.now() - start;
-}
-
 function Shown({
   show,
   kind = "row",
+  index = 0,
 }: {
   show: boolean;
   kind?: "row" | "overlay";
+  index?: number;
 }) {
   return (
     <MotionProvider>
       <Presence>
         {show && (
-          <Appear key="a" rise={kind}>
+          <Appear key="a" rise={kind} index={index}>
             Hello
           </Appear>
         )}
@@ -95,50 +97,112 @@ it("Appear starts soft and below its place, 6px for rows and 8px for overlays", 
 
 it("Appear settles into place", async () => {
   render(<Shown show />);
-  await waitFor(() => {
-    const { opacity, transform } = screen.getByText("Hello").style;
-    expect([opacity, transform]).toEqual(["1", "none"]);
-  });
+  await frames();
+  await clock.advance(SETTLED_MS);
+  const { opacity, transform } = screen.getByText("Hello").style;
+  expect([opacity, transform]).toEqual(["1", "none"]);
 });
 
+// Under the test clock the library never reaches its transitionEnd (the filter
+// stays at blur(0px)), so this one runs in real time. It waits for a state, with
+// no duration to compare against, so a slow machine only makes it take longer.
 it("Appear carries no filter once settled, so long lists keep no compositing layers", async () => {
+  clock.restore();
   render(<Shown show />);
-  await waitFor(() => {
-    const { opacity, filter } = screen.getByText("Hello").style;
-    expect(opacity).toBe("1");
-    expect(["", "none"]).toContain(filter);
-  });
+  await waitFor(
+    () => {
+      const { opacity, filter } = screen.getByText("Hello").style;
+      expect(opacity).toBe("1");
+      expect(["", "none"]).toContain(filter);
+    },
+    { timeout: 10_000 },
+  );
 });
 
 it("Appear carries no filter once settled under reduced motion", async () => {
   useReducedMotion();
   render(<Shown show />);
-  await waitFor(() => {
-    const { opacity, filter } = screen.getByText("Hello").style;
-    expect(opacity).toBe("1");
-    expect(["", "none"]).toContain(filter);
-  });
+  await frames();
+  const { opacity, filter } = screen.getByText("Hello").style;
+  expect(opacity).toBe("1");
+  expect(["", "none"]).toContain(filter);
+});
+
+it("Appear's stagger delays the whole entrance, not only the rise", async () => {
+  render(<Shown show index={7} />);
+  const row = screen.getByText("Hello");
+  await frames(); // let the entrance start before time moves
+  // Item 7 waits 7 steps. Just short of that, nothing has moved yet.
+  await clock.advance(7 * STAGGER_MS - 10);
+  expect(row.style.opacity).toBe("0");
+  expect(row.style.filter).toBe("blur(4px)");
+  expect(row.style.transform).toContain("translateY(6px)");
+  // Well past the wait and the entrance, it has settled.
+  await clock.advance(SETTLED_MS);
+  expect(row.style.opacity).toBe("1");
+  expect(row.style.transform).toBe("none");
+});
+
+it("Appear's stagger does not delay the first item", async () => {
+  render(<Shown show index={0} />);
+  await frames();
+  await clock.advance(50);
+  expect(Number(screen.getByText("Hello").style.opacity)).toBeGreaterThan(0);
+});
+
+it("Appear's stagger does not delay its exit", async () => {
+  const { rerender } = render(<Shown show index={7} />);
+  await frames();
+  await clock.advance(SETTLED_MS);
+  rerender(<Shown show={false} index={7} />);
+  await frames();
+  await clock.advance(EXIT_MS + 10);
+  expect(screen.queryByText("Hello")).toBeNull();
+});
+
+it("Appear's stagger waits no longer under reduced motion", async () => {
+  useReducedMotion();
+  render(<Shown show index={7} />);
+  await frames();
+  expect(screen.getByText("Hello").style.opacity).toBe("1");
+});
+
+it("Appear's stagger waits no longer while a key repeats", async () => {
+  const { rerender } = render(<Shown show={false} index={7} />);
+  holdKey();
+  rerender(<Shown show index={7} />);
+  await frames();
+  expect(screen.getByText("Hello").style.opacity).toBe("1");
 });
 
 it("Appear leaves in its own time, not at once", async () => {
   const { rerender } = render(<Shown show />);
+  await frames();
   rerender(<Shown show={false} />);
+  await frames();
   expect(screen.queryByText("Hello")).not.toBeNull();
-  expect(await leaves("Hello")).toBeGreaterThanOrEqual(EXIT_MS - 10);
+  await clock.advance(EXIT_MS - 10);
+  expect(screen.queryByText("Hello")).not.toBeNull();
+  await clock.advance(20);
+  expect(screen.queryByText("Hello")).toBeNull();
 });
 
+// The instant paths. Time stands still in these tests, so a leave that is gone
+// after the next frame did not wait on any duration.
 it("Appear leaves at once under reduced motion", async () => {
   useReducedMotion();
   const { rerender } = render(<Shown show />);
   rerender(<Shown show={false} />);
-  expect(await leaves("Hello")).toBeLessThan(EXIT_MS - 10);
+  await frames();
+  expect(screen.queryByText("Hello")).toBeNull();
 });
 
 it("Appear leaves at once while a key repeats", async () => {
   const { rerender } = render(<Shown show />);
   holdKey();
   rerender(<Shown show={false} />);
-  expect(await leaves("Hello")).toBeLessThan(EXIT_MS - 10);
+  await frames();
+  expect(screen.queryByText("Hello")).toBeNull();
 });
 
 it("the provider stops guarding when it unmounts", () => {
@@ -175,23 +239,30 @@ it("Glide is one decorative highlight that follows the active item", () => {
 it("CrossfadeText shows the new text while the old one fades out", async () => {
   const { rerender } = render(<Swapped text="Open" />);
   rerender(<Swapped text="Closed" />);
+  await frames();
   expect(screen.queryByText("Open")).not.toBeNull();
   expect(screen.queryByText("Closed")).not.toBeNull();
-  expect(await leaves("Open")).toBeGreaterThanOrEqual(EXIT_MS - 10);
+  await clock.advance(EXIT_MS - 10);
+  expect(screen.queryByText("Open")).not.toBeNull();
+  await clock.advance(20);
+  expect(screen.queryByText("Open")).toBeNull();
+  expect(screen.queryByText("Closed")).not.toBeNull();
 });
 
 it("CrossfadeText swaps at once under reduced motion", async () => {
   useReducedMotion();
   const { rerender } = render(<Swapped text="Open" />);
   rerender(<Swapped text="Closed" />);
-  expect(await leaves("Open")).toBeLessThan(EXIT_MS - 10);
+  await frames();
+  expect(screen.queryByText("Open")).toBeNull();
 });
 
 it("CrossfadeText swaps at once while a key repeats", async () => {
   const { rerender } = render(<Swapped text="Open" />);
   holdKey();
   rerender(<Swapped text="Closed" />);
-  expect(await leaves("Open")).toBeLessThan(EXIT_MS - 10);
+  await frames();
+  expect(screen.queryByText("Open")).toBeNull();
 });
 
 it("Expand keeps closed content mounted but inert", () => {
