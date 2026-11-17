@@ -56,6 +56,7 @@ mod search;
 pub use search::{Availability, TicketFilter, TicketOrder};
 mod sync_files;
 pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
+mod read_scope;
 mod tags;
 mod ticket_documents;
 mod write_scope;
@@ -600,6 +601,9 @@ impl Workspace {
             }
             if version == FORMAT_VERSION {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
+                // Room for every statement hydrating a ticket at once (the default is 16),
+                // so a list does not evict and re-prepare them per ticket.
+                connection.set_prepared_statement_cache_capacity(64);
                 return Ok(Self {
                     connection,
                     _lock: lock,
@@ -688,8 +692,10 @@ impl Workspace {
     }
 
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        history::read(&self.connection, &ticket.id)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            history::read(&self.connection, &ticket.id)
+        })
     }
 
     pub fn add_activity_with_details(
@@ -763,8 +769,10 @@ impl Workspace {
     }
     /// Read the latest authored Activity without loading its history.
     pub fn latest_update(&self, reference: &str) -> Result<Option<LatestUpdate>, Error> {
-        let id = relationships::id(&self.connection, reference)?;
-        activities::latest(&self.connection, &id)
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::latest(&self.connection, &id)
+        })
     }
 
     pub fn activity_feed(
@@ -773,13 +781,17 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ActivityFeedEntry>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        activities::feed(&self.connection, &ticket.id, limit, offset)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            activities::feed(&self.connection, &ticket.id, limit, offset)
+        })
     }
 
     pub fn activity(&self, reference: &str, id: &str) -> Result<Activity, Error> {
-        let ticket = self.show_ticket(reference)?;
-        activities::get(&self.connection, &ticket.id, id)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            activities::get(&self.connection, &ticket.id, id)
+        })
     }
 
     pub fn activities(
@@ -788,8 +800,10 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Activity>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        activities::read(&self.connection, &ticket.id, limit, offset)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            activities::read(&self.connection, &ticket.id, limit, offset)
+        })
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
@@ -810,47 +824,50 @@ impl Workspace {
     }
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
-        let mut statement = self.connection.prepare(&format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
-            readiness::indicator_sql("t")
-        ))?;
-        let mut tickets = statement
-            .query_map([trashed], listed_ticket_from_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        for ticket in &mut tickets {
-            ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
-            relationships::populate(&self.connection, ticket)?;
-            hierarchy::populate(&self.connection, ticket)?;
-            duplicates::populate(&self.connection, ticket)?;
-            source::populate(&self.connection, ticket)?;
-            activities::populate_update(&self.connection, ticket)?;
-        }
-        Ok(tickets)
+        read_scope::run(&self.connection, |connection| {
+            let mut statement = connection.prepare_cached(&format!(
+                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
+                readiness::indicator_sql("t")
+            ))?;
+            let mut tickets = statement
+                .query_map([trashed], listed_ticket_from_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            for ticket in &mut tickets {
+                hydrate(connection, ticket)?;
+            }
+            Ok(tickets)
+        })
     }
 
     pub fn show_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        read_ticket(&self.connection, reference)
+        read_scope::run(&self.connection, |connection| {
+            read_ticket(connection, reference)
+        })
     }
+}
+
+/// Everything shown about a listed ticket beyond its own row and availability.
+pub(crate) fn hydrate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
+    ticket.tags = tags::for_ticket(connection, &ticket.id)?;
+    relationships::populate(connection, ticket)?;
+    hierarchy::populate(connection, ticket)?;
+    duplicates::populate(connection, ticket)?;
+    source::populate(connection, ticket)?;
+    activities::populate_update(connection, ticket)
 }
 
 /// A ticket with everything shown about it. A write calls this at the end of its scope, so
 /// the result is what the write left behind.
 pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
     let ticket = connection
-        .query_row(
+        .prepare_cached(
             "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
-            [reference],
-            ticket_from_row,
-        )
+        )?
+        .query_row([reference], ticket_from_row)
         .optional()?;
     let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-    ticket.tags = tags::for_ticket(connection, &ticket.id)?;
-    relationships::populate(connection, &mut ticket)?;
     ticket.availability = readiness::indicator(connection, &ticket.id)?;
-    hierarchy::populate(connection, &mut ticket)?;
-    duplicates::populate(connection, &mut ticket)?;
-    source::populate(connection, &mut ticket)?;
-    activities::populate_update(connection, &mut ticket)?;
+    hydrate(connection, &mut ticket)?;
     Ok(ticket)
 }
 

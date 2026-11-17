@@ -154,6 +154,7 @@ impl Workspace {
         kind: RecordKind,
         reference: &str,
     ) -> Result<Vec<VersionSummary>, Error> {
+        self.read(|_| {
         let record_id = match kind {
             RecordKind::Ticket => relationships::id(&self.connection, reference)?,
             RecordKind::Document => self.show_document(reference)?.id,
@@ -172,6 +173,7 @@ impl Workspace {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(versions)
+        })
     }
 
     /// One earlier version with its content.
