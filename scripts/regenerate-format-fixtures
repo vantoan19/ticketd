@@ -23,6 +23,26 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out_dir="$root/crates/ticketd-core/tests/fixtures/format"
 
+# Everything to remove when the script ends, however it ends. One EXIT trap owns the
+# cleanup: a RETURN trap is a single handler for the whole script, so a function that sets
+# its own replaces its caller's, and in bash 4.4 and later it runs after the function's
+# locals are gone. The `${array[@]+...}` form keeps an empty array legal under `set -u`
+# in bash 3.2, which macOS ships.
+worktrees=()
+temp_dirs=()
+discard() {
+  local path
+  for path in ${worktrees[@]+"${worktrees[@]}"}; do
+    git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
+  done
+  for path in ${temp_dirs[@]+"${temp_dirs[@]}"}; do
+    rm -rf "$path"
+  done
+  worktrees=()
+  temp_dirs=()
+}
+trap discard EXIT
+
 commits() {
   case "$1" in
     v55) echo dbf9154c ;;
@@ -36,7 +56,7 @@ commits() {
 seed() {
   local ticketd="$1" output="$2" scratch
   scratch="$(mktemp -d)"
-  trap 'rm -rf "$scratch"' RETURN
+  temp_dirs+=("$scratch")
   export TICKETD_TEST_WORKSPACE="$scratch/workspace.sqlite3"
   # A command's JSON result, then one field of it.
   field() { jq -r "$1"; }
@@ -83,11 +103,14 @@ build_and_seed() {
   local version="$1" commit work
   commit="$(commits "$version")"
   work="$(mktemp -d)"
-  trap 'git -C "$root" worktree remove --force "$work/tree" >/dev/null 2>&1 || true; rm -rf "$work"' RETURN
+  temp_dirs+=("$work")
+  worktrees+=("$work/tree")
   git -C "$root" worktree add --detach "$work/tree" "$commit" >/dev/null
   (cd "$work/tree" && CARGO_TARGET_DIR="$work/tree/target" cargo build -p ticketd-cli --locked)
   seed "$work/tree/target/debug/ticketd" "$out_dir/$version.sqlite3"
   echo "wrote $out_dir/$version.sqlite3"
+  # Free this version's build before the next one starts.
+  discard
 }
 
 if [[ "${1:-}" == seed ]]; then
