@@ -21,8 +21,9 @@ pub struct BackupRecord {
     pub completed_at: String,
 }
 
-pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
-    let resolved = match path.canonicalize() {
+/// The Workspace file `path` names, with links followed, also before it exists.
+pub(crate) fn resolve(path: &Path) -> Result<PathBuf, Error> {
+    Ok(match path.canonicalize() {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             let parent = path
@@ -35,7 +36,11 @@ pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
             )
         }
         Err(error) => return Err(error.into()),
-    };
+    })
+}
+
+pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
+    let resolved = resolve(path)?;
     let mut name = resolved.as_os_str().to_os_string();
     name.push(".lock");
     Ok(OpenOptions::new()
@@ -46,9 +51,11 @@ pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
         .open(name)?)
 }
 
+/// Copies `source` into `destination`, which is left a single file whatever the
+/// journal mode of `source`: the copy takes its header, WAL flag included.
 pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<(), Error> {
     Backup::new(source, destination)?.run_to_completion(100, Duration::from_millis(25), None)?;
-    Ok(())
+    crate::session::single_file(destination)
 }
 
 pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool, Error> {
@@ -193,7 +200,7 @@ pub(crate) fn save_snapshot(
     // for the snapshot/path inventory, never for hashing/copying large file bodies.
     let barrier = if let Some(path) = source.path().filter(|path| !path.is_empty()) {
         let barrier = Connection::open(path)?;
-        barrier.busy_timeout(Duration::from_secs(10))?;
+        crate::session::configure(&barrier)?;
         barrier.execute_batch("BEGIN IMMEDIATE")?;
         Some(barrier)
     } else {

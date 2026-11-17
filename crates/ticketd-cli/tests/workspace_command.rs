@@ -467,3 +467,33 @@ fn a_write_through_the_cli_is_marked_for_sync() {
     assert_eq!(dirty.len(), 1);
     assert_ne!(dirty[0].id, first[0].id);
 }
+
+/// The desktop's warm session (ADR 0016) lets go of the Workspace when a restore in
+/// another process asks: the CLI gets it within its two-second wait, and on Windows
+/// replaces a file the session had open.
+#[test]
+fn restore_takes_the_workspace_from_a_warm_session_in_another_process() {
+    let dir = tempfile::tempdir().unwrap();
+    run(dir.path(), &["create", "Before"]);
+    let backup = dir.path().join("backup.sqlite3");
+    run(dir.path(), &["backup", backup.to_str().unwrap()]);
+    run(dir.path(), &["create", "After the backup"]);
+    let session =
+        ticketd_core::WorkspaceSession::for_file(dir.path().join("workspace.sqlite3")).unwrap();
+    assert_eq!(
+        session.workspace().unwrap().list_tickets().unwrap().len(),
+        2
+    );
+
+    run(dir.path(), &["restore-workspace", backup.to_str().unwrap()]);
+
+    let titles: Vec<_> = session
+        .workspace()
+        .unwrap()
+        .list_tickets()
+        .unwrap()
+        .into_iter()
+        .map(|ticket| ticket.title)
+        .collect();
+    assert_eq!(titles, ["Before"]);
+}

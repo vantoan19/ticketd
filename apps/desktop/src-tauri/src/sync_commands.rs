@@ -23,7 +23,7 @@ use ticketd_core::{
     },
 };
 
-use super::{BridgeFailure, open_workspace};
+use super::{BridgeFailure, open_workspace, workspace_session};
 use crate::sync_scheduler::{Binding, EXIT_LIMIT, Scheduler};
 
 /// The one scheduler of this process and the instant its time counts from.
@@ -718,7 +718,7 @@ pub struct ExitReport {
 
 #[tauri::command]
 pub fn sync_conflicts() -> Outcome<Vec<ConflictSummary>> {
-    Ok(conflicts(&open_workspace()?)?)
+    Ok(conflicts(&*open_workspace()?)?)
 }
 
 #[tauri::command]
@@ -728,7 +728,7 @@ pub fn sync_conflict(
     id: String,
 ) -> Outcome<Conflict> {
     let bound = host.scheduler.binding()?;
-    Ok(conflict(&open_workspace()?, kind, &id, bound.as_ref())?)
+    Ok(conflict(&*open_workspace()?, kind, &id, bound.as_ref())?)
 }
 
 #[tauri::command]
@@ -738,7 +738,7 @@ pub fn resolve_sync_conflict(
     resolutions: Vec<Resolution>,
     request_id: String,
 ) -> Outcome<()> {
-    resolve(&mut open_workspace()?, kind, id, resolutions, &request_id)
+    resolve(&mut *open_workspace()?, kind, id, resolutions, &request_id)
 }
 
 #[tauri::command]
@@ -763,7 +763,7 @@ pub fn record_versions(
     source: Source,
 ) -> Outcome<Vec<VersionEntry>> {
     let bound = host.scheduler.binding()?;
-    versions(&open_workspace()?, bound.as_ref(), kind, &id, source)
+    versions(&*open_workspace()?, bound.as_ref(), kind, &id, source)
 }
 
 #[tauri::command(async)]
@@ -776,7 +776,7 @@ pub fn record_version(
 ) -> Outcome<VersionDetail> {
     let bound = host.scheduler.binding()?;
     version_detail(
-        &open_workspace()?,
+        &*open_workspace()?,
         bound.as_ref(),
         kind,
         &id,
@@ -796,7 +796,7 @@ pub fn restore_record_version(
 ) -> Outcome<()> {
     let bound = host.scheduler.binding()?;
     restore(
-        &mut open_workspace()?,
+        &mut *open_workspace()?,
         bound.as_ref(),
         kind,
         &id,
@@ -914,20 +914,23 @@ pub struct Downloaded {
 }
 
 /// Replaces the Workspace file, like restoring a backup: sync is held off
-/// meanwhile, and the handle used here is the one the core consumes.
+/// meanwhile, the desktop's session lets go of the file, and the handle used
+/// here is the one the core consumes.
 #[tauri::command(async)]
 pub fn sync_download_workspace(
     host: tauri::State<'_, SyncHost>,
     folder_id: String,
 ) -> Outcome<Downloaded> {
     check_folder_id(&folder_id)?;
+    let remote = signed_in_drive(&*open_workspace()?)?;
     let _no_run = host.scheduler.hold();
-    let workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
-    let (replaced, safety_backup) =
-        workspace.sync_download_workspace(remote.as_ref(), &folder_id)?;
+    let (status, safety_backup) = workspace_session()?.exclusive(|path| {
+        let (replaced, safety_backup) =
+            Workspace::open_existing(path)?.sync_download_workspace(remote.as_ref(), &folder_id)?;
+        Ok((replaced.sync_status()?, safety_backup))
+    })?;
     Ok(Downloaded {
-        status: replaced.sync_status()?,
+        status,
         safety_backup: safety_backup.display().to_string(),
     })
 }
@@ -1004,7 +1007,7 @@ fn change_settings(workspace: &mut Workspace, settings: &SettingsChange) -> Outc
 
 #[tauri::command]
 pub fn set_sync_settings(settings: SettingsChange) -> Outcome<SyncSettings> {
-    change_settings(&mut open_workspace()?, &settings)
+    change_settings(&mut *open_workspace()?, &settings)
 }
 
 #[tauri::command]

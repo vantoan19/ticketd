@@ -4,15 +4,13 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
-use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, FORMAT_VERSION, Workspace, backup, backup_archive, default_path};
+use crate::{Error, FORMAT_VERSION, Workspace, backup, backup_archive, default_path, session};
 
 #[derive(Serialize, Deserialize)]
 struct RestoreJournal {
@@ -116,14 +114,8 @@ impl Workspace {
                 backup.display()
             )));
         }
-        let lock = backup::lock_file(workspace)?;
-        FileExt::try_lock_exclusive(&lock).map_err(|source| {
-            if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
-                Error::RestoreLock { source }
-            } else {
-                Error::Directory(source)
-            }
-        })?;
+        // Warm sessions elsewhere are asked to let go first (ADR 0016).
+        let _lock = session::lock_exclusive(workspace, session::RELEASE_WAIT)?;
         let reported_workspace = if workspace
             .symlink_metadata()
             .is_ok_and(|m| m.file_type().is_symlink())
@@ -152,6 +144,7 @@ impl Workspace {
             return Err(Error::Backup("backup is the current workspace".into()));
         }
         let source = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        session::configure(&source)?;
         source.execute_batch("BEGIN")?;
         backup::validate(&source)?;
         let parent = workspace
@@ -185,7 +178,7 @@ impl Workspace {
         } else {
             Connection::open_in_memory()?
         };
-        current.busy_timeout(Duration::from_secs(10))?;
+        session::configure(&current)?;
         let version: i64 = current.pragma_query_value(None, "user_version", |r| r.get(0))?;
         if version > FORMAT_VERSION {
             return Err(Error::NewerSchema(version));
@@ -210,7 +203,11 @@ impl Workspace {
                 source: Box::new(source),
             }
         })?;
+        // The fence before the swap: everything committed is in the replaced file, which
+        // the safety copy already holds, and no WAL is left to replay into the new one.
+        session::single_file(&current)?;
         drop(current);
+        session::remove_wal_files(&workspace)?;
         let journal = RestoreJournal {
             token: Uuid::new_v4(),
             had_root: root.exists(),
