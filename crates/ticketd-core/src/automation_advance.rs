@@ -9,6 +9,7 @@
 //! for every effect below: a Stop, a take-over, turning the Automation off or
 //! deleting it waits for it, and then finds the step finished.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
@@ -19,7 +20,7 @@ use crate::automation_endings::{Cause, end};
 use crate::automation_run_machine::{Next, RunEnd, StepOutcome, next_action};
 use crate::automation_runs::{AutomationRun, AutomationRunStatus, AutomationStepStatus, NOW, one};
 use crate::automation_steps::AutomationNotification;
-use crate::automations::{StepAction, Trigger};
+use crate::automations::{Step, StepAction, Trigger};
 use crate::chats::{ChatLink, ChatLinkKind, NewChat, create_chat_in};
 use crate::events::{WorkspaceEvent, WorkspaceEventType};
 use crate::{Error, Workspace};
@@ -171,6 +172,30 @@ fn unusable_folder(folder: &str) -> Option<String> {
     }
 }
 
+/// What `unusable_folder` said of each folder the run's agent steps have yet to use.
+/// Asked of the filesystem before the write lock is taken: a slow or unreachable
+/// folder (a network volume) must not hold every other writer.
+type FolderChecks = HashMap<String, Option<String>>;
+
+/// Adds the check of every agent step's folder in `steps`, at any depth.
+fn check_folders(steps: &[Step], unused: &dyn Fn(&str) -> bool, checks: &mut FolderChecks) {
+    for step in steps {
+        if let StepAction::RunAgent {
+            execution_folder: Some(folder),
+            ..
+        } = &step.action
+            && unused(&step.id)
+        {
+            checks
+                .entry(folder.clone())
+                .or_insert_with(|| unusable_folder(folder));
+        }
+        for path in step.action.paths() {
+            check_folders(path, unused, checks);
+        }
+    }
+}
+
 /// Whether `error` says storage failed, rather than that the Workspace refused what
 /// a step asked. A refusal is the step's failure; storage failing is not the step's.
 fn storage_failed(error: &Error) -> bool {
@@ -198,13 +223,22 @@ impl Workspace {
         run_id: &str,
         outcome: Option<StepOutcome>,
     ) -> Result<RunAction, Error> {
-        self.in_write_scope(|workspace| workspace.advance_inside(run_id, outcome))
+        // The run is read to check the folders its steps will use; it is read again
+        // under the lock, which decides everything that follows.
+        let run = one(&self.connection, run_id)?;
+        let mut folders = FolderChecks::new();
+        if run.status == AutomationRunStatus::Running {
+            let begun = |id: &str| run.steps.iter().any(|step| step.step_id == id);
+            check_folders(&run.definition.steps, &|id| !begun(id), &mut folders);
+        }
+        self.in_write_scope(|workspace| workspace.advance_inside(run_id, outcome, &folders))
     }
 
     fn advance_inside(
         &mut self,
         run_id: &str,
         outcome: Option<StepOutcome>,
+        folders: &FolderChecks,
     ) -> Result<RunAction, Error> {
         let run = one(&self.connection, run_id)?;
         match run.status {
@@ -255,7 +289,7 @@ impl Workspace {
                 "INSERT INTO automation_run_steps (run_id, position, step_id, status) VALUES (?1, (SELECT COUNT(*) FROM automation_run_steps WHERE run_id = ?1), ?2, 'running')",
                 params![run_id, step_id],
             )?;
-            match self.start_step(&run, &step_id)? {
+            match self.start_step(&run, &step_id, folders)? {
                 Started::Finished(outcome) => finished = Some((step_id, outcome)),
                 Started::Handed(action) => return Ok(*action),
             }
@@ -263,7 +297,12 @@ impl Workspace {
     }
 
     /// Starts the step `step_id`, which the run has just been marked as on.
-    fn start_step(&mut self, run: &AutomationRun, step_id: &str) -> Result<Started, Error> {
+    fn start_step(
+        &mut self,
+        run: &AutomationRun,
+        step_id: &str,
+        folders: &FolderChecks,
+    ) -> Result<Started, Error> {
         let failed = |reason: &str| {
             Ok(Started::Finished(StepOutcome::Failed {
                 reason: reason.to_owned(),
@@ -283,7 +322,7 @@ impl Workspace {
                 agent_id: Some(agent_id),
                 execution_folder: Some(folder),
                 ..
-            } => self.start_agent(run, step_id, agent_id, folder),
+            } => self.start_agent(run, step_id, agent_id, folder, folders),
             StepAction::RunAgent { .. } => failed("This step has no agent or no folder."),
             StepAction::ChangeTicket { .. } => refusal(
                 self.apply_change(run, step)
@@ -312,6 +351,7 @@ impl Workspace {
         step_id: &str,
         agent_id: &str,
         folder: &str,
+        folders: &FolderChecks,
     ) -> Result<Started, Error> {
         let failed = |reason: String| Ok(Started::Finished(StepOutcome::Failed { reason }));
         let agent = match self.automation_agent(agent_id) {
@@ -322,7 +362,13 @@ impl Workspace {
             Err(error) => return Err(error),
         };
         // Before the Chat, so a step that cannot run leaves none behind.
-        if let Some(reason) = unusable_folder(folder) {
+        // Checked before the lock. A folder not found there cannot happen, since a run
+        // keeps its own copy of the definition; it is checked here rather than trusted.
+        let unusable = match folders.get(folder) {
+            Some(checked) => checked.clone(),
+            None => unusable_folder(folder),
+        };
+        if let Some(reason) = unusable {
             return failed(reason);
         }
         let name = &run.definition.name;
