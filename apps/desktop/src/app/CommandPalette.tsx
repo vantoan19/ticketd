@@ -45,6 +45,7 @@ import {
 import { ariaKeyShortcuts, matchesShortcut } from "@/lib/shortcuts";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { ConfirmLeaveDuplicate } from "@/features/tickets/ConfirmLeaveDuplicate";
+import { useResultCascade } from "./use-result-cascade";
 import { useContext, useEffect, useRef, useState, type RefObject } from "react";
 import {
   Inbox,
@@ -199,6 +200,8 @@ export function CommandPalette({
   const time = useReminderTime(draft, occurrence);
   const instants = time.instants;
   const input = useRef<HTMLInputElement>(null);
+  const resultList = useRef<HTMLDivElement>(null);
+  useResultCascade(resultList, query !== "");
   const [scope, setScope] = useState<TicketCommandScope | null>(null);
   const commandsOnly = query.trimStart().startsWith(">");
   const filter = commandsOnly ? query.trimStart().slice(1).trim() : query;
@@ -557,7 +560,7 @@ export function CommandPalette({
                 </Button>
               </div>
             )}
-            <CommandList hidden={custom}>
+            <CommandList ref={resultList} hidden={custom}>
               {scope && (
                 <CommandGroup>
                   {actions.options.map((option, index) => (
