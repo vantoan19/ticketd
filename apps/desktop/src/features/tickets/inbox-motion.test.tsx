@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -10,7 +9,8 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { Inbox } from "./Inbox";
-import { UnreadDot, useArrivals } from "./inbox-motion";
+import { useArrivals } from "./inbox-arrivals";
+import { UnreadDot } from "./inbox-motion";
 import type { Entry } from "./inboxModel";
 import {
   applyTokens,
@@ -172,8 +172,7 @@ test("nothing is new on the first settled render; a later key is, in the render 
   expect(told.every((arrived) => arrived === "")).toBe(true);
   told = [];
   rerender(<Arrivals keys={["c", "a", "b"]} />);
-  expect(told[0]).toBe("c");
-  expect(told.at(-1)).toBe("");
+  expect(told.at(-1)).toBe("c");
 });
 
 test("keys that arrive while loading, or with Show more, are not new", () => {

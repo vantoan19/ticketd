@@ -75,7 +75,7 @@ export function FirstRunGuide({
         <Appear index={2}>
           <p className="ui-guide-lede">{copy.sentence}</p>
         </Appear>
-        <Appear index={3} className="first-run-steps">
+        <Appear index={3} className="mt-4.5">
           <Steps variant="settings">
             <Step
               state="current"
@@ -160,7 +160,7 @@ export function FirstRunGuide({
             />
           </Steps>
         </Appear>
-        <Appear index={4} className="first-run-hint">
+        <Appear index={4} className="mt-3.5">
           <p className="ui-guide-hint">
             Press <Kbd>{shortcutLabel("command-palette")}</Kbd> to search or
             jump anywhere.

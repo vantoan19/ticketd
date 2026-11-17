@@ -70,7 +70,8 @@ import {
   type SnoozeChoice,
 } from "./inboxModel";
 import "./inbox.css";
-import { EntrySlot, UnreadDot, useArrivals } from "./inbox-motion";
+import { EntrySlot, UnreadDot } from "./inbox-motion";
+import { useArrivals } from "./inbox-arrivals";
 import { Reference } from "@/components/ui/reference";
 import { ConflictReview } from "@/features/sync-review/ConflictReview";
 import {
