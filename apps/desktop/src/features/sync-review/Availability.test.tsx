@@ -17,7 +17,7 @@ import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { TicketFiles } from "@/features/tickets/TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
-import { WorkspaceChangeProvider } from "@/lib/workspace-change";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -188,18 +188,30 @@ test("a download on open that fails says why and leaves Download", async () => {
 
 test("availability that cannot be read again keeps what was last known", async () => {
   const ticket = { id: "t", reference: "T-KQ12", trashed: false } as Ticket;
-  const view = (change: number) => (
-    <WorkspaceChangeProvider value={change}>
-      <TestOpenTicket ticket={ticket}>
-        <TicketFiles />
-      </TestOpenTicket>
-    </WorkspaceChangeProvider>
+  // Nothing is downloading, so only a change can make availability be read again.
+  states = [
+    { id: "a", state: "not_downloaded", progress: null },
+    { id: "b", state: "not_downloaded", progress: null },
+    { id: "c", state: "downloaded", progress: null },
+  ];
+  const signal = fakeChangeSignal();
+  render(
+    <TestOpenTicket ticket={ticket} signal={signal}>
+      <TicketFiles />
+    </TestOpenTicket>,
   );
-  const { rerender } = render(view(0));
-  await screen.findByText("193 B · Not downloaded");
+  await screen.findAllByText("193 B · Not downloaded");
+  expect(syncReview.availability).toHaveBeenCalledTimes(1);
+
   vi.mocked(syncReview.availability).mockRejectedValue(new Error("busy"));
-  rerender(view(1));
-  await waitFor(() => expect(syncReview.availability).toHaveBeenCalledTimes(2));
-  await act(() => new Promise<void>((done) => setTimeout(done)));
-  expect(screen.getByText("193 B · Not downloaded")).toBeTruthy();
+  act(() => signal.change());
+  // Well inside the two-second download poll: the change itself re-read it.
+  await waitFor(
+    () => expect(syncReview.availability).toHaveBeenCalledTimes(2),
+    {
+      timeout: 1000,
+    },
+  );
+  await act(async () => {});
+  expect(screen.getAllByText("193 B · Not downloaded")).toHaveLength(2);
 });
