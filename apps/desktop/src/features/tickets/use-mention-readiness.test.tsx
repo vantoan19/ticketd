@@ -149,4 +149,61 @@ describe("a followed mention is judged against a read made after it was followed
     await settle();
     expect(judged()).toBe("old body");
   });
+
+  test("a record never read is judged after the page's first read, with one read", async () => {
+    const reads: ReturnType<typeof deferred<ReturnType<typeof ticketFor>>>[] =
+      [];
+    bridge.invoke.mockImplementation(async () => {
+      const next = deferred<ReturnType<typeof ticketFor>>();
+      reads.push(next);
+      return next.promise;
+    });
+    render(
+      <TestReads>
+        <Harness />
+      </TestReads>,
+    );
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+    await settle();
+    expect(reads).toHaveLength(1);
+    await act(async () => reads[0]?.resolve(ticketFor("T-2", { body: "b" })));
+    await settle();
+    expect(reads).toHaveLength(1);
+    expect(judged()).toBe("b");
+  });
+
+  test("a stale copy waits for the re-read already under way", async () => {
+    const reads: ReturnType<typeof deferred<ReturnType<typeof ticketFor>>>[] =
+      [];
+    let hold = false;
+    bridge.invoke.mockImplementation(async () => {
+      if (!hold) return ticketFor("T-2", { body: "old body" });
+      const next = deferred<ReturnType<typeof ticketFor>>();
+      reads.push(next);
+      return next.promise;
+    });
+    const signal = fakeChangeSignal();
+    render(
+      <TestReads signal={signal}>
+        <Harness />
+      </TestReads>,
+    );
+    await settle();
+    hold = true;
+    await act(async () => signal.change());
+    await settle();
+    expect(reads).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+    await settle();
+    expect(reads).toHaveLength(1);
+    expect(judged()).toBe("waiting");
+    await act(async () =>
+      reads[0]?.resolve(ticketFor("T-2", { body: "new body" })),
+    );
+    await settle();
+    expect(reads).toHaveLength(1);
+    expect(judged()).toBe("new body");
+  });
 });

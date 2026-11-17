@@ -31,21 +31,25 @@ export function useMentionReadiness({
     mention !== null && !mention.ready && selected !== null
       ? mention.reference === selected
       : false;
-  // A record that is known is read once more for each followed mention,
-  // whatever it holds (a copy as current as the last change, a stale one, or
-  // one with a failure kept from before): `retry` resolves only once a read
-  // made after the call has answered, with a body or a failure. A record never
-  // read waits for the page's first read of it, which is made after the follow.
-  const forced = useRef<number | null>(null);
+  // Decided once per mention, when it is first judged (the answer to the
+  // page's first read must not turn a never-read record into a known one that
+  // is then read again). A current copy, or any kept failure, is read once
+  // more: `retry` resolves only once a read made after the call has answered,
+  // with a body or a failure. A record never read, or a stale one the page is
+  // already re-reading, waits for that read (`current`, or a failure).
+  const decided = useRef<{ key: number; force: boolean } | null>(null);
   useEffect(() => {
     if (!judging || key === undefined || selected === null) return;
-    if (forced.current === key) return;
-    if (known) {
-      forced.current = key;
-      void retry().then(() => {
-        if (forced.current === key) onReady(selected);
-      });
-    } else if (current || failed) onReady(selected);
+    if (decided.current?.key !== key) {
+      const force = known && (current || failed);
+      decided.current = { key, force };
+      if (force) {
+        void retry().then(() => {
+          if (decided.current?.key === key) onReady(selected);
+        });
+      }
+    }
+    if (!decided.current.force && (current || failed)) onReady(selected);
   }, [judging, key, selected, known, current, failed, retry, onReady]);
 
   const trashed = record.value?.trashed;
