@@ -12,7 +12,8 @@ const SETTLE_MS = 120;
  * rail and the drafts inside it are not remounted when the workspace is shown
  * again.
  *
- * The first measure is immediate; later ones wait for the width to settle, so a
+ * The first measure, and the observer's first report, are immediate; later ones
+ * wait for the width to settle, so a
  * panel that is resizing (the sidebar's width spring sweeps the content panel)
  * never flips the layout halfway through its motion.
  */
@@ -29,9 +30,15 @@ export function useNarrowPane(
     };
     measure(pane.clientWidth);
     let settle: ReturnType<typeof setTimeout> | undefined;
+    let reported = false;
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       const { width } = entry.contentRect;
+      if (!reported) {
+        reported = true;
+        measure(width);
+        return;
+      }
       clearTimeout(settle);
       settle = setTimeout(() => measure(width), SETTLE_MS);
     });

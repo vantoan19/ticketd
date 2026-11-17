@@ -50,9 +50,16 @@ it("measures the first layout at once", () => {
   expect(narrow(container)).toBe("true");
 });
 
+it("takes the observer's first report at once", () => {
+  const { container } = render(<Probe width={0} />);
+  act(() => resize(700));
+  expect(narrow(container)).toBe("true");
+});
+
 it("does not flip while the width sweeps across the threshold", () => {
   const { container } = render(<Probe width={1000} />);
   expect(narrow(container)).toBe("false");
+  act(() => resize(1000));
   // A sidebar spring: the panel shrinks through 880 and ends narrow; the
   // flip waits for the width to stop changing.
   for (const width of [960, 900, 870, 850, 840]) {
@@ -70,6 +77,7 @@ it("does not flip while the width sweeps across the threshold", () => {
 
 it("a sweep that ends on the same side never flips it", () => {
   const { container } = render(<Probe width={1000} />);
+  act(() => resize(1000));
   const flips: (string | null | undefined)[] = [];
   for (const width of [900, 860, 890, 940, 1000]) {
     act(() => {

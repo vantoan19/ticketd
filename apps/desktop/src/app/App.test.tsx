@@ -180,6 +180,14 @@ async function openManageMenu(label: string, item: string) {
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
 }
 
+/** Collapse the sidebar and let the groups finish folding into their icons. */
+async function foldSidebar() {
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+}
+
 /** One ticket for an unfiltered read, none once a search or filter narrows it. */
 function unfilteredOnly(args: unknown) {
   const filter = (
@@ -2817,7 +2825,7 @@ test("the ticket detail bounds one document scroller and keeps properties in the
 test("the folded sidebar opens Projects and Plans as one menu each", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
-  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await foldSidebar();
   // The rail holds one entry per group, not a row per project or Plan.
   expect(screen.queryByRole("button", { name: "All projects" })).toBeNull();
   await openManageMenu("Projects", "All projects");
@@ -2829,7 +2837,7 @@ test("the folded sidebar opens Projects and Plans as one menu each", async () =>
 test("every icon on the folded rail names itself in a tooltip", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
-  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await foldSidebar();
   const rail = document.querySelector<HTMLElement>(".sidebar")!;
   const unnamed = within(rail)
     .getAllByRole("button")
