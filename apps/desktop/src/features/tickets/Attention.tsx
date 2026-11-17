@@ -1,5 +1,5 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { followingFill, useTicket, useTicketChanged } from "./open-ticket";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -87,22 +87,41 @@ export function FollowToggle({
     }
   }
   // A failed read offers a read again; a failed change offers sending it again.
-  const retry = () => (changeError ? void toggle() : void read.retry());
-  const retryFromLine = useEffectEvent(retry);
+  // Both settle when that action does, so the status line stays busy until
+  // then.
+  const retry = (): Promise<void> => (changeError ? toggle() : read.retry());
+  // A line is about the Ticket it was shown for: once the header moves on it
+  // goes (below), and a Retry that still reaches here does nothing.
+  const retryFromLine = useEffectEvent((target: string) =>
+    target === reference ? retry() : Promise.resolve(),
+  );
+  const shownFor = useRef<string | null>(null);
   useEffect(() => {
-    if (variant !== "strip" || !error) return;
+    if (variant !== "strip" || !error) {
+      shownFor.current = null;
+      return;
+    }
+    shownFor.current = reference;
     line.show({
       tone: "error",
       message: `${error.title}. ${error.sentence}`,
-      action: { label: "Retry", run: () => retryFromLine() },
+      action: { label: "Retry", run: () => retryFromLine(reference) },
     });
-  }, [error, variant, line]);
+  }, [error, variant, line, reference]);
+  useEffect(
+    () => () => {
+      if (shownFor.current !== reference) return;
+      shownFor.current = null;
+      line.dismiss();
+    },
+    [reference, line],
+  );
   const Icon = following ? Eye : EyeOff;
   const failure = error && (
     <FailureCaption
       failure={error}
       label={changeError ? "Not saved" : "Not checked"}
-      onRetry={() => retry()}
+      onRetry={() => void retry()}
     />
   );
   if (variant === "strip")

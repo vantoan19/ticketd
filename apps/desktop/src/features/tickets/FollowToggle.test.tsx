@@ -6,13 +6,16 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   StatusLineContext,
   type StatusLineMessage,
 } from "@/components/ui/use-status-line";
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { FollowToggle } from "@/features/tickets/Attention";
+import { deferred } from "@/lib/workspace-reads/test-support";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { TestReads } from "@/lib/workspace-reads/testing";
 
@@ -287,4 +290,64 @@ test("the rail's Retry after a failed change sends the change again", async () =
     expect(toggle().getAttribute("aria-pressed")).toBe("true"),
   );
   expect(calls("set_following")).toHaveLength(2);
+});
+
+test("the status line's Retry stays busy until the re-read answers", async () => {
+  const answer = deferred<boolean>();
+  let reads = 0;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following") {
+        reads += 1;
+        if (reads === 1) throw new Error("database is busy");
+        return answer.promise;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(
+    <TestReads>
+      <StatusLineRegion>
+        <FollowToggle reference="T-A" variant="strip" />
+      </StatusLineRegion>
+    </TestReads>,
+  );
+  const line = await screen.findByRole("alert");
+  fireEvent.click(within(line).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(reads).toBe(2));
+  expect(screen.queryByRole("alert")).toBeTruthy();
+  expect(
+    within(screen.getByRole("alert"))
+      .getByRole("button", { name: "Retry" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  await act(async () => answer.resolve(true));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(toggle().getAttribute("aria-pressed")).toBe("true");
+});
+
+test("a status line about one Ticket's failure goes when the header moves to another", async () => {
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following") {
+        if (args!.reference === "T-A") throw new Error("database is busy");
+        return false;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  const view = (reference: string) => (
+    <TestReads>
+      <StatusLineRegion>
+        <FollowToggle reference={reference} variant="strip" />
+      </StatusLineRegion>
+    </TestReads>
+  );
+  const { rerender } = render(view("T-A"));
+  await screen.findByRole("alert");
+  rerender(view("T-B"));
+  await waitFor(() => expect(calls("is_following", "T-B")).toHaveLength(1));
+  expect(screen.queryByRole("alert")).toBeNull();
 });
