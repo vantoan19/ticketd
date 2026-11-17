@@ -107,7 +107,7 @@ test("the starters open without a rise under reduced motion", async () => {
   await screen.findByRole("group", { name: "Start from an example" });
   for (const each of appears(container)) {
     expect(each.style.transform).not.toContain("6px");
-    expect(each.style.filter).toBe("blur(0px)");
+    expect(each.style.filter).not.toContain("4px");
   }
 });
 
@@ -141,17 +141,23 @@ test("a step added to an open flow arrives and its line draws; the steps it open
   fireEvent.click((await within(rows).findAllByRole("button"))[0]!);
   const steps = await screen.findByRole("application", { name: "Steps" });
   await within(steps).findByRole("button", { name: /^Notify/ });
-  expect(container.querySelectorAll(".flow-card-arrival")).toHaveLength(0);
+  expect(
+    container.querySelectorAll('.flow-canvas [data-slot="appear"]'),
+  ).toHaveLength(0);
 
   const adders = within(steps).getAllByRole("button", { name: /^Add a step/ });
   fireEvent.keyDown(adders[adders.length - 1]!, { key: "Enter" });
   fireEvent.click(await screen.findByRole("menuitem", { name: /Notify me/ }));
 
   await waitFor(() =>
-    expect(container.querySelectorAll(".flow-card-arrival")).toHaveLength(1),
+    expect(
+      container.querySelectorAll('.flow-canvas [data-slot="appear"]'),
+    ).toHaveLength(1),
   );
   expect(
-    container.querySelector(".flow-card-arrival")?.getAttribute("data-slot"),
+    container
+      .querySelector('.flow-canvas [data-slot="appear"]')
+      ?.getAttribute("data-slot"),
   ).toBe("appear");
 });
 

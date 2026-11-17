@@ -312,10 +312,6 @@
   box-shadow: var(--shadow-border-base);
 }
 /* A step added to an open flow: the card fades up, then its line draws. */
-.flow-card-arrival {
-  width: 100%;
-  height: 100%;
-}
 .flow-canvas .react-flow__edge-path.ui-drawn {
   animation-delay: var(--dur-enter);
 }

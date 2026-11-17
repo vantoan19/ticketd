@@ -238,11 +238,7 @@ function StepArrival({
   arrived: boolean;
   children: ReactNode;
 }) {
-  return arrived ? (
-    <Appear className="flow-card-arrival">{children}</Appear>
-  ) : (
-    children
-  );
+  return arrived ? <Appear className="size-full">{children}</Appear> : children;
 }
 
 /**
