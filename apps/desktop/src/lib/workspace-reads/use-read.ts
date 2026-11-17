@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readKey, skip, words, type ReadSpec, type Skip } from "./catalog";
 import {
@@ -38,14 +38,27 @@ export function useRead<A, V>(
     args === skip ? "" : words(spec.failure, args),
   );
   const refetch = query.refetch;
-  const retry = useCallback(() => void refetch(), [refetch]);
+  // Retry reads only what is read now: a leftover button (for a Ticket that has
+  // closed, or a hidden view) must not call the read or touch the entry.
+  // It asks the latest render, because the button may be from an earlier one.
+  const readsNow = useRef(enabled);
+  useEffect(() => {
+    readsNow.current = enabled;
+  });
+  const retry = useCallback(() => {
+    if (readsNow.current) void refetch();
+  }, [refetch]);
+  // A skipped read is idle whatever its shared entry holds.
+  const skipped = args === skip;
   return withCurrent(
     {
-      value: query.data,
-      failure,
+      value: skipped ? undefined : query.data,
+      failure: skipped ? null : failure,
       retry,
-      status: statusOf(query.data !== undefined, failure !== null, enabled),
+      status: skipped
+        ? "idle"
+        : statusOf(query.data !== undefined, failure !== null, enabled),
     },
-    () => query.data !== undefined && !query.isStale,
+    () => !skipped && query.data !== undefined && !query.isStale,
   );
 }

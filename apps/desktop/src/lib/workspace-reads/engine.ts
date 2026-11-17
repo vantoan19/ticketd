@@ -36,7 +36,6 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
         gcTime: 60 * 60 * 1000,
         // Nothing retries on its own; the person presses Retry.
         retry: false,
-        retryOnMount: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
         // Every read is local; macOS may report no network while offline.

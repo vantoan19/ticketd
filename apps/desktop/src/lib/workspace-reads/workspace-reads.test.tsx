@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { read, skip } from "./catalog";
+import { read, skip, type ReadSpec, type Skip } from "./catalog";
 import { fakeChangeSignal } from "./fake-signal";
 import { TestReads } from "./testing";
 import { useRead } from "./use-read";
@@ -357,5 +357,90 @@ describe("no needless renders", () => {
     await settle();
     expect(renders).toBe(rendersAfterFirst);
     expect(values.at(-1)).toBe(first);
+  });
+});
+
+describe("skip", () => {
+  it("does nothing on Retry and never shows a failure for a skipped read", async () => {
+    const call = vi.fn(async (reference: string) => {
+      if (typeof reference !== "string") throw new Error("bad arguments");
+      throw new Error("locked");
+    });
+    const spec = read({ key: "skipped", call, failure: "load the update" });
+    const { result, rerender } = renderHook(
+      ({ args }: { args: string | Skip }) => ({
+        mine: useRead(spec, args),
+        other: useRead(spec, skip),
+      }),
+      { wrapper: wrap(), initialProps: { args: "T-1" as string | Skip } },
+    );
+    await waitFor(() => expect(result.current.mine.failure).not.toBeNull());
+    // A Retry button from before the Ticket closed is still around.
+    const retry = result.current.mine.retry;
+    rerender({ args: skip });
+    await settle();
+    expect(result.current.mine.failure).toBeNull();
+    expect(result.current.mine.status).toBe("idle");
+    call.mockClear();
+
+    act(() => retry());
+    await settle();
+    await settle();
+    expect(call).not.toHaveBeenCalled();
+    expect(result.current.other.failure).toBeNull();
+    expect(result.current.other.status).toBe("idle");
+  });
+});
+
+describe("catching up after a failed first read", () => {
+  /** A view mounted only while its Ticket is selected, like a section. */
+  function Section({ spec }: { spec: ReadSpec<string, string> }) {
+    const state = useRead(spec, "T-1");
+    return <output>{state.value ?? state.failure?.title ?? "loading"}</output>;
+  }
+
+  it("reads again when the view returns after a change arrived while it was away", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockResolvedValue("evidence");
+    const spec = read({ key: "away", call, failure: "load evidence" });
+    const tree = (shown: boolean) => (
+      <TestReads signal={signal}>{shown && <Section spec={spec} />}</TestReads>
+    );
+    const { rerender } = render(tree(true));
+    await screen.findByText("Couldn't load evidence");
+    rerender(tree(false));
+    act(() => signal.change());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+
+    rerender(tree(true));
+    await screen.findByText("evidence");
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads again when a hidden read with no value is shown", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockResolvedValue("evidence");
+    const spec = read({ key: "hidden-failed", call, failure: "load evidence" });
+    const tree = (hidden: boolean) => (
+      <TestReads signal={signal}>
+        <Visibility hidden={hidden}>
+          <Section spec={spec} />
+        </Visibility>
+      </TestReads>
+    );
+    const { rerender } = render(tree(false));
+    await screen.findByText("Couldn't load evidence");
+    rerender(tree(true));
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+    rerender(tree(false));
+    await screen.findByText("evidence");
   });
 });
