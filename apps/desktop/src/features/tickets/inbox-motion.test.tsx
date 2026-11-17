@@ -1,23 +1,13 @@
 // @vitest-environment jsdom
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { Inbox } from "./Inbox";
-import { useArrivals } from "./inbox-arrivals";
+import { useNewEntries } from "./inbox-arrivals";
 import { UnreadDot } from "./inbox-motion";
 import type { Entry } from "./inboxModel";
-import {
-  applyTokens,
-  instantTokens,
-  reducedTokens,
-  rootTokens,
-} from "@/test/motion-tokens";
+import { frames } from "@/test/motion-clock";
+import { EXIT_MS, holdKey, motionTestbed } from "@/test/motion-testbed";
 
 // Inbox entries (DESIGN.md section 12): a new entry opens its space and fades
 // up; marked read, the unread dot shrinks away in the exit time. Entries that
@@ -54,14 +44,9 @@ const entry = (id: number): Entry => ({
   editing_agent: null,
 });
 
-let restoreTokens: () => void;
+const testbed = motionTestbed();
 beforeEach(() => {
-  restoreTokens = applyTokens(rootTokens);
   store = [entry(1), entry(2)];
-});
-afterEach(() => {
-  cleanup();
-  restoreTokens();
 });
 
 const slot = (title: string) =>
@@ -94,6 +79,41 @@ test("an entry that arrives opens its space soft and small; the others stay put"
   expect(inserted[0]?.[1]).toContain("blur(4px)");
 });
 
+test("entries are marked as rows for a page arrival, and rest with no blur filter", async () => {
+  render(
+    <MotionProvider>
+      <Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />
+    </MotionProvider>,
+  );
+  await screen.findByText("Ticket 1");
+  for (const title of ["Ticket 1", "Ticket 2"]) {
+    expect(slot(title).getAttribute("data-arrive")).toBe("row");
+    // A resting blur(0px) would keep a compositing layer on every row.
+    expect(slot(title).style.filter).not.toBe("blur(0px)");
+  }
+});
+
+test("an entry that arrives settles with no blur filter either", async () => {
+  testbed.realTime();
+  const view = (revision: number) => (
+    <MotionProvider>
+      <Inbox revision={revision} select={vi.fn()} onBrowse={vi.fn()} />
+    </MotionProvider>
+  );
+  const { rerender } = render(view(0));
+  await screen.findByText("Ticket 1");
+  store = [entry(3), ...store];
+  rerender(view(1));
+  await screen.findByText("Ticket 3");
+  await waitFor(
+    () => {
+      expect(slot("Ticket 3").style.opacity).toBe("1");
+      expect(slot("Ticket 3").style.filter).toBe("none");
+    },
+    { timeout: 10_000 },
+  );
+});
+
 function Dot({ read }: { read: boolean }) {
   return (
     <MotionProvider>
@@ -101,38 +121,40 @@ function Dot({ read }: { read: boolean }) {
     </MotionProvider>
   );
 }
-const dot = () =>
-  document.querySelector('[data-slot="status-dot"], svg, span i');
 
 test("marked read, the unread dot shrinks away in the exit time, not before", async () => {
   const { container, rerender } = render(<Dot read={false} />);
-  expect(container.textContent).toBe("");
   const mark = () => container.querySelector("span");
   expect(mark()).not.toBeNull();
   rerender(<Dot read />);
-  const start = performance.now();
+  await frames();
   expect(mark()).not.toBeNull();
-  await waitFor(() => expect(mark()).toBeNull(), { interval: 4 });
-  expect(performance.now() - start).toBeGreaterThanOrEqual(140);
-  void dot;
+  await testbed.advance(EXIT_MS - 10);
+  expect(mark()).not.toBeNull();
+  await testbed.advance(20);
+  expect(mark()).toBeNull();
 });
 
-test.each([
-  ["reduced motion", reducedTokens],
-  ["a held key or rapid clicks", instantTokens],
-])("with %s the dot goes at once", async (_name, tokens) => {
-  restoreTokens();
-  restoreTokens = applyTokens({ ...rootTokens, ...tokens });
+test("under reduced motion the dot goes at once", async () => {
+  testbed.reduceMotion();
   const { container, rerender } = render(<Dot read={false} />);
   rerender(<Dot read />);
-  const start = performance.now();
-  await waitFor(() => expect(container.querySelector("span")).toBeNull(), {
-    interval: 4,
-  });
-  expect(performance.now() - start).toBeLessThan(100);
+  await frames();
+  expect(container.querySelector("span")).toBeNull();
+});
+
+test("while a key repeats the dot goes at once", async () => {
+  const { container, rerender } = render(<Dot read={false} />);
+  await frames();
+  holdKey();
+  rerender(<Dot read />);
+  await frames();
+  expect(container.querySelector("span")).toBeNull();
 });
 
 test("opening an entry marks it read and its dot goes", async () => {
+  // The dot leaves in its own time; this waits for the state, not a duration.
+  testbed.realTime();
   render(
     <MotionProvider>
       <Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />
@@ -161,7 +183,7 @@ function Arrivals({
   settled?: boolean;
   pages?: number;
 }) {
-  const arrived = useArrivals(keys, settled, pages);
+  const arrived = useNewEntries(keys, settled, pages);
   told.push([...arrived].join(","));
   return null;
 }

@@ -1,14 +1,9 @@
 import type { ReactNode } from "react";
 import { m } from "motion/react";
 import { Presence } from "@/components/ui/motion";
+import { arrival } from "@/components/ui/row-motion";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  blur,
-  enterTransition,
-  exitTransition,
-  rise,
-  spring,
-} from "@/lib/motion-tokens";
+import { exitTransition } from "@/lib/motion-tokens";
 
 /** The motion of Inbox entries (DESIGN.md section 12). */
 
@@ -24,28 +19,12 @@ export function EntrySlot({
   arriving: boolean;
   children: ReactNode;
 }) {
-  const smooth = spring("smooth");
+  const { initial, animate } = arrival(0, { space: true });
   return (
     <m.li
-      initial={
-        arriving
-          ? {
-              height: 0,
-              opacity: 0,
-              y: rise("row"),
-              filter: `blur(${blur("in")}px)`,
-              overflow: "hidden",
-            }
-          : false
-      }
-      animate={{
-        height: "auto",
-        opacity: 1,
-        y: 0,
-        filter: "blur(0px)",
-        transition: { default: enterTransition(), height: smooth, y: smooth },
-        transitionEnd: { overflow: "visible" },
-      }}
+      data-arrive="row"
+      initial={arriving ? initial : false}
+      animate={animate}
     >
       {children}
     </m.li>

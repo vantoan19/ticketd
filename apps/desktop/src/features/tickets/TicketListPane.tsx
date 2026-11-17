@@ -32,6 +32,7 @@ import { allowRemoval } from "@/lib/removal-guard";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import { useListCascade } from "@/features/tickets/use-list-cascade";
 import {
   useFiltersMenu,
   type FiltersMenuState,
@@ -130,14 +131,10 @@ function TicketListBody({
         )
       : null;
   const headerTotal = boardTotal ?? total;
-  // Back from the Board, the rows fade up top first.
-  const [layouts, setLayouts] = useState({
-    now: workspace.layout,
-    before: workspace.layout,
-  });
-  if (layouts.now !== workspace.layout)
-    setLayouts({ now: workspace.layout, before: layouts.now });
-  const cameFromBoard = layouts.before === "board" && layouts.now === "list";
+  // Back from the Board, or in place of the placeholders, the rows fade up top
+  // first, once.
+  const waiting = loading && tickets.length === 0;
+  const { cascade, done: cascaded } = useListCascade(workspace.layout, waiting);
   // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const planAction = usePlanAction(planState);
@@ -365,17 +362,20 @@ function TicketListBody({
             // First run (S20): the title alone over an empty workspace.
             (workspace.listKnown || boardTotal !== null) &&
             !bare && (
-              <Count>
-                {filtered && scopeTotal != null
-                  ? ofTotal(headerTotal, scopeTotal)
-                  : headerTotal}
+              // The noun sits outside Count so the number alone crossfades.
+              <>
+                <Count>
+                  {filtered && scopeTotal != null
+                    ? ofTotal(headerTotal, scopeTotal)
+                    : headerTotal}
+                </Count>
                 {!(filtered && scopeTotal != null) && (
                   <span className="sr-only">
                     {" "}
                     {noun(headerTotal, "ticket")}
                   </span>
                 )}
-              </Count>
+              </>
             )
           }
           actions={
@@ -453,6 +453,9 @@ function TicketListBody({
               <m.div
                 key="list"
                 className="ticket-scroll"
+                // The rows glide from where they were on screen, not from
+                // where they sat before the list scrolled.
+                layoutScroll
                 exit={{
                   opacity: 0,
                   filter: `blur(${blur("out")}px)`,
@@ -473,7 +476,7 @@ function TicketListBody({
                     }
                     onRetry={() => void refresh({ reportFailure: true })}
                   />
-                ) : loading && tickets.length === 0 ? (
+                ) : waiting ? (
                   <TicketRowsSkeleton detailed={ticketRows === "detailed"} />
                 ) : (
                   <>
@@ -502,7 +505,8 @@ function TicketListBody({
                         query,
                         trash,
                       ])}
-                      cascade={cameFromBoard}
+                      cascade={cascade}
+                      onCascaded={cascaded}
                       tickets={visibleTickets}
                       empty={emptyView}
                       scope={{

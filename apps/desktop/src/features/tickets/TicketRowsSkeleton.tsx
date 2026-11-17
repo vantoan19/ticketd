@@ -1,22 +1,9 @@
 import { useState } from "react";
 import { m } from "motion/react";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  blur,
-  enterTransition,
-  rise,
-  spring,
-  staggerDelay,
-} from "@/lib/motion-tokens";
+import { arrival } from "@/components/ui/row-motion";
+import { loadingDelay } from "@/lib/motion-tokens";
 import "./ticket-list.css";
-
-/** The wait before any placeholder shows, so a fast read never flashes one. */
-function loadingDelay(): number {
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue("--dur-loading-delay")
-    .trim();
-  return (Number.parseFloat(value) || 0) / (value.endsWith("ms") ? 1000 : 1);
-}
 
 /**
  * Row-shaped placeholders retain the chosen ledger density. After the loading
@@ -36,27 +23,9 @@ export function TicketRowsSkeleton({
       <span className="sr-only">Loading tickets…</span>
       <ul className="ticket-rows" aria-hidden="true">
         {Array.from({ length: count }, (_, index) => {
-          const wait = delay + staggerDelay(index);
           return (
-            <m.li
-              key={index}
-              initial={{
-                opacity: 0,
-                y: rise("row"),
-                filter: `blur(${blur("in")}px)`,
-              }}
-              animate={{
-                opacity: 1,
-                y: 0,
-                filter: "blur(0px)",
-                // The delay sits inside each entry: a `default` entry would
-                // otherwise start at once and ignore a delay beside it.
-                transition: {
-                  default: { ...enterTransition(), delay: wait },
-                  y: { ...spring("smooth"), delay: wait },
-                },
-              }}
-            >
+            // Placeholders never carry data-arrive: they are not page rows.
+            <m.li key={index} {...arrival(index, { after: delay })}>
               <span className="ticket-select" />
               <span
                 className="ticket-row"

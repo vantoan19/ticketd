@@ -6,12 +6,12 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { m } from "motion/react";
 import { Arrival } from "@/components/ui/motion";
+import { glide } from "@/components/ui/row-motion";
 import { spring } from "@/lib/motion-tokens";
 import {
   ArrowLeft,
@@ -141,6 +141,7 @@ function ChatRow({
   active,
   tabStop,
   now,
+  order,
   onOpen,
   onResult,
 }: {
@@ -151,6 +152,8 @@ function ChatRow({
   /** The row the list's one Tab stop lands on. */
   tabStop: boolean;
   now: number;
+  /** The list's order (the ids joined): rows are measured for a glide only when it changes. */
+  order: string;
   onOpen: () => void;
   onResult: (failure: ChatFailureNotice | null) => void;
 }) {
@@ -160,10 +163,6 @@ function ChatRow({
   const more = useRef<HTMLSpanElement>(null);
   // A row that moves up into "Needs you" glides there, then its fill arrives.
   const [arrival, setArrival] = useState<number>();
-  const transition = useMemo(
-    () => spring(needs ? "travel" : "smooth"),
-    [needs],
-  );
   const wasNeeds = useRef(needs);
   useEffect(() => {
     const was = wasNeeds.current;
@@ -181,8 +180,9 @@ function ChatRow({
   });
   return (
     <m.li
-      layout="position"
-      transition={transition}
+      // Read in render, never cached, so a held key and reduced motion reach it.
+      {...glide(`${order}:${needs}`, needs ? "travel" : "smooth")}
+      data-arrive="row"
       className="chat-row-item"
       onKeyDown={moveInList}
     >
@@ -342,6 +342,7 @@ export function ChatsView({
   const list = useChatList(scope);
   const [pointerOver, setPointerOver] = useState(false);
   const placed = usePlaced(list?.chats, pointerOver);
+  const order = placed.map(({ chat }) => chat.id).join();
   const now = useNow();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
@@ -496,6 +497,7 @@ export function ChatsView({
                 chat={chat}
                 needs={needs}
                 now={now}
+                order={order}
                 active={open?.kind === "chat" && open.id === chat.id}
                 tabStop={
                   list.chats.some(

@@ -15,7 +15,7 @@ type Seen = {
  * list only grew because "Show more" was pressed, so a page of fifty rows
  * never animates at once.
  */
-export function useArrivals(
+export function useNewEntries(
   keys: readonly string[],
   settled: boolean,
   pages: number,

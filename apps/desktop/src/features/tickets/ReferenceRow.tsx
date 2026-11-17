@@ -29,6 +29,7 @@ export function ReferenceRow({
   action,
   kind,
   animated = false,
+  layoutDependency,
 }: {
   reference: string;
   title: string;
@@ -45,11 +46,17 @@ export function ReferenceRow({
   /** Fades up when it arrives, fades out when it leaves and glides when a
    *  neighbour does; the list puts its rows in a `Presence`. */
   animated?: boolean;
+  /** Changes when the list's order does, so the row is measured then only. */
+  layoutDependency?: string;
 }) {
   return (
     <m.li
       className="reference-row"
-      {...(animated && { ...arrival(), ...departure(), ...glide() })}
+      {...(animated && {
+        ...arrival(),
+        ...departure(),
+        ...glide(layoutDependency),
+      })}
       data-density={density}
       data-kind={kind}
       data-action={action ? "" : undefined}

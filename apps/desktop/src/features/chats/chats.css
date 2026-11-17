@@ -48,6 +48,8 @@
 /* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
 .chat-row-item {
   position: relative;
+  /* The arrival fill sits behind the row (Arrival's contract). */
+  isolation: isolate;
 }
 .chat-row-more {
   position: absolute;
