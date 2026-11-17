@@ -289,3 +289,39 @@ test("Undo of a removal shows the Document again even when the re-read after the
   });
   expect(await screen.findByRole("button", { name: "Linked" })).toBeTruthy();
 });
+
+test("Undo of a removal shows the Document again and keeps it when the re-read after Undo fails", async () => {
+  let attached = true;
+  let failReads = false;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "document_context_links") {
+      if (failReads) throw new Error("database is busy");
+      return [attached ? [link("d1", "Linked", true)] : [], []];
+    }
+    if (command === "set_ticket_document") {
+      attached = (args as { present: boolean }).present;
+      return null;
+    }
+    return command === "ticket_attachments" ? [] : null;
+  });
+  let message: StatusLineMessage | null = null;
+  const line = {
+    show: (next: StatusLineMessage) => {
+      message = next;
+    },
+    dismiss: () => {},
+    setInset: () => {},
+  };
+  render(<StatusLineContext value={line}>{files()}</StatusLineContext>);
+  fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));
+  await waitFor(() => expect(message?.undo).toBeTruthy());
+  await act(async () => {});
+  expect(screen.queryByRole("button", { name: "Linked" })).toBeNull();
+
+  failReads = true;
+  await act(async () => {
+    await (message as StatusLineMessage | null)?.undo?.();
+  });
+  expect(screen.getByRole("button", { name: "Linked" })).toBeTruthy();
+  expect(attached).toBe(true);
+});
