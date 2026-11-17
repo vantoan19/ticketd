@@ -26,6 +26,8 @@ export const windowClient = {
       .onCloseRequested((event) => {
         if (quitting) return;
         event.preventDefault();
+        // Editors report typing they hold, so drafts are queued before quitting.
+        window.dispatchEvent(new Event("ticketd:window-closing"));
         // With Chats working the shell hides the window and nothing is quitting.
         void invoke<boolean>("close_keeps_running")
           .catch(() => false)
