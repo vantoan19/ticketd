@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { TicketList } from "@/features/tickets/TicketList";
 import type { Ticket } from "@/lib/api/client";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
@@ -80,15 +81,17 @@ const ticket = (id: string, reference: string): Ticket => ({
 test("a ticket row says Needs review in place of its readiness", async () => {
   vi.mocked(syncReview.conflicts).mockResolvedValue([conflict]);
   render(
-    <TicketList
-      tickets={[ticket("guid-12", "T-KQ12"), ticket("guid-13", "T-KQ13")]}
-      selected={null}
-      onOpen={vi.fn()}
-      bulkSelection={[]}
-      onToggle={vi.fn()}
-      selectable
-      scope={{ showPlan: false, showProject: false, plans: [], projects: [] }}
-    />,
+    <TestReads>
+      <TicketList
+        tickets={[ticket("guid-12", "T-KQ12"), ticket("guid-13", "T-KQ13")]}
+        selected={null}
+        onOpen={vi.fn()}
+        bulkSelection={[]}
+        onToggle={vi.fn()}
+        selectable
+        scope={{ showPlan: false, showProject: false, plans: [], projects: [] }}
+      />
+    </TestReads>,
   );
   const label = await screen.findByText("Needs review");
   const row = label.closest("li");

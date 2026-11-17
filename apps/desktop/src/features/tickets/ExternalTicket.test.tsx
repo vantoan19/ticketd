@@ -465,23 +465,25 @@ test("a closed state line uses the core's closure time and names its canonical i
 
 test("a row shows the owner's pill and a local row shows none", () => {
   render(
-    <TicketList
-      tickets={[
-        ticket(),
-        ticket({ id: "2", reference: "T-KQ2", title: "Mine", source: null }),
-      ]}
-      selected={null}
-      onOpen={vi.fn()}
-      bulkSelection={[]}
-      onToggle={vi.fn()}
-      selectable
-      scope={{
-        showPlan: false,
-        showProject: false,
-        plans: [],
-        projects: [],
-      }}
-    />,
+    <TestReads>
+      <TicketList
+        tickets={[
+          ticket(),
+          ticket({ id: "2", reference: "T-KQ2", title: "Mine", source: null }),
+        ]}
+        selected={null}
+        onOpen={vi.fn()}
+        bulkSelection={[]}
+        onToggle={vi.fn()}
+        selectable
+        scope={{
+          showPlan: false,
+          showProject: false,
+          plans: [],
+          projects: [],
+        }}
+      />
+    </TestReads>,
   );
   const pills = [
     ...document.querySelectorAll('[data-slot="badge"][data-variant="source"]'),
