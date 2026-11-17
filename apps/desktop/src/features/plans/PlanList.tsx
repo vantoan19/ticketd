@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArchiveRestore, Layers, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Appear } from "@/components/ui/motion";
+import { enter } from "@/components/ui/enter";
 import { Count } from "@/components/ui/count";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
@@ -106,8 +106,12 @@ export function PlanList({
   }
 
   return (
-    <ManagementPage layout="centered" aria-labelledby="plan-index-heading">
-      <Appear>
+    <ManagementPage
+      layout="centered"
+      ownEntrance
+      aria-labelledby="plan-index-heading"
+    >
+      <div {...enter(0)}>
         <PageHeader
           title="Plans"
           titleId="plan-index-heading"
@@ -136,7 +140,7 @@ export function PlanList({
             </>
           }
         />
-      </Appear>
+      </div>
       {known && failure && (
         <FailureAlert
           failure={failure}
@@ -174,7 +178,7 @@ export function PlanList({
         >
           {shown.map((item, index) => (
             <li key={item.id}>
-              <Appear index={index + 1}>
+              <div {...enter(index + 1)}>
                 <PlanCard
                   plan={item}
                   projects={projects}
@@ -200,7 +204,7 @@ export function PlanList({
                     </span>
                   )}
                 </PlanCard>
-              </Appear>
+              </div>
             </li>
           ))}
         </ul>

@@ -21,6 +21,8 @@ import {
 } from "@/features/settings/pages/SearchPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import { useFadeThrough } from "@/features/settings/fade-through";
+// The keyframes of the page's own entrance (settings-layout.css plays them).
+import "@/components/ui/enter";
 import "@/features/settings/settings.css";
 
 /** True for the platform's find chord: ⌘F on macOS, Ctrl+F elsewhere. */
@@ -85,7 +87,10 @@ export function SettingsView({
     <div
       ref={scroller}
       className="settings-page"
+      data-own-entrance=""
       data-leaving={leaving || undefined}
+      // Fading out, the page is out of reach: nothing in it takes focus or a click.
+      inert={leaving || undefined}
     >
       {selected === "appearance" && <AppearancePage />}
       {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}

@@ -1,17 +1,20 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { applyTokens, reducedTokens, rootTokens } from "@/test/motion-tokens";
+import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import { PlanFlow } from "./PlanFlow";
 import { PlanList } from "./PlanList";
 
 // Opening Plans and a Plan's Flow (DESIGN.md section 12): the header, then each
-// card fades up from a soft blur in turn; the Flow's lanes arrive left to
-// right and its lines draw once both ends are in place. Timing comes from the
-// tokens, so these tests apply the real ones.
+// card fades up from a soft blur in turn (CSS, enter.css, so these tests check
+// the markers it plays from); the Flow's lanes arrive left to right and its
+// lines draw once both ends are in place. Timing comes from the tokens, so
+// these tests apply the real ones.
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -58,11 +61,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function reduce() {
-  restoreTokens();
-  restoreTokens = applyTokens({ ...rootTokens, ...reducedTokens });
-}
-
 const plans = [
   { id: "p1", name: "Launch", archived: false, purpose: "" },
   { id: "p2", name: "Docs", archived: false, purpose: "" },
@@ -88,34 +86,45 @@ const appears = (root: HTMLElement) => [
   ...root.querySelectorAll<HTMLElement>('[data-slot="appear"]'),
 ];
 
-test("opening Plans fades up the header, then each card, from a soft blur", async () => {
+const steps = (root: HTMLElement) => [
+  ...root.querySelectorAll<HTMLElement>("[data-enter]"),
+];
+
+test("Plans arrange their own entrance: the header, then each card, a stagger step apart", () => {
   const { container } = list();
-  const [header, ...cards] = appears(container);
+  expect(
+    container
+      .querySelector('[data-slot="management-page"]')
+      ?.hasAttribute("data-own-entrance"),
+  ).toBe(true);
+  const [header, ...cards] = steps(container);
   expect(header?.querySelector('[data-slot="page-header"]')).not.toBeNull();
   expect(cards.map((card) => card.textContent)).toEqual([
     expect.stringContaining("Launch"),
     expect.stringContaining("Docs"),
   ]);
-  for (const each of [header!, ...cards]) {
-    expect(each.style.opacity).toBe("0");
-    expect(each.style.filter).toBe("blur(4px)");
-  }
-  await waitFor(() =>
-    expect(appears(container).map((each) => each.style.opacity)).toEqual([
-      "1",
-      "1",
-      "1",
-    ]),
-  );
+  expect(
+    steps(container).map((each) => each.style.getPropertyValue("--enter-step")),
+  ).toEqual(["0", "1", "2"]);
 });
 
-test("Plans open without a rise or blur under reduced motion", () => {
-  reduce();
+test("each card's progress bar waits for its own card, not a flat delay", () => {
+  // The bar's delay is its card's step plus the entrance (plan-progress.css),
+  // so the bar has to sit inside the element that holds the card's step.
+  const css = readFileSync(join(__dirname, "plan-progress.css"), "utf8");
+  expect(css).toMatch(
+    /animation-delay:\s*calc\(\s*var\(--stagger\)\s*\*\s*min\(var\(--enter-step, 0\), 7\)\s*\+\s*var\(--dur-enter\)/,
+  );
   const { container } = list();
-  for (const each of appears(container)) {
-    expect(each.style.transform).not.toContain("6px");
-    expect(each.style.filter).not.toContain("4px");
-  }
+  for (const bar of container.querySelectorAll(".plan-split-bar"))
+    expect(bar.closest("[data-enter]")?.textContent).toMatch(/Launch|Docs/);
+});
+
+test("the Flow's edge-draw timing is named, not a bare multiplier", () => {
+  const css = readFileSync(join(__dirname, "plan-flow.css"), "utf8");
+  expect(css).toContain("--edge-wait-entrances: 2;");
+  expect(css).toContain("--edge-draw-entrances: 1.75;");
+  expect(css).not.toMatch(/calc\(var\(--dur-enter\) \* [\d.]+\)/);
 });
 
 function flow() {

@@ -20,7 +20,7 @@ import type {
 import { fakeStored } from "@/features/automations/fake-core";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
-import { applyTokens, reducedTokens, rootTokens } from "@/test/motion-tokens";
+import { applyTokens, rootTokens } from "@/test/motion-tokens";
 
 // Opening Automations (DESIGN.md section 12): the page header, then each
 // starter fades up in turn; in the editor a step added to an open flow takes
@@ -74,16 +74,21 @@ const page = () =>
       </ChatClientContext>
     </MotionProvider>,
   );
-const appears = (root: HTMLElement) => [
-  ...root.querySelectorAll<HTMLElement>('[data-slot="appear"]'),
+const steps = (root: HTMLElement) => [
+  ...root.querySelectorAll<HTMLElement>("[data-enter]"),
 ];
 
-test("opening Automations fades up the header, then each starter, from a soft blur", async () => {
+test("Automations arrange their own entrance: the heading, then the label and each starter, a stagger step apart", async () => {
   const { container } = page();
   const examples = await screen.findByRole("group", {
     name: "Start from an example",
   });
-  const arrivals = appears(container);
+  expect(
+    container
+      .querySelector(".plan-workspace")
+      ?.hasAttribute("data-own-entrance"),
+  ).toBe(true);
+  const arrivals = steps(container);
   expect(arrivals.map((each) => each.textContent)).toEqual([
     expect.stringContaining("Let agents act on tickets for you"),
     "Start from an example",
@@ -91,24 +96,10 @@ test("opening Automations fades up the header, then each starter, from a soft bl
     expect.stringContaining("Verify what is ready for testing"),
     expect.stringContaining("Weekly summary"),
   ]);
+  expect(
+    arrivals.map((each) => each.style.getPropertyValue("--enter-step")),
+  ).toEqual(["0", "1", "2", "3", "4"]);
   expect(within(examples).getAllByRole("button")).toHaveLength(3);
-  for (const each of arrivals) expect(each.style.filter).toBe("blur(4px)");
-  await waitFor(() =>
-    expect(arrivals.map((each) => each.style.opacity)).toEqual(
-      arrivals.map(() => "1"),
-    ),
-  );
-});
-
-test("the starters open without a rise under reduced motion", async () => {
-  restoreTokens();
-  restoreTokens = applyTokens({ ...rootTokens, ...reducedTokens });
-  const { container } = page();
-  await screen.findByRole("group", { name: "Start from an example" });
-  for (const each of appears(container)) {
-    expect(each.style.transform).not.toContain("6px");
-    expect(each.style.filter).not.toContain("4px");
-  }
 });
 
 test("a step added to an open flow arrives and its line draws; the steps it opened with do not move", async () => {

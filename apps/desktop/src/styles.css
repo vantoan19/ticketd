@@ -3965,9 +3965,6 @@ kbd,
 .documents-list-view {
   box-shadow: inset -1px 0 0 var(--border);
 }
-.documents-list-view > [data-slot="pane-header"] {
-  background: var(--surface);
-}
 .documents-group {
   background: var(--recessed);
   border-radius: var(--radius-card);

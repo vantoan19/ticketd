@@ -88,6 +88,38 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   await screen.findByRole("button", { name: "Document actions" });
 });
 
+it("arranges its own entrance: the header, then the toolbar, then the list, a stagger step apart", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([
+    { id: "d1", heading: "Context" },
+  ]);
+  const { container } = render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  await screen.findByRole("button", { name: "Context" });
+  expect(
+    container
+      .querySelector(".documents-page")
+      ?.hasAttribute("data-own-entrance"),
+  ).toBe(true);
+  const steps = [...container.querySelectorAll<HTMLElement>("[data-enter]")];
+  expect(
+    steps.map((step) => step.style.getPropertyValue("--enter-step")),
+  ).toEqual(["0", "1", "2"]);
+  // The header keeps its place at the top of the scrolling list.
+  expect(steps[0]?.className).toBe("documents-list-head");
+  expect(steps[0]?.querySelector('[data-slot="pane-header"]')).not.toBeNull();
+  expect(steps[1]?.className).toBe("documents-toolbar");
+  expect(steps[2]?.textContent).toContain("Context");
+});
+
 it("searches and opens a result using keyboard accessible controls", async () => {
   vi.mocked(documents.recent).mockResolvedValue([]);
   vi.mocked(documents.trash).mockResolvedValue([]);

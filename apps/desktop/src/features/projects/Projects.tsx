@@ -24,7 +24,7 @@ import { FailureAlert } from "@/components/ui/failure-alert";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { Appear } from "@/components/ui/motion";
+import { enter } from "@/components/ui/enter";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
 import { PathText } from "@/components/ui/path-text";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,7 +44,6 @@ import { plural } from "@/lib/format";
 import { nameFromFolder } from "@/lib/paths";
 import { allowRemoval } from "@/lib/removal-guard";
 import { fileManagerName } from "@/lib/platform";
-import { useReopened } from "@/lib/use-reopened";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import "./projects.css";
 
@@ -207,9 +206,6 @@ export function Projects({
 }) {
   const statusLine = useStatusLine();
   const { copy } = useCopy();
-  // The page stays mounted while another is shown: its entrance plays on return.
-  const page = useRef<HTMLElement>(null);
-  const reopened = useReopened(page);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Drafts survive closing a dialog; a successful save discards them.
@@ -379,8 +375,10 @@ export function Projects({
   const blocked = pending ? "Saving…" : null;
 
   return (
-    <ManagementPage ref={page} aria-labelledby="projects-heading">
-      <Appear key={reopened}>
+    // The page stays mounted while another is shown; its entrance (enter.ts)
+    // plays again each time it comes back from `hidden`.
+    <ManagementPage ownEntrance aria-labelledby="projects-heading">
+      <div {...enter(0)}>
         <PageHeader
           title="Projects"
           titleId="projects-heading"
@@ -392,7 +390,7 @@ export function Projects({
             lede: "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
           })}
         />
-      </Appear>
+      </div>
       {loading && projects.length === 0 ? (
         <div
           className="project-skeleton"
@@ -421,7 +419,7 @@ export function Projects({
                 className="project-row"
                 data-open={isOpen || undefined}
               >
-                <Appear key={reopened} index={index + 1}>
+                <div {...enter(index + 1)}>
                   <div className="project-row-main">
                     <h2 className="project-row-heading">
                       <button
@@ -525,7 +523,7 @@ export function Projects({
                       </ul>
                     )}
                   </div>
-                </Appear>
+                </div>
               </li>
             );
           })}
