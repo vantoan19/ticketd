@@ -190,7 +190,6 @@
   --dur-exit: 150ms;
   --overlay-slide: 4px;
   --overlay-scale: 0.98;
-  --dialog-rise: 8px;
   --dialog-scale: 0.985;
   --sheet-scale: 0.96;
   --dur-lift: 120ms;
@@ -936,7 +935,7 @@
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 .ui-overlay[data-state="open"] {
-  animation: palette-scrim var(--dur-2) var(--ease-out);
+  animation: palette-scrim var(--dur-3) var(--ease-out);
 }
 .ui-overlay[data-state="closed"] {
   animation: overlay-leave var(--dur-exit) var(--ease-in);
@@ -948,6 +947,8 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover,
 .ui-menu {
+  /* The row highlight's Glide sits under the rows, inside this surface. */
+  isolation: isolate;
   --overlay-offset-x: 0px;
   --overlay-offset-y: calc(-1 * var(--overlay-slide));
 }
@@ -968,7 +969,7 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover[data-state="closed"],
 .ui-menu[data-state="closed"] {
-  animation: menu-leave var(--dur-exit) var(--ease-in);
+  animation: menu-leave var(--dur-2) var(--ease-in);
 }
 :is(
   .ui-popover,
@@ -980,7 +981,7 @@ body:has([data-slot="dialog-overlay"])
   pointer-events: none;
 }
 .ui-dialog[data-state="open"] {
-  animation: palette-enter var(--dur-4) var(--ease-out);
+  animation: dialog-enter var(--spring-smooth-t) var(--spring-smooth);
 }
 .ui-dialog[data-state="closed"] {
   animation: dialog-leave var(--dur-exit) var(--ease-in);
@@ -991,26 +992,31 @@ body:has([data-slot="dialog-overlay"])
 .ui-sheet[data-state="closed"] {
   animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
+/* A menu or popover grows out of its trigger: a short slide from the trigger's
+   side, a slight scale and blur. It leaves in place, faster. */
 @keyframes menu-enter {
   from {
     opacity: 0;
     transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
       scale(var(--overlay-scale));
+    filter: blur(var(--motion-blur-out));
   }
   to {
     opacity: 1;
     transform: translate(0, 0) scale(1);
+    filter: blur(0px);
   }
 }
 @keyframes menu-leave {
   from {
     opacity: 1;
-    transform: translate(0, 0) scale(1);
+    transform: scale(1);
+    filter: blur(0px);
   }
   to {
     opacity: 0;
-    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
-      scale(var(--overlay-scale));
+    transform: scale(var(--overlay-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 /* Radix Presence waits for a changed animation name before unmounting. */
@@ -1022,14 +1028,29 @@ body:has([data-slot="dialog-overlay"])
     opacity: 0;
   }
 }
+/* A dialog rises from its top anchor out of a soft blur, and leaves in place. */
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise-overlay)) scale(var(--dialog-scale));
+    filter: blur(var(--motion-blur-in));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0px);
+  }
+}
 @keyframes dialog-leave {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: scale(1);
+    filter: blur(0px);
   }
   to {
     opacity: 0;
-    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
+    transform: scale(var(--dialog-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 @keyframes overlay-enter {
@@ -1059,6 +1080,14 @@ body:has([data-slot="dialog-overlay"])
   text-wrap: balance;
 }
 /* A choice list's search row (P3): 32px, a hairline under it. */
+/* The row highlight's Glide sits under the rows, inside the list, and fills
+   with the highlight colour (row-highlight.tsx). */
+[data-slot="command-list"] {
+  isolation: isolate;
+}
+:is(.ui-menu, .ui-popover, [data-slot="command-list"]) [data-slot="glide"] {
+  background: var(--accent);
+}
 [data-slot="command-input-wrapper"] {
   height: 32px;
   padding-inline: 8px;
@@ -3000,13 +3029,23 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
-.ui-tooltip[data-state="delayed-open"],
-.ui-tooltip[data-state="instant-open"] {
+/* After the hover delay the label fades in from a slight scale and blur. Moving
+   to a neighbouring control opens its label at once (instant-open): no fade in,
+   while the one it leaves still fades out. */
+.ui-tooltip {
+  --tooltip-scale: 0.96;
+}
+.ui-tooltip[data-state="delayed-open"] {
   animation: tooltip-enter var(--dur-2) var(--ease-out);
+}
+.ui-tooltip[data-state="closed"] {
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 @keyframes tooltip-enter {
   from {
     opacity: 0;
+    transform: scale(var(--tooltip-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 /* A tooltip only labels; its positioning wrapper must not cover the controls
@@ -3279,23 +3318,6 @@ kbd,
 }
 .ui-overlay:has(+ .ui-dialog[data-size="palette"]) {
   background: var(--scrim-soft);
-  animation: palette-scrim var(--dur-2) var(--ease-out);
-}
-.ui-dialog[data-size="palette"][data-state="open"] {
-  animation: palette-enter var(--dur-3) var(--ease-out);
-}
-.ui-dialog[data-size="palette"][data-state="closed"] {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
-}
-@keyframes palette-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 @keyframes palette-scrim {
   from {
@@ -3368,9 +3390,6 @@ kbd,
   [data-variant="palette"] [data-slot="command-item"] {
     min-height: 44px;
   }
-}
-.ui-overlay:has(+ .ui-dialog[data-size="palette"][data-state="closed"]) {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 
 [data-variant="palette"] [data-slot="command-shortcut"] {
@@ -4183,6 +4202,10 @@ kbd,
 .ui-dialog[data-surface="capture"] {
   width: min(560px, calc(100vw - 32px));
   background: var(--popover);
+}
+.ui-dialog[data-surface="create"] {
+  /* Widening glides; the top anchor stays, so it never re-centres vertically. */
+  transition: width var(--spring-smooth-t) var(--spring-smooth);
 }
 .ui-dialog[data-surface="create"][data-expanded] {
   width: min(760px, calc(100vw - 32px));
