@@ -877,7 +877,6 @@ A spring token is a CSS `linear()` easing sampled from a critically damped sprin
 - **Workspace band.** The slot beside the top of the content panel opens by height on the smooth spring and closes the same way, with everything below moving with it; the message fades in from a soft blur. It follows the reservation (`use-band-continuity`), not the condition, so it never opens or closes under the pointer.
 - **Counts.** `Count` crossfades a number or word that changes, which gives the sidebar, headers, columns and queues the same behavior.
 
-
 Menus, submenus and popovers enter over `--dur-3` with a tokenized 4px slide from the trigger side, scale .98 and a 2px blur; their distinct exit animation fades to .98 and a slight blur over `--dur-2`. Closing menus, popovers, selects and sheets remain inert until Presence removes them. Activity hover actions stay in keyboard order and reveal on row focus; the confirmation keeps its action exposed through focus return, and a newer focused control keeps focus when an older overlay finishes. The navigation sheet is the exception to the rise: it glides in from its edge (see Shell motion) and shares the `--dur-exit` exit. Dialog/palette rise and scale use `--motion-rise-overlay` and `--dialog-scale`; all offsets and durations resolve instantly under reduced motion.
 
 The global command palette uses the shared `Command` palette variant inside a
