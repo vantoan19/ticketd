@@ -86,6 +86,21 @@
   }
 }
 
+/* Segmented controls and tabs: the labels trade colour as the thumb glides. */
+.ui-segmented :is([role="radio"], [role="tab"]) {
+  transition: color var(--dur-3) var(--ease-out);
+}
+
+/* Switch: the thumb glides across while the track trades colour. */
+[data-slot="switch-track"] {
+  transition: background-color var(--dur-3) var(--ease-out);
+}
+[data-slot="switch-thumb"] {
+  transition:
+    translate var(--spring-glide-t) var(--spring-glide),
+    background-color var(--dur-3) var(--ease-out);
+}
+
 /* IconTile: one recipe for page headers, settings rows and empty states. */
 .ui-icon-tile {
   display: inline-flex;

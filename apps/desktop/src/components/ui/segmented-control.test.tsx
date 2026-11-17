@@ -8,7 +8,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { SegmentedControl } from "./segmented-control";
+import { MotionProvider } from "./motion";
+import {
+  SegmentedControl,
+  SegmentedTab,
+  SegmentedTabList,
+} from "./segmented-control";
 
 afterEach(cleanup);
 
@@ -61,4 +66,64 @@ test("arrow keys move the selection, and a disabled option shows its reason", as
   );
   expect(option("Graph").disabled).toBe(true);
   expect(option("Graph").title).toBe("Needs a project");
+});
+
+const thumbIn = (element: HTMLElement) =>
+  element.querySelector('[data-slot="glide"]');
+
+test("the selection is one highlight that moves to the chosen segment", () => {
+  render(
+    <MotionProvider>
+      <Harness onChange={vi.fn()} />
+    </MotionProvider>,
+  );
+  expect(document.querySelectorAll('[data-slot="glide"]')).toHaveLength(1);
+  expect(thumbIn(option("List"))).not.toBeNull();
+  fireEvent.click(option("Board"));
+  expect(document.querySelectorAll('[data-slot="glide"]')).toHaveLength(1);
+  expect(thumbIn(option("Board"))).not.toBeNull();
+  expect(thumbIn(option("List"))).toBeNull();
+});
+
+test("two controls on a page keep their own highlight", () => {
+  render(
+    <MotionProvider>
+      <Harness onChange={vi.fn()} />
+      <Harness onChange={vi.fn()} />
+    </MotionProvider>,
+  );
+  expect(document.querySelectorAll('[data-slot="glide"]')).toHaveLength(2);
+});
+
+test("a tab list moves the highlight with the selected tab", () => {
+  function Tabs({ selected }: { selected: string }) {
+    return (
+      <MotionProvider>
+        <SegmentedTabList aria-label="Mode">
+          {["Ask", "Plan"].map((name) => (
+            <SegmentedTab key={name} aria-selected={name === selected}>
+              {name}
+            </SegmentedTab>
+          ))}
+        </SegmentedTabList>
+      </MotionProvider>
+    );
+  }
+  const { rerender } = render(<Tabs selected="Ask" />);
+  const tab = (name: string) => screen.getByRole("tab", { name });
+  expect(thumbIn(tab("Ask"))).not.toBeNull();
+  rerender(<Tabs selected="Plan" />);
+  expect(thumbIn(tab("Plan"))).not.toBeNull();
+  expect(thumbIn(tab("Ask"))).toBeNull();
+});
+
+test("plain tabs show the selection by colour alone", () => {
+  render(
+    <MotionProvider>
+      <SegmentedTabList plain aria-label="Sections">
+        <SegmentedTab aria-selected>One</SegmentedTab>
+      </SegmentedTabList>
+    </MotionProvider>,
+  );
+  expect(document.querySelector('[data-slot="glide"]')).toBeNull();
 });
