@@ -99,11 +99,11 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Backlink>, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        relationships::id(&tx, reference)?;
-        let links = query(&tx, reference, limit, offset)?;
-        tx.commit()?;
-        Ok(links)
+        crate::read_scope::run(&self.connection, |tx| {
+            relationships::id(tx, reference)?;
+            let links = query(tx, reference, limit, offset)?;
+            Ok(links)
+        })
     }
 }
 

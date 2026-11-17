@@ -16,7 +16,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    let mut statement = connection.prepare("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.parent_id WHERE ticket_parents.child_id = ?1")?;
+    let mut statement = connection.prepare_cached("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.parent_id WHERE ticket_parents.child_id = ?1")?;
     ticket.parent = statement
         .query_row([&ticket.id], |row| {
             Ok(RelatedTicket {
@@ -26,7 +26,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             })
         })
         .optional()?;
-    let mut statement = connection.prepare("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.child_id WHERE ticket_parents.parent_id = ?1 ORDER BY tickets.number")?;
+    let mut statement = connection.prepare_cached("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.child_id WHERE ticket_parents.parent_id = ?1 ORDER BY tickets.number")?;
     ticket.children = statement
         .query_map([&ticket.id], |row| {
             Ok(RelatedTicket {

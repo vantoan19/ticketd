@@ -150,9 +150,9 @@ pub(crate) fn provider_display_name(provider: &str) -> String {
 pub(crate) fn clock(connection: &rusqlite::Connection, now: Option<&str>) -> Result<String, Error> {
     Ok(match now {
         Some(now) => now.to_owned(),
-        None => connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
-            row.get(0)
-        })?,
+        None => connection
+            .prepare_cached("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')")?
+            .query_row([], |row| row.get(0))?,
     })
 }
 

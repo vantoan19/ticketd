@@ -450,7 +450,7 @@ struct SourceRow {
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
     let row: Option<SourceRow> = connection
-        .query_row(
+        .prepare_cached(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
                     s.external_state, s.closure_reason, s.last_refreshed_at, \
                     s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
@@ -459,6 +459,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
              WHERE i.ticket_id = ?1",
+        )?
+        .query_row(
             [&ticket.id],
             |row| {
                 Ok(SourceRow {

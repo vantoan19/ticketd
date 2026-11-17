@@ -64,15 +64,17 @@ impl Workspace {
     }
     /// Return the scheduled instant in UTC, independent of following.
     pub fn reminder(&self, reference: &str) -> Result<Option<String>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        Ok(self
-            .connection
-            .query_row(
-                "SELECT due_at FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
-                params![LOCAL_PERSON, ticket.id],
-                |row| row.get(0),
-            )
-            .optional()?)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            Ok(self
+                .connection
+                .query_row(
+                    "SELECT due_at FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+                    params![LOCAL_PERSON, ticket.id],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })
     }
 
     /// Set or dismiss a reminder. Every set schedules a new occurrence.
@@ -114,12 +116,14 @@ impl Workspace {
     }
 
     pub fn is_following(&self, reference: &str) -> Result<bool, Error> {
-        let ticket = self.show_ticket(reference)?;
-        Ok(self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2)",
-            params![LOCAL_PERSON, ticket.id],
-            |row| row.get(0),
-        )?)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            Ok(self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2)",
+                params![LOCAL_PERSON, ticket.id],
+                |row| row.get(0),
+            )?)
+        })
     }
     pub fn set_following(&mut self, reference: &str, following: bool) -> Result<(), Error> {
         // Following is the person's own, so a ticket in Trash may be followed.
@@ -136,20 +140,25 @@ impl Workspace {
             Ok(())
         })
     }
-    /// Due reminders become inbox entries when someone looks, so every read of
-    /// the inbox or its counts delivers them first. Insertion and marking
-    /// delivered commit together, including across processes.
-    pub(crate) fn deliver_due_reminders(&self) -> Result<(), Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        crate::write_scope::lock(&tx)?;
-        let now: String =
-            tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
-                row.get(0)
-            })?;
-        tx.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
-        tx.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
-        tx.commit()?;
-        Ok(())
+    /// Turn reminders that have come due into inbox entries. Reads never do this: the
+    /// reminder poll (the desktop) and the inbox command (the CLI) call it. Insertion and
+    /// marking delivered commit together, so each reminder is delivered once, including
+    /// across processes. It takes the write lock only when a reminder is due.
+    pub fn deliver_due_reminders(&mut self) -> Result<(), Error> {
+        // Checked with the same comparison the delivery makes, so the two cannot disagree.
+        let due: bool = self.connection.prepare_cached("SELECT EXISTS(SELECT 1 FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday('now'))")?.query_row([LOCAL_PERSON], |row| row.get(0))?;
+        if !due {
+            return Ok(());
+        }
+        crate::write_scope::run(&self.connection, |scope| {
+            let now: String =
+                scope.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+                    row.get(0)
+                })?;
+            scope.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+            scope.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+            Ok(())
+        })
     }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
         self.inbox_page(limit, offset, false)
@@ -162,8 +171,7 @@ impl Workspace {
         offset: u32,
         unread_only: bool,
     ) -> Result<Vec<InboxEntry>, Error> {
-        self.deliver_due_reminders()?;
-        let mut stmt = self.connection.prepare("SELECT i.id, t.reference, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value)) FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
+        let mut stmt = self.connection.prepare_cached("SELECT i.id, t.reference, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value)) FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
             .query_map(
                 params![LOCAL_PERSON, limit.min(100), offset, unread_only],

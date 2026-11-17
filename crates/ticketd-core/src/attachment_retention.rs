@@ -241,10 +241,7 @@ impl Workspace {
 
     /// Includes recoverable trash and unpromoted Activity details; never flattens linked Documents.
     pub fn attachment_usage(&self, id: &str) -> Result<AttachmentUsage, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let usage = read_usage(&tx, id)?;
-        tx.commit()?;
-        Ok(usage)
+        crate::read_scope::run(&self.connection, |tx| read_usage(tx, id))
     }
 }
 

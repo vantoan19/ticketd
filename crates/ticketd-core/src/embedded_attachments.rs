@@ -134,6 +134,7 @@ impl Workspace {
 
     /// Derived inline uses only; excludes direct associations and linked Documents.
     pub fn embedded_attachments(&self, source_id: &str) -> Result<Vec<Attachment>, Error> {
+        self.read(|_| {
         let mut statement = self.connection.prepare("SELECT attachment_id FROM embedded_attachments WHERE source_id=?1 AND attachment_id IS NOT NULL ORDER BY attachment_id")?;
         let ids = statement
             .query_map([source_id], |r| r.get::<_, String>(0))?
@@ -141,6 +142,7 @@ impl Workspace {
         ids.iter()
             .map(|id| crate::attachments::read_attachment(&self.connection, id))
             .collect()
+        })
     }
 
     /// Preserve unresolved foreign links for inspection without pretending they resolve.

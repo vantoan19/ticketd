@@ -2276,16 +2276,16 @@ impl Workspace {
 
     /// The Chat and its latest `limit` history items, with the change sequence to follow from.
     pub fn chat_snapshot(&self, chat_id: &str, limit: usize) -> Result<ChatSnapshot, Error> {
-        let transaction = self.connection.unchecked_transaction()?;
-        let chat = read_chat(&transaction, chat_id)?;
-        let page = read_history(&transaction, chat_id, i64::MAX, limit)?;
-        let sequence = head(&transaction)?;
-        transaction.commit()?;
-        Ok(ChatSnapshot {
-            chat,
-            sequence,
-            items: page.items,
-            earlier: page.earlier,
+        crate::read_scope::run(&self.connection, |transaction| {
+            let chat = read_chat(transaction, chat_id)?;
+            let page = read_history(transaction, chat_id, i64::MAX, limit)?;
+            let sequence = head(transaction)?;
+            Ok(ChatSnapshot {
+                chat,
+                sequence,
+                items: page.items,
+                earlier: page.earlier,
+            })
         })
     }
 
@@ -2296,8 +2296,10 @@ impl Workspace {
         before: i64,
         limit: usize,
     ) -> Result<ChatHistoryPage, Error> {
-        read_chat(&self.connection, chat_id)?;
-        read_history(&self.connection, chat_id, before, limit)
+        crate::read_scope::run(&self.connection, |connection| {
+            read_chat(connection, chat_id)?;
+            read_history(connection, chat_id, before, limit)
+        })
     }
 
     /// The latest change sequence across all Chats; it moves on every Chat write.
@@ -2314,49 +2316,49 @@ impl Workspace {
         after: i64,
         limit: usize,
     ) -> Result<ChatCatchUp, Error> {
-        let transaction = self.connection.unchecked_transaction()?;
-        let trimmed_through: i64 = transaction
-            .query_row(
-                "SELECT changes_trimmed_through FROM chats WHERE id = ?1",
-                [chat_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or_else(|| Error::ChatNotFound(chat_id.to_owned()))?;
-        if after < trimmed_through || after > head(&transaction)? {
-            return Ok(ChatCatchUp::Resync);
-        }
-        let mut statement = transaction.prepare(
+        crate::read_scope::run(&self.connection, |transaction| {
+            let trimmed_through: i64 = transaction
+                .query_row(
+                    "SELECT changes_trimmed_through FROM chats WHERE id = ?1",
+                    [chat_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or_else(|| Error::ChatNotFound(chat_id.to_owned()))?;
+            if after < trimmed_through || after > head(transaction)? {
+                return Ok(ChatCatchUp::Resync);
+            }
+            let mut statement = transaction.prepare(
             "SELECT kind, subject_id, MAX(sequence) AS latest FROM chat_changes
              WHERE chat_id = ?1 AND sequence > ?2 GROUP BY kind, subject_id ORDER BY latest LIMIT ?3",
         )?;
-        let mut subjects = statement
-            .query_map(params![chat_id, after, limit as i64 + 1], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        let more = subjects.len() > limit;
-        subjects.truncate(limit);
-        let sequence = subjects.last().map_or(after, |subject| subject.2);
-        let mut changes = Vec::with_capacity(subjects.len());
-        for (kind, id, sequence) in subjects {
-            let record = if kind == "chat" {
-                Some(ChatRecord::Chat(read_chat(&transaction, &id)?))
-            } else {
-                read_item(&transaction, &kind, &id)?.map(ChatRecord::Item)
-            };
-            changes.extend(record.map(|record| ChatChange { sequence, record }));
-        }
-        transaction.commit()?;
-        Ok(ChatCatchUp::Changes {
-            changes,
-            sequence,
-            more,
+            let mut subjects = statement
+                .query_map(params![chat_id, after, limit as i64 + 1], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            let more = subjects.len() > limit;
+            subjects.truncate(limit);
+            let sequence = subjects.last().map_or(after, |subject| subject.2);
+            let mut changes = Vec::with_capacity(subjects.len());
+            for (kind, id, sequence) in subjects {
+                let record = if kind == "chat" {
+                    Some(ChatRecord::Chat(read_chat(transaction, &id)?))
+                } else {
+                    read_item(transaction, &kind, &id)?.map(ChatRecord::Item)
+                };
+                changes.extend(record.map(|record| ChatChange { sequence, record }));
+            }
+            Ok(ChatCatchUp::Changes {
+                changes,
+                sequence,
+                more,
+            })
         })
     }
 }

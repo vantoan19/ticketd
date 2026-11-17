@@ -53,13 +53,11 @@ pub(crate) fn track(connection: &Connection, table: &str) -> Result<(), Error> {
 impl Workspace {
     /// A number that changes whenever any ticket, Document, Activity, plan,
     /// relationship, inbox entry or other shown data changes, and otherwise stays put.
-    /// Due reminders are delivered first so a reminder that just came due moves it.
+    /// A reminder moves it when it is delivered, not when it comes due.
     pub fn change_token(&self) -> Result<i64, Error> {
-        self.deliver_due_reminders()?;
-        Ok(self.connection.query_row(
-            "SELECT token FROM workspace_changes WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?)
+        Ok(self
+            .connection
+            .prepare_cached("SELECT token FROM workspace_changes WHERE id = 1")?
+            .query_row([], |row| row.get(0))?)
     }
 }

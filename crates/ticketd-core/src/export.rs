@@ -301,53 +301,53 @@ const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
 impl Workspace {
     /// Capture all domain records from a single read snapshot.
     pub fn export(&self) -> Result<Value, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let mut result = Map::new();
-        result.insert("format_version".into(), Value::from(2));
-        for &(table, columns) in EXPORTED {
-            let mut statement =
-                tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;
-            let names: Vec<String> = statement
-                .column_names()
-                .iter()
-                .map(|s| (*s).into())
-                .collect();
-            let rows = statement
-                .query_map([], |row| {
-                    let mut object = Map::new();
-                    for (index, name) in names.iter().enumerate() {
-                        let value = match row.get_ref(index)? {
-                            ValueRef::Null => Value::Null,
-                            ValueRef::Integer(value) => Value::from(value),
-                            ValueRef::Real(value) => Value::from(value),
-                            ValueRef::Text(value) => Value::String(
-                                std::str::from_utf8(value)
-                                    .map_err(|e| {
-                                        rusqlite::Error::FromSqlConversionFailure(
-                                            index,
-                                            rusqlite::types::Type::Text,
-                                            Box::new(e),
-                                        )
-                                    })?
-                                    .to_owned(),
-                            ),
-                            ValueRef::Blob(_) => {
-                                return Err(rusqlite::Error::InvalidColumnType(
-                                    index,
-                                    name.clone(),
-                                    rusqlite::types::Type::Blob,
-                                ));
-                            }
-                        };
-                        object.insert(name.clone(), value);
-                    }
-                    Ok(Value::Object(object))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            result.insert(table.into(), Value::Array(rows));
-        }
-        tx.commit()?;
-        Ok(Value::Object(result))
+        crate::read_scope::run(&self.connection, |tx| {
+            let mut result = Map::new();
+            result.insert("format_version".into(), Value::from(2));
+            for &(table, columns) in EXPORTED {
+                let mut statement =
+                    tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;
+                let names: Vec<String> = statement
+                    .column_names()
+                    .iter()
+                    .map(|s| (*s).into())
+                    .collect();
+                let rows = statement
+                    .query_map([], |row| {
+                        let mut object = Map::new();
+                        for (index, name) in names.iter().enumerate() {
+                            let value = match row.get_ref(index)? {
+                                ValueRef::Null => Value::Null,
+                                ValueRef::Integer(value) => Value::from(value),
+                                ValueRef::Real(value) => Value::from(value),
+                                ValueRef::Text(value) => Value::String(
+                                    std::str::from_utf8(value)
+                                        .map_err(|e| {
+                                            rusqlite::Error::FromSqlConversionFailure(
+                                                index,
+                                                rusqlite::types::Type::Text,
+                                                Box::new(e),
+                                            )
+                                        })?
+                                        .to_owned(),
+                                ),
+                                ValueRef::Blob(_) => {
+                                    return Err(rusqlite::Error::InvalidColumnType(
+                                        index,
+                                        name.clone(),
+                                        rusqlite::types::Type::Blob,
+                                    ));
+                                }
+                            };
+                            object.insert(name.clone(), value);
+                        }
+                        Ok(Value::Object(object))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                result.insert(table.into(), Value::Array(rows));
+            }
+            Ok(Value::Object(result))
+        })
     }
 
     /// Write an export without replacing an existing destination.
