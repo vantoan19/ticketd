@@ -26,6 +26,7 @@ import { useStatusLine } from "@/components/ui/use-status-line";
 import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { codeLanguageLabel } from "./syntax-highlighting";
+import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -425,6 +426,7 @@ export function MarkdownDocument({
   revision,
   mention,
   onChange,
+  chunkStarts,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -433,6 +435,8 @@ export function MarkdownDocument({
   mention?: MentionMark | undefined;
   onChange?:
     ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
+  /** Streamed text: source offsets where each newly arrived chunk began; each fades in. */
+  chunkStarts?: readonly number[] | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
@@ -485,7 +489,11 @@ export function MarkdownDocument({
           <MarkdownSource.Provider value={source}>
             <AttachmentReplacement.Provider value={replacement}>
               <ReactMarkdown
-                remarkPlugins={remarkPlugins}
+                remarkPlugins={
+                  chunkStarts?.length
+                    ? [...remarkPlugins, [chunkFade, chunkStarts]]
+                    : remarkPlugins
+                }
                 urlTransform={(url) =>
                   url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
                 }

@@ -1,7 +1,18 @@
 import { Item } from "@/components/ui/item";
 import { EmptyState } from "@/components/ui/empty-state";
 import { emptyCopy } from "@/lib/empty-copy";
-import { Fragment, useContext, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { m } from "motion/react";
+import { Arrival } from "@/components/ui/motion";
+import { spring } from "@/lib/motion-tokens";
 import {
   ArrowLeft,
   BellOff,
@@ -123,8 +134,48 @@ function moveInList(event: React.KeyboardEvent<HTMLElement>) {
   }
 }
 
+type Placed = { chat: ChatSummary; needs: boolean };
+
+/**
+ * The list in order: the Chats that need you first. While the pointer is over
+ * the list its order and groups are held, so nothing moves under it; the Chats
+ * still update in place, and any move happens once the pointer leaves.
+ */
+function usePlaced(chats: ChatSummary[] | undefined, held: boolean): Placed[] {
+  const needs = (chat: ChatSummary) => chat.status.rank === "approval";
+  const current = (chats ?? [])
+    .slice()
+    .sort((a, b) => Number(needs(b)) - Number(needs(a)))
+    .map((chat) => ({ id: chat.id, needs: needs(chat) }));
+  const [frozen, setFrozen] = useState(current);
+  const same =
+    frozen.length === current.length &&
+    frozen.every(
+      (one, index) =>
+        one.id === current[index]?.id && one.needs === current[index].needs,
+    );
+  if (!held && !same) setFrozen(current);
+  const shown = held ? frozen : current;
+  const byId = new Map((chats ?? []).map((chat) => [chat.id, chat]));
+  const placed = shown.flatMap(({ id, needs }) => {
+    const chat = byId.get(id);
+    return chat ? [{ chat, needs }] : [];
+  });
+  // A Chat that appeared while the list was held goes on top of its group.
+  const unplaced = current.flatMap(({ id, needs }) => {
+    const chat = byId.get(id);
+    return chat && !shown.some((one) => one.id === id) ? [{ chat, needs }] : [];
+  });
+  return [
+    ...unplaced.filter((one) => one.needs),
+    ...placed,
+    ...unplaced.filter((one) => !one.needs),
+  ];
+}
+
 function ChatRow({
   chat,
+  needs,
   active,
   tabStop,
   now,
@@ -132,6 +183,8 @@ function ChatRow({
   onResult,
 }: {
   chat: ChatSummary;
+  /** In the "Needs you" group. */
+  needs: boolean;
   active: boolean;
   /** The row the list's one Tab stop lands on. */
   tabStop: boolean;
@@ -143,12 +196,35 @@ function ChatRow({
   const [menu, setMenu] = useState(false);
   const strong = emphasised(chat.status);
   const more = useRef<HTMLSpanElement>(null);
+  // A row that moves up into "Needs you" glides there, then its fill arrives.
+  const [arrival, setArrival] = useState<number>();
+  const transition = useMemo(
+    () => spring(needs ? "travel" : "smooth"),
+    [needs],
+  );
+  const wasNeeds = useRef(needs);
+  useEffect(() => {
+    const was = wasNeeds.current;
+    wasNeeds.current = needs;
+    if (!needs || was) return;
+    const timer = setTimeout(
+      () => setArrival((count) => (count ?? 0) + 1),
+      spring("travel").duration * 1000,
+    );
+    return () => clearTimeout(timer);
+  }, [needs]);
   // The actions are reached with Right Arrow, not Tab.
   useLayoutEffect(() => {
     more.current?.querySelector("button")?.setAttribute("tabindex", "-1");
   });
   return (
-    <li className="chat-row-item" onKeyDown={moveInList}>
+    <m.li
+      layout="position"
+      transition={transition}
+      className="chat-row-item"
+      onKeyDown={moveInList}
+    >
+      <Arrival {...(arrival !== undefined && { at: arrival })} />
       <Item asChild variant="navigator">
         <button
           ref={row}
@@ -211,7 +287,7 @@ function ChatRow({
           onResult={onResult}
         />
       </span>
-    </li>
+    </m.li>
   );
 }
 
@@ -302,6 +378,8 @@ export function ChatsView({
     setNewFocus((count) => count + 1);
   }
   const list = useChatList(scope);
+  const [pointerOver, setPointerOver] = useState(false);
+  const placed = usePlaced(list?.chats, pointerOver);
   const now = useNow();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
@@ -434,29 +512,27 @@ export function ChatsView({
       {list && !list.error && list.chats.length === 0 && (
         <ChatListEmpty scope={scope} />
       )}
-      <ul className="chat-rows" aria-label="Chats">
-        {list?.chats
-          .slice()
-          .sort(
-            (a, b) =>
-              Number(b.status.rank === "approval") -
-              Number(a.status.rank === "approval"),
-          )
-          .map((chat, index, chats) => (
+      <ul
+        className="chat-rows"
+        aria-label="Chats"
+        onPointerEnter={() => setPointerOver(true)}
+        onPointerLeave={() => setPointerOver(false)}
+      >
+        {list &&
+          placed.map(({ chat, needs }, index) => (
             <Fragment key={chat.id}>
               {scope === "active" &&
-                (index === 0 ||
-                  (chats[index - 1]?.status.rank === "approval") !==
-                    (chat.status.rank === "approval")) && (
+                (index === 0 || placed[index - 1]?.needs !== needs) && (
                   <li
                     className="chat-list-group text-xs text-muted-foreground"
                     role="presentation"
                   >
-                    {chat.status.rank === "approval" ? "Needs you" : "Recent"}
+                    {needs ? "Needs you" : "Recent"}
                   </li>
                 )}
               <ChatRow
                 chat={chat}
+                needs={needs}
                 now={now}
                 active={open?.kind === "chat" && open.id === chat.id}
                 tabStop={

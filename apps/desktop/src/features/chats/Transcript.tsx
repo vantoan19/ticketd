@@ -87,6 +87,13 @@ import { ProjectNavigation } from "@/features/documents/navigation";
 import { ImageTiles } from "@/features/chats/ImageTiles";
 import { OutputBox } from "@/features/chats/OutputBox";
 import { ReceiptRow } from "@/features/chats/ReceiptRow";
+import { Arrives } from "@/features/chats/arrivals";
+import {
+  ArrivalsContext,
+  useArrivals,
+  useChunkStarts,
+} from "@/features/chats/use-arrivals";
+import { Presence, Appear, Shimmer } from "@/components/ui/motion";
 import { useReading } from "@/features/chats/use-transcript-scroll";
 import { formatTime } from "@/lib/format";
 
@@ -212,32 +219,34 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const time = sentAt(item.at);
   return (
     <div className="chat-you-part">
-      {item.images && item.images.length > 0 && (
-        <ImageTiles images={item.images} />
-      )}
-      <div className="chat-you">
-        <div ref={text} data-clamped={more ? undefined : ""}>
-          <span className="sr-only">You: </span>
-          <SentText text={item.text} />
+      <Arrives id={item.id} className="flex flex-col items-end">
+        {item.images && item.images.length > 0 && (
+          <ImageTiles images={item.images} />
+        )}
+        <div className="chat-you">
+          <div ref={text} data-clamped={more ? undefined : ""}>
+            <span className="sr-only">You: </span>
+            <SentText text={item.text} />
+          </div>
         </div>
-      </div>
-      {long && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="-mt-1 -mr-2"
-          aria-expanded={more}
-          onClick={() => setMore(!more)}
-        >
-          {more ? "Show less" : "Show more"}
-        </Button>
-      )}
-      {caption && <div className="chat-caption">{caption}</div>}
-      <div className="chat-you-actions">
-        {time && <span className="chat-fine">{time}</span>}
-        {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
-        <CopyButton text={item.text} label="Copy message" />
-      </div>
+        {long && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="-mt-1 -mr-2"
+            aria-expanded={more}
+            onClick={() => setMore(!more)}
+          >
+            {more ? "Show less" : "Show more"}
+          </Button>
+        )}
+        {caption && <div className="chat-caption">{caption}</div>}
+        <div className="chat-you-actions">
+          {time && <span className="chat-fine">{time}</span>}
+          {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
+          <CopyButton text={item.text} label="Copy message" />
+        </div>
+      </Arrives>
     </div>
   );
 }
@@ -253,31 +262,36 @@ function Response({
   readOnly: boolean;
   actions: TranscriptActions;
 }) {
+  // Streamed text fades in chunk by chunk as it arrives; no typewriter.
+  const chunkStarts = useChunkStarts(item.text, item.state === "streaming");
   return (
     <div className="chat-turn">
-      <div className="chat-ai">
-        <span className="sr-only">{harness}: </span>
-        <MarkdownDocument source={item.text} />
-      </div>
-      {item.state === "partial" && (
-        <p className="chat-fine">
-          Incomplete. ticketd closed before the rest of this response was saved.
-        </p>
-      )}
-      {item.state === "complete" && (
-        <div className="chat-actions">
-          <CopyButton text={item.text} label="Copy response" />
-          {!readOnly && (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => actions.saveAsDocument(item)}
-            >
-              <FilePlus2 aria-hidden /> Save as Document
-            </Button>
-          )}
+      <Arrives id={item.id} className="flex flex-col">
+        <div className="chat-ai">
+          <span className="sr-only">{harness}: </span>
+          <MarkdownDocument source={item.text} chunkStarts={chunkStarts} />
         </div>
-      )}
+        {item.state === "partial" && (
+          <p className="chat-fine">
+            Incomplete. ticketd closed before the rest of this response was
+            saved.
+          </p>
+        )}
+        {item.state === "complete" && (
+          <div className="chat-actions">
+            <CopyButton text={item.text} label="Copy response" />
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => actions.saveAsDocument(item)}
+              >
+                <FilePlus2 aria-hidden /> Save as Document
+              </Button>
+            )}
+          </div>
+        )}
+      </Arrives>
     </div>
   );
 }
@@ -508,7 +522,8 @@ export function StepRow({
                   : undefined
               }
             >
-              {part.text}
+              {/* A soft light passes over the words of the step that runs. */}
+              {running ? <Shimmer>{part.text}</Shimmer> : part.text}
             </span>
           );
         return (
@@ -762,12 +777,14 @@ function Row({
   switch (row.kind) {
     case "step":
       return (
-        <StepRow
-          step={row.step}
-          harness={harness}
-          decision={row.decision}
-          live={live}
-        />
+        <Arrives id={row.key}>
+          <StepRow
+            step={row.step}
+            harness={harness}
+            decision={row.decision}
+            live={live}
+          />
+        </Arrives>
       );
     case "response":
       return (
@@ -785,7 +802,11 @@ function Row({
     case "record":
       return <RecordStep change={row.change} />;
     case "receipt":
-      return <Receipt item={row.item} />;
+      return (
+        <Arrives id={row.key}>
+          <Receipt item={row.item} />
+        </Arrives>
+      );
     case "note":
       return <Note item={row.item} />;
     case "warnings":
@@ -1143,7 +1164,7 @@ function WorkingLine({
   return (
     <div className="chat-working">
       {spinner && <LoaderCircle size={12} className="chat-spin" aria-hidden />}
-      <span>
+      <Words shimmer={spinner}>
         {since ? (
           Number.isNaN(worked) || worked < 1000 ? (
             `${label}…`
@@ -1159,9 +1180,20 @@ function WorkingLine({
         {fromShown && now - shown >= 1000 && (
           <span aria-hidden="true"> · {duration(now - shown)}</span>
         )}
-      </span>
+      </Words>
     </div>
   );
+}
+
+/** The working line's words; they shimmer while the line has its spinner. */
+function Words({
+  shimmer,
+  children,
+}: {
+  shimmer: boolean;
+  children: ReactNode;
+}) {
+  return shimmer ? <Shimmer>{children}</Shimmer> : <span>{children}</span>;
 }
 
 /** How long no step must run before the working line takes the slot. */
@@ -1234,14 +1266,20 @@ export function JumpToLatest({
       data-shown={shown ? "" : undefined}
       inert={!shown}
     >
-      <Button
-        variant="outline"
-        size="sm"
-        // A click from the keyboard has no pointer position.
-        onClick={(event) => onJump(event.detail === 0)}
-      >
-        <ArrowDown aria-hidden /> Jump to latest
-      </Button>
+      <Presence initial={false}>
+        {shown && (
+          <Appear key="jump">
+            <Button
+              variant="outline"
+              size="sm"
+              // A click from the keyboard has no pointer position.
+              onClick={(event) => onJump(event.detail === 0)}
+            >
+              <ArrowDown aria-hidden /> Jump to latest
+            </Button>
+          </Appear>
+        )}
+      </Presence>
     </div>
   );
 }
@@ -1291,6 +1329,19 @@ export function Transcript({
     }),
     [client, chatId, folder, missing],
   );
+  const parts = turns(items, chat);
+  const arrivals = useArrivals(
+    chat.id,
+    parts.flatMap((part) =>
+      part.kind === "turn"
+        ? [
+            ...part.turn.rows.map((row) => row.key),
+            ...(part.turn.final ? [part.turn.final.id] : []),
+          ]
+        : [part.item.id],
+    ),
+    chat.catching_up,
+  );
   if (picked)
     return (
       <div className="chat-col" ref={contentRef}>
@@ -1321,7 +1372,6 @@ export function Transcript({
         )}
       </div>
     );
-  const parts = turns(items, chat);
   const live = !chat.catching_up;
   const sentLinks = { links: chat.links, trashed: chat.trashed_links };
   const stepRuns = parts.some(
@@ -1340,101 +1390,109 @@ export function Transcript({
     (item) => item.kind === "request" && item.state === "pending",
   );
   return (
-    <ChatFilesContext.Provider value={files}>
-      <SentLinksContext.Provider value={sentLinks}>
-        <OpeningContext.Provider value={working && Boolean(chat.opening)}>
-          <div className="chat-col" ref={contentRef}>
-            {empty && !readOnly && (
-              <p className="chat-empty">Say what you want done.</p>
-            )}
-            {parts.map((part) => {
-              const marker = newFrom !== undefined &&
-                (part.kind === "turn"
-                  ? part.turn.ids.includes(newFrom)
-                  : part.item.id === newFrom) && (
-                  <NewMarker key="new" markerRef={markerRef ?? null} />
-                );
-              return part.kind === "turn" ? (
-                <Fragment key={part.turn.key}>
-                  {marker}
-                  <TurnView
-                    turn={part.turn}
-                    chatId={chat.id}
-                    harness={harness}
-                    readOnly={readOnly}
-                    actions={actions}
-                    live={live}
-                  />
-                </Fragment>
-              ) : (
-                <Fragment key={part.item.id}>
-                  {marker}
-                  <div
-                    className="chat-part"
-                    data-anchor=""
-                    data-seen={part.item.id}
-                  >
-                    <Item
-                      item={part.item}
+    <ArrivalsContext value={arrivals}>
+      <ChatFilesContext.Provider value={files}>
+        <SentLinksContext.Provider value={sentLinks}>
+          <OpeningContext.Provider value={working && Boolean(chat.opening)}>
+            <div className="chat-col" ref={contentRef}>
+              {empty && !readOnly && (
+                <p className="chat-empty">Say what you want done.</p>
+              )}
+              {parts.map((part) => {
+                const marker = newFrom !== undefined &&
+                  (part.kind === "turn"
+                    ? part.turn.ids.includes(newFrom)
+                    : part.item.id === newFrom) && (
+                    <NewMarker key="new" markerRef={markerRef ?? null} />
+                  );
+                return part.kind === "turn" ? (
+                  <Fragment key={part.turn.key}>
+                    {marker}
+                    <TurnView
+                      turn={part.turn}
+                      chatId={chat.id}
                       harness={harness}
                       readOnly={readOnly}
                       actions={actions}
+                      live={live}
                     />
-                  </div>
-                </Fragment>
-              );
-            })}
-            {chat.catching_up && (
-              <>
-                <div className="chat-skel chat-skel-long" aria-hidden="true" />
-                <div className="chat-skel chat-skel-short" aria-hidden="true" />
-              </>
-            )}
-            {chat.catching_up ? (
-              <WorkingLine label="Catching up…" />
-            ) : chat.activity === "waiting" ? (
-              // The dock already shows the request; the slot keeps its height.
-              chat.has_composer && asking ? (
-                <WorkingSlot />
-              ) : (
-                <WorkingLine label="Waiting for you" spinner={false} />
-              )
-            ) : working && chat.stopping ? (
-              <WorkingLine label="Stopping…" spinner={!stepRuns} />
-            ) : working && chat.opening ? (
-              <WorkingLine
-                key="opening"
-                label={
-                  chat.opening === "resume"
-                    ? `Resuming the ${harness} session…`
-                    : `Starting ${harness}…`
-                }
-                fromShown
-              />
-            ) : // After an unconfirmed stop the open turn row and the notice say it.
-            working &&
-              !parts.some(
-                (part) => part.kind === "turn" && part.turn.unconfirmed,
-              ) ? (
-              <BetweenSteps running={stepRuns}>
-                {chat.doing ? (
-                  <WorkingLine
-                    label={chat.doing.label}
-                    since={chat.doing.since}
-                    items={items}
-                  />
+                  </Fragment>
                 ) : (
-                  <WorkingLine label="Working…" />
-                )}
-              </BetweenSteps>
-            ) : (
-              // While a step row holds the spinner the line's place is kept,
-              // so the end of the transcript does not bounce between rows.
-              working && <WorkingSlot />
-            )}
-          </div>
-        </OpeningContext.Provider>
-      </SentLinksContext.Provider>
-    </ChatFilesContext.Provider>
+                  <Fragment key={part.item.id}>
+                    {marker}
+                    <div
+                      className="chat-part"
+                      data-anchor=""
+                      data-seen={part.item.id}
+                    >
+                      <Item
+                        item={part.item}
+                        harness={harness}
+                        readOnly={readOnly}
+                        actions={actions}
+                      />
+                    </div>
+                  </Fragment>
+                );
+              })}
+              {chat.catching_up && (
+                <>
+                  <div
+                    className="chat-skel chat-skel-long"
+                    aria-hidden="true"
+                  />
+                  <div
+                    className="chat-skel chat-skel-short"
+                    aria-hidden="true"
+                  />
+                </>
+              )}
+              {chat.catching_up ? (
+                <WorkingLine label="Catching up…" />
+              ) : chat.activity === "waiting" ? (
+                // The dock already shows the request; the slot keeps its height.
+                chat.has_composer && asking ? (
+                  <WorkingSlot />
+                ) : (
+                  <WorkingLine label="Waiting for you" spinner={false} />
+                )
+              ) : working && chat.stopping ? (
+                <WorkingLine label="Stopping…" spinner={!stepRuns} />
+              ) : working && chat.opening ? (
+                <WorkingLine
+                  key="opening"
+                  label={
+                    chat.opening === "resume"
+                      ? `Resuming the ${harness} session…`
+                      : `Starting ${harness}…`
+                  }
+                  fromShown
+                />
+              ) : // After an unconfirmed stop the open turn row and the notice say it.
+              working &&
+                !parts.some(
+                  (part) => part.kind === "turn" && part.turn.unconfirmed,
+                ) ? (
+                <BetweenSteps running={stepRuns}>
+                  {chat.doing ? (
+                    <WorkingLine
+                      label={chat.doing.label}
+                      since={chat.doing.since}
+                      items={items}
+                    />
+                  ) : (
+                    <WorkingLine label="Working…" />
+                  )}
+                </BetweenSteps>
+              ) : (
+                // While a step row holds the spinner the line's place is kept,
+                // so the end of the transcript does not bounce between rows.
+                working && <WorkingSlot />
+              )}
+            </div>
+          </OpeningContext.Provider>
+        </SentLinksContext.Provider>
+      </ChatFilesContext.Provider>
+    </ArrivalsContext>
   );
 }
