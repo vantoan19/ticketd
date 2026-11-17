@@ -31,22 +31,21 @@ export function useMentionReadiness({
     mention !== null && !mention.ready && selected !== null
       ? mention.reference === selected
       : false;
-  // How each followed mention is judged. A cached copy that is as current as
-  // the last change is read once more; one a change made stale, or one never
-  // read, is read anyway when the page is shown, so it only waits for that.
-  const route = useRef<{ key: number; reread: boolean } | null>(null);
+  // A record that is known is read once more for each followed mention,
+  // whatever it holds (a copy as current as the last change, a stale one, or
+  // one with a failure kept from before): `retry` resolves only once a read
+  // made after the call has answered, with a body or a failure. A record never
+  // read waits for the page's first read of it, which is made after the follow.
+  const forced = useRef<number | null>(null);
   useEffect(() => {
     if (!judging || key === undefined || selected === null) return;
-    if (route.current?.key !== key) {
-      route.current = { key, reread: known && current && !failed };
-      if (route.current.reread) {
-        void retry().then(() => {
-          if (route.current?.key === key) onReady(selected);
-        });
-        return;
-      }
-    }
-    if (!route.current.reread && (current || failed)) onReady(selected);
+    if (forced.current === key) return;
+    if (known) {
+      forced.current = key;
+      void retry().then(() => {
+        if (forced.current === key) onReady(selected);
+      });
+    } else if (current || failed) onReady(selected);
   }, [judging, key, selected, known, current, failed, retry, onReady]);
 
   const trashed = record.value?.trashed;

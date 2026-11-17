@@ -204,6 +204,37 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
   );
 });
 
+test("a mention waits for the fresh body when a reported change has made the cached one stale", async () => {
+  let fresh = false;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  setUp(async (reference) => {
+    if (reference === "T-KQ1") return ticket("T-KQ1", "Plain.");
+    if (!fresh) return ticket("T-KQ2", OLD);
+    await gate;
+    return ticket("T-KQ2", STORED);
+  });
+  const signal = fakeChangeSignal();
+  render(
+    <TestReads signal={signal}>
+      <Harness />
+    </TestReads>,
+  );
+  act(() => api.select("T-KQ2"));
+  await screen.findByText(passage);
+  act(() => api.select("T-KQ1"));
+  // A CLI edit changes the body while T-KQ2 is hidden, and the poll reports it:
+  // its cached copy is stale, and not read again until it is shown.
+  fresh = true;
+  await act(async () => signal.change());
+  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  expect(marked()).toBeNull();
+  await act(async () => release());
+  await waitFor(() =>
+    expect(marked()?.textContent).toBe("Blocked on T-KQ1 today."),
+  );
+});
+
 test("trashing and restoring the revealed ticket does not reveal it again", async () => {
   let current = ticket("T-KQ2", STORED);
   setUp(async (reference) =>

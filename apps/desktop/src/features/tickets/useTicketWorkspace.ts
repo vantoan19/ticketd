@@ -50,8 +50,9 @@ type RefreshOptions = { reportFailure?: boolean };
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
  * A mention being followed. It is not `ready` until the selected ticket's record
- * is current (`useTicket().current`), so it is judged against the stored text
- * rather than a copy a change has made stale.
+ * has been read after the mention was followed (or that read failed), so it is
+ * judged against the stored text rather than a copy a change has made stale or
+ * a failure has left behind.
  */
 export type FollowedMention = MentionTarget & { key: number; ready: boolean };
 export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
