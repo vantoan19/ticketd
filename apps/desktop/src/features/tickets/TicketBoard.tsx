@@ -15,7 +15,6 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import { m } from "motion/react";
 import { listMotion } from "./list-motion";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
