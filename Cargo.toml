@@ -23,6 +23,14 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 
+# Smaller, faster release binaries at the cost of a longer release build. Panics keep
+# unwinding: the desktop relies on tokio containing a task panic, and Cargo does not
+# allow `panic` in a per-package profile override, so the CLI cannot abort alone.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
