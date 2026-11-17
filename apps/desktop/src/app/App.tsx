@@ -61,7 +61,6 @@ import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -527,13 +526,9 @@ function AppContent() {
     }
   };
   // Writes made outside a ticket's page (the palette, bulk edits) report that
-  // the Workspace changed, so an open ticket shows them at once, and refresh
-  // the list.
-  const changed = useTicketChanged();
-  const reportChange = useCallback(async () => {
-    await changed();
-    await refresh();
-  }, [changed, refresh]);
+  // the Workspace changed, so an open ticket shows them at once. The report
+  // moves the shared version, which reloads the list.
+  const reportChange = useTicketChanged();
   const bulk = useBulkEdit(reportChange);
   const openNotifiedTicket = (reference: string) => {
     setInboxTarget(null);

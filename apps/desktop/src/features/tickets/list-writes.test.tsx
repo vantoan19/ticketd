@@ -3,6 +3,7 @@
 // Plan, add to a Plan, refresh sources) report themselves, so the open Ticket's
 // page shows the result at once instead of at the next poll.
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -131,6 +132,8 @@ beforeEach(() => {
             },
             members: [],
           };
+        case "create_ticket":
+          return { ...ticket, id: "9", reference: "T-KQ9", title: "Created" };
         case "find_tickets_with_updates":
         case "search_documents":
           return [];
@@ -252,4 +255,41 @@ test("refreshing sources shows what it changed on the page", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Refresh sources" }));
   await waitFor(() => expect(page()).toContain("Source, refreshed"));
+});
+
+function Creating() {
+  const workspace = useTicketWorkspace(vi.fn(), vi.fn());
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        void workspace.create("Created", "", "Todo", null, null, [])
+      }
+    >
+      Create
+    </button>
+  );
+}
+
+test("creating a Ticket reloads the list once: its write report already moves the shared version", async () => {
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <Creating />
+    </TestOpenTicket>,
+  );
+  const lists = () =>
+    bridge.invoke.mock.calls.filter(([c]) => c === "find_tickets_with_updates")
+      .length;
+  await waitFor(() => expect(lists()).toBeGreaterThan(0));
+  await act(async () => {});
+  const before = lists();
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "create_ticket",
+      expect.anything(),
+    ),
+  );
+  for (let turn = 0; turn < 5; turn += 1) await act(async () => {});
+  expect(lists() - before).toBe(1);
 });

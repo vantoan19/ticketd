@@ -403,7 +403,7 @@ export function useTicketWorkspace(
       setCreating(false);
       setSelected(ticket.reference);
     }
-    await refresh();
+    // The report moves the shared version, which reloads the list.
     await reported;
     return ticket.reference;
   }

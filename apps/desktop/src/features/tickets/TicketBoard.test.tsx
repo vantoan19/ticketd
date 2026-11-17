@@ -1063,12 +1063,14 @@ test("switching layouts preserves a pending card request and its protection", as
 });
 
 test("a membership response for an old scope cannot announce the wrong filtered outcome", async () => {
+  // The first Done read after the write is the membership check, which this
+  // test holds. (The write report no longer reloads the board before it.)
   let doneReads = 0;
   let finish: ((value: unknown) => void) | undefined;
   writeOverride = async () => {
     saved[0] = ticket(1, "Done");
     readOverride = (filter) =>
-      filter.status === "Done" && ++doneReads === 2
+      filter.status === "Done" && ++doneReads === 1
         ? new Promise((resolve) => {
             finish = resolve;
           })

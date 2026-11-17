@@ -103,17 +103,27 @@ export function useBoardStatus(workspace: {
         (trigger ?? board)?.focus({ preventScroll: true });
     });
   }
-  async function reconcile(reference: string) {
+  /**
+   * Reads the Ticket anew and shows it. `wrote` says a write of this Ticket
+   * succeeded, so it is reported (which also reloads the list); otherwise it
+   * only shows what was read, since nothing was written.
+   */
+  async function reconcile(reference: string, wrote: boolean) {
     // Successful request replays contain historical results, so only a new read is current.
     const current = await client.showTicket(reference);
-    const reported = latest.current.changed(current);
-    latest.current.board.confirmTicket(current);
-    await latest.current.refresh();
-    await reported;
+    if (wrote) {
+      const reported = latest.current.changed(current);
+      latest.current.board.confirmTicket(current);
+      await reported;
+    } else {
+      latest.current.patchTicket(current);
+      latest.current.board.confirmTicket(current);
+      await latest.current.refresh();
+    }
     return current;
   }
-  async function saved(reference: string, previous?: string) {
-    const current = await reconcile(reference);
+  async function saved(reference: string, wrote: boolean, previous?: string) {
+    const current = await reconcile(reference, wrote);
     for (;;) {
       const board = latest.current.board;
       const matches = await board.matches(current);
@@ -146,14 +156,14 @@ export function useBoardStatus(workspace: {
         { status: attempt.status },
         attempt.id,
       );
-      await saved(reference, attempt.ticket.status);
+      await saved(reference, true, attempt.ticket.status);
       attempts.current.delete(reference);
       return true;
     } catch (reason) {
       let placement =
         "Its saved status couldn't be checked. Retry to check again.";
       try {
-        const current = await reconcile(reference);
+        const current = await reconcile(reference, false);
         putBack(current, move);
         placement =
           current.status === attempt.ticket.status
@@ -211,7 +221,7 @@ export function useBoardStatus(workspace: {
       const current = await client.showTicket(reference);
       latest.current.patchTicket(current);
       if (current.status === status) {
-        await saved(reference);
+        await saved(reference, false);
         from = null;
         return;
       }
@@ -273,9 +283,9 @@ export function useBoardStatus(workspace: {
       void submit({ ticket, status, id: crypto.randomUUID() }, null);
     },
     completeDuplicate: () =>
-      review ? saved(review.ticket.reference) : Promise.resolve(),
+      review ? saved(review.ticket.reference, true) : Promise.resolve(),
     reconcileDuplicate: async () => {
-      if (review) await reconcile(review.ticket.reference);
+      if (review) await reconcile(review.ticket.reference, false);
     },
     retry(reference: string) {
       if (busy.current.has(reference)) return;

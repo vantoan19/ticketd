@@ -1415,6 +1415,29 @@ test("moves selected tickets to a project from the direct Project control", asyn
   expect(changes).toEqual([{ project_id: "p1" }]);
 });
 
+test("a bulk change reloads the list once: its write report already moves the shared version", async () => {
+  let lists = 0;
+  await renderBulk({
+    find_tickets: () => {
+      lists += 1;
+      return [bulkTicket(1)];
+    },
+    list_projects: () => [
+      { id: "p1", name: "Project one", path: "/p", paths: ["/p"] },
+    ],
+    bulk_change: () => [],
+  });
+  const before = lists;
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  openMenu("Project of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Project one" }));
+  for (let turn = 0; turn < 5; turn += 1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  expect(lists - before).toBe(1);
+});
+
 test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
   const changes: unknown[] = [];
   await renderBulk({
