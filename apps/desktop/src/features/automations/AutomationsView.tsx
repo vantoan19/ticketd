@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Appear } from "@/components/ui/motion";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -462,19 +463,22 @@ export function AutomationsView({
       role="group"
       aria-label="Start from an example"
     >
-      <p className="auto-starters-label">Start from an example</p>
-      {EXAMPLES.map(({ example, icon: Icon, title, sub }) => (
-        <button
-          key={example}
-          type="button"
-          className="auto-starter"
-          onClick={() => void added(automationsClient.createExample(example))}
-        >
-          <Icon size={16} aria-hidden />
-          <span className="auto-starter-title">{title}</span>
-          <span className="auto-starter-sub">{sub}</span>
-          <ArrowRight size={16} aria-hidden />
-        </button>
+      <Appear index={1}>
+        <p className="auto-starters-label">Start from an example</p>
+      </Appear>
+      {EXAMPLES.map(({ example, icon: Icon, title, sub }, index) => (
+        <Appear key={example} index={index + 2}>
+          <button
+            type="button"
+            className="auto-starter"
+            onClick={() => void added(automationsClient.createExample(example))}
+          >
+            <Icon size={16} aria-hidden />
+            <span className="auto-starter-title">{title}</span>
+            <span className="auto-starter-sub">{sub}</span>
+            <ArrowRight size={16} aria-hidden />
+          </button>
+        </Appear>
       ))}
     </div>
   );
@@ -730,11 +734,13 @@ export function AutomationsView({
     >
       {empty && tab === "automations" ? (
         <div className="auto-empty auto-start">
-          <EmptyState
-            icon={<Workflow />}
-            title="Let agents act on tickets for you"
-            description="Run a sequence of steps when a ticket changes, on a schedule, or whenever you choose."
-          />
+          <Appear>
+            <EmptyState
+              icon={<Workflow />}
+              title="Let agents act on tickets for you"
+              description="Run a sequence of steps when a ticket changes, on a schedule, or whenever you choose."
+            />
+          </Appear>
           {!narrow && examples}
         </div>
       ) : (

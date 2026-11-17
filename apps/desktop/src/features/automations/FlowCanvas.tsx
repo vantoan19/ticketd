@@ -1,11 +1,22 @@
-import { createContext, use, useMemo, useRef, type ReactNode } from "react";
+import {
+  createContext,
+  use,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Background,
+  BaseEdge,
+  getSmoothStepPath,
+  getStraightPath,
   Handle,
   Position,
   ReactFlow,
   ReactFlowProvider,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -34,6 +45,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
+import { Appear } from "@/components/ui/motion";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   CARD_HEIGHT,
@@ -211,7 +223,71 @@ type CardData = {
    * path, and absent on a card that cannot have one.
    */
   failureSteps?: number | null;
+  /** A step added since the flow opened: it fades up into place. */
+  arrived: boolean;
 };
+
+/**
+ * A step added to a flow that is open takes the shared entrance. The ones the
+ * flow opened with are there already, so a flow does not replay on opening.
+ */
+function StepArrival({
+  arrived,
+  children,
+}: {
+  arrived: boolean;
+  children: ReactNode;
+}) {
+  return arrived ? (
+    <Appear className="flow-card-arrival">{children}</Appear>
+  ) : (
+    children
+  );
+}
+
+/**
+ * A line to or from a step that just arrived: it draws along its length. Lines
+ * are otherwise React Flow's own; this one only adds the drawing.
+ */
+export function DrawnEdge({
+  id,
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  markerEnd,
+  style,
+  label,
+  data,
+}: EdgeProps) {
+  const geometry = {
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  };
+  const [path, labelX, labelY] = data?.smooth
+    ? getSmoothStepPath(geometry)
+    : getStraightPath(geometry);
+  return (
+    <BaseEdge
+      id={id}
+      path={path}
+      labelX={labelX}
+      labelY={labelY}
+      label={label}
+      className="ui-drawn"
+      pathLength={1}
+      {...(markerEnd && { markerEnd })}
+      {...(style && { style })}
+      {...PATH_LABEL_SHAPE}
+    />
+  );
+}
 
 function CardNode({ data }: NodeProps<Node<CardData>>) {
   const { card, place, selected, failureSteps } = data;
@@ -252,81 +328,83 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
   return (
     <>
       <Handle type="target" position={Position.Top} isConnectable={false} />
-      <div
-        className="flow-card"
-        data-kind={cardColor(card)}
-        data-selected={selected || undefined}
-        data-unset={card.unset || undefined}
-      >
-        {card.menu === "choose-trigger" ? (
-          <TriggerMenu>
-            <button {...main}>{face}</button>
-          </TriggerMenu>
-        ) : (
-          <button
-            {...main}
-            aria-pressed={selected}
-            onClick={() => openCard(card.id, selected, onSelect)}
-            // Delete on a step asks before it goes; the trigger stays.
-            onKeyDown={(event) => {
-              if (event.key === "Delete" && card.menu === "step")
-                onDeleteStep(card.id);
-            }}
-          >
-            {face}
-          </button>
-        )}
-        {card.menu === "change-trigger" && (
-          <span className="flow-card-menu nodrag nopan">
+      <StepArrival arrived={data.arrived}>
+        <div
+          className="flow-card"
+          data-kind={cardColor(card)}
+          data-selected={selected || undefined}
+          data-unset={card.unset || undefined}
+        >
+          {card.menu === "choose-trigger" ? (
             <TriggerMenu>
-              <IconButton label="Change what starts it">
-                <Ellipsis aria-hidden />
-              </IconButton>
+              <button {...main}>{face}</button>
             </TriggerMenu>
-          </span>
-        )}
-        {card.menu === "step" && (
-          <span className="flow-card-menu nodrag nopan">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton label={`Actions for ${cardName(card)}`}>
+          ) : (
+            <button
+              {...main}
+              aria-pressed={selected}
+              onClick={() => openCard(card.id, selected, onSelect)}
+              // Delete on a step asks before it goes; the trigger stays.
+              onKeyDown={(event) => {
+                if (event.key === "Delete" && card.menu === "step")
+                  onDeleteStep(card.id);
+              }}
+            >
+              {face}
+            </button>
+          )}
+          {card.menu === "change-trigger" && (
+            <span className="flow-card-menu nodrag nopan">
+              <TriggerMenu>
+                <IconButton label="Change what starts it">
                   <Ellipsis aria-hidden />
                 </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" aria-label="Step actions">
-                {failureSteps === null && (
+              </TriggerMenu>
+            </span>
+          )}
+          {card.menu === "step" && (
+            <span className="flow-card-menu nodrag nopan">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton label={`Actions for ${cardName(card)}`}>
+                    <Ellipsis aria-hidden />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" aria-label="Step actions">
+                  {failureSteps === null && (
+                    <DropdownMenuItem
+                      className="items-start whitespace-normal"
+                      onSelect={() => onSetFailurePath(card.id, true)}
+                    >
+                      <span className="flow-menu-item-text">
+                        Add failure path
+                        <small>Steps that run only if this step fails</small>
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  {typeof failureSteps === "number" && (
+                    <DropdownMenuItem
+                      onSelect={() => onSetFailurePath(card.id, false)}
+                    >
+                      {/* It asks first when steps would go with the path. */}
+                      {failureSteps > 0
+                        ? "Remove failure path…"
+                        : "Remove failure path"}
+                    </DropdownMenuItem>
+                  )}
+                  {failureSteps !== undefined && <DropdownMenuSeparator />}
                   <DropdownMenuItem
-                    className="items-start whitespace-normal"
-                    onSelect={() => onSetFailurePath(card.id, true)}
+                    variant="destructive"
+                    onSelect={() => onDeleteStep(card.id)}
                   >
-                    <span className="flow-menu-item-text">
-                      Add failure path
-                      <small>Steps that run only if this step fails</small>
-                    </span>
+                    Delete step…
                   </DropdownMenuItem>
-                )}
-                {typeof failureSteps === "number" && (
-                  <DropdownMenuItem
-                    onSelect={() => onSetFailurePath(card.id, false)}
-                  >
-                    {/* It asks first when steps would go with the path. */}
-                    {failureSteps > 0
-                      ? "Remove failure path…"
-                      : "Remove failure path"}
-                  </DropdownMenuItem>
-                )}
-                {failureSteps !== undefined && <DropdownMenuSeparator />}
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => onDeleteStep(card.id)}
-                >
-                  Delete step…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
-        )}
-      </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          )}
+        </div>
+      </StepArrival>
       {/* The line to the next step leaves the bottom; a failure path, the side. */}
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
       <Handle
@@ -447,6 +525,7 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
 }
 
 const nodeTypes = { card: CardNode, add: AddNode };
+const edgeTypes = { drawn: DrawnEdge };
 
 /**
  * An Automation's steps as a diagram, arranged by `layoutFlow`: nothing is
@@ -481,6 +560,19 @@ export function FlowCanvas({
   const { trigger, steps } = definition;
   // Every step and every path, so that a path added with nothing on it counts.
   const shape = JSON.stringify(flowSteps(steps));
+  // The steps present when the flow opened do not animate; each one added
+  // after that arrives (and keeps its entrance mounted, so it never replays).
+  const [tracker, setTracker] = useState(() => ({
+    seen: new Set(everyStep(steps).map((step) => step.id)),
+    arrived: new Set<string>(),
+  }));
+  const added = everyStep(steps).filter((step) => !tracker.seen.has(step.id));
+  if (added.length > 0)
+    setTracker({
+      seen: new Set([...tracker.seen, ...added.map((step) => step.id)]),
+      arrived: new Set([...tracker.arrived, ...added.map((step) => step.id)]),
+    });
+  const { arrived } = tracker;
   const { nodes, edges } = useMemo(() => {
     const cards = new Map(
       [
@@ -514,6 +606,7 @@ export function FlowCanvas({
             card: cardOf(item.id),
             place: places.get(item.id),
             selected: item.id === selected,
+            arrived: arrived.has(item.id),
             needs: problems.find((problem) => problem.step_id === item.id)
               ?.message,
             ...(failureSteps.has(item.id) && {
@@ -542,8 +635,13 @@ export function FlowCanvas({
     });
     const edges: Edge[] = layout.edges.map(({ path, ...edge }) => ({
       ...edge,
-      // A line to a path bends to reach it, and says which path it is.
-      type: path ? "smoothstep" : "straight",
+      // A line to a path bends to reach it, and says which path it is. A line
+      // to or from a step that just arrived draws (never a failure path's
+      // dashes, which the drawing would replace).
+      ...(path !== "failure" &&
+      (arrived.has(edge.source) || arrived.has(edge.target))
+        ? { type: "drawn", data: { smooth: !!path } }
+        : { type: path ? "smoothstep" : "straight" }),
       focusable: false,
       ...(path && { label: PATH_LABELS[path], ...PATH_LABEL_SHAPE }),
       ...(path === "yes" && { className: "flow-edge-yes" }),
@@ -555,7 +653,7 @@ export function FlowCanvas({
       }),
     }));
     return { nodes, edges };
-  }, [trigger, only, steps, agents, projects, problems, selected]);
+  }, [trigger, only, steps, agents, projects, problems, selected, arrived]);
   const {
     onSelect,
     onChooseTrigger,
@@ -592,6 +690,7 @@ export function FlowCanvas({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             // As far out as the zoom control goes, for an overview.
             minZoom={LEAST_ZOOM}
             maxZoom={1.5}
