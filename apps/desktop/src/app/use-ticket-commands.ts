@@ -31,7 +31,8 @@ export function useTicketCommands({
   projects: Project[];
   plans: { id: string; name: string; archived: boolean }[];
   close: () => void;
-  refresh: () => Promise<void>;
+  /** The write report, with the Ticket the write returned. */
+  refresh: (returned?: Ticket) => Promise<void>;
 }) {
   const [target, setTarget] = useState<Ticket | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -118,8 +119,15 @@ export function useTicketCommands({
       active = false;
     };
   }, [open, reference, scope, line, reminderReads]);
+  // The Ticket a flow that outlives the palette (the duplicate review) was
+  // started on. The palette's own copy goes with it, and the list may not
+  // hold the Ticket, so the flow keeps the one it began with.
+  const [flowTicket, setFlowTicket] = useState<Ticket | null>(null);
+  const flowing = duplicate || leaving !== null;
   const ticket =
-    initialTicket ?? (target?.reference === reference ? target : null);
+    (flowing ? flowTicket : null) ??
+    initialTicket ??
+    (target?.reference === reference ? target : null);
   const presets = reminderPresets(new Date());
   let options: Option[] = [];
   if (ticket) {
@@ -183,64 +191,90 @@ export function useTicketCommands({
     )
   )
     options.push({ value: query.trim(), label: `Create “${query.trim()}”` });
-  async function apply(value: string, confirmed = false, customAt?: string) {
+  async function apply(
+    value: string,
+    confirmed = false,
+    customAt?: string,
+    read?: Ticket,
+  ) {
+    // The copy shown may be older than the Workspace; `read` is one just made.
+    const subject = read ?? ticket;
     if (
-      !ticket ||
+      !subject ||
       blocked ||
       pending ||
       !scope ||
-      (scope === "Reminder" && reminderLoaded !== ticket.reference)
+      (scope === "Reminder" && reminderLoaded !== subject.reference)
     )
       return;
     if (
       scope === "Status" &&
-      ticket.status === value &&
-      (value !== "Duplicate" || externalSource(ticket))
+      subject.status === value &&
+      (value !== "Duplicate" || externalSource(subject))
     ) {
+      // Only a read made now says it is already set (the ADR's check before a
+      // write); a copy from before a change elsewhere would close without writing.
+      if (!read) {
+        setPending(true);
+        let current: Ticket;
+        try {
+          current = await client.showTicket(subject.reference);
+        } catch (reason) {
+          const message = failureText(reason, "check the status");
+          setError(message);
+          line.show({ message, tone: "error" });
+          return;
+        } finally {
+          setPending(false);
+        }
+        return apply(value, confirmed, customAt, current);
+      }
       close();
       return;
     }
     if (scope === "Status" && value === "Duplicate") {
+      setFlowTicket(subject);
       close();
       setDuplicate(true);
       return;
     }
     if (
       scope === "Status" &&
-      ticket.status === "Duplicate" &&
-      ticket.duplicate_of &&
+      subject.status === "Duplicate" &&
+      subject.duplicate_of &&
       !confirmed
     ) {
+      setFlowTicket(subject);
       close();
       setLeaving(value);
       return;
     }
-    const reference = ticket.reference;
-    let forward: () => Promise<unknown>;
-    let undo: () => Promise<unknown>;
+    const reference = subject.reference;
+    let forward: () => Promise<Ticket | void>;
+    let undo: () => Promise<Ticket | void>;
     let message: string;
     switch (scope) {
       case "Status":
         forward = () => client.changeTicket(reference, { status: value });
-        undo = () => client.changeTicket(reference, { status: ticket.status });
+        undo = () => client.changeTicket(reference, { status: subject.status });
         message = `Moved ${reference} to ${value}`;
         break;
       case "Project":
         forward = () =>
           client.changeTicket(reference, { project_id: value || null });
         undo = () =>
-          client.changeTicket(reference, { project_id: ticket.project_id });
+          client.changeTicket(reference, { project_id: subject.project_id });
         message = `Moved ${reference} to ${projects.find((p) => p.id === value)?.name ?? "No project"}`;
         break;
       case "Plan":
         forward = () => client.setPlan(reference, value || null);
-        undo = () => client.setPlan(reference, ticket.plan_id);
+        undo = () => client.setPlan(reference, subject.plan_id);
         message = value
           ? `Added ${reference} to ${plans.find((p) => p.id === value)?.name ?? value}`
           : `Removed ${reference} from its Plan`;
         break;
       case "Tags": {
-        const removing = ticket.tags.includes(value);
+        const removing = subject.tags.includes(value);
         forward = () =>
           client.changeTag(
             removing ? "remove_tag" : "add_tag",
@@ -283,27 +317,26 @@ export function useTicketCommands({
     }
     setPending(true);
     try {
-      await forward();
+      const written = await forward();
       if (scope === "Reminder") reminderAttempt.current = null;
       setRetry(null);
       setError("");
       close();
       line.show({
         message,
-        ...(scope !== "Status" || ticket.status !== "Duplicate"
+        ...(scope !== "Status" || subject.status !== "Duplicate"
           ? {
               undo: async () => {
-                await undo();
-                await refresh();
+                await refresh((await undo()) ?? undefined);
               },
             }
           : {}),
       });
-      await refresh().catch((reason: unknown) =>
+      await refresh(written ?? undefined).catch((reason: unknown) =>
         line.show({
           message: `Saved, not refreshed. ${failureText(reason, "refresh the ticket")}`,
           tone: "error",
-          action: { label: "Retry", run: refresh },
+          action: { label: "Retry", run: () => refresh(written ?? undefined) },
         }),
       );
     } catch (reason) {

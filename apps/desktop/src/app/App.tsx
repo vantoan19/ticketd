@@ -61,6 +61,7 @@ import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -73,6 +74,7 @@ import {
   TicketListSync,
   useTicket,
   useTicketChanged,
+  type ReturnedTickets,
 } from "@/features/tickets/open-ticket";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
@@ -528,7 +530,16 @@ function AppContent() {
   // Writes made outside a ticket's page (the palette, bulk edits) report that
   // the Workspace changed, so an open ticket shows them at once. The report
   // moves the shared version, which reloads the list.
-  const reportChange = useTicketChanged();
+  const reportTicketChanged = useTicketChanged();
+  // This sits above `TicketListSync`, so its report would not reach the list
+  // row: show the returned Tickets in the list here, as the other write sites do.
+  const reportChange = useCallback(
+    (returned?: ReturnedTickets) => {
+      for (const ticket of [returned ?? []].flat()) patchTicket(ticket);
+      return reportTicketChanged(returned);
+    },
+    [patchTicket, reportTicketChanged],
+  );
   const bulk = useBulkEdit(reportChange);
   // A restore or a download from Drive replaced the whole Workspace: the
   // selection, the opened pages and a failed bulk change describe the old one.

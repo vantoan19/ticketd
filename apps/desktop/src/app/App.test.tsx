@@ -3133,6 +3133,48 @@ test("focused Ticket status key opens a scoped palette and Undo restores the sta
   await vi.waitFor(() => expect(current.status).toBe("Todo"));
 });
 
+test("a palette status change shows on the list row at once, before the list is read again", async () => {
+  vi.useFakeTimers();
+  let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });
+  // After the write the list read is still on its way.
+  let listRead: Promise<unknown> | null = null;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { patch?: { status?: string } }) => {
+      if (command === "find_tickets")
+        return listRead ?? Promise.resolve([current]);
+      if (command === "show_ticket") return current;
+      if (command === "change_ticket") {
+        current = { ...current, status: args?.patch?.status ?? current.status };
+        listRead = new Promise(() => {});
+        return current;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  render(<App />);
+  await turn();
+  const row = screen.getByRole("button", { name: /Palette target/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "s" });
+  await turn();
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Search tickets and destinations" }),
+    { key: "4" },
+  );
+  for (let i = 0; i < 4; i += 1) await turn();
+  expect(screen.getByText("Moved T-FV1 to Done")).toBeTruthy();
+  // The row keeps its place (the list holds a moved row still), but shows the new status.
+  expect(
+    screen
+      .getByRole("button", { name: /Palette target/ })
+      .getAttribute("data-status"),
+  ).toBe("Done");
+});
+
 test.each([
   [
     "p",
