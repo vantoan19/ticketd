@@ -12,8 +12,10 @@ const time = (ticket: Ticket) => {
  * Keep the ledger's reading position while the saved properties update. A row
  * the list dropped shows the newest copy of its Ticket known (`known`, which
  * peeks at the Ticket reads: the open Ticket's page, or the Ticket a write
- * returned), when it is no older than the list's copy (compared as times), and
- * otherwise the list's copy. The summary of its latest update, which only the
+ * returned), when it is strictly newer than the list's copy (compared as
+ * times), and otherwise the list's copy. On a tie the list's copy wins: tags
+ * and availability do not move `updated_at`, and a cached copy of a Ticket
+ * nobody views may never have been read again. The summary of its latest update, which only the
  * list carries, stays while it still names the Ticket's latest update.
  *
  * `watching` is the open Ticket when its row is held and dropped: the one
@@ -35,7 +37,7 @@ export function useStickyRows(
   const [previousSelected, setPreviousSelected] = useState(selected);
   const newest = (listed: Ticket): Ticket => {
     const copy = known(listed.reference);
-    if (!copy || time(copy) < time(listed)) return listed;
+    if (!copy || time(copy) <= time(listed)) return listed;
     return listed.progress_summary !== undefined &&
       listed.progress_summary?.activity_id === copy.latest_update?.activity_id
       ? { ...copy, progress_summary: listed.progress_summary }

@@ -103,6 +103,20 @@ it("an older cached record does not replace the list's copy", () => {
   expect(rows(hook.result.current.tickets)[0]).toBe("T-1:Gamma:In progress");
 });
 
+it("on equal times the list's copy wins over a cached copy", () => {
+  // Tags and availability do not move `updated_at`, so a cached copy of the
+  // same time may be older than the list's.
+  const tagged = { ...listed, tags: ["cli"] };
+  const cached = { ...listed, tags: [] };
+  const hook = mount({
+    tickets: [tagged, other],
+    record: cached,
+    scopeKey: "a",
+  });
+  hook.rerender({ tickets: [other], record: cached, scopeKey: "a" });
+  expect(hook.result.current.tickets[0]?.tags).toEqual(["cli"]);
+});
+
 it("after a scope change a row is held when the newest copy has moved", () => {
   const hook = mount({
     tickets: [listed, other],
