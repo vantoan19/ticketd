@@ -3,6 +3,7 @@ import {
   type InvokeArgs,
   type InvokeOptions,
 } from "@tauri-apps/api/core";
+import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 import {
   reportWorkspaceFailure,
@@ -98,15 +99,17 @@ export class BridgeFailure extends Error {
   }
 }
 
-const failureSchema = z.object({
-  code: z.enum(failureCodes).catch("failed"),
-  index: z.number().nullish(),
-  cause: z.enum(failureCodes).nullish().catch(null),
-  message: z.string(),
-  fields: z
-    .array(z.object({ field: z.string(), message: z.string() }))
-    .nullish(),
-});
+const failureSchema = lazySchema(() =>
+  z.object({
+    code: z.enum(failureCodes).catch("failed"),
+    index: z.number().nullish(),
+    cause: z.enum(failureCodes).nullish().catch(null),
+    message: z.string(),
+    fields: z
+      .array(z.object({ field: z.string(), message: z.string() }))
+      .nullish(),
+  }),
+);
 
 /** Reads what a command rejected with; anything unstructured is a plain failure. */
 export function toFailure(reason: unknown): BridgeFailure {

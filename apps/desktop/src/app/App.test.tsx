@@ -19,6 +19,11 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
+// The views App loads on first visit, loaded up front so a visit renders at once.
+import "@/features/documents/ContextGraph";
+import "@/features/documents/WorkspaceGraph";
+import "@/features/attachments/AttachmentLibrary";
+import "@/features/automations/AutomationsView";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
 
@@ -5248,8 +5253,10 @@ test("highlighted description edits preserve canonical code and links, and copy 
     bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
   ).toBe(false);
   fireEvent.click(checkbox);
-  await vi.waitFor(() =>
-    expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+  // The editor reports once idle, then autosave waits its own delay.
+  await vi.waitFor(
+    () => expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+    { timeout: 5000 },
   );
   const richCopy = screen.getByRole("button", { name: "Copy code" });
   richCopy.focus();
