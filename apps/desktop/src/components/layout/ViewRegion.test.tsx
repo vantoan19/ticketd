@@ -295,6 +295,21 @@ it("a page inside a host that owns its entrance is left alone too", () => {
   expect(played).toHaveLength(1);
 });
 
+it("a page whose marker sits deeper inside it is left alone too", () => {
+  layOut();
+  const { rerender } = render(<Panel page="tickets" />);
+  rerender(
+    <Panel page="documents">
+      <div className="management-host">
+        <div className="wrapper">
+          <section data-own-entrance />
+        </div>
+      </div>
+    </Panel>,
+  );
+  expect(played).toHaveLength(1);
+});
+
 it("the picture keeps its ids as data-id: out of getElementById, still in reach of CSS", () => {
   giveBoxes();
   const { container, rerender } = render(

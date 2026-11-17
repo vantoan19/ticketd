@@ -125,12 +125,15 @@ function show(
   leave(frame, () => frame.remove());
 }
 
-/** A page that choreographs its own entrance marks its root (arrival contract rule 2). */
+/**
+ * A page that choreographs its own entrance marks its root, or an element
+ * inside it (Documents marks `.documents-page`, Projects and Automations mark
+ * inside a wrapper), so the marker is looked for anywhere in the page
+ * (arrival contract rule 2).
+ */
 function ownsEntrance(page: HTMLElement): boolean {
-  return (
-    page.hasAttribute("data-own-entrance") ||
-    page.querySelector(":scope > [data-own-entrance]") !== null
-  );
+  const marker = "[data-own-entrance]";
+  return page.matches(marker) || page.querySelector(marker) !== null;
 }
 
 /**
