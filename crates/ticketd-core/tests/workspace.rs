@@ -1283,27 +1283,48 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     use ticketd_core::{WriteRequest, WriteResult};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
     let request = || WriteRequest::CreateTicket {
         title: "Saved".into(),
         project_id: None,
     };
-    let original = workspace.write(Some("request-1"), request()).unwrap();
-    let reference = match &original {
-        WriteResult::Ticket(ticket) => ticket.reference.clone(),
-        _ => panic!("expected ticket"),
-    };
-    workspace.add_tag(&reference, "kept").unwrap();
-    drop(workspace);
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 12;")
+    // A request and the outcome it was recorded with, as a Workspace saves them.
+    let donor = dir.path().join("donor.sqlite3");
+    let original = Workspace::open(&donor)
+        .unwrap()
+        .write(Some("request-1"), request())
         .unwrap();
-    drop(db);
+    let (recorded_request, recorded_outcome): (String, String) = rusqlite::Connection::open(&donor)
+        .unwrap()
+        .query_row(
+            "SELECT request, outcome FROM request_outcomes WHERE id = 'request-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    // A Workspace as format version 12 left it: a ticket, a tag and a recorded request.
+    let seed = |path: &std::path::Path| {
+        ticketd_core::create_workspace_at_format_version(path, 12).unwrap();
+        let db = rusqlite::Connection::open(path).unwrap();
+        db.execute_batch(
+            "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Saved', 'Todo');
+             INSERT INTO tags (name) VALUES ('kept');
+             INSERT INTO ticket_tags (ticket_id, tag_name) VALUES ('t1', 'kept');",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO request_outcomes (id, request, outcome) VALUES ('request-1', ?1, ?2)",
+            [&recorded_request, &recorded_outcome],
+        )
+        .unwrap();
+    };
+    seed(&path);
     // Hold a shared lock while both openers observe the old schema, so neither
     // can migrate until both have had an opportunity to contend.
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
+        .create(true)
+        .truncate(false)
         .open(format!("{}.lock", path.display()))
         .unwrap();
     fs2::FileExt::lock_shared(&lock).unwrap();
@@ -1332,38 +1353,53 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
         handle.join().unwrap();
     }
     assert_eq!(
-        workspaces[0].show_ticket(&reference).unwrap().tags,
+        workspaces[0].show_ticket("T-KQ1").unwrap().tags,
         vec!["kept"]
     );
-    assert_eq!(
-        workspaces[0].write(Some("request-1"), request()).unwrap(),
-        original
-    );
+    // The same request ID after the migration returns the outcome recorded before it,
+    // not a second ticket.
+    let replayed = workspaces[0].write(Some("request-1"), request()).unwrap();
+    assert_eq!(replayed, original);
+    assert!(matches!(replayed, WriteResult::Ticket(_)));
+    assert_eq!(workspaces[0].list_tickets().unwrap().len(), 1);
     workspaces.clear();
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 12;").unwrap();
-    drop(db);
-    let error = match Workspace::open(&path) {
+
+    // A migration that fails changes nothing, names the copy saved first, and that copy
+    // restores to a Workspace that migrates once the cause is gone. Here the cause is a
+    // table in the way of the step that creates `inbox_entries`.
+    let failing = dir.path().join("failing.sqlite3");
+    seed(&failing);
+    rusqlite::Connection::open(&failing)
+        .unwrap()
+        .execute_batch("CREATE TABLE inbox_entries (in_the_way INTEGER)")
+        .unwrap();
+    let error = match Workspace::open(&failing) {
         Ok(_) => panic!("migration should fail"),
         Err(error) => error.to_string(),
     };
     assert!(error.contains("restore-workspace"));
-    let backup = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().path()).filter(|p| p.to_string_lossy().contains("pre-migration")).find(|p| {
-        let db = rusqlite::Connection::open(p).unwrap();
-        db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='ticket_history_ticket_id'", [], |r| r.get::<_, i64>(0)).unwrap() == 1
-    }).unwrap();
-    Workspace::restore(&path, &backup).unwrap();
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
-    )
-    .unwrap();
-    drop(db);
-    let workspace = Workspace::open(&path).unwrap();
-    assert_eq!(
-        workspace.show_ticket(&reference).unwrap().tags,
-        vec!["kept"]
-    );
+    let version: i64 = rusqlite::Connection::open(&failing)
+        .unwrap()
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 12, "the failed migration was rolled back");
+    let backup = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name().is_some_and(|name| {
+                name.to_string_lossy()
+                    .starts_with("failing.sqlite3.pre-migration")
+            })
+        })
+        .unwrap();
+    Workspace::restore(&failing, &backup).unwrap();
+    rusqlite::Connection::open(&failing)
+        .unwrap()
+        .execute_batch("DROP TABLE inbox_entries")
+        .unwrap();
+    let workspace = Workspace::open(&failing).unwrap();
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap().tags, vec!["kept"]);
 }
 
 #[test]
@@ -2345,34 +2381,19 @@ fn evidence_rejects_empty_fields_and_incomplete_pull_request_urls() {
 
 #[test]
 fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
-    use ticketd_core::{EvidenceInput, EvidenceKind};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace
-        .create_ticket("Evidence survives migration")
-        .unwrap();
-    workspace
-        .add_evidence(
-            &ticket.reference,
-            EvidenceInput {
-                kind: EvidenceKind::Commit,
-                name: "Commit".into(),
-                value: "abc123".into(),
-                editing_agent: None,
-            },
-        )
-        .unwrap();
-    drop(workspace);
+    ticketd_core::create_workspace_at_format_version(&path, 16).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 16;",
+        "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Evidence survives migration', 'Todo');
+         INSERT INTO evidence (id, ticket_id, kind, name, value) VALUES ('e1', 't1', 'commit', 'Commit', 'abc123');",
     )
     .unwrap();
     drop(db);
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.evidence(&ticket.reference, 10, 0).unwrap()[0].value,
+        workspace.evidence("T-KQ1", 10, 0).unwrap()[0].value,
         "abc123"
     );
     let backup = dir.path().join("backup.sqlite3");
@@ -2386,6 +2407,61 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
     );
+}
+
+#[test]
+fn a_version_thirty_four_workspace_whose_text_links_a_ticket_migrates_to_the_current_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 34).unwrap();
+    // At version 34 a ticket is known by its number: the references of device codes
+    // arrive at version 56, and the steps between index text that links the ticket.
+    let link = "[x](ticketd://ticket/T-1)";
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO tickets (id, title, status, body) VALUES ('t1', 'Linked', 'Todo', ?1)",
+        [format!("See {link}")],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO activities (id, ticket_id, brief) VALUES ('a1', 't1', ?1)",
+        [format!("Reported {link}, T-1 and T-KQ1")],
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.show_ticket("T-KQ1").unwrap().body,
+        format!("See {link}")
+    );
+}
+
+#[test]
+fn a_foreign_database_stamped_with_a_negative_version_is_refused_and_left_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("foreign.sqlite3");
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = -1;")
+        .unwrap();
+
+    let error = Workspace::open(&path).err().expect("a foreign file opens");
+    assert!(error.to_string().contains("not a ticketd"), "{error}");
+
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(tables, ["photos"], "no ticketd table was added");
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, -1);
 }
 
 #[test]
@@ -2930,29 +3006,25 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let backup = dir.path().join("version-18.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Remember after migration").unwrap();
-    workspace
-        .set_reminder(&ticket.reference, Some("2030-01-01T00:00:00Z"))
-        .unwrap();
-    drop(workspace);
+    ticketd_core::create_workspace_at_format_version(&path, 18).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 18;",
+        "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Remember after migration', 'Todo');
+         INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES ('local-person', 't1', '2030-01-01T00:00:00Z', 0);",
     )
     .unwrap();
     drop(db);
     std::fs::copy(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        workspace.reminder("T-KQ1").unwrap().as_deref(),
         Some("2030-01-01T00:00:00Z")
     );
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        workspace.reminder("T-KQ1").unwrap().as_deref(),
         Some("2030-01-01T00:00:00Z")
     );
     let db = rusqlite::Connection::open(&path).unwrap();
@@ -3851,49 +3923,77 @@ fn workflow_order_and_status_counts_describe_the_same_filtered_result() {
     assert_eq!(w.count_tickets(&query).unwrap().total(), 2);
 }
 
-/// Build a version-20 workspace holding every legacy duplicate shape, then open it so
-/// migration step 21 runs.
+/// A version-20 Workspace as that code left it: Tickets have a number and no reference yet.
+/// Rows are ticket, status, and (for a duplicate) the status undo returns to, seeded
+/// with SQL valid at version 20. A ticket's id is its title.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
+fn workspace_at_v20_with_duplicates(
+    path: &std::path::Path,
+    tickets: &[(&str, &str)],
+    duplicates: &[(&str, &str, Option<&str>)],
+) {
+    ticketd_core::create_workspace_at_format_version(path, 20).unwrap();
+    let db = rusqlite::Connection::open(path).unwrap();
+    for (title, status) in tickets {
+        db.execute(
+            "INSERT INTO tickets (id, title, status) VALUES (?1, ?1, ?2)",
+            [title, status],
+        )
+        .unwrap();
+    }
+    for (source, canonical, restore) in duplicates {
+        db.execute(
+            "INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3)",
+            rusqlite::params![source, canonical, restore],
+        )
+        .unwrap();
+    }
+}
+
+/// A ticket seeded by `workspace_at_v20_with_duplicates`, by the reference it has once
+/// the Workspace is current.
+struct Seeded {
+    reference: String,
+}
+
+impl Seeded {
+    fn at(number: u32) -> Self {
+        Self {
+            reference: format!("T-KQ{number}"),
+        }
+    }
+}
+
+/// A genuine version-20 Workspace holding every legacy duplicate shape, opened so
+/// migration step 21 runs. Tickets get references T-KQ1.. in the order they were seeded.
 #[test]
 fn legacy_canceled_duplicates_migrate_deliberately() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.db");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let canonical = workspace.create_ticket("Canonical").unwrap();
-    let ordinary = workspace.create_ticket("Ordinary canceled").unwrap();
-    let plain = workspace.create_ticket("Marked from in progress").unwrap();
-    let independent = workspace.create_ticket("Canceled again later").unwrap();
-    let moved_on = workspace.create_ticket("Moved on").unwrap();
-    for t in [&ordinary, &plain, &independent, &moved_on] {
-        set_status(&mut workspace, &t.reference, Status::InProgress);
-    }
-    set_status(&mut workspace, &ordinary.reference, Status::Canceled);
-    for t in [&plain, &independent, &moved_on] {
-        workspace
-            .mark_duplicate(&t.reference, &canonical.reference, None)
-            .unwrap();
-    }
-    drop(workspace);
-    // Rewrite to the legacy shape: duplicates were Canceled plus a link.
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute(
-        "UPDATE tickets SET status = 'Canceled' WHERE id IN (?1, ?2, ?3)",
-        [&plain.id, &independent.id, &moved_on.id],
-    )
-    .unwrap();
-    // Independent later status changes cleared the remembered status.
-    db.execute(
-        "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id IN (?1, ?2)",
-        [&independent.id, &moved_on.id],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE tickets SET status = 'Done' WHERE id = ?1",
-        [&moved_on.id],
-    )
-    .unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 20;")
-        .unwrap();
-    drop(db);
+    // Duplicates were Canceled plus a link. Independent later status changes cleared the
+    // remembered status, and one of those moved on to Done.
+    workspace_at_v20_with_duplicates(
+        &path,
+        &[
+            ("Canonical", "In progress"),
+            ("Ordinary canceled", "Canceled"),
+            ("Marked from in progress", "Canceled"),
+            ("Canceled again later", "Canceled"),
+            ("Moved on", "Done"),
+        ],
+        &[
+            ("Marked from in progress", "Canonical", Some("In progress")),
+            ("Canceled again later", "Canonical", None),
+            ("Moved on", "Canonical", None),
+        ],
+    );
+    let (canonical, ordinary, plain, independent, moved_on) = (
+        Seeded::at(1),
+        Seeded::at(2),
+        Seeded::at(3),
+        Seeded::at(4),
+        Seeded::at(5),
+    );
 
     let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(
@@ -3928,16 +4028,12 @@ fn legacy_canceled_duplicates_migrate_deliberately() {
     assert!(
         history
             .iter()
-            .any(|e| e.kind == "relationship:duplicate" && e.to_value == canonical.reference)
-    );
-    assert!(
-        history
-            .iter()
             .any(|e| e.kind == "status" && e.from_value == "Canceled" && e.to_value == "Duplicate")
     );
+    // The Ticket was known as T-1 at version 20, so that is what the entry names.
     let history = workspace.ticket_history(&moved_on.reference).unwrap();
     assert!(history.iter().any(|e| e.kind == "relationship:duplicate"
-        && e.from_value == canonical.reference
+        && e.from_value == "T-1"
         && e.to_value.is_empty()));
     // Undo returns to the status before marking, or to Canceled when that had been chosen
     // independently.
@@ -3956,6 +4052,25 @@ fn legacy_canceled_duplicates_migrate_deliberately() {
             .status,
         Status::Canceled
     );
+}
+
+/// Step 21 names the canonical Ticket of a duplicate whose status moved on in history. At
+/// version 20 a Ticket has a number and no reference, so the step cannot read one.
+#[test]
+fn a_version_20_workspace_with_a_moved_on_duplicate_migrates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    workspace_at_v20_with_duplicates(
+        &path,
+        &[("Canonical", "Todo"), ("Moved on", "Done")],
+        &[("Moved on", "Canonical", None)],
+    );
+
+    let workspace = Workspace::open(&path).unwrap();
+
+    let moved_on = workspace.show_ticket("T-KQ2").unwrap();
+    assert_eq!(moved_on.status, Status::Done);
+    assert_eq!(moved_on.duplicate_of, None);
 }
 
 mod duplicate_review_outcomes {

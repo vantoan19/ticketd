@@ -1092,6 +1092,22 @@ test("a turn ticketd stopped for a take-over says so, not that ticketd quit", as
   expect(screen.queryByText(/ticketd quit/)).toBeNull();
 });
 
+test("a turn ticketd stopped because the Chat was trashed says so in its own words", async () => {
+  await open(
+    one({ id: "c1", title: "Migrate" }, [
+      youSaid,
+      turnTiming("quit", "2026-11-10T10:00:40Z"),
+      { id: "t1", at, kind: "marker", reason: "trashed", turn_id: "t1" },
+    ]),
+    "Migrate",
+  );
+  expect(
+    await screen.findByText(
+      "Stopped when the Chat was moved to the trash. Edits already made are kept.",
+    ),
+  ).toBeTruthy();
+});
+
 test("a failure message without a full stop still ends its sentence", async () => {
   const client = await open(one({ id: "c1", title: "Migrate" }), "Migrate");
   act(() =>

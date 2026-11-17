@@ -58,6 +58,7 @@ mod sync_files;
 pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
 mod tags;
 mod ticket_documents;
+mod write_scope;
 pub use plans::{Plan, PlanCounts, PlanView};
 
 use std::{
@@ -68,10 +69,10 @@ use std::{
 use directories::ProjectDirs;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 mod counts;
 mod history;
+mod readiness;
 pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
@@ -99,9 +100,11 @@ pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
     DEFAULT_ATTACHMENT_LIMIT,
 };
+mod automation_advance;
 mod automation_agents;
 mod automation_background;
 pub use automation_background::{DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE};
+mod automation_endings;
 mod automation_examples;
 mod automation_matching;
 mod automation_run_machine;
@@ -116,11 +119,12 @@ mod events;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
+pub use automation_advance::{AgentStart, RunAction, StartedBy, TicketData};
 pub use automation_agents::{
     AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
 };
 pub use automation_examples::AutomationExample;
-pub use automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
+pub use automation_run_machine::{RunEnd, StepOutcome};
 pub use automation_runs::{
     AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
     AutomationStepStatus, RunAnswer,
@@ -142,12 +146,14 @@ pub use chats::{
     NewChat,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
-pub use history::{HistoryEntry, Readiness, Status};
+pub use history::{HistoryEntry, Status};
 pub use projects::Project;
+pub use readiness::Readiness;
 
-/// The workspace format version this application reads and writes. The next
-/// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 82;
+mod format;
+pub use format::FORMAT_VERSION;
+#[cfg(feature = "test-schema")]
+pub use format::create_workspace_at_format_version;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -634,7 +640,7 @@ impl Workspace {
                 } else {
                     None
                 };
-                let result = Self::migrate(&mut connection, version);
+                let result = format::migrate(&mut connection, version);
                 if let Err(source) = result {
                     return Err(match backup {
                         Some(backup) => Error::Migration {
@@ -650,591 +656,35 @@ impl Workspace {
         }
     }
 
-    fn migrate(connection: &mut Connection, version: i64) -> Result<(), Error> {
-        // Schema51 rebuilds the parent attachment table without cascading into
-        // reference/retention rows. Validate all foreign keys before committing.
-        connection.pragma_update(None, "foreign_keys", "OFF")?;
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        if version == 0 {
-            transaction.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); PRAGMA user_version = 1;")?;
-        }
-        if version < 2 {
-            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN body TEXT NOT NULL DEFAULT ''; PRAGMA user_version = 2;")?;
-        }
-        if version < 3 {
-            history::migrate(&transaction)?;
-        }
-        if version < 4 {
-            tags::migrate(&transaction)?;
-            transaction.pragma_update(None, "user_version", 4)?;
-        }
-        if version < 5 {
-            activities::migrate(&transaction)?;
-        }
-        if version < 6 {
-            relationships::migrate(&transaction)?;
-            transaction.pragma_update(None, "user_version", 6)?;
-        }
-        if version < 7 {
-            projects::migrate(&transaction)?;
-        }
-        if version < 8 {
-            plans::migrate(&transaction)?;
-            transaction.pragma_update(None, "user_version", 8)?;
-        }
-        if version < 9 {
-            hierarchy::migrate(&transaction)?;
-            transaction.pragma_update(None, "user_version", 9)?;
-        }
-        if version < 10 {
-            projects::migrate_checkouts(&transaction)?;
-            transaction.pragma_update(None, "user_version", 10)?;
-        }
-        if version < 11 {
-            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 11;")?;
-        }
-        if version < 12 {
-            transaction.execute_batch("CREATE TABLE request_outcomes (id TEXT PRIMARY KEY, request TEXT NOT NULL, outcome TEXT NOT NULL); PRAGMA user_version = 12;")?;
-        }
-        if version < 13 {
-            transaction.execute_batch("CREATE INDEX ticket_history_ticket_id ON ticket_history(ticket_id); PRAGMA user_version = 13;")?;
-        }
-        if version < 14 {
-            inbox::migrate(&transaction)?;
-        }
-        if version < 15 {
-            duplicates::migrate(&transaction)?;
-        }
-        if version < 16 {
-            transaction.execute_batch("CREATE TABLE evidence (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), editing_agent TEXT); PRAGMA user_version = 16;")?;
-        }
-        if version < 17 {
-            transaction.execute_batch("ALTER TABLE inbox_entries ADD COLUMN editing_agent TEXT; PRAGMA user_version = 17;")?;
-        }
-        if version < 18 {
-            inbox::migrate_reminders(&transaction)?;
-        }
-        if version < 19 {
-            transaction.execute_batch("CREATE TABLE contextual_relationships (kind TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES tickets(id), target_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(kind, source_id, target_id)); PRAGMA user_version = 19;")?;
-        }
-        if version < 20 {
-            transaction.execute_batch("CREATE TABLE last_backup (id INTEGER PRIMARY KEY CHECK (id = 1), path TEXT NOT NULL, completed_at TEXT NOT NULL); PRAGMA user_version = 20;")?;
-        }
-        if version < 21 {
-            duplicates::migrate_status(&transaction)?;
-        }
-        if version < 22 {
-            source::migrate(&transaction)?;
-        }
-        if version < 23 {
-            source::migrate_tracking(&transaction)?;
-        }
-        if version < 24 {
-            source::migrate_conversation(&transaction)?;
-        }
-        if version < 25 {
-            source::migrate_freshness(&transaction)?;
-        }
-        if version < 26 {
-            source::migrate_publication(&transaction)?;
-        }
-        if version < 27 {
-            source::migrate_details(&transaction)?;
-        }
-        if version < 28 {
-            activities::migrate_updates(&transaction)?;
-        }
-        if version < 29 {
-            source::migrate_run_counts(&transaction)?;
-        }
-        if version < 30 {
-            transaction.execute_batch("CREATE INDEX IF NOT EXISTS dependencies_dependent ON dependencies(dependent_id, blocker_id); PRAGMA user_version = 30;")?;
-        }
-        if version < 31 {
-            documents::migrate(&transaction)?;
-        }
-        if version < 32 {
-            transaction.execute_batch("ALTER TABLE notes RENAME TO activities; ALTER TABLE activities RENAME COLUMN content TO brief; ALTER TABLE activities RENAME COLUMN created_at TO reported_at; UPDATE inbox_entries SET kind = 'activity' WHERE kind = 'note'; CREATE INDEX IF NOT EXISTS activities_feed ON activities(ticket_id, reported_at DESC, number DESC); CREATE INDEX IF NOT EXISTS ticket_history_feed ON ticket_history(ticket_id, timestamp DESC, number DESC); PRAGMA user_version = 32;")?;
-        }
-        if version < 33 {
-            transaction.execute_batch("CREATE INDEX IF NOT EXISTS tickets_plan_scope ON tickets(plan_id, trashed, number); PRAGMA user_version = 33;")?;
-        }
-        if version < 34 {
-            let has_trashed: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name = 'trashed')",
-                [],
-                |row| row.get(0),
-            )?;
-            if !has_trashed {
-                transaction.execute_batch("ALTER TABLE documents ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0 CHECK(trashed IN (0, 1));")?;
-            }
-            transaction.execute_batch("PRAGMA user_version = 34;")?;
-        }
-        if version < 41 {
-            transaction.execute_batch(document_links::MENTION_INDEX_SCHEMA)?;
-        }
-        if version < 35 {
-            document_links::migrate(&transaction)?;
-        }
-        if version < 36 {
-            documents::migrate_search(&transaction)?;
-        }
-        if version < 37 {
-            for (table, column, definition) in [
-                (
-                    "activities",
-                    "supporting_document_id",
-                    "TEXT REFERENCES documents(id)",
-                ),
-                (
-                    "documents",
-                    "originating_activity_id",
-                    "TEXT REFERENCES activities(id) ON DELETE SET NULL",
-                ),
-            ] {
-                let exists: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
-                    [table, column],
-                    |row| row.get(0),
-                )?;
-                if !exists {
-                    transaction.execute_batch(&format!(
-                        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
-                    ))?;
-                }
-            }
-            transaction.execute_batch("PRAGMA user_version = 37;")?;
-        }
-        if version < 38 {
-            let exists: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name = 'kept')",
-                [],
-                |row| row.get(0),
-            )?;
-            if !exists {
-                transaction.execute_batch(
-                    "ALTER TABLE documents ADD COLUMN kept INTEGER NOT NULL DEFAULT 0;",
-                )?;
-            }
-            transaction.execute_batch("PRAGMA user_version = 38;")?;
-        }
-        if version < 39 {
-            let exists: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('plans') WHERE name = 'spec_document_id')",
-                [],
-                |row| row.get(0),
-            )?;
-            if !exists {
-                transaction.execute_batch(
-                    "ALTER TABLE plans ADD COLUMN spec_document_id TEXT REFERENCES documents(id);",
-                )?;
-            }
-            transaction.execute_batch("CREATE TABLE IF NOT EXISTS plan_documents (plan_id TEXT NOT NULL REFERENCES plans(id), document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(plan_id, document_id));
-                CREATE INDEX IF NOT EXISTS plan_documents_by_document ON plan_documents(document_id, plan_id);
-                PRAGMA user_version = 39;")?;
-        }
-        if version < 40 {
-            transaction.execute_batch("CREATE TABLE IF NOT EXISTS activity_mentions (activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, target_id TEXT NOT NULL REFERENCES entities(id), passage TEXT NOT NULL, PRIMARY KEY(activity_id, target_id, passage)); CREATE INDEX IF NOT EXISTS activity_mentions_target ON activity_mentions(target_id, activity_id); CREATE INDEX IF NOT EXISTS activities_support_ticket ON activities(ticket_id, supporting_document_id, id); CREATE INDEX IF NOT EXISTS activities_support_document ON activities(supporting_document_id, ticket_id, id); PRAGMA user_version = 40;")?;
-            let mut statement = transaction.prepare("SELECT id, brief FROM activities")?;
-            let activities = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
-            for (id, brief) in activities {
-                document_links::index_activity(&transaction, &id, &brief)?;
-            }
-        }
-        if version < 41 {
-            transaction.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_identity ON activities(ticket_id, id); CREATE TRIGGER IF NOT EXISTS numeric_mentions_activity_delete AFTER DELETE ON activities BEGIN DELETE FROM numeric_mentions WHERE source_id = OLD.id AND activity = 1; END;")?;
-            let mut statement = transaction.prepare("SELECT id, body, 0 FROM tickets UNION ALL SELECT id, body, 0 FROM documents UNION ALL SELECT id, brief, 1 FROM activities")?;
-            let records = statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, bool>(2)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
-            for (id, body, activity) in records {
-                if activity {
-                    document_links::index_activity(&transaction, &id, &body)?;
-                } else {
-                    document_links::index_body(&transaction, &id, &body)?;
-                }
-            }
-            transaction.pragma_update(None, "user_version", 41)?;
-        }
-        if version < 42 {
-            // Rebuildable, ordered projections let graph reads stop after a bounded
-            // number of Activity mentions without walking unrelated Activities.
-            transaction.execute_batch("                CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
-                INSERT OR IGNORE INTO activity_graph_numbers SELECT a.ticket_id, m.source_id, m.reference, m.passage FROM numeric_mentions m JOIN activities a ON a.id=m.source_id WHERE m.activity=1;
-                INSERT OR IGNORE INTO activity_graph_targets SELECT a.ticket_id, m.activity_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id=m.activity_id;
-                CREATE TRIGGER IF NOT EXISTS activity_graph_targets_insert AFTER INSERT ON activity_mentions BEGIN INSERT OR IGNORE INTO activity_graph_targets SELECT ticket_id, NEW.activity_id, NEW.target_id, NEW.passage FROM activities WHERE id=NEW.activity_id; END;
-                CREATE TRIGGER IF NOT EXISTS activity_graph_targets_delete AFTER DELETE ON activity_mentions BEGIN DELETE FROM activity_graph_targets WHERE activity_id=OLD.activity_id AND target_id=OLD.target_id AND passage=OLD.passage; END;
-                CREATE INDEX IF NOT EXISTS activity_graph_targets_source ON activity_graph_targets(activity_id, target_id, passage);
-                CREATE INDEX IF NOT EXISTS context_mentions_reverse_full ON context_mentions(target_id, source_id, passage);
-                CREATE INDEX IF NOT EXISTS activity_mentions_reverse_full ON activity_mentions(target_id, activity_id, passage);
-                PRAGMA user_version=42;")?;
-        }
-        if version < 43 {
-            let has_body_heading: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name = 'body_heading')", [], |row| row.get(0))?;
-            if !has_body_heading {
-                transaction.execute_batch("ALTER TABLE documents ADD COLUMN body_heading TEXT;")?;
-            }
-            transaction.execute_batch("UPDATE documents SET body_heading = nullif(trim(substr(ltrim(body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), '');
-                CREATE TRIGGER IF NOT EXISTS document_heading_insert AFTER INSERT ON documents BEGIN UPDATE documents SET body_heading = nullif(trim(substr(ltrim(new.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(new.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), '') WHERE id = new.id; END;
-                CREATE TRIGGER IF NOT EXISTS document_heading_update AFTER UPDATE OF body ON documents BEGIN UPDATE documents SET body_heading = nullif(trim(substr(ltrim(new.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(new.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), '') WHERE id = new.id; END;")?;
-            transaction.execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS ticket_graph_fts USING fts5(title, body, content='tickets', content_rowid='rowid');
-                INSERT INTO ticket_graph_fts(ticket_graph_fts) VALUES ('rebuild');
-                CREATE TRIGGER IF NOT EXISTS ticket_graph_fts_insert AFTER INSERT ON tickets BEGIN INSERT INTO ticket_graph_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body); END;
-                CREATE TRIGGER IF NOT EXISTS ticket_graph_fts_delete AFTER DELETE ON tickets BEGIN INSERT INTO ticket_graph_fts(ticket_graph_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body); END;
-                CREATE TRIGGER IF NOT EXISTS ticket_graph_fts_update AFTER UPDATE OF title, body ON tickets BEGIN INSERT INTO ticket_graph_fts(ticket_graph_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body); INSERT INTO ticket_graph_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body); END;
-                CREATE VIRTUAL TABLE IF NOT EXISTS plan_graph_fts USING fts5(name, purpose, content='plans', content_rowid='rowid');
-                INSERT INTO plan_graph_fts(plan_graph_fts) VALUES ('rebuild');
-                CREATE TRIGGER IF NOT EXISTS plan_graph_fts_insert AFTER INSERT ON plans BEGIN INSERT INTO plan_graph_fts(rowid, name, purpose) VALUES (new.rowid, new.name, new.purpose); END;
-                CREATE TRIGGER IF NOT EXISTS plan_graph_fts_delete AFTER DELETE ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); END;
-                CREATE TRIGGER IF NOT EXISTS plan_graph_fts_update AFTER UPDATE OF name, purpose ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); INSERT INTO plan_graph_fts(rowid, name, purpose) VALUES (new.rowid, new.name, new.purpose); END;
-                PRAGMA user_version = 43;")?;
-        }
-        if version < 44 {
-            // The latest Activity of a ticket is read on every refresh.
-            transaction.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_number ON activities(ticket_id, number DESC); PRAGMA user_version = 44;")?;
-        }
-        if version < 45 {
-            change_token::migrate(&transaction)?;
-        }
-        if version < 46 {
-            ticket_documents::migrate(&transaction)?;
-        }
-        if version < 47 {
-            attachments::migrate(&transaction)?;
-        }
-        if version < 48 {
-            embedded_attachments::migrate(&transaction)?;
-        }
-        if version < 49 {
-            attachments::migrate_upload_settings(&transaction)?;
-        }
-        if version < 50 {
-            attachment_retention::migrate(&transaction, version > 0)?;
-        }
-        if version < 51 {
-            drive::migrate(&transaction)?;
-        }
-        if version < 52 {
-            drive::migrate_uploads(&transaction)?;
-        }
-        if version < 53 {
-            attachment_cleanup::migrate(&transaction)?;
-        }
-        if version < 54 {
-            attachment_cleanup::migrate_purge(&transaction)?;
-        }
-        if version < 55 {
-            upload_destination::migrate(&transaction)?;
-        }
-        if version < 56 {
-            device::migrate(&transaction)?;
-        }
-        if version < 57 {
-            versions::migrate(&transaction)?;
-        }
-        if version < 58 {
-            sync::migrate(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 58;")?;
-        }
-        if version < 59 {
-            sync::migrate_setup(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 59;")?;
-        }
-        if version < 60 {
-            sync::migrate_recovery(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 60;")?;
-        }
-        if version < 61 {
-            sync::migrate_run_token(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 61;")?;
-        }
-        if version < 62 {
-            sync::migrate_download_attempts(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 62;")?;
-        }
-        if version < 63 {
-            sync::migrate_file_identity(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 63;")?;
-        }
-        if version < 64 {
-            sync::migrate_file_created(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 64;")?;
-        }
-        if version < 65 {
-            sync::migrate_last_folder(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 65;")?;
-        }
-        if version < 66 {
-            chats::migrate(&transaction)?;
-        }
-        if version < 67 {
-            chats::migrate_attention(&transaction)?;
-        }
-        if version < 68 {
-            chats::migrate_tool_start(&transaction)?;
-        }
-        if version < 69 {
-            chats::migrate_interaction_tool(&transaction)?;
-        }
-        if version < 70 {
-            chats::migrate_read_through(&transaction)?;
-        }
-        if version < 71 {
-            chats::migrate_marked_unread(&transaction)?;
-        }
-        if version < 72 {
-            chats::migrate_request_times(&transaction)?;
-        }
-        if version < 73 {
-            events::migrate(&transaction)?;
-        }
-        if version < 74 {
-            automation_agents::migrate(&transaction)?;
-        }
-        if version < 75 {
-            automations::migrate(&transaction)?;
-        }
-        if version < 76 {
-            automations::migrate_sync(&transaction)?;
-        }
-        if version < 77 {
-            automation_runs::migrate(&transaction)?;
-        }
-        if version < 78 {
-            automation_background::migrate(&transaction)?;
-        }
-        if version < 79 {
-            automation_runs::migrate_attention(&transaction)?;
-        }
-        if version < 80 {
-            automations::migrate_schedule(&transaction)?;
-        }
-        if version < 81 {
-            automation_agents::migrate_any_command(&transaction)?;
-            events::migrate_workspace_sync_actor(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 81;")?;
-        }
-        if version < 82 {
-            source::migrate_read_partitions(&transaction)?;
-        }
-        let violations: i64 =
-            transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
-                r.get(0)
-            })?;
-        if violations != 0 {
-            return Err(Error::Attachment(
-                "migration would invalidate existing references; preserved pre-migration backup"
-                    .into(),
-            ));
-        }
-        transaction.commit()?;
-        connection.pragma_update(None, "foreign_keys", "ON")?;
-        Ok(())
-    }
-
-    pub fn create_ticket(&mut self, title: &str) -> Result<Ticket, Error> {
-        self.create_ticket_in_project(title, None)
-    }
-
-    pub fn create_ticket_in_project(
-        &mut self,
-        title: &str,
-        project_id: Option<&str>,
-    ) -> Result<Ticket, Error> {
-        self.create_ticket_in_context(title, project_id, None)
-    }
-
-    pub fn create_ticket_in_context(
-        &mut self,
-        title: &str,
-        project_id: Option<&str>,
-        plan_id: Option<&str>,
-    ) -> Result<Ticket, Error> {
-        let title = title.trim();
-        if title.is_empty() {
-            return Err(Error::EmptyTitle);
-        }
-        let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
-        if let Some(id) = project_id {
-            projects::find(&transaction, id)?;
-        }
-        if let Some(id) = plan_id {
-            plans::ensure_active(&transaction, id)?;
-        }
-        let id = Uuid::new_v4().to_string();
-        let reference = device::issue_reference(&transaction)?;
-        transaction.execute(
-            "INSERT INTO tickets (id, reference, title, status, project_id, plan_id) VALUES (?1, ?2, ?3, 'Todo', ?4, ?5)",
-            params![id, reference, title, project_id, plan_id],
-        )?;
-        if let Some(project_id) = project_id {
-            history::record(&transaction, &id, "project", "", project_id, None)?;
-        }
-        if let Some(plan_id) = plan_id {
-            history::record(&transaction, &id, "plan", "", plan_id, None)?;
-        }
-        transaction.commit()?;
-        self.show_ticket(&reference)
-    }
-
-    pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
-        let title = patch.title.as_deref().map(str::trim);
-        if title == Some("") {
-            return Err(Error::EmptyTitle);
-        }
-        let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
-        let ticket = transaction
-            .query_row(
-                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
-                [reference],
-                ticket_from_row,
-            )
-            .optional()?
-            .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-        ensure_editable(&transaction, &ticket.id)?;
-        let stale = |new: &Option<String>, expected: &Option<String>, stored: &str| {
-            new.is_some()
-                && expected
-                    .as_deref()
-                    .is_some_and(|expected| expected != stored)
-        };
-        if stale(&patch.title, &patch.expected_title, &ticket.title)
-            || stale(&patch.body, &patch.expected_body, &ticket.body)
-        {
-            return Err(Error::TicketChanged(reference.to_owned()));
-        }
-        source::guard_change(
-            &transaction,
-            &ticket,
-            title,
-            patch.body.as_deref(),
-            patch.status.unwrap_or(ticket.status),
-        )?;
-        if let Some(ref plan_id) = patch.plan_id {
-            if let Some(id) = plan_id {
-                if *plan_id == ticket.plan_id {
-                    plans::get(&transaction, id)?;
-                } else {
-                    // Moving a ticket out of an archived Plan stays allowed; moving in is not.
-                    plans::ensure_active(&transaction, id)?;
-                }
-            }
-            if *plan_id != ticket.plan_id {
-                transaction.execute(
-                    "UPDATE tickets SET plan_id = ?1 WHERE id = ?2",
-                    params![plan_id, ticket.id],
-                )?;
-                history::record(
-                    &transaction,
-                    &ticket.id,
-                    "plan",
-                    ticket.plan_id.as_deref().unwrap_or(""),
-                    plan_id.as_deref().unwrap_or(""),
-                    patch.editing_agent.as_deref(),
-                )?;
-            }
-        }
-        if let Some(ref project_id) = patch.project_id {
-            if let Some(id) = project_id {
-                projects::find(&transaction, id)?;
-            }
-            if *project_id != ticket.project_id {
-                transaction.execute(
-                    "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
-                    params![project_id, ticket.id],
-                )?;
-                history::record(
-                    &transaction,
-                    &ticket.id,
-                    "project",
-                    ticket.project_id.as_deref().unwrap_or(""),
-                    project_id.as_deref().unwrap_or(""),
-                    patch.editing_agent.as_deref(),
-                )?;
-            }
-        }
-        let status = patch.status.unwrap_or(ticket.status);
-        if status != ticket.status {
-            if status == Status::Duplicate {
-                return Err(Error::DuplicateNeedsCanonical);
-            }
-            if ticket.status == Status::Duplicate {
-                duplicates::clear(&transaction, &ticket.id, patch.editing_agent.as_deref())?;
-            }
-        }
-        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE id = ?4", params![title, patch.body, status.to_string(), ticket.id])?;
-        if let Some(body) = patch.body.as_deref() {
-            document_links::index_body(&transaction, &ticket.id, body)?;
-        }
-        if status != ticket.status {
-            history::record(
-                &transaction,
-                &ticket.id,
-                "status",
-                &ticket.status.to_string(),
-                &status.to_string(),
-                patch.editing_agent.as_deref(),
-            )?;
-        }
-        let mut updated = transaction.query_row(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1",
-            [&ticket.id],
-            ticket_from_row,
-        )?;
-        updated.tags = tags::for_ticket(&transaction, &updated.id)?;
-        relationships::populate(&transaction, &mut updated)?;
-        hierarchy::populate(&transaction, &mut updated)?;
-        duplicates::populate(&transaction, &mut updated)?;
-        source::populate(&transaction, &mut updated)?;
-        activities::populate_update(&transaction, &mut updated)?;
-        transaction.commit()?;
-        Ok(updated)
-    }
-
     pub fn set_trashed(
         &mut self,
         reference: &str,
         trashed: bool,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id = relationships::id(&tx, reference)?;
-        let old: bool =
-            tx.query_row("SELECT trashed FROM tickets WHERE id = ?1", [&id], |row| {
-                row.get(0)
-            })?;
-        if old != trashed {
-            tx.execute(
-                "UPDATE tickets SET trashed = ?1 WHERE id = ?2",
-                params![trashed, id],
-            )?;
-            history::record(
-                &tx,
-                &id,
-                "trash",
-                if old { "trashed" } else { "active" },
-                if trashed { "trashed" } else { "active" },
-                agent,
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(reference)
+        write_scope::run(&self.connection, |scope| {
+            // Putting a ticket in Trash and restoring it are the writes a ticket in Trash allows.
+            let id = scope.even_if_trashed(reference)?;
+            let old: bool =
+                scope.query_row("SELECT trashed FROM tickets WHERE id = ?1", [&id], |row| {
+                    row.get(0)
+                })?;
+            if old != trashed {
+                scope.execute(
+                    "UPDATE tickets SET trashed = ?1 WHERE id = ?2",
+                    params![trashed, id],
+                )?;
+                history::record(
+                    scope,
+                    &id,
+                    "trash",
+                    if old { "trashed" } else { "active" },
+                    if trashed { "trashed" } else { "active" },
+                    agent,
+                )?;
+            }
+            read_ticket(scope, reference)
+        })
     }
 
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
@@ -1242,21 +692,6 @@ impl Workspace {
         history::read(&self.connection, &ticket.id)
     }
 
-    pub fn add_activity(
-        &mut self,
-        reference: &str,
-        content: &str,
-        agent: Option<&str>,
-    ) -> Result<Activity, Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id_ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &id_ticket)?;
-        let result = activities::add(&tx, &id_ticket, content, agent)?;
-        inbox::record(&tx, &id_ticket, "activity", &result.id, content, agent)?;
-        tx.commit()?;
-        Ok(result)
-    }
     pub fn add_activity_with_details(
         &mut self,
         reference: &str,
@@ -1270,46 +705,43 @@ impl Workspace {
         if details.is_some() && existing_document_id.is_some() {
             return Err(Error::ConflictingActivitySupport);
         }
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &ticket)?;
-        let activity = activities::add(&tx, &ticket, brief, agent)?;
-        let document_id = if let Some(body) = details {
-            let id = uuid::Uuid::new_v4().to_string();
+        write_scope::run(&self.connection, |tx| {
+            let ticket = tx.editable(reference)?;
+            let activity = activities::add(tx, &ticket, brief, agent)?;
+            let document_id = if let Some(body) = details {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO entities (id, kind) VALUES (?1, 'document')",
+                    [&id],
+                )?;
+                tx.execute(
+                    "INSERT INTO documents (id, body, originating_activity_id) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![id, body, activity.id],
+                )?;
+                document_links::index_body(tx, &id, body)?;
+                Some(id)
+            } else if let Some(id) = existing_document_id {
+                let trashed: Option<bool> = tx
+                    .query_row("SELECT trashed FROM documents WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })
+                    .optional()?;
+                match trashed {
+                    None => return Err(Error::DocumentNotFound(id.to_owned())),
+                    Some(true) => return Err(Error::DocumentTrashed(id.to_owned())),
+                    Some(false) => {}
+                }
+                Some(id.to_owned())
+            } else {
+                None
+            };
             tx.execute(
-                "INSERT INTO entities (id, kind) VALUES (?1, 'document')",
-                [&id],
+                "UPDATE activities SET supporting_document_id = ?1 WHERE id = ?2",
+                rusqlite::params![document_id, activity.id],
             )?;
-            tx.execute(
-                "INSERT INTO documents (id, body, originating_activity_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![id, body, activity.id],
-            )?;
-            document_links::index_body(&tx, &id, body)?;
-            Some(id)
-        } else if let Some(id) = existing_document_id {
-            let trashed: Option<bool> = tx
-                .query_row("SELECT trashed FROM documents WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })
-                .optional()?;
-            match trashed {
-                None => return Err(Error::DocumentNotFound(id.to_owned())),
-                Some(true) => return Err(Error::DocumentTrashed(id.to_owned())),
-                Some(false) => {}
-            }
-            Some(id.to_owned())
-        } else {
-            None
-        };
-        tx.execute(
-            "UPDATE activities SET supporting_document_id = ?1 WHERE id = ?2",
-            rusqlite::params![document_id, activity.id],
-        )?;
-        inbox::record(&tx, &ticket, "activity", &activity.id, brief, agent)?;
-        let result = activities::get(&tx, &ticket, &activity.id)?;
-        tx.commit()?;
-        Ok(result)
+            inbox::record(tx, &ticket, "activity", &activity.id, brief, agent)?;
+            activities::get(tx, &ticket, &activity.id)
+        })
     }
     pub fn edit_activity(
         &mut self,
@@ -1317,23 +749,17 @@ impl Workspace {
         id: &str,
         patch: ActivityPatch,
     ) -> Result<Activity, Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id_ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &id_ticket)?;
-        let result = activities::edit(&tx, &id_ticket, id, patch)?;
-        tx.commit()?;
-        Ok(result)
+        write_scope::run(&self.connection, |scope| {
+            let id_ticket = scope.editable(reference)?;
+            activities::edit(scope, &id_ticket, id, patch)
+        })
     }
     pub fn delete_activity(&mut self, reference: &str, id: &str) -> Result<(), Error> {
-        let tx = self.connection.savepoint()?;
-        transaction_write_lock(&tx)?;
-        let id_ticket = relationships::id(&tx, reference)?;
-        ensure_editable(&tx, &id_ticket)?;
-        tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 AND kept = 0 ON CONFLICT(document_id) DO NOTHING", [id])?;
-        activities::delete(&tx, &id_ticket, id)?;
-        tx.commit()?;
-        Ok(())
+        write_scope::run(&self.connection, |scope| {
+            let id_ticket = scope.editable(reference)?;
+            scope.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 AND kept = 0 ON CONFLICT(document_id) DO NOTHING", [id])?;
+            activities::delete(scope, &id_ticket, id)
+        })
     }
     /// Read the latest authored Activity without loading its history.
     pub fn latest_update(&self, reference: &str) -> Result<Option<LatestUpdate>, Error> {
@@ -1384,11 +810,12 @@ impl Workspace {
     }
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
-        )?;
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
+            readiness::indicator_sql("t")
+        ))?;
         let mut tickets = statement
-            .query_map([trashed], ticket_from_row)?
+            .query_map([trashed], listed_ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         for ticket in &mut tickets {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
@@ -1402,23 +829,37 @@ impl Workspace {
     }
 
     pub fn show_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        let ticket = self
-            .connection
-            .query_row(
-                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
-                [reference],
-                ticket_from_row,
-            )
-            .optional()?;
-        let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-        ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
-        relationships::populate(&self.connection, &mut ticket)?;
-        hierarchy::populate(&self.connection, &mut ticket)?;
-        duplicates::populate(&self.connection, &mut ticket)?;
-        source::populate(&self.connection, &mut ticket)?;
-        activities::populate_update(&self.connection, &mut ticket)?;
-        Ok(ticket)
+        read_ticket(&self.connection, reference)
     }
+}
+
+/// A ticket with everything shown about it. A write calls this at the end of its scope, so
+/// the result is what the write left behind.
+pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
+    let ticket = connection
+        .query_row(
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+            [reference],
+            ticket_from_row,
+        )
+        .optional()?;
+    let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
+    ticket.tags = tags::for_ticket(connection, &ticket.id)?;
+    relationships::populate(connection, &mut ticket)?;
+    ticket.availability = readiness::indicator(connection, &ticket.id)?;
+    hierarchy::populate(connection, &mut ticket)?;
+    duplicates::populate(connection, &mut ticket)?;
+    source::populate(connection, &mut ticket)?;
+    activities::populate_update(connection, &mut ticket)?;
+    Ok(ticket)
+}
+
+/// A ticket from a list query that selected `readiness::indicator_sql` as its ninth
+/// column, after the eight of [`ticket_from_row`]: its availability needs no query of its own.
+pub(crate) fn listed_ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
+    let mut ticket = ticket_from_row(row)?;
+    ticket.availability = row.get(8)?;
+    Ok(ticket)
 }
 
 fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
@@ -1452,27 +893,10 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
     })
 }
 
-// All ticket mutations must check this inside the same write transaction.
-pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), Error> {
-    let (trashed, reference): (bool, String) = connection.query_row(
-        "SELECT trashed, reference FROM tickets WHERE id = ?1",
-        [id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if trashed {
-        return Err(Error::Trashed(reference));
-    }
-    Ok(())
-}
-
-// A savepoint used independently acquires the write lock before reading invariants.
-fn transaction_write_lock(connection: &Connection) -> Result<(), Error> {
-    connection.execute("UPDATE tickets SET number = number WHERE 0", [])?;
-    Ok(())
-}
-
 mod batch;
-pub use batch::{BatchOperation, TicketChange};
+pub use batch::BatchOperation;
+mod ticket_change;
+pub use ticket_change::TicketChange;
 
 /// Where the default workspace lives, without creating anything.
 fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {

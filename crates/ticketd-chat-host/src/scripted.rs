@@ -163,6 +163,19 @@ pub(crate) fn brief(kind: &EventKind) -> String {
             request,
             resolution,
         } => format!("resolved {} {resolution:?}", request.0),
+        EventKind::TurnEvidence { turn, evidence } => {
+            let mut said = Vec::new();
+            if evidence.interrupt_written {
+                said.push("interrupt-written".to_owned());
+            }
+            if let Some(denied) = &evidence.denied {
+                said.push(format!("denied {denied:?}"));
+            }
+            if let Some(why) = &evidence.not_started {
+                said.push(format!("not-started {why:?}"));
+            }
+            format!("turn-evidence {} {}", turn.0, said.join(", "))
+        }
         EventKind::TurnEnded {
             turn,
             outcome,

@@ -46,6 +46,7 @@ impl Item {
         let mut value = json!({
             "id": self.id, "name": self.name, "mimeType": self.mime, "parents": self.parents,
             "appProperties": self.properties, "createdTime": self.created, "trashed": self.trashed,
+            "capabilities": { "canAddChildren": true, "canDownload": true },
         });
         if let Some(head) = self.revisions.last() {
             value["size"] = json!(head.bytes.len().to_string());
@@ -108,6 +109,8 @@ struct State {
     counter: u64,
     token: Option<String>,
     revoked: bool,
+    /// When set, only this refresh token is exchanged for an access token.
+    refresh_token: Option<String>,
     offline: bool,
     page_size: usize,
     faults: Vec<Fault>,
@@ -214,6 +217,14 @@ impl State {
             if self.revoked {
                 return respond(400, json!({"error": "invalid_grant"}));
             }
+            if let Some(accepted) = &self.refresh_token {
+                let sent = url::form_urlencoded::parse(&request.body)
+                    .find(|(key, _)| key == "refresh_token")
+                    .map(|(_, value)| value.into_owned());
+                if sent.as_deref() != Some(accepted.as_str()) {
+                    return respond(400, json!({"error": "invalid_grant"}));
+                }
+            }
             let token = self.next("access-");
             self.token = Some(token.clone());
             return respond(200, json!({ "access_token": token }));
@@ -266,10 +277,34 @@ impl State {
                 )
             }
             ("PUT", ["upload", "drive", "v3", "files", ..]) => self.receive(request, &query),
-            ("GET", ["drive", "v3", "files", id]) => match self.find(id) {
-                Some(item) => respond(200, item.json()),
-                None => respond(404, json!({})),
-            },
+            ("GET", ["drive", "v3", "files", id]) => {
+                let media = query.get("alt").map(String::as_str) == Some("media");
+                let Some(item) = self.find(id) else {
+                    return respond(404, json!({}));
+                };
+                if !media {
+                    return respond(200, item.json());
+                }
+                let bytes = &item.revisions.last().unwrap().bytes;
+                let range = header(request, "range")
+                    .unwrap()
+                    .strip_prefix("bytes=")
+                    .unwrap();
+                let (from, to) = range.split_once('-').unwrap();
+                let (from, to): (usize, usize) = (from.parse().unwrap(), to.parse().unwrap());
+                assert!(
+                    to - from < 256 * 1024,
+                    "downloads must stay within the transport limit"
+                );
+                DriveResponse {
+                    status: 206,
+                    body: bytes[from..=to].to_vec(),
+                    headers: vec![(
+                        "Content-Range".into(),
+                        format!("bytes {from}-{to}/{}", bytes.len()),
+                    )],
+                }
+            }
             ("GET", ["drive", "v3", "files", id, "revisions"]) => {
                 let Some(item) = self.find(id) else {
                     return respond(404, json!({}));
@@ -473,6 +508,14 @@ impl DriveSim {
         let mut state = self.state();
         state.token = None;
         state.revoked = true;
+    }
+
+    /// The person signed in again: the old refresh token stops working, so does
+    /// the access token it issued, and only `refresh_token` is accepted now.
+    pub fn rotate_refresh_token(&self, refresh_token: &str) {
+        let mut state = self.state();
+        state.token = None;
+        state.refresh_token = Some(refresh_token.to_owned());
     }
 
     pub fn offline(&self, offline: bool) {

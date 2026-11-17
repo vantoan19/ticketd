@@ -22,7 +22,7 @@ use crate::{
 };
 
 pub(super) use crate::stdio::{ChildProcess, Io, Reader, Writer};
-use crate::stdio::{close_process, write_bounded};
+use crate::stdio::{close_outcome, runtime_lost, write_bounded};
 use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 
 use super::discovery;
@@ -30,9 +30,6 @@ use super::mapping::{Call, Session, rejection_reason, unknown};
 use super::report::{self, Overrides};
 use super::rpc::{self, Frame, MAX_FRAME_BYTES, Pending, Reply, Resolved, RpcError, StderrTail};
 use super::ticket_tool::{self, TicketTool};
-
-/// How long a loss waits to learn the exit code before reporting without one.
-const EXIT_OBSERVATION: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub(super) struct Options {
@@ -350,21 +347,15 @@ impl Connection {
             state.pending.fail_all();
             state.session.clear_live();
         }
-        // Closing its input asks app-server to shut down and stop what it started.
-        match close_process(&self.stdin, &self.child, self.options.close_timeout).await {
-            Some(exit_code) => CloseOutcome::Confirmed { exit_code },
-            None => {
-                // ponytail: only the app-server process is killed. Owning its whole
-                // process tree (Windows job object, POSIX process group) is #257/#267.
-                CloseOutcome::Unconfirmed {
-                    reason: format!(
-                        "Codex app-server did not exit within {} seconds of its input \
-                         closing and was killed; tools it started may still be running",
-                        self.options.close_timeout.as_secs()
-                    ),
-                }
-            }
-        }
+        // Closing its input makes it end the session and exit.
+        close_outcome(
+            &self.stdin,
+            &self.child,
+            self.options.close_timeout,
+            "Codex app-server",
+            "tools it started may still be running",
+        )
+        .await
     }
 
     /// The protocol reader. Waiting to hand an event to the supervisor is the only
@@ -400,16 +391,7 @@ impl Connection {
         if closing {
             return;
         }
-        *self.stdin.lock().await = None;
-        let exit_code = timeout(EXIT_OBSERVATION, async {
-            self.child.lock().await.wait().await
-        })
-        .await
-        .unwrap_or(None);
-        let lost = EventKind::RuntimeLost {
-            exit_code,
-            diagnostics: self.stderr.readable(),
-        };
+        let lost = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
         let _ = events.send(self.event(lost)).await;
     }
 

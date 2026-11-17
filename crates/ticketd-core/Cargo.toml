@@ -35,10 +35,13 @@ test-device-code = []
 fake-remote = []
 # Adds `Workspace::open_with_lock_waits`. For tests only; changes no default.
 test-lock-waits = []
+# Adds `create_workspace_at_format_version`: a Workspace file at an older format version,
+# built by the real migration ladder. For tests only; changes no default.
+test-schema = []
 
 [dev-dependencies]
 # Turns the fixed device code and the fake storage on for this crate's own tests.
-ticketd-core = { path = ".", features = ["test-device-code", "fake-remote", "test-lock-waits"] }
+ticketd-core = { path = ".", features = ["test-device-code", "fake-remote", "test-lock-waits", "test-schema"] }
 serde_json = "1"
 tempfile = "3"
 

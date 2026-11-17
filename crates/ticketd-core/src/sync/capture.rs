@@ -94,20 +94,6 @@ const CAPTURED: [(&str, RecordKind, &str); 23] = [
     ("automation_agents", AutomationAgent, "id"),
 ];
 
-pub(crate) const TRIGGER_EVENTS: [&str; 3] = ["insert", "update", "delete"];
-
-/// The tables with capture triggers, named `sync_capture_<table>_<event>`, each
-/// with the format version its triggers came with.
-pub(crate) fn captured_tables() -> impl Iterator<Item = (&'static str, i64)> {
-    CAPTURED.iter().map(|(table, kind, _)| {
-        let since = match kind {
-            Automation | AutomationAgent => 70,
-            Ticket | Document | Plan | Project | Attachment => 58,
-        };
-        (*table, since)
-    })
-}
-
 /// Safe to run again after a later migration rebuilds a captured table.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(

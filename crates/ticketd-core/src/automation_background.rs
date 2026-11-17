@@ -2,7 +2,9 @@
 //! whether any Automation is on (the desktop stays in the tray while one is), and
 //! switching one off together with its active runs. None of it synchronizes.
 
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
+
+use crate::automation_endings::{Cause, end_each};
 
 use crate::{Error, Workspace};
 
@@ -10,45 +12,41 @@ use crate::{Error, Workspace};
 pub const MOST_AUTOMATION_RUNS_AT_ONCE: usize = 10;
 /// How many runs execute at once until the person says otherwise.
 pub const DEFAULT_AUTOMATION_RUNS_AT_ONCE: usize = 2;
-/// Why a run ended when its Automation was switched off with "Stop it and turn off".
-const TURNED_OFF: &str = "You stopped this run when you turned the Automation off.";
-const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS automation_settings (id INTEGER PRIMARY KEY CHECK(id = 1), runs_at_once INTEGER NOT NULL CHECK(runs_at_once > 0));
-         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});
-         PRAGMA user_version = 78;",
+         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});",
     ))?;
     Ok(())
 }
 
-/// Ends an Automation's Queued and Running runs as Needs attention with `reason`,
-/// failing the step each was on. Returns the Chats of the agents that were working.
+/// Ends an Automation's Queued and Running runs for `cause`. Returns the Chats of
+/// the agents that were working.
 pub(crate) fn end_active_runs(
     connection: &Connection,
     automation_id: &str,
-    reason: &str,
+    cause: Cause,
 ) -> Result<Vec<String>, Error> {
-    const ACTIVE: &str = "SELECT id FROM automation_runs WHERE automation_id = ?1 AND status IN ('queued', 'running')";
-    let chats = {
-        let mut statement = connection.prepare(&format!(
-            "SELECT chat_id FROM automation_run_steps WHERE status = 'running' AND chat_id IS NOT NULL AND run_id IN ({ACTIVE})"
-        ))?;
+    let ids = {
+        let mut statement = connection.prepare(
+            "SELECT id FROM automation_runs WHERE automation_id = ?1 AND status IN ('queued', 'running')",
+        )?;
         statement
-            .query_map([automation_id], |row| row.get(0))?
-            .collect::<Result<Vec<String>, _>>()?
+            .query_map([automation_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
     };
-    // Steps first: afterwards the runs are no longer active to find them by.
-    connection.execute(
-        &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE status = 'running' AND run_id IN ({ACTIVE})"),
-        params![automation_id, reason],
+    Ok(end_each(connection, &ids, cause)?.1)
+}
+
+/// The Queued and Running runs of Automations that are deleted.
+fn active_runs_of_deleted(connection: &Connection) -> Result<Vec<String>, Error> {
+    let mut statement = connection.prepare(
+        "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE a.trashed = 1 AND r.status IN ('queued', 'running')",
     )?;
-    connection.execute(
-        &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE automation_id = ?1 AND status IN ('queued', 'running')"),
-        params![automation_id, reason],
-    )?;
-    Ok(chats)
+    Ok(statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 impl Workspace {
@@ -91,13 +89,29 @@ impl Workspace {
     /// working, for the host to interrupt.
     pub fn stop_and_turn_off_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         transaction.execute(
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],
         )?;
-        let chats = end_active_runs(&transaction, id, TURNED_OFF)?;
-        crate::automation_runs::announce(&transaction)?;
+        let chats = end_active_runs(&transaction, id, Cause::TurnedOff)?;
+        transaction.commit()?;
+        Ok(chats)
+    }
+
+    /// Ends the Queued and Running runs of Automations that are deleted, as deleting
+    /// them here does: an Automation deleted on another desktop and brought here by
+    /// Workspace sync has runs that will no longer run. Returns the Chats of the
+    /// agents that were working, for the host to interrupt.
+    pub fn end_runs_of_deleted_automations(&mut self) -> Result<Vec<String>, Error> {
+        // Read first: the runner looks every few seconds, and finds nothing nearly always.
+        if active_runs_of_deleted(&self.connection)?.is_empty() {
+            return Ok(Vec::new());
+        }
+        let transaction = self.connection.savepoint()?;
+        crate::write_scope::lock(&transaction)?;
+        let ids = active_runs_of_deleted(&transaction)?;
+        let (_, chats) = end_each(&transaction, &ids, Cause::Deleted)?;
         transaction.commit()?;
         Ok(chats)
     }

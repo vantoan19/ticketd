@@ -47,7 +47,7 @@ fn automation(workspace: &mut Workspace, trigger: Trigger) -> Automation {
                 id: "summarise".into(),
                 action: StepAction::RunAgent {
                     agent_id: Some(agent.id),
-                    execution_folder: Some("/work/app".into()),
+                    execution_folder: Some(std::env::temp_dir().to_string_lossy().into_owned()),
                     on_failure: None,
                 },
             }],

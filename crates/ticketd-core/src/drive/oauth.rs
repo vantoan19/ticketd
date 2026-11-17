@@ -1,7 +1,8 @@
 use super::{
     CredentialStore, DRIVE_FILE_SCOPE, DriveCredential, DriveError, DriveErrorKind, DriveRequest,
     DriveTransport,
-    provider::{api_disabled_error, credential_lock, invalid_response, token_request},
+    client::{api_disabled_error, invalid_response},
+    provider::{credential_lock, token_request},
     valid_file_id,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};

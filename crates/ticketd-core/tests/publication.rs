@@ -8,6 +8,9 @@
 // matchers panic on the wrong error; those carry their own allow below.
 #![allow(clippy::unwrap_used)]
 
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use std::{
     collections::BTreeMap,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -1149,7 +1152,7 @@ fn discovery_leaves_an_issue_an_open_attempt_is_creating_to_that_attempt() {
 }
 
 #[test]
-fn attempts_survive_export_backup_restore_and_the_format_upgrade() {
+fn attempts_survive_export_backup_and_restore() {
     let mut f = Fixture::new();
     let ticket = describe(&mut f, "Escalate", "Body");
     f.mode(Mode::LoseResponse);
@@ -1176,17 +1179,22 @@ fn attempts_survive_export_backup_restore_and_the_format_upgrade() {
         AttemptState::Unresolved
     );
     drop(workspace);
+    drop(dir);
+}
 
-    // A version 25 workspace gains the table on open and keeps its tickets.
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 25;")
-        .unwrap();
-    drop(db);
+/// A version 25 workspace gains the table on open and keeps its tickets.
+#[test]
+fn a_version_25_workspace_gains_the_attempts_table_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 25).unwrap();
+    old_workspace::add_ticket(&path, "11111111-1111-4111-8111-111111111111", "Escalate");
+
     let workspace = Workspace::open(&path).unwrap();
-    let after = workspace.show_ticket(&ticket.reference).unwrap();
+
+    let after = workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(after.title, "Escalate");
     assert!(after.publication.is_none());
-    drop(dir);
 }
 
 // ---- Resolving an uncertain publication (#109) ----

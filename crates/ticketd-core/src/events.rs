@@ -75,7 +75,6 @@ pub struct WorkspaceEvent {
 /// write that changes nothing out of the log.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     create(connection)?;
-    connection.execute_batch("PRAGMA user_version = 73;")?;
     Ok(())
 }
 

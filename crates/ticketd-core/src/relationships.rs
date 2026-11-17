@@ -1,7 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Status, Ticket, Workspace, history};
+use crate::write_scope::{self, WriteScope};
+use crate::{Error, Status, Ticket, Workspace, history, ticket_change};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prerequisite {
@@ -53,7 +54,7 @@ pub(crate) fn prerequisites(
                         reference: row.get::<_, String>(0)?,
                         title: row.get(1)?,
                         trashed: row.get(3)?,
-                        unresolved: !status.satisfies_dependency(),
+                        unresolved: crate::readiness::unresolved(status),
                         status,
                     },
                     row.get::<_, i64>(4)?,
@@ -68,19 +69,11 @@ pub(crate) fn prerequisites(
         .collect())
 }
 
+/// The prerequisites of a ticket. Its availability is not set here: a read of one ticket
+/// asks `readiness::indicator`, and a list selects `readiness::indicator_sql` with the
+/// tickets, so a list makes no readiness query per ticket.
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
     ticket.prerequisites = prerequisites(connection, &ticket.id, None)?;
-    ticket.availability = match history::readiness(
-        ticket.status,
-        ticket.trashed,
-        ticket.prerequisites.iter().map(|p| p.status),
-    ) {
-        // Awaiting a local decision on an unrecognized closure: not Ready, not Blocked.
-        _ if crate::source::closure_held(connection, &ticket.id)? => None,
-        history::Readiness::Ready => Some("Ready".into()),
-        history::Readiness::Blocked => Some("Blocked".into()),
-        history::Readiness::NoReadyState => None,
-    };
     Ok(())
 }
 
@@ -165,50 +158,9 @@ impl Workspace {
         dependent: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let blocker_id = id(&tx, blocker)?;
-        let dependent_id = id(&tx, dependent)?;
-        crate::ensure_editable(&tx, &blocker_id)?;
-        crate::ensure_editable(&tx, &dependent_id)?;
-        let cycle = reaches(&tx, &dependent_id, &blocker_id, None)?;
-        if blocker_id == dependent_id {
-            return Err(Error::DependencySelf(blocker.into()));
-        }
-        if cycle {
-            let path = chain(&tx, &dependent_id, &blocker_id)?;
-            let between = path.get(1..path.len().saturating_sub(1)).unwrap_or(&[]);
-            let detail = if between.is_empty() {
-                format!("{dependent} already blocks {blocker}.")
-            } else {
-                format!(
-                    "{dependent} already reaches {blocker} through {}.",
-                    between.join(" → ")
-                )
-            };
-            return Err(Error::DependencyCycle {
-                blocker: blocker.into(),
-                dependent: dependent.into(),
-                detail,
-            });
-        }
-        let changed = tx.execute(
-            "INSERT OR IGNORE INTO dependencies (blocker_id, dependent_id) VALUES (?1, ?2)",
-            params![blocker_id, dependent_id],
-        )?;
-        if changed != 0 {
-            history::record(&tx, &dependent_id, "dependency", "", blocker, agent)?;
-            history::record(
-                &tx,
-                &blocker_id,
-                "relationship:blocks",
-                "",
-                dependent,
-                agent,
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(dependent)
+        ticket_change::commit(&self.connection, dependent, |tx| {
+            add_dependency(tx, blocker, dependent, agent)
+        })
     }
     pub fn remove_dependency(
         &mut self,
@@ -216,39 +168,75 @@ impl Workspace {
         dependent: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let blocker_id = id(&tx, blocker)?;
-        let dependent_id = id(&tx, dependent)?;
-        // Either visible endpoint may detach an edge to a trashed ticket.
-        let blocker_trash: bool = tx.query_row(
-            "SELECT trashed FROM tickets WHERE id = ?1",
-            [&blocker_id],
-            |r| r.get(0),
-        )?;
-        if blocker_trash {
-            crate::ensure_editable(&tx, &dependent_id)?;
-        } else {
-            crate::ensure_editable(&tx, &blocker_id)?;
-        }
-        let changed = tx.execute(
-            "DELETE FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2",
-            params![blocker_id, dependent_id],
-        )?;
-        if changed != 0 {
-            history::record(&tx, &dependent_id, "dependency", blocker, "", agent)?;
-            history::record(
-                &tx,
-                &blocker_id,
-                "relationship:blocks",
-                dependent,
-                "",
-                agent,
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(dependent)
+        ticket_change::commit(&self.connection, dependent, |tx| {
+            remove_dependency(tx, blocker, dependent, agent)
+        })
     }
+}
+
+/// Make `blocker` block `dependent`: both must be visible, and the edge must not close a
+/// cycle.
+pub(crate) fn add_dependency(
+    tx: &WriteScope<'_>,
+    blocker: &str,
+    dependent: &str,
+    agent: Option<&str>,
+) -> Result<(), Error> {
+    let blocker_id = tx.even_if_trashed(blocker)?;
+    let dependent_id = tx.even_if_trashed(dependent)?;
+    tx.ensure_editable(&blocker_id)?;
+    tx.ensure_editable(&dependent_id)?;
+    let cycle = reaches(tx, &dependent_id, &blocker_id, None)?;
+    if blocker_id == dependent_id {
+        return Err(Error::DependencySelf(blocker.into()));
+    }
+    if cycle {
+        let path = chain(tx, &dependent_id, &blocker_id)?;
+        let between = path.get(1..path.len().saturating_sub(1)).unwrap_or(&[]);
+        let detail = if between.is_empty() {
+            format!("{dependent} already blocks {blocker}.")
+        } else {
+            format!(
+                "{dependent} already reaches {blocker} through {}.",
+                between.join(" → ")
+            )
+        };
+        return Err(Error::DependencyCycle {
+            blocker: blocker.into(),
+            dependent: dependent.into(),
+            detail,
+        });
+    }
+    let changed = tx.execute(
+        "INSERT OR IGNORE INTO dependencies (blocker_id, dependent_id) VALUES (?1, ?2)",
+        params![blocker_id, dependent_id],
+    )?;
+    if changed != 0 {
+        history::record(tx, &dependent_id, "dependency", "", blocker, agent)?;
+        history::record(tx, &blocker_id, "relationship:blocks", "", dependent, agent)?;
+    }
+    Ok(())
+}
+
+/// Remove the edge. Either visible endpoint may detach an edge to a trashed ticket.
+pub(crate) fn remove_dependency(
+    tx: &WriteScope<'_>,
+    blocker: &str,
+    dependent: &str,
+    agent: Option<&str>,
+) -> Result<(), Error> {
+    let blocker_id = tx.even_if_trashed(blocker)?;
+    let dependent_id = tx.even_if_trashed(dependent)?;
+    tx.ensure_either_editable(&blocker_id, &dependent_id)?;
+    let changed = tx.execute(
+        "DELETE FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2",
+        params![blocker_id, dependent_id],
+    )?;
+    if changed != 0 {
+        history::record(tx, &dependent_id, "dependency", blocker, "", agent)?;
+        history::record(tx, &blocker_id, "relationship:blocks", dependent, "", agent)?;
+    }
+    Ok(())
 }
 
 /// Related is symmetric; Discovered points from the work to the discovered ticket.
@@ -288,51 +276,46 @@ impl Workspace {
         agent: Option<&str>,
         add: bool,
     ) -> Result<Ticket, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
-        let source_id = id(&tx, source)?;
-        let target_id = id(&tx, target)?;
-        if source_id == target_id {
-            return Err(Error::RelationshipSelfLink);
-        }
-        if add {
-            crate::ensure_editable(&tx, &source_id)?;
-            crate::ensure_editable(&tx, &target_id)?;
-        } else {
-            let source_trash: bool = tx.query_row(
-                "SELECT trashed FROM tickets WHERE id=?1",
-                [&source_id],
-                |r| r.get(0),
-            )?;
-            crate::ensure_editable(&tx, if source_trash { &target_id } else { &source_id })?;
-        }
-        let (first, second) = if kind == RelationshipKind::Related && source_id > target_id {
-            (&target_id, &source_id)
-        } else {
-            (&source_id, &target_id)
-        };
-        let kind_name = match kind {
-            RelationshipKind::Related => "related",
-            RelationshipKind::Discovered => "discovered",
-        };
-        let changed = if add {
-            tx.execute("INSERT OR IGNORE INTO contextual_relationships(kind,source_id,target_id) VALUES (?1,?2,?3)", params![kind_name,first,second])?
-        } else {
-            tx.execute("DELETE FROM contextual_relationships WHERE kind=?1 AND source_id=?2 AND target_id=?3", params![kind_name,first,second])?
-        };
-        if changed != 0 {
-            let (from_target, to_target) = if add { ("", target) } else { (target, "") };
-            let (from_source, to_source) = if add { ("", source) } else { (source, "") };
-            let (source_kind, target_kind) = match kind {
-                RelationshipKind::Related => ("relationship:related", "relationship:related"),
-                RelationshipKind::Discovered => {
-                    ("relationship:discovery", "relationship:discovered-while")
-                }
+        write_scope::run(&self.connection, |tx| {
+            let source_id = tx.even_if_trashed(source)?;
+            let target_id = tx.even_if_trashed(target)?;
+            if source_id == target_id {
+                return Err(Error::RelationshipSelfLink);
+            }
+            if add {
+                tx.ensure_editable(&source_id)?;
+                tx.ensure_editable(&target_id)?;
+            } else {
+                // Either visible endpoint may detach a relationship to a trashed ticket.
+                tx.ensure_either_editable(&source_id, &target_id)?;
+            }
+            let (first, second) = if kind == RelationshipKind::Related && source_id > target_id {
+                (&target_id, &source_id)
+            } else {
+                (&source_id, &target_id)
             };
-            history::record(&tx, &source_id, source_kind, from_target, to_target, agent)?;
-            history::record(&tx, &target_id, target_kind, from_source, to_source, agent)?;
-        }
-        tx.commit()?;
-        self.show_ticket(source)
+            let kind_name = match kind {
+                RelationshipKind::Related => "related",
+                RelationshipKind::Discovered => "discovered",
+            };
+            let changed = if add {
+                tx.execute("INSERT OR IGNORE INTO contextual_relationships(kind,source_id,target_id) VALUES (?1,?2,?3)", params![kind_name,first,second])?
+            } else {
+                tx.execute("DELETE FROM contextual_relationships WHERE kind=?1 AND source_id=?2 AND target_id=?3", params![kind_name,first,second])?
+            };
+            if changed != 0 {
+                let (from_target, to_target) = if add { ("", target) } else { (target, "") };
+                let (from_source, to_source) = if add { ("", source) } else { (source, "") };
+                let (source_kind, target_kind) = match kind {
+                    RelationshipKind::Related => ("relationship:related", "relationship:related"),
+                    RelationshipKind::Discovered => {
+                        ("relationship:discovery", "relationship:discovered-while")
+                    }
+                };
+                history::record(tx, &source_id, source_kind, from_target, to_target, agent)?;
+                history::record(tx, &target_id, target_kind, from_source, to_source, agent)?;
+            }
+            crate::read_ticket(tx, source)
+        })
     }
 }

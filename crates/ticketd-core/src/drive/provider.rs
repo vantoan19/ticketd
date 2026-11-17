@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::client::{DriveClient, Failure, Retry, invalid_response, response_error};
 use super::{
     AttachmentProvider, DriveError, DriveErrorKind, DriveMetadata, valid_file_id, validate_metadata,
 };
@@ -79,7 +80,7 @@ pub fn request_allowed(method: &str, url: &str) -> bool {
     const FILES: &str = "https://www.googleapis.com/drive/v3/files";
     match method {
         "POST" if url == "https://oauth2.googleapis.com/token" => true,
-        "POST" | "PUT" | "PATCH" if super::upload_provider::safe_session_url(url) => true,
+        "POST" | "PUT" | "PATCH" if super::client::safe_session_url(url) => true,
         // Metadata-only creation of the Workspace sync folders.
         "POST" => url.starts_with(&format!("{FILES}?")),
         "GET" => {
@@ -170,21 +171,18 @@ impl DriveTransport for GoogleTransport {
     }
 }
 
+/// Attachment access to one Drive account, through the shared [`DriveClient`].
 pub struct GoogleDrive<'a> {
-    connection_id: &'a str,
-    vault: &'a dyn CredentialStore,
-    pub(super) transport: &'a dyn DriveTransport,
+    pub(super) client: DriveClient<'a>,
 }
 impl<'a> GoogleDrive<'a> {
     pub fn new(
-        connection_id: &'a str,
+        connection_id: &str,
         vault: &'a dyn CredentialStore,
         transport: &'a dyn DriveTransport,
     ) -> Self {
         Self {
-            connection_id,
-            vault,
-            transport,
+            client: DriveClient::new(connection_id, vault, transport),
         }
     }
 }
@@ -252,40 +250,15 @@ impl AttachmentProvider for GoogleDrive<'_> {
         if !valid_file_id(id) || resource_key.is_some_and(|key| !valid_file_id(key)) {
             return Err(invalid_response());
         }
-        let mut headers = self.authorization()?;
+        let mut headers = Vec::new();
         if let Some(key) = resource_key {
             headers.push(("X-Goog-Drive-Resource-Keys".into(), format!("{id}/{key}")));
         }
-        let response = self.transport.send(DriveRequest { method: "GET", url: format!("https://www.googleapis.com/drive/v3/files/{id}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,resourceKey,trashed,isAppAuthorized"), headers, body: vec![] })?;
+        let response = self.client.send("GET", &format!("https://www.googleapis.com/drive/v3/files/{id}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,resourceKey,trashed,isAppAuthorized"), &headers, &[], Retry::Never)?;
         if response.status != 200 {
-            return Err(metadata_error(&response));
+            return Err(response_error(&response));
         }
         parse_metadata(id, resource_key, &response.body)
-    }
-}
-
-impl GoogleDrive<'_> {
-    pub(super) fn authorization(&self) -> Result<Vec<(String, String)>, DriveError> {
-        // The secure-store lock serializes refresh-token rotation across CLI/desktop.
-        let _lock = credential_lock(self.connection_id)?;
-        let mut credential = self.vault.load(self.connection_id)?;
-        let mut fields = vec![
-            ("grant_type", "refresh_token"),
-            ("client_id", &credential.client_id),
-            ("refresh_token", &credential.refresh_token),
-        ];
-        if let Some(secret) = credential.client_secret.as_deref() {
-            fields.push(("client_secret", secret));
-        }
-        let token = token_request(self.transport, &fields)?;
-        if let Some(refresh) = token.refresh_token.filter(|r| !r.is_empty()) {
-            credential.refresh_token = refresh;
-            self.vault.save(self.connection_id, &credential)?;
-        }
-        Ok(vec![(
-            "Authorization".into(),
-            format!("Bearer {}", token.access_token),
-        )])
     }
 }
 pub(super) fn parse_metadata(
@@ -310,7 +283,7 @@ pub(super) fn parse_metadata(
         return Err(invalid_response());
     }
     if file.is_app_authorized == Some(false) {
-        return Err(select_file());
+        return Err(Failure::SelectFile.guidance());
     }
     if file.trashed == Some(true) {
         return Err(DriveError::new(
@@ -357,90 +330,4 @@ pub(crate) fn credential_lock(id: &str) -> Result<std::fs::File, DriveError> {
         .map_err(|_| vault_error())?;
     fs2::FileExt::lock_exclusive(&lock).map_err(|_| vault_error())?;
     Ok(lock)
-}
-pub(crate) fn invalid_response() -> DriveError {
-    DriveError::new(
-        DriveErrorKind::InvalidResponse,
-        "Google returned an unreadable response; retry or select the file again",
-    )
-}
-fn select_file() -> DriveError {
-    DriveError::new(
-        DriveErrorKind::SelectFile,
-        "this file is not authorized for ticketd; open the Google Drive tab in the attachment picker and select this file; account access alone does not authorize it",
-    )
-}
-pub(super) fn api_disabled_error(response: &DriveResponse) -> Option<DriveError> {
-    if response.status != 403 {
-        return None;
-    }
-    let body: serde_json::Value = serde_json::from_slice(&response.body).ok()?;
-    let disabled = body["error"]["errors"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|error| error["reason"] == "accessNotConfigured")
-        || body["error"]["details"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|error| {
-                error["reason"] == "SERVICE_DISABLED"
-                    && error["domain"] == "googleapis.com"
-                    && error["metadata"]["service"] == "drive.googleapis.com"
-            });
-    disabled.then(|| DriveError::new(
-        DriveErrorKind::Unconfigured,
-        "Google Drive API is disabled for ticketd's Google app; the app publisher must enable Google Drive API in Google Cloud, then retry",
-    ))
-}
-pub(super) fn metadata_error(response: &DriveResponse) -> DriveError {
-    if let Some(error) = api_disabled_error(response) {
-        return error;
-    }
-    let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
-    let reasons: Vec<&str> = body["error"]["errors"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e["reason"].as_str())
-        .collect();
-    if response.status == 403 && reasons.contains(&"appNotAuthorizedToFile") {
-        return select_file();
-    }
-    match response.status {
-        401 => DriveError::new(
-            DriveErrorKind::Reauthorize,
-            "Drive authorization expired; select the file again in ticketd's Google Drive tab",
-        ),
-        429 => DriveError::new(
-            DriveErrorKind::RateLimited,
-            "Drive is rate limited; wait and retry",
-        ),
-        403 if reasons.iter().any(|r| {
-            matches!(
-                *r,
-                "rateLimitExceeded" | "userRateLimitExceeded" | "dailyLimitExceeded"
-            )
-        }) =>
-        {
-            DriveError::new(
-                DriveErrorKind::RateLimited,
-                "Drive is rate limited; wait and retry",
-            )
-        }
-        403 if reasons.contains(&"insufficientFilePermissions") => DriveError::new(
-            DriveErrorKind::PermissionDenied,
-            "Drive denied permission for this file; open it in Drive and request access from its owner, then retry; ticketd never changes sharing",
-        ),
-        403 | 404 => DriveError::new(
-            DriveErrorKind::InaccessibleOrMissing,
-            "Drive cannot provide this file: it may be inaccessible or missing; select it again or request access from its owner in Drive",
-        ),
-        500..=599 => DriveError::new(
-            DriveErrorKind::Offline,
-            "Drive is temporarily unavailable; retry later",
-        ),
-        _ => invalid_response(),
-    }
 }

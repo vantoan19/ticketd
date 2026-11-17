@@ -250,6 +250,37 @@ fn a_ticket_created_with_content_and_tags_logs_created_and_one_tag_added_per_tag
 }
 
 #[test]
+fn a_ticket_created_from_a_document_logs_one_created_event_with_its_link() {
+    let (_dir, mut workspace) = workspace();
+    let document = workspace
+        .create_document(Some("Spec"), "Sign-in flow")
+        .unwrap();
+    let head = workspace.workspace_event_head().unwrap();
+
+    let ticket = workspace
+        .create_ticket_from_document(&document.id, "Build sign-in")
+        .unwrap();
+
+    // Not also a `ticket.updated` for the body that links the Document.
+    let logged: Vec<_> = events_after(&workspace, head)
+        .into_iter()
+        .map(|event| (event.kind, event.ticket_id, event.current))
+        .collect();
+    assert_eq!(
+        logged,
+        [(
+            WorkspaceEventType::TicketCreated,
+            ticket.id,
+            Some(json!({
+                "title": "Build sign-in",
+                "body": format!("[Spec](ticketd://document/{})", document.id),
+                "status": "Todo", "project_id": null, "plan_id": null,
+            }))
+        )]
+    );
+}
+
+#[test]
 fn reading_after_a_cursor_returns_later_events_oldest_first_up_to_the_limit() {
     let (_dir, mut workspace) = workspace();
     for title in ["One", "Two", "Three"] {

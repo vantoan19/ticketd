@@ -16,7 +16,8 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use tokio::time::timeout;
 
 use crate::stdio::{
-    ChildProcess, Io, Line, Reader, StderrTail, Writer, close_process, read_line, write_bounded,
+    ChildProcess, Io, Line, Reader, StderrTail, Writer, close_outcome, read_line, runtime_lost,
+    write_bounded,
 };
 use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 use crate::{
@@ -35,8 +36,6 @@ const PROTOCOL: u64 = 1;
 /// Largest bridge event kept. Provisional; a tool result carries up to 1,048,576
 /// characters of output in one event.
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
-/// How long a loss waits to learn the exit code before reporting without one.
-const EXIT_OBSERVATION: Duration = Duration::from_secs(2);
 const MAX_REASON_CHARS: usize = 500;
 
 #[derive(Debug, Clone)]
@@ -410,23 +409,15 @@ impl Connection {
             state.commands.clear();
             state.session.clear_live();
         }
-        // Closing its input makes the bridge end the session, which terminates
-        // Claude Code, and exit.
-        match close_process(&self.stdin, &self.child, self.options.close_timeout).await {
-            Some(exit_code) => CloseOutcome::Confirmed { exit_code },
-            None => {
-                // ponytail: only the bridge process is killed. Owning its whole
-                // process tree (Windows job object, POSIX process group) is #257/#267.
-                CloseOutcome::Unconfirmed {
-                    reason: format!(
-                        "The Claude bridge did not exit within {} seconds of its input \
-                         closing and was killed; Claude Code and tools it started may \
-                         still be running",
-                        self.options.close_timeout.as_secs()
-                    ),
-                }
-            }
-        }
+        // Closing its input makes it end the session and exit.
+        close_outcome(
+            &self.stdin,
+            &self.child,
+            self.options.close_timeout,
+            "The Claude bridge",
+            "Claude Code and tools it started may still be running",
+        )
+        .await
     }
 
     /// The protocol reader. Waiting to hand an event to the supervisor is the only
@@ -466,16 +457,7 @@ impl Connection {
         if closing {
             return;
         }
-        *self.stdin.lock().await = None;
-        let exit_code = timeout(EXIT_OBSERVATION, async {
-            self.child.lock().await.wait().await
-        })
-        .await
-        .unwrap_or(None);
-        let lost = EventKind::RuntimeLost {
-            exit_code,
-            diagnostics: self.stderr.readable(),
-        };
+        let lost = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
         let _ = events.send(self.event(lost)).await;
     }
 

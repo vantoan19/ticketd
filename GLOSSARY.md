@@ -7,6 +7,10 @@ ticketd organizes workable outcomes and their supporting context.
 **Workspace**:
 The local boundary containing tickets, Documents, Activities, projects, Plans, Chats, and their shared tag vocabulary.
 
+**Format version**:
+Which shape of Workspace file a ticketd can read. It rises with each change to what a Workspace stores. A backup restores on a ticketd with the same or newer format version.
+_Avoid_: schema version
+
 **Chat**:
 A standalone conversation in a workspace, linked to a harness session. It can have optional links to multiple projects, tickets, and Documents without belonging to any one of them.
 

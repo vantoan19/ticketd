@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 
-use crate::{Error, Ticket, Workspace};
+use crate::write_scope::WriteScope;
+use crate::{Error, Ticket, Workspace, ticket_change};
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
@@ -22,6 +23,8 @@ pub(crate) fn for_ticket(connection: &Connection, id: &str) -> Result<Vec<String
         .collect::<Result<_, _>>()?)
 }
 
+/// The tag name as stored. A write checks this before it enters the write scope, so a
+/// blank name is refused at once instead of after waiting for another writer's lock.
 fn normalize(name: &str) -> Result<String, Error> {
     let name = name.trim().to_lowercase();
     if name.is_empty() {
@@ -45,32 +48,39 @@ impl Workspace {
 
     /// Add a normalized workspace tag without replacing other memberships.
     pub fn add_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
-        let name = normalize(name)?;
-        let ticket = self.show_ticket(reference)?;
-        let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
-        crate::ensure_editable(&transaction, &ticket.id)?;
-        transaction.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
-        transaction.execute(
-            "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
-            params![ticket.id, name],
-        )?;
-        transaction.commit()?;
-        self.show_ticket(reference)
+        normalize(name)?;
+        ticket_change::commit(&self.connection, reference, |scope| {
+            add(scope, reference, name)
+        })
     }
 
     /// Remove one normalized tag without replacing other memberships.
     pub fn remove_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
-        let name = normalize(name)?;
-        let ticket = self.show_ticket(reference)?;
-        let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
-        crate::ensure_editable(&transaction, &ticket.id)?;
-        transaction.execute(
-            "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
-            params![ticket.id, name],
-        )?;
-        transaction.commit()?;
-        self.show_ticket(reference)
+        normalize(name)?;
+        ticket_change::commit(&self.connection, reference, |scope| {
+            remove(scope, reference, name)
+        })
     }
+}
+
+/// Tag a ticket. The name is checked before the ticket is looked up.
+pub(crate) fn add(scope: &WriteScope<'_>, reference: &str, name: &str) -> Result<(), Error> {
+    let name = normalize(name)?;
+    let ticket_id = scope.editable(reference)?;
+    scope.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
+    scope.execute(
+        "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
+        params![ticket_id, name],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn remove(scope: &WriteScope<'_>, reference: &str, name: &str) -> Result<(), Error> {
+    let name = normalize(name)?;
+    let ticket_id = scope.editable(reference)?;
+    scope.execute(
+        "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
+        params![ticket_id, name],
+    )?;
+    Ok(())
 }

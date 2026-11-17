@@ -6,7 +6,24 @@ use ticketd_core::{
     ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat, Workspace,
 };
 
-const CHAT_TABLES: &str = "DROP TABLE chat_record_writes; DROP TABLE chat_changes; DROP TABLE chat_notices; DROP TABLE chat_interactions; DROP TABLE chat_tools; DROP TABLE chat_submission_attempts; DROP TABLE chat_messages; DROP TABLE chat_turns; DROP TABLE chat_sessions; DROP TABLE chat_links; DROP TABLE chats;";
+/// A Workspace file as format `version` left it, holding one Chat (`chat-1`) with one
+/// turn (`turn-1`, position 1) in `state`. Rows are seeded with SQL valid at that version,
+/// so each column the test cares about is one the version already had.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
+fn old_chat_workspace(path: &std::path::Path, version: i64, state: &str) {
+    ticketd_core::create_workspace_at_format_version(path, version).unwrap();
+    let db = rusqlite::Connection::open(path).unwrap();
+    db.execute(
+        "INSERT INTO chats (id, harness, execution_folder) VALUES ('chat-1', 'claude-code', '/work/app')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO chat_turns (id, chat_id, position, state) VALUES ('turn-1', 'chat-1', 1, ?1)",
+        [state],
+    )
+    .unwrap();
+}
 
 fn new_chat() -> NewChat {
     NewChat {
@@ -295,6 +312,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                     detail: None,
                     problem: None,
                     problem_resets_at: None,
+                    ending: None,
                 },
             ],
         )
@@ -467,7 +485,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
     let queued = workspace.save_chat_input(None, &chat.id, "Later").unwrap();
 
     let affected = workspace
-        .mark_chat_contact_lost(None, "the harness process exited")
+        .mark_chat_contact_lost(None, "the harness process exited", "contact_lost")
         .unwrap();
     assert_eq!(affected, vec![chat.id.clone()]);
     assert_eq!(workspace.chat(&chat.id).unwrap().active_turn, None);
@@ -477,6 +495,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
             ChatItem::Turn(turn) => {
                 assert_eq!(turn.state, ChatTurnState::Unknown);
                 assert_eq!(turn.detail.as_deref(), Some("the harness process exited"));
+                assert_eq!(turn.ending.as_deref(), Some("contact_lost"));
             }
             ChatItem::Tool(tool) => assert_eq!(tool.state, ChatToolState::Unknown),
             ChatItem::Interaction(interaction) => {
@@ -513,7 +532,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
     // Nothing is left to reconcile the second time.
     assert!(
         workspace
-            .mark_chat_contact_lost(None, "again")
+            .mark_chat_contact_lost(None, "again", "contact_lost")
             .unwrap()
             .is_empty()
     );
@@ -541,6 +560,7 @@ fn a_failed_observation_rolls_back_the_whole_batch_and_its_change_entries() {
                 detail: None,
                 problem: None,
                 problem_resets_at: None,
+                ending: None,
             },
         ],
     );
@@ -760,6 +780,7 @@ fn archive_and_trash_keep_identity_history_queue_and_links() {
                 detail: None,
                 problem: None,
                 problem_resets_at: None,
+                ending: None,
             }],
         )
         .unwrap();
@@ -860,7 +881,9 @@ fn chat_state_survives_backup_and_restore_without_resuming_work() {
     );
     // The restored turn has no process behind it; the host reconciles before anything runs.
     assert_eq!(
-        workspace.mark_chat_contact_lost(None, "restored").unwrap(),
+        workspace
+            .mark_chat_contact_lost(None, "restored", "contact_lost")
+            .unwrap(),
         vec![chat.id.clone()]
     );
     assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
@@ -871,20 +894,20 @@ fn a_format_before_chat_and_its_backups_gain_chat_storage_without_losing_records
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let backup = dir.path().join("old-backup.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Kept").unwrap();
-    drop(workspace);
     // Format 66 added Chat storage.
-    let previous = 65;
+    ticketd_core::create_workspace_at_format_version(&path, 65).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(&format!("{CHAT_TABLES} PRAGMA user_version = {previous};"))
-        .unwrap();
+    db.execute(
+        "INSERT INTO tickets (id, title, status, reference) VALUES ('t-1', 'Kept', 'Todo', 'T-KQ1')",
+        [],
+    )
+    .unwrap();
     db.execute("VACUUM INTO ?1", [backup.to_string_lossy()])
         .unwrap();
     drop(db);
 
     let mut workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap().title, "Kept");
     let chat = workspace.create_chat(None, new_chat()).unwrap();
     workspace.save_chat_input(None, &chat.id, "Hello").unwrap();
     assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
@@ -893,7 +916,7 @@ fn a_format_before_chat_and_its_backups_gain_chat_storage_without_losing_records
     // A backup taken before Chat existed still restores and then migrates on open.
     Workspace::restore(&path, &backup).unwrap();
     let mut workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap().title, "Kept");
     assert!(
         workspace
             .list_chats(ChatListFilter::Active)
@@ -1017,13 +1040,14 @@ fn a_submission_its_turn_processed_stays_received_when_contact_is_lost() {
                     detail: None,
                     problem: None,
                     problem_resets_at: None,
+                    ending: None,
                 },
             ],
         )
         .unwrap();
 
     let affected = workspace
-        .mark_chat_contact_lost(None, "ticketd was restarted")
+        .mark_chat_contact_lost(None, "ticketd was restarted", "contact_lost")
         .unwrap();
 
     let attempt = message(&workspace, &chat, &input.id).attempts[0].clone();
@@ -1042,7 +1066,9 @@ fn a_person_closes_uncertain_delivery_without_rewriting_what_was_observed() {
         workspace
             .record_chat_submission(&chat.id, &input.id, attempt, ChatSubmissionIntent::NewTurn)
             .unwrap();
-        workspace.mark_chat_contact_lost(None, "lost").unwrap();
+        workspace
+            .mark_chat_contact_lost(None, "lost", "contact_lost")
+            .unwrap();
         input
     };
     let discarded = uncertain(&mut workspace, "first", "a1");
@@ -1116,6 +1142,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
                     detail: Some("usage limit reached".into()),
                     problem: Some("quota_exhausted".into()),
                     problem_resets_at: Some(1_730_948_100),
+                    ending: Some("failed".into()),
                 },
             ],
         )
@@ -1132,6 +1159,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
     });
     assert_eq!(turn.unwrap().problem.as_deref(), Some("quota_exhausted"));
     assert_eq!(turn.unwrap().problem_resets_at, Some(1_730_948_100));
+    assert_eq!(turn.unwrap().ending.as_deref(), Some("failed"));
     let notice = items.iter().find_map(|item| match item {
         ChatItem::Notice(notice) => Some(notice),
         _ => None,
@@ -1207,6 +1235,7 @@ fn what_a_harness_reports_is_stored_within_bounds() {
             detail: None,
             problem: Some("quota_exhausted".into()),
             problem_resets_at: Some(reported),
+            ending: None,
         };
         workspace
             .record_chat_observations(&chat.id, vec![ended])
@@ -1358,7 +1387,7 @@ fn every_combination_of_delivery_decision_and_later_observation_has_one_standing
                 }
                 LoseContact => {
                     workspace
-                        .mark_chat_contact_lost(Some(&chat.id), "lost")
+                        .mark_chat_contact_lost(Some(&chat.id), "lost", "contact_lost")
                         .unwrap();
                 }
                 Resend(attempt) => {
@@ -1511,6 +1540,7 @@ fn end_turn(workspace: &mut Workspace, chat: &Chat, turn: &str) {
                 detail: None,
                 problem: None,
                 problem_resets_at: None,
+                ending: None,
             }],
         )
         .unwrap();
@@ -1599,33 +1629,19 @@ fn mute_is_kept_with_the_chat() {
 fn upgrading_keeps_existing_requests_without_a_tool() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let (mut workspace, chat) = workspace_with_chat(&dir);
-    start_turn(&mut workspace, &chat, "go", "t1");
-    workspace
-        .record_chat_observations(
-            &chat.id,
-            vec![ChatObservation::InteractionRequested {
-                interaction_id: "ask-1".into(),
-                turn_id: "t1".into(),
-                kind: ChatInteractionKind::Approval,
-                native_request_id: None,
-                prompt: "npm install".into(),
-                reason: None,
-                tool_id: Some("tool-1".into()),
-            }],
-        )
-        .unwrap();
-    drop(workspace);
     // Format 69 added the tool call an approval was asked for.
+    old_chat_workspace(&path, 68, "active");
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "ALTER TABLE chat_interactions DROP COLUMN tool_id; PRAGMA user_version = 68;",
+    db.execute(
+        "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, prompt, state) \
+         VALUES ('ask-1', 'chat-1', 1, 'turn-1', 'approval', 'npm install', 'pending')",
+        [],
     )
     .unwrap();
     drop(db);
 
     let workspace = Workspace::open(&path).unwrap();
-    let items = workspace.chat_snapshot(&chat.id, 50).unwrap().items;
+    let items = workspace.chat_snapshot("chat-1", 50).unwrap().items;
     let asked = items.iter().find_map(|item| match item {
         ChatItem::Interaction(asked) => Some(asked),
         _ => None,
@@ -1640,21 +1656,28 @@ fn upgrading_keeps_existing_requests_without_a_tool() {
 fn upgrading_counts_every_existing_turn_as_seen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let (mut workspace, chat) = workspace_with_chat(&dir);
-    start_turn(&mut workspace, &chat, "Hello", "turn-1");
-    end_turn(&mut workspace, &chat, "turn-1");
-    drop(workspace);
     // Format 67 added what the person has seen of each Chat.
-    let previous = 66;
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(&format!(
-        "ALTER TABLE chats DROP COLUMN seen_through; ALTER TABLE chats DROP COLUMN muted; PRAGMA user_version = {previous};"
-    ))
-    .unwrap();
-    drop(db);
+    old_chat_workspace(&path, 66, "completed");
 
     let workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.chat("chat-1").unwrap();
     let upgraded = workspace.chat(&chat.id).unwrap();
     assert!(!upgraded.unseen(&last_turn(&workspace, &chat)));
     assert!(!upgraded.muted);
+}
+
+/// Format 83 adds the column that records how a turn ended; turns recorded before it keep
+/// everything else and have no ending.
+#[test]
+fn a_format_82_workspace_gains_the_turn_ending_column_and_keeps_its_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    old_chat_workspace(&path, 82, "completed");
+
+    let workspace = Workspace::open(&path).unwrap();
+
+    let chat = workspace.chat("chat-1").unwrap();
+    let turn = last_turn(&workspace, &chat);
+    assert_eq!(turn.state, ChatTurnState::Completed);
+    assert_eq!(turn.ending, None);
 }

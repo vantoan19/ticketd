@@ -1,0 +1,1010 @@
+Workspace format ledger. Generated from the migration ladder in src/format.rs; do not edit.
+
+Each section lists what that format version added (+) and removed (-), by name.
+Types, defaults and data changes are not covered. A diff in the section of a version
+that has already shipped means an old migration step was edited: Workspaces saved by
+that version would no longer validate as backups. Regenerate on purpose with
+TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
+
+## 1
++ table tickets
++ column tickets.id
++ column tickets.number
++ column tickets.status
++ column tickets.title
+
+## 2
++ column tickets.body
+
+## 3
++ table ticket_history
++ column ticket_history.editing_agent
++ column ticket_history.from_value
++ column ticket_history.kind
++ column ticket_history.number
++ column ticket_history.ticket_id
++ column ticket_history.timestamp
++ column ticket_history.to_value
+
+## 4
++ table tags
++ table ticket_tags
++ column tags.name
++ column ticket_tags.tag_name
++ column ticket_tags.ticket_id
+
+## 5
++ table notes
++ column notes.content
++ column notes.created_at
++ column notes.editing_agent
++ column notes.id
++ column notes.number
++ column notes.ticket_id
++ column notes.updated_at
+
+## 6
++ table dependencies
++ column dependencies.blocker_id
++ column dependencies.dependent_id
+
+## 7
++ table projects
++ column projects.id
++ column projects.name
++ column projects.path
++ column tickets.project_id
+
+## 8
++ table plans
++ column plans.archived
++ column plans.id
++ column plans.name
++ column plans.purpose
++ column tickets.plan_id
+
+## 9
++ table ticket_parents
++ column ticket_parents.child_id
++ column ticket_parents.parent_id
+
+## 10
++ table project_checkouts
++ column project_checkouts.path
++ column project_checkouts.project_id
+
+## 11
++ column tickets.trashed
+
+## 12
++ table request_outcomes
++ column request_outcomes.id
++ column request_outcomes.outcome
++ column request_outcomes.request
+
+## 13
+(no table, column, trigger or unique index changes)
+
+## 14
++ table inbox_entries
++ table ticket_follows
++ column inbox_entries.from_value
++ column inbox_entries.id
++ column inbox_entries.kind
++ column inbox_entries.person
++ column inbox_entries.read
++ column inbox_entries.ticket_id
++ column inbox_entries.timestamp
++ column inbox_entries.to_value
++ column ticket_follows.person
++ column ticket_follows.ticket_id
+
+## 15
++ table duplicate_tickets
++ column duplicate_tickets.canonical_id
++ column duplicate_tickets.restore_status
++ column duplicate_tickets.source_id
+
+## 16
++ table evidence
++ column evidence.created_at
++ column evidence.editing_agent
++ column evidence.id
++ column evidence.kind
++ column evidence.name
++ column evidence.number
++ column evidence.ticket_id
++ column evidence.updated_at
++ column evidence.value
+
+## 17
++ column inbox_entries.editing_agent
+
+## 18
++ table ticket_reminders
++ column ticket_reminders.delivered
++ column ticket_reminders.due_at
++ column ticket_reminders.person
++ column ticket_reminders.ticket_id
+
+## 19
++ table contextual_relationships
++ column contextual_relationships.kind
++ column contextual_relationships.source_id
++ column contextual_relationships.target_id
+
+## 20
++ table last_backup
++ column last_backup.completed_at
++ column last_backup.id
++ column last_backup.path
+
+## 21
+(no table, column, trigger or unique index changes)
+
+## 22
++ table source_configurations
++ column source_configurations.account
++ column source_configurations.configuration
++ column source_configurations.contract_version
++ column source_configurations.provider
++ column source_configurations.saved_at
+
+## 23
++ table external_duplicate_targets
++ table external_identities
++ table external_ownership
++ table source_sync
++ column external_duplicate_targets.display
++ column external_duplicate_targets.external_id
++ column external_duplicate_targets.locator
++ column external_duplicate_targets.provider
++ column external_duplicate_targets.ticket_id
++ column external_identities.display
++ column external_identities.external_id
++ column external_identities.linked_at
++ column external_identities.locator
++ column external_identities.origin
++ column external_identities.provider
++ column external_identities.ticket_id
++ column external_identities.url
++ column external_ownership.authority
++ column external_ownership.changed_at
++ column external_ownership.ticket_id
++ column source_sync.closure_reason
++ column source_sync.external_state
++ column source_sync.external_updated_at
++ column source_sync.last_attempt_at
++ column source_sync.last_error_code
++ column source_sync.last_error_message
++ column source_sync.last_refreshed_at
++ column source_sync.ticket_id
+
+## 24
++ table source_conversation
++ column source_conversation.actor
++ column source_conversation.body
++ column source_conversation.created_at
++ column source_conversation.edited_at
++ column source_conversation.entry_id
++ column source_conversation.event
++ column source_conversation.kind
++ column source_conversation.position
++ column source_conversation.subject
++ column source_conversation.ticket_id
++ column source_conversation.url
++ column source_sync.conversation_updated_at
+
+## 25
++ table source_status
++ column source_status.error_code
++ column source_status.error_message
++ column source_status.failing_since
++ column source_status.last_attempt_at
++ column source_status.last_refreshed_at
++ column source_status.provider
++ column source_status.retry_after
++ column source_sync.failing_since
+
+## 26
++ table publication_attempts
++ column publication_attempts.body
++ column publication_attempts.destination
++ column publication_attempts.display
++ column publication_attempts.external_id
++ column publication_attempts.failure_code
++ column publication_attempts.failure_message
++ column publication_attempts.id
++ column publication_attempts.lease_expires_at
++ column publication_attempts.locator
++ column publication_attempts.provider
++ column publication_attempts.started_at
++ column publication_attempts.status
++ column publication_attempts.ticket_id
++ column publication_attempts.title
++ column publication_attempts.updated_at
++ column publication_attempts.url
++ unique index publication_attempts_open
+
+## 27
++ column external_duplicate_targets.last_known
++ column external_duplicate_targets.url
++ column source_status.partial_message
++ column source_sync.conversation_error_code
++ column source_sync.conversation_error_message
+
+## 28
++ column source_sync.discovery_matches
++ column tickets.updated_at
++ trigger note_changed_time
++ trigger note_created_time
++ trigger note_deleted_time
++ trigger ticket_changed_time
++ trigger ticket_created_time
++ trigger ticket_history_time
+
+## 29
++ column source_status.last_checked_tickets
+
+## 30
+(no table, column, trigger or unique index changes)
+
+## 31
++ table document_opens
++ table documents
++ table entities
++ column document_opens.document_id
++ column document_opens.sequence
++ column documents.body
++ column documents.created_at
++ column documents.id
++ column documents.kind
++ column documents.title
++ column documents.updated_at
++ column entities.id
++ column entities.kind
+
+## 32
++ table activities
++ column activities.brief
++ column activities.editing_agent
++ column activities.id
++ column activities.number
++ column activities.reported_at
++ column activities.ticket_id
++ column activities.updated_at
+- table notes
+- column notes.content
+- column notes.created_at
+- column notes.editing_agent
+- column notes.id
+- column notes.number
+- column notes.ticket_id
+- column notes.updated_at
+
+## 33
+(no table, column, trigger or unique index changes)
+
+## 34
++ column documents.trashed
+
+## 35
++ table context_mentions
++ column context_mentions.passage
++ column context_mentions.source_id
++ column context_mentions.target_id
++ trigger plan_entity_insert
++ trigger ticket_entity_insert
+
+## 36
++ table document_fts
++ table document_pins
++ table document_tags
++ column document_fts.body
++ column document_fts.document_fts
++ column document_fts.rank
++ column document_fts.title
++ column document_pins.document_id
++ column document_tags.document_id
++ column document_tags.tag_name
++ trigger document_fts_delete
++ trigger document_fts_insert
++ trigger document_fts_update
+
+## 37
++ column activities.supporting_document_id
++ column documents.originating_activity_id
+
+## 38
++ column documents.kept
+
+## 39
++ table plan_documents
++ column plan_documents.document_id
++ column plan_documents.plan_id
++ column plans.spec_document_id
+
+## 40
++ table activity_mentions
++ column activity_mentions.activity_id
++ column activity_mentions.passage
++ column activity_mentions.target_id
+
+## 41
++ table numeric_mentions
++ column numeric_mentions.activity
++ column numeric_mentions.number
++ column numeric_mentions.passage
++ column numeric_mentions.source_id
++ trigger numeric_mentions_activity_delete
+
+## 42
++ table activity_graph_numbers
++ table activity_graph_targets
++ column activity_graph_numbers.activity_id
++ column activity_graph_numbers.number
++ column activity_graph_numbers.passage
++ column activity_graph_numbers.ticket_id
++ column activity_graph_targets.activity_id
++ column activity_graph_targets.passage
++ column activity_graph_targets.target_id
++ column activity_graph_targets.ticket_id
++ trigger activity_graph_numbers_delete
++ trigger activity_graph_numbers_insert
++ trigger activity_graph_targets_delete
++ trigger activity_graph_targets_insert
+
+## 43
++ table plan_graph_fts
++ table ticket_graph_fts
++ column documents.body_heading
++ column plan_graph_fts.name
++ column plan_graph_fts.plan_graph_fts
++ column plan_graph_fts.purpose
++ column plan_graph_fts.rank
++ column ticket_graph_fts.body
++ column ticket_graph_fts.rank
++ column ticket_graph_fts.ticket_graph_fts
++ column ticket_graph_fts.title
++ trigger document_heading_insert
++ trigger document_heading_update
++ trigger plan_graph_fts_delete
++ trigger plan_graph_fts_insert
++ trigger plan_graph_fts_update
++ trigger ticket_graph_fts_delete
++ trigger ticket_graph_fts_insert
++ trigger ticket_graph_fts_update
+
+## 44
+(no table, column, trigger or unique index changes)
+
+## 45
++ table workspace_changes
++ column workspace_changes.id
++ column workspace_changes.token
++ trigger workspace_change_activities_DELETE
++ trigger workspace_change_activities_INSERT
++ trigger workspace_change_activities_UPDATE
++ trigger workspace_change_activity_graph_numbers_DELETE
++ trigger workspace_change_activity_graph_numbers_INSERT
++ trigger workspace_change_activity_graph_numbers_UPDATE
++ trigger workspace_change_activity_graph_targets_DELETE
++ trigger workspace_change_activity_graph_targets_INSERT
++ trigger workspace_change_activity_graph_targets_UPDATE
++ trigger workspace_change_activity_mentions_DELETE
++ trigger workspace_change_activity_mentions_INSERT
++ trigger workspace_change_activity_mentions_UPDATE
++ trigger workspace_change_context_mentions_DELETE
++ trigger workspace_change_context_mentions_INSERT
++ trigger workspace_change_context_mentions_UPDATE
++ trigger workspace_change_contextual_relationships_DELETE
++ trigger workspace_change_contextual_relationships_INSERT
++ trigger workspace_change_contextual_relationships_UPDATE
++ trigger workspace_change_dependencies_DELETE
++ trigger workspace_change_dependencies_INSERT
++ trigger workspace_change_dependencies_UPDATE
++ trigger workspace_change_document_pins_DELETE
++ trigger workspace_change_document_pins_INSERT
++ trigger workspace_change_document_pins_UPDATE
++ trigger workspace_change_document_tags_DELETE
++ trigger workspace_change_document_tags_INSERT
++ trigger workspace_change_document_tags_UPDATE
++ trigger workspace_change_documents_DELETE
++ trigger workspace_change_documents_INSERT
++ trigger workspace_change_documents_UPDATE
++ trigger workspace_change_duplicate_tickets_DELETE
++ trigger workspace_change_duplicate_tickets_INSERT
++ trigger workspace_change_duplicate_tickets_UPDATE
++ trigger workspace_change_entities_DELETE
++ trigger workspace_change_entities_INSERT
++ trigger workspace_change_entities_UPDATE
++ trigger workspace_change_evidence_DELETE
++ trigger workspace_change_evidence_INSERT
++ trigger workspace_change_evidence_UPDATE
++ trigger workspace_change_external_duplicate_targets_DELETE
++ trigger workspace_change_external_duplicate_targets_INSERT
++ trigger workspace_change_external_duplicate_targets_UPDATE
++ trigger workspace_change_external_identities_DELETE
++ trigger workspace_change_external_identities_INSERT
++ trigger workspace_change_external_identities_UPDATE
++ trigger workspace_change_external_ownership_DELETE
++ trigger workspace_change_external_ownership_INSERT
++ trigger workspace_change_external_ownership_UPDATE
++ trigger workspace_change_inbox_entries_DELETE
++ trigger workspace_change_inbox_entries_INSERT
++ trigger workspace_change_inbox_entries_UPDATE
++ trigger workspace_change_numeric_mentions_DELETE
++ trigger workspace_change_numeric_mentions_INSERT
++ trigger workspace_change_numeric_mentions_UPDATE
++ trigger workspace_change_plan_documents_DELETE
++ trigger workspace_change_plan_documents_INSERT
++ trigger workspace_change_plan_documents_UPDATE
++ trigger workspace_change_plans_DELETE
++ trigger workspace_change_plans_INSERT
++ trigger workspace_change_plans_UPDATE
++ trigger workspace_change_project_checkouts_DELETE
++ trigger workspace_change_project_checkouts_INSERT
++ trigger workspace_change_project_checkouts_UPDATE
++ trigger workspace_change_projects_DELETE
++ trigger workspace_change_projects_INSERT
++ trigger workspace_change_projects_UPDATE
++ trigger workspace_change_publication_attempts_DELETE
++ trigger workspace_change_publication_attempts_INSERT
++ trigger workspace_change_publication_attempts_UPDATE
++ trigger workspace_change_source_configurations_DELETE
++ trigger workspace_change_source_configurations_INSERT
++ trigger workspace_change_source_configurations_UPDATE
++ trigger workspace_change_source_conversation_DELETE
++ trigger workspace_change_source_conversation_INSERT
++ trigger workspace_change_source_conversation_UPDATE
++ trigger workspace_change_source_status_DELETE
++ trigger workspace_change_source_status_INSERT
++ trigger workspace_change_source_status_UPDATE
++ trigger workspace_change_source_sync_DELETE
++ trigger workspace_change_source_sync_INSERT
++ trigger workspace_change_source_sync_UPDATE
++ trigger workspace_change_tags_DELETE
++ trigger workspace_change_tags_INSERT
++ trigger workspace_change_tags_UPDATE
++ trigger workspace_change_ticket_follows_DELETE
++ trigger workspace_change_ticket_follows_INSERT
++ trigger workspace_change_ticket_follows_UPDATE
++ trigger workspace_change_ticket_history_DELETE
++ trigger workspace_change_ticket_history_INSERT
++ trigger workspace_change_ticket_history_UPDATE
++ trigger workspace_change_ticket_parents_DELETE
++ trigger workspace_change_ticket_parents_INSERT
++ trigger workspace_change_ticket_parents_UPDATE
++ trigger workspace_change_ticket_reminders_DELETE
++ trigger workspace_change_ticket_reminders_INSERT
++ trigger workspace_change_ticket_reminders_UPDATE
++ trigger workspace_change_ticket_tags_DELETE
++ trigger workspace_change_ticket_tags_INSERT
++ trigger workspace_change_ticket_tags_UPDATE
++ trigger workspace_change_tickets_DELETE
++ trigger workspace_change_tickets_INSERT
++ trigger workspace_change_tickets_UPDATE
+
+## 46
++ table ticket_documents
++ column ticket_documents.document_id
++ column ticket_documents.ticket_id
++ trigger workspace_change_ticket_documents_DELETE
++ trigger workspace_change_ticket_documents_INSERT
++ trigger workspace_change_ticket_documents_UPDATE
+
+## 47
++ table attachments
++ table ticket_attachments
++ column attachments.display_name
++ column attachments.id
++ column attachments.kind
++ column attachments.locator
++ column attachments.original_filename
++ column attachments.size_bytes
++ column ticket_attachments.attachment_id
++ column ticket_attachments.ticket_id
++ trigger workspace_change_attachments_DELETE
++ trigger workspace_change_attachments_INSERT
++ trigger workspace_change_attachments_UPDATE
++ trigger workspace_change_ticket_attachments_DELETE
++ trigger workspace_change_ticket_attachments_INSERT
++ trigger workspace_change_ticket_attachments_UPDATE
+
+## 48
++ table attachment_workspace
++ table embedded_attachments
++ column attachment_workspace.id
++ column attachment_workspace.singleton
++ column embedded_attachments.attachment_id
++ column embedded_attachments.source_id
++ column embedded_attachments.uri
++ trigger embedded_activity_delete
+
+## 49
++ table attachment_upload_settings
++ column attachment_upload_settings.id
++ column attachment_upload_settings.limit_bytes
++ trigger workspace_change_attachment_upload_settings_DELETE
++ trigger workspace_change_attachment_upload_settings_INSERT
++ trigger workspace_change_attachment_upload_settings_UPDATE
++ trigger workspace_change_attachment_workspace_DELETE
++ trigger workspace_change_attachment_workspace_INSERT
++ trigger workspace_change_attachment_workspace_UPDATE
++ trigger workspace_change_embedded_attachments_DELETE
++ trigger workspace_change_embedded_attachments_INSERT
++ trigger workspace_change_embedded_attachments_UPDATE
+
+## 50
++ table attachment_draft_cutover
++ table attachment_draft_references
++ table attachment_drafts
++ column attachment_draft_cutover.pending
++ column attachment_draft_cutover.singleton
++ column attachment_draft_references.attachment_id
++ column attachment_draft_references.owner
++ column attachment_draft_references.uri
++ column attachment_drafts.kind
++ column attachment_drafts.markdown
++ column attachment_drafts.owner
++ column attachment_drafts.payload
++ column attachment_drafts.revision
++ trigger workspace_change_attachment_draft_cutover_DELETE
++ trigger workspace_change_attachment_draft_cutover_INSERT
++ trigger workspace_change_attachment_draft_cutover_UPDATE
++ trigger workspace_change_attachment_draft_references_DELETE
++ trigger workspace_change_attachment_draft_references_INSERT
++ trigger workspace_change_attachment_draft_references_UPDATE
++ trigger workspace_change_attachment_drafts_DELETE
++ trigger workspace_change_attachment_drafts_INSERT
++ trigger workspace_change_attachment_drafts_UPDATE
+
+## 51
++ table drive_references
++ column drive_references.attachment_id
++ column drive_references.connection_id
++ column drive_references.file_id
++ column drive_references.metadata
++ trigger workspace_change_drive_references_DELETE
++ trigger workspace_change_drive_references_INSERT
++ trigger workspace_change_drive_references_UPDATE
+
+## 52
++ table drive_upload_operations
++ column drive_upload_operations.attachment_id
++ column drive_upload_operations.operation
++ column drive_upload_operations.request_id
++ trigger drive_upload_request_namespace
++ trigger workspace_change_drive_upload_operations_DELETE
++ trigger workspace_change_drive_upload_operations_INSERT
++ trigger workspace_change_drive_upload_operations_UPDATE
++ trigger write_drive_request_namespace
+
+## 53
++ column attachments.added_at
++ column attachments.quarantined
+
+## 54
++ column attachments.purge_state
+
+## 55
++ table attachment_upload_destination
++ table attachment_upload_destinations
++ column attachment_upload_destination.destination
++ column attachment_upload_destination.id
++ column attachment_upload_destinations.destination
++ column attachment_upload_destinations.request_id
++ trigger workspace_change_attachment_upload_destination_DELETE
++ trigger workspace_change_attachment_upload_destination_INSERT
++ trigger workspace_change_attachment_upload_destination_UPDATE
++ trigger workspace_change_attachment_upload_destinations_DELETE
++ trigger workspace_change_attachment_upload_destinations_INSERT
++ trigger workspace_change_attachment_upload_destinations_UPDATE
+
+## 56
++ table device
++ column activity_graph_numbers.reference
++ column device.code
++ column device.id
++ column device.issued
++ column numeric_mentions.reference
++ column tickets.reference
++ unique index tickets_reference
+- column activity_graph_numbers.number
+- column numeric_mentions.number
+- trigger workspace_change_activity_graph_numbers_DELETE
+- trigger workspace_change_activity_graph_numbers_INSERT
+- trigger workspace_change_activity_graph_numbers_UPDATE
+- trigger workspace_change_numeric_mentions_DELETE
+- trigger workspace_change_numeric_mentions_INSERT
+- trigger workspace_change_numeric_mentions_UPDATE
+
+## 57
++ table record_versions
++ column record_versions.body
++ column record_versions.changed
++ column record_versions.device
++ column record_versions.id
++ column record_versions.kind
++ column record_versions.record_id
++ column record_versions.replaced_at
++ column record_versions.status
++ column record_versions.title
++ column record_versions.trashed
++ trigger record_version_document
++ trigger record_version_ticket
+
+## 58
++ table sync_capture
++ table sync_conflicts
++ table sync_dirty
++ table sync_files
++ table sync_notices
++ column dependencies.created_at
++ column sync_capture.applying
++ column sync_capture.id
++ column sync_capture.marks
++ column sync_capture.origin
++ column sync_conflicts.base
++ column sync_conflicts.detected_at
++ column sync_conflicts.field
++ column sync_conflicts.id
++ column sync_conflicts.kind
++ column sync_conflicts.read
++ column sync_conflicts.remote
++ column sync_conflicts.remote_changed_at
++ column sync_conflicts.remote_device
++ column sync_dirty.id
++ column sync_dirty.kind
++ column sync_dirty.mark
++ column sync_files.applied
++ column sync_files.content
++ column sync_files.id
++ column sync_files.kind
++ column sync_files.version
++ column sync_files.wanted
++ column sync_notices.cause
++ column sync_notices.id
++ column sync_notices.notice
++ column sync_notices.read
++ column sync_notices.timestamp
++ trigger sync_capture_activities_delete
++ trigger sync_capture_activities_insert
++ trigger sync_capture_activities_update
++ trigger sync_capture_attachments_delete
++ trigger sync_capture_attachments_insert
++ trigger sync_capture_attachments_update
++ trigger sync_capture_contextual_relationships_delete
++ trigger sync_capture_contextual_relationships_insert
++ trigger sync_capture_contextual_relationships_update
++ trigger sync_capture_dependencies_delete
++ trigger sync_capture_dependencies_insert
++ trigger sync_capture_dependencies_update
++ trigger sync_capture_document_pins_delete
++ trigger sync_capture_document_pins_insert
++ trigger sync_capture_document_pins_update
++ trigger sync_capture_document_tags_delete
++ trigger sync_capture_document_tags_insert
++ trigger sync_capture_document_tags_update
++ trigger sync_capture_documents_delete
++ trigger sync_capture_documents_insert
++ trigger sync_capture_documents_update
++ trigger sync_capture_duplicate_tickets_delete
++ trigger sync_capture_duplicate_tickets_insert
++ trigger sync_capture_duplicate_tickets_update
++ trigger sync_capture_evidence_delete
++ trigger sync_capture_evidence_insert
++ trigger sync_capture_evidence_update
++ trigger sync_capture_external_identities_delete
++ trigger sync_capture_external_identities_insert
++ trigger sync_capture_external_identities_update
++ trigger sync_capture_external_ownership_delete
++ trigger sync_capture_external_ownership_insert
++ trigger sync_capture_external_ownership_update
++ trigger sync_capture_plan_documents_delete
++ trigger sync_capture_plan_documents_insert
++ trigger sync_capture_plan_documents_update
++ trigger sync_capture_plans_delete
++ trigger sync_capture_plans_insert
++ trigger sync_capture_plans_update
++ trigger sync_capture_projects_delete
++ trigger sync_capture_projects_insert
++ trigger sync_capture_projects_update
++ trigger sync_capture_ticket_attachments_delete
++ trigger sync_capture_ticket_attachments_insert
++ trigger sync_capture_ticket_attachments_update
++ trigger sync_capture_ticket_documents_delete
++ trigger sync_capture_ticket_documents_insert
++ trigger sync_capture_ticket_documents_update
++ trigger sync_capture_ticket_follows_delete
++ trigger sync_capture_ticket_follows_insert
++ trigger sync_capture_ticket_follows_update
++ trigger sync_capture_ticket_parents_delete
++ trigger sync_capture_ticket_parents_insert
++ trigger sync_capture_ticket_parents_update
++ trigger sync_capture_ticket_reminders_delete
++ trigger sync_capture_ticket_reminders_insert
++ trigger sync_capture_ticket_reminders_update
++ trigger sync_capture_ticket_tags_delete
++ trigger sync_capture_ticket_tags_insert
++ trigger sync_capture_ticket_tags_update
++ trigger sync_capture_tickets_delete
++ trigger sync_capture_tickets_insert
++ trigger sync_capture_tickets_update
++ trigger sync_dependency_time
+
+## 59
++ table sync_attachments
++ table sync_state
++ column sync_attachments.failed
++ column sync_attachments.id
++ column sync_attachments.progress
++ column sync_attachments.sha256
++ column sync_attachments.state
++ column sync_attachments.version
++ column sync_state.account
++ column sync_state.attachment_download
++ column sync_state.connection
++ column sync_state.device_id
++ column sync_state.device_name
++ column sync_state.first_sync
++ column sync_state.first_total
++ column sync_state.folder
++ column sync_state.folder_name
++ column sync_state.id
++ column sync_state.last_synced_at
++ column sync_state.poll_interval_secs
++ column sync_state.recovery
+
+## 60
++ column sync_files.newer
++ column sync_state.recovery_message
+
+## 61
++ column sync_state.run_due
++ column sync_state.run_previous
++ column sync_state.run_token
+
+## 62
++ column sync_attachments.attempts
+
+## 63
++ column sync_files.file
+
+## 64
++ column sync_files.file_created
+
+## 65
++ column sync_state.last_account
++ column sync_state.last_folder
+
+## 66
++ table chat_changes
++ table chat_interactions
++ table chat_links
++ table chat_messages
++ table chat_notices
++ table chat_record_writes
++ table chat_sessions
++ table chat_submission_attempts
++ table chat_tools
++ table chat_turns
++ table chats
++ column chat_changes.chat_id
++ column chat_changes.kind
++ column chat_changes.sequence
++ column chat_changes.subject_id
++ column chat_interactions.chat_id
++ column chat_interactions.id
++ column chat_interactions.kind
++ column chat_interactions.native_request_id
++ column chat_interactions.position
++ column chat_interactions.prompt
++ column chat_interactions.reason
++ column chat_interactions.response
++ column chat_interactions.state
++ column chat_interactions.turn_id
++ column chat_links.chat_id
++ column chat_links.kind
++ column chat_links.target_id
++ column chat_messages.chat_id
++ column chat_messages.complete
++ column chat_messages.created_at
++ column chat_messages.id
++ column chat_messages.position
++ column chat_messages.role
++ column chat_messages.text
++ column chat_messages.turn_id
++ column chat_notices.chat_id
++ column chat_notices.created_at
++ column chat_notices.id
++ column chat_notices.position
++ column chat_notices.text
++ column chat_record_writes.activity_id
++ column chat_record_writes.chat_id
++ column chat_record_writes.history_number
++ column chat_sessions.chat_id
++ column chat_sessions.id
++ column chat_sessions.native_session_id
++ column chat_sessions.origin
++ column chat_sessions.position
++ column chat_sessions.started_at
++ column chat_submission_attempts.chat_id
++ column chat_submission_attempts.decision
++ column chat_submission_attempts.delivery
++ column chat_submission_attempts.detail
++ column chat_submission_attempts.id
++ column chat_submission_attempts.intent
++ column chat_submission_attempts.message_id
++ column chat_submission_attempts.recorded_at
++ column chat_submission_attempts.turn_id
++ column chat_tools.chat_id
++ column chat_tools.id
++ column chat_tools.input
++ column chat_tools.name
++ column chat_tools.output
++ column chat_tools.output_truncated
++ column chat_tools.position
++ column chat_tools.state
++ column chat_tools.turn_id
++ column chat_turns.chat_id
++ column chat_turns.detail
++ column chat_turns.ended_at
++ column chat_turns.id
++ column chat_turns.native_turn_id
++ column chat_turns.position
++ column chat_turns.problem
++ column chat_turns.problem_resets_at
++ column chat_turns.started_at
++ column chat_turns.state
++ column chats.archived
++ column chats.changes_trimmed_through
++ column chats.created_at
++ column chats.effective_settings
++ column chats.execution_folder
++ column chats.folder_managed
++ column chats.harness
++ column chats.id
++ column chats.queue_paused
++ column chats.title
++ column chats.trashed
++ unique index chat_turns_active
+
+## 67
++ column chats.muted
++ column chats.seen_through
+
+## 68
++ column chat_tools.started_at
+
+## 69
++ column chat_interactions.tool_id
+
+## 70
++ column chats.read_through
++ column chats.read_through_position
+
+## 71
++ column chats.marked_unread
+
+## 72
++ column chat_interactions.asked_at
++ column chat_interactions.resolved_at
++ column chat_notices.from_harness
+
+## 73
++ table workspace_events
++ column workspace_events.actor
++ column workspace_events.at
++ column workspace_events.current
++ column workspace_events.id
++ column workspace_events.previous
++ column workspace_events.ticket_id
++ column workspace_events.type
++ trigger workspace_event_activity_created
++ trigger workspace_event_ticket_created
++ trigger workspace_event_ticket_status_changed
++ trigger workspace_event_ticket_tag_added
++ trigger workspace_event_ticket_tag_removed
++ trigger workspace_event_ticket_updated
+
+## 74
++ table automation_agents
++ column automation_agents.allowed_commands
++ column automation_agents.created_at
++ column automation_agents.edit_files
++ column automation_agents.harness
++ column automation_agents.id
++ column automation_agents.instructions
++ column automation_agents.model
++ column automation_agents.name
++ column automation_agents.read_files
++ column automation_agents.run_commands
++ column automation_agents.time_limit_minutes
++ column automation_agents.trashed
++ column automation_agents.turn_limit
++ column automation_agents.use_web
++ trigger workspace_change_automation_agents_DELETE
++ trigger workspace_change_automation_agents_INSERT
++ trigger workspace_change_automation_agents_UPDATE
+
+## 75
++ table automation_device_state
++ table automations
++ column automation_device_state.automation_id
++ column automation_device_state.cursor
++ column automations.created_at
++ column automations.definition
++ column automations.id
++ column automations.name
++ column automations.trashed
++ trigger workspace_change_automation_device_state_DELETE
++ trigger workspace_change_automation_device_state_INSERT
++ trigger workspace_change_automation_device_state_UPDATE
++ trigger workspace_change_automations_DELETE
++ trigger workspace_change_automations_INSERT
++ trigger workspace_change_automations_UPDATE
+
+## 76
++ table automation_arrivals
++ column automation_arrivals.automation_id
++ trigger sync_capture_automation_agents_delete
++ trigger sync_capture_automation_agents_insert
++ trigger sync_capture_automation_agents_update
++ trigger sync_capture_automations_delete
++ trigger sync_capture_automations_insert
++ trigger sync_capture_automations_update
++ trigger workspace_change_automation_arrivals_DELETE
++ trigger workspace_change_automation_arrivals_INSERT
++ trigger workspace_change_automation_arrivals_UPDATE
+
+## 77
++ table automation_run_steps
++ table automation_runs
++ column automation_run_steps.chat_id
++ column automation_run_steps.ended_at
++ column automation_run_steps.position
++ column automation_run_steps.reason
++ column automation_run_steps.run_id
++ column automation_run_steps.started_at
++ column automation_run_steps.status
++ column automation_run_steps.step_id
++ column automation_runs.automation_id
++ column automation_runs.created_at
++ column automation_runs.definition
++ column automation_runs.ended_at
++ column automation_runs.event
++ column automation_runs.event_id
++ column automation_runs.id
++ column automation_runs.reason
++ column automation_runs.started_at
++ column automation_runs.status
++ column automation_runs.ticket_id
++ column chats.automation_run_id
++ trigger workspace_change_automation_run_steps_DELETE
++ trigger workspace_change_automation_run_steps_INSERT
++ trigger workspace_change_automation_run_steps_UPDATE
++ trigger workspace_change_automation_runs_DELETE
++ trigger workspace_change_automation_runs_INSERT
++ trigger workspace_change_automation_runs_UPDATE
++ unique index automation_runs_active
+
+## 78
++ table automation_settings
++ column automation_settings.id
++ column automation_settings.runs_at_once
+
+## 79
++ column automation_runs.attention_cleared
+
+## 80
++ column automation_device_state.schedule_from
+
+## 81
++ column automation_agents.any_command
+
+## 82
++ column source_status.read_partitions
+
+## 83
++ column chat_turns.ending

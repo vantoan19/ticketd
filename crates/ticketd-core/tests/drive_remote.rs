@@ -239,6 +239,65 @@ fn server_failures_are_retried_then_reported_as_offline() {
 }
 
 #[test]
+fn a_revision_listing_that_fails_for_a_transient_reason_is_not_a_missing_file() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let pauses = Mutex::new(Vec::new());
+    let timed = timed(&sim, &pauses);
+    let ticket = key("a");
+    put(&remote, &ticket, None, b"a").unwrap();
+    timed.list(FOLDER).unwrap();
+    let lookups = sim.count("GET", "/drive/v3/files?");
+
+    sim.fault(Fault {
+        times: 5,
+        ..Fault::new("GET", "/revisions?", 503)
+    });
+    assert_eq!(timed.revisions(FOLDER, &ticket), Err(RemoteError::Offline));
+
+    sim.fault(Fault {
+        times: 5,
+        headers: vec![("Retry-After".into(), "30".into())],
+        ..Fault::new("GET", "/revisions?", 429)
+    });
+    assert_eq!(
+        timed.revisions(FOLDER, &ticket),
+        Err(RemoteError::RateLimited {
+            retry_after: Some(Duration::from_secs(30))
+        })
+    );
+
+    sim.fault(Fault {
+        times: 2,
+        ..Fault::new("GET", "/revisions?", 401)
+    });
+    assert_eq!(
+        timed.revisions(FOLDER, &ticket),
+        Err(RemoteError::Unauthorized)
+    );
+
+    assert_eq!(timed.revisions(FOLDER, &ticket).unwrap().len(), 1);
+    assert_eq!(
+        sim.count("GET", "/drive/v3/files?"),
+        lookups,
+        "the file's ID stayed cached through every failure"
+    );
+}
+
+#[test]
+fn a_revision_listing_of_a_file_drive_no_longer_has_is_missing() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let ticket = key("a");
+    put(&remote, &ticket, None, b"a").unwrap();
+    sim.fault(Fault::new("GET", "/revisions?", 404));
+    assert_eq!(
+        remote.revisions(FOLDER, &ticket),
+        Err(RemoteError::NotFound)
+    );
+}
+
+#[test]
 fn full_storage_no_network_and_a_removed_folder_are_reported_without_waiting() {
     let sim = DriveSim::default();
     let remote = connected(&sim);
@@ -454,6 +513,35 @@ fn the_production_transport_allows_every_request_sync_sends() {
 
 /// F44: the server's wait is honoured only up to a minute; beyond that the run
 /// ends rate limited instead of holding the app for as long as a header says.
+#[test]
+fn a_download_that_answers_another_range_than_asked_is_refused() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let ticket = key("ranged");
+    let file = put(&remote, &ticket, None, b"hello").unwrap();
+    for range in ["bytes 5-9/10", "bytes 0-4/6", "bytes 0-3/5"] {
+        sim.fault(Fault {
+            body: "world",
+            headers: vec![("Content-Range".into(), range.into())],
+            ..Fault::new("GET", "alt=media", 206)
+        });
+        let mut bytes = Vec::new();
+        assert!(
+            matches!(
+                remote.download(FOLDER, &ticket, &file.version, &mut bytes),
+                Err(RemoteError::Other(_))
+            ),
+            "{range}"
+        );
+        assert!(bytes.is_empty(), "{range}");
+    }
+    let mut bytes = Vec::new();
+    remote
+        .download(FOLDER, &ticket, &file.version, &mut bytes)
+        .unwrap();
+    assert_eq!(bytes, b"hello");
+}
+
 #[test]
 fn a_long_retry_after_ends_the_call_instead_of_waiting() {
     let sim = DriveSim::default();
