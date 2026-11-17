@@ -7,6 +7,8 @@ import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { cn } from "cn";
 import { SearchIcon } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
+import { HighlightGroup } from "@/components/ui/highlight-group";
+import { RowHighlight } from "@/components/ui/row-highlight";
 
 import {
   Dialog,
@@ -24,6 +26,7 @@ function Command({
 }: React.ComponentProps<typeof CommandPrimitive> & {
   variant?: "default" | "palette";
 }) {
+  const group = React.useId();
   return (
     <CommandPrimitive
       data-slot="command"
@@ -34,7 +37,7 @@ function Command({
       )}
       {...props}
     >
-      {children}
+      <HighlightGroup value={group}>{children}</HighlightGroup>
       <CommandActiveOption />
     </CommandPrimitive>
   );
@@ -182,6 +185,7 @@ function CommandSeparator({
 function CommandItem({
   className,
   size = "default",
+  children,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Item> & {
   size?: "default" | "tall";
@@ -191,11 +195,14 @@ function CommandItem({
       data-slot="command-item"
       data-size={size}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:text-(--disabled-foreground) data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:text-(--disabled-foreground) data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       {...props}
-    />
+    >
+      <RowHighlight attribute="data-selected" />
+      {children}
+    </CommandPrimitive.Item>
   );
 }
 
