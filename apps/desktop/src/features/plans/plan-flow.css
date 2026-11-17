@@ -29,6 +29,22 @@
   z-index: 1;
   overflow: visible;
 }
+/* The lines draw once both ends are in place (two entrances after the lane
+   cascade begins) and take longer than an entrance (1.75 times --dur-enter,
+   420ms). Their arrowheads fade in as they draw. All of it is zero under
+   reduced motion and a held key. */
+.plan-flow-edges .ui-drawn {
+  animation:
+    ui-draw calc(var(--dur-enter) * 1.75) var(--ease-out)
+      calc(var(--dur-enter) * 2) both,
+    plan-flow-edge-in calc(var(--dur-enter) * 1.75) var(--ease-out)
+      calc(var(--dur-enter) * 2) both;
+}
+@keyframes plan-flow-edge-in {
+  from {
+    opacity: 0;
+  }
+}
 .plan-flow-footer {
   display: flex;
   align-items: center;
