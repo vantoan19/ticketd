@@ -55,12 +55,16 @@ export function TicketList({
   simple = true,
   empty,
   scopeKey = "",
-  lastWritten = {},
+  selectedRecord,
 }: {
   tickets: Ticket[];
   empty?: ReactNode;
   scopeKey?: string;
-  lastWritten?: Record<string, Ticket>;
+  /**
+   * The newest copy of the selected Ticket known (its read), so a row held in
+   * place after the list dropped it shows what the Ticket is now.
+   */
+  selectedRecord?: Ticket | undefined;
   selected: string | null;
   onOpen: (reference: string) => void;
   bulkSelection: string[];
@@ -109,7 +113,7 @@ export function TicketList({
   const sticky = useStickyRows(
     tickets,
     selected,
-    lastWritten,
+    selectedRecord,
     bulkSelection,
     scopeKey,
   );

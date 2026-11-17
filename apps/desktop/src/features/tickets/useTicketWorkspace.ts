@@ -166,16 +166,8 @@ export function useTicketWorkspace(
       setMention((current) => markReady(current, reference)),
     [],
   );
-  // The latest copy of each Ticket this window wrote, so a list row that was
-  // held in place can tell it has moved once the list no longer holds it. It
-  // stays here, not in a per-row `useTicket`: the list decides what to hold in
-  // the render where it changes, which needs the copy at that moment, and a
-  // row's own read would report one render later. It goes with the Ticket list
-  // query (a later slice of ADR 0013).
-  const [lastWritten, setLastWritten] = useState<Record<string, Ticket>>({});
   const clearOpened = useCallback(() => {
     setOpened([]);
-    setLastWritten({});
   }, []);
   const wrote = useWrote();
   // A local preference (sidebar, display) that could not be saved. It stays
@@ -416,7 +408,6 @@ export function useTicketWorkspace(
   // on the reads module yet) and drops a list read sent before the write.
   const patchTicket = useCallback((updated: Ticket) => {
     generation.current++;
-    setLastWritten((items) => ({ ...items, [updated.reference]: updated }));
     setTickets((items) =>
       items.map((item) => {
         if (item.id !== updated.id) return item;
@@ -578,7 +569,6 @@ export function useTicketWorkspace(
     clearMention,
     setSelected,
     opened,
-    lastWritten,
     clearOpened,
     markMentionReady,
     error,

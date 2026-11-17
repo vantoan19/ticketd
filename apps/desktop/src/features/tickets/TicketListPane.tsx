@@ -36,6 +36,7 @@ import {
 import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketBoard } from "./TicketBoard";
+import { useTicket } from "./open-ticket";
 import { DisplayMenu } from "@/features/tickets/DisplayMenu";
 import { usePreferences } from "@/lib/preferences";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
@@ -116,6 +117,9 @@ function TicketListBody({
     listFailure,
     refreshFailed,
   } = workspace;
+  // The selected Ticket's read, shared with its page, tells a row held in
+  // place what the Ticket is now.
+  const selectedRecord = useTicket(selected).value ?? undefined;
   // Complete well counts are an independent, authoritative total while the
   // shared list read is unavailable; a failed well retains its own Retry.
   const boardTotal =
@@ -481,7 +485,7 @@ function TicketListBody({
                     ])}
                     tickets={visibleTickets}
                     empty={emptyView}
-                    lastWritten={workspace.lastWritten}
+                    selectedRecord={selectedRecord}
                     scope={{
                       showPlan: !navigation.plan,
                       showProject: navigation.project === "all",

@@ -3,11 +3,16 @@ import type { Ticket } from "@/lib/api/client";
 
 type Placement = { status: string; index: number; ticket: Ticket };
 
-/** Keep the ledger's reading position while the saved properties update. */
+/**
+ * Keep the ledger's reading position while the saved properties update. A row
+ * the list dropped shows the newest copy of its Ticket known: the selected
+ * Ticket's `record` (its read, which refreshes on every change) when it is no
+ * older than the list's copy, otherwise the list's copy.
+ */
 export function useStickyRows(
   tickets: Ticket[],
   selected: string | null,
-  lastWritten: Record<string, Ticket>,
+  record: Ticket | undefined,
   bulkSelection: string[],
   scopeKey: string,
 ) {
@@ -18,6 +23,11 @@ export function useStickyRows(
   const [held, setHeld] = useState(new Map<string, Placement>());
   const [arrivals, setArrivals] = useState(new Set<string>());
   const [previousSelected, setPreviousSelected] = useState(selected);
+  const newest = (listed: Ticket) =>
+    record?.reference === listed.reference &&
+    (record.updated_at ?? "") >= (listed.updated_at ?? "")
+      ? record
+      : listed;
   const wake = useRef<() => void>(() => {});
   const hovered = useRef<string | null>(null);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
@@ -64,7 +74,7 @@ export function useStickyRows(
       )
         return;
       const listed = tickets.find((ticket) => ticket.id === before.id);
-      const after = listed ?? lastWritten[before.reference];
+      const after = listed ?? newest(before);
       if (
         !next.has(before.id) &&
         ((!listed && allowMissing && previousScope === scopeKey) ||
@@ -189,9 +199,7 @@ export function useStickyRows(
   for (const [id, placement] of held) {
     const index = displayed.findIndex((ticket) => ticket.id === id);
     const ticket =
-      index < 0
-        ? (lastWritten[placement.ticket.reference] ?? placement.ticket)
-        : displayed.splice(index, 1)[0]!;
+      index < 0 ? newest(placement.ticket) : displayed.splice(index, 1)[0]!;
     displayed.splice(Math.min(placement.index, displayed.length), 0, ticket);
   }
   return {
