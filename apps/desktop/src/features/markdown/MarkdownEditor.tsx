@@ -14,7 +14,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
 import {
@@ -1059,9 +1059,38 @@ const richPlugins = [
   }),
 ];
 
+/** How long typing pauses before rich text is written out as Markdown. */
+const IDLE_MS = 250;
+/** Continuous typing is still written out at least this often. */
+const LONGEST_WAIT_MS = 2000;
+
+/** The attachment links in a text, as written; a test for growth, not a parser. */
+function attachmentLinks(text: string) {
+  return new Set(text.match(/ticketd:\/\/attachment\/[^\s)>\]"'<]+/gi));
+}
+
+/** Whether rich text holds only one empty paragraph. */
+function blank(value: Value) {
+  const [first] = value;
+  return (
+    value.length === 1 && first?.type === "p" && NodeApi.string(first) === ""
+  );
+}
+
 export interface MarkdownEditorProps {
   value: string;
+  /**
+   * The Markdown, at the editor's own cadence: rich edits once typing pauses
+   * (about 250 ms, at most every 2 s) and at once on blur, Escape, a Ctrl/Cmd
+   * shortcut, unmount and window close; source edits as typed.
+   */
   onChange: (markdown: string) => void;
+  /**
+   * The editor holds rich edits that `onChange` has not reported yet (true), or
+   * has reported them (false). Hosts that refresh from outside changes treat
+   * the text as edited meanwhile.
+   */
+  onPendingChange?: (pending: boolean) => void;
   readOnly?: boolean;
   label?: string;
   autoFocus?: boolean;
@@ -1099,6 +1128,7 @@ export interface MarkdownEditorProps {
 export function MarkdownEditor({
   value,
   onChange,
+  onPendingChange,
   readOnly = false,
   label = "Markdown document",
   autoFocus = false,
@@ -1121,24 +1151,51 @@ export function MarkdownEditor({
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
-  const [protectedValue, setProtectedValue] = useState<string | null>(null);
   const protectAttachment = useCallback(
     (uri: string) =>
       recovery.put(historyOwner, null, [`[File](${uri})`], "undo"),
     [recovery, historyOwner],
   );
+  // Undo can bring back any text this editor held, so its record keeps every
+  // attachment link seen (ADR 0009); the core accumulates them. Only a new link
+  // needs a write.
+  const [historyLinks, setHistoryLinks] = useState<{
+    recovery: typeof recovery;
+    links: ReadonlySet<string>;
+  }>({ recovery, links: new Set() });
+  const protectedLinks =
+    historyLinks.recovery === recovery ? historyLinks.links : null;
+  const valueLinks = useMemo(() => attachmentLinks(value), [value]);
+  const linksProtected = [...valueLinks].every((link) =>
+    protectedLinks?.has(link),
+  );
   useEffect(() => {
+    if (linksProtected) return;
     let current = true;
     void recovery
-      .put(historyOwner, null, value ? [value] : [], "undo")
+      .put(historyOwner, null, [value], "undo")
       .then(() => {
-        if (current) setProtectedValue(value);
+        if (current)
+          setHistoryLinks((previous) => ({
+            recovery,
+            links: new Set([
+              ...(previous.recovery === recovery ? previous.links : []),
+              ...valueLinks,
+            ]),
+          }));
       })
       .catch(() => {});
     return () => {
       current = false;
     };
-  }, [recovery, historyOwner, value, recoveryError]);
+  }, [
+    recovery,
+    historyOwner,
+    value,
+    valueLinks,
+    linksProtected,
+    recoveryError,
+  ]);
   useEffect(
     () => () => {
       void recovery.put(historyOwner, null, []).catch(() => {});
@@ -1149,12 +1206,22 @@ export function MarkdownEditor({
   const [focused, setFocused] = useState(false);
   const [assessed, setAssessed] = useState<{
     source: string;
-    document: Pick<ReturnType<typeof readMarkdown>, "value" | "reasons">;
+    document: Pick<
+      ReturnType<typeof readMarkdown>,
+      "value" | "reasons" | "markdown"
+    >;
   }>(() => ({ source: value, document: readMarkdown(value) }));
+  // The text the host holds, as last reported here or given from outside.
+  const emitted = useRef(value);
+  // Whether the rich text is empty, for the placeholder.
+  const [empty, setEmpty] = useState(() => value.trim() === "");
   let document = assessed.document;
+  // A value this editor reported is already assessed: rich text as it was
+  // written, source typing when typing pauses (see `report`).
   if (assessed.source !== value) {
     document = readMarkdown(value);
     setAssessed({ source: value, document });
+    setEmpty(value.trim() === "");
   }
   const [sourceMode, setSourceMode] = useState(false);
   const [slash, setSlash] = useState(false);
@@ -1190,10 +1257,20 @@ export function MarkdownEditor({
     },
     [],
   );
-  const emitted = useRef(value);
-  const synchronizing = useRef(false);
-  const [initialMarkdown] = useState(() => writeMarkdown(document.value));
-  const previousMarkdown = useRef(initialMarkdown);
+  // The canonical Markdown of the text the host holds: rich text that still
+  // writes this has nothing new to report.
+  const canonical = useRef(document.markdown);
+  // When rich edits not yet reported began, or null.
+  const pendingSince = useRef<number | null>(null);
+  // Source typing the rich value has not read yet.
+  const sourceUnread = useRef(false);
+  const idleTimer = useRef<number | undefined>(undefined);
+  // Operations that applied the host's value, so they never count as edits.
+  const outsideOperations = useRef(new WeakSet<object>());
+  const latest = useRef({ onChange, onPendingChange });
+  useEffect(() => {
+    latest.current = { onChange, onPendingChange };
+  });
   const editor = usePlateEditor({
     plugins: richPlugins,
     components: {
@@ -1228,6 +1305,65 @@ export function MarkdownEditor({
     },
     value: document.value,
   });
+  /**
+   * Bring the host and the rich value up to date: read pending source typing
+   * into the rich value, and report pending rich edits as Markdown. Each
+   * converts the whole document once, so it runs when typing pauses or when the
+   * text is needed now, never per keystroke.
+   */
+  const report = useCallback(() => {
+    window.clearTimeout(idleTimer.current);
+    if (sourceUnread.current) {
+      sourceUnread.current = false;
+      const parsed = readMarkdown(emitted.current);
+      canonical.current = parsed.markdown;
+      setAssessed({ source: emitted.current, document: parsed });
+      setEmpty(emitted.current.trim() === "");
+      editor.tf.setValue(parsed.value);
+      for (const operation of editor.operations)
+        outsideOperations.current.add(operation);
+    }
+    if (pendingSince.current === null) return;
+    pendingSince.current = null;
+    latest.current.onPendingChange?.(false);
+    const markdown = writeMarkdown(editor.children);
+    if (markdown === canonical.current) return;
+    canonical.current = markdown;
+    emitted.current = markdown;
+    setAssessed({
+      source: markdown,
+      document: { value: editor.children, reasons: [], markdown },
+    });
+    latest.current.onChange(markdown);
+  }, [editor]);
+  /** Report once typing pauses, or once rich edits have waited long enough. */
+  const reportWhenIdle = useCallback(() => {
+    window.clearTimeout(idleTimer.current);
+    const since = pendingSince.current;
+    const wait =
+      since === null
+        ? IDLE_MS
+        : Math.max(0, Math.min(IDLE_MS, since + LONGEST_WAIT_MS - Date.now()));
+    idleTimer.current = window.setTimeout(report, wait);
+  }, [report]);
+  // Closing the window or unmounting reports what is pending, so a host's
+  // recovery draft has it.
+  useEffect(() => {
+    const hidden = () => {
+      if (globalThis.document.visibilityState === "hidden") report();
+    };
+    window.addEventListener("beforeunload", report);
+    window.addEventListener("pagehide", report);
+    window.addEventListener("ticketd:window-closing", report);
+    globalThis.document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("beforeunload", report);
+      window.removeEventListener("pagehide", report);
+      window.removeEventListener("ticketd:window-closing", report);
+      globalThis.document.removeEventListener("visibilitychange", hidden);
+      report();
+    };
+  }, [report]);
   useEffect(() => {
     if (!autoFocus || readOnly) return;
     const frame = window.requestAnimationFrame(() => {
@@ -1263,10 +1399,11 @@ export function MarkdownEditor({
             suppressThrow: true,
           })
         : null;
+    report();
     insertion.current = {
       rich: rich ?? editor.selection ?? lastSelection.current,
       source: sourceEditor.current?.view?.state.selection.main,
-      markdown: value,
+      markdown: emitted.current,
       links: new Map(),
     };
     focusAfterInsertion.current = true;
@@ -1312,6 +1449,7 @@ export function MarkdownEditor({
     const uri = await attachments.uri(file.id);
     await recovery.put(historyOwner, null, [`[File](${uri})`], "undo");
     if (!pending || pending !== insertion.current) return;
+    report();
     if (pending.markdown !== emitted.current)
       throw new Error(
         "The document changed while choosing a file. Close the picker and choose the insertion point again; the stored file remains available.",
@@ -1424,13 +1562,20 @@ export function MarkdownEditor({
   }, [focusRequest, focusLink, readOnly, source, editor, paragraphAfterQuote]);
   useEffect(() => {
     if (value === emitted.current) return;
-    synchronizing.current = true;
+    // Typing not reported yet is newer than what the host holds: report it
+    // instead of replacing it (hosts learn of it through onPendingChange).
+    const reported = emitted.current;
+    if (pendingSince.current !== null) report();
+    if (emitted.current !== reported) return;
+    window.clearTimeout(idleTimer.current);
+    sourceUnread.current = false;
     emitted.current = value;
-    const next = document.value;
-    previousMarkdown.current = writeMarkdown(next);
-    applyExternalValue(editor, next, lastSelection.current);
-    synchronizing.current = false;
-  }, [value, document, editor]);
+    canonical.current = document.markdown;
+    applyExternalValue(editor, document.value, lastSelection.current);
+    // Slate reports these with the next change; they are not typing.
+    for (const operation of editor.operations)
+      outsideOperations.current.add(operation);
+  }, [value, document, editor, report]);
   const choices = slashChoices(slashQuery);
   function closeSlash() {
     setSlash(false);
@@ -1560,12 +1705,14 @@ export function MarkdownEditor({
   // menu took focus, else the whole text.
   const exportSnapshot = useRef<MarkdownExportSource | null>(null);
   const exportSource = (): MarkdownExportSource => {
+    report();
+    const whole = emitted.current;
     const selection = sourceEditor.current?.view?.state.selection.main;
     if (source && selection && !selection.empty)
       return {
         kind: "selection",
-        body: value.slice(selection.from, selection.to),
-        context: value,
+        body: whole.slice(selection.from, selection.to),
+        context: whole,
       };
     const nativeSelection = window.getSelection();
     const rich =
@@ -1580,7 +1727,7 @@ export function MarkdownEditor({
     const selected =
       !source && rich && !RangeApi.isCollapsed(rich)
         ? writeMarkdown(editor.api.fragment(rich))
-        : value;
+        : whole;
     return { kind: "markdown", body: selected };
   };
   const captureExport = (open: boolean) => {
@@ -1592,15 +1739,16 @@ export function MarkdownEditor({
   const moreItems = (
     <DropdownMenuGroup>
       <DropdownMenuItem
-        onSelect={() =>
-          void writeClipboard(value).then((failure) =>
+        onSelect={() => {
+          report();
+          void writeClipboard(emitted.current).then((failure) =>
             statusLine.show(
               failure === null
                 ? { message: "Copied Markdown" }
                 : { tone: "error", message: "Couldn't copy the Markdown" },
             ),
-          )
-        }
+          );
+        }}
       >
         Copy Markdown
       </DropdownMenuItem>
@@ -1620,6 +1768,8 @@ export function MarkdownEditor({
     </span>
   );
   const toggleSource = () => {
+    // Each side starts from the other's latest text.
+    report();
     setSourceMode((current) => !current);
     closeSlash();
   };
@@ -1739,8 +1889,17 @@ export function MarkdownEditor({
       onBlur={() => {
         setFocused(false);
         closeSlash();
+        report();
       }}
       onKeyDownCapture={(event) => {
+        // Escape finishes editing, and a Ctrl/Cmd shortcut may save or submit
+        // in this same keypress: the host must hold the text first.
+        if (event.key === "Escape") report();
+        else if (
+          (event.metaKey || event.ctrlKey) &&
+          pendingSince.current !== null
+        )
+          flushSync(report);
         if (event.defaultPrevented) return;
         if (
           event.target instanceof HTMLElement &&
@@ -1790,9 +1949,9 @@ export function MarkdownEditor({
       }}
     >
       {recovery.active &&
-        protectedValue === value &&
-        !recoveryError &&
-        value.includes("ticketd://attachment/") && (
+        valueLinks.size > 0 &&
+        linksProtected &&
+        !recoveryError && (
           <p
             role="status"
             aria-label="Attachment draft protection"
@@ -1814,16 +1973,14 @@ export function MarkdownEditor({
             theme="none"
             extensions={sourceEditorExtensions}
             onChange={(next) => {
-              if (!readOnly && next !== value) {
-                emitted.current = next;
-                synchronizing.current = true;
-                const parsed = readMarkdown(next);
-                setAssessed({ source: next, document: parsed });
-                previousMarkdown.current = writeMarkdown(parsed.value);
-                editor.tf.setValue(parsed.value);
-                synchronizing.current = false;
-                onChange(next);
-              }
+              if (readOnly || next === value) return;
+              // The host takes the text as typed. The rich value reads it
+              // once typing pauses, or on switching back to rich text.
+              emitted.current = next;
+              sourceUnread.current = true;
+              setAssessed((current) => ({ ...current, source: next }));
+              reportWhenIdle();
+              onChange(next);
             }}
           />
         </>
@@ -1835,26 +1992,31 @@ export function MarkdownEditor({
             if (selection) lastSelection.current = selection;
           }}
           onValueChange={({ value: next }: { value: Value }) => {
-            if (readOnly || synchronizing.current) return;
-            // Selection, focus and initialization never emit a write.
-            if (
-              !editor.operations.some(
-                (operation) => operation.type !== "set_selection",
-              )
-            )
-              return;
-            const markdown = writeMarkdown(next);
-            if (markdown !== previousMarkdown.current) {
-              previousMarkdown.current = markdown;
-              // This controlled echo already consists of supported Plate nodes.
-              // Re-parsing it would repeat the entire fidelity check per keypress.
-              setAssessed({
-                source: markdown,
-                document: { value: next, reasons: [] },
-              });
-              emitted.current = markdown;
-              onChange(markdown);
+            if (readOnly) return;
+            // Selection, focus, initialization and the host's own value are
+            // not edits.
+            const edits = editor.operations.filter(
+              (operation) =>
+                operation.type !== "set_selection" &&
+                !outsideOperations.current.has(operation),
+            );
+            if (!edits.length) return;
+            setEmpty(blank(next));
+            if (pendingSince.current === null) {
+              pendingSince.current = Date.now();
+              onPendingChange?.(true);
             }
+            // A new attachment link is reported at once, so Undo protects it
+            // before the person can remove it again.
+            const linksFile = edits.some(
+              (operation) =>
+                (operation.type === "insert_node" ||
+                  operation.type === "insert_text" ||
+                  operation.type === "set_node") &&
+                JSON.stringify(operation).includes("ticketd://attachment/"),
+            );
+            if (linksFile) report();
+            else reportWhenIdle();
           }}
         >
           {chrome !== "compact" &&
@@ -1873,7 +2035,7 @@ export function MarkdownEditor({
               // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
               // inside the editable, so native input (autocorrect, dictation) could keep it beside
               // typed text or fold it into what is saved. Only while the document is empty.
-              {...(placeholder && value.trim() === ""
+              {...(placeholder && empty
                 ? {
                     "data-empty": "",
                     style: {

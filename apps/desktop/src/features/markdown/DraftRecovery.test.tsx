@@ -3,6 +3,7 @@ import { createRef, useState } from "react";
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -12,7 +13,10 @@ import { EditorView } from "@codemirror/view";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
-import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import {
+  DraftRecoveryGate,
+  useDraftRecovery,
+} from "@/lib/draft-recovery-context";
 import { WorkspaceBand } from "@/app/WorkspaceBand";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
@@ -495,14 +499,15 @@ test("source Undo and rich/source transitions keep independent history protectio
     </DraftRecoveryProvider>,
   );
   await typeSource("Markdown document", "");
-  await waitFor(() =>
-    expect(
-      [...records.values()].some(
-        (record) =>
-          record.kind === "undo" && (record.markdown as string[]).length === 0,
-      ),
-    ).toBe(true),
-  );
+  // Removing the reference writes nothing: the Undo record still holds it.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(
+    [...records.values()].filter(
+      (record) =>
+        record.kind === "undo" &&
+        (record.markdown as string[]).some((text) => text.includes(body)),
+    ),
+  ).toHaveLength(1);
   const source = screen.getByRole("textbox", {
     name: "Markdown document source",
   });
@@ -542,7 +547,9 @@ test("legacy draft import protects unopened owners and does not acknowledge othe
   localStorage.setItem("ticketd:activity-support:other", "document-id");
   render(
     <DraftRecoveryProvider>
-      <p>Workspace ready</p>
+      <DraftRecoveryGate>
+        <p>Workspace ready</p>
+      </DraftRecoveryGate>
     </DraftRecoveryProvider>,
   );
   await screen.findByText("Workspace ready");
@@ -582,7 +589,9 @@ test("distinct legacy profile drafts survive a primary recovery tombstone", asyn
   );
   render(
     <DraftRecoveryProvider>
-      <p>Workspace ready</p>
+      <DraftRecoveryGate>
+        <p>Workspace ready</p>
+      </DraftRecoveryGate>
     </DraftRecoveryProvider>,
   );
   await screen.findByText("Workspace ready");
@@ -716,4 +725,118 @@ test("late retention completion cannot publish or replace newer typing before it
   await act(async () => {
     finishCreate("T-KQ1");
   });
+});
+
+test("rich typing left without a blur is recovered after the window is killed once the editor was idle", async () => {
+  const ticket: Ticket = {
+    id: "t1",
+    reference: "T-KQ1",
+    title: "Killed window",
+    body: "Saved description",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    plan_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  // The ticket save never finishes: only the recovery draft holds the typing.
+  const records = bridge(new Map(), (command) =>
+    command === "change_ticket" ? new Promise(() => {}) : [],
+  );
+  const first = render(
+    <DraftRecoveryProvider>
+      <TicketEditor ticket={ticket} onSaved={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  fireEvent.click(
+    await screen.findByRole("group", { name: "Read description" }),
+  );
+  const editable = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  Object.defineProperty(editable, "isContentEditable", { value: true });
+  editable.focus();
+  await act(async () => {
+    fireEvent(
+      editable,
+      createEvent.paste(editable, {
+        clipboardData: { getData: () => " typed before the crash" },
+      }),
+    );
+  });
+  // No blur, Escape or unmount: the idle editor alone makes the draft durable.
+  await waitFor(() =>
+    expect(JSON.stringify(records.get("ticket:t1")?.payload)).toContain(
+      "typed before the crash",
+    ),
+  );
+  // A killed window runs no cleanup; a new one starts from the stored rows.
+  const stored = new Map(records);
+  first.unmount();
+  cleanup();
+  bridge(stored);
+  render(
+    <DraftRecoveryProvider>
+      <TicketEditor ticket={ticket} onSaved={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  expect(
+    (await screen.findByRole("group", { name: "Read description" }))
+      .textContent,
+  ).toContain("typed before the crash");
+});
+
+test("typing writes the Undo record only when its attachment links grow", async () => {
+  bridge();
+  const body = "[Trace](ticketd://attachment/workspace/file)";
+  function Editor() {
+    const [value, setValue] = useState(body);
+    return <MarkdownEditor value={value} onChange={setValue} />;
+  }
+  render(
+    <DraftRecoveryProvider>
+      <Editor />
+    </DraftRecoveryProvider>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  const source = await screen.findByRole("textbox", {
+    name: "Markdown document source",
+  });
+  const view = EditorView.findFromDOM(source);
+  const undoWrites = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(
+        ([command, args]) =>
+          command === "retain_draft" &&
+          String((args as { draft: { owner: string } }).draft.owner).startsWith(
+            "undo:",
+          ),
+      ).length;
+  await waitFor(() => expect(undoWrites()).toBe(1));
+  for (let index = 0; index < 20; index++)
+    act(() => {
+      view?.dispatch({
+        changes: { from: view.state.doc.length, insert: "x" },
+        userEvent: "input.type",
+      });
+    });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(undoWrites()).toBe(1);
+  act(() => {
+    view?.dispatch({
+      changes: {
+        from: view.state.doc.length,
+        insert: " [Log](ticketd://attachment/workspace/log)",
+      },
+      userEvent: "input.paste",
+    });
+  });
+  await waitFor(() => expect(undoWrites()).toBe(2));
 });

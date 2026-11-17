@@ -47,10 +47,17 @@ function Harness() {
   const [ticket, setTicket] = useState(initial);
   return <TicketEditor ticket={ticket} onSaved={setTicket} />;
 }
+/** The rich editor reports its text once typing pauses. */
+async function editorIdle() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(300);
+  });
+}
 async function autosave() {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+  await editorIdle();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(600);
   });
@@ -227,6 +234,7 @@ test("external description changes pause a rich draft until reload or overwrite 
       onSaved={onSaved}
     />,
   );
+  await editorIdle();
   bridge.invoke.mockResolvedValueOnce({
     ...external,
     body: "- [x] External content",

@@ -635,8 +635,12 @@ entries, including drafts, Undo and Trash; the display subset never decides clea
 Draft recovery payloads and derived attachment claims commit together through
 `Workspace::retain_draft`. The core parses canonical Markdown using the saved
 reference parser. Drafts are private workspace recovery data, not published
-Documents or Activities. Desktop startup loads recovery before mounting editors;
-each host retains its existing autosave or explicit-submit behavior. Capture
+Documents or Activities. Desktop startup loads recovery while the views mount;
+editor hosts wait for it behind a recovery gate, and each host retains its
+existing autosave or explicit-submit behavior. The Markdown editor owns its save
+cadence: rich text is written out as Markdown once typing pauses and at once on
+blur, Escape, a shortcut, unmount and window close; source text passes through
+as typed. Recovery writes for one owner coalesce while queued. Capture
 requests keep their original retry identity across restart. Backups include
 recovery prose and protections; ordinary domain JSON export excludes this private
 authoring state.
@@ -645,8 +649,10 @@ Owners use compare-and-swap revisions, including release tombstones; exact
 retries of the last update are idempotent. Desktop writes serialize and failures
 remain visible and block subsequent submission until protection is durable.
 Current draft replacement and independent editor Undo use separate claims; Undo
-accumulates references until history is reset/unmounted. Normal unmount releases
-only transient history, never a recoverable draft. An interrupted history release
+accumulates references until history is reset/unmounted, and is written only when
+its attachment links grow. Normal unmount releases only transient history, never
+a recoverable draft; a released history record is removed, since its owner
+belongs to one editor mount. An interrupted history release
 leaves conservative protection for explicit review, without a time expiry.
 
 `Workspace::attachment_usage` returns a consistent snapshot of direct, embedded,
