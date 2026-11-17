@@ -1960,7 +1960,7 @@ test("totals and group counts describe the whole result, not the loaded page", a
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
   expect(
     screen.getByText("120", {
-      selector: '.ui-pane-header [data-slot="count"]',
+      selector: '.ui-pane-header [data-slot="count"] span',
     }),
   ).toBeTruthy();
   // The Todo header counts all 119 in the result, not the one shown.
