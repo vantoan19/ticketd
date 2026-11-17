@@ -5253,8 +5253,10 @@ test("highlighted description edits preserve canonical code and links, and copy 
     bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
   ).toBe(false);
   fireEvent.click(checkbox);
-  await vi.waitFor(() =>
-    expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+  // The editor reports once idle, then autosave waits its own delay.
+  await vi.waitFor(
+    () => expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+    { timeout: 5000 },
   );
   const richCopy = screen.getByRole("button", { name: "Copy code" });
   richCopy.focus();

@@ -68,9 +68,14 @@ impl Workspace {
         )?;
         Ok(())
     }
+    /// Every recovery row an editor may resume, read at desktop startup. Empty
+    /// editor-history rows (`undo:` owners, unique to one editor mount) are
+    /// skipped: earlier versions left one behind for every closed editor.
     pub fn draft_retentions(&self) -> Result<Vec<DraftRetention>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT owner, kind, revision, payload, markdown FROM attachment_drafts ORDER BY owner",
+            "SELECT owner, kind, revision, payload, markdown FROM attachment_drafts
+             WHERE NOT (owner LIKE 'undo:%' AND payload IS NULL AND markdown = '[]')
+             ORDER BY owner",
         )?;
         let rows = statement.query_map([], |r| {
             Ok((
@@ -137,8 +142,41 @@ impl Workspace {
                 });
             }
         }
+        let release = draft.payload.is_none() && draft.markdown.is_empty();
+        // A replayed release of editor history that is already gone.
+        if previous.is_none() && release && draft.revision > 0 {
+            return Ok(DraftRetention {
+                revision: 0,
+                ..draft.clone()
+            });
+        }
         if previous.unwrap_or(0) != draft.revision {
             return Err(Error::Attachment("recovery draft changed in another window; copy this window's draft before reloading to review the stored recovery".into()));
+        }
+        // Releasing editor history removes it: its owner belongs to one editor
+        // mount, so no other window can resume or resurrect it, and a tombstone
+        // would only grow the startup read.
+        if release && previous.is_some() {
+            let history: bool = tx.query_row(
+                "SELECT kind='undo' FROM attachment_drafts WHERE owner=?1",
+                [&draft.owner],
+                |r| r.get(0),
+            )?;
+            if history {
+                tx.execute(
+                    "DELETE FROM attachment_draft_references WHERE owner=?1",
+                    [&draft.owner],
+                )?;
+                tx.execute(
+                    "DELETE FROM attachment_drafts WHERE owner=?1",
+                    [&draft.owner],
+                )?;
+                tx.commit()?;
+                return Ok(DraftRetention {
+                    revision: 0,
+                    ..draft.clone()
+                });
+            }
         }
         let next = draft.revision + 1;
         tx.execute("INSERT INTO attachment_drafts(owner,kind,revision,payload,markdown) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(owner) DO UPDATE SET kind=excluded.kind,revision=excluded.revision,payload=excluded.payload,markdown=excluded.markdown",

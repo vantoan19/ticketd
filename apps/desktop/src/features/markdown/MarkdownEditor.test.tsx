@@ -11,11 +11,22 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EditorView } from "@codemirror/view";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import { slashChoices, slashMayOpen } from "./slash-menu";
 vi.mock("./MermaidDiagram", () => ({
   MermaidDiagram: () => <div>Diagram preview</div>,
 }));
+// Counted, so a test can see how often the whole document is converted.
+vi.mock("./plate-markdown", async (original) => {
+  const actual = await original<typeof import("./plate-markdown")>();
+  return {
+    ...actual,
+    readMarkdown: vi.fn(actual.readMarkdown),
+    writeMarkdown: vi.fn(actual.writeMarkdown),
+  };
+});
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(HTMLElement.prototype, "isContentEditable");
@@ -478,4 +489,166 @@ it("mounts a diagram's source editor only once its Source opens", () => {
   expect(screen.getByLabelText("Mermaid source").textContent).toContain(
     "graph LR",
   );
+});
+
+describe("Save cadence", () => {
+  /** Types into the rich text the way a paste does: one edit, no blur. */
+  async function typeRich(text: string) {
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    Object.defineProperty(editable, "isContentEditable", {
+      configurable: true,
+      value: true,
+    });
+    editable.focus();
+    await act(async () => {
+      fireEvent(
+        editable,
+        createEvent.paste(editable, { clipboardData: { getData: () => text } }),
+      );
+    });
+    return editable;
+  }
+  function Controlled({
+    initial,
+    onChange,
+    onEscape,
+  }: {
+    initial: string;
+    onChange: (markdown: string) => void;
+    onEscape?: () => void;
+  }) {
+    const [value, setValue] = useState(initial);
+    return (
+      <MarkdownEditor
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          onChange(next);
+        }}
+        {...(onEscape && { onEscape })}
+      />
+    );
+  }
+
+  it("converts the document only inside readMarkdown when it mounts", () => {
+    vi.mocked(readMarkdown).mockClear();
+    vi.mocked(writeMarkdown).mockClear();
+    render(<MarkdownEditor value={"# Title\n\nText"} onChange={vi.fn()} />);
+    expect(readMarkdown).toHaveBeenCalledTimes(1);
+    expect(writeMarkdown).not.toHaveBeenCalled();
+  });
+
+  it("reports rich edits once the editor is idle, converting the document once", async () => {
+    const onChange = vi.fn();
+    render(<Controlled initial="Start" onChange={onChange} />);
+    vi.mocked(writeMarkdown).mockClear();
+    await typeRich("one");
+    await typeRich(" two");
+    await typeRich(" three");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(writeMarkdown).not.toHaveBeenCalled();
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0]?.[0]).toContain("one two three");
+    expect(writeMarkdown).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["blur", () => fireEvent.blur(document.activeElement ?? document.body)],
+    [
+      "Escape",
+      () =>
+        fireEvent.keyDown(document.activeElement ?? document.body, {
+          key: "Escape",
+        }),
+    ],
+    [
+      "a Ctrl+Enter shortcut",
+      () =>
+        fireEvent.keyDown(document.activeElement ?? document.body, {
+          key: "Enter",
+          ctrlKey: true,
+        }),
+    ],
+    [
+      "window close",
+      () => window.dispatchEvent(new Event("ticketd:window-closing")),
+    ],
+    ["page unload", () => window.dispatchEvent(new Event("beforeunload"))],
+  ])("reports pending rich edits at once on %s", async (_, trigger) => {
+    const onChange = vi.fn();
+    const onEscape = vi.fn();
+    render(
+      <Controlled initial="Start" onChange={onChange} onEscape={onEscape} />,
+    );
+    await typeRich(" now");
+    expect(onChange).not.toHaveBeenCalled();
+    trigger();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0]?.[0]).toContain("now");
+    // Escape finishes editing only after the host has the text.
+    if (onEscape.mock.calls.length)
+      expect(onChange.mock.invocationCallOrder[0]).toBeLessThan(
+        onEscape.mock.invocationCallOrder[0] ?? 0,
+      );
+  });
+
+  it("reports pending rich edits when it unmounts", async () => {
+    const onChange = vi.fn();
+    const view = render(<MarkdownEditor value="Start" onChange={onChange} />);
+    await typeRich(" now");
+    expect(onChange).not.toHaveBeenCalled();
+    view.unmount();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0]?.[0]).toContain("now");
+  });
+
+  it("passes source typing through without converting the document until idle", async () => {
+    const onChange = vi.fn();
+    render(<Controlled initial="<aside>raw</aside>" onChange={onChange} />);
+    const source = screen.getByRole("textbox", {
+      name: "Markdown document source",
+    });
+    const view = EditorView.findFromDOM(source);
+    vi.mocked(readMarkdown).mockClear();
+    vi.mocked(writeMarkdown).mockClear();
+    for (const letter of ["a", "b", "c"])
+      act(() => {
+        view?.dispatch({
+          changes: { from: view.state.doc.length, insert: letter },
+          userEvent: "input.type",
+        });
+      });
+    expect(onChange.mock.calls.map(([text]) => text as string)).toEqual([
+      "<aside>raw</aside>a",
+      "<aside>raw</aside>ab",
+      "<aside>raw</aside>abc",
+    ]);
+    expect(readMarkdown).not.toHaveBeenCalled();
+    expect(writeMarkdown).not.toHaveBeenCalled();
+    await waitFor(() => expect(readMarkdown).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows source edits in the rich text on switching back before the editor is idle", async () => {
+    render(<Controlled initial="Plain" onChange={vi.fn()} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit Markdown source" }),
+    );
+    const source = await screen.findByRole("textbox", {
+      name: "Markdown document source",
+    });
+    act(() => {
+      const view = EditorView.findFromDOM(source);
+      view?.dispatch({
+        changes: { from: view.state.doc.length, insert: " more" },
+        userEvent: "input.type",
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
+    expect(
+      screen.getByRole("textbox", { name: "Markdown document rich text" })
+        .textContent,
+    ).toBe("Plain more");
+  });
 });

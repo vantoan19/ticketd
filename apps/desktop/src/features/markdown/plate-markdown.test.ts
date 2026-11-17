@@ -48,6 +48,18 @@ describe("canonical Markdown rich-edit boundary", () => {
     ).toEqual([]);
   });
 
+  it("returns the canonical Markdown it already wrote, so a caller need not write it again", () => {
+    for (const source of [
+      "###   Keep exact opening source\n\n- [x] Done\n\n3. Third\n",
+      "Status [WIP] - 5 * 3, see snake_case_name",
+      "<aside>raw</aside>\n\nText",
+      "",
+    ]) {
+      const document = readMarkdown(source);
+      expect(document.markdown).toBe(writeMarkdown(document.value));
+    }
+  });
+
   it("retains exact Mermaid source including CRLF and invalid syntax across another rich edit", () => {
     const source =
       "before\r\n\r\n```mermaid\r\ngraph TD;\r\n A --> \r\n```\r\n";

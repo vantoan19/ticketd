@@ -21,7 +21,10 @@ import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
 import { loadPreferences } from "@/lib/preferences";
 import { z } from "zod";
-import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import {
+  DraftRecoveryGate,
+  useDraftRecovery,
+} from "@/lib/draft-recovery-context";
 import "./create-ticket.css";
 
 type Draft = {
@@ -50,16 +53,7 @@ const draftSchema = z.object({
   followCreated: z.boolean().optional(),
   createMore: z.boolean().optional(),
 });
-export function CreateTicketDialog({
-  open,
-  onOpenChange,
-  triggerRef,
-  navigation,
-  initialStatus,
-  projects,
-  plans,
-  create,
-}: {
+type CreateTicketDialogProps = {
   open: boolean;
   /** The status a status group's Add action starts the ticket with. */
   initialStatus?: string;
@@ -80,7 +74,27 @@ export function CreateTicketDialog({
     followCreated?: boolean,
     blockers?: string[],
   ) => Promise<string>;
-}) {
+};
+
+/** Opens once stored recovery has loaded, so an unsent ticket comes back with it. */
+export function CreateTicketDialog(props: CreateTicketDialogProps) {
+  return (
+    <DraftRecoveryGate>
+      <RecoveredCreateTicketDialog {...props} />
+    </DraftRecoveryGate>
+  );
+}
+
+function RecoveredCreateTicketDialog({
+  open,
+  onOpenChange,
+  triggerRef,
+  navigation,
+  initialStatus,
+  projects,
+  plans,
+  create,
+}: CreateTicketDialogProps) {
   const recovery = useDraftRecovery();
   const [expanded, setExpanded] = useState(false);
   const [savedDraft, setDraft] = useState<Draft | null>(() => {

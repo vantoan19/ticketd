@@ -118,6 +118,37 @@ function meaning(node: unknown): unknown {
   return node;
 }
 
+/**
+ * Whether two trees mean the same thing: `JSON.stringify(meaning(a)) === JSON.stringify(meaning(b))`
+ * without building either copy. Keys compare in order, as the JSON text would.
+ */
+function sameMeaning(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+      return false;
+    return a.every((item, index) => sameMeaning(item, b[index]));
+  }
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const entries = (node: object) =>
+      Object.entries(node).filter(
+        ([key, value]) =>
+          !["position", "spread", "data"].includes(key) &&
+          value !== null &&
+          value !== undefined,
+      );
+    const left = entries(a);
+    const right = entries(b);
+    return (
+      left.length === right.length &&
+      left.every(
+        ([key, value], index) =>
+          right[index]?.[0] === key && sameMeaning(value, right[index]?.[1]),
+      )
+    );
+  }
+  return a === b;
+}
+
 /** What a construct the rich editor cannot keep is called, in plain words. */
 const unsupportedNames: Record<string, string> = {
   html: "raw HTML",
@@ -424,10 +455,7 @@ export function writeMarkdown(value: Value): string {
     // Unescaped neighbours can combine into syntax (`a*` before emphasis); keep the
     // standard output unless both spellings mean the same thing.
     const standard = processor.stringify(tree);
-    if (
-      JSON.stringify(meaning(processor.parse(result))) !==
-      JSON.stringify(meaning(processor.parse(standard)))
-    )
+    if (!sameMeaning(processor.parse(result), processor.parse(standard)))
       result = standard;
   }
   diagrams.forEach((source, index) => {
@@ -445,6 +473,10 @@ export function writeMarkdown(value: Value): string {
   return result.replace(/\n$/, "");
 }
 
+/**
+ * The rich value for `source`, why it must stay in source editing (if it must), and `markdown`:
+ * the canonical text the rich value writes, so callers need not write it again.
+ */
 export function readMarkdown(source: string) {
   const tree = processor.parse(source);
   const reasons = new Set<string>();
@@ -453,14 +485,23 @@ export function readMarkdown(source: string) {
     .map((node) => convert(node, source))
     .filter((node): node is TElement => !TextApi.isText(node));
   if (!value.length) value.push({ type: "p", children: [{ text: "" }] });
-  const originalMeaning = meaning(tree);
+  const markdown = writeMarkdown(value);
   if (
     !reasons.size &&
     source.trim() &&
-    JSON.stringify(meaning(processor.parse(writeMarkdown(value)))) !==
-      JSON.stringify(originalMeaning)
+    // Identical text needs no second parse to mean the same thing.
+    markdown !== source &&
+    !sameMeaning(processor.parse(markdown), tree)
   ) {
     reasons.add("Markdown it would rewrite");
   }
-  return { value, reasons: [...reasons], meaning: originalMeaning };
+  return {
+    value,
+    reasons: [...reasons],
+    markdown,
+    /** The tree's meaning, built only when asked for. */
+    get meaning() {
+      return meaning(tree);
+    },
+  };
 }
