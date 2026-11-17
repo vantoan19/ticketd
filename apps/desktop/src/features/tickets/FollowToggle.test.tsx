@@ -131,3 +131,160 @@ test("a failed Follow on one Ticket does not hide or replace what another Ticket
     ),
   );
 });
+
+test("a Follow shows the value it wrote, and a later outside change replaces it even when re-reads are held or fail", async () => {
+  let following = false;
+  let hold: Promise<boolean> | null = null;
+  let fail = false;
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { reference?: string; following?: boolean },
+    ) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following") {
+        if (fail) throw new Error("database is busy");
+        return hold ?? following;
+      }
+      if (command === "set_following") {
+        following = args!.following!;
+        return null;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  const signal = fakeChangeSignal();
+  render(
+    <TestReads signal={signal}>
+      <FollowToggle reference="T-A" variant="strip" />
+    </TestReads>,
+  );
+  const pressed = () => toggle().getAttribute("aria-pressed");
+  await waitFor(() => expect(calls("is_following")).toHaveLength(1));
+  fireEvent.click(toggle());
+  await waitFor(() => expect(pressed()).toBe("true"));
+  await act(async () => {});
+
+  // Unfollowed elsewhere; the change is read.
+  following = false;
+  await act(async () => signal.change());
+  await waitFor(() => expect(pressed()).toBe("false"));
+
+  // Later changes whose re-read is slow, or fails, still say not followed.
+  let release: (value: boolean) => void = () => {};
+  hold = new Promise<boolean>((resolve) => (release = resolve));
+  await act(async () => signal.change());
+  expect(pressed()).toBe("false");
+  hold = null;
+  await act(async () => release(false));
+  fail = true;
+  await act(async () => signal.change());
+  expect(pressed()).toBe("false");
+});
+
+test("Follow is pending and fails per Ticket while the toggle stays mounted", async () => {
+  const writes: Record<string, (outcome: "ok" | "fail") => void> = {};
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following") return false;
+      if (command === "set_following")
+        return new Promise((resolve, reject) => {
+          writes[args!.reference!] = (outcome) =>
+            outcome === "ok"
+              ? resolve(null)
+              : reject(new Error("disk I/O error"));
+        });
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  const view = (reference: string) => (
+    <TestReads>
+      <FollowToggle reference={reference} variant="rail" />
+    </TestReads>
+  );
+  const { rerender } = render(view("T-A"));
+  await waitFor(() => expect(calls("is_following", "T-A")).toHaveLength(1));
+  fireEvent.click(toggle());
+  await waitFor(() => expect(calls("set_following", "T-A")).toHaveLength(1));
+
+  // T-B is open now: it can be followed while T-A's write is out.
+  rerender(view("T-B"));
+  await waitFor(() => expect(calls("is_following", "T-B")).toHaveLength(1));
+  await waitFor(() => expect(toggle().hasAttribute("disabled")).toBe(false));
+  fireEvent.click(toggle());
+  await waitFor(() => expect(calls("set_following", "T-B")).toHaveLength(1));
+  expect(toggle().hasAttribute("disabled")).toBe(true);
+
+  // T-A's write finishing does not re-enable T-B's button mid-write.
+  await act(async () => writes["T-A"]!("fail"));
+  expect(toggle().hasAttribute("disabled")).toBe(true);
+  fireEvent.click(toggle());
+  expect(calls("set_following", "T-B")).toHaveLength(1);
+
+  // T-B finishing does not wipe T-A's "Not saved".
+  await act(async () => writes["T-B"]!("ok"));
+  await waitFor(() => expect(toggle().hasAttribute("disabled")).toBe(false));
+  rerender(view("T-A"));
+  expect(await screen.findByText("Not saved")).toBeTruthy();
+  expect(calls("set_following")).toHaveLength(2);
+});
+
+test("the rail's Retry after a failed read of Follow reads again and writes nothing", async () => {
+  let reads = 0;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following") {
+        reads += 1;
+        if (reads === 1) throw new Error("database is busy");
+        return true;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(
+    <TestReads>
+      <FollowToggle reference="T-A" variant="rail" />
+    </TestReads>,
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).not.toContain("Not saved");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(toggle().getAttribute("aria-pressed")).toBe("true"),
+  );
+  expect(calls("set_following")).toHaveLength(0);
+  expect(reads).toBe(2);
+});
+
+test("the rail's Retry after a failed change sends the change again", async () => {
+  let writes = 0;
+  let following = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following") return following;
+      if (command === "set_following") {
+        writes += 1;
+        if (writes === 1) throw new Error("disk I/O error");
+        following = true;
+        return null;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(
+    <TestReads>
+      <FollowToggle reference="T-A" variant="rail" />
+    </TestReads>,
+  );
+  await waitFor(() => expect(calls("is_following")).toHaveLength(1));
+  fireEvent.click(toggle());
+  expect((await screen.findByRole("alert")).textContent).toContain("Not saved");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(toggle().getAttribute("aria-pressed")).toBe("true"),
+  );
+  expect(calls("set_following")).toHaveLength(2);
+});

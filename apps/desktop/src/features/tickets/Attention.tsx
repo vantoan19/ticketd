@@ -1,6 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useEffect, useEffectEvent, useState } from "react";
-import { useTicket, useTicketChanged } from "./open-ticket";
+import { followingFill, useTicket, useTicketChanged } from "./open-ticket";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -29,76 +29,80 @@ export function FollowToggle({
   const line = useStatusLine();
   const read = useTicket(reference, "following");
   const changed = useTicketChanged();
-  // What this window last wrote for each Ticket is shown until a read answers
-  // after it, so a saved Follow whose re-read failed does not look unsaved. The
-  // state belongs to the Ticket it was made on: the toggle stays mounted when
-  // the header moves to another one.
-  const [written, setWritten] = useState<{
-    reference: string;
-    value: boolean;
-    reread: boolean;
-  } | null>(null);
-  const mine = written?.reference === reference ? written : null;
-  const answered =
-    mine !== null && mine.reread && read.failure === null && read.current;
-  const following = (mine && !answered ? mine.value : read.value) ?? false;
+  const following = read.value ?? false;
   // Reading and changing Follow fail separately; a failed change wins until
-  // the next try.
-  const [changeFailure, setChangeFailure] = useState<{
-    reference: string;
-    failure: FailureDescription;
-  } | null>(null);
-  const changeError =
-    changeFailure?.reference === reference ? changeFailure.failure : null;
-  const [pendingReference, setPendingReference] = useState<string | null>(null);
-  const pending = pendingReference === reference;
+  // the next try. The toggle stays mounted when the header moves to another
+  // Ticket, so what is out and what failed are kept for each Ticket, and a
+  // Ticket's own write finishing touches only its own entry.
+  const [pendingReferences, setPendingReferences] = useState<
+    ReadonlySet<string>
+  >(new Set());
+  const [changeFailures, setChangeFailures] = useState<
+    Readonly<Record<string, FailureDescription>>
+  >({});
+  const pending = pendingReferences.has(reference);
+  const changeError = changeFailures[reference] ?? null;
   const error = changeError ?? read.failure;
+  function setPending(target: string, on: boolean) {
+    setPendingReferences((current) => {
+      const next = new Set(current);
+      if (on) next.add(target);
+      else next.delete(target);
+      return next;
+    });
+  }
+  function setChangeFailure(
+    target: string,
+    failure: FailureDescription | null,
+  ) {
+    setChangeFailures((current) => {
+      const others = Object.entries(current).filter(([key]) => key !== target);
+      return Object.fromEntries(
+        failure ? [...others, [target, failure]] : others,
+      );
+    });
+  }
   async function toggle() {
+    const target = reference;
     const next = !following;
-    setPendingReference(reference);
+    setPending(target, true);
     try {
-      await inboxClient.setFollowing(reference, next);
+      await inboxClient.setFollowing(target, next);
     } catch (reason) {
-      setChangeFailure({
-        reference,
-        failure: describeFailure(
+      setChangeFailure(
+        target,
+        describeFailure(
           reason,
-          following ? `unfollow ${reference}` : `follow ${reference}`,
+          following ? `unfollow ${target}` : `follow ${target}`,
         ),
-      });
-      setPendingReference(null);
+      );
+      setPending(target, false);
       return;
     }
-    setChangeFailure(null);
-    setWritten({ reference, value: next, reread: false });
+    setChangeFailure(target, null);
     try {
-      await changed();
+      await changed(undefined, [followingFill(target, next)]);
     } finally {
-      setWritten((current) =>
-        current?.reference === reference
-          ? { ...current, reread: true }
-          : current,
-      );
-      setPendingReference(null);
+      setPending(target, false);
     }
   }
-  const retry = useEffectEvent(() =>
-    changeError ? void toggle() : read.retry(),
-  );
+  // A failed read offers a read again; a failed change offers sending it again.
+  const retry = () => (changeError ? void toggle() : void read.retry());
+  const retryFromLine = useEffectEvent(retry);
   useEffect(() => {
     if (variant !== "strip" || !error) return;
     line.show({
       tone: "error",
       message: `${error.title}. ${error.sentence}`,
-      action: { label: "Retry", run: () => retry() },
+      action: { label: "Retry", run: () => retryFromLine() },
     });
   }, [error, variant, line]);
   const Icon = following ? Eye : EyeOff;
   const failure = error && (
     <FailureCaption
       failure={error}
-      label="Not saved"
-      onRetry={() => void toggle()}
+      label={changeError ? "Not saved" : "Not checked"}
+      onRetry={() => retry()}
     />
   );
   if (variant === "strip")
