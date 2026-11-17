@@ -65,6 +65,7 @@ export function Appear({
   index = 0,
   ...props
 }: AppearProps) {
+  const delay = staggerDelay(index);
   return (
     <m.div
       data-slot="appear"
@@ -80,10 +81,11 @@ export function Appear({
         // Once settled, drop the filter itself: a resting blur(0px) still keeps
         // a compositing layer on every row of a long list.
         transitionEnd: { filter: "none" },
+        // The stagger waits inside each property's own transition: Motion reads
+        // a sibling `delay` for none of them once `default` is present.
         transition: {
-          default: enterTransition(),
-          y: spring("smooth"),
-          delay: staggerDelay(index),
+          default: { ...enterTransition(), delay },
+          y: { ...spring("smooth"), delay },
         },
       }}
       exit={{
