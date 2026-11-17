@@ -2391,6 +2391,34 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
 }
 
 #[test]
+fn a_version_thirty_four_workspace_whose_text_links_a_ticket_migrates_to_the_current_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 34).unwrap();
+    // At version 34 a ticket is known by its number: the references of device codes
+    // arrive at version 56, and the steps between index text that links the ticket.
+    let link = "[x](ticketd://ticket/T-1)";
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO tickets (id, title, status, body) VALUES ('t1', 'Linked', 'Todo', ?1)",
+        [format!("See {link}")],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO activities (id, ticket_id, brief) VALUES ('a1', 't1', ?1)",
+        [format!("Reported {link}, T-1 and T-KQ1")],
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.show_ticket("T-KQ1").unwrap().body,
+        format!("See {link}")
+    );
+}
+
+#[test]
 fn duplicate_preview_explains_why_a_replacement_is_invalid() {
     use ticketd_core::ReplacementIssue;
     let dir = tempfile::tempdir().unwrap();
