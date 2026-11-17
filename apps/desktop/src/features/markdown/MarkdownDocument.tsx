@@ -5,6 +5,7 @@ import {
   createElement,
   useContext,
   useEffect,
+  useMemo,
   useState,
   useRef,
   useLayoutEffect,
@@ -72,6 +73,8 @@ function htmlAsText() {
   return (tree: MdNode) => walk(tree);
 }
 const remarkPlugins = [remarkGfm, references, htmlAsText];
+const urlTransform = (url: string) =>
+  url.startsWith("ticketd:") ? url : defaultUrlTransform(url);
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
@@ -478,21 +481,27 @@ export function MarkdownDocument({
       );
     };
   }
+  // Parsing is the cost (about 70 ms at 50 kB): only a new source parses again.
+  // What a block needs besides its text reaches it through the providers below.
+  const rendered = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        urlTransform={urlTransform}
+        components={components}
+      >
+        {source}
+      </ReactMarkdown>
+    ),
+    [source],
+  );
   return (
     <div className="markdown-document">
       <TicketNavigation.Provider value={{ select, revision }}>
         <MentionTarget.Provider value={mention ?? null}>
           <MarkdownSource.Provider value={source}>
             <AttachmentReplacement.Provider value={replacement}>
-              <ReactMarkdown
-                remarkPlugins={remarkPlugins}
-                urlTransform={(url) =>
-                  url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
-                }
-                components={components}
-              >
-                {source}
-              </ReactMarkdown>
+              {rendered}
             </AttachmentReplacement.Provider>
           </MarkdownSource.Provider>
         </MentionTarget.Provider>

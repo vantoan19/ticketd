@@ -198,7 +198,6 @@ const connected = (view: ReactNode) => (
       refresh: () => Promise.reject(new Error("unused")),
       openSettings: () => {},
       openReview: () => {},
-      setNavigation: () => {},
     }}
   >
     {view}
