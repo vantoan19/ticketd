@@ -189,6 +189,32 @@ fn stopping_and_switching_off_ends_every_active_run_as_needs_attention() {
     );
 }
 
+/// An Automation this build cannot read (a newer ticketd wrote it) keeps its cursor
+/// until a build that reads it arrives, so its events stay after the cursor. A pass
+/// must still see that it can do nothing with them and leave the write lock alone;
+/// otherwise every pass would take it again for as long as that Automation exists.
+#[test]
+#[allow(clippy::unwrap_used)]
+fn the_waiting_events_of_an_automation_this_build_cannot_read_take_no_write_lock() {
+    let (dir, mut workspace) = workspace();
+    let unreadable = triage(&mut workspace);
+    let db = rusqlite::Connection::open(dir.path().join("background.sqlite3")).unwrap();
+    db.execute(
+        "UPDATE automations SET definition = json_set(definition, '$.schema_version', 99) WHERE id = ?1",
+        [&unreadable.id],
+    )
+    .unwrap();
+    drop(db);
+    let ticket = workspace.create_ticket("Fix login").unwrap();
+    workspace.add_tag(&ticket.reference, TAG).unwrap();
+    // The event waits for a build that can read the Automation.
+    assert_eq!(workspace.queue_automation_runs().unwrap(), 0);
+
+    let holder = rusqlite::Connection::open(dir.path().join("background.sqlite3")).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    assert_eq!(workspace.queue_automation_runs().unwrap(), 0);
+}
+
 /// A pass of the runner that finds nothing to do must not take the write lock, which
 /// every other write of the Workspace waits for: passes come every few seconds. Another
 /// connection holds the write lock; each step of the pass still answers, having read

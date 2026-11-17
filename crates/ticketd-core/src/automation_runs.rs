@@ -459,14 +459,30 @@ impl Workspace {
     /// that already has an active run of the Automation gets no second one. Returns
     /// how many runs were created.
     pub fn queue_automation_runs(&mut self) -> Result<usize, Error> {
-        // The runner asks every few seconds: with no event past any cursor there is
-        // nothing to write, and the write lock stays free for everyone else.
-        let events_waiting: bool = self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM automation_device_state s WHERE EXISTS (SELECT 1 FROM workspace_events e WHERE e.id > s.cursor))",
-            [],
-            |row| row.get(0),
-        )?;
-        if !events_waiting {
+        // The runner asks every few seconds: with no event past the cursor of an
+        // Automation this build can read there is nothing to write, and the write lock
+        // stays free for everyone else. One a newer ticketd wrote keeps its cursor (see
+        // below), so its waiting events would otherwise take the lock on every pass.
+        let waiting: Vec<String> = {
+            let mut statement = self.connection.prepare(
+                "SELECT s.automation_id FROM automation_device_state s WHERE EXISTS (SELECT 1 FROM workspace_events e WHERE e.id > s.cursor)",
+            )?;
+            statement
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        let mut readable_waiting = false;
+        for automation_id in &waiting {
+            match crate::automations::one(&self.connection, automation_id) {
+                Ok(_) => {
+                    readable_waiting = true;
+                    break;
+                }
+                Err(Error::InvalidAutomation(_)) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        if !readable_waiting {
             return Ok(0);
         }
         let transaction = self.connection.savepoint()?;
