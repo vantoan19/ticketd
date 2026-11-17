@@ -67,6 +67,15 @@ fn the_legacy_mention_tables_appear_at_the_versions_that_first_wrote_them() {
 }
 
 #[test]
+fn the_objects_of_a_version_are_the_same_every_time_they_are_asked_for() {
+    for version in [1, 41, FORMAT_VERSION] {
+        let built = Objects::read(&scratch(version).unwrap()).unwrap();
+        assert_eq!(objects_at(version).unwrap(), built, "first ask, {version}");
+        assert_eq!(objects_at(version).unwrap(), built, "kept, {version}");
+    }
+}
+
+#[test]
 fn migrating_an_existing_workspace_continues_the_ladder() {
     let mut connection = Connection::open_in_memory().unwrap();
     document_links::register_heading_function(&connection).unwrap();

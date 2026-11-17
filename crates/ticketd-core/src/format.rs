@@ -13,7 +13,8 @@
 //! the code that shipped it stops validating. `format-ledger.txt` and the fixtures in
 //! `tests/fixtures/format` exist to make such an edit show up in review.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
@@ -312,8 +313,27 @@ impl Objects {
 }
 
 /// The schema objects a Workspace at `version` must have, from the ladder.
+///
+/// The ladder is fixed for the life of the process, so each version is built once and kept:
+/// every backup check asks, and building one takes dozens of migration steps.
 pub(crate) fn objects_at(version: i64) -> Result<Objects, Error> {
-    Objects::read(&scratch(version)?)
+    static BUILT: OnceLock<Mutex<HashMap<i64, Objects>>> = OnceLock::new();
+    let built = BUILT.get_or_init(Default::default);
+    // A cache entry is written whole, so a panic elsewhere cannot leave one half-built.
+    if let Some(objects) = built
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&version)
+    {
+        return Ok(objects.clone());
+    }
+    // Built outside the lock: two checks that race both build it and store the same value.
+    let objects = Objects::read(&scratch(version)?)?;
+    built
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(version, objects.clone());
+    Ok(objects)
 }
 
 const TICKETS: &str = "CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL);";
