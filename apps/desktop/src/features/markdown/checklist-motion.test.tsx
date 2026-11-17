@@ -61,3 +61,31 @@ test("only the done state carries the transitions, so unchecking is at once", ()
   expect(done).toContain("background-size: 100% 1px");
   expect(done).toContain("background-size var(--dur-enter)");
 });
+
+// The editor's box is a native checkbox drawn like the read-only one, so a
+// person who ticks it sees the same fill and pop (appearance: none plus a tick
+// on ::after). The motion is a transition on the checked state alone: an item
+// that is already checked has nothing to run on mount, and unchecking is at once.
+const box = '.rich-document li > input[type="checkbox"]';
+
+test("the editor's box is drawn, not native", () => {
+  expect(rule(`${box} {`)).toContain("appearance: none");
+  expect(rule(`${box}::after {`)).toContain("content:");
+});
+
+test("only the checked editor box carries the fill and pop transitions", () => {
+  expect(rule(`${box}:checked {`)).toContain("transition:");
+  expect(rule(`${box}:checked::after {`)).toContain("var(--spring-glide)");
+  expect(rule(`${box} {`)).not.toContain("transition");
+  expect(rule(`${box}::after {`)).not.toContain("transition");
+});
+
+test("the editor's box does not animate on mount", () => {
+  for (const selector of [
+    `${box} {`,
+    `${box}:checked {`,
+    `${box}::after {`,
+    `${box}:checked::after {`,
+  ])
+    expect(rule(selector)).not.toContain("animation");
+});

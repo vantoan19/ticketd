@@ -80,7 +80,7 @@ export function TicketPage({
 }) {
   // A known saved list copy (`opening`) reserves geometry until the fresh
   // read of the record settles.
-  const { record: ticket, opening, changed } = useOpenTicket();
+  const { record: ticket, opening, fresh, changed } = useOpenTicket();
   // Readers not yet on the Open Ticket (the source's conversation, rendered
   // Markdown, the editor's conflict check) follow the Workspace's change.
   const revision = useWorkspaceChange();
@@ -339,6 +339,7 @@ export function TicketPage({
       inert={opening || leaving}
       aria-busy={opening}
       data-swap={swap || undefined}
+      data-fresh={fresh || undefined}
       data-leaving={leaving || undefined}
       data-trashed={ticket.trashed || undefined}
     >

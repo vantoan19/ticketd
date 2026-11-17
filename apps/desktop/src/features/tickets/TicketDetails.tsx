@@ -109,7 +109,9 @@ export function TicketDetails({
     onReady: onMentionReady,
     onEnd: onClearMention,
   });
-  const swap = usePageSwap(selected);
+  // A ticket closed a moment ago is still held on screen: it is not one to
+  // move from, so reopening inside the close is not a swap.
+  const swap = usePageSwap(leaving ? null : selected);
   const pages =
     selected && !opened.includes(selected) ? [...opened, selected] : opened;
   return (

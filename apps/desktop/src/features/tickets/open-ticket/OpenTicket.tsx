@@ -38,6 +38,23 @@ export function OpenTicket({
   );
 }
 
+/**
+ * Whether the page is showing a record that arrived after its skeleton, as
+ * seen by a person: a hidden page never waited and is not fresh.
+ */
+function useAfterSkeleton(loaded: boolean, hidden: boolean): boolean {
+  const [phase, setPhase] = useState<"idle" | "waiting" | "after">("idle");
+  const next = hidden
+    ? "idle"
+    : !loaded
+      ? "waiting"
+      : phase === "waiting"
+        ? "after"
+        : phase;
+  if (next !== phase) setPhase(next);
+  return next === "after";
+}
+
 function Gate({
   reference,
   seed,
@@ -60,6 +77,7 @@ function Gate({
   const gone = state.value === null;
   const record = gone ? undefined : (state.value ?? kept);
   const opening = state.value === undefined;
+  const fresh = useAfterSkeleton(record !== undefined, hidden);
   const { failure, retry } = state;
   // The gate's read of the record is the only one: callers of
   // `useOpenTicket().current` are served from it, so the gate tracks `current`
@@ -69,9 +87,18 @@ function Gate({
   const open = useMemo<OpenTicketScope | null>(
     () =>
       record
-        ? { reference, record, opening, failure, retry, changed, currency }
+        ? {
+            reference,
+            record,
+            opening,
+            fresh,
+            failure,
+            retry,
+            changed,
+            currency,
+          }
         : null,
-    [reference, record, opening, failure, retry, changed, currency],
+    [reference, record, opening, fresh, failure, retry, changed, currency],
   );
   const notFound = useMemo(
     () =>

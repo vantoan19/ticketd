@@ -195,6 +195,41 @@ test("J and K keep the old document one exit, then show the next with a swap arr
   expect(document.querySelector("[data-swap]")).toBeNull();
 });
 
+test("reopening inside the close does not swap: the held document is not a ticket to move from", async () => {
+  await setUp();
+  open("T-KQ1");
+  await screen.findByText("Title of T-KQ1");
+  open(null);
+  expect(group().getAttribute("data-pane-leaving")).toBe("detail");
+  open("T-KQ2");
+  // Closed to open plays the pane's glide alone: no old document is kept for
+  // an exit and the new one waits for nothing.
+  expect(group().getAttribute("data-pane-arrival")).toBe("open");
+  expect(document.querySelector("[data-leaving]")).toBeNull();
+  await screen.findByText("Title of T-KQ2");
+  expect(document.querySelector("[data-swap]")).toBeNull();
+});
+
+test("a ticket that loads after its skeleton is marked to fade up, and a cached one is not", async () => {
+  await setUp();
+  open("T-KQ1");
+  const loaded = await screen.findByText("Title of T-KQ1");
+  expect(loaded.closest(".detail-content")?.hasAttribute("data-fresh")).toBe(
+    true,
+  );
+  // Back to a page that stays open: no skeleton, so nothing fades up again.
+  open("T-KQ2");
+  await screen.findByText("Title of T-KQ2");
+  open("T-KQ1");
+  await waitFor(() =>
+    expect(document.querySelector("[data-leaving]")).toBeNull(),
+  );
+  const again = screen.getByText("Title of T-KQ1");
+  expect(again.closest(".detail-content")?.hasAttribute("data-fresh")).toBe(
+    false,
+  );
+});
+
 test.each([
   ["reduced motion", reducedTokens],
   ["a held key", instantTokens],
