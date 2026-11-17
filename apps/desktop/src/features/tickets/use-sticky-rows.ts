@@ -3,16 +3,26 @@ import type { Ticket } from "@/lib/api/client";
 
 type Placement = { status: string; index: number; ticket: Ticket };
 
+const time = (ticket: Ticket) => {
+  const at = ticket.updated_at ? Date.parse(ticket.updated_at) : NaN;
+  return Number.isNaN(at) ? 0 : at;
+};
+
 /**
  * Keep the ledger's reading position while the saved properties update. A row
- * the list dropped shows the newest copy of its Ticket known: the selected
- * Ticket's `record` (its read, which refreshes on every change) when it is no
- * older than the list's copy, otherwise the list's copy.
+ * the list dropped shows the newest copy of its Ticket known (`known`, which
+ * peeks at the Ticket reads: the open Ticket's page, or the Ticket a write
+ * returned), when it is no older than the list's copy (compared as times), and
+ * otherwise the list's copy. The summary of its latest update, which only the
+ * list carries, stays while it still names the Ticket's latest update.
+ *
+ * `watching` is the open Ticket when its row is held and dropped: the one
+ * reference whose changes the list has to follow to keep that row current.
  */
 export function useStickyRows(
   tickets: Ticket[],
   selected: string | null,
-  record: Ticket | undefined,
+  known: (reference: string) => Ticket | null | undefined,
   bulkSelection: string[],
   scopeKey: string,
 ) {
@@ -23,11 +33,14 @@ export function useStickyRows(
   const [held, setHeld] = useState(new Map<string, Placement>());
   const [arrivals, setArrivals] = useState(new Set<string>());
   const [previousSelected, setPreviousSelected] = useState(selected);
-  const newest = (listed: Ticket) =>
-    record?.reference === listed.reference &&
-    (record.updated_at ?? "") >= (listed.updated_at ?? "")
-      ? record
-      : listed;
+  const newest = (listed: Ticket): Ticket => {
+    const copy = known(listed.reference);
+    if (!copy || time(copy) < time(listed)) return listed;
+    return listed.progress_summary !== undefined &&
+      listed.progress_summary?.activity_id === copy.latest_update?.activity_id
+      ? { ...copy, progress_summary: listed.progress_summary }
+      : copy;
+  };
   const wake = useRef<() => void>(() => {});
   const hovered = useRef<string | null>(null);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
@@ -202,8 +215,18 @@ export function useStickyRows(
       index < 0 ? newest(placement.ticket) : displayed.splice(index, 1)[0]!;
     displayed.splice(Math.min(placement.index, displayed.length), 0, ticket);
   }
+  const watching =
+    selected !== null &&
+    [...held].some(
+      ([id, placement]) =>
+        placement.ticket.reference === selected &&
+        !tickets.some((ticket) => ticket.id === id),
+    )
+      ? selected
+      : null;
   return {
     tickets: displayed,
+    watching,
     status: (ticket: Ticket) => held.get(ticket.id)?.status ?? ticket.status,
     arrivals,
     onArrivalEnd: (id: string) =>

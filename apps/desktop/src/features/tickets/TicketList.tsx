@@ -20,6 +20,7 @@ import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
 import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
+import { useKnownTicket, useTicket } from "./open-ticket";
 import { useStickyRows } from "./use-sticky-rows";
 import { groupTickets } from "./ticket-groups";
 import {
@@ -55,16 +56,10 @@ export function TicketList({
   simple = true,
   empty,
   scopeKey = "",
-  selectedRecord,
 }: {
   tickets: Ticket[];
   empty?: ReactNode;
   scopeKey?: string;
-  /**
-   * The newest copy of the selected Ticket known (its read), so a row held in
-   * place after the list dropped it shows what the Ticket is now.
-   */
-  selectedRecord?: Ticket | undefined;
   selected: string | null;
   onOpen: (reference: string) => void;
   bulkSelection: string[];
@@ -110,13 +105,18 @@ export function TicketList({
         ticketChats.set(reference, chat);
     }
   }
+  const known = useKnownTicket();
   const sticky = useStickyRows(
     tickets,
     selected,
-    selectedRecord,
+    known,
     bulkSelection,
     scopeKey,
   );
+  // A held row shows the newest copy known of its Ticket. Only the open
+  // Ticket's row that the list dropped follows its read; no other row, and the
+  // list otherwise, re-renders for a Ticket's read.
+  useTicket(sticky.watching);
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
