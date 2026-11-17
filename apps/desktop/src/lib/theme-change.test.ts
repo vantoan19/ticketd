@@ -72,7 +72,9 @@ test.each([
 test("the fade is plain CSS transitions, not view transitions", () => {
   const css = readFileSync(join(__dirname, "..", "styles.css"), "utf8");
   expect(css).not.toContain("view-transition");
-  const rule = css.match(/:root\[data-theme-fading\]\s*\*[^{]*\{([^}]*)\}/)?.[1];
+  const rule = css.match(
+    /:root\[data-theme-fading\]\s*\*[^{]*\{([^}]*)\}/,
+  )?.[1];
   expect(rule).toContain("var(--dur-theme)");
   expect(rule).toContain("var(--ease-in-out)");
   for (const property of [
