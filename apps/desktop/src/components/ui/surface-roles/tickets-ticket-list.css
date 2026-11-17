@@ -47,6 +47,27 @@
     opacity: 0;
   }
 }
+/* Selecting: the checkboxes fade in with the first selection and out with the
+   last; each check pops in on the glide spring. */
+@media (hover: hover) and (pointer: fine) {
+  .ticket-select input:not(:checked) {
+    transition: opacity var(--dur-exit) var(--ease-in);
+  }
+  .ticket-rows li:hover .ticket-select input,
+  .ticket-rows li:focus-within .ticket-select input,
+  .ticket-rows:has(input:checked) .ticket-select input {
+    transition: opacity var(--dur-3) var(--ease-out);
+  }
+}
+.ticket-rows input[type="checkbox"]:checked {
+  animation: ticket-check-in var(--spring-glide-t) var(--spring-glide) both;
+}
+@keyframes ticket-check-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
 .bulk-bar {
   white-space: normal;
 }

@@ -8,6 +8,8 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
+import { m } from "motion/react";
+import { listMotion } from "./list-motion";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
 import { useInboxAttention } from "./use-inbox-attention";
@@ -188,6 +190,12 @@ export function TicketBoard({
         )
         ?.focus();
   }, [lengthKey, workspace.board.columns, boardRef]);
+  // Choosing Board: the columns fade up left to right.
+  const motion = listMotion();
+  const columnEnter = (position: number) => ({
+    initial: motion.initial(false),
+    animate: motion.animate(position, false),
+  });
   const scope = {
     showPlan: !workspace.navigation.plan,
     showProject: workspace.navigation.project === "all",
@@ -269,7 +277,7 @@ export function TicketBoard({
           target?.focus();
         }}
       >
-        {workspace.board.columns.map((column) => {
+        {workspace.board.columns.map((column, position) => {
           const { status, tickets: items, total, loading, error } = column;
           const allowed = drag
             ? ticketStatusChoices(drag.ticket).includes(status) &&
@@ -285,7 +293,8 @@ export function TicketBoard({
           if (folded)
             return (
               <Card variant="well" asChild key={status}>
-                <section
+                <m.section
+                  {...columnEnter(position)}
                   className="board-column"
                   data-folded=""
                   {...columnProps}
@@ -325,7 +334,7 @@ export function TicketBoard({
                         <span>Saving…</span>
                       </Card>
                     ))}
-                </section>
+                </m.section>
               </Card>
             );
           // A move's old place: a dashed slot until the core confirms it.
@@ -375,7 +384,11 @@ export function TicketBoard({
             );
           return (
             <Card variant="well" asChild key={status}>
-              <section className="board-column" {...columnProps}>
+              <m.section
+                className="board-column"
+                {...columnEnter(position)}
+                {...columnProps}
+              >
                 <header className="board-column-header" tabIndex={-1}>
                   <StatusIcon status={status} />
                   <h2>{status}</h2>
@@ -470,7 +483,7 @@ export function TicketBoard({
                     />
                   )}
                 </div>
-              </section>
+              </m.section>
             </Card>
           );
         })}
