@@ -204,14 +204,20 @@ export function InboxTriageCard() {
           before ??= (await client.showTicket(reference)).status;
           return client.changeTicket(reference, { status: "Done" }, id);
         },
-        async () => {
-          const restored = await client.changeTicket(
+        // The Ticket the Undo wrote is reported at once; the Inbox's own record
+        // that this review needs you again follows, and fails on its own.
+        () =>
+          client.changeTicket(
             reference,
             { status: before ?? "In review" },
             undoId,
-          );
-          await attention?.restoreReview?.(entry);
-          return restored;
+          ),
+        undefined,
+        {
+          action: `show ${reference} under Needs you again`,
+          run: async () => {
+            await attention?.restoreReview?.(entry);
+          },
         },
       );
     } else {

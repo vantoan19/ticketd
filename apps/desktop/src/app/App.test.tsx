@@ -8543,6 +8543,74 @@ test("Inbox Retry preserves its operation identity and Undo restores Needs you a
   expect(screen.getByRole("button", { name: /T-KQ2.*Second/ })).toBeTruthy();
 });
 
+test("Undo of a review with no agent reports the restored status at once and never says it failed", async () => {
+  vi.useFakeTimers();
+  let first = bulkTicket(1, { status: "In review" });
+  const second = bulkTicket(2);
+  let transition = {
+    kind: "status",
+    from_value: "In progress",
+    to_value: "In review",
+    timestamp: "2020-01-01T00:00:00Z",
+    // A status change from the CLI without `--agent`.
+    editing_agent: null as string | null,
+  };
+  const entries = [
+    { ...transition, id: 401, reference: "T-KQ1", title: "First", read: false },
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args?: Record<string, unknown>) => {
+      if (command === "find_tickets") return [first, second];
+      if (command === "show_ticket")
+        return args?.reference === "T-KQ1" ? first : second;
+      if (command === "ticket_history")
+        return args?.reference === "T-KQ1" ? [transition] : [];
+      if (command === "inbox") return entries;
+      if (command === "set_inbox_read") return;
+      if (command === "change_ticket") {
+        const status = (args?.patch as { status: string }).status;
+        transition = {
+          kind: "status",
+          from_value: first.status,
+          to_value: status,
+          timestamp: "2026-11-16T00:00:00Z",
+          editing_agent: null,
+        };
+        first = { ...first, status };
+        return first;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  render(<App />);
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  await flush();
+  const row = screen.getByRole("button", { name: /T-KQ1.*First/ });
+  fireEvent.click(row);
+  await flush();
+  const moveToDone = () =>
+    within(screen.getByRole("region", { name: "Inbox triage" })).getByRole(
+      "button",
+      { name: /Move to Done/ },
+    ) as HTMLButtonElement;
+  fireEvent.keyDown(row, { key: "Enter", ctrlKey: true });
+  await flush();
+  expect(first.status).toBe("Done");
+  expect(moveToDone().disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(first.status).toBe("In review");
+  // The card shows the restored status without waiting for the next poll.
+  expect(moveToDone().disabled).toBe(false);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
 test("Inbox unlinked approvals keep Chat review available and mark all read sends only real Inbox IDs", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient, chatState } =
