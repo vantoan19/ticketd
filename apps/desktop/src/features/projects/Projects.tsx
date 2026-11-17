@@ -24,6 +24,7 @@ import { FailureAlert } from "@/components/ui/failure-alert";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { Appear } from "@/components/ui/motion";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
 import { PathText } from "@/components/ui/path-text";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,6 +44,7 @@ import { plural } from "@/lib/format";
 import { nameFromFolder } from "@/lib/paths";
 import { allowRemoval } from "@/lib/removal-guard";
 import { fileManagerName } from "@/lib/platform";
+import { useReopened } from "@/lib/use-reopened";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import "./projects.css";
 
@@ -205,6 +207,9 @@ export function Projects({
 }) {
   const statusLine = useStatusLine();
   const { copy } = useCopy();
+  // The page stays mounted while another is shown: its entrance plays on return.
+  const page = useRef<HTMLElement>(null);
+  const reopened = useReopened(page);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Drafts survive closing a dialog; a successful save discards them.
@@ -374,18 +379,20 @@ export function Projects({
   const blocked = pending ? "Saving…" : null;
 
   return (
-    <ManagementPage aria-labelledby="projects-heading">
-      <PageHeader
-        title="Projects"
-        titleId="projects-heading"
-        {...(projects.length > 0 && {
-          count: <Count>{projects.length}</Count>,
-          actions: newProject,
-        })}
-        {...(projects.length > 0 && {
-          lede: "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
-        })}
-      />
+    <ManagementPage ref={page} aria-labelledby="projects-heading">
+      <Appear key={reopened}>
+        <PageHeader
+          title="Projects"
+          titleId="projects-heading"
+          {...(projects.length > 0 && {
+            count: <Count>{projects.length}</Count>,
+            actions: newProject,
+          })}
+          {...(projects.length > 0 && {
+            lede: "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
+          })}
+        />
+      </Appear>
       {loading && projects.length === 0 ? (
         <div
           className="project-skeleton"
@@ -405,7 +412,7 @@ export function Projects({
         />
       ) : (
         <ul className="project-list" aria-label="Projects">
-          {projects.map((item) => {
+          {projects.map((item, index) => {
             const isOpen = expanded[item.id] ?? false;
             const checkouts = `project-${item.id}-checkouts`;
             return (
@@ -414,105 +421,111 @@ export function Projects({
                 className="project-row"
                 data-open={isOpen || undefined}
               >
-                <div className="project-row-main">
-                  <h2 className="project-row-heading">
-                    <button
-                      type="button"
-                      className="project-row-toggle"
-                      aria-expanded={isOpen}
-                      aria-controls={checkouts}
-                      onClick={() =>
-                        setExpanded((old) => ({ ...old, [item.id]: !isOpen }))
-                      }
-                    >
-                      <ChevronRight
-                        aria-hidden="true"
-                        className="project-row-chevron"
-                      />
-                      <ProjectIcon
-                        project={{ id: item.id, title: item.name }}
-                        size={20}
-                      />
-                      <span className="project-row-text">
-                        <span className="project-row-name">{item.name}</span>
-                        <span className="project-row-meta">
-                          {projectMeta(item, counts[item.id])}
-                        </span>
-                      </span>
-                    </button>
-                  </h2>
-                  <span className="project-row-actions">
-                    {onOpenTickets && (
-                      <Button
+                <Appear key={reopened} index={index + 1}>
+                  <div className="project-row-main">
+                    <h2 className="project-row-heading">
+                      <button
                         type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Open tickets of ${item.name}`}
-                        onClick={() => onOpenTickets(item)}
+                        className="project-row-toggle"
+                        aria-expanded={isOpen}
+                        aria-controls={checkouts}
+                        onClick={() =>
+                          setExpanded((old) => ({ ...old, [item.id]: !isOpen }))
+                        }
                       >
-                        Open tickets
-                      </Button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <IconButton label={`Actions for ${item.name}`}>
-                          <MoreHorizontal />
-                        </IconButton>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() => open({ kind: "rename", id: item.id })}
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="project-row-chevron"
+                        />
+                        <ProjectIcon
+                          project={{ id: item.id, title: item.name }}
+                          size={20}
+                        />
+                        <span className="project-row-text">
+                          <span className="project-row-name">{item.name}</span>
+                          <span className="project-row-meta">
+                            {projectMeta(item, counts[item.id])}
+                          </span>
+                        </span>
+                      </button>
+                    </h2>
+                    <span className="project-row-actions">
+                      {onOpenTickets && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Open tickets of ${item.name}`}
+                          onClick={() => onOpenTickets(item)}
                         >
-                          <Pencil /> Rename…
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => void copyId(item)}>
-                          <Copy /> Copy project ID
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
+                          Open tickets
+                        </Button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <IconButton label={`Actions for ${item.name}`}>
+                            <MoreHorizontal />
+                          </IconButton>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              open({ kind: "rename", id: item.id })
+                            }
+                          >
+                            <Pencil /> Rename…
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void copyId(item)}>
+                            <Copy /> Copy project ID
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              open({ kind: "checkout", id: item.id })
+                            }
+                          >
+                            <Plus /> Register checkout…
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </span>
+                  </div>
+                  <div
+                    id={checkouts}
+                    className="project-checkouts"
+                    hidden={!isOpen}
+                  >
+                    {item.paths.length === 0 ? (
+                      <p className="project-checkouts-empty">
+                        No checkouts. Register one so the command line finds{" "}
+                        {item.name} from its folder.{" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="inline"
+                          onClick={() =>
                             open({ kind: "checkout", id: item.id })
                           }
                         >
-                          <Plus /> Register checkout…
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </span>
-                </div>
-                <div
-                  id={checkouts}
-                  className="project-checkouts"
-                  hidden={!isOpen}
-                >
-                  {item.paths.length === 0 ? (
-                    <p className="project-checkouts-empty">
-                      No checkouts. Register one so the command line finds{" "}
-                      {item.name} from its folder.{" "}
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="inline"
-                        onClick={() => open({ kind: "checkout", id: item.id })}
+                          Register checkout…
+                        </Button>
+                      </p>
+                    ) : (
+                      <ul
+                        className="checkout-list"
+                        aria-label={`Checkouts of ${item.name}`}
                       >
-                        Register checkout…
-                      </Button>
-                    </p>
-                  ) : (
-                    <ul
-                      className="checkout-list"
-                      aria-label={`Checkouts of ${item.name}`}
-                    >
-                      {item.paths.map((path) => (
-                        <CheckoutRow
-                          key={path}
-                          path={path}
-                          first={path === item.path}
-                          onRemove={() => void removeCheckout(item, path)}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                        {item.paths.map((path) => (
+                          <CheckoutRow
+                            key={path}
+                            path={path}
+                            first={path === item.path}
+                            onRemove={() => void removeCheckout(item, path)}
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </Appear>
               </li>
             );
           })}

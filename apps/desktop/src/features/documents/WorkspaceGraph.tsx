@@ -127,6 +127,8 @@ export function WorkspaceGraph({
   const [pagesLoaded, setPagesLoaded] = useState(1);
   const [graph, setGraph] = useState<Graph | null>(null);
   const [centerOn, setCenterOn] = useState<string | null>(null);
+  // The ticket or island Center here brought into focus; Fit shows everything again.
+  const [focusId, setFocusId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [mapChoice, setMapChoice] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -187,6 +189,7 @@ export function WorkspaceGraph({
         if (active) {
           setGraph(value);
           setFit(true);
+          setFocusId(null);
           setError(null);
         }
       })
@@ -335,6 +338,7 @@ export function WorkspaceGraph({
         y: top,
         width: 760,
         height,
+        memberIds: members.map((node) => node.id),
       });
       points[plan.id] = { x: 40, y: top + 12 };
       members.forEach((node, index) => {
@@ -651,6 +655,7 @@ export function WorkspaceGraph({
             onCenter={() => {
               setMapChoice(true);
               setCenterOn(preview.id);
+              setFocusId(preview.id);
             }}
           />
         )
@@ -919,6 +924,8 @@ export function WorkspaceGraph({
               }
               fit={fit}
               centerOn={centerOn}
+              focusId={focusId}
+              onShowAll={() => setFocusId(null)}
               onFitted={() => {
                 setFit(false);
                 setCenterOn(null);

@@ -12,3 +12,17 @@
   min-width: 0;
   overflow: hidden;
 }
+
+/* On the Plans page each bar fills on the travel spring once its card has
+   arrived (--dur-enter is the card's entrance). The tokens are zero under
+   reduced motion and a held key, and the stylesheet drops animations. */
+.plan-index-list .plan-split-bar > span {
+  transform-origin: 0 50%;
+  animation: plan-bar-fill var(--spring-travel-t) var(--spring-travel)
+    var(--dur-enter) backwards;
+}
+@keyframes plan-bar-fill {
+  from {
+    transform: scaleX(0);
+  }
+}
