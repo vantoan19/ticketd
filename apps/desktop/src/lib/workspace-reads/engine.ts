@@ -1,6 +1,7 @@
 import {
   QueryClient,
   notifyManager,
+  type Query,
   type QueryKey,
 } from "@tanstack/react-query";
 import type { ChangeSignal } from "./change-signal";
@@ -25,6 +26,15 @@ export type Reads = {
   wrote(returned?: Returned): Promise<void>;
   /** The whole Workspace was replaced; see `useReplaced`. */
   replaced(): Promise<void>;
+  /**
+   * Reads one more page of a paged read; see `usePagedRead`. `retrying` says the
+   * last "Show more" failed, so the pages before it are as they were read.
+   */
+  showMore(queryKey: QueryKey, retrying?: boolean): void;
+  /** Reads a page asked for earlier, if the read is current and visible. */
+  resumeMore(queryKey: QueryKey): void;
+  /** Forgets a page asked for earlier (its view is gone). */
+  dropMore(queryKey: QueryKey): void;
   /** Fills reads from returned Tickets as if they had just been read, for tests. */
   prime(returned: Returned): void;
 };
@@ -46,44 +56,94 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
     },
   });
 
+  // "Show more" pages the person asked for that must be read once the pages
+  // before them are current. They are kept by query hash, never as a fetch in
+  // flight: a fetch started before a change is dropped, and one started after
+  // it is not the re-read of the pages it comes after.
+  const wanted = new Set<string>();
+
+  type Pages = { pages: unknown[]; pageParams: unknown[] };
+  type Paged = {
+    getNextPageParam?: (
+      last: unknown,
+      pages: unknown[],
+      lastParam: unknown,
+      params: unknown[],
+    ) => unknown;
+  };
+  const hasNextPage = (query: Query) => {
+    const data = query.state.data as Pages | undefined;
+    if (!data || data.pages.length === 0) return false;
+    const next = (query.options as Paged).getNextPageParam?.(
+      data.pages.at(-1),
+      data.pages,
+      data.pageParams.at(-1),
+      data.pageParams,
+    );
+    return next !== undefined && next !== null;
+  };
+  const isLoadingMore = (query: Query) =>
+    query.state.fetchStatus === "fetching" &&
+    query.state.fetchMeta?.fetchMore?.direction === "forward";
+  const loadNextPage = (query: Query) =>
+    void query
+      .fetch(undefined, { meta: { fetchMore: { direction: "forward" } } })
+      .catch(() => {});
+
+  // Reads a wanted page once its query is idle, visible and current.
+  const readWanted = (query: Query) => {
+    if (!wanted.has(query.queryHash)) return;
+    if (
+      query.state.fetchStatus !== "idle" ||
+      query.state.isInvalidated ||
+      !query.isActive()
+    )
+      return;
+    wanted.delete(query.queryHash);
+    if (hasNextPage(query)) loadNextPage(query);
+  };
+  client.getQueryCache().subscribe((event) => {
+    if (event.type !== "updated") return;
+    const { query } = event;
+    if (event.action.type === "error") {
+      // The pages before it could not be read, so the page cannot follow them.
+      wanted.delete(query.queryHash);
+    } else if (event.action.type === "success") {
+      queueMicrotask(() => readWanted(query));
+    }
+  });
+
+  // A "Show more" call in flight is dropped and remembered as wanted, because
+  // the pages it was to follow are about to be re-read.
+  const takeShowingMore = () => {
+    for (const query of client.getQueryCache().findAll()) {
+      if (!isLoadingMore(query)) continue;
+      wanted.add(query.queryHash);
+      void client.cancelQueries(
+        { queryKey: query.queryKey, exact: true },
+        { revert: true, silent: true },
+      );
+    }
+  };
+
   // A call cannot be aborted, but its answer can be dropped: cancelling reverts
   // the entry to what it held before the call and ignores the late answer.
-  // It returns the visible "Show more" calls it dropped, so the page the person
-  // asked for is read again after the change (see `makeStale`).
   const supersede = () => {
-    const showingMore = client
-      .getQueryCache()
-      .findAll({
-        predicate: (query) =>
-          query.state.fetchStatus === "fetching" &&
-          query.isActive() &&
-          query.state.fetchMeta?.fetchMore?.direction === "forward",
-      })
-      .map((query) => query.queryKey);
+    takeShowingMore();
     void client.cancelQueries(
       { predicate: (query) => query.state.fetchStatus === "fetching" },
       { revert: true, silent: true },
     );
-    return showingMore;
   };
 
-  // Marks everything stale and re-reads what is visible (active). Reads that
-  // started after the last `supersede` are reused rather than restarted. A page
-  // that was being added is read once the loaded ones are back, so it comes from
-  // after the change, and an answer to the old call is never shown.
-  const makeStale = async (showingMore: readonly QueryKey[] = []) => {
+  // Marks everything stale and re-reads what is visible (active). A re-read that
+  // started after the last `supersede` is reused rather than restarted. A page
+  // that was being added is read once the loaded ones are back (`readWanted`).
+  const makeStale = async () => {
+    takeShowingMore();
     await client.invalidateQueries(
       { refetchType: "active" },
       { cancelRefetch: false },
-    );
-    await Promise.all(
-      showingMore.map((queryKey) =>
-        client
-          .getQueryCache()
-          .find({ queryKey })
-          ?.fetch(undefined, { meta: { fetchMore: { direction: "forward" } } })
-          .catch(() => {}),
-      ),
     );
   };
 
@@ -95,18 +155,43 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
       }
     },
     changed() {
-      void makeStale(supersede()).catch(() => {});
+      supersede();
+      void makeStale().catch(() => {});
       moved();
+    },
+    showMore(queryKey, retrying = false) {
+      const query = client.getQueryCache().find({ queryKey, exact: true });
+      if (!query || !hasNextPage(query) || isLoadingMore(query)) return;
+      if (query.state.fetchStatus === "fetching") {
+        // A re-read is under way: the page follows it.
+        wanted.add(query.queryHash);
+      } else if (query.state.isInvalidated && !retrying) {
+        // The pages shown may be older than the last change (a re-read failed
+        // or is waiting for the view to be shown; a failure also counts):
+        // re-read them, then the page.
+        wanted.add(query.queryHash);
+        void query.fetch().catch(() => {});
+      } else {
+        loadNextPage(query);
+      }
+    },
+    resumeMore(queryKey) {
+      const query = client.getQueryCache().find({ queryKey, exact: true });
+      if (query) readWanted(query);
+    },
+    dropMore(queryKey) {
+      const query = client.getQueryCache().find({ queryKey, exact: true });
+      if (query) wanted.delete(query.queryHash);
     },
     async wrote(returned) {
       // Reads sent before the write may not include it.
-      const showingMore = supersede();
+      supersede();
       for (const seed of seedsFor(returned)) {
         client.setQueryData(seed.key, seed.value);
       }
       // The poll must see the token this write produced as already seen.
       await signal.catchUp().catch(() => {});
-      const settled = makeStale(showingMore);
+      const settled = makeStale();
       moved();
       await settled.catch(() => {});
     },

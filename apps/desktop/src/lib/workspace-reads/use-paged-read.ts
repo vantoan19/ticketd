@@ -1,9 +1,10 @@
-import { useCallback, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { readKey, skip, words, type PagedReadSpec, type Skip } from "./catalog";
 import {
   statusOf,
   useFailure,
+  useLatest,
   withCurrent,
   type ReadState,
 } from "./read-state";
@@ -58,13 +59,30 @@ export function usePagedRead<A, V, P>(
     () => (data === undefined ? undefined : spec.join(data.pages)),
     [data, spec],
   );
+  // The same key as a value that changes only when the read's identity does.
+  const identity = JSON.stringify(readKey(spec, args));
+  const queryKey = useMemo(() => JSON.parse(identity) as unknown[], [identity]);
   const refetch = query.refetch;
-  const retry = useCallback(() => void refetch(), [refetch]);
-  const fetchNextPage = query.fetchNextPage;
   const loadingMore = query.isFetchingNextPage;
-  const showMore = useCallback(() => {
-    if (!loadingMore) void fetchNextPage({ cancelRefetch: false });
-  }, [fetchNextPage, loadingMore]);
+  // The buttons may be from an earlier render, so they act on the latest one.
+  // The engine reads the page when the pages before it are current, so a click
+  // during a re-read is not lost; see `Reads.showMore`.
+  const showMore = useLatest(() => {
+    if (enabled) reads.showMore(queryKey);
+  });
+  // Retry repeats what failed: the page after a failed "Show more", the loaded
+  // pages after a failed re-read.
+  const retry = useLatest(() => {
+    if (!enabled) return;
+    if (failedMore) reads.showMore(queryKey, true);
+    else void refetch();
+  });
+  // A page asked for while hidden is read when the view is shown again, and is
+  // forgotten when the view goes away.
+  useEffect(() => {
+    if (enabled) reads.resumeMore(queryKey);
+  }, [reads, enabled, queryKey]);
+  useEffect(() => () => reads.dropMore(queryKey), [reads, queryKey]);
   return withCurrent(
     {
       value,

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   describeFailure,
   type FailureDescription,
@@ -87,4 +87,18 @@ export function withCurrent<S extends object>(
     current: { get: current, enumerable: true },
   });
   return withGetter;
+}
+
+/**
+ * A stable function that runs the latest render's `callback`, for buttons that
+ * may be from an earlier render (a Retry kept after its Ticket closed).
+ */
+export function useLatest<Args extends unknown[]>(
+  callback: (...args: Args) => void,
+): (...args: Args) => void {
+  const latest = useRef(callback);
+  useEffect(() => {
+    latest.current = callback;
+  });
+  return useCallback((...args: Args) => latest.current(...args), []);
 }

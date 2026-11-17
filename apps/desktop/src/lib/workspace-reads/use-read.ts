@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readKey, skip, words, type ReadSpec, type Skip } from "./catalog";
 import {
   statusOf,
   useFailure,
+  useLatest,
   withCurrent,
   type ReadState,
 } from "./read-state";
@@ -40,14 +40,9 @@ export function useRead<A, V>(
   const refetch = query.refetch;
   // Retry reads only what is read now: a leftover button (for a Ticket that has
   // closed, or a hidden view) must not call the read or touch the entry.
-  // It asks the latest render, because the button may be from an earlier one.
-  const readsNow = useRef(enabled);
-  useEffect(() => {
-    readsNow.current = enabled;
+  const retry = useLatest(() => {
+    if (enabled) void refetch();
   });
-  const retry = useCallback(() => {
-    if (readsNow.current) void refetch();
-  }, [refetch]);
   // A skipped read is idle whatever its shared entry holds.
   const skipped = args === skip;
   return withCurrent(
