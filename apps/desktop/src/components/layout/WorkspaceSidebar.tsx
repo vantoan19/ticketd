@@ -43,6 +43,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CrossfadeText } from "@/components/ui/motion";
 import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -71,7 +72,9 @@ function SidebarCount({ value }: { value: number }) {
   return (
     <>
       {" "}
-      <span className="sidebar-count">{value}</span>
+      <span className="sidebar-count">
+        <CrossfadeText>{String(value)}</CrossfadeText>
+      </span>
     </>
   );
 }
@@ -398,9 +401,7 @@ export function WorkspaceSidebar({
           >
             <Search aria-hidden="true" />
             <span>Search or jump to…</span>
-            {!collapsed && (
-              <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
-            )}
+            <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
           </Button>
         </Tooltip>
       </SidebarHeader>
@@ -417,14 +418,16 @@ export function WorkspaceSidebar({
                 aria-label={inboxLabel}
                 onClick={() => setView("inbox")}
               >
-                <Inbox size={16} /> Inbox
+                <Inbox size={16} /> <span className="sidebar-label">Inbox</span>
                 {(needsCount > 0 || unread) && (
                   <span className="sidebar-count" aria-hidden="true">
                     <StatusDot
                       tone={needsCount ? "attention" : "unread"}
                       size={6}
                     />
-                    {needsCount > 0 && needsCount}
+                    {needsCount > 0 && (
+                      <CrossfadeText>{String(needsCount)}</CrossfadeText>
+                    )}
                   </span>
                 )}
               </SidebarMenuButton>
@@ -440,7 +443,8 @@ export function WorkspaceSidebar({
                 tooltip="All tickets"
                 onClick={() => scope("all")}
               >
-                <ListTodo size={16} /> All tickets
+                <ListTodo size={16} />{" "}
+                <span className="sidebar-label">All tickets</span>
                 {counts?.total !== undefined && (
                   <SidebarCount value={counts.total} />
                 )}
@@ -452,7 +456,8 @@ export function WorkspaceSidebar({
                 tooltip="Ready"
                 onClick={() => scope("ready")}
               >
-                <CirclePlay size={16} /> Ready
+                <CirclePlay size={16} />{" "}
+                <span className="sidebar-label">Ready</span>
                 {counts && <SidebarCount value={counts.ready} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -462,7 +467,8 @@ export function WorkspaceSidebar({
                 tooltip="In progress"
                 onClick={() => scope("progress")}
               >
-                <StatusIcon status="In progress" decorative /> In progress
+                <StatusIcon status="In progress" decorative />{" "}
+                <span className="sidebar-label">In progress</span>
                 {counts && <SidebarCount value={counts.in_progress} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -474,7 +480,8 @@ export function WorkspaceSidebar({
                   aria-label={chatsName}
                   onClick={() => setView("chats")}
                 >
-                  <MessagesSquare size={16} /> Chats
+                  <MessagesSquare size={16} />{" "}
+                  <span className="sidebar-label">Chats</span>
                   {(waiting > 0 || working > 0 || unreadChats > 0) && (
                     <span className="sidebar-count" aria-hidden="true">
                       {waiting === 0 && working > 0 ? (
@@ -502,7 +509,8 @@ export function WorkspaceSidebar({
                   aria-label={automationsLabel}
                   onClick={() => setView("automations")}
                 >
-                  <Workflow size={16} /> Automations
+                  <Workflow size={16} />{" "}
+                  <span className="sidebar-label">Automations</span>
                   {runsWaiting > 0 && (
                     <span className="sidebar-count" aria-hidden="true">
                       <StatusDot tone="attention" />
@@ -637,7 +645,8 @@ export function WorkspaceSidebar({
                     tooltip="Documents"
                     onClick={() => setView("documents")}
                   >
-                    <FileText size={16} /> Documents
+                    <FileText size={16} />{" "}
+                    <span className="sidebar-label">Documents</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -646,7 +655,8 @@ export function WorkspaceSidebar({
                     tooltip="Attachments"
                     onClick={() => setView("attachments")}
                   >
-                    <Paperclip size={16} /> Attachments
+                    <Paperclip size={16} />{" "}
+                    <span className="sidebar-label">Attachments</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -655,7 +665,8 @@ export function WorkspaceSidebar({
                     tooltip="Workspace graph"
                     onClick={() => openGraph?.("__workspace__")}
                   >
-                    <Network size={16} /> Workspace graph
+                    <Network size={16} />{" "}
+                    <span className="sidebar-label">Workspace graph</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>

@@ -180,9 +180,24 @@
   flex-direction: column;
   gap: 4px;
   padding: 0;
-
-  transform: scale(1.02) rotate(-1.2deg);
+  /* Held: a 2% scale and the lift shadow, no tilt. */
+  transform: scale(1.02);
   pointer-events: none;
+}
+/* A card in the air between columns (board-motion). Its real card waits
+   unseen where it lands, still focusable. */
+.board-flight {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+}
+.board-card-container[data-flying] {
+  opacity: 0;
+}
+/* The arrival fill sits behind the card's content. */
+.board-card-container [data-board-reference] {
+  position: relative;
+  isolation: isolate;
 }
 .board-read-error {
   display: flex;
@@ -200,7 +215,7 @@
 .ticket-workspace[data-peek] #list {
   flex: 1 1 0 !important;
 }
-.ticket-workspace.unselected #detail,
+.ticket-workspace.unselected:not([data-pane-leaving="detail"]) #detail,
 .ticket-workspace.unselected .split-handle,
 .ticket-workspace[data-peek] .split-handle {
   display: none !important;

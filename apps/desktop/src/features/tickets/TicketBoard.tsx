@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { m } from "motion/react";
 import {
   AlarmClock,
   ChevronsLeftRight,
@@ -21,6 +28,8 @@ import { Reference } from "@/components/ui/reference";
 import { StatusDot } from "@/components/ui/status-dot";
 import { FailureCaption } from "@/components/ui/failure-alert";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Arrival } from "@/components/ui/motion";
+import { blur, enterTransition, rise, spring } from "@/lib/motion-tokens";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +59,7 @@ import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import type { BoardMove } from "./useBoardStatus";
 import { useBoardDrag } from "./useBoardDrag";
+import { FlightCard, MoveWatch, type Flight } from "./board-motion";
 import "./ticket-board.css";
 
 /** Cards the board reads per column at a time (useTicketBoard). */
@@ -116,17 +126,52 @@ export function TicketBoard({
   }, [statusAction.moves, statusAction.failures]);
   useEffect(() => {
     if (!settlingSlots.size) return;
-    const token = getComputedStyle(document.documentElement)
-      .getPropertyValue("--dur-settle")
-      .trim();
-    const duration =
-      Number.parseFloat(token) * (token.endsWith("ms") ? 1 : 1000) || 0;
+    // The slot closes on the smooth spring (board-slot-collapse).
     const timer = window.setTimeout(
       () => setSettlingSlots(new Map()),
-      duration,
+      spring("smooth").duration * 1000,
     );
     return () => window.clearTimeout(timer);
   }, [settlingSlots]);
+  // Cards that changed column fly there (board-motion); each lands with the
+  // arrival fill once it has settled.
+  const [flights, setFlights] = useState<readonly Flight[]>([]);
+  const [arrivals, setArrivals] = useState<ReadonlyMap<string, number>>(
+    new Map(),
+  );
+  const addFlights = useCallback((added: readonly Flight[]) => {
+    setFlights((old) => [
+      ...old.filter(
+        (flight) => !added.some((a) => a.reference === flight.reference),
+      ),
+      ...added,
+    ]);
+  }, []);
+  const land = useCallback((landed: Flight) => {
+    setFlights((old) =>
+      old.filter((flight) => flight.serial !== landed.serial),
+    );
+    setArrivals((old) =>
+      new Map(old).set(landed.reference, (old.get(landed.reference) ?? 0) + 1),
+    );
+  }, []);
+  // A folded column opens by revealing from its 40px; folding fades the 40px
+  // header in. The mark stays until another column changes.
+  const [reveal, setReveal] = useState<{
+    status: string;
+    kind: "open" | "fold";
+  } | null>(null);
+  useEffect(() => {
+    if (reveal?.kind !== "open") return;
+    boardRef.current
+      ?.querySelector(`[data-board-status="${reveal.status}"]`)
+      // The board scrolls when the column opens beyond its edge.
+      ?.scrollIntoView?.({
+        block: "nearest",
+        inline: "nearest",
+        behavior: spring("smooth").duration > 0 ? "smooth" : "auto",
+      });
+  }, [reveal, boardRef]);
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
@@ -156,6 +201,8 @@ export function TicketBoard({
     );
     setMoved(new Set([...moved].filter((r) => !arrived.has(r))));
     setUnfolded(new Set([...unfolded, ...landed.map((c) => c.status)]));
+    const [first] = landed;
+    if (first) setReveal({ status: first.status, kind: "open" });
   }
   // "Show 50 more": the next cards land where the button was. For a moment a
   // click there is ignored, and keyboard focus moves to the first new card,
@@ -281,6 +328,7 @@ export function TicketBoard({
             "data-drop-allowed": allowed,
             "data-drop-target": drag?.target === status || undefined,
             "aria-label": `${status} column`,
+            "data-reveal": reveal?.status === status ? reveal.kind : undefined,
           };
           if (folded)
             return (
@@ -297,9 +345,10 @@ export function TicketBoard({
                       aria-label={`Show ${status}, ${total ?? "unknown"} ${total === 1 ? "ticket" : "tickets"}`}
                       aria-expanded={false}
                       disabled={Boolean(drag) || statusAction.pending.size > 0}
-                      onClick={() =>
-                        setUnfolded((old) => new Set(old).add(status))
-                      }
+                      onClick={() => {
+                        setUnfolded((old) => new Set(old).add(status));
+                        setReveal({ status, kind: "open" });
+                      }}
                     >
                       <StatusIcon status={status} decorative />
                       <span className="board-column-fold-label">{status}</span>
@@ -332,10 +381,14 @@ export function TicketBoard({
           const slots = [
             ...new Map([...settlingSlots, ...statusAction.moves]).entries(),
           ].filter(([, move]) => move.status === status);
-          const cards = items.map((ticket) => (
+          const cards = items.map((ticket, index) => (
             <BoardCard
               key={ticket.id}
               ticket={ticket}
+              place={`${status}:${index}`}
+              fresh={workspace.board.fresh.has(ticket.id)}
+              flying={flights.some((f) => f.reference === ticket.reference)}
+              arrival={arrivals.get(ticket.reference)}
               workspace={workspace}
               scope={scope}
               selected={workspace.selected === ticket.reference}
@@ -379,9 +432,9 @@ export function TicketBoard({
                 <header className="board-column-header" tabIndex={-1}>
                   <StatusIcon status={status} />
                   <h2>{status}</h2>
-                  <span aria-label={`${total ?? "Unknown"} matching tickets`}>
+                  <Count aria-label={`${total ?? "Unknown"} matching tickets`}>
                     {total ?? "…"}
-                  </span>
+                  </Count>
                   {allowed === false && (
                     // Said where the card is, while dragging over refusal.
                     <span className="board-column-refused">
@@ -403,13 +456,14 @@ export function TicketBoard({
                         disabled={
                           Boolean(drag) || statusAction.pending.size > 0
                         }
-                        onClick={() =>
+                        onClick={() => {
                           setUnfolded((old) => {
                             const next = new Set(old);
                             next.delete(status);
                             return next;
-                          })
-                        }
+                          });
+                          setReveal({ status, kind: "fold" });
+                        }}
                       >
                         <ChevronsLeftRight />
                       </IconButton>
@@ -480,6 +534,7 @@ export function TicketBoard({
           <Card
             variant="lift"
             data-board-drag-preview=""
+            data-board-drag-reference={drag.ticket.reference}
             aria-hidden="true"
             inert
             style={{
@@ -489,6 +544,7 @@ export function TicketBoard({
             }}
           >
             <BoardCard
+              copy
               ticket={drag.ticket}
               workspace={workspace}
               scope={scope}
@@ -506,6 +562,36 @@ export function TicketBoard({
           </p>
         </>
       )}
+      <MoveWatch
+        columns={workspace.board.columns}
+        holding={Boolean(drag)}
+        board={boardRef}
+        onFlights={addFlights}
+      />
+      {flights.map((flight) => {
+        const ticket = workspace.board.columns
+          .flatMap((column) => column.tickets)
+          .find((item) => item.reference === flight.reference);
+        return (
+          ticket && (
+            <FlightCard key={flight.serial} flight={flight} onLand={land}>
+              <Card variant={flight.kind === "drop" ? "lift" : "board"}>
+                <BoardCard
+                  copy
+                  ticket={ticket}
+                  workspace={workspace}
+                  scope={scope}
+                  selected={false}
+                  dragging={false}
+                  needsReview={needsReview.has(ticket.id)}
+                  onPointerDown={() => {}}
+                  onClick={() => {}}
+                />
+              </Card>
+            </FlightCard>
+          )
+        );
+      })}
       {/* Only while something narrows the columns (BD-04). */}
       {narrowed && (
         <p className="board-summary">Counts reflect current filters.</p>
@@ -540,6 +626,11 @@ function BoardCard({
   needsReview,
   onPointerDown,
   onClick,
+  copy = false,
+  place,
+  fresh = false,
+  flying = false,
+  arrival,
 }: {
   ticket: Ticket;
   workspace: TicketWorkspace;
@@ -549,8 +640,24 @@ function BoardCard({
   needsReview: boolean;
   onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** A picture of the card in the air (the drag, a flight): it stays still. */
+  copy?: boolean;
+  /** Where the card sits (column and place in it); glides when it changes. */
+  place?: string;
+  /** The card is news: it opens its space and fades up. */
+  fresh?: boolean;
+  /** Its copy is in the air; this card waits unseen where it lands. */
+  flying?: boolean;
+  /** Counts each time the card lands, to play the arrival fill. */
+  arrival?: number | undefined;
 }) {
   const { statusAction } = workspace;
+  // How a card that arrived enters, fixed when it mounts. No motion means no
+  // entrance: a card is never left collapsed for a frame.
+  const [entrance] = useState(() =>
+    fresh && !copy && spring("smooth").duration > 0 ? cardEntrance() : null,
+  );
+  const [entered, setEntered] = useState(false);
   const attention = useInboxAttention();
   const now = useNow();
   const reminder = attention?.reminders.get(ticket.reference);
@@ -577,12 +684,21 @@ function BoardCard({
   const pending = statusAction.pending.has(ticket.reference);
   const failure = statusAction.failures[ticket.reference];
   return (
-    <div
+    <m.div
       className="board-card-container"
       data-ticket-reference={ticket.reference}
       data-dragging={dragging || undefined}
+      data-flying={flying || undefined}
       aria-busy={pending}
       data-failed={failure ? "" : undefined}
+      // Cards around a move make room by gliding; layout is measured only
+      // when the card's place changes.
+      layout={copy ? false : "position"}
+      layoutDependency={place}
+      transition={{ layout: spring("smooth") }}
+      initial={entrance ? entrance.from : false}
+      animate={entrance ? entrance.to : {}}
+      onAnimationComplete={() => setEntered(true)}
     >
       <Button
         variant="card"
@@ -592,9 +708,9 @@ function BoardCard({
         onPointerDown={onPointerDown}
         onDragStart={(event) => event.preventDefault()}
         aria-keyshortcuts={ariaKeyShortcuts("board-move")}
-
         onClick={onClick}
       >
+        <Arrival {...arrivedAt(arrival, entrance && entered)} />
         {failure && (
           <span className="sr-only">
             {ticket.status} {ticket.reference}
@@ -727,6 +843,45 @@ function BoardCard({
           />
         </div>
       )}
-    </div>
+    </m.div>
   );
+}
+
+/** The arrival fill plays after a flight lands, or after an entrance. */
+function arrivedAt(landed: number | undefined, entered: boolean | null) {
+  const at = landed ?? (entered ? 1 : undefined);
+  return at === undefined ? {} : { at };
+}
+
+/**
+ * A card that arrived opens its space, then fades up from a soft blur. The
+ * space is its height; the column's 6px gap closes with it, so the cards around
+ * move apart only as it opens.
+ */
+function cardEntrance() {
+  const grow = spring("smooth");
+  return {
+    from: {
+      opacity: 0,
+      y: rise("row"),
+      filter: `blur(${blur("in")}px)`,
+      height: 0,
+      marginBottom: -6,
+      overflow: "hidden",
+    },
+    to: {
+      opacity: 1,
+      y: 0,
+      filter: "blur(0px)",
+      height: "auto",
+      marginBottom: 0,
+      transition: {
+        default: enterTransition(),
+        y: grow,
+        height: grow,
+        marginBottom: grow,
+      },
+      transitionEnd: { overflow: "visible", filter: "none" },
+    },
+  };
 }

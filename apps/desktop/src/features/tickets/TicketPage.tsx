@@ -50,6 +50,8 @@ type NoteTarget = { id: string; key: number };
 /** The ticket document with its wrapping properties and linked context. */
 export function TicketPage({
   active,
+  swap = false,
+  leaving = false,
   outsideResults = false,
   projects,
   plans,
@@ -61,6 +63,10 @@ export function TicketPage({
 }: {
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
+  /** Shown after another open ticket: its document fades up once that one has left. */
+  swap?: boolean;
+  /** Not the open ticket any more, kept on screen for one exit while it fades out. */
+  leaving?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
   projects: Project[];
@@ -330,8 +336,10 @@ export function TicketPage({
       ref={page}
       className="detail-content"
       hidden={!active}
-      inert={opening}
+      inert={opening || leaving}
       aria-busy={opening}
+      data-swap={swap || undefined}
+      data-leaving={leaving || undefined}
       data-trashed={ticket.trashed || undefined}
     >
       {/* Mounted here, not inside the rail or the narrow layout, so crossing

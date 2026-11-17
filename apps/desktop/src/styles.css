@@ -190,7 +190,6 @@
   --dur-exit: 150ms;
   --overlay-slide: 4px;
   --overlay-scale: 0.98;
-  --dialog-rise: 8px;
   --dialog-scale: 0.985;
   --sheet-scale: 0.96;
   --dur-lift: 120ms;
@@ -817,16 +816,14 @@
 }
 .ui-segmented {
   background: var(--segmented-track);
+  /* The travelling thumb sits above the track and below the labels. */
+  isolation: isolate;
 }
 .ui-segmented :is([role="radio"], [role="tab"]) {
   font-size: var(--text-code);
   line-height: var(--text-ui-line);
 }
-.ui-segmented
-  :is(
-    [role="radio"][data-state="checked"],
-    [role="tab"][aria-selected="true"]
-  ) {
+.ui-segmented .ui-glide {
   background: var(--segmented-thumb);
   box-shadow: var(--shadow-segmented-thumb);
 }
@@ -838,8 +835,6 @@
   height: 28px;
   justify-content: flex-start;
   padding-inline: 0;
-  background: none;
-  box-shadow: none;
   font-size: var(--text-ui);
 }
 /* A disabled switch keeps its shape at full strength: a recessed track and a
@@ -936,7 +931,7 @@
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 .ui-overlay[data-state="open"] {
-  animation: palette-scrim var(--dur-2) var(--ease-out);
+  animation: palette-scrim var(--dur-3) var(--ease-out);
 }
 .ui-overlay[data-state="closed"] {
   animation: overlay-leave var(--dur-exit) var(--ease-in);
@@ -948,6 +943,8 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover,
 .ui-menu {
+  /* The row highlight's Glide sits under the rows, inside this surface. */
+  isolation: isolate;
   --overlay-offset-x: 0px;
   --overlay-offset-y: calc(-1 * var(--overlay-slide));
 }
@@ -968,7 +965,7 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover[data-state="closed"],
 .ui-menu[data-state="closed"] {
-  animation: menu-leave var(--dur-exit) var(--ease-in);
+  animation: menu-leave var(--dur-2) var(--ease-in);
 }
 :is(
   .ui-popover,
@@ -980,37 +977,77 @@ body:has([data-slot="dialog-overlay"])
   pointer-events: none;
 }
 .ui-dialog[data-state="open"] {
-  animation: palette-enter var(--dur-4) var(--ease-out);
+  animation: dialog-enter var(--spring-smooth-t) var(--spring-smooth);
 }
 .ui-dialog[data-state="closed"] {
   animation: dialog-leave var(--dur-exit) var(--ease-in);
 }
+/* A sheet glides in from its edge on the smooth spring and slides back out
+   faster, over a scrim that fades with it (section 12). Radix Presence still
+   waits for the animation name to change on close. */
 .ui-sheet[data-state="open"] {
-  animation: overlay-enter var(--dur-4) var(--ease-out);
+  animation: sheet-in var(--spring-smooth-t) var(--spring-smooth) both;
 }
 .ui-sheet[data-state="closed"] {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
+  animation: sheet-out var(--dur-exit) var(--ease-in) both;
 }
+.ui-sheet[data-side="right"] {
+  --sheet-from: 100%;
+}
+.ui-sheet[data-side="left"] {
+  --sheet-from: -100%;
+}
+[data-slot="sheet-overlay"][data-state="open"] {
+  animation: sheet-scrim-in var(--dur-4) var(--ease-out) both;
+}
+[data-slot="sheet-overlay"][data-state="closed"] {
+  animation: sheet-scrim-out var(--dur-3) var(--ease-in) both;
+}
+@keyframes sheet-in {
+  from {
+    transform: translateX(var(--sheet-from, 0));
+  }
+}
+@keyframes sheet-out {
+  to {
+    transform: translateX(var(--sheet-from, 0));
+  }
+}
+@keyframes sheet-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sheet-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+/* A menu or popover grows out of its trigger: a short slide from the trigger's
+   side, a slight scale and blur. It leaves in place, faster. */
 @keyframes menu-enter {
   from {
     opacity: 0;
     transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
       scale(var(--overlay-scale));
+    filter: blur(var(--motion-blur-out));
   }
   to {
     opacity: 1;
     transform: translate(0, 0) scale(1);
+    filter: blur(0px);
   }
 }
 @keyframes menu-leave {
   from {
     opacity: 1;
-    transform: translate(0, 0) scale(1);
+    transform: scale(1);
+    filter: blur(0px);
   }
   to {
     opacity: 0;
-    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
-      scale(var(--overlay-scale));
+    transform: scale(var(--overlay-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 /* Radix Presence waits for a changed animation name before unmounting. */
@@ -1022,14 +1059,29 @@ body:has([data-slot="dialog-overlay"])
     opacity: 0;
   }
 }
+/* A dialog rises from its top anchor out of a soft blur, and leaves in place. */
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise-overlay)) scale(var(--dialog-scale));
+    filter: blur(var(--motion-blur-in));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0px);
+  }
+}
 @keyframes dialog-leave {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: scale(1);
+    filter: blur(0px);
   }
   to {
     opacity: 0;
-    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
+    transform: scale(var(--dialog-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 @keyframes overlay-enter {
@@ -1059,6 +1111,14 @@ body:has([data-slot="dialog-overlay"])
   text-wrap: balance;
 }
 /* A choice list's search row (P3): 32px, a hairline under it. */
+/* The row highlight's Glide sits under the rows, inside the list, and fills
+   with the highlight colour (row-highlight.tsx). */
+[data-slot="command-list"] {
+  isolation: isolate;
+}
+:is(.ui-menu, .ui-popover, [data-slot="command-list"]) [data-slot="glide"] {
+  background: var(--accent);
+}
 [data-slot="command-input-wrapper"] {
   height: 32px;
   padding-inline: 8px;
@@ -1866,8 +1926,15 @@ html[data-window-bar] {
   flex-direction: column;
   /* 208px rows inside the 232px navigation column (C-Sidebar). */
   padding: 0 12px;
+  /* Labels clip as the sidebar narrows to the rail. */
+  overflow-x: clip;
   background: var(--background);
   color: var(--foreground);
+  /* Collapsing and expanding glide on the smooth spring (section 12). Only the
+     preference changes this width, so resizing the window never animates it. */
+  transition:
+    width var(--spring-smooth-t) var(--spring-smooth),
+    padding-inline var(--spring-smooth-t) var(--spring-smooth);
 }
 .sidebar-header,
 .sidebar-body,
@@ -1931,12 +1998,26 @@ html[data-window-bar] {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
+/* The top row holds the wordmark and two buttons, which the rail stacks. Each
+   sits at an explicit place so the move between the two arrangements is a
+   transition and the rows below follow the height: the New ticket button drops
+   a step and the collapse button takes its place. */
 .sidebar-top {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  --top-step: calc(var(--header-control-height) + 4px);
+  position: relative;
   height: 48px;
-  gap: 4px;
+  transition: height var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-top > button {
+  position: absolute;
+  top: calc((48px - var(--header-control-height)) / 2);
+  right: 0;
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-top > button:not(:last-child) {
+  right: var(--top-step);
 }
 .sidebar-top .ui-button,
 .sidebar-footer-actions .ui-button {
@@ -1944,9 +2025,9 @@ html[data-window-bar] {
   height: var(--header-control-height);
 }
 .sidebar-wordmark {
-  flex: none;
-  margin-left: 12px;
-  margin-right: auto;
+  position: absolute;
+  top: 14px;
+  left: 12px;
   font-size: var(--text-wordmark);
   line-height: 20px;
   font-weight: 600;
@@ -1958,12 +2039,34 @@ html[data-window-bar] {
   margin: 2px 0 14px;
   padding: 0 6px 0 10px;
   justify-content: flex-start;
+  overflow: hidden;
+  white-space: nowrap;
   border-radius: var(--radius-card);
   color: var(--disabled-foreground);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+/* What the rail drops fades with a slight blur: out first, in once the width
+   has arrived. The elements stay in the row and the narrowing clips them. */
+.sidebar-label,
+.sidebar-wordmark,
+.ui-button-jump > span,
+.ui-button-jump kbd {
+  transition:
+    opacity var(--dur-enter) var(--ease-out) var(--dur-4),
+    filter var(--dur-enter) var(--ease-out) var(--dur-4);
+}
+.sidebar[data-collapsed] :is(.sidebar-label, .sidebar-wordmark),
+.sidebar[data-collapsed] .ui-button-jump > span,
+.sidebar[data-collapsed] .ui-button-jump kbd {
+  opacity: 0;
+  filter: blur(var(--motion-blur-out));
+  pointer-events: none;
+  transition:
+    opacity var(--dur-exit) var(--ease-in),
+    filter var(--dur-exit) var(--ease-in);
 }
 .ui-button-jump kbd {
   margin-left: auto;
@@ -1978,19 +2081,15 @@ html[data-window-bar] {
   background: var(--accent);
 }
 .sidebar[data-collapsed] .sidebar-top {
-  height: auto;
-  flex-direction: column;
-  padding-block: 10px;
+  --top-step: 0px;
+  height: calc(20px + 2 * var(--header-control-height) + 4px);
 }
-.sidebar[data-collapsed] .sidebar-wordmark {
-  display: none;
+.sidebar[data-collapsed] .sidebar-top > button {
+  top: 10px;
+  right: 4px;
 }
-.sidebar[data-collapsed] .ui-button-jump {
-  padding: 0;
-  justify-content: center;
-}
-.sidebar[data-collapsed] .ui-button-jump > span {
-  display: none;
+.sidebar[data-collapsed] .sidebar-top > button:last-child {
+  top: calc(10px + var(--header-control-height) + 4px);
 }
 .sidebar[data-collapsed] .sidebar-footer-actions {
   padding-inline: 0;
@@ -2043,8 +2142,21 @@ html[data-window-bar] {
   background: var(--recessed);
   color: var(--foreground);
 }
-.sidebar-nav button[data-active="true"] {
+/* The current row's fill is the Glide beside its button, which travels from
+   the previous row; the button itself only changes its text color. */
+.sidebar-nav li {
+  position: relative;
+  isolation: isolate;
+}
+.sidebar-nav li > [data-slot="glide"] {
+  border-radius: var(--radius);
   background: var(--accent);
+}
+.sidebar-nav button {
+  transition: color var(--dur-3) var(--ease-out);
+}
+.sidebar-nav button[data-active="true"] {
+  background: transparent;
   color: var(--foreground);
 }
 /* Back from Settings: no hover fill until the pointer moves (App.tsx). */
@@ -2120,14 +2232,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .sidebar[data-collapsed] .brand strong + button {
   margin-left: 0;
 }
+/* The icon stays where it is; the label, already faded, is clipped by the row. */
 .sidebar[data-collapsed] .sidebar-nav button {
   position: relative;
-  justify-content: center;
-  width: 36px;
-  margin: 0 auto;
-  padding: 0;
-  gap: 0;
-  font-size: 0;
 }
 /* The dot alone, centred on the icon's top-right corner, cut out of the row
    by a 2px ring in the row's own fill (DESIGN.md section 6). */
@@ -2208,6 +2315,20 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .content-panel:focus {
   outline: none;
+}
+/* The pages sit in a wrapper that adds no box (ViewRegion). A page that has
+   just been switched away from fades out over the panel as a still picture. */
+.view-region {
+  display: contents;
+}
+.view-departing {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--surface);
 }
 /* The narrow window's navigation button in a header's leading slot, with what
    waits in the sheet as a dot on its corner, cut out by the panel's fill. */
@@ -2459,7 +2580,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 /* !important here and in the narrow block: the panel library sets flex and
    size inline on #list and #detail, so only !important wins. */
-.ticket-workspace.expanded #list,
+.ticket-workspace.expanded:not([data-pane-leaving="list"]) #list,
 .ticket-workspace.expanded .split-handle {
   display: none !important;
 }
@@ -2807,7 +2928,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   .ticket-workspace #list {
     flex: 1 1 0 !important;
   }
-  .ticket-workspace #detail,
+  .ticket-workspace:not([data-pane-leaving="detail"]) #detail,
   .ticket-workspace .split-handle {
     display: none !important;
   }
@@ -3000,13 +3121,23 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
-.ui-tooltip[data-state="delayed-open"],
-.ui-tooltip[data-state="instant-open"] {
+/* After the hover delay the label fades in from a slight scale and blur. Moving
+   to a neighbouring control opens its label at once (instant-open): no fade in,
+   while the one it leaves still fades out. */
+.ui-tooltip {
+  --tooltip-scale: 0.96;
+}
+.ui-tooltip[data-state="delayed-open"] {
   animation: tooltip-enter var(--dur-2) var(--ease-out);
+}
+.ui-tooltip[data-state="closed"] {
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 @keyframes tooltip-enter {
   from {
     opacity: 0;
+    transform: scale(var(--tooltip-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 /* A tooltip only labels; its positioning wrapper must not cover the controls
@@ -3277,25 +3408,10 @@ kbd,
   background: var(--popover);
   overflow: hidden;
 }
+/* Open and close come from the shared dialog and its scrim (dialog.tsx); the
+   palette only sets its own size and soft scrim color. */
 .ui-overlay:has(+ .ui-dialog[data-size="palette"]) {
   background: var(--scrim-soft);
-  animation: palette-scrim var(--dur-2) var(--ease-out);
-}
-.ui-dialog[data-size="palette"][data-state="open"] {
-  animation: palette-enter var(--dur-3) var(--ease-out);
-}
-.ui-dialog[data-size="palette"][data-state="closed"] {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
-}
-@keyframes palette-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 @keyframes palette-scrim {
   from {
@@ -3368,9 +3484,6 @@ kbd,
   [data-variant="palette"] [data-slot="command-item"] {
     min-height: 44px;
   }
-}
-.ui-overlay:has(+ .ui-dialog[data-size="palette"][data-state="closed"]) {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 
 [data-variant="palette"] [data-slot="command-shortcut"] {
@@ -4184,6 +4297,10 @@ kbd,
   width: min(560px, calc(100vw - 32px));
   background: var(--popover);
 }
+.ui-dialog[data-surface="create"] {
+  /* Widening glides; the top anchor stays, so it never re-centres vertically. */
+  transition: width var(--spring-smooth-t) var(--spring-smooth);
+}
 .ui-dialog[data-surface="create"][data-expanded] {
   width: min(760px, calc(100vw - 32px));
   height: calc(100dvh - var(--dialog-top) - 16px);
@@ -4328,9 +4445,22 @@ kbd,
 .ui-button-attention svg {
   color: var(--status-blocked);
 }
+/* The slot opens by height (Expand); an open slot holds 40px even when the
+   condition has cleared, so nothing moves under the pointer. */
 .workspace-band-slot {
   flex: none;
-  height: 40px;
+}
+.workspace-band-slot[data-open="true"] .ui-expand-body {
+  min-height: 40px;
+}
+.workspace-band-slot .workspace-band {
+  animation: band-in var(--dur-enter) var(--ease-out) var(--dur-1) backwards;
+}
+@keyframes band-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--motion-blur-in));
+  }
 }
 .ui-popover[data-variant="workspace"] .workspace-band {
   height: auto;

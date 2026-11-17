@@ -11,6 +11,7 @@ type Column = {
   loading: boolean;
   error: string;
 };
+const noFresh: ReadonlySet<string> = new Set();
 const emptyColumns = (): Column[] =>
   ticketStatuses.map((status) => ({
     status,
@@ -19,6 +20,21 @@ const emptyColumns = (): Column[] =>
     loading: true,
     error: "",
   }));
+
+type Shown = { key: string; ids: Set<string>; settled: boolean };
+/**
+ * Notes every ticket the board shows. Once the board has settled, a ticket it
+ * had not shown before has arrived (a live update, not a move or a page).
+ */
+function remember(shown: Shown, columns: Column[], arrive: boolean) {
+  const arrived = new Set<string>();
+  for (const column of columns)
+    for (const { id } of column.tickets) {
+      if (arrive && shown.settled && !shown.ids.has(id)) arrived.add(id);
+      shown.ids.add(id);
+    }
+  return arrived;
+}
 
 /** Independent bounded reads; core owns matching and ordering, desktop owns pages. */
 export function useTicketBoard(
@@ -32,9 +48,14 @@ export function useTicketBoard(
     () => JSON.parse(key) as FindFilter,
     [key],
   );
-  const [state, setState] = useState({ key, columns: emptyColumns() });
+  const [state, setState] = useState({
+    key,
+    columns: emptyColumns(),
+    fresh: noFresh,
+  });
   const displayed = state.key === key ? state.columns : emptyColumns();
   const saved = useRef(state);
+  const shown = useRef<Shown>({ key, ids: new Set(), settled: false });
   const generation = useRef(0);
   const loadingMore = useRef(new Set<TicketStatus>());
 
@@ -87,14 +108,19 @@ export function useTicketBoard(
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     loadingMore.current.clear();
+    if (shown.current.key !== key)
+      shown.current = { key, ids: new Set(), settled: false };
     const previous =
       saved.current.key === key ? saved.current.columns : emptyColumns();
-    const commit = (columns: Column[]) => {
-      const next = { key, columns };
+    const commit = (columns: Column[], fresh = saved.current.fresh) => {
+      const next = { key, columns, fresh };
       saved.current = next;
       setState(next);
     };
-    commit(previous.map((column) => ({ ...column, loading: true, error: "" })));
+    commit(
+      previous.map((column) => ({ ...column, loading: true, error: "" })),
+      noFresh,
+    );
     await Promise.all(
       previous.map(async (column) => {
         try {
@@ -103,12 +129,17 @@ export function useTicketBoard(
             Math.max(BATCH_SIZE, column.tickets.length),
           );
           if (request !== generation.current) return;
+          const columns = saved.current.columns.map((current) =>
+            current.status === column.status
+              ? { ...current, ...result, loading: false, error: "" }
+              : current,
+          );
           commit(
-            saved.current.columns.map((current) =>
-              current.status === column.status
-                ? { ...current, ...result, loading: false, error: "" }
-                : current,
-            ),
+            columns,
+            new Set([
+              ...saved.current.fresh,
+              ...remember(shown.current, columns, true),
+            ]),
           );
         } catch (reason) {
           if (request !== generation.current) return;
@@ -126,6 +157,7 @@ export function useTicketBoard(
         }
       }),
     );
+    if (request === generation.current) shown.current.settled = true;
   }, [key, read]);
 
   useEffect(() => {
@@ -151,12 +183,12 @@ export function useTicketBoard(
     const request = generation.current;
     loadingMore.current.add(status);
     const commit = (patch: Partial<Column>) => {
-      const next = {
-        key,
-        columns: saved.current.columns.map((item) =>
-          item.status === status ? { ...item, ...patch } : item,
-        ),
-      };
+      const columns = saved.current.columns.map((item) =>
+        item.status === status ? { ...item, ...patch } : item,
+      );
+      // A page the person asked for lands where the button was; it is not news.
+      remember(shown.current, columns, false);
+      const next = { key, columns, fresh: noFresh };
       saved.current = next;
       setState(next);
     };
@@ -209,7 +241,7 @@ export function useTicketBoard(
             : Math.max(0, column.total - 1),
       };
     });
-    saved.current = { key, columns };
+    saved.current = { key, columns, fresh: noFresh };
     setState(saved.current);
   }
   /**
@@ -247,12 +279,14 @@ export function useTicketBoard(
         total: column.total === null ? null : Math.max(0, column.total - 1),
       };
     });
-    saved.current = { key, columns };
+    saved.current = { key, columns, fresh: noFresh };
     setState(saved.current);
     return from;
   }
   return {
     columns: displayed,
+    /** Ids of tickets the last refresh added to a board already showing. */
+    fresh: state.key === key ? state.fresh : noFresh,
     refresh,
     loadMore,
     matches,
