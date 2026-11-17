@@ -180,7 +180,7 @@ test("returning to the window does not read the files again", async () => {
       ).length;
   const before = reads();
   window.dispatchEvent(new Event("focus"));
-  await new Promise((done) => setTimeout(done, 20));
+  for (let turn = 0; turn < 3; turn += 1) await act(async () => {});
   expect(reads()).toBe(before);
 });
 
