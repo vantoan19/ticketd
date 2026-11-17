@@ -183,6 +183,42 @@ describe("a Ticket that stops existing", () => {
   });
 });
 
+describe("a Ticket that is gone stays gone", () => {
+  it("keeps the not-found state and plain chips when a later re-read fails another way", async () => {
+    const signal = fakeChangeSignal();
+    bridge.invoke
+      .mockResolvedValueOnce(ticket("Was here"))
+      .mockRejectedValueOnce({ code: "not_found", message: "T-1 not found" })
+      .mockRejectedValueOnce({ code: "workspace_locked", message: "busy" });
+    function Chip() {
+      const { value } = useTicket("T-1");
+      return <span>{value === null ? "plain" : (value?.title ?? "…")}</span>;
+    }
+    render(
+      <TestReads signal={signal}>
+        <OpenTicket reference="T-1">
+          <Page />
+        </OpenTicket>
+        <Chip />
+      </TestReads>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Was here" }),
+    ).toBeTruthy();
+
+    act(() => signal.change());
+    expect(await screen.findByText("It was deleted or moved.")).toBeTruthy();
+    expect(screen.getByText("plain")).toBeTruthy();
+
+    await act(async () => signal.change());
+    expect(bridge.invoke).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("Couldn't load T-1")).toBeTruthy();
+    expect(screen.getByText("It was deleted or moved.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Was here" })).toBeNull();
+    expect(screen.getByText("plain")).toBeTruthy();
+  });
+});
+
 const recordReads = () =>
   bridge.invoke.mock.calls.filter(([command]) => command === "show_ticket");
 

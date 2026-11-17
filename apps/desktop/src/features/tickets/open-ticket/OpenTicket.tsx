@@ -2,6 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Ticket } from "@/lib/api/client";
+import { BridgeFailure } from "@/lib/api/bridge-failure";
+import { describeFailure } from "@/lib/api/describe-failure";
 import { ticketRead, useRead, Visibility } from "@/lib/workspace-reads";
 import { useTicketChanged } from "./changed";
 import { OpenTicketContext, type OpenTicketScope } from "./open-ticket-context";
@@ -49,7 +51,10 @@ function Gate({
   // read is unanswered does not close the page.
   const [kept, setKept] = useState(seed);
   if (seed && seed !== kept) setKept(seed);
-  const record = state.value ?? kept;
+  // A Ticket the core says is gone is an answer too: neither the seed nor an
+  // old copy stands in for it.
+  const gone = state.value === null;
+  const record = gone ? undefined : (state.value ?? kept);
   const opening = state.value === undefined;
   const { failure, retry } = state;
   const open = useMemo<OpenTicketScope | null>(
@@ -57,9 +62,17 @@ function Gate({
       record ? { reference, record, opening, failure, retry, changed } : null,
     [reference, record, opening, failure, retry, changed],
   );
-  // A Ticket that was read and is now gone is a failure too, not its old copy.
-  const gone = failure?.code === "not_found";
-  if ((state.status === "failed" || gone) && failure)
+  const notFound = useMemo(
+    () =>
+      describeFailure(
+        new BridgeFailure("not_found", `${reference} was not found`),
+        `load ${reference}`,
+      ),
+    [reference],
+  );
+  if (gone)
+    return hidden ? null : <FailureState failure={notFound} onRetry={retry} />;
+  if (state.status === "failed" && failure)
     return hidden ? null : <FailureState failure={failure} onRetry={retry} />;
   if (!open) {
     if (hidden) return null;

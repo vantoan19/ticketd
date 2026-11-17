@@ -29,13 +29,12 @@ export function useTicket<Name extends PartName>(
   ...args: PartArgs<Name>
 ): TicketState | PartState<Name> | undefined {
   const state = useRead(ticketRead, reference ?? skip);
-  // A failed re-read keeps the last copy, but "not found" says it is gone.
-  const gone = state.failure?.code === "not_found";
-  const served = usePart(gone ? undefined : state.value, part, args);
+  // A Ticket that is gone reads as null; parts are served only for a known one.
+  const served = usePart(state.value ?? undefined, part, args);
   if (part !== undefined) return served;
   return withCurrent(
     {
-      value: gone ? null : state.value,
+      value: state.value,
       failure: state.failure,
       retry: state.retry,
     },
