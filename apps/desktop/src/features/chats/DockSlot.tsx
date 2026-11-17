@@ -1,7 +1,5 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
-
-/** How long a height change glides; matches `.chat-dock-slot` in chats.css. */
-const GLIDE_MS = 150;
+import { spring } from "@/lib/motion-tokens";
 
 /**
  * A part of the dock whose height glides to its content's instead of cutting,
@@ -34,7 +32,12 @@ export function DockSlot({
       slot.dataset.gliding = "";
       slot.style.height = `${next}px`;
       clearTimeout(timer);
-      timer = setTimeout(() => delete slot.dataset.gliding, GLIDE_MS + 50);
+      // The glide is the smooth spring (`.chat-dock-slot`); reduced motion and a
+      // held key make it zero.
+      timer = setTimeout(
+        () => delete slot.dataset.gliding,
+        spring("smooth").duration * 1000 + 50,
+      );
     });
     observer.observe(content);
     return () => {

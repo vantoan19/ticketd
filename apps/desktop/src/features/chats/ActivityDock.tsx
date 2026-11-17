@@ -21,7 +21,11 @@ import {
   ShieldQuestion,
   X,
 } from "lucide-react";
+import { useIsPresent } from "motion/react";
+import { Presence } from "@/components/ui/motion";
+import { Rise } from "@/features/chats/arrivals";
 import { Button } from "@/components/ui/button";
+import { Count } from "@/components/ui/count";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Kbd } from "@/components/ui/kbd";
 import { Time } from "@/components/ui/time";
@@ -48,7 +52,9 @@ function Request({
   onAnswered,
   name,
   focusTitle = false,
+  ref,
 }: {
+  ref?: Ref<HTMLDivElement>;
   request: PendingRequest;
   /** Names the Chat's linked records by their titles. */
   name: RecordName;
@@ -64,6 +70,8 @@ function Request({
 }) {
   const titleId = useId();
   const reasonId = useId();
+  // Once answered it fades out where it was; nothing in it can be reached.
+  const present = useIsPresent();
   const title = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (focusTitle) title.current?.focus();
@@ -117,9 +125,10 @@ function Request({
   ) : null;
   const Icon = question ? MessageCircleQuestion : ShieldQuestion;
   return (
-    <section
+    <Rise
+      ref={ref}
+      inert={!present}
       role="group"
-      className="chat-request"
       data-request={request.request}
       aria-labelledby={titleId}
       {...(request.reason &&
@@ -304,7 +313,7 @@ function Request({
         )}
         {question && error && <FailureAlert size="compact" failure={error} />}
       </div>
-    </section>
+    </Rise>
   );
 }
 
@@ -314,7 +323,9 @@ function QueueCard({
   onSendNow,
   onEdit,
   onRemove,
+  ref,
 }: {
+  ref?: Ref<HTMLLIElement>;
   queued: Queued;
   canSendNow: boolean;
   onSendNow: () => Promise<void>;
@@ -323,51 +334,54 @@ function QueueCard({
 }) {
   const textId = useId();
   const [sending, setSending] = useState(false);
+  const present = useIsPresent();
   return (
-    <li className="chat-queue-card">
-      <span className="chat-queue-main">
-        <span id={textId} className="chat-queue-text">
-          {queued.text}
+    <li ref={ref} className="chat-queue-card">
+      <Rise inert={!present} className="flex w-full items-center min-h-8">
+        <span className="chat-queue-main">
+          <span id={textId} className="chat-queue-text">
+            {queued.text}
+          </span>
+          {queued.refused_steer && (
+            <span className="chat-queue-note">
+              Couldn't steer; queued · {queued.refused_steer}
+            </span>
+          )}
         </span>
-        {queued.refused_steer && (
-          <span className="chat-queue-note">
-            Couldn't steer; queued · {queued.refused_steer}
+        {sending ? (
+          <span className="chat-queue-sending">Sending…</span>
+        ) : (
+          <span className="chat-queue-actions">
+            {canSendNow && (
+              <IconButton
+                label="Send now"
+                aria-describedby={textId}
+                onClick={() => {
+                  setSending(true);
+                  // On success the card leaves the queue; on failure it stays.
+                  onSendNow().catch(() => setSending(false));
+                }}
+              >
+                <CornerUpRight aria-hidden />
+              </IconButton>
+            )}
+            <IconButton
+              label="Edit in the message box"
+              aria-describedby={textId}
+              onClick={onEdit}
+            >
+              <Pencil aria-hidden />
+            </IconButton>
+            <IconButton
+              label="Remove from queue"
+              aria-describedby={textId}
+              onClick={onRemove}
+            >
+              <X aria-hidden />
+            </IconButton>
           </span>
         )}
-      </span>
-      {sending ? (
-        <span className="chat-queue-sending">Sending…</span>
-      ) : (
-        <span className="chat-queue-actions">
-          {canSendNow && (
-            <IconButton
-              label="Send now"
-              aria-describedby={textId}
-              onClick={() => {
-                setSending(true);
-                // On success the card leaves the queue; on failure it stays.
-                onSendNow().catch(() => setSending(false));
-              }}
-            >
-              <CornerUpRight aria-hidden />
-            </IconButton>
-          )}
-          <IconButton
-            label="Edit in the message box"
-            aria-describedby={textId}
-            onClick={onEdit}
-          >
-            <Pencil aria-hidden />
-          </IconButton>
-          <IconButton
-            label="Remove from queue"
-            aria-describedby={textId}
-            onClick={onRemove}
-          >
-            <X aria-hidden />
-          </IconButton>
-        </span>
-      )}
+      </Rise>
     </li>
   );
 }
@@ -409,58 +423,82 @@ export function ActivityDock({
 }) {
   const request = requests[0];
   const { queue, queue_paused: paused } = chat;
-  if (!request && !plan && queue.length === 0) return null;
   // During a turn that cannot be steered, a queued message can only wait.
   const live = chat.activity === "working" || chat.activity === "waiting";
   const canSendNow = !live || chat.steering.available;
+  // Always drawn (empty it takes no room): a request or the queue that leaves
+  // fades out here while the tray closes its space (DockSlot).
   return (
     <div ref={dockRef} className="chat-activity">
-      {request && (
-        <Request
-          key={request.id}
-          request={request}
-          position={1}
-          count={requests.length}
-          onAnswer={(optionId) => onAnswer(request.id, optionId)}
-          onLeave={onLeave}
-          {...(onAnswered && { onAnswered })}
-          name={recordNamer(chat.links)}
-          focusTitle={focusRequest}
-        />
-      )}
+      <Presence mode="popLayout" initial={false}>
+        {request && (
+          <Request
+            key={request.id}
+            request={request}
+            position={1}
+            count={requests.length}
+            onAnswer={(optionId) => onAnswer(request.id, optionId)}
+            onLeave={onLeave}
+            {...(onAnswered && { onAnswered })}
+            name={recordNamer(chat.links)}
+            focusTitle={focusRequest}
+          />
+        )}
+      </Presence>
       {plan && <section className="chat-activity-slot">{plan}</section>}
-      {queue.length > 0 && (
-        <section className="chat-queue">
-          <div className="chat-queue-head">
-            <span>
-              Queued {queue.length} · {paused ? "Paused" : "After this turn"}
-            </span>
-            {paused && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto"
-                onClick={onResume}
-              >
-                Resume
-              </Button>
-            )}
-          </div>
-          <ol aria-label="Queued messages">
-            {queue.map((queued) => (
-              <QueueCard
-                key={queued.id}
-                queued={queued}
-                canSendNow={canSendNow}
-                onSendNow={() => onSendNow(queued.id)}
-                onEdit={() => onEdit(queued)}
-                onRemove={() => onRemove(queued.id)}
-              />
-            ))}
-          </ol>
-        </section>
-      )}
+      <Presence mode="popLayout" initial={false}>
+        {queue.length > 0 && (
+          <QueueSection key="queue">
+            <div className="chat-queue-head">
+              <span>
+                Queued <Count>{queue.length}</Count> ·{" "}
+                {paused ? "Paused" : "After this turn"}
+              </span>
+              {paused && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={onResume}
+                >
+                  Resume
+                </Button>
+              )}
+            </div>
+            <ol aria-label="Queued messages">
+              <Presence mode="popLayout" initial={false}>
+                {queue.map((queued) => (
+                  <QueueCard
+                    key={queued.id}
+                    queued={queued}
+                    canSendNow={canSendNow}
+                    onSendNow={() => onSendNow(queued.id)}
+                    onEdit={() => onEdit(queued)}
+                    onRemove={() => onRemove(queued.id)}
+                  />
+                ))}
+              </Presence>
+            </ol>
+          </QueueSection>
+        )}
+      </Presence>
     </div>
+  );
+}
+
+/** The queue's section: it fades up with its first card and out with its last. */
+function QueueSection({
+  ref,
+  children,
+}: {
+  ref?: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  const present = useIsPresent();
+  return (
+    <Rise ref={ref} inert={!present}>
+      <section className="chat-queue">{children}</section>
+    </Rise>
   );
 }
 
