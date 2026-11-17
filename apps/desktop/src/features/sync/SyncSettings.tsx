@@ -25,7 +25,6 @@ import {
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { ago } from "@/features/tickets/ticket-source";
-import { useReplaced } from "@/lib/workspace-reads";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
 import {
@@ -179,7 +178,12 @@ function StatusSkeleton() {
 }
 
 /** Settings › Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
-export function SyncSettings() {
+export function SyncSettings({
+  onReplaced,
+}: {
+  /** Called after a download replaced this Workspace, to drop what described the old one. */
+  onReplaced: () => Promise<void>;
+}) {
   const { status } = useSyncStatus();
   // Where the Workspace a download replaced was kept, while this page is open.
   const [safetyBackup, setSafetyBackup] = useState("");
@@ -192,7 +196,11 @@ export function SyncSettings() {
         (status.connection === "not_connected" ? (
           <Connect />
         ) : status.connection === "choosing" ? (
-          <Choose status={status} onDownloaded={setSafetyBackup} />
+          <Choose
+            status={status}
+            onDownloaded={setSafetyBackup}
+            onReplaced={onReplaced}
+          />
         ) : // What stopped a first sync is shown with its action, not as progress standing still.
         status.first_sync && !status.recovery ? (
           <FirstSync status={status} progress={status.first_sync} />
@@ -342,13 +350,14 @@ const RECONNECT = "reconnect";
 function Choose({
   status,
   onDownloaded,
+  onReplaced,
 }: {
   status: SyncStatus;
   /** Told where the safety backup of the replaced Workspace is. */
   onDownloaded: (safetyBackup: string) => void;
+  onReplaced: () => Promise<void>;
 }) {
   const now = useNow();
-  const workspaceReplaced = useReplaced();
   const { busy, failure, run } = useCommand();
   const [options, setOptions] = useState<SyncSetupOptions | null>(null);
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
@@ -523,7 +532,7 @@ function Choose({
                 download.folder_id,
               );
               onDownloaded(replaced.safety_backup);
-              void workspaceReplaced();
+              void onReplaced();
               return replaced;
             }, "replace this Workspace");
           }}

@@ -13,7 +13,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
-import { read, useRead } from "@/lib/workspace-reads";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
@@ -73,11 +72,11 @@ const options = {
   reconnect: null,
 };
 
-function show(extra?: ReactNode) {
+function show(extra?: ReactNode, onReplaced = async () => {}) {
   return render(
     <TestReads>
       <SyncStatusProvider>
-        <SyncSettings />
+        <SyncSettings onReplaced={onReplaced} />
       </SyncStatusProvider>
       {extra}
     </TestReads>,
@@ -191,22 +190,14 @@ test("a Workspace that synced with a folder of this account is offered that fold
   expect(api.downloadWorkspace).not.toHaveBeenCalled();
 });
 
-test("replacing the Workspace drops what the desktop had read from the old one", async () => {
+test("a download that replaces the Workspace tells the app once, after it finished", async () => {
   api.status.mockResolvedValue(choosing());
   api.downloadWorkspace.mockResolvedValue({
     ...syncStatus(),
     safety_backup: "/ticketd/workspace.sqlite3.safety-1.sqlite3",
   });
-  const call = vi
-    .fn<() => Promise<string>>()
-    .mockResolvedValueOnce("Old Workspace")
-    .mockResolvedValue("New Workspace");
-  const title = read({ key: "sync-replace-title", call, failure: "load" });
-  function Cached() {
-    return <output>{useRead(title, null).value}</output>;
-  }
-  show(<Cached />);
-  await screen.findByText("Old Workspace");
+  const onReplaced = vi.fn(async () => {});
+  show(undefined, onReplaced);
   fireEvent.click(
     await screen.findByRole("radio", { name: /Download “ticketd · web-app”/ }),
   );
@@ -214,10 +205,12 @@ test("replacing the Workspace drops what the desktop had read from the old one",
   const dialog = await screen.findByRole("dialog", {
     name: "Replace this Workspace?",
   });
+  expect(onReplaced).not.toHaveBeenCalled();
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Replace Workspace" }),
   );
-  expect(await screen.findByText("New Workspace")).toBeTruthy();
+  await waitFor(() => expect(onReplaced).toHaveBeenCalledTimes(1));
+  expect(api.downloadWorkspace).toHaveBeenCalledTimes(1);
 });
 
 test("downloading an existing Workspace asks once before replacing this one", async () => {

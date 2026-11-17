@@ -1438,6 +1438,151 @@ test("a bulk change reloads the list once: its write report already moves the sh
   expect(lists - before).toBe(1);
 });
 
+// Like renderBulk, but a command with no handler gets the shared default.
+async function renderReplaceable(handlers: Record<string, unknown>) {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string, args?: never) => {
+    if (!(command in handlers)) return bridgeDefault(command, args);
+    const handler = handlers[command];
+    return typeof handler === "function" ? handler(args) : handler;
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+const driveOptions = {
+  local: { tickets: 2, documents: 0, attachments: 0 },
+  existing: [
+    {
+      folder_id: "folder-1",
+      folder_name: "ticketd · other",
+      last_synced_by: "Studio",
+      last_synced_at: "2026-11-01T00:00:00Z",
+      counts: { tickets: 2, documents: 0, attachments: 0 },
+    },
+  ],
+  reconnect: null,
+};
+
+test("a Drive download that replaces the Workspace drops the old selection and a failed bulk change", async () => {
+  const sent: string[] = [];
+  let downloaded = false;
+  await renderReplaceable({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    sync_status: syncStatus({
+      connection: "choosing",
+      folder: null,
+      state: "saved_locally",
+      last_synced_at: null,
+    }),
+    sync_settings: syncSettings(),
+    sync_setup_options: driveOptions,
+    sync_download_workspace: () => {
+      downloaded = true;
+      return { ...syncStatus(), safety_backup: "/ticketd/safety.sqlite3" };
+    },
+    bulk_status: (args: { requestId: string }) => {
+      sent.push(args.requestId);
+      throw { code: "unavailable", message: "lost reply" };
+    },
+  });
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ2" }));
+  openMenu("Status of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
+  await turn();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Google Drive" }),
+  );
+  for (let i = 0; i < 3; i += 1) await turn();
+  fireEvent.click(
+    screen.getByRole("radio", { name: /Download “ticketd · other”/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("dialog", { name: "Replace this Workspace?" }),
+    ).getByRole("button", { name: "Replace Workspace" }),
+  );
+  for (let i = 0; i < 4; i += 1) await turn();
+  expect(downloaded).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
+  for (let i = 0; i < 2; i += 1) await turn();
+
+  // The old selection and the batch it sent belong to the replaced Workspace.
+  expect(screen.queryByText("2 selected")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(sent).toHaveLength(1);
+});
+
+test("a restore reads the list once, during the restore", async () => {
+  const backup = "/tmp/restore-once.ticketd-backup";
+  const summary = {
+    last_change: null,
+    tickets: 1,
+    documents: 0,
+    activities: 0,
+    evidence: 0,
+    projects: 0,
+    plans: 0,
+  };
+  let lists = 0;
+  await renderReplaceable({
+    find_tickets: () => {
+      lists += 1;
+      return [bulkTicket(1)];
+    },
+    safety_backups: [
+      {
+        path: backup,
+        kind: "safety",
+        saved_at: "2026-11-01T00:00:00Z",
+        size_bytes: 1024,
+      },
+    ],
+    inspect_backup: {
+      path: backup,
+      current: summary,
+      check: { status: "valid", format_version: 19, summary },
+    },
+    restore_workspace: { safety_path: "/tmp/safety.sqlite3" },
+    draft_retentions: [],
+    draft_cutover_pending: false,
+  });
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Backups" }),
+  );
+  for (let i = 0; i < 3; i += 1) await turn();
+  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  for (let i = 0; i < 3; i += 1) await turn();
+  const before = lists;
+  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  for (let i = 0; i < 6; i += 1) await turn();
+  expect(screen.getByText("Workspace restored")).toBeTruthy();
+  expect(lists - before).toBe(1);
+});
+
 test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
   const changes: unknown[] = [];
   await renderBulk({

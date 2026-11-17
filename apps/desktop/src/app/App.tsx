@@ -530,6 +530,15 @@ function AppContent() {
   // moves the shared version, which reloads the list.
   const reportChange = useTicketChanged();
   const bulk = useBulkEdit(reportChange);
+  // A restore or a download from Drive replaced the whole Workspace: the
+  // selection, the opened pages and a failed bulk change describe the old one.
+  // The report reloads the list through the shared version.
+  const replaceWorkspace = async () => {
+    setSelected(null);
+    clearOpened();
+    bulk.reset();
+    await workspaceReplaced();
+  };
   const openNotifiedTicket = (reference: string) => {
     setInboxTarget(null);
     setSelected(reference);
@@ -1039,13 +1048,7 @@ function AppContent() {
                                       selected={settingsSection}
                                       onSelect={setSettingsSection}
                                       onOpenInbox={() => setView("inbox")}
-                                      onRestore={async () => {
-                                        setSelected(null);
-                                        clearOpened();
-                                        bulk.reset();
-                                        await workspaceReplaced();
-                                        await refresh();
-                                      }}
+                                      onRestore={replaceWorkspace}
                                     />
                                   )}
                                 {view === "attachments" &&
