@@ -125,6 +125,8 @@ test("a created row settles into place", async () => {
   const { rerender } = render(<List tickets={[ticket(1)]} />);
   rerender(<List tickets={[ticket(1), ticket(2)]} />);
   await waitFor(() => expect(rowOf("Ticket 2").style.opacity).toBe("1"));
+  // Settled, the row carries no blur filter at all.
+  await waitFor(() => expect(rowOf("Ticket 2").style.filter).toBe("none"));
 });
 
 test("a trashed row stays while it fades and its space closes", async () => {

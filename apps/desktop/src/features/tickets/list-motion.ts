@@ -33,6 +33,9 @@ export function listMotion() {
       opacity: 1,
       y: 0,
       filter: "blur(0px)",
+      // Settled rows drop the filter itself: a resting blur(0px) still keeps a
+      // compositing layer on every row of a long list.
+      transitionEnd: { filter: "none" },
       ...(space && { height: "auto" }),
       transition: {
         default: enter,
