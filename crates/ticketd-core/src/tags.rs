@@ -16,8 +16,9 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 pub(crate) fn for_ticket(connection: &Connection, id: &str) -> Result<Vec<String>, Error> {
-    let mut statement = connection
-        .prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name")?;
+    let mut statement = connection.prepare_cached(
+        "SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name",
+    )?;
     Ok(statement
         .query_map([id], |row| row.get(0))?
         .collect::<Result<_, _>>()?)

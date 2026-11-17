@@ -4,7 +4,7 @@ pub struct TicketWithUpdate {
     pub latest_update: Option<crate::LatestUpdate>,
 }
 
-use crate::{Error, Ticket, Workspace, hierarchy, listed_ticket_from_row, relationships, tags};
+use crate::{Error, Ticket, Workspace, listed_ticket_from_row, read_scope, relationships};
 use crate::{Status, StatusCounts};
 use rusqlite::{params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
@@ -163,34 +163,31 @@ impl Workspace {
     /// Find non-trashed tickets, newest first unless the filter asks for workflow order.
     /// Tags use AND semantics.
     pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
-        let (conditions, mut values) = self.filter_conditions(filter)?;
-        let mut sql = format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0{conditions}",
-            crate::readiness::indicator_sql("t")
-        );
-        match filter.order {
-            TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
-            TicketOrder::Workflow => sql.push_str(&format!(
-                " ORDER BY {}, t.number DESC",
-                Status::workflow_order_sql("t.status")
-            )),
-        }
-        sql.push_str(" LIMIT ? OFFSET ?");
-        values.push(i64::from(filter.limit.clamp(1, 100)).into());
-        values.push(i64::from(filter.offset).into());
-        let mut statement = self.connection.prepare(&sql)?;
-        let mut tickets = statement
-            .query_map(params_from_iter(values), listed_ticket_from_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        for ticket in &mut tickets {
-            ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
-            relationships::populate(&self.connection, ticket)?;
-            hierarchy::populate(&self.connection, ticket)?;
-            crate::duplicates::populate(&self.connection, ticket)?;
-            crate::source::populate(&self.connection, ticket)?;
-            crate::activities::populate_update(&self.connection, ticket)?;
-        }
-        Ok(tickets)
+        read_scope::run(&self.connection, |connection| {
+            let (conditions, mut values) = self.filter_conditions(filter)?;
+            let mut sql = format!(
+                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+                crate::readiness::indicator_sql("t")
+            );
+            match filter.order {
+                TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
+                TicketOrder::Workflow => sql.push_str(&format!(
+                    " ORDER BY {}, t.number DESC",
+                    Status::workflow_order_sql("t.status")
+                )),
+            }
+            sql.push_str(" LIMIT ? OFFSET ?");
+            values.push(i64::from(filter.limit.clamp(1, 100)).into());
+            values.push(i64::from(filter.offset).into());
+            let mut statement = connection.prepare_cached(&sql)?;
+            let mut tickets = statement
+                .query_map(params_from_iter(values), listed_ticket_from_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            for ticket in &mut tickets {
+                crate::hydrate(connection, ticket)?;
+            }
+            Ok(tickets)
+        })
     }
 
     /// Metadata projection of the existing filtered page. Body, activity, parent,
@@ -202,72 +199,72 @@ impl Workspace {
         ids: Option<&[String]>,
         prerequisites: bool,
     ) -> Result<TicketMetadataPage, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let (conditions, mut values) = self.filter_conditions(filter)?;
-        let mut sql = format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE t.trashed = 0{conditions}",
-            crate::readiness::indicator_sql("t")
-        );
-        if let Some(ids) = ids {
-            if ids.len() > 250 {
-                return Err(Error::InvalidBatch(
-                    "Metadata selection exceeds 250 identities".into(),
+        read_scope::run(&self.connection, |tx| {
+            let (conditions, mut values) = self.filter_conditions(filter)?;
+            let mut sql = format!(
+                "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+                crate::readiness::indicator_sql("t")
+            );
+            if let Some(ids) = ids {
+                if ids.len() > 250 {
+                    return Err(Error::InvalidBatch(
+                        "Metadata selection exceeds 250 identities".into(),
+                    ));
+                }
+                sql.push_str(&format!(
+                    " AND t.id IN ({})",
+                    vec!["?"; ids.len()].join(",")
                 ));
+                values.extend(ids.iter().cloned().map(Value::from));
             }
-            sql.push_str(&format!(
-                " AND t.id IN ({})",
-                vec!["?"; ids.len()].join(",")
-            ));
-            values.extend(ids.iter().cloned().map(Value::from));
-        }
-        match filter.order {
-            TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
-            TicketOrder::Workflow => sql.push_str(&format!(
-                " ORDER BY {}, t.number DESC",
-                Status::workflow_order_sql("t.status")
-            )),
-        }
-        sql.push_str(" LIMIT ? OFFSET ?");
-        values.push(i64::from(filter.limit.clamp(1, 100)).into());
-        values.push(i64::from(filter.offset).into());
-        let mut statement = tx.prepare(&sql)?;
-        let mut items = statement
-            .query_map(params_from_iter(values), |row| {
-                let status: String = row.get(3)?;
-                Ok(TicketMetadata {
-                    id: row.get(0)?,
-                    reference: row.get(1)?,
-                    title: row.get(2)?,
-                    status: status.parse().map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            3,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?,
-                    trashed: row.get(4)?,
-                    project_id: row.get(5)?,
-                    plan_id: row.get(6)?,
-                    availability: row.get(8)?,
-                    updated_at: row.get(7)?,
-                    source: None,
-                    prerequisites: None,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        let mut omitted = false;
-        for ticket in &mut items {
-            if prerequisites {
-                ticket.source = crate::source::availability_projection(&tx, &ticket.id)?;
-                let mut blockers = relationships::prerequisites(&tx, &ticket.id, Some(51))?;
-                omitted |= blockers.len() > 50;
-                blockers.truncate(50);
-                ticket.prerequisites = Some(blockers);
+            match filter.order {
+                TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
+                TicketOrder::Workflow => sql.push_str(&format!(
+                    " ORDER BY {}, t.number DESC",
+                    Status::workflow_order_sql("t.status")
+                )),
             }
-        }
-        tx.commit()?;
-        Ok(TicketMetadataPage { items, omitted })
+            sql.push_str(" LIMIT ? OFFSET ?");
+            values.push(i64::from(filter.limit.clamp(1, 100)).into());
+            values.push(i64::from(filter.offset).into());
+            let mut statement = tx.prepare(&sql)?;
+            let mut items = statement
+                .query_map(params_from_iter(values), |row| {
+                    let status: String = row.get(3)?;
+                    Ok(TicketMetadata {
+                        id: row.get(0)?,
+                        reference: row.get(1)?,
+                        title: row.get(2)?,
+                        status: status.parse().map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                3,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                        trashed: row.get(4)?,
+                        project_id: row.get(5)?,
+                        plan_id: row.get(6)?,
+                        availability: row.get(8)?,
+                        updated_at: row.get(7)?,
+                        source: None,
+                        prerequisites: None,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            let mut omitted = false;
+            for ticket in &mut items {
+                if prerequisites {
+                    ticket.source = crate::source::availability_projection(tx, &ticket.id)?;
+                    let mut blockers = relationships::prerequisites(tx, &ticket.id, Some(51))?;
+                    omitted |= blockers.len() > 50;
+                    blockers.truncate(50);
+                    ticket.prerequisites = Some(blockers);
+                }
+            }
+            Ok(TicketMetadataPage { items, omitted })
+        })
     }
 
     /// Return the same filtered ticket page with bounded authored progress.
@@ -275,47 +272,47 @@ impl Workspace {
         &self,
         filter: &TicketFilter,
     ) -> Result<Vec<TicketWithUpdate>, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let tickets = self.find_tickets(filter)?;
-        let result = tickets
-            .into_iter()
-            .map(|ticket| {
-                let latest_update = crate::activities::latest(&tx, &ticket.id)?;
-                Ok(TicketWithUpdate {
-                    ticket,
-                    latest_update,
+        read_scope::run(&self.connection, |tx| {
+            self.find_tickets(filter)?
+                .into_iter()
+                .map(|ticket| {
+                    let latest_update = crate::activities::latest(tx, &ticket.id)?;
+                    Ok(TicketWithUpdate {
+                        ticket,
+                        latest_update,
+                    })
                 })
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
-        tx.commit()?;
-        Ok(result)
+                .collect()
+        })
     }
 
     /// Count the tickets of the whole filtered result set by status, ignoring its paging.
     /// Uses the same conditions as [`Workspace::find_tickets`].
     pub fn count_tickets(&self, filter: &TicketFilter) -> Result<StatusCounts, Error> {
-        let (conditions, values) = self.filter_conditions(filter)?;
-        let sql = format!(
-            "SELECT t.status, COUNT(*) FROM tickets t WHERE t.trashed = 0{conditions} GROUP BY t.status"
-        );
-        let mut statement = self.connection.prepare(&sql)?;
-        let rows = statement
-            .query_map(params_from_iter(values), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut counts = StatusCounts::default();
-        for (status, count) in rows {
-            match status.parse::<Status>()? {
-                Status::Todo => counts.todo = count,
-                Status::InProgress => counts.in_progress = count,
-                Status::InReview => counts.in_review = count,
-                Status::Done => counts.done = count,
-                Status::Canceled => counts.canceled = count,
-                Status::Duplicate => counts.duplicate = count,
+        read_scope::run(&self.connection, |connection| {
+            let (conditions, values) = self.filter_conditions(filter)?;
+            let sql = format!(
+                "SELECT t.status, COUNT(*) FROM tickets t WHERE t.trashed = 0{conditions} GROUP BY t.status"
+            );
+            let mut statement = connection.prepare_cached(&sql)?;
+            let rows = statement
+                .query_map(params_from_iter(values), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut counts = StatusCounts::default();
+            for (status, count) in rows {
+                match status.parse::<Status>()? {
+                    Status::Todo => counts.todo = count,
+                    Status::InProgress => counts.in_progress = count,
+                    Status::InReview => counts.in_review = count,
+                    Status::Done => counts.done = count,
+                    Status::Canceled => counts.canceled = count,
+                    Status::Duplicate => counts.duplicate = count,
+                }
             }
-        }
-        Ok(counts)
+            Ok(counts)
+        })
     }
 
     /// Search saved content using a literal, ASCII case-insensitive substring.
@@ -332,27 +329,24 @@ impl Workspace {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        if let Some(id) = project {
-            self.show_project(id)?;
-        }
-        let mut statement = self.connection.prepare(&format!(
+        read_scope::run(&self.connection, |connection| {
+            if let Some(id) = project {
+                self.show_project(id)?;
+            }
+            let mut statement = connection.prepare(&format!(
             "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5",
             crate::readiness::indicator_sql("t")
         ))?;
-        let mut tickets = statement
-            .query_map(
-                params![query, project, unlinked, limit.clamp(1, 100), offset],
-                listed_ticket_from_row,
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-        for ticket in &mut tickets {
-            ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
-            relationships::populate(&self.connection, ticket)?;
-            hierarchy::populate(&self.connection, ticket)?;
-            crate::duplicates::populate(&self.connection, ticket)?;
-            crate::source::populate(&self.connection, ticket)?;
-            crate::activities::populate_update(&self.connection, ticket)?;
-        }
-        Ok(tickets)
+            let mut tickets = statement
+                .query_map(
+                    params![query, project, unlinked, limit.clamp(1, 100), offset],
+                    listed_ticket_from_row,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            for ticket in &mut tickets {
+                crate::hydrate(connection, ticket)?;
+            }
+            Ok(tickets)
+        })
     }
 }

@@ -884,12 +884,12 @@ impl Workspace {
     }
 
     pub fn automation(&self, id: &str) -> Result<Automation, Error> {
-        one(&self.connection, id)
+        self.read(|_| one(&self.connection, id))
     }
 
     /// The Automations that are not deleted, newest first.
     pub fn automations(&self) -> Result<Vec<Automation>, Error> {
-        load(&self.connection, None)
+        self.read(|_| load(&self.connection, None))
     }
 
     /// Switches an Automation on or off for this device. Switching on is refused

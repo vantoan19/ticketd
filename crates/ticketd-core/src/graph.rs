@@ -49,236 +49,236 @@ pub struct DependencyGraph {
 
 impl Workspace {
     pub fn dependency_graph(&self, reference: &str) -> Result<DependencyGraph, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let root = relationships::id(&tx, reference)?;
-        let mut ids = vec![root.clone()];
-        let mut depths = HashMap::from([(root.clone(), 0)]);
-        let mut frontier = vec![root];
-        let mut candidates = BTreeSet::new();
-        let mut omitted_neighbors = false;
-        let mut incomplete = false;
-        let mut work = 0;
-        for depth in 0..=MAX_DEPTH {
-            if frontier.is_empty() {
-                break;
-            }
-            // Each term is independently limited before the UNION. The two covering
-            // indexes make the budget effective even for very high-degree tickets.
-            let quota = (MAX_WORK - work) / (frontier.len() * 2);
-            if quota == 0 {
-                incomplete = true;
-                break;
-            }
-            let mut terms = Vec::new();
-            let mut parameters = Vec::new();
-            for id in &frontier {
-                for (column, other, outgoing) in [
-                    ("dependent_id", "blocker_id", 0),
-                    ("blocker_id", "dependent_id", 1),
-                ] {
-                    // Neighbors are chosen by ticket number so the same ones are shown on
-                    // every read, whatever their opaque ids happen to be.
-                    terms.push(format!("SELECT ? AS root, {outgoing} AS outgoing, neighbor FROM (SELECT d.{other} AS neighbor FROM dependencies d JOIN tickets t ON t.id = d.{other} WHERE d.{column} = ? ORDER BY t.number LIMIT {})", quota + 1));
-                    parameters.push(id.clone());
-                    parameters.push(id.clone());
-                }
-            }
-            let mut statement = tx.prepare(&terms.join(" UNION ALL "))?;
-            let rows = statement
-                .query_map(rusqlite::params_from_iter(parameters), |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, bool>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
-            // Blockers take the node budget before dependents; the sort is stable, so
-            // each group keeps its ticket-number order.
-            let mut rows = rows;
-            rows.sort_by_key(|(_, outgoing, _)| *outgoing);
-            let mut seen_per_direction: HashMap<(String, bool), usize> = HashMap::new();
-            let mut next = Vec::new();
-            for (id, outgoing, neighbor) in rows {
-                let count = seen_per_direction
-                    .entry((id.clone(), outgoing))
-                    .or_default();
-                *count += 1;
-                if *count > quota {
-                    incomplete = true;
-                    continue;
-                }
-                work += 1;
-                let edge = if outgoing {
-                    (id.clone(), neighbor.clone())
-                } else {
-                    (neighbor.clone(), id.clone())
-                };
-                candidates.insert(edge);
-                if let std::collections::hash_map::Entry::Vacant(entry) =
-                    depths.entry(neighbor.clone())
-                {
-                    if depth == MAX_DEPTH || ids.len() == MAX_NODES {
-                        omitted_neighbors = true;
-                    } else {
-                        entry.insert(depth + 1);
-                        ids.push(neighbor.clone());
-                        next.push(neighbor);
-                    }
-                }
-            }
-            frontier = next;
-        }
-        omitted_neighbors |= incomplete;
-        let (nodes, references) = graph_nodes(&tx, &ids, &BTreeSet::new())?;
-        let mut edges = Vec::new();
-        let mut omitted_edges = incomplete;
-        for (blocker, dependent) in candidates {
-            if let (Some(blocker), Some(dependent)) =
-                (references.get(&blocker), references.get(&dependent))
-            {
-                if edges.len() == MAX_EDGES {
-                    omitted_edges = true;
+        crate::read_scope::run(&self.connection, |tx| {
+            let root = relationships::id(tx, reference)?;
+            let mut ids = vec![root.clone()];
+            let mut depths = HashMap::from([(root.clone(), 0)]);
+            let mut frontier = vec![root];
+            let mut candidates = BTreeSet::new();
+            let mut omitted_neighbors = false;
+            let mut incomplete = false;
+            let mut work = 0;
+            for depth in 0..=MAX_DEPTH {
+                if frontier.is_empty() {
                     break;
                 }
-                edges.push(GraphEdge {
-                    blocker: blocker.clone(),
-                    dependent: dependent.clone(),
-                });
+                // Each term is independently limited before the UNION. The two covering
+                // indexes make the budget effective even for very high-degree tickets.
+                let quota = (MAX_WORK - work) / (frontier.len() * 2);
+                if quota == 0 {
+                    incomplete = true;
+                    break;
+                }
+                let mut terms = Vec::new();
+                let mut parameters = Vec::new();
+                for id in &frontier {
+                    for (column, other, outgoing) in [
+                        ("dependent_id", "blocker_id", 0),
+                        ("blocker_id", "dependent_id", 1),
+                    ] {
+                        // Neighbors are chosen by ticket number so the same ones are shown on
+                        // every read, whatever their opaque ids happen to be.
+                        terms.push(format!("SELECT ? AS root, {outgoing} AS outgoing, neighbor FROM (SELECT d.{other} AS neighbor FROM dependencies d JOIN tickets t ON t.id = d.{other} WHERE d.{column} = ? ORDER BY t.number LIMIT {})", quota + 1));
+                        parameters.push(id.clone());
+                        parameters.push(id.clone());
+                    }
+                }
+                let mut statement = tx.prepare(&terms.join(" UNION ALL "))?;
+                let rows = statement
+                    .query_map(rusqlite::params_from_iter(parameters), |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(statement);
+                // Blockers take the node budget before dependents; the sort is stable, so
+                // each group keeps its ticket-number order.
+                let mut rows = rows;
+                rows.sort_by_key(|(_, outgoing, _)| *outgoing);
+                let mut seen_per_direction: HashMap<(String, bool), usize> = HashMap::new();
+                let mut next = Vec::new();
+                for (id, outgoing, neighbor) in rows {
+                    let count = seen_per_direction
+                        .entry((id.clone(), outgoing))
+                        .or_default();
+                    *count += 1;
+                    if *count > quota {
+                        incomplete = true;
+                        continue;
+                    }
+                    work += 1;
+                    let edge = if outgoing {
+                        (id.clone(), neighbor.clone())
+                    } else {
+                        (neighbor.clone(), id.clone())
+                    };
+                    candidates.insert(edge);
+                    if let std::collections::hash_map::Entry::Vacant(entry) =
+                        depths.entry(neighbor.clone())
+                    {
+                        if depth == MAX_DEPTH || ids.len() == MAX_NODES {
+                            omitted_neighbors = true;
+                        } else {
+                            entry.insert(depth + 1);
+                            ids.push(neighbor.clone());
+                            next.push(neighbor);
+                        }
+                    }
+                }
+                frontier = next;
             }
-        }
-        tx.commit()?;
-        Ok(DependencyGraph {
-            nodes,
-            edges,
-            max_nodes: MAX_NODES,
-            max_depth: MAX_DEPTH,
-            max_edges: MAX_EDGES,
-            max_work: MAX_WORK,
-            omitted_neighbors,
-            omitted_edges,
-            truncated: omitted_neighbors || omitted_edges,
-            total_members: None,
-            outside_total: None,
+            omitted_neighbors |= incomplete;
+            let (nodes, references) = graph_nodes(tx, &ids, &BTreeSet::new())?;
+            let mut edges = Vec::new();
+            let mut omitted_edges = incomplete;
+            for (blocker, dependent) in candidates {
+                if let (Some(blocker), Some(dependent)) =
+                    (references.get(&blocker), references.get(&dependent))
+                {
+                    if edges.len() == MAX_EDGES {
+                        omitted_edges = true;
+                        break;
+                    }
+                    edges.push(GraphEdge {
+                        blocker: blocker.clone(),
+                        dependent: dependent.clone(),
+                    });
+                }
+            }
+            Ok(DependencyGraph {
+                nodes,
+                edges,
+                max_nodes: MAX_NODES,
+                max_depth: MAX_DEPTH,
+                max_edges: MAX_EDGES,
+                max_work: MAX_WORK,
+                omitted_neighbors,
+                omitted_edges,
+                truncated: omitted_neighbors || omitted_edges,
+                total_members: None,
+                outside_total: None,
+            })
         })
     }
     /// A bounded Plan scope, including prerequisites just outside that scope.
     pub fn plan_dependency_graph(&self, plan: &str) -> Result<DependencyGraph, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        crate::plans::get(&tx, plan)?;
-        let mut stmt = tx.prepare(
+        crate::read_scope::run(&self.connection, |tx| {
+            crate::plans::get(tx, plan)?;
+            let mut stmt = tx.prepare(
             "SELECT id FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT ?2",
         )?;
-        let mut ids = stmt
-            .query_map(rusqlite::params![plan, MAX_NODES + 1], |row| {
-                row.get::<_, String>(0)
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(stmt);
-        let total_members: usize = tx.query_row(
-            "SELECT COUNT(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0",
-            [plan],
-            |row| row.get(0),
-        )?;
-        let mut omitted_neighbors = ids.len() > MAX_NODES;
-        ids.truncate(MAX_NODES);
-        let members = ids.clone();
-        let mut boundaries = BTreeSet::new();
-        let mut outside_seen = BTreeSet::new();
-        let mut candidates = BTreeSet::new();
-        let mut incomplete = false;
-        let quota = MAX_WORK / (members.len().max(1) * 2);
-        if !members.is_empty() {
-            // Prerequisites and tickets that wait on a member, both outside the Plan.
-            let mut terms = Vec::new();
-            let mut parameters = Vec::new();
-            for id in &members {
-                for (column, other, outgoing) in [
-                    ("dependent_id", "blocker_id", 0),
-                    ("blocker_id", "dependent_id", 1),
-                ] {
-                    terms.push(format!("SELECT ? AS member, {outgoing} AS outgoing, neighbor FROM (SELECT {other} AS neighbor FROM dependencies WHERE {column} = ? ORDER BY {other} LIMIT {})", quota + 1));
-                    parameters.push(id);
-                    parameters.push(id);
-                }
-            }
-            let mut stmt = tx.prepare(&terms.join(" UNION ALL "))?;
-            let rows = stmt
-                .query_map(rusqlite::params_from_iter(parameters), |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, bool>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
+            let mut ids = stmt
+                .query_map(rusqlite::params![plan, MAX_NODES + 1], |row| {
+                    row.get::<_, String>(0)
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             drop(stmt);
-            let mut counts = HashMap::<(String, bool), usize>::new();
-            for (member, outgoing, neighbor) in rows {
-                let count = counts.entry((member.clone(), outgoing)).or_default();
-                *count += 1;
-                if *count > quota {
-                    incomplete = true;
-                    continue;
+            let total_members: usize = tx.query_row(
+                "SELECT COUNT(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0",
+                [plan],
+                |row| row.get(0),
+            )?;
+            let mut omitted_neighbors = ids.len() > MAX_NODES;
+            ids.truncate(MAX_NODES);
+            let members = ids.clone();
+            let mut boundaries = BTreeSet::new();
+            let mut outside_seen = BTreeSet::new();
+            let mut candidates = BTreeSet::new();
+            let mut incomplete = false;
+            let quota = MAX_WORK / (members.len().max(1) * 2);
+            if !members.is_empty() {
+                // Prerequisites and tickets that wait on a member, both outside the Plan.
+                let mut terms = Vec::new();
+                let mut parameters = Vec::new();
+                for id in &members {
+                    for (column, other, outgoing) in [
+                        ("dependent_id", "blocker_id", 0),
+                        ("blocker_id", "dependent_id", 1),
+                    ] {
+                        terms.push(format!("SELECT ? AS member, {outgoing} AS outgoing, neighbor FROM (SELECT {other} AS neighbor FROM dependencies WHERE {column} = ? ORDER BY {other} LIMIT {})", quota + 1));
+                        parameters.push(id);
+                        parameters.push(id);
+                    }
                 }
-                if !ids.contains(&neighbor) {
-                    // A member past the node limit is omitted, not an outside ticket.
-                    let in_plan = tx.query_row(
-                        "SELECT plan_id IS ?2 FROM tickets WHERE id = ?1",
-                        rusqlite::params![neighbor, plan],
-                        |row| row.get::<_, bool>(0),
-                    )?;
-                    if in_plan {
-                        omitted_neighbors = true;
+                let mut stmt = tx.prepare(&terms.join(" UNION ALL "))?;
+                let rows = stmt
+                    .query_map(rusqlite::params_from_iter(parameters), |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(stmt);
+                let mut counts = HashMap::<(String, bool), usize>::new();
+                for (member, outgoing, neighbor) in rows {
+                    let count = counts.entry((member.clone(), outgoing)).or_default();
+                    *count += 1;
+                    if *count > quota {
+                        incomplete = true;
                         continue;
                     }
-                    outside_seen.insert(neighbor.clone());
-                    if boundaries.len() == MAX_OUTSIDE {
-                        omitted_neighbors = true;
-                        continue;
+                    if !ids.contains(&neighbor) {
+                        // A member past the node limit is omitted, not an outside ticket.
+                        let in_plan = tx.query_row(
+                            "SELECT plan_id IS ?2 FROM tickets WHERE id = ?1",
+                            rusqlite::params![neighbor, plan],
+                            |row| row.get::<_, bool>(0),
+                        )?;
+                        if in_plan {
+                            omitted_neighbors = true;
+                            continue;
+                        }
+                        outside_seen.insert(neighbor.clone());
+                        if boundaries.len() == MAX_OUTSIDE {
+                            omitted_neighbors = true;
+                            continue;
+                        }
+                        boundaries.insert(neighbor.clone());
+                        ids.push(neighbor.clone());
                     }
-                    boundaries.insert(neighbor.clone());
-                    ids.push(neighbor.clone());
+                    candidates.insert(if outgoing {
+                        (member, neighbor)
+                    } else {
+                        (neighbor, member)
+                    });
                 }
-                candidates.insert(if outgoing {
-                    (member, neighbor)
-                } else {
-                    (neighbor, member)
-                });
             }
-        }
-        let (nodes, references) = graph_nodes(&tx, &ids, &boundaries)?;
-        let mut edges = Vec::new();
-        let mut omitted_edges = incomplete;
-        for (blocker, dependent) in candidates {
-            if edges.len() == MAX_EDGES {
-                omitted_edges = true;
-                break;
+            let (nodes, references) = graph_nodes(tx, &ids, &boundaries)?;
+            let mut edges = Vec::new();
+            let mut omitted_edges = incomplete;
+            for (blocker, dependent) in candidates {
+                if edges.len() == MAX_EDGES {
+                    omitted_edges = true;
+                    break;
+                }
+                if let (Some(blocker), Some(dependent)) =
+                    (references.get(&blocker), references.get(&dependent))
+                {
+                    edges.push(GraphEdge {
+                        blocker: blocker.clone(),
+                        dependent: dependent.clone(),
+                    });
+                }
             }
-            if let (Some(blocker), Some(dependent)) =
-                (references.get(&blocker), references.get(&dependent))
-            {
-                edges.push(GraphEdge {
-                    blocker: blocker.clone(),
-                    dependent: dependent.clone(),
-                });
-            }
-        }
-        omitted_neighbors |= incomplete;
-        tx.commit()?;
-        Ok(DependencyGraph {
-            nodes,
-            edges,
-            max_nodes: MAX_NODES,
-            max_depth: 1,
-            max_edges: MAX_EDGES,
-            max_work: MAX_WORK,
-            omitted_neighbors,
-            omitted_edges,
-            truncated: omitted_neighbors || omitted_edges,
-            total_members: Some(total_members),
-            outside_total: Some(outside_seen.len()),
+            omitted_neighbors |= incomplete;
+            Ok(DependencyGraph {
+                nodes,
+                edges,
+                max_nodes: MAX_NODES,
+                max_depth: 1,
+                max_edges: MAX_EDGES,
+                max_work: MAX_WORK,
+                omitted_neighbors,
+                omitted_edges,
+                truncated: omitted_neighbors || omitted_edges,
+                total_members: Some(total_members),
+                outside_total: Some(outside_seen.len()),
+            })
         })
     }
 }

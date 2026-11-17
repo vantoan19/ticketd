@@ -2841,8 +2841,9 @@ fn concurrent_inbox_reads_deliver_one_reminder_and_backup_restores_it() {
             let path = path.clone();
             let barrier = Arc::clone(&barrier);
             std::thread::spawn(move || {
-                let workspace = Workspace::open(path).unwrap();
+                let mut workspace = Workspace::open(path).unwrap();
                 barrier.wait();
+                workspace.deliver_due_reminders().unwrap();
                 workspace.inbox(100, 0).unwrap()
             })
         })
@@ -2856,11 +2857,12 @@ fn concurrent_inbox_reads_deliver_one_reminder_and_backup_restores_it() {
     );
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
-    let workspace = Workspace::open(path).unwrap();
+    let mut workspace = Workspace::open(path).unwrap();
     assert_eq!(
         workspace.reminder(&ticket.reference).unwrap().as_deref(),
         Some("2020-01-01T00:00:00Z")
     );
+    workspace.deliver_due_reminders().unwrap();
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }
 
@@ -3192,7 +3194,7 @@ fn reviewed_dependency_replacement_records_each_change_once_and_replay_is_silent
 }
 
 #[test]
-fn unread_observation_delivers_reminders_once_across_reopen() {
+fn reminders_are_delivered_once_across_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
@@ -3203,13 +3205,16 @@ fn unread_observation_delivers_reminders_once_across_reopen() {
         .unwrap();
     drop(workspace);
     let mut workspace = Workspace::open(&path).unwrap();
+    workspace.deliver_due_reminders().unwrap();
     assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 1);
+    workspace.deliver_due_reminders().unwrap();
     assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 1);
     let entries = workspace.inbox(100, 0).unwrap();
     assert_eq!(entries.len(), 1);
     workspace.set_inbox_read(&[entries[0].id], true).unwrap();
     drop(workspace);
-    let workspace = Workspace::open(&path).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.deliver_due_reminders().unwrap();
     assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 0);
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }
@@ -3221,12 +3226,15 @@ fn snoozing_or_dismissing_a_delivered_reminder_marks_it_read() {
     let ticket = ws.create_ticket("Remember").unwrap();
     ws.set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
         .unwrap();
+    ws.deliver_due_reminders().unwrap();
     assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 1);
     ws.set_reminder(&ticket.reference, Some("2999-01-01T00:00:00Z"))
         .unwrap();
+    ws.deliver_due_reminders().unwrap();
     assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 0);
     ws.set_reminder(&ticket.reference, Some("2020-01-02T00:00:00Z"))
         .unwrap();
+    ws.deliver_due_reminders().unwrap();
     assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 1);
     ws.set_reminder(&ticket.reference, None).unwrap();
     assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 0);
@@ -3244,10 +3252,13 @@ fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
         due_at: Some("2020-01-01T00:00:00Z".into()),
     };
     ws.write(Some("lost-response"), request()).unwrap();
+    ws.deliver_due_reminders().unwrap();
     assert_eq!(ws.inbox(100, 0).unwrap().len(), 1);
     ws.write(Some("lost-response"), request()).unwrap();
+    ws.deliver_due_reminders().unwrap();
     assert_eq!(ws.inbox(100, 0).unwrap().len(), 1);
     ws.write(Some("new-occurrence"), request()).unwrap();
+    ws.deliver_due_reminders().unwrap();
     assert_eq!(ws.inbox(100, 0).unwrap().len(), 2);
 }
 

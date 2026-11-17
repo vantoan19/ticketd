@@ -36,7 +36,7 @@ pub(crate) fn prerequisites(
     } else {
         "tickets.number"
     };
-    let mut statement = connection.prepare(&format!("SELECT reference, title, status, trashed, tickets.number FROM dependencies JOIN tickets ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY {order} LIMIT ?2"))?;
+    let mut statement = connection.prepare_cached(&format!("SELECT reference, title, status, trashed, tickets.number FROM dependencies JOIN tickets ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY {order} LIMIT ?2"))?;
     let mut prerequisites = statement
         .query_map(
             params![ticket_id, limit.map(i64::from).unwrap_or(-1)],

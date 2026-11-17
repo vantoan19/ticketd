@@ -82,14 +82,12 @@ pub(crate) fn judge(
 
 /// The readiness of the ticket `id`, read from the connection's current state.
 pub(crate) fn of(connection: &Connection, id: &str) -> Result<Readiness, Error> {
-    let (status, trashed, held): (String, bool, bool) = connection.query_row(
-        &format!(
+    let (status, trashed, held): (String, bool, bool) = connection
+        .prepare_cached(&format!(
             "SELECT t.status, t.trashed, {} FROM tickets t WHERE t.id = ?1",
             crate::source::held_sql("t.id")
-        ),
-        [id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    )?;
+        ))?
+        .query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
     let status: Status = status.parse()?;
     if trashed || held || status != Status::Todo {
         return Ok(Readiness::NoReadyState);

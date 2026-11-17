@@ -60,26 +60,28 @@ pub struct WorkspaceInfo {
 
 impl Workspace {
     pub fn workspace_info(&self) -> Result<WorkspaceInfo, Error> {
-        let path = self
-            .connection
-            .path()
-            .filter(|path| !path.is_empty())
-            .ok_or_else(|| Error::Backup("workspace has no file path".into()))?
-            .to_owned();
-        let count = |sql: &str| -> Result<u64, Error> {
-            Ok(self.connection.query_row(sql, [], |row| row.get(0))?)
-        };
-        let format_version: u32 =
-            self.connection
-                .pragma_query_value(None, "user_version", |row| row.get(0))?;
-        Ok(WorkspaceInfo {
-            size_bytes: std::fs::metadata(&path)?.len(),
-            tickets: count("SELECT COUNT(*) FROM tickets WHERE trashed = 0")?,
-            documents: count("SELECT COUNT(*) FROM documents")?,
-            projects: count("SELECT COUNT(*) FROM projects")?,
-            active_plans: count("SELECT COUNT(*) FROM plans WHERE archived = 0")?,
-            path,
-            format_version,
+        self.read(|_| {
+            let path = self
+                .connection
+                .path()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| Error::Backup("workspace has no file path".into()))?
+                .to_owned();
+            let count = |sql: &str| -> Result<u64, Error> {
+                Ok(self.connection.query_row(sql, [], |row| row.get(0))?)
+            };
+            let format_version: u32 =
+                self.connection
+                    .pragma_query_value(None, "user_version", |row| row.get(0))?;
+            Ok(WorkspaceInfo {
+                size_bytes: std::fs::metadata(&path)?.len(),
+                tickets: count("SELECT COUNT(*) FROM tickets WHERE trashed = 0")?,
+                documents: count("SELECT COUNT(*) FROM documents")?,
+                projects: count("SELECT COUNT(*) FROM projects")?,
+                active_plans: count("SELECT COUNT(*) FROM plans WHERE archived = 0")?,
+                path,
+                format_version,
+            })
         })
     }
 }
