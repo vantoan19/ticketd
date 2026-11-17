@@ -71,11 +71,13 @@ pub(crate) enum Mode {
     Bulk,
 }
 
-/// How long a batch may take. A batch holds the Workspace's write lock until it ends,
-/// and every other writer (the CLI, another window, a sync run) waits for that lock no
-/// longer than the connection's busy timeout, which is also 10 seconds. A batch that
-/// ran past that would make them fail with "database is locked", so it stops first
-/// and rolls back instead.
+/// How long a batch may take. It is one of the bounds on a request that came with batches
+/// (`docs/cli.md`: size, operations, individual edits and time), so that a plan nobody is
+/// watching cannot run without end; a batch that runs past it rolls back instead of
+/// committing part of a plan. It is checked between operations, so one slow operation can
+/// still overrun it. It is not derived from the connection's busy timeout, which also
+/// happens to be 10 seconds: a batch holds the Workspace's write lock until it ends, so a
+/// long one makes other writers wait, but this limit does not promise they stay under it.
 const BATCH_TIME_LIMIT: Duration = Duration::from_secs(10);
 
 /// The time a batch may take.
