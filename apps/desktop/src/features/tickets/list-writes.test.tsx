@@ -17,6 +17,7 @@ import type { Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { plansClient } from "@/lib/api/plans";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { deferred } from "@/lib/workspace-reads/test-support";
 import { MarkDuplicateDialog } from "./MarkDuplicateDialog";
 import { TestOpenTicket } from "./open-ticket/testing";
@@ -71,6 +72,7 @@ let stored: Ticket;
 // What the next source refresh finds, and whether the list can be read.
 let changedBySources = true;
 let listFails = false;
+let refreshFails = false;
 // While set, a failing list read waits for the test to let it fail.
 let listGate: Promise<void> | null = null;
 beforeEach(() => {
@@ -78,6 +80,7 @@ beforeEach(() => {
   stored = ticket;
   changedBySources = true;
   listFails = false;
+  refreshFails = false;
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
       switch (command) {
@@ -113,6 +116,7 @@ beforeEach(() => {
           };
           return null;
         case "refresh_sources":
+          if (refreshFails) throw new Error("offline");
           if (changedBySources)
             stored = { ...stored, title: "Source, refreshed" };
           return {
@@ -281,9 +285,9 @@ const turns = async () => {
 };
 
 /** Renders the Ticket and the list, both read once, then clicks Refresh sources. */
-async function clickRefreshSources() {
+async function clickRefreshSources(signal = fakeChangeSignal()) {
   render(
-    <TestOpenTicket ticket={ticket}>
+    <TestOpenTicket ticket={ticket} signal={signal}>
       <Page />
       <Sources />
     </TestOpenTicket>,
@@ -316,12 +320,23 @@ test("refreshing sources that found something reads the list once and re-reads t
   expect(loads.tickets()).toBe(1);
 });
 
-test("refreshing sources that found nothing reads the list once and reports no write", async () => {
+test("refreshing sources that found nothing still reports the run it wrote, and reads the list once", async () => {
   changedBySources = false;
-  const loads = await clickRefreshSources();
+  const signal = fakeChangeSignal();
+  const loads = await clickRefreshSources(signal);
+  // The run wrote its status, so the token is caught up (the poll starts no
+  // second wave) and the open Ticket's "Refreshed" time is read again.
+  expect(signal.catchUps).toBe(1);
   expect(loads.lists()).toBe(1);
-  // Nothing changed, so the open Ticket has nothing to re-read.
-  expect(loads.tickets()).toBe(0);
+  expect(loads.tickets()).toBe(1);
+});
+
+test("a refresh that failed still reports the run it recorded", async () => {
+  refreshFails = true;
+  const signal = fakeChangeSignal();
+  const loads = await clickRefreshSources(signal);
+  expect(signal.catchUps).toBe(1);
+  expect(loads.lists()).toBe(1);
 });
 
 test.each([true, false])(

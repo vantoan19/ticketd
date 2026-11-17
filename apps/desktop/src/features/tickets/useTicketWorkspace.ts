@@ -369,10 +369,8 @@ export function useTicketWorkspace(
    */
   async function refreshSources(ticket?: string) {
     setSourceRefresh({ running: true, report: null, error: "", errorAt: null });
-    let found = false;
     try {
       const report = await sourcesClient.refresh(ticket);
-      found = report.imported.length > 0 || report.updated.length > 0;
       setSourceRefresh({ running: false, report, error: "", errorAt: null });
     } catch (reason) {
       setSourceRefresh({
@@ -382,15 +380,13 @@ export function useTicketWorkspace(
         errorAt: new Date().toISOString(),
       });
     }
-    // One list read per click, and a failed one is explained. When Tickets
-    // changed, the write report moves the shared version, which reloads the
-    // list; otherwise the click reloads it itself, for the sources' health.
-    if (found) {
-      explainAfter.current = generation.current;
-      await wrote();
-    } else {
-      await refresh({ reportFailure: true });
-    }
+    // Every run writes (the sources' health, and each confirmed Ticket's
+    // refresh time), even a failed one or one that imported nothing. Its write
+    // report catches the token up, so the poll starts no second wave, and moves
+    // the shared version, which reloads the list once. That reload explains its
+    // failure.
+    explainAfter.current = generation.current;
+    await wrote();
   }
   function setSource(next: string) {
     setSourceFilter(next);
