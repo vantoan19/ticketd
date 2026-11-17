@@ -5,6 +5,7 @@ import { cn } from "cn";
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
+import { scrollHost } from "@/components/ui/motion";
 import { HighlightGroup } from "@/components/ui/highlight-group";
 import { RowHighlight } from "@/components/ui/row-highlight";
 
@@ -21,6 +22,11 @@ function DropdownMenuPortal({
     <DropdownMenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />
   );
 }
+
+// The lists scroll their rows, so they are `layoutScroll` hosts: the highlight
+// Glide measures its old row against the scroll (DESIGN.md section 12).
+const ScrollingContent = scrollHost(DropdownMenuPrimitive.Content);
+const ScrollingSubContent = scrollHost(DropdownMenuPrimitive.SubContent);
 
 function DropdownMenuTrigger({
   ...props
@@ -54,7 +60,8 @@ function DropdownMenuContent({
   const group = React.useId();
   return (
     <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.Content
+      <ScrollingContent
+        layoutScroll
         ref={contentRef}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
@@ -71,7 +78,7 @@ function DropdownMenuContent({
         }}
       >
         <HighlightGroup value={group}>{children}</HighlightGroup>
-      </DropdownMenuPrimitive.Content>
+      </ScrollingContent>
     </DropdownMenuPrimitive.Portal>
   );
 }
@@ -115,13 +122,14 @@ function DropdownMenuItem({
       )}
       {...props}
     >
-      <RowHighlight />
       {children}
       {reason && (
         <span id={reasonId} data-slot="dropdown-menu-item-reason">
           {reason}
         </span>
       )}
+      {/* After the children: styles.css reads `> svg:first-child` for the reason's indent. */}
+      <RowHighlight />
     </DropdownMenuPrimitive.Item>
   );
 }
@@ -270,7 +278,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:text-accent-foreground data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:text-accent-foreground data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       {...props}
@@ -296,7 +304,8 @@ function DropdownMenuSubContent({
   const group = React.useId();
   return (
     <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.SubContent
+      <ScrollingSubContent
+        layoutScroll
         ref={contentRef}
         data-slot="dropdown-menu-sub-content"
         collisionPadding={collisionPadding}
@@ -308,7 +317,7 @@ function DropdownMenuSubContent({
         {...props}
       >
         <HighlightGroup value={group}>{children}</HighlightGroup>
-      </DropdownMenuPrimitive.SubContent>
+      </ScrollingSubContent>
     </DropdownMenuPrimitive.Portal>
   );
 }

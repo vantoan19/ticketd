@@ -4486,12 +4486,14 @@ kbd,
 .ui-button-attention svg {
   color: var(--status-blocked);
 }
-/* The slot opens by height (Expand); an open slot holds 40px even when the
-   condition has cleared, so nothing moves under the pointer. */
+/* The slot opens by height (Expand). The 40px is held by a block inside the
+   Expand body, not by the body's own min-height, which would start the track
+   at 40px and leave nothing to animate. The block stays when the condition
+   has cleared, so nothing moves under the pointer. */
 .workspace-band-slot {
   flex: none;
 }
-.workspace-band-slot[data-open="true"] .ui-expand-body {
+.workspace-band-reserve {
   min-height: 40px;
 }
 .workspace-band-slot .workspace-band {

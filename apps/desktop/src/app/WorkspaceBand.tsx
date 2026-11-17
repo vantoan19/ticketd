@@ -47,7 +47,9 @@ export function BandSlot({
   const expanded = open && phase.settled;
   return (
     <div className="workspace-band-slot" data-open={expanded}>
-      <Expand open={expanded}>{children}</Expand>
+      <Expand open={expanded}>
+        <div className="workspace-band-reserve">{children}</div>
+      </Expand>
     </div>
   );
 }

@@ -108,6 +108,19 @@ it("the band opens a frame after it mounts and stays until its closing is done",
   expect(slot()).toBeNull();
 });
 
+it("the band's 40px is held inside the Expand body, so the height has room to animate", () => {
+  // Even with no band content (the condition has cleared) the reserve stays.
+  const { container } = render(<BandSlot open>{null}</BandSlot>);
+  const reserve = container.querySelector(
+    ".ui-expand-body > .workspace-band-reserve",
+  );
+  expect(reserve).not.toBeNull();
+  // The body must not carry the 40px itself: a min-height there starts the
+  // 0fr to 1fr track at 40px and nothing is left to interpolate.
+  expect(styles).not.toMatch(/\.workspace-band-slot[^{]*\.ui-expand-body/);
+  expect(styles).toMatch(/\.workspace-band-reserve \{\s*min-height: 40px/);
+});
+
 it("a band that is there when the window opens is simply open", () => {
   const { container } = render(<Slot open />);
   expect(
