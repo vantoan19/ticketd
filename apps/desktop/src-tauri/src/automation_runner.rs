@@ -8,6 +8,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 use ticketd_automation_runner::{Notifier, Runner};
+use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::Error;
 
 use crate::chats::Chats;
@@ -18,7 +19,7 @@ const NOTIFICATION_TARGET: &str = "automation";
 
 /// Shows a Notify me step's notification from here, not from the page: a run goes
 /// on while the window is hidden to the tray, and must not depend on the page.
-fn notifier(app: AppHandle) -> Notifier {
+pub fn notifier(app: AppHandle) -> Notifier {
     Arc::new(move |notification| {
         app.notification()
             .builder()
@@ -50,26 +51,39 @@ pub fn open_on_click(app: &AppHandle) {
 /// nothing new in the event log, one reads each cursor and writes nothing.
 const TICK: Duration = Duration::from_secs(5);
 
-/// The one Automation runner of this process, created the first time anything needs
-/// it, so that the loop and the commands that end runs reach the same one. It asks
-/// the Chats for the host each time, so it follows Chat being switched off and on.
+/// The one Automation runner of this process, so that the loop and the commands that
+/// end runs reach the same one. It is created when the desktop starts, before any command
+/// is served and whether or not Chat is on: creating it ends the runs a process that is
+/// gone left Running, and a Stop that came first would find them already ended. It
+/// asks the Chats for the host each time, so it follows Chat being switched off and on.
 #[derive(Clone)]
 pub struct AutomationRunner {
     chats: Arc<Chats>,
-    app: AppHandle,
+    open_workspace: WorkspaceOpener,
+    notifier: Notifier,
     runner: Arc<Mutex<Option<Runner>>>,
 }
 
 impl AutomationRunner {
-    pub fn new(chats: Arc<Chats>, app: AppHandle) -> Self {
+    pub fn new(chats: Arc<Chats>, open_workspace: WorkspaceOpener, notifier: Notifier) -> Self {
         Self {
             chats,
-            app,
+            open_workspace,
+            notifier,
             runner: Arc::default(),
         }
     }
 
-    /// The runner. Creating it ends the runs a process that is gone left Running.
+    /// Creates the runner now, ending the runs a process that is gone left Running.
+    /// Called once while the desktop starts. A failure (the Workspace is unreadable) is
+    /// logged and tried again by whatever needs the runner next.
+    pub fn start_up(&self) {
+        if let Err(error) = self.get() {
+            eprintln!("ticketd: the Automation runner could not start: {error}");
+        }
+    }
+
+    /// The runner, created if `start_up` could not.
     pub fn get(&self) -> Result<Runner, Error> {
         let mut slot = self.runner.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(runner) = slot.as_ref() {
@@ -77,9 +91,9 @@ impl AutomationRunner {
         }
         let chats = Arc::clone(&self.chats);
         let runner = Runner::new(
-            Arc::new(crate::open_workspace),
+            Arc::clone(&self.open_workspace),
             Arc::new(move || chats.automation_host()),
-            notifier(self.app.clone()),
+            Arc::clone(&self.notifier),
         )?;
         *slot = Some(runner.clone());
         Ok(runner)
@@ -88,7 +102,7 @@ impl AutomationRunner {
     /// Whether a pass may run: false while Chat is off, a backup is being restored or
     /// the host could not start, when nothing is matched.
     fn host_available(&self) -> bool {
-        self.chats.automation_host().is_some()
+        self.chats.automation_host().is_ok()
     }
 
     /// One pass. A pass that fails (the Workspace is busy or unreadable) is tried
@@ -123,3 +137,7 @@ pub fn start(runner: AutomationRunner, app: AppHandle) {
         }
     });
 }
+
+#[cfg(test)]
+#[path = "automation_runner_tests.rs"]
+mod tests;

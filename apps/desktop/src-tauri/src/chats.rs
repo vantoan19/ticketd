@@ -840,6 +840,11 @@ impl Chats {
                 "The workspace is being restored from a backup. Try again when it has finished.",
             ));
         }
+        Ok(self.started_or_start()?)
+    }
+
+    /// The one host, started if it has not been yet.
+    fn started_or_start(&self) -> Result<ChatHost, HostError> {
         let mut host = lock(&self.host);
         if let Some(host) = host.as_ref() {
             return Ok(host.clone());
@@ -853,10 +858,17 @@ impl Chats {
         Ok(started)
     }
 
-    /// The host for Automation runs, or `None` while nothing may run: Chat is off,
-    /// a backup is being restored, or the host could not start.
-    pub fn automation_host(&self) -> Option<ChatHost> {
-        self.host().ok()
+    /// The host for Automation runs, or why nothing may run: Chat is off
+    /// (`HostError::TurnedOff`), a backup is being restored (`HostError::Restoring`), or
+    /// the host could not start. A run whose agent cannot start says which.
+    pub fn automation_host(&self) -> Result<ChatHost, HostError> {
+        if !self.enabled() {
+            return Err(HostError::TurnedOff);
+        }
+        if self.restoring.load(Ordering::SeqCst) {
+            return Err(HostError::Restoring);
+        }
+        self.started_or_start()
     }
 
     /// Starts the host if Chat is on, so its change signal can be watched.

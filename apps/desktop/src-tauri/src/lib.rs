@@ -1652,8 +1652,14 @@ pub fn run() -> Result<(), tauri::Error> {
             });
             let version = app.package_info().version.to_string();
             let chat = chat_commands::ChatBridge::new(version);
-            let runner =
-                automation_runner::AutomationRunner::new(chat.chats(), app.handle().clone());
+            let runner = automation_runner::AutomationRunner::new(
+                chat.chats(),
+                std::sync::Arc::new(open_workspace),
+                automation_runner::notifier(app.handle().clone()),
+            );
+            // Before any command is served, so a Stop never meets runs the previous
+            // process left Running.
+            runner.start_up();
             automation_runner::start(runner.clone(), app.handle().clone());
             tauri::Manager::manage(app, runner);
             tauri::Manager::manage(app, chat);

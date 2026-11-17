@@ -10,7 +10,7 @@ use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    HostError, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
     NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
     SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
@@ -140,7 +140,7 @@ impl Fixture {
         let serving = host.clone();
         let runner = Runner::new(
             opener(&path),
-            Arc::new(move || Some(serving.clone())),
+            Arc::new(move || Ok(serving.clone())),
             Arc::new(|_| Ok(())),
         )
         .unwrap();
@@ -606,7 +606,7 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
     let host = ChatHost::new(opener(&f.path), Vec::new()).unwrap();
     Runner::new(
         opener(&f.path),
-        Arc::new(move || Some(host.clone())),
+        Arc::new(move || Ok(host.clone())),
         Arc::new(|_| Ok(())),
     )
     .unwrap();
@@ -1017,7 +1017,7 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
     let host = f.host.clone();
     let runner = Runner::new(
         flaky,
-        Arc::new(move || Some(host.clone())),
+        Arc::new(move || Ok(host.clone())),
         Arc::new(|_| Ok(())),
     )
     .unwrap();
@@ -1085,7 +1085,7 @@ async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_p
     let counted = told.clone();
     let runner = Runner::new(
         opener(&f.path),
-        Arc::new(move || Some(host.clone())),
+        Arc::new(move || Ok(host.clone())),
         Arc::new(move |_| {
             *counted.lock().unwrap() += 1;
             Ok(())
@@ -1134,7 +1134,7 @@ impl Fixture {
         let counted = told.clone();
         let runner = Runner::new(
             opener(&self.path),
-            Arc::new(move || Some(host.clone())),
+            Arc::new(move || Ok(host.clone())),
             Arc::new(move |_| {
                 *counted.lock().unwrap() += 1;
                 Ok(())
@@ -1216,6 +1216,43 @@ async fn trashing_a_working_agents_chat_fails_the_step_and_runs_its_failure_path
     assert_eq!(run.status, AutomationRunStatus::Completed, "{run:?}");
     assert_eq!(run.steps[0].status, AutomationStepStatus::Failed);
     assert_eq!(*told.lock().unwrap(), 1);
+}
+
+/// The host source says why there is no host when the run's agent is about to start:
+/// the run ends saying that, not with the wording for a reason nobody knows.
+#[tokio::test(start_paused = true)]
+async fn a_run_whose_agent_cannot_start_for_want_of_a_host_says_why() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    const SERVING: u8 = 0;
+    const OFF: u8 = 1;
+    const RESTORING: u8 = 2;
+    for (state, said) in [
+        (OFF, "Chat was turned off while this run was going."),
+        (RESTORING, "A backup was restored while this run was going."),
+    ] {
+        let f = Fixture::new();
+        let answer = Arc::new(AtomicU8::new(SERVING));
+        let (host, asked) = (f.host.clone(), answer.clone());
+        let runner = Runner::new(
+            opener(&f.path),
+            Arc::new(move || match asked.load(Ordering::SeqCst) {
+                SERVING => Ok(host.clone()),
+                OFF => Err(HostError::TurnedOff),
+                _ => Err(HostError::Restoring),
+            }),
+            Arc::new(|_| Ok(())),
+        )
+        .unwrap();
+        f.tag("Fix login");
+        // The pass starts the run; Chat changes before its agent does.
+        runner.tick().unwrap();
+        answer.store(state, Ordering::SeqCst);
+        settle().await;
+
+        assert_eq!(f.needs_attention(), said);
+        assert_eq!(f.fake.opens().len(), 0);
+    }
 }
 
 /// A Stop or Delete that arrives after the run ended (it finished as the person pressed
@@ -1679,7 +1716,12 @@ async fn with_chat_off_ending_a_run_changes_only_its_record() {
     assert_eq!(f.runs()[0].status, AutomationRunStatus::Queued);
 
     // A runner with no Chat host to reach: Chat is off in this process.
-    let off = Runner::new(opener(&f.path), Arc::new(|| None), Arc::new(|_| Ok(()))).unwrap();
+    let off = Runner::new(
+        opener(&f.path),
+        Arc::new(|| Err(HostError::TurnedOff)),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
     off.tick().unwrap();
     let stopped = off.stop_run(&f.runs()[0].id).await.unwrap();
 

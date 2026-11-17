@@ -78,12 +78,8 @@ impl Fixture {
             Ok(())
         });
         let host = ChatHost::new(opener(&path), Vec::new()).unwrap();
-        let runner = Runner::new(
-            opener(&path),
-            Arc::new(move || Some(host.clone())),
-            notifier,
-        )
-        .unwrap();
+        let runner =
+            Runner::new(opener(&path), Arc::new(move || Ok(host.clone())), notifier).unwrap();
         Self {
             _dir: dir,
             path,
