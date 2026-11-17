@@ -14,7 +14,9 @@ import { useVisible } from "./visibility-context";
  * Reads `spec` with `args` (or nothing yet, with `skip`). Views using the same
  * read and arguments share one entry and one call. It fetches when it has no
  * value, after a change, after an own write or on `retry()`, and never while
- * hidden. A failed re-read keeps the last value.
+ * hidden. A failed re-read keeps the last value. A read that failed is read
+ * again only by `retry()`, by a change or write while it is shown, or when it
+ * is shown after a change it missed (not because another view of it mounted).
  */
 export function useRead<A, V>(
   spec: ReadSpec<A, V>,
@@ -24,24 +26,27 @@ export function useRead<A, V>(
   const visible = useVisible();
   const enabled = args !== skip && visible;
   // Properties are tracked: a view re-renders only for the ones it reads here.
+  const queryKey = readKey(spec, args);
   const query = useQuery(
     {
-      queryKey: readKey(spec, args),
+      queryKey,
       queryFn: () => spec.call(args as A),
-      enabled,
+      enabled: (entry) => enabled && reads.mayRead(entry),
+      meta: { visible: enabled },
     },
     reads.client,
   );
   const { failure } = useFailure(
     query,
-    JSON.stringify(readKey(spec, args)),
+    JSON.stringify(queryKey),
     args === skip ? "" : words(spec.failure, args),
   );
   const refetch = query.refetch;
   // Retry reads only what is read now: a leftover button (for a Ticket that has
-  // closed, or a hidden view) must not call the read or touch the entry.
+  // closed, or a hidden view) must not call the read or touch the entry. It
+  // resolves once a read made after it has answered (`Reads.reread`).
   const retry = useLatest(async () => {
-    if (enabled) await refetch().catch(() => {});
+    if (enabled) await reads.reread(queryKey, refetch);
   });
   // A skipped read is idle whatever its shared entry holds.
   const skipped = args === skip;
@@ -54,6 +59,12 @@ export function useRead<A, V>(
         ? "idle"
         : statusOf(query.data !== undefined, failure !== null, enabled),
     },
-    () => !skipped && query.data !== undefined && !query.isStale,
+    // A failed re-read leaves the value as old as the change that asked for it,
+    // though a read that waits for the next change is not "stale" to TanStack.
+    () =>
+      !skipped &&
+      query.data !== undefined &&
+      !query.isStale &&
+      !query.isRefetchError,
   );
 }

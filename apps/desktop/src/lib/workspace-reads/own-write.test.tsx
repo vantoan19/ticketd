@@ -143,6 +143,79 @@ describe("own write", () => {
     expect(call).toHaveBeenCalledTimes(1);
   });
 
+  it("resolves a Retry cancelled by the write only once the write's re-read has answered", async () => {
+    const catchUp = deferred<void>();
+    const signal = fakeChangeSignal(() => catchUp.promise);
+    const retried = deferred<string>();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockResolvedValueOnce("Before")
+      .mockReturnValueOnce(retried.promise)
+      .mockResolvedValue("After");
+    const { result } = mount(titleRead(call), signal);
+    await waitFor(() => expect(result.current.read.value).toBe("Before"));
+
+    let resolved = false;
+    act(() => {
+      void result.current.read.retry().then(() => {
+        resolved = true;
+      });
+    });
+    await settle();
+    expect(call).toHaveBeenCalledTimes(2);
+    // The write drops the Retry's read, which may not include it, and reads
+    // again once the token has been read.
+    act(() => void result.current.wrote());
+    retried.resolve("Before the write");
+    await settle();
+    expect(resolved).toBe(false);
+    expect(result.current.read.value).toBe("Before");
+
+    await act(async () => catchUp.resolve());
+    await waitFor(() => expect(resolved).toBe(true));
+    expect(result.current.read.value).toBe("After");
+    expect(call).toHaveBeenCalledTimes(3);
+  });
+
+  it("resolves a Retry at once when its view is hidden while it waits for the write's re-read", async () => {
+    const catchUp = deferred<void>();
+    const signal = fakeChangeSignal(() => catchUp.promise);
+    const retried = deferred<string>();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockResolvedValueOnce("Before")
+      .mockReturnValueOnce(retried.promise)
+      .mockResolvedValue("After");
+    const spec = titleRead(call, "retry-hidden");
+    let hidden = false;
+    const { result, rerender } = renderHook(
+      () => ({ read: useRead(spec, "T-1"), wrote: useWrote() }),
+      {
+        wrapper: ({ children }) => (
+          <TestReads signal={signal}>
+            <Visibility hidden={hidden}>{children}</Visibility>
+          </TestReads>
+        ),
+      },
+    );
+    await waitFor(() => expect(result.current.read.value).toBe("Before"));
+    let resolved = false;
+    act(() => {
+      void result.current.read.retry().then(() => {
+        resolved = true;
+      });
+    });
+    await settle();
+    act(() => void result.current.wrote());
+    await settle();
+    expect(resolved).toBe(false);
+
+    hidden = true;
+    rerender();
+    await settle();
+    expect(resolved).toBe(true);
+  });
+
   it("never rejects, even when the token cannot be read or a re-read fails", async () => {
     const signal = fakeChangeSignal(() =>
       Promise.reject(new Error("no token")),

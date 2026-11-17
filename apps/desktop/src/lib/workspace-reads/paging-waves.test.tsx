@@ -3,7 +3,9 @@ import { act, render, renderHook } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { pagedRead } from "./catalog";
+import type { Reads } from "./engine";
 import { fakeChangeSignal } from "./fake-signal";
+import { useReads } from "./reads-context";
 import { deferred, settle, wrap } from "./test-support";
 import { TestReads } from "./testing";
 import { usePagedRead } from "./use-paged-read";
@@ -244,6 +246,34 @@ describe("Retry", () => {
     expect(result.current.failure).toBeNull();
   });
 
+  it("resolves only once the missing page after a failed Show more has been read", async () => {
+    const signal = fakeChangeSignal();
+    const list = slowList("retry-more-resolves");
+    const { result } = renderHook(() => usePagedRead(list.spec, "T-1"), {
+      wrapper: wrap(signal),
+    });
+    await list.flush();
+    list.failing.add(2);
+    act(() => result.current.showMore());
+    await list.flush();
+    expect(result.current.failedMore).toBe(true);
+
+    list.failing.clear();
+    let resolved = false;
+    act(() => {
+      void result.current.retry().then(() => {
+        resolved = true;
+      });
+    });
+    await settle();
+    expect(list.offsets()).toEqual([0, 2, 2]);
+    expect(resolved).toBe(false);
+
+    await list.flush();
+    expect(resolved).toBe(true);
+    expect(result.current.value).toEqual(["g1-0", "g1-1", "g1-2", "g1-3"]);
+  });
+
   it("re-reads the loaded pages after a failed refresh", async () => {
     const signal = fakeChangeSignal();
     const list = slowList("retry-refresh");
@@ -268,5 +298,103 @@ describe("Retry", () => {
     await list.flush();
     expect(result.current.value).toEqual(["g2-0", "g2-1", "g2-2", "g2-3"]);
     expect(result.current.failure).toBeNull();
+  });
+});
+
+describe("a page nobody asks for any more", () => {
+  /**
+   * Two views of one list that a test closes or hides one at a time, and the
+   * handles to move the Workspace under them.
+   */
+  function open(key: string) {
+    const signal = fakeChangeSignal();
+    const list = slowList(key);
+    const control = {
+      close: [] as ((closed: boolean) => void)[],
+      hide: [] as ((hidden: boolean) => void)[],
+      reads: undefined as Reads | undefined,
+      states: [] as ReturnType<typeof usePagedRead<string, string[], Page>>[],
+    };
+    function Section({ index }: { index: number }) {
+      control.states[index] = usePagedRead(list.spec, "T-1");
+      return null;
+    }
+    function Host({ index }: { index: number }) {
+      const [closed, close] = useState(false);
+      const [hidden, hide] = useState(false);
+      control.close[index] = close;
+      control.hide[index] = hide;
+      return closed ? null : (
+        <Visibility hidden={hidden}>
+          <Section index={index} />
+        </Visibility>
+      );
+    }
+    function Probe() {
+      control.reads = useReads("test");
+      return null;
+    }
+    const views = (count: number) =>
+      render(
+        <TestReads signal={signal}>
+          <Probe />
+          {Array.from({ length: count }, (_, index) => (
+            <Host key={index} index={index} />
+          ))}
+        </TestReads>,
+      );
+    return { signal, list, control, views };
+  }
+
+  it("is not read when its view, closed while it loaded, is opened again after a change", async () => {
+    const { signal, list, control, views } = open("orphan-page");
+    views(1);
+    await list.flush();
+    act(() => control.states[0]!.showMore()); // page 2 is in flight
+    await settle();
+    act(() => control.close[0]!(true));
+    await settle();
+    list.generation.n = 2;
+    act(() => signal.change()); // drops the page in flight
+    await list.flush();
+
+    act(() => control.close[0]!(false));
+    await list.flush();
+    expect(list.offsets()).toEqual([0, 2, 0]);
+    expect(control.states[0]!.value).toEqual(["g2-0", "g2-1"]);
+  });
+
+  it("is forgotten when the Workspace is replaced while its hidden view waits to read it", async () => {
+    const { signal, list, control, views } = open("replaced-page");
+    views(1);
+    await list.flush();
+    act(() => control.states[0]!.showMore()); // page 2 is in flight
+    await settle();
+    act(() => control.hide[0]!(true));
+    list.generation.n = 2;
+    act(() => signal.change()); // drops it: wanted once page 0 is read again
+    await list.flush();
+
+    list.generation.n = 3;
+    await act(async () => control.reads!.replaced());
+    act(() => control.hide[0]!(false));
+    await list.flush();
+    expect(list.offsets()).toEqual([0, 2, 0]);
+    expect(control.states[0]!.value).toEqual(["g3-0", "g3-1"]);
+  });
+
+  it("is still read for the views that remain when another view of the list is closed", async () => {
+    const { signal, list, control, views } = open("shared-page");
+    views(2);
+    await list.flush();
+    act(() => control.states[0]!.showMore());
+    await settle();
+    list.generation.n = 2;
+    act(() => signal.change()); // page 2 is wanted after page 0's re-read, held
+    await settle();
+
+    act(() => control.close[1]!(true));
+    await list.flush();
+    expect(control.states[0]!.value).toEqual(["g2-0", "g2-1", "g2-2", "g2-3"]);
   });
 });

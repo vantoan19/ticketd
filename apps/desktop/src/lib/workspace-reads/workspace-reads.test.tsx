@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { read, skip, type ReadSpec, type Skip } from "./catalog";
+import type { ReadState } from "./read-state";
 import { fakeChangeSignal } from "./fake-signal";
 import { deferred, settle, wrap } from "./test-support";
 import { TestReads } from "./testing";
@@ -465,7 +466,7 @@ describe("catching up after a failed first read", () => {
     expect(call).toHaveBeenCalledTimes(2);
   });
 
-  it("reads again when a hidden read with no value is shown", async () => {
+  it("reads again when a hidden read with no value is shown after a change", async () => {
     const signal = fakeChangeSignal();
     const call = vi
       .fn<(reference: string) => Promise<string>>()
@@ -482,9 +483,118 @@ describe("catching up after a failed first read", () => {
     const { rerender } = render(tree(false));
     await screen.findByText("Couldn't load evidence");
     rerender(tree(true));
+    act(() => signal.change());
     await settle();
     expect(call).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("evidence")).toBeNull();
+
     rerender(tree(false));
     await screen.findByText("evidence");
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a failed read", () => {
+  function setup(withValue: boolean) {
+    const signal = fakeChangeSignal();
+    const call = vi.fn<(reference: string) => Promise<string>>();
+    if (withValue) call.mockResolvedValueOnce("good");
+    call.mockRejectedValueOnce(new Error("locked")).mockResolvedValue("fresh");
+    const spec = read({
+      key: `failed-${withValue}`,
+      call,
+      failure: "load the title",
+    });
+    const latest: ReadState<string>[] = [];
+    function View({ index }: { index: number }) {
+      const state = useRead(spec, "T-1");
+      latest[index] = state;
+      const shown = `${state.value ?? "-"}:${state.failure ? "failed" : "ok"}`;
+      return <output>{`${index}:${shown}`}</output>;
+    }
+    const tree = ({ second = false, hidden = false } = {}) => (
+      <TestReads signal={signal}>
+        <Visibility hidden={hidden}>
+          <View index={0} />
+          {second && <View index={1} />}
+        </Visibility>
+      </TestReads>
+    );
+    return { signal, call, latest, tree, kept: withValue ? "good" : "-" };
+  }
+  /** The read has failed once: with no value, or after a good one. */
+  async function failedOnce(withValue: boolean) {
+    const test = setup(withValue);
+    const view = render(test.tree());
+    if (withValue) {
+      await screen.findByText("0:good:ok");
+      act(() => test.signal.change());
+    }
+    await screen.findByText(`0:${test.kept}:failed`);
+    return { ...test, ...view };
+  }
+  const cases = [
+    ["no value", false],
+    ["a kept value", true],
+  ] as const;
+
+  it.each(cases)(
+    "with %s is not read again because another view of it mounted",
+    async (_, withValue) => {
+      const { call, tree, rerender, kept } = await failedOnce(withValue);
+      const calls = call.mock.calls.length;
+      rerender(tree({ second: true }));
+      await screen.findByText(`1:${kept}:failed`);
+      await settle();
+      expect(call).toHaveBeenCalledTimes(calls);
+    },
+  );
+
+  it.each(cases)(
+    "with %s is not read again when shown again with no change since",
+    async (_, withValue) => {
+      const { call, tree, rerender } = await failedOnce(withValue);
+      const calls = call.mock.calls.length;
+      rerender(tree({ hidden: true }));
+      await settle();
+      rerender(tree());
+      await settle();
+      expect(call).toHaveBeenCalledTimes(calls);
+    },
+  );
+
+  it.each(cases)(
+    "with %s is read once after a change, whatever the number of views",
+    async (_, withValue) => {
+      const { call, signal, tree, rerender } = await failedOnce(withValue);
+      rerender(tree({ second: true }));
+      await settle();
+      const calls = call.mock.calls.length;
+      act(() => signal.change());
+      await screen.findByText("1:fresh:ok");
+      expect(call).toHaveBeenCalledTimes(calls + 1);
+    },
+  );
+
+  it.each(cases)(
+    "with %s is read on Retry, even though nothing else would read it",
+    async (_, withValue) => {
+      const { call, latest, tree, rerender } = await failedOnce(withValue);
+      rerender(tree({ second: true }));
+      await settle();
+      const calls = call.mock.calls.length;
+      await act(async () => latest[1]!.retry());
+      expect(call).toHaveBeenCalledTimes(calls + 1);
+      expect(screen.getByText("0:fresh:ok")).toBeTruthy();
+    },
+  );
+
+  it("is not current while its re-read has failed, however many views are mounted", async () => {
+    const { latest, tree, rerender } = await failedOnce(true);
+    expect(latest[0]!.value).toBe("good");
+    expect(latest[0]!.current).toBe(false);
+    rerender(tree({ second: true }));
+    await settle();
+    expect(latest[1]!.current).toBe(false);
   });
 });

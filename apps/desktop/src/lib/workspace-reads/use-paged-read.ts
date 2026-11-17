@@ -34,13 +34,17 @@ export function usePagedRead<A, V, P>(
   const reads = useReads("usePagedRead");
   const visible = useVisible();
   const enabled = args !== skip && visible;
+  // The key as a value that changes only when the read's identity does.
+  const identity = JSON.stringify(readKey(spec, args));
+  const queryKey = useMemo(() => JSON.parse(identity) as unknown[], [identity]);
   const query = useInfiniteQuery(
     {
-      queryKey: readKey(spec, args),
+      queryKey,
       queryFn: ({ pageParam }) => spec.call(args as A, pageParam),
       initialPageParam: 0,
       getNextPageParam: (last, all) => spec.next(last, all) ?? undefined,
-      enabled,
+      enabled: (entry) => enabled && reads.mayRead(entry),
+      meta: { visible: enabled },
     },
     reads.client,
   );
@@ -50,7 +54,7 @@ export function usePagedRead<A, V, P>(
       : words(query.isFetchNextPageError ? spec.more : spec.failure, args);
   const { failure, more: failedMore } = useFailure(
     query,
-    JSON.stringify(readKey(spec, args)),
+    identity,
     action,
     query.isFetchNextPageError,
   );
@@ -59,9 +63,6 @@ export function usePagedRead<A, V, P>(
     () => (data === undefined ? undefined : spec.join(data.pages)),
     [data, spec],
   );
-  // The same key as a value that changes only when the read's identity does.
-  const identity = JSON.stringify(readKey(spec, args));
-  const queryKey = useMemo(() => JSON.parse(identity) as unknown[], [identity]);
   const refetch = query.refetch;
   const loadingMore = query.isFetchingNextPage;
   // The buttons may be from an earlier render, so they act on the latest one.
@@ -71,18 +72,19 @@ export function usePagedRead<A, V, P>(
     if (enabled) reads.showMore(queryKey);
   });
   // Retry repeats what failed: the page after a failed "Show more", the loaded
-  // pages after a failed re-read.
+  // pages after a failed re-read. It resolves once that read has answered.
   const retry = useLatest(async () => {
     if (!enabled) return;
-    if (failedMore) reads.showMore(queryKey, true);
-    else await refetch().catch(() => {});
+    await reads.reread(queryKey, () =>
+      failedMore ? reads.showMore(queryKey, true) : refetch(),
+    );
   });
   // A page asked for while hidden is read when the view is shown again, and is
-  // forgotten when the view goes away.
+  // forgotten when the last view of the read goes away.
   useEffect(() => {
     if (enabled) reads.resumeMore(queryKey);
   }, [reads, enabled, queryKey]);
-  useEffect(() => () => reads.dropMore(queryKey), [reads, queryKey]);
+  useEffect(() => reads.watchMore(queryKey), [reads, queryKey]);
   return withCurrent(
     {
       value,
@@ -94,6 +96,11 @@ export function usePagedRead<A, V, P>(
       showMore,
       loadingMore,
     },
-    () => query.data !== undefined && !query.isStale,
+    // A failed re-read leaves the pages as old as the change that asked for it;
+    // a failed "Show more" leaves them as current as they were read.
+    () =>
+      query.data !== undefined &&
+      !query.isStale &&
+      !(query.isRefetchError && !query.isFetchNextPageError),
   );
 }
