@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { syncApi, type SyncStatus } from "@/lib/sync-api";
 import { useWorkspaceChange } from "@/lib/workspace-change";
-import { SyncStatusContext, type SyncNavigation } from "./sync-status";
+import {
+  SyncNavigationContext,
+  SyncStatusContext,
+  type SyncNavigation,
+} from "./sync-status";
 
 const POLL_MS = 2000;
+
+/** The status the bridge sent is plain JSON, so equal text is an equal status. */
+const unchanged = (previous: SyncStatus | null, next: SyncStatus) =>
+  previous !== null && JSON.stringify(previous) === JSON.stringify(next);
 
 /**
  * Reads the sync status for every place that shows it. A Workspace that does not
@@ -17,10 +25,16 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
   // A read that started before a newer status arrived must not put the old one back.
   const generation = useRef(0);
   const navigation = useRef<SyncNavigation | null>(null);
+  // An idle poll finds the same status; keeping the old object re-renders nothing.
+  const show = useMemo(
+    () => (next: SyncStatus) =>
+      setStatus((previous) => (unchanged(previous, next) ? previous : next)),
+    [],
+  );
   const actions = useMemo(() => {
     const apply = (next: SyncStatus) => {
       generation.current += 1;
-      setStatus(next);
+      show(next);
     };
     return {
       apply,
@@ -31,11 +45,15 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
       },
       openSettings: () => navigation.current?.openSettings(),
       openReview: () => navigation.current?.openReview(),
-      setNavigation: (next: SyncNavigation) => {
-        navigation.current = next;
-      },
     };
-  }, []);
+  }, [show]);
+  // Its own context: the shell registers navigation without following the status.
+  const setNavigation = useMemo(
+    () => (next: SyncNavigation) => {
+      navigation.current = next;
+    },
+    [],
+  );
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -49,14 +67,13 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
       void syncApi
         .status()
         .then((next) => {
-          if (mounted.current && started === generation.current)
-            setStatus(next);
+          if (mounted.current && started === generation.current) show(next);
         })
         .catch(() => {
           // Keep what is shown; the next read tries again.
         });
     },
-    [],
+    [show],
   );
   const version = useWorkspaceChange();
   useEffect(read, [read, version]);
@@ -67,5 +84,9 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [read, syncing]);
   const value = useMemo(() => ({ status, ...actions }), [status, actions]);
-  return <SyncStatusContext value={value}>{children}</SyncStatusContext>;
+  return (
+    <SyncNavigationContext value={setNavigation}>
+      <SyncStatusContext value={value}>{children}</SyncStatusContext>
+    </SyncNavigationContext>
+  );
 }
