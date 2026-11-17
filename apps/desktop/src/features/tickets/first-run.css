@@ -5,6 +5,11 @@
   min-width: 0;
   min-height: 0;
 }
+.first-run-host[data-leaving] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
 .first-run-host .ui-management-page-guide {
   width: 100%;
   max-width: 608px;
@@ -12,12 +17,12 @@
   padding: 96px 24px 40px;
   gap: 10px;
 }
-.first-run-host .ui-management-page-guide > [data-slot="steps"] {
+.first-run-host .first-run-steps {
   margin-top: 18px;
 }
 .first-run-host .ui-guide-title {
   margin-top: 10px;
 }
-.first-run-host .ui-guide-hint {
+.first-run-host .first-run-hint {
   margin-top: 14px;
 }

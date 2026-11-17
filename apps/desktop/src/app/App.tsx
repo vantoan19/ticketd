@@ -4,6 +4,7 @@ import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
 import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
 import { requestTicketUpdate } from "@/features/tickets/activity-composer-request";
 import { FirstRunGuide } from "@/features/tickets/FirstRunGuide";
+import { Presence } from "@/components/ui/motion";
 import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
 import {
   TicketCommandContext,
@@ -1254,18 +1255,21 @@ function AppContent() {
                                     setPaletteOpen(true);
                                   }}
                                 >
-                                  {firstRun &&
-                                    view === "tickets" &&
-                                    graphOrigin === null && (
-                                      <FirstRunGuide
-                                        disabledReason={createDisabledReason}
-                                        onCreate={(trigger) => {
-                                          createTriggerRef.current = trigger;
-                                          setCreateStatus(undefined);
-                                          setCreating(true);
-                                        }}
-                                      />
-                                    )}
+                                  <Presence>
+                                    {firstRun &&
+                                      view === "tickets" &&
+                                      graphOrigin === null && (
+                                        <FirstRunGuide
+                                          key="first-run"
+                                          disabledReason={createDisabledReason}
+                                          onCreate={(trigger) => {
+                                            createTriggerRef.current = trigger;
+                                            setCreateStatus(undefined);
+                                            setCreating(true);
+                                          }}
+                                        />
+                                      )}
+                                  </Presence>
                                   <TicketListSync value={patchTicket}>
                                     <InboxTriageProvider
                                       active={view === "inbox"}

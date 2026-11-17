@@ -70,6 +70,7 @@ import {
   type SnoozeChoice,
 } from "./inboxModel";
 import "./inbox.css";
+import { EntrySlot, UnreadDot, useArrivals } from "./inbox-motion";
 import { Reference } from "@/components/ui/reference";
 import { ConflictReview } from "@/features/sync-review/ConflictReview";
 import {
@@ -261,6 +262,7 @@ function InboxRow({
   onMark,
   snooze,
   disabledReason,
+  arriving = false,
 }: {
   reference: string | null;
   title: string;
@@ -274,91 +276,98 @@ function InboxRow({
   onMark: () => void;
   disabledReason?: string | null;
   snooze?: (openRequest: number) => React.ReactNode;
+  /** A new entry opens its space; one already shown just renders. */
+  arriving?: boolean;
 }) {
   const now = useNow();
   const [snoozeRequest, setSnoozeRequest] = useState(0);
   return (
-    <li
-      className="inbox-entry"
-      data-read={read}
-      aria-current={current || undefined}
-    >
-      <span className="inbox-dot">
-        {!read && <StatusDot tone="unread" size={6} />}
-      </span>
-      <button
-        type="button"
-        className="inbox-ticket"
-        aria-keyshortcuts={snooze ? "E H" : "E"}
-        onClick={(event) => {
-          onOpen();
-          // Opening the detail must leave entry shortcuts on the entry.
-          event.currentTarget.focus();
-        }}
-        onKeyDown={(event) => {
-          if (
-            event.defaultPrevented ||
-            event.metaKey ||
-            event.ctrlKey ||
-            event.altKey
-          )
-            return;
-          if (disabledReason && ["e", "h"].includes(event.key.toLowerCase())) {
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-          if (event.key === "e" || event.key === "E") {
-            event.preventDefault();
-            event.stopPropagation();
-            onMark();
-          } else if (snooze && (event.key === "h" || event.key === "H")) {
-            event.preventDefault();
-            event.stopPropagation();
-            setSnoozeRequest((value) => value + 1);
-          } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            // ↑/↓ move between rows, as in every list.
-            event.preventDefault();
-            const rows = [
-              ...(event.currentTarget
-                .closest(".inbox-body")
-                ?.querySelectorAll<HTMLElement>(".inbox-ticket") ?? []),
-            ];
-            const index = rows.indexOf(event.currentTarget);
-            rows[index + (event.key === "ArrowDown" ? 1 : -1)]?.focus();
-          }
-        }}
+    <EntrySlot arriving={arriving}>
+      <div
+        className="inbox-entry"
+        data-read={read}
+        aria-current={current || undefined}
       >
-        <span className="inbox-title-line">
-          <span className="inbox-icon">{icon}</span>
-          {reference && <Reference>{reference}</Reference>}
-          <span className="inbox-title">{title}</span>
-          {!read && <span className="sr-only">Unread</span>}
+        <span className="inbox-dot">
+          <UnreadDot read={read} />
         </span>
-        <span className="inbox-summary">{summary}</span>
-      </button>
-      <span className="inbox-trailing">
-        <Tooltip content={formatDateTime(timestamp)} side="top">
-          <time dateTime={timestamp} tabIndex={-1}>
-            {compactAgo(timestamp, now) ?? timestamp}
-          </time>
-        </Tooltip>
-        <span className="inbox-actions">
-          {snooze?.(snoozeRequest)}
-          <IconButton
-            disabled={!!disabledReason}
-            label={
-              disabledReason ? `${markLabel} · ${disabledReason}` : markLabel
+        <button
+          type="button"
+          className="inbox-ticket"
+          aria-keyshortcuts={snooze ? "E H" : "E"}
+          onClick={(event) => {
+            onOpen();
+            // Opening the detail must leave entry shortcuts on the entry.
+            event.currentTarget.focus();
+          }}
+          onKeyDown={(event) => {
+            if (
+              event.defaultPrevented ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.altKey
+            )
+              return;
+            if (
+              disabledReason &&
+              ["e", "h"].includes(event.key.toLowerCase())
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
             }
-            tooltipSide="top"
-            aria-keyshortcuts="E"
-            onClick={onMark}
-          >
-            {read ? <Circle /> : <Check />}
-          </IconButton>
+            if (event.key === "e" || event.key === "E") {
+              event.preventDefault();
+              event.stopPropagation();
+              onMark();
+            } else if (snooze && (event.key === "h" || event.key === "H")) {
+              event.preventDefault();
+              event.stopPropagation();
+              setSnoozeRequest((value) => value + 1);
+            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              // ↑/↓ move between rows, as in every list.
+              event.preventDefault();
+              const rows = [
+                ...(event.currentTarget
+                  .closest(".inbox-body")
+                  ?.querySelectorAll<HTMLElement>(".inbox-ticket") ?? []),
+              ];
+              const index = rows.indexOf(event.currentTarget);
+              rows[index + (event.key === "ArrowDown" ? 1 : -1)]?.focus();
+            }
+          }}
+        >
+          <span className="inbox-title-line">
+            <span className="inbox-icon">{icon}</span>
+            {reference && <Reference>{reference}</Reference>}
+            <span className="inbox-title">{title}</span>
+            {!read && <span className="sr-only">Unread</span>}
+          </span>
+          <span className="inbox-summary">{summary}</span>
+        </button>
+        <span className="inbox-trailing">
+          <Tooltip content={formatDateTime(timestamp)} side="top">
+            <time dateTime={timestamp} tabIndex={-1}>
+              {compactAgo(timestamp, now) ?? timestamp}
+            </time>
+          </Tooltip>
+          <span className="inbox-actions">
+            {snooze?.(snoozeRequest)}
+            <IconButton
+              disabled={!!disabledReason}
+              label={
+                disabledReason ? `${markLabel} · ${disabledReason}` : markLabel
+              }
+              tooltipSide="top"
+              aria-keyshortcuts="E"
+              onClick={onMark}
+            >
+              {read ? <Circle /> : <Check />}
+            </IconButton>
+          </span>
         </span>
-      </span>
-    </li>
+      </div>
+    </EntrySlot>
   );
 }
 
@@ -368,8 +377,10 @@ function SyncRow({
   mark,
   open,
   disabledReason,
+  arriving,
 }: {
   entry: SyncEntry;
+  arriving: boolean;
   disabledReason?: string | null;
   mark: (read: boolean) => void;
   open: () => void;
@@ -389,6 +400,7 @@ function SyncRow({
       read={entry.read}
       timestamp={entry.timestamp}
       current={false}
+      arriving={arriving}
       disabledReason={disabledReason ?? null}
       markLabel={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
       onOpen={() => {
@@ -585,6 +597,14 @@ function InboxContent({
   const groups = [...grouped].filter(
     ([group, items]) =>
       items.length || (group === "Needs you" && projection.approvals.length),
+  );
+  const arrivals = useArrivals(
+    [
+      ...projection.approvals.map((chat) => `chat:${chat.id}`),
+      ...groups.flatMap(([, items]) => items.map((item) => String(item.id))),
+    ],
+    !loading,
+    pages,
   );
   async function markChat(id: string, read: boolean) {
     if (blocked) return;
@@ -849,6 +869,7 @@ function InboxContent({
                 projection.approvals.map((chat) => (
                   <InboxRow
                     key={`chat:${chat.id}`}
+                    arriving={arrivals.has(`chat:${chat.id}`)}
                     reference={
                       chat.tickets[0]?.reference ?? chat.first_ticket ?? null
                     }
@@ -909,6 +930,7 @@ function InboxContent({
                   return (
                     <SyncRow
                       key={e.id}
+                      arriving={arrivals.has(String(e.id))}
                       entry={{
                         ...e,
                         read:
@@ -930,6 +952,7 @@ function InboxContent({
                 return (
                   <InboxRow
                     key={e.id}
+                    arriving={arrivals.has(String(e.id))}
                     reference={e.reference}
                     title={e.title}
                     summary={
