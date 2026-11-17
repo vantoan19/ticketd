@@ -142,10 +142,20 @@ pub(crate) fn suggestion_candidates(
     under_way: [(Status, usize); 2],
     references: &str,
 ) -> Result<Vec<ActiveTicket>, Error> {
+    // The first `count` in that order are among the first `count` of the Project and the
+    // first `count` of all: at most as many of all's first come from the Project as it
+    // has. Each reads the trashed and status index in order and stops.
     let first = |status: &str, count: &str| {
+        let changed_last = |project: &str| {
+            format!(
+                "SELECT * FROM (SELECT {ACTIVE_COLUMNS}, number FROM tickets WHERE trashed = 0 AND status = {status}{project}
+                   ORDER BY updated_at DESC, number DESC LIMIT {count})"
+            )
+        };
         format!(
-            "SELECT * FROM (SELECT {ACTIVE_COLUMNS}, number FROM tickets WHERE trashed = 0 AND status = {status}
-               ORDER BY (?1 IS NULL OR project_id IS NOT ?1), updated_at DESC, number DESC LIMIT {count})"
+            "{} UNION {}",
+            changed_last(" AND project_id = ?1"),
+            changed_last("")
         )
     };
     let mut statement = connection.prepare_cached(&format!(
@@ -242,6 +252,16 @@ fn trigram_hits(phrase: &str) -> String {
         "SELECT ht.id FROM ticket_search_fts JOIN tickets ht ON ht.rowid = ticket_search_fts.rowid WHERE ticket_search_fts MATCH {phrase}
          UNION SELECT ha.ticket_id FROM activity_search_fts JOIN activities ha ON ha.rowid = activity_search_fts.rowid WHERE activity_search_fts MATCH {phrase}"
     )
+}
+
+/// The `trashed` term of a page query. Newest first, a page reads tickets in number order
+/// and stops at the page's end; the `+` keeps SQLite from reading the trashed and status
+/// index instead, which would make it sort every ticket to find the first few.
+pub(crate) fn trashed_column(order: TicketOrder) -> &'static str {
+    match order {
+        TicketOrder::Newest => "+t.trashed",
+        TicketOrder::Workflow => "t.trashed",
+    }
 }
 
 /// What a search for some text reads. A trigram index can only narrow a search for three
@@ -360,8 +380,9 @@ impl Workspace {
     pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
         read_scope::run(&self.connection, |connection| {
             let (conditions, mut values) = self.filter_conditions(filter)?;
+            let trashed = trashed_column(filter.order);
             let mut sql = format!(
-                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE {trashed} = 0{conditions}",
                 crate::readiness::indicator_sql("t")
             );
             match filter.order {
@@ -399,8 +420,9 @@ impl Workspace {
     pub fn find_ticket_rows(&self, filter: &TicketFilter) -> Result<Vec<TicketRow>, Error> {
         read_scope::run(&self.connection, |connection| {
             let (conditions, mut values) = self.filter_conditions(filter)?;
+            let trashed = trashed_column(filter.order);
             let mut sql = format!(
-                "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+                "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE {trashed} = 0{conditions}",
                 crate::readiness::indicator_sql("t")
             );
             match filter.order {
@@ -458,8 +480,9 @@ impl Workspace {
     ) -> Result<TicketMetadataPage, Error> {
         read_scope::run(&self.connection, |tx| {
             let (conditions, mut values) = self.filter_conditions(filter)?;
+            let trashed = trashed_column(filter.order);
             let mut sql = format!(
-                "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+                "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE {trashed} = 0{conditions}",
                 crate::readiness::indicator_sql("t")
             );
             if let Some(ids) = ids {

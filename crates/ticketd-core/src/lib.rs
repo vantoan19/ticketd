@@ -822,7 +822,7 @@ impl Workspace {
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
         read_scope::run(&self.connection, |connection| {
             let mut statement = connection.prepare_cached(&format!(
-                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
+                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE +t.trashed = ?1 ORDER BY t.number DESC",
                 readiness::indicator_sql("t")
             ))?;
             let mut tickets = statement

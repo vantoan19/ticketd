@@ -499,7 +499,7 @@ fn graph_search(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 fn read_models(tx: &Transaction<'_>) -> Result<(), Error> {
     tx.execute_batch(
         "CREATE INDEX IF NOT EXISTS duplicate_tickets_canonical ON duplicate_tickets(canonical_id, source_id);
-         CREATE INDEX IF NOT EXISTS tickets_trashed_status ON tickets(trashed, status);
+         CREATE INDEX IF NOT EXISTS tickets_trashed_status ON tickets(trashed, status, updated_at, number);
          CREATE INDEX IF NOT EXISTS tickets_recent ON tickets(trashed, updated_at, number);
          DROP TRIGGER IF EXISTS ticket_graph_fts_update;
          CREATE TRIGGER ticket_graph_fts_update AFTER UPDATE OF title, body ON tickets
