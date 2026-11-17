@@ -177,3 +177,20 @@ it("reduced motion and a held key make every move instant", () => {
     expect(onFlights).not.toHaveBeenCalled();
   }
 });
+
+it("a render that changes neither the columns nor the hold reads no tokens", () => {
+  const { update } = setup(columns([1, 2], [3]));
+  const reads = vi.spyOn(window, "getComputedStyle");
+  update({}); // a pointer move re-renders the board with the same columns
+  expect(reads).not.toHaveBeenCalled();
+});
+
+it("motion tokens are read again for every move, so a held key stops the next flight", () => {
+  const { onFlights, update } = setup(columns([1, 2], [3]));
+  update({ columns: columns([2], [3, 1]) });
+  expect(onFlights).toHaveBeenCalledTimes(1);
+  const restoreInstant = applyTokens(instantTokens);
+  update({ columns: columns([1, 2], [3]) });
+  restoreInstant();
+  expect(onFlights).toHaveBeenCalledTimes(1);
+});

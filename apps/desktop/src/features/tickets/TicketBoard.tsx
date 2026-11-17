@@ -242,6 +242,13 @@ export function TicketBoard({
     initial: motion.initial(false),
     animate: motion.animate(position, false),
   });
+  // The smooth spring, read once for the render and handed to every card: a
+  // drag re-renders the board on each pointer move, and a card reading its own
+  // tokens would cost a style read per card. It is not kept between renders, so
+  // a held key still reaches the next motion.
+  const smooth = spring("smooth");
+  // Columns that open or fold move the ones after them (see layoutDependency).
+  const unfoldedKey = [...unfolded].join(",");
   const scope = {
     showPlan: !workspace.navigation.plan,
     showProject: workspace.navigation.project === "all",
@@ -342,6 +349,9 @@ export function TicketBoard({
               <Card variant="well" asChild key={status}>
                 <m.section
                   {...columnEnter(position)}
+                  layout="position"
+                  layoutDependency={unfoldedKey}
+                  transition={{ layout: smooth }}
                   className="board-column"
                   data-folded=""
                   {...columnProps}
@@ -399,6 +409,7 @@ export function TicketBoard({
               arrival={arrivals.get(ticket.reference)}
               workspace={workspace}
               scope={scope}
+              smooth={smooth}
               selected={workspace.selected === ticket.reference}
               dragging={drag?.ticket.reference === ticket.reference}
               needsReview={needsReview.has(ticket.id)}
@@ -439,6 +450,9 @@ export function TicketBoard({
               <m.section
                 className="board-column"
                 {...columnEnter(position)}
+                layout="position"
+                layoutDependency={unfoldedKey}
+                transition={{ layout: smooth }}
                 {...columnProps}
               >
                 <header className="board-column-header" tabIndex={-1}>
@@ -560,6 +574,7 @@ export function TicketBoard({
               ticket={drag.ticket}
               workspace={workspace}
               scope={scope}
+              smooth={smooth}
               selected={false}
               dragging={false}
               needsReview={needsReview.has(drag.ticket.id)}
@@ -593,6 +608,7 @@ export function TicketBoard({
                   ticket={ticket}
                   workspace={workspace}
                   scope={scope}
+                  smooth={smooth}
                   selected={false}
                   dragging={false}
                   needsReview={needsReview.has(ticket.id)}
@@ -633,6 +649,7 @@ function BoardCard({
   ticket,
   workspace,
   scope,
+  smooth,
   selected,
   dragging,
   needsReview,
@@ -647,6 +664,8 @@ function BoardCard({
   ticket: Ticket;
   workspace: TicketWorkspace;
   scope: Parameters<typeof rowContextItem>[1];
+  /** The smooth spring the board read for this render. */
+  smooth: ReturnType<typeof spring>;
   selected: boolean;
   dragging: boolean;
   needsReview: boolean;
@@ -667,7 +686,7 @@ function BoardCard({
   // How a card that arrived enters, fixed when it mounts. No motion means no
   // entrance: a card is never left collapsed for a frame.
   const [entrance] = useState(() =>
-    fresh && !copy && spring("smooth").duration > 0 ? cardEntrance() : null,
+    fresh && !copy && smooth.duration > 0 ? cardEntrance(smooth) : null,
   );
   const [entered, setEntered] = useState(false);
   const attention = useInboxAttention();
@@ -707,7 +726,7 @@ function BoardCard({
       // when the card's place changes.
       layout={copy ? false : "position"}
       layoutDependency={place}
-      transition={{ layout: spring("smooth") }}
+      transition={{ layout: smooth }}
       initial={entrance ? entrance.from : false}
       animate={entrance ? entrance.to : {}}
       onAnimationComplete={() => setEntered(true)}
@@ -870,8 +889,7 @@ function arrivedAt(landed: number | undefined, entered: boolean | null) {
  * space is its height; the column's 6px gap closes with it, so the cards around
  * move apart only as it opens.
  */
-function cardEntrance() {
-  const grow = spring("smooth");
+function cardEntrance(grow: ReturnType<typeof spring>) {
   return {
     from: {
       opacity: 0,
