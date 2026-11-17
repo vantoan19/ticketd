@@ -294,8 +294,11 @@ core ends the runs in one transaction and returns the Chats of the steps that ha
 agent working, so a step that started meanwhile is stopped too, and the runner then
 asks the Chat host to close those agents (`ChatHost::end_run_agents`), which
 records the turn as stopped by ticketd (`StopReason::RunEnded`). The desktop
-commands make one call into the runner each. With Chat off the runner only changes
-the record. An Automation deleted on another desktop and brought here by Workspace
+commands make one call into the runner each. The desktop creates the runner when it
+starts, before any command is served and whether or not Chat is on: creating it ends
+the runs a process that is gone left Running. A Stop of a run that has already ended
+(it finished as the person pressed the button, or a restart ended it) returns the run
+as it ended, not an error. With Chat off the runner only changes the record. An Automation deleted on another desktop and brought here by Workspace
 sync is treated the same at the runner's next pass: its Queued runs never start
 and its Running runs end as after a local Delete. Run again on a finished run queues a new run for the same Workspace
 event, from the first step of the Automation as it is now; the finished run stays

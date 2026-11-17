@@ -1776,6 +1776,20 @@ async fn a_backup_that_cannot_be_restored_stops_no_chat() {
     );
 }
 
+/// What a backup lacks is more than tables (columns, triggers and unique indexes too),
+/// so the refusal names it without calling it one kind of thing.
+#[test]
+fn an_incomplete_backup_is_refused_listing_what_it_lacks_without_calling_it_tables() {
+    let reason = refusal(BackupCheck::MissingTables {
+        tables: vec!["notes".to_owned(), "chat_turns.ending".to_owned()],
+    });
+
+    assert_eq!(
+        reason.as_deref(),
+        Some("This backup is incomplete. It is missing: notes, chat_turns.ending.")
+    );
+}
+
 #[test]
 fn a_restore_that_replaced_the_data_is_a_success_whatever_followed_it() {
     let safety = || Ok(PathBuf::from("/backups/safety.sqlite3"));

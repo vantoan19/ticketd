@@ -227,8 +227,16 @@ fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
     let Ok(inspection) = open().and_then(|workspace| workspace.inspect_backup(backup)) else {
         return Ok(());
     };
-    Err(match inspection.check {
-        BackupCheck::Valid { .. } => return Ok(()),
+    match refusal(inspection.check) {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    }
+}
+
+/// Why a backup that was inspected cannot be restored, or `None` when it can.
+fn refusal(check: BackupCheck) -> Option<String> {
+    Some(match check {
+        BackupCheck::Valid { .. } => return None,
         BackupCheck::NewerFormat {
             backup_version,
             supported_version,
@@ -236,10 +244,13 @@ fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
             "This backup can't be restored by this version. It was saved by a newer ticketd (workspace format {backup_version}; this app reads up to {supported_version})."
         ),
         BackupCheck::NotTicketd => "This isn't a ticketd backup.".to_owned(),
-        BackupCheck::MissingTables { tables } => format!(
-            "This backup is incomplete. It is missing tables ticketd needs: {}.",
-            tables.join(", ")
-        ),
+        // What is missing is tables, columns, triggers and unique indexes alike.
+        BackupCheck::MissingTables { tables } => {
+            format!(
+                "This backup is incomplete. It is missing: {}.",
+                tables.join(", ")
+            )
+        }
         BackupCheck::CurrentWorkspace => "This is the current workspace.".to_owned(),
         BackupCheck::Damaged { reason } => {
             format!("This backup is damaged. It failed ticketd's checks: {reason}.")
