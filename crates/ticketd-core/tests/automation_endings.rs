@@ -260,3 +260,104 @@ fn a_run_that_needs_the_person_is_counted_and_one_that_was_answered_is_not() {
         assert_eq!(unread, counted as usize, "{cause:?}");
     }
 }
+
+const MANY: usize = 50;
+
+/// A Workspace with an Automation that has `MANY` runs: the first half Running, each
+/// on its agent step with a Chat, the rest Queued.
+struct Many {
+    _dir: tempfile::TempDir,
+    workspace: Workspace,
+    automation: String,
+    running: Vec<String>,
+}
+
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
+fn many_runs() -> Many {
+    let Setup {
+        _dir,
+        mut workspace,
+        automation,
+        ..
+    } = run_in(AutomationRunStatus::Queued);
+    for number in 1..MANY {
+        let ticket = workspace
+            .create_ticket(&format!("Fix login {number}"))
+            .unwrap();
+        workspace.add_tag(&ticket.reference, TAG).unwrap();
+    }
+    workspace.queue_automation_runs().unwrap();
+    let running = workspace.start_automation_runs(MANY / 2).unwrap();
+    for run in &running {
+        let begun = workspace.advance_automation_run(&run.id, None).unwrap();
+        assert!(matches!(begun, RunAction::RunAgent(_)), "{begun:?}");
+    }
+    Many {
+        _dir,
+        workspace,
+        automation,
+        running: running.into_iter().map(|run| run.id).collect(),
+    }
+}
+
+/// What a person can see of the runs and their inbox, with nothing that differs
+/// between two Workspaces (ids): each run as `seen`, the inbox entries, the count of
+/// runs needing them. Sorted, so the order the runs ended in is not compared.
+#[allow(clippy::unwrap_used)]
+fn records(workspace: &Workspace) -> (Vec<String>, usize, u32) {
+    let mut runs: Vec<_> = workspace
+        .all_automation_runs()
+        .unwrap()
+        .iter()
+        .map(|run| format!("{:?}", seen(run)))
+        .collect();
+    runs.sort();
+    let inbox = workspace.inbox(1000, 0).unwrap().len();
+    let counted = workspace.sidebar_counts().unwrap().runs_needing_you;
+    (runs, inbox, counted)
+}
+
+#[test]
+fn ending_many_runs_at_once_leaves_the_records_ending_them_one_by_one_does() {
+    let mut together = many_runs();
+    let mut one_by_one = many_runs();
+
+    let ended = together
+        .workspace
+        .end_running_automation_runs(&[], LOST)
+        .unwrap();
+    for id in &one_by_one.running {
+        assert!(one_by_one.workspace.fail_automation_run(id, LOST).unwrap());
+    }
+
+    assert_eq!(ended, MANY / 2);
+    let (runs, inbox, counted) = records(&together.workspace);
+    // Half the runs ended, each asking for the person and told in the inbox.
+    assert_eq!(counted as usize, MANY / 2);
+    assert_eq!(inbox, MANY / 2);
+    assert_eq!(
+        runs.iter()
+            .filter(|run| run.contains("ended: true"))
+            .count(),
+        MANY / 2
+    );
+    assert_eq!((runs, inbox, counted), records(&one_by_one.workspace));
+}
+
+#[test]
+fn deleting_an_automation_with_many_runs_ends_them_all_answered() {
+    let mut many = many_runs();
+
+    let chats = many.workspace.delete_automation(&many.automation).unwrap();
+
+    assert_eq!(chats.len(), MANY / 2, "the agents that were working");
+    let runs = many.workspace.all_automation_runs().unwrap();
+    assert_eq!(runs.len(), MANY);
+    for run in &runs {
+        assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+        assert_eq!(run.reason.as_deref(), Some(DELETED));
+        assert!(!run.needs_you, "they asked for this");
+    }
+    let (_, inbox, counted) = records(&many.workspace);
+    assert_eq!((inbox, counted), (0, 0));
+}
