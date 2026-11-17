@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { Ticket } from "@/lib/api/client";
 import { ticketRead, useRead, Visibility } from "@/lib/workspace-reads";
 import { useTicketChanged } from "./changed";
-import { OpenTicketContext, type OpenTicketState } from "./open-ticket-context";
+import { OpenTicketContext, type OpenTicketScope } from "./open-ticket-context";
 
 /**
  * A scope and a gate for one Ticket that is open: its children render once a
@@ -52,13 +52,10 @@ function Gate({
   const record = state.value ?? kept;
   const opening = state.value === undefined;
   const { failure, retry } = state;
-  const current = state.current;
-  const open = useMemo<OpenTicketState | null>(
+  const open = useMemo<OpenTicketScope | null>(
     () =>
-      record
-        ? { reference, record, opening, current, failure, retry, changed }
-        : null,
-    [reference, record, opening, current, failure, retry, changed],
+      record ? { reference, record, opening, failure, retry, changed } : null,
+    [reference, record, opening, failure, retry, changed],
   );
   // A Ticket that was read and is now gone is a failure too, not its old copy.
   const gone = failure?.code === "not_found";

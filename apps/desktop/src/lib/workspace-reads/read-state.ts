@@ -78,15 +78,16 @@ export function useFailure(
 /**
  * Adds `current` to a read's state as a getter, so a view that never asks for
  * it does not re-render when it moves (it is a tracked property of the query).
+ * The getter is an own property, so a spread of the state copies the value.
  */
 export function withCurrent<S extends object>(
   state: S,
   current: () => boolean,
 ): S & { readonly current: boolean } {
-  const withGetter = Object.create(state, {
-    current: { get: current, enumerable: true },
-  });
-  return withGetter;
+  return Object.defineProperty({ ...state }, "current", {
+    get: current,
+    enumerable: true,
+  }) as S & { readonly current: boolean };
 }
 
 /**

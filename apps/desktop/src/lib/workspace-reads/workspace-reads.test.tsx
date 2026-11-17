@@ -360,6 +360,24 @@ describe("no needless renders", () => {
   });
 });
 
+describe("current", () => {
+  it("survives a spread of the read's state", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi.fn(async () => "value");
+    const spec = read({ key: "spread", call, failure: "load" });
+    const { result } = renderHook(() => useRead(spec, null), {
+      wrapper: wrap(signal),
+    });
+    await waitFor(() => expect(result.current.value).toBe("value"));
+    const copy = { ...result.current };
+    expect(copy.value).toBe("value");
+    expect(copy.status).toBe("ready");
+    expect(copy.failure).toBeNull();
+    expect(typeof copy.retry).toBe("function");
+    expect(copy.current).toBe(true);
+  });
+});
+
 describe("skip", () => {
   it("does nothing on Retry and never shows a failure for a skipped read", async () => {
     const call = vi.fn(async (reference: string) => {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from "react";
 import {
   act,
   cleanup,
@@ -262,6 +263,35 @@ describe("the record", () => {
 
     await act(async () => reread.resolve(ticket("Second")));
     expect(await screen.findByText("current")).toBeTruthy();
+  });
+
+  it("does not re-render a page that never asks whether it is current when a change re-reads an equal record", async () => {
+    const signal = fakeChangeSignal();
+    const reread = deferred<Ticket>();
+    bridge.invoke
+      .mockResolvedValueOnce(ticket("Same"))
+      .mockReturnValueOnce(reread.promise);
+    const commits: string[] = [];
+    function Counted() {
+      const { record } = useOpenTicket();
+      return <h3>{record.title}</h3>;
+    }
+    render(
+      <TestReads signal={signal}>
+        <OpenTicket reference="T-1">
+          <Profiler id="page" onRender={(id) => commits.push(id)}>
+            <Counted />
+          </Profiler>
+        </OpenTicket>
+      </TestReads>,
+    );
+    await screen.findByRole("heading", { name: "Same" });
+    const before = commits.length;
+
+    act(() => signal.change());
+    await act(async () => reread.resolve(ticket("Same")));
+    expect(bridge.invoke).toHaveBeenCalledTimes(2);
+    expect(commits).toHaveLength(before);
   });
 
   it("shows a Ticket a write returned at once and re-reads once", async () => {
