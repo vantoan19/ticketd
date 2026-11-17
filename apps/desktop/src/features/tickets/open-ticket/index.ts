@@ -8,3 +8,4 @@ export type { TicketState } from "./use-ticket";
 export type { Part } from "./parts";
 export { TicketListSync, useTicketChanged } from "./changed";
 export type { ReturnedTickets } from "./changed";
+export { useLatestUpdateOf } from "./parts/activity";

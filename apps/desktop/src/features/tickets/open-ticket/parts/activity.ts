@@ -54,7 +54,16 @@ export function useActivityNote(
   );
 }
 
+/**
+ * The latest authored update of the Ticket named by `reference`, or null when
+ * it has none. It does not wait for the Ticket's record, so the agent line is
+ * not held up by a record that cannot be read.
+ */
+export function useLatestUpdateOf(reference: string | null) {
+  return useRead(latestUpdateRead, reference ?? skip);
+}
+
 /** The Ticket's latest authored update, or null when it has none. */
 export function useLatestUpdate(record: Ticket | undefined) {
-  return useRead(latestUpdateRead, record?.reference ?? skip);
+  return useLatestUpdateOf(record?.reference ?? null);
 }

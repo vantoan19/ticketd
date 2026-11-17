@@ -27,7 +27,7 @@ import type { Ticket } from "@/lib/api/client";
 import { relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { useInboxAttention } from "./use-inbox-attention";
-import { useTicket } from "./open-ticket";
+import { useLatestUpdateOf } from "./open-ticket";
 import { progressBrief } from "./progress-brief";
 
 /** Decide the slot once per opening, before displaying the document. */
@@ -44,8 +44,9 @@ export function TicketAgentSession({
     ticket && enabled ? { kind: "ticket", id: ticket.id } : null,
   );
   const reference = ticket?.reference;
-  // The latest update is shared with the Ticket page's "Latest update" line.
-  const latest = useTicket(reference ?? null, "latestUpdate");
+  // The latest update is shared with the Ticket page's "Latest update" line,
+  // and is read by reference: it does not wait for the Ticket's record.
+  const latest = useLatestUpdateOf(reference ?? null);
   const { failure, retry } = latest;
   useEffect(() => {
     if (!failure) return;
@@ -55,8 +56,11 @@ export function TicketAgentSession({
       action: { label: "Retry", run: retry },
     });
   }, [failure, retry, show]);
-  // Answered, or failed: a failed read leaves the line without an update.
-  const answered = latest.value !== undefined || failure !== null;
+  // Answered since the last change, or failed: a cached answer a change has
+  // made stale (an update posted while this Ticket was away) does not decide
+  // the once-per-opening slot, and a failed read leaves the line without one.
+  const answered =
+    (latest.value !== undefined && latest.current) || failure !== null;
   const update = latest.value ?? null;
   const attention = useInboxAttention();
   const ready = Boolean(ticket && answered && (!enabled || list));
