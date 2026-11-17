@@ -2419,6 +2419,33 @@ fn a_version_thirty_four_workspace_whose_text_links_a_ticket_migrates_to_the_cur
 }
 
 #[test]
+fn a_foreign_database_stamped_with_a_negative_version_is_refused_and_left_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("foreign.sqlite3");
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = -1;")
+        .unwrap();
+
+    let error = Workspace::open(&path).err().expect("a foreign file opens");
+    assert!(error.to_string().contains("not a ticketd"), "{error}");
+
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(tables, ["photos"], "no ticketd table was added");
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, -1);
+}
+
+#[test]
 fn duplicate_preview_explains_why_a_replacement_is_invalid() {
     use ticketd_core::ReplacementIssue;
     let dir = tempfile::tempdir().unwrap();

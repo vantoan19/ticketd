@@ -147,6 +147,13 @@ const LADDER: [(i64, Step); 83] = [
 /// Takes a Workspace at format version `from` to the current one, or creates it when
 /// `from` is `0`. All or nothing: one immediate transaction, rolled back on any error.
 pub(crate) fn migrate(connection: &mut Connection, from: i64) -> Result<(), Error> {
+    // Many unrelated databases use `user_version`. Ticketd never wrote a negative one, so
+    // the ladder would build over somebody else's file; leave it as it is.
+    if from < 0 {
+        return Err(Error::Backup(format!(
+            "not a ticketd workspace: its format version is {from}"
+        )));
+    }
     migrate_to(connection, from, FORMAT_VERSION, |_, _| Ok(()))
 }
 
