@@ -2591,5 +2591,41 @@ fn ready_and_blocked_agree_on_every_read() {
         // The sidebar counts exactly the Ready list: held and trashed tickets stay out.
         let counts = f.workspace.sidebar_counts().unwrap();
         assert_eq!(counts.ready as usize, ready_len, "Ready count, {name}");
+
+        // A list carries the indicator it was selected with, which is the detail's.
+        let availability_in = |tickets: Vec<ticketd_core::Ticket>| {
+            tickets
+                .into_iter()
+                .find(|t| t.reference == subject)
+                .map(|t| t.availability)
+        };
+        let (listing, trash) = (
+            availability_in(f.workspace.list_tickets().unwrap()),
+            availability_in(f.workspace.list_trash().unwrap()),
+        );
+        let found = availability_in(f.workspace.find_tickets(&TicketFilter::default()).unwrap());
+        let searched = availability_in(
+            f.workspace
+                .search_tickets(&subject, None, false, 10, 0)
+                .unwrap(),
+        );
+        let metadata = f
+            .workspace
+            .find_ticket_metadata(&TicketFilter::default(), None, false)
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|t| t.reference == subject)
+            .map(|t| t.availability);
+        let expected = case.expected.map(str::to_owned);
+        if case.trashed {
+            assert_eq!(trash, Some(expected), "trash list, {name}");
+            assert_eq!(listing, None, "list, {name}");
+        } else {
+            assert_eq!(listing, Some(expected.clone()), "list, {name}");
+            assert_eq!(found, Some(expected.clone()), "find, {name}");
+            assert_eq!(searched, Some(expected.clone()), "search, {name}");
+            assert_eq!(metadata, Some(expected), "metadata, {name}");
+        }
     }
 }

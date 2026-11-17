@@ -69,9 +69,11 @@ pub(crate) fn prerequisites(
         .collect())
 }
 
+/// The prerequisites of a ticket. Its availability is not set here: a read of one ticket
+/// asks `readiness::indicator`, and a list selects `readiness::indicator_sql` with the
+/// tickets, so a list makes no readiness query per ticket.
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
     ticket.prerequisites = prerequisites(connection, &ticket.id, None)?;
-    ticket.availability = crate::readiness::indicator(connection, &ticket.id)?;
     Ok(())
 }
 

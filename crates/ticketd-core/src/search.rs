@@ -4,7 +4,7 @@ pub struct TicketWithUpdate {
     pub latest_update: Option<crate::LatestUpdate>,
 }
 
-use crate::{Error, Ticket, Workspace, hierarchy, relationships, tags, ticket_from_row};
+use crate::{Error, Ticket, Workspace, hierarchy, relationships, tags, listed_ticket_from_row};
 use crate::{Status, StatusCounts};
 use rusqlite::{params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
@@ -165,7 +165,8 @@ impl Workspace {
     pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
         let (conditions, mut values) = self.filter_conditions(filter)?;
         let mut sql = format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+            crate::readiness::indicator_sql("t")
         );
         match filter.order {
             TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
@@ -179,7 +180,7 @@ impl Workspace {
         values.push(i64::from(filter.offset).into());
         let mut statement = self.connection.prepare(&sql)?;
         let mut tickets = statement
-            .query_map(params_from_iter(values), ticket_from_row)?
+            .query_map(params_from_iter(values), listed_ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         for ticket in &mut tickets {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
@@ -204,7 +205,8 @@ impl Workspace {
         let tx = self.connection.unchecked_transaction()?;
         let (conditions, mut values) = self.filter_conditions(filter)?;
         let mut sql = format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at FROM tickets t WHERE t.trashed = 0{conditions}"
+            "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+            crate::readiness::indicator_sql("t")
         );
         if let Some(ids) = ids {
             if ids.len() > 250 {
@@ -246,7 +248,7 @@ impl Workspace {
                     trashed: row.get(4)?,
                     project_id: row.get(5)?,
                     plan_id: row.get(6)?,
-                    availability: None,
+                    availability: row.get(8)?,
                     updated_at: row.get(7)?,
                     source: None,
                     prerequisites: None,
@@ -256,7 +258,6 @@ impl Workspace {
         drop(statement);
         let mut omitted = false;
         for ticket in &mut items {
-            ticket.availability = crate::readiness::indicator(&tx, &ticket.id)?;
             if prerequisites {
                 ticket.source = crate::source::availability_projection(&tx, &ticket.id)?;
                 let mut blockers = relationships::prerequisites(&tx, &ticket.id, Some(51))?;
@@ -334,13 +335,14 @@ impl Workspace {
         if let Some(id) = project {
             self.show_project(id)?;
         }
-        let mut statement = self.connection.prepare(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5"
-        )?;
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5",
+            crate::readiness::indicator_sql("t")
+        ))?;
         let mut tickets = statement
             .query_map(
                 params![query, project, unlinked, limit.clamp(1, 100), offset],
-                ticket_from_row,
+                listed_ticket_from_row,
             )?
             .collect::<Result<Vec<_>, _>>()?;
         for ticket in &mut tickets {
