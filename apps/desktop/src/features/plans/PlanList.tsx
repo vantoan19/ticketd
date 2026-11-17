@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArchiveRestore, Layers, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Appear } from "@/components/ui/motion";
 import { Count } from "@/components/ui/count";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
@@ -106,34 +107,36 @@ export function PlanList({
 
   return (
     <ManagementPage layout="centered" aria-labelledby="plan-index-heading">
-      <PageHeader
-        title="Plans"
-        titleId="plan-index-heading"
-        {...(shown.length > 0 && { count: <Count>{shown.length}</Count> })}
-        lede="A Plan groups the tickets that ship together, across projects."
-        actions={
-          <>
-            {onArchivedChange && (
-              <SegmentedControl
-                aria-label="Which Plans"
-                value={archived ? "archived" : "active"}
-                onValueChange={(value) =>
-                  onArchivedChange(value === "archived")
-                }
-                options={[
-                  { value: "active", label: "Active" },
-                  { value: "archived", label: "Archived" },
-                ]}
-              />
-            )}
-            <Tooltip content="New Plan" shortcut={shortcutLabel("new-plan")}>
-              <Button size="sm" onClick={() => setCreating(true)}>
-                <Plus data-icon="inline-start" /> New Plan
-              </Button>
-            </Tooltip>
-          </>
-        }
-      />
+      <Appear>
+        <PageHeader
+          title="Plans"
+          titleId="plan-index-heading"
+          {...(shown.length > 0 && { count: <Count>{shown.length}</Count> })}
+          lede="A Plan groups the tickets that ship together, across projects."
+          actions={
+            <>
+              {onArchivedChange && (
+                <SegmentedControl
+                  aria-label="Which Plans"
+                  value={archived ? "archived" : "active"}
+                  onValueChange={(value) =>
+                    onArchivedChange(value === "archived")
+                  }
+                  options={[
+                    { value: "active", label: "Active" },
+                    { value: "archived", label: "Archived" },
+                  ]}
+                />
+              )}
+              <Tooltip content="New Plan" shortcut={shortcutLabel("new-plan")}>
+                <Button size="sm" onClick={() => setCreating(true)}>
+                  <Plus data-icon="inline-start" /> New Plan
+                </Button>
+              </Tooltip>
+            </>
+          }
+        />
+      </Appear>
       {known && failure && (
         <FailureAlert
           failure={failure}
@@ -169,33 +172,35 @@ export function PlanList({
           className="plan-index-list"
           aria-label={archived ? "Archived Plans" : "Active Plans"}
         >
-          {shown.map((item) => (
+          {shown.map((item, index) => (
             <li key={item.id}>
-              <PlanCard
-                plan={item}
-                projects={projects}
-                onOpen={() => onOpen(item.id)}
-                {...(onTicket && { onTicket })}
-              >
-                {archived && (
-                  <span className="plan-index-action">
-                    <Tooltip
-                      content="Reactivate Plan"
-                      shortcut={shortcutLabel("list-open")}
-                    >
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={pending === item.id}
-                        aria-label={`Reactivate ${item.name}`}
-                        onClick={() => void reactivate(item)}
+              <Appear index={index + 1}>
+                <PlanCard
+                  plan={item}
+                  projects={projects}
+                  onOpen={() => onOpen(item.id)}
+                  {...(onTicket && { onTicket })}
+                >
+                  {archived && (
+                    <span className="plan-index-action">
+                      <Tooltip
+                        content="Reactivate Plan"
+                        shortcut={shortcutLabel("list-open")}
                       >
-                        <ArchiveRestore data-icon="inline-start" /> Reactivate
-                      </Button>
-                    </Tooltip>
-                  </span>
-                )}
-              </PlanCard>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pending === item.id}
+                          aria-label={`Reactivate ${item.name}`}
+                          onClick={() => void reactivate(item)}
+                        >
+                          <ArchiveRestore data-icon="inline-start" /> Reactivate
+                        </Button>
+                      </Tooltip>
+                    </span>
+                  )}
+                </PlanCard>
+              </Appear>
             </li>
           ))}
         </ul>

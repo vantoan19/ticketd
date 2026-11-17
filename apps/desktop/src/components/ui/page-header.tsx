@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { cn } from "cn";
 import { ShellLeading, ShellNoticeSlot } from "@/components/ui/list-header";
 import "./patterns.css";
@@ -15,7 +15,9 @@ export function ManagementPage({
   children,
   "aria-labelledby": labelledBy,
   "aria-label": label,
+  ref,
 }: {
+  ref?: Ref<HTMLElement>;
   className?: string;
   layout?: "default" | "centered" | "guide";
   children: ReactNode;
@@ -24,6 +26,7 @@ export function ManagementPage({
 }) {
   return (
     <section
+      ref={ref}
       data-slot="management-page"
       aria-labelledby={labelledBy}
       aria-label={label}
