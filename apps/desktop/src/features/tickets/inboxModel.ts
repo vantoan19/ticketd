@@ -4,6 +4,19 @@ import { describeChange } from "./history-sentence";
 import { providerName } from "./ticket-source";
 export type { Entry } from "@/lib/api/inbox";
 import type { Entry } from "@/lib/api/inbox";
+import type { Ticket } from "@/lib/api/client";
+
+/**
+ * Why the Ticket an Inbox entry names cannot be changed, or null when it can:
+ * `undefined` is a Ticket not read yet, `null` one the core says is gone.
+ */
+export function ticketUnavailable(
+  record: Ticket | null | undefined,
+): string | null {
+  if (record === undefined) return "The Ticket is still loading.";
+  if (record === null) return "The Ticket no longer exists.";
+  return record.trashed ? "Restore the Ticket before changing it." : null;
+}
 
 export type DayGroup = "Today" | "Yesterday" | "Earlier";
 

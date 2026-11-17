@@ -35,7 +35,12 @@ import { Snooze } from "./Inbox";
 import { useInboxTriage } from "./inbox-triage-context";
 import { useInboxAttention } from "./use-inbox-attention";
 import { requestTicketUpdate } from "./activity-composer-request";
-import { summarize, snoozeInstant, type SnoozeChoice } from "./inboxModel";
+import {
+  summarize,
+  snoozeInstant,
+  ticketUnavailable,
+  type SnoozeChoice,
+} from "./inboxModel";
 
 export function InboxTriageCard() {
   const triage = useInboxTriage();
@@ -59,18 +64,16 @@ export function InboxTriageCard() {
     chat?.tickets[0]?.reference ??
     chat?.first_ticket ??
     null;
-  const ticket = useTicket(reference).value ?? undefined;
+  const record = useTicket(reference).value;
+  // Undefined until the Ticket is read; null once the core says it is gone.
+  const ticket = record ?? undefined;
   const changed = useTicketChanged();
   const read = entry?.read ?? !chat?.status.unseen;
   const ticketReason =
     blocked ??
     (!reference
       ? "This Chat has no linked Ticket."
-      : !ticket
-        ? "The Ticket is still loading."
-        : ticket.trashed
-          ? "Restore the Ticket before changing it."
-          : null);
+      : ticketUnavailable(record));
   const agent = entry?.editing_agent ?? chat?.harness_name;
   const harness = chat?.harness_id ?? editingHarness(agent);
   const description = entry

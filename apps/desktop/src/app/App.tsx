@@ -1,3 +1,4 @@
+import { ticketUnavailable } from "@/features/tickets/inboxModel";
 import { requestInboxAction } from "@/features/tickets/inbox-commands";
 import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
 import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
@@ -636,7 +637,9 @@ function AppContent() {
             inboxSelection.chat.first_ticket)
           : null
       : null;
-  const inboxTicket = useTicket(inboxReference ?? null).value ?? undefined;
+  // Undefined until read, null once the Ticket is gone.
+  const inboxRecord = useTicket(inboxReference ?? null).value;
+  const inboxTicket = inboxRecord ?? undefined;
   // Read only while the palette is open: a closed one has no use for it.
   const paletteTicket =
     useTicket(paletteOpen ? paletteReference : null).value ?? undefined;
@@ -762,11 +765,9 @@ function AppContent() {
                                     : undefined;
                                   const ticketActionReason =
                                     ticketReason ??
-                                    (!activeTicket
-                                      ? "The Ticket is still loading."
-                                      : activeTicket.trashed
-                                        ? "Restore the Ticket before changing it."
-                                        : null);
+                                    ticketUnavailable(
+                                      reference ? inboxRecord : undefined,
+                                    );
                                   const isReview =
                                     entry?.kind === "status" &&
                                     entry.to_value === "In review";
