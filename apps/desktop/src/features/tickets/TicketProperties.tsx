@@ -300,19 +300,8 @@ export function TicketProperties({
     }
     try {
       // The report shows the saved Ticket and refreshes what follows from it.
+      // It never rejects, so a saved change has no "not refreshed" state.
       await onSaved(updated);
-    } catch (reason) {
-      setErrors((old) => ({
-        ...old,
-        [key]: {
-          failure: describeFailure(reason, "refresh the ticket"),
-          label: "Saved, not refreshed",
-          retry: () => {
-            setErrors((current) => ({ ...current, [key]: null }));
-            void refresh().catch(() => {});
-          },
-        },
-      }));
     } finally {
       setPending("");
       restoreFocus();
