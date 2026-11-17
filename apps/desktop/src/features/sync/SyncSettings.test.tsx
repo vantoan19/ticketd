@@ -8,10 +8,12 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
 import {
@@ -70,11 +72,14 @@ const options = {
   reconnect: null,
 };
 
-function show() {
+function show(extra?: ReactNode, onReplaced = async () => {}) {
   return render(
-    <SyncStatusProvider>
-      <SyncSettings />
-    </SyncStatusProvider>,
+    <TestReads>
+      <SyncStatusProvider>
+        <SyncSettings onReplaced={onReplaced} />
+      </SyncStatusProvider>
+      {extra}
+    </TestReads>,
   );
 }
 
@@ -183,6 +188,29 @@ test("a Workspace that synced with a folder of this account is offered that fold
   expect(api.reconnect).toHaveBeenCalled();
   expect(api.uploadWorkspace).not.toHaveBeenCalled();
   expect(api.downloadWorkspace).not.toHaveBeenCalled();
+});
+
+test("a download that replaces the Workspace tells the app once, after it finished", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.downloadWorkspace.mockResolvedValue({
+    ...syncStatus(),
+    safety_backup: "/ticketd/workspace.sqlite3.safety-1.sqlite3",
+  });
+  const onReplaced = vi.fn(async () => {});
+  show(undefined, onReplaced);
+  fireEvent.click(
+    await screen.findByRole("radio", { name: /Download “ticketd · web-app”/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Replace this Workspace?",
+  });
+  expect(onReplaced).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Replace Workspace" }),
+  );
+  await waitFor(() => expect(onReplaced).toHaveBeenCalledTimes(1));
+  expect(api.downloadWorkspace).toHaveBeenCalledTimes(1);
 });
 
 test("downloading an existing Workspace asks once before replacing this one", async () => {

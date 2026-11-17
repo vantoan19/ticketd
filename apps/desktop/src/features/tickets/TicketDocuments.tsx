@@ -3,7 +3,7 @@ import { FileText, MessageSquareText, Pencil, X } from "lucide-react";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { IconButton } from "@/components/ui/icon-button";
 import { FileRow } from "./FileRow";
-import type { DocumentLink } from "./use-ticket-documents";
+import type { DocumentLink } from "@/features/documents/api";
 
 /**
  * A Document in the rail's Files: its title on one line, a caption naming

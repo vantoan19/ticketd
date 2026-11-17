@@ -1063,14 +1063,16 @@ test("switching layouts preserves a pending card request and its protection", as
 });
 
 test("a membership response for an old scope cannot announce the wrong filtered outcome", async () => {
-  let doneReads = 0;
-  let finish: ((value: unknown) => void) | undefined;
+  // Every Done read after the write is held, whichever of them is the
+  // membership check, and answered only after the scope has changed.
+  const held: ((value: unknown) => void)[] = [];
+  let release = false;
   writeOverride = async () => {
     saved[0] = ticket(1, "Done");
     readOverride = (filter) =>
-      filter.status === "Done" && ++doneReads === 2
+      filter.status === "Done" && !release
         ? new Promise((resolve) => {
-            finish = resolve;
+            held.push(resolve);
           })
         : null;
     return [saved[0]];
@@ -1079,11 +1081,13 @@ test("a membership response for an old scope cannot announce the wrong filtered 
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "Done");
-  expect(finish).toBeTypeOf("function");
+  expect(held.length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));
   await settle();
+  release = true;
   await act(async () => {
-    finish?.([{ ticket: saved[0], latest_update: null }]);
+    for (const finish of held)
+      finish([{ ticket: saved[0], latest_update: null }]);
   });
   await settle();
   expect(

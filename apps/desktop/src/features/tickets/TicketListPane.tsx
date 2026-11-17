@@ -481,7 +481,6 @@ function TicketListBody({
                     ])}
                     tickets={visibleTickets}
                     empty={emptyView}
-                    details={workspace.details}
                     scope={{
                       showPlan: !navigation.plan,
                       showProject: navigation.project === "all",
@@ -582,7 +581,6 @@ function TicketListBody({
       <MarkDuplicateDialog
         open={markingDuplicate}
         onOpenChange={setMarkingDuplicate}
-        refresh={refresh}
       />
       <ListOverlays>
         {showBulk && workspace.layout === "list" && (

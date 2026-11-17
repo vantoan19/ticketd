@@ -23,7 +23,10 @@ type Notice = { message: string; undo?: () => unknown };
 export function useBoardStatus(workspace: {
   board: ReturnType<typeof useTicketBoard>;
   refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
+  /** Shows a Ticket in the list at once, without reporting a write. */
+  patchTicket: (ticket: Ticket) => void;
+  /** The write report: a status change succeeded and returned this Ticket. */
+  changed: (ticket: Ticket) => Promise<void>;
 }) {
   const latest = useRef(workspace);
   useEffect(() => {
@@ -100,16 +103,32 @@ export function useBoardStatus(workspace: {
         (trigger ?? board)?.focus({ preventScroll: true });
     });
   }
-  async function reconcile(reference: string) {
+  /**
+   * Reads the Ticket anew and shows it. `written` says whether a write of this
+   * Ticket succeeded: `true` is known, and `landed` says whether the read shows
+   * a write that failed was committed anyway. A write that landed is reported,
+   * which also reloads the list; otherwise the read is only shown, since
+   * nothing was written.
+   */
+  async function reconcile(
+    reference: string,
+    written: boolean | { landed: (read: Ticket) => boolean },
+  ) {
     // Successful request replays contain historical results, so only a new read is current.
     const current = await client.showTicket(reference);
-    latest.current.updateTicket(current);
-    latest.current.board.confirmTicket(current);
-    await latest.current.refresh();
+    if (written === true || (written && written.landed(current))) {
+      const reported = latest.current.changed(current);
+      latest.current.board.confirmTicket(current);
+      await reported;
+    } else {
+      latest.current.patchTicket(current);
+      latest.current.board.confirmTicket(current);
+      await latest.current.refresh();
+    }
     return current;
   }
-  async function saved(reference: string, previous?: string) {
-    const current = await reconcile(reference);
+  async function saved(reference: string, wrote: boolean, previous?: string) {
+    const current = await reconcile(reference, wrote);
     for (;;) {
       const board = latest.current.board;
       const matches = await board.matches(current);
@@ -142,14 +161,17 @@ export function useBoardStatus(workspace: {
         { status: attempt.status },
         attempt.id,
       );
-      await saved(reference, attempt.ticket.status);
+      await saved(reference, true, attempt.ticket.status);
       attempts.current.delete(reference);
       return true;
     } catch (reason) {
       let placement =
         "Its saved status couldn't be checked. Retry to check again.";
       try {
-        const current = await reconcile(reference);
+        // The reply may have been lost after the core committed the move.
+        const current = await reconcile(reference, {
+          landed: (read) => read.status === attempt.status,
+        });
         putBack(current, move);
         placement =
           current.status === attempt.ticket.status
@@ -205,9 +227,9 @@ export function useBoardStatus(workspace: {
     try {
       // Authority may have changed since the card was read. The write also validates atomically.
       const current = await client.showTicket(reference);
-      latest.current.updateTicket(current);
+      latest.current.patchTicket(current);
       if (current.status === status) {
-        await saved(reference);
+        await saved(reference, false);
         from = null;
         return;
       }
@@ -269,9 +291,12 @@ export function useBoardStatus(workspace: {
       void submit({ ticket, status, id: crypto.randomUUID() }, null);
     },
     completeDuplicate: () =>
-      review ? saved(review.ticket.reference) : Promise.resolve(),
+      review ? saved(review.ticket.reference, true) : Promise.resolve(),
     reconcileDuplicate: async () => {
-      if (review) await reconcile(review.ticket.reference);
+      if (review)
+        await reconcile(review.ticket.reference, {
+          landed: (read) => read.status === review.status,
+        });
     },
     retry(reference: string) {
       if (busy.current.has(reference)) return;

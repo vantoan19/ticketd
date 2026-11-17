@@ -46,13 +46,19 @@ export function SettingsView({
   selected?: SettingsPageId;
   /** Opens another page, for links between pages and for ⌘F. */
   onSelect?: (page: SettingsPageId) => void;
+  /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
 }) {
   // The parent mounts this only while Settings is open, so every page reads
-  // fresh data on each visit. A restore replaces the workspace under an open
-  // page, so source pages (the only ones kept mounted) start over afterwards.
+  // fresh data on each visit. A restore or a download replaces the workspace
+  // under an open page, so source pages (the only ones kept mounted) start over
+  // afterwards.
   const [restores, setRestores] = useState(0);
+  const replaced = async () => {
+    setRestores((count) => count + 1);
+    await onRestore();
+  };
   const { entries: sources } = useSources();
   // Every page shares one scroll container, so a page would otherwise open at
   // the scroll offset the previous one was left at. Before paint: no jump.
@@ -78,20 +84,13 @@ export function SettingsView({
       {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}
       {selected === "location" && <LocationPage />}
       {selected === "attachments" && <AttachmentsPage key={restores} />}
-      {selected === "backups" && (
-        <BackupsPage
-          onRestore={async () => {
-            setRestores((count) => count + 1);
-            await onRestore();
-          }}
-        />
-      )}
+      {selected === "backups" && <BackupsPage onRestore={replaced} />}
       {selected === "export" && <ExportPage />}
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
       {selected === "chat" && <ChatPage />}
       {selected === "automations" && <AutomationsPage />}
-      {selected === "google-drive" && <GoogleDrivePage />}
+      {selected === "google-drive" && <GoogleDrivePage onReplaced={replaced} />}
       {selected === "keyboard-shortcuts" && <KeyboardShortcutsPage />}
       {selected === "about" && <AboutPage />}
       {selected === "search" && <SearchPage />}

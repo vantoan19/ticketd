@@ -1,0 +1,18 @@
+// The interface of the Open Ticket module (ADR 0013, GLOSSARY "Open Ticket").
+// Test helpers are in "./testing" and are imported by tests only.
+export { OpenTicket } from "./OpenTicket";
+export { useOpenTicket } from "./open-ticket-context";
+export type { OpenTicketState } from "./open-ticket-context";
+export { useKnownTicket, useTicket } from "./use-ticket";
+export type { TicketState } from "./use-ticket";
+export type { Part } from "./parts";
+export { TicketListSync, useTicketChanged } from "./changed";
+export type { ReturnedTickets } from "./changed";
+export { useLatestUpdateOf } from "./parts/activity";
+export {
+  editedUpdateFills,
+  followingFill,
+  relinkedDocumentFill,
+  unlinkedDocumentFill,
+} from "./parts";
+export type { Fill } from "@/lib/workspace-reads";

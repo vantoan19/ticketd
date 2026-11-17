@@ -40,6 +40,9 @@ What the harness reported about a turn besides its steps and final response: its
 A unit of work describing an intended outcome, optionally linked to one project. A ticket with subtickets still has its own outcome rather than serving only as a container.
 _Avoid_: Issue, task
 
+**Open Ticket**:
+The Ticket shown in the detail pane, whose details the person is viewing. It says nothing about the Ticket's status or about an external issue being open.
+
 **Locally owned ticket**:
 A ticket whose authoritative record is maintained by ticketd.
 

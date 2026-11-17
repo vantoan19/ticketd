@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TicketDetails } from "./TicketDetails";
 import type { Ticket } from "@/lib/api/client";
+import { TestReads } from "@/lib/workspace-reads/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => []) }));
 afterEach(cleanup);
@@ -16,15 +17,18 @@ test("relationship navigation replaces the reference and focuses it outside the 
     setSelected: vi.fn(),
     projects: [],
     plans: [],
-    revision: 0,
-    refresh: vi.fn(async () => {}),
-    updateTicket: vi.fn(),
-    details: {},
+    onMentionReady: vi.fn(),
+    onClearMention: vi.fn(),
   };
-  const { rerender } = render(<TicketDetails {...props} selected="T-KQ39" />);
+  const view = (selected: string) => (
+    <TestReads>
+      <TicketDetails {...props} selected={selected} />
+    </TestReads>
+  );
+  const { rerender } = render(view("T-KQ39"));
   const previous = screen.getByRole("heading", { name: "T-KQ39" });
   previous.focus();
-  rerender(<TicketDetails {...props} selected="T-KQ21" />);
+  rerender(view("T-KQ21"));
   const heading = screen.getByRole("heading", { name: "T-KQ21" });
   expect(document.activeElement).toBe(heading);
   expect(heading.closest(".detail-scroll")).toBeNull();
@@ -48,20 +52,21 @@ test("trashed ticket descriptions remain readable without editing controls", () 
     prerequisites: [],
   };
   render(
-    <TicketDetails
-      selected="T-KQ2"
-      mention={null}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ "T-KQ2": ticket }}
-      projects={[]}
-      plans={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />,
+    <TestReads primed={{ ticket }}>
+      <TicketDetails
+        selected="T-KQ2"
+        mention={null}
+        expanded={false}
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        setSelected={vi.fn()}
+        opened={["T-KQ2"]}
+        onMentionReady={vi.fn()}
+        onClearMention={vi.fn()}
+        projects={[]}
+        plans={[]}
+      />
+    </TestReads>,
   );
   expect(
     screen.getByRole("heading", { name: "Archived context" }),
@@ -99,20 +104,21 @@ test("the full-width view marks the reading column and drops the repeated headin
     prerequisites: [],
   };
   const { container } = render(
-    <TicketDetails
-      selected="T-KQ3"
-      mention={null}
-      expanded
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ "T-KQ3": ticket }}
-      projects={[]}
-      plans={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />,
+    <TestReads primed={{ ticket }}>
+      <TicketDetails
+        selected="T-KQ3"
+        mention={null}
+        expanded
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        setSelected={vi.fn()}
+        opened={["T-KQ3"]}
+        onMentionReady={vi.fn()}
+        onClearMention={vi.fn()}
+        projects={[]}
+        plans={[]}
+      />
+    </TestReads>,
   );
   expect(
     container.querySelector(".ticket-detail")?.getAttribute("data-expanded"),

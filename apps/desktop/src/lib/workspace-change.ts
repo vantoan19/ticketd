@@ -1,38 +1,8 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { changesClient } from "@/lib/api/changes";
+import { createContext, useContext, useEffect, useRef } from "react";
 
-const POLL_MS = 2000;
-
+// The version is provided by WorkspaceReads (lib/workspace-reads), which owns the change
+// poll; it moves when the Workspace changed and when the desktop made its own write.
 const WorkspaceChangeContext = createContext(0);
-
-/**
- * The one workspace poll. It asks the core for a single change token every two
- * seconds and counts how often it moved, so changes made by the CLI or an agent
- * reach the screen within that time while views never poll on their own.
- */
-export function useWorkspaceChangePoll(): number {
-  const [version, setVersion] = useState(0);
-  useEffect(() => {
-    let active = true;
-    let last: number | null = null;
-    const poll = () =>
-      void changesClient
-        .token()
-        .then((token) => {
-          if (!active) return;
-          if (last !== null && token !== last) setVersion((value) => value + 1);
-          last = token;
-        })
-        .catch(() => {});
-    poll();
-    const timer = window.setInterval(poll, POLL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, []);
-  return version;
-}
 
 export const WorkspaceChangeProvider = WorkspaceChangeContext.Provider;
 

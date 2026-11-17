@@ -51,8 +51,13 @@ export function AddTicketsDialog({
     const requestId = request.current.id;
     let committed = false;
     const refreshed = await run(async () => {
-      await client.bulkChange(references, { plan_id: plan.id }, requestId);
+      const changed = await client.bulkChange(
+        references,
+        { plan_id: plan.id },
+        requestId,
+      );
       committed = true;
+      return changed;
     }, `add tickets to ${plan.name}`);
     const added = refreshed || committed;
     setFailed(!added);

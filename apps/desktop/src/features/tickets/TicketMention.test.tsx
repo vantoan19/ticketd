@@ -15,6 +15,8 @@ import { useTicketWorkspace } from "./useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault } from "@/test/bridge-defaults";
 import { TickingChanges } from "@/test/ticking-changes";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { TestReads } from "@/lib/workspace-reads/testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -176,14 +178,17 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
     await gate;
     return ticket("T-KQ2", STORED);
   });
+  const signal = fakeChangeSignal();
   render(
-    <TickingChanges>
+    <TestReads signal={signal}>
       <Harness />
-    </TickingChanges>,
+    </TestReads>,
   );
   act(() => api.select("T-KQ2"));
   await screen.findByText(passage);
   act(() => api.select("T-KQ1"));
+  // A CLI edit changes the body while T-KQ2 is hidden, and the poll has not
+  // noticed yet: following the mention still judges it against a fresh read.
   fresh = true;
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
   // The cached body is on screen, but nothing is revealed or reported yet.
@@ -196,6 +201,37 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
   expect(document.activeElement).toBe(marked());
   expect(document.getElementById("mention-note-T-KQ2")?.textContent).toBe(
     "Mentions T-KQ1",
+  );
+});
+
+test("a mention waits for the fresh body when a reported change has made the cached one stale", async () => {
+  let fresh = false;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  setUp(async (reference) => {
+    if (reference === "T-KQ1") return ticket("T-KQ1", "Plain.");
+    if (!fresh) return ticket("T-KQ2", OLD);
+    await gate;
+    return ticket("T-KQ2", STORED);
+  });
+  const signal = fakeChangeSignal();
+  render(
+    <TestReads signal={signal}>
+      <Harness />
+    </TestReads>,
+  );
+  act(() => api.select("T-KQ2"));
+  await screen.findByText(passage);
+  act(() => api.select("T-KQ1"));
+  // A CLI edit changes the body while T-KQ2 is hidden, and the poll reports it:
+  // its cached copy is stale, and not read again until it is shown.
+  fresh = true;
+  await act(async () => signal.change());
+  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  expect(marked()).toBeNull();
+  await act(async () => release());
+  await waitFor(() =>
+    expect(marked()?.textContent).toBe("Blocked on T-KQ1 today."),
   );
 });
 

@@ -1,81 +1,45 @@
-import { useEffect, useState } from "react";
-import { documents, type DocumentSummary } from "@/features/documents/api";
+import { useMemo, useRef, useState } from "react";
 import {
-  describeFailure,
-  type FailureDescription,
-} from "@/lib/api/describe-failure";
+  documents,
+  type DocumentLink,
+  type DocumentSummary,
+} from "@/features/documents/api";
+import { describeFailure } from "@/lib/api/describe-failure";
+import type { FailureDescription } from "@/lib/api/describe-failure";
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { type Ticket } from "@/lib/api/client";
-
-export type DocumentLink = Awaited<
-  ReturnType<typeof documents.links>
->[0][number];
-
-const sourceRank = (link: DocumentLink) =>
-  link.explicit ? 0 : link.activity_id ? 2 : 1;
+import {
+  relinkedDocumentFill,
+  unlinkedDocumentFill,
+  useOpenTicket,
+  type Fill,
+} from "./open-ticket";
 
 /**
  * The Documents a ticket links to, one per Document by its strongest source
- * (attached, then mentioned in the description, then in an update). It reads
- * again on a new workspace revision and when the window comes back, since
- * trashing a Document elsewhere does not change the ticket.
+ * (attached, then mentioned in the description, then in an update), read
+ * through the Open Ticket. Trashing a Document elsewhere does not change the
+ * ticket, but it does change the workspace, which reads them again.
  */
-export function useTicketDocuments({
-  ticket,
-  revision,
-  refresh,
-}: {
-  ticket: Ticket;
-  revision: number;
-  refresh: () => Promise<void>;
-}) {
-  // Null until the first read answers: an unread list never reads as empty.
-  const [links, setLinks] = useState<DocumentLink[] | null>(null);
+export function useTicketDocuments() {
+  const { reference, record, changed } = useOpenTicket();
+  const read = useOpenTicket("documents");
   const [error, setError] = useState<FailureDescription | null>(null);
-  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
-    null,
-  );
   const statusLine = useStatusLine();
-  const [visits, setVisits] = useState(0);
-  useEffect(() => {
-    const again = () => setVisits((value) => value + 1);
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
-  }, []);
-  useEffect(() => {
-    let current = true;
-    void documents
-      .links(ticket.id)
-      .then(([outgoing]) => {
-        if (!current) return;
-        const byDocument = new Map<string, DocumentLink>();
-        for (const link of outgoing) {
-          if (link.target_kind !== "document") continue;
-          const known = byDocument.get(link.target_id);
-          if (!known || sourceRank(link) < sourceRank(known))
-            byDocument.set(link.target_id, link);
-        }
-        // Attached Documents list first, like the CLI's context.
-        setLinks(
-          [...byDocument.values()].sort(
-            (a, b) => sourceRank(a) - sourceRank(b),
-          ),
-        );
-        setLoadFailure(null);
-      })
-      .catch((reason: unknown) => {
-        if (current) setLoadFailure(describeFailure(reason, "load Documents"));
-      });
-    return () => {
-      current = false;
-    };
-  }, [ticket.id, ticket.body, revision, visits]);
-  async function change(id: string, present: boolean) {
+  // Documents being removed: hidden at once, and their Remove ignored until
+  // the write answers (the ref covers a second click before the next render).
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
+  const writing = useRef(new Set<string>());
+  // Null until the first read answers: an unread list never reads as empty.
+  const links = useMemo(
+    () => read.links?.filter((link) => !removing.has(link.target_id)) ?? null,
+    [read.links, removing],
+  );
+  /** `fills` is what the change set in the list, reported once it is saved. */
+  async function change(id: string, present: boolean, fills: readonly Fill[]) {
     setError(null);
     try {
-      await documents.setTicketDocument(ticket.reference, id, present);
-      setVisits((value) => value + 1);
-      await refresh();
+      await documents.setTicketDocument(reference, id, present);
+      await changed(undefined, fills);
       return true;
     } catch (reason) {
       setError(
@@ -87,37 +51,40 @@ export function useTicketDocuments({
       return false;
     }
   }
-  /** Removes the link at once; the pane's status line offers Undo (P7). */
+  /** Removes the link; the pane's status line offers Undo (P7). */
   async function unlink(link: DocumentLink) {
-    setLinks(
-      (current) =>
-        current?.filter((item) => item.target_id !== link.target_id) ?? null,
-    );
-    if (!(await change(link.target_id, false))) {
-      setVisits((value) => value + 1);
+    const id = link.target_id;
+    if (writing.current.has(id)) return;
+    writing.current.add(id);
+    setRemoving((old) => new Set(old).add(id));
+    const removed = await change(id, false, [unlinkedDocumentFill(record, id)]);
+    writing.current.delete(id);
+    setRemoving((old) => {
+      const next = new Set(old);
+      next.delete(id);
+      return next;
+    });
+    if (!removed) {
+      void read.retry();
       return;
     }
     statusLine.show({
-      message: `Removed ${link.target_label} from ${ticket.reference}`,
+      message: `Removed ${link.target_label} from ${reference}`,
       undo: async () => {
-        await documents.setTicketDocument(
-          ticket.reference,
-          link.target_id,
-          true,
-        );
-        setVisits((value) => value + 1);
-        await refresh();
+        await documents.setTicketDocument(reference, link.target_id, true);
+        // Shown again now, and kept if the re-read that follows fails.
+        await changed(undefined, [relinkedDocumentFill(record, link)]);
       },
     });
   }
   async function add(picked: DocumentSummary) {
-    await change(picked.id, true);
+    await change(picked.id, true, []);
   }
   return {
     links,
     error,
-    loadFailure,
-    retry: () => setVisits((value) => value + 1),
+    loadFailure: read.failure,
+    retry: read.retry,
     unlink,
     add,
   };

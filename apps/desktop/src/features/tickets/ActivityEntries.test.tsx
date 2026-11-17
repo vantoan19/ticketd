@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
-import { Activity } from "./Activity";
+import type { ComponentProps } from "react";
+import type { ChangeSignal } from "@/lib/workspace-reads";
+import { Activity as ActivitySection } from "./Activity";
+import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -33,9 +36,27 @@ afterEach(() => {
   bridge.invoke.mockReset();
 });
 
+/** Activity as a section of the open Ticket, as on the page. */
+function Activity({
+  signal,
+  hidden,
+  ...props
+}: ComponentProps<typeof ActivitySection> & {
+  signal?: ChangeSignal;
+  hidden?: boolean;
+}) {
+  return (
+    <OpenTicketFor
+      reference={props.reference}
+      {...(signal && { signal })}
+      {...(hidden !== undefined && { hidden })}
+    >
+      <ActivitySection {...props} />
+    </OpenTicketFor>
+  );
+}
+
 const props = {
-  status: "Todo",
-  revision: 0,
   projects: [],
   active: true,
   trashed: false,

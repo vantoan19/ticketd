@@ -1415,6 +1415,174 @@ test("moves selected tickets to a project from the direct Project control", asyn
   expect(changes).toEqual([{ project_id: "p1" }]);
 });
 
+test("a bulk change reloads the list once: its write report already moves the shared version", async () => {
+  let lists = 0;
+  await renderBulk({
+    find_tickets: () => {
+      lists += 1;
+      return [bulkTicket(1)];
+    },
+    list_projects: () => [
+      { id: "p1", name: "Project one", path: "/p", paths: ["/p"] },
+    ],
+    bulk_change: () => [],
+  });
+  const before = lists;
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  openMenu("Project of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Project one" }));
+  for (let turn = 0; turn < 5; turn += 1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  expect(lists - before).toBe(1);
+});
+
+// Like renderBulk, but a command with no handler gets the shared default.
+async function renderReplaceable(handlers: Record<string, unknown>) {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string, args?: never) => {
+    if (!(command in handlers)) return bridgeDefault(command, args);
+    const handler = handlers[command];
+    return typeof handler === "function" ? handler(args) : handler;
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+const driveOptions = {
+  local: { tickets: 2, documents: 0, attachments: 0 },
+  existing: [
+    {
+      folder_id: "folder-1",
+      folder_name: "ticketd · other",
+      last_synced_by: "Studio",
+      last_synced_at: "2026-11-01T00:00:00Z",
+      counts: { tickets: 2, documents: 0, attachments: 0 },
+    },
+  ],
+  reconnect: null,
+};
+
+test("a Drive download that replaces the Workspace drops the old selection and a failed bulk change", async () => {
+  const sent: string[] = [];
+  let downloaded = false;
+  await renderReplaceable({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    sync_status: syncStatus({
+      connection: "choosing",
+      folder: null,
+      state: "saved_locally",
+      last_synced_at: null,
+    }),
+    sync_settings: syncSettings(),
+    sync_setup_options: driveOptions,
+    sync_download_workspace: () => {
+      downloaded = true;
+      return { ...syncStatus(), safety_backup: "/ticketd/safety.sqlite3" };
+    },
+    bulk_status: (args: { requestId: string }) => {
+      sent.push(args.requestId);
+      throw { code: "unavailable", message: "lost reply" };
+    },
+  });
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ2" }));
+  openMenu("Status of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
+  await turn();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Google Drive" }),
+  );
+  for (let i = 0; i < 3; i += 1) await turn();
+  fireEvent.click(
+    screen.getByRole("radio", { name: /Download “ticketd · other”/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("dialog", { name: "Replace this Workspace?" }),
+    ).getByRole("button", { name: "Replace Workspace" }),
+  );
+  for (let i = 0; i < 4; i += 1) await turn();
+  expect(downloaded).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
+  for (let i = 0; i < 2; i += 1) await turn();
+
+  // The old selection and the batch it sent belong to the replaced Workspace.
+  expect(screen.queryByText("2 selected")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(sent).toHaveLength(1);
+});
+
+test("a restore reads the list once, during the restore", async () => {
+  const backup = "/tmp/restore-once.ticketd-backup";
+  const summary = {
+    last_change: null,
+    tickets: 1,
+    documents: 0,
+    activities: 0,
+    evidence: 0,
+    projects: 0,
+    plans: 0,
+  };
+  let lists = 0;
+  await renderReplaceable({
+    find_tickets: () => {
+      lists += 1;
+      return [bulkTicket(1)];
+    },
+    safety_backups: [
+      {
+        path: backup,
+        kind: "safety",
+        saved_at: "2026-11-01T00:00:00Z",
+        size_bytes: 1024,
+      },
+    ],
+    inspect_backup: {
+      path: backup,
+      current: summary,
+      check: { status: "valid", format_version: 19, summary },
+    },
+    restore_workspace: { safety_path: "/tmp/safety.sqlite3" },
+    draft_retentions: [],
+    draft_cutover_pending: false,
+  });
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Backups" }),
+  );
+  for (let i = 0; i < 3; i += 1) await turn();
+  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  for (let i = 0; i < 3; i += 1) await turn();
+  const before = lists;
+  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  for (let i = 0; i < 6; i += 1) await turn();
+  expect(screen.getByText("Workspace restored")).toBeTruthy();
+  expect(lists - before).toBe(1);
+});
+
 test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
   const changes: unknown[] = [];
   await renderBulk({
@@ -2965,6 +3133,48 @@ test("focused Ticket status key opens a scoped palette and Undo restores the sta
   await vi.waitFor(() => expect(current.status).toBe("Todo"));
 });
 
+test("a palette status change shows on the list row at once, before the list is read again", async () => {
+  vi.useFakeTimers();
+  let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });
+  // After the write the list read is still on its way.
+  let listRead: Promise<unknown> | null = null;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { patch?: { status?: string } }) => {
+      if (command === "find_tickets")
+        return listRead ?? Promise.resolve([current]);
+      if (command === "show_ticket") return current;
+      if (command === "change_ticket") {
+        current = { ...current, status: args?.patch?.status ?? current.status };
+        listRead = new Promise(() => {});
+        return current;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  render(<App />);
+  await turn();
+  const row = screen.getByRole("button", { name: /Palette target/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "s" });
+  await turn();
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Search tickets and destinations" }),
+    { key: "4" },
+  );
+  for (let i = 0; i < 4; i += 1) await turn();
+  expect(screen.getByText("Moved T-FV1 to Done")).toBeTruthy();
+  // The row keeps its place (the list holds a moved row still), but shows the new status.
+  expect(
+    screen
+      .getByRole("button", { name: /Palette target/ })
+      .getAttribute("data-status"),
+  ).toBe("Done");
+});
+
 test.each([
   [
     "p",
@@ -3067,6 +3277,43 @@ function paletteTickets(prefix = "KQ", status = "Todo") {
   );
   return tickets;
 }
+
+test("a closed palette stops reading its Ticket when the workspace changes", async () => {
+  vi.useFakeTimers();
+  paletteTickets();
+  render(<App />);
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  await turn();
+  const row = screen.getByRole("button", { name: /Focused Ticket/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "k", ctrlKey: true });
+  await turn();
+  const input = screen.getByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  await turn();
+  fireEvent.keyDown(input, { key: "Escape" });
+  await turn();
+  expect(
+    screen.queryByRole("combobox", { name: "Search tickets and destinations" }),
+  ).toBeNull();
+  const reads = () =>
+    bridge.invoke.mock.calls.filter(
+      ([command, args]) =>
+        command === "show_ticket" &&
+        (args as { reference: string }).reference === "T-KQ2",
+    ).length;
+  const before = reads();
+  // Every poll sees a moved token, so each is a change made elsewhere.
+  for (let poll = 0; poll < 3; poll += 1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+  expect(reads()).toBe(before);
+});
 
 test("palette actions come first, > excludes ticket search, and Tab and Backspace stay in the palette", async () => {
   paletteTickets();
@@ -8124,6 +8371,130 @@ test.each([
   },
 );
 
+test("Inbox triage reports accepting a review as one write", async () => {
+  let first = bulkTicket(1, { status: "In review" });
+  const timestamp = "2026-11-15T00:00:00Z";
+  const entries = [
+    {
+      id: 201,
+      reference: "T-KQ1",
+      title: "First",
+      kind: "status",
+      from_value: "In progress",
+      to_value: "In review",
+      timestamp,
+      editing_agent: "codex",
+      read: false,
+    },
+  ];
+  await renderBulk({
+    attachment_workspace_id: () => "triage-test",
+    latest_update: () => null,
+    is_following: () => false,
+    find_tickets: () => [first],
+    show_ticket: () => first,
+    ticket_history: () => [
+      {
+        kind: "status",
+        from_value: "In progress",
+        to_value: first.status,
+        timestamp,
+        editing_agent: "codex",
+      },
+    ],
+    reminder: () => null,
+    inbox: () => entries,
+    change_ticket: ({ patch }: { patch: { status: string } }) => {
+      first = { ...first, status: patch.status };
+      return first;
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  await flush();
+  const review = screen.getByRole("button", {
+    name: /T-KQ1.*First.*waiting for you/,
+  });
+  review.focus();
+  fireEvent.keyDown(review, { key: "j" });
+  await flush();
+  // Each write report reads the change token once.
+  const before = tokenCalls;
+  fireEvent.keyDown(review, { key: "Enter", ctrlKey: true });
+  await flush();
+  await flush();
+  expect(first.status).toBe("Done");
+  expect(tokenCalls - before).toBe(1);
+});
+
+test.each([true, false])(
+  "Inbox triage says a deleted Ticket no longer exists instead of loading for good (still listed: %s)",
+  async (stillListed) => {
+    const first = bulkTicket(1, { status: "In review" });
+    const timestamp = "2026-11-15T00:00:00Z";
+    let gone = false;
+    await renderBulk({
+      attachment_workspace_id: () => "triage-gone",
+      latest_update: () => null,
+      is_following: () => false,
+      find_tickets: () => (gone && !stillListed ? [] : [first]),
+      show_ticket: () => {
+        if (gone) throw { code: "not_found", message: "T-KQ1 was not found" };
+        return first;
+      },
+      ticket_history: () => [
+        {
+          kind: "status",
+          from_value: "In progress",
+          to_value: "In review",
+          timestamp,
+          editing_agent: "codex",
+        },
+      ],
+      reminder: () => null,
+      inbox: () => [
+        {
+          id: 301,
+          reference: "T-KQ1",
+          title: "First",
+          kind: "status",
+          from_value: "In progress",
+          to_value: "In review",
+          timestamp,
+          editing_agent: "codex",
+          read: false,
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+    const flush = () =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    await flush();
+    const review = screen.getByRole("button", {
+      name: /T-KQ1.*First.*waiting for you/,
+    });
+    review.focus();
+    fireEvent.keyDown(review, { key: "j" });
+    await flush();
+    const card = screen.getByRole("region", { name: "Inbox triage" });
+    // Deleted elsewhere; the next change reads it as gone.
+    gone = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    await flush();
+    expect(within(card).getByText("The Ticket no longer exists.")).toBeTruthy();
+    expect(within(card).queryByText("The Ticket is still loading.")).toBeNull();
+    // Nothing waits on the Ticket any more, so no placeholder stays.
+    expect(card.querySelector('[data-slot="skeleton"]')).toBeNull();
+  },
+);
+
 test("Inbox Retry preserves its operation identity and Undo restores Needs you after reload until a genuine later review", async () => {
   vi.useFakeTimers();
   let first = bulkTicket(1, { status: "In review" });
@@ -8277,6 +8648,74 @@ test("Inbox Retry preserves its operation identity and Undo restores Needs you a
     screen.queryByRole("button", { name: "Inbox, 1 entry needs you" }),
   ).toBeNull();
   expect(screen.getByRole("button", { name: /T-KQ2.*Second/ })).toBeTruthy();
+});
+
+test("Undo of a review with no agent reports the restored status at once and never says it failed", async () => {
+  vi.useFakeTimers();
+  let first = bulkTicket(1, { status: "In review" });
+  const second = bulkTicket(2);
+  let transition = {
+    kind: "status",
+    from_value: "In progress",
+    to_value: "In review",
+    timestamp: "2020-01-01T00:00:00Z",
+    // A status change from the CLI without `--agent`.
+    editing_agent: null as string | null,
+  };
+  const entries = [
+    { ...transition, id: 401, reference: "T-KQ1", title: "First", read: false },
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args?: Record<string, unknown>) => {
+      if (command === "find_tickets") return [first, second];
+      if (command === "show_ticket")
+        return args?.reference === "T-KQ1" ? first : second;
+      if (command === "ticket_history")
+        return args?.reference === "T-KQ1" ? [transition] : [];
+      if (command === "inbox") return entries;
+      if (command === "set_inbox_read") return;
+      if (command === "change_ticket") {
+        const status = (args?.patch as { status: string }).status;
+        transition = {
+          kind: "status",
+          from_value: first.status,
+          to_value: status,
+          timestamp: "2026-11-16T00:00:00Z",
+          editing_agent: null,
+        };
+        first = { ...first, status };
+        return first;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  render(<App />);
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  await flush();
+  const row = screen.getByRole("button", { name: /T-KQ1.*First/ });
+  fireEvent.click(row);
+  await flush();
+  const moveToDone = () =>
+    within(screen.getByRole("region", { name: "Inbox triage" })).getByRole(
+      "button",
+      { name: /Move to Done/ },
+    ) as HTMLButtonElement;
+  fireEvent.keyDown(row, { key: "Enter", ctrlKey: true });
+  await flush();
+  expect(first.status).toBe("Done");
+  expect(moveToDone().disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(first.status).toBe("In review");
+  // The card shows the restored status without waiting for the next poll.
+  expect(moveToDone().disabled).toBe(false);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
 test("Inbox unlinked approvals keep Chat review available and mark all read sends only real Inbox IDs", async () => {
@@ -11912,6 +12351,13 @@ test("a retained native 200% reload initializes the palette and Reset recovers e
     .mockImplementation(() => actualZoom * 2);
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
     if (command === "plugin:window|scale_factor") return 2;
+    // The window check half a second after mount reads the window size; answer
+    // with one in step with the page, so it does not try a repair.
+    if (command === "plugin:window|inner_size")
+      return {
+        width: window.innerWidth * actualZoom * 2,
+        height: window.innerHeight * actualZoom * 2,
+      };
     if (command === "plugin:window|is_decorated") return true;
     if (command === "plugin:window|set_theme") return;
     if (command === "plugin:webview|set_webview_zoom") {

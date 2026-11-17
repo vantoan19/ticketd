@@ -182,7 +182,6 @@ export function TicketProperties({
   chats,
   attention,
   active = true,
-  revision = 0,
   layout = "rail",
 }: {
   /** The ticket's Chats, after Status and Latest update. */
@@ -191,11 +190,11 @@ export function TicketProperties({
   attention?: ReactNode;
   layout?: "rail" | "strip";
   active?: boolean;
-  revision?: number;
   ticket: Ticket;
   projects: Project[];
   plans: Plan[];
-  onSaved: (ticket: Ticket) => void;
+  /** Reports the saved Ticket (the write report); awaited before the property settles. */
+  onSaved: (ticket: Ticket) => void | Promise<void>;
   refresh: () => Promise<void>;
   /** Sections that follow Attention in the rail: Relationships and Files. */
   children?: ReactNode;
@@ -299,21 +298,10 @@ export function TicketProperties({
       restoreFocus();
       return;
     }
-    onSaved(updated);
     try {
-      await refresh();
-    } catch (reason) {
-      setErrors((old) => ({
-        ...old,
-        [key]: {
-          failure: describeFailure(reason, "refresh the ticket"),
-          label: "Saved, not refreshed",
-          retry: () => {
-            setErrors((current) => ({ ...current, [key]: null }));
-            void refresh().catch(() => {});
-          },
-        },
-      }));
+      // The report shows the saved Ticket and refreshes what follows from it.
+      // It never rejects, so a saved change has no "not refreshed" state.
+      await onSaved(updated);
     } finally {
       setPending("");
       restoreFocus();
@@ -364,9 +352,7 @@ export function TicketProperties({
     ticket.status === "In progress" || ticket.status === "In review";
   const latestUpdate = reportsProgress && (
     <LatestUpdate
-      reference={ticket.reference}
       active={active}
-      revision={revision}
       onOpen={onOpenNote}
       variant={strip ? "line" : "rail"}
     />

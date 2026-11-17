@@ -184,6 +184,10 @@ export function InboxAttentionProvider({
           };
         },
         restoreReview: async (entry) => {
+          // A review without an agent never needed you ("absence never
+          // establishes a human", see `needsYou`), so there is nothing to
+          // bring back and its Undo has nothing left to record.
+          if (entry.editing_agent === null) return;
           const latest = (await historyClient.list(entry.reference))
             .filter((item) => item.kind === "status")
             .at(-1);

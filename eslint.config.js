@@ -50,6 +50,31 @@ export default tseslint.config(
     },
   },
   {
+    // ADR 0013: workspace reads live behind lib/workspace-reads, the only code
+    // that knows which cache is underneath. Views use its hooks, not TanStack.
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    ignores: ["apps/desktop/src/lib/workspace-reads/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@tanstack/react-query",
+              message:
+                "Read through lib/workspace-reads (useRead, usePagedRead, useWrote); only that module imports @tanstack/react-query.",
+            },
+            {
+              name: "@tanstack/query-core",
+              message:
+                "Read through lib/workspace-reads (useRead, usePagedRead, useWrote); only that module imports TanStack Query.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["apps/chat-bridge-claude/**/*.{ts,mjs}"],
     languageOptions: { globals: globals.node },
     rules: { "@typescript-eslint/no-explicit-any": "error" },

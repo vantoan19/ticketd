@@ -1,0 +1,63 @@
+import type { Ticket } from "@/lib/api/client";
+import type { FailureDescription } from "@/lib/api/describe-failure";
+import {
+  skip,
+  ticketRead,
+  useKnown,
+  useRead,
+  withCurrent,
+} from "@/lib/workspace-reads";
+import { usePart, type PartArgs, type PartName, type PartState } from "./parts";
+
+export type TicketState = {
+  /** The Ticket; null when it no longer exists; undefined until it is known. */
+  value: Ticket | null | undefined;
+  failure: FailureDescription | null;
+  retry(): Promise<void>;
+  /** Whether `value` is as current as the last change. */
+  readonly current: boolean;
+};
+
+/**
+ * One Ticket by reference, for chips and the header outside a page. Every
+ * caller naming the same Ticket shares one read; with no reference it reads
+ * nothing. `useTicket(reference, part, ...args)` serves a part of the Ticket.
+ */
+export function useTicket(reference: string | null): TicketState;
+export function useTicket<Name extends PartName>(
+  reference: string | null,
+  part: Name,
+  ...args: PartArgs<Name>
+): PartState<Name>;
+export function useTicket<Name extends PartName>(
+  reference: string | null,
+  part?: Name,
+  ...args: PartArgs<Name>
+): TicketState | PartState<Name> | undefined {
+  const state = useRead(ticketRead, reference ?? skip);
+  // A Ticket that is gone reads as null; parts are served only for a known one.
+  const served = usePart(state.value ?? undefined, part, args);
+  if (part !== undefined) return served;
+  return withCurrent(
+    {
+      value: state.value,
+      failure: state.failure,
+      retry: state.retry,
+    },
+    () => state.current,
+  );
+}
+
+/**
+ * A peek at the newest copy known of a Ticket, for a row that is not the open
+ * one: `known(reference)` is the record, null when the Ticket is gone, and
+ * undefined when none was read. It reads what is cached now, starts no read and
+ * does not re-render the caller when the copy changes: ask again where it is
+ * needed (a render that happens anyway, or an event handler). The function is
+ * stable.
+ */
+export function useKnownTicket(): (
+  reference: string,
+) => Ticket | null | undefined {
+  return useKnown(ticketRead);
+}

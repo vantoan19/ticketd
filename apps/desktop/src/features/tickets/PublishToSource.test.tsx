@@ -13,8 +13,20 @@ import type { PublicationAttempt, Ticket } from "@/lib/api/client";
 import { SourceActivityContext } from "./source-activity";
 import { PublicationNotice, PublishDialog } from "./PublishToSource";
 import { TicketHeader } from "./TicketHeader";
-import { TicketProperties } from "./TicketProperties";
+import { TestReads } from "@/lib/workspace-reads/testing";
+import type { ComponentProps } from "react";
+import { TicketProperties as Properties } from "./TicketProperties";
+import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { open } from "@tauri-apps/plugin-dialog";
+
+/** The property rail as the Ticket page mounts it, inside the open Ticket. */
+function TicketProperties(props: ComponentProps<typeof Properties>) {
+  return (
+    <OpenTicketFor reference={props.ticket.reference} ticket={props.ticket}>
+      <Properties {...props} />
+    </OpenTicketFor>
+  );
+}
 
 window.ResizeObserver = class {
   observe() {}
@@ -912,17 +924,17 @@ test("the Actions menu offers publish with the core's disabled reason", async ()
     },
   });
   render(
-    <TicketHeader
-      selected="T-KQ1"
-      ticket={ticket({ status: "Done" })}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      onClose={vi.fn()}
-      onOpenGraph={vi.fn()}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />,
+    <TestReads>
+      <TicketHeader
+        selected="T-KQ1"
+        ticket={ticket({ status: "Done" })}
+        expanded={false}
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        onClose={vi.fn()}
+        onOpenGraph={vi.fn()}
+      />
+    </TestReads>,
   );
   fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
     key: "Enter",
@@ -941,17 +953,17 @@ test("the Actions menu offers publish with the core's disabled reason", async ()
 test("publishing from Actions opens the same exact preview before sending", async () => {
   bridgeAnswers(eligible);
   render(
-    <TicketHeader
-      selected="T-KQ1"
-      ticket={ticket()}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      onClose={vi.fn()}
-      onOpenGraph={vi.fn()}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />,
+    <TestReads>
+      <TicketHeader
+        selected="T-KQ1"
+        ticket={ticket()}
+        expanded={false}
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        onClose={vi.fn()}
+        onOpenGraph={vi.fn()}
+      />
+    </TestReads>,
   );
   fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
     key: "Enter",

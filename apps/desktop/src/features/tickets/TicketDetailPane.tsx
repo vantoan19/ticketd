@@ -35,12 +35,9 @@ export function TicketDetailPane({
     loading,
     queryError,
     tickets,
-    details,
+    opened,
     projects,
     plans,
-    revision,
-    refresh,
-    updateTicket,
     position,
     openAdjacent,
   } = workspace;
@@ -70,13 +67,12 @@ export function TicketDetailPane({
         mention={mention}
         inboxTarget={inboxTarget}
         setSelected={onSelect}
-        details={details}
+        opened={opened}
+        onMentionReady={workspace.markMentionReady}
+        onClearMention={workspace.clearMention}
         preview={resultTickets.find((ticket) => ticket.reference === selected)}
         projects={projects}
         plans={plans}
-        revision={revision}
-        refresh={refresh}
-        updateTicket={updateTicket}
         position={
           context === "inbox"
             ? (triage?.position ?? null)
@@ -89,8 +85,6 @@ export function TicketDetailPane({
             ? (triage?.adjacent ?? openAdjacent)
             : openAdjacent
         }
-        failure={workspace.detailFailure}
-        onRetry={workspace.retryDetail}
         returnLabel={context === "inbox" ? "Inbox" : workspace.scopeName}
       />
     </StatusLineRegion>

@@ -1,34 +1,18 @@
-import { useEffect, useState } from "react";
-import { client } from "@/lib/api/client";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { RecordLink } from "@/components/ui/record-link";
 import { references } from "./ticket-references";
+import { useTicket } from "./open-ticket";
 
 export function TicketReference({
   reference,
   select,
-  revision,
 }: {
   reference: string;
   select: (reference: string) => void;
-  revision: number | undefined;
 }) {
-  const [target, setTarget] = useState<{ trashed: boolean } | null>(null);
-  useEffect(() => {
-    let active = true;
-    void client.showTicket(reference).then(
-      (ticket) => {
-        if (active) setTarget(ticket);
-      },
-      () => {
-        if (active) setTarget(null);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [reference, revision]);
+  // Chips naming the same ticket share one read, which follows every change.
+  const target = useTicket(reference).value;
   // A reference opens its ticket; one that cannot be found is plain (P15).
   return target ? (
     <RecordLink reference={reference} onClick={() => select(reference)}>
@@ -42,11 +26,9 @@ export function TicketReference({
 export function TicketMarkdown({
   content,
   select,
-  revision,
 }: {
   content: string;
   select: ((reference: string) => void) | undefined;
-  revision?: number | undefined;
 }) {
   return (
     <ReactMarkdown
@@ -57,11 +39,7 @@ export function TicketMarkdown({
       components={{
         a: ({ href, children, ...props }) =>
           href?.startsWith("ticketd:") && select ? (
-            <TicketReference
-              reference={href.slice(8)}
-              select={select}
-              revision={revision}
-            />
+            <TicketReference reference={href.slice(8)} select={select} />
           ) : (
             <a href={href} {...props}>
               {children}

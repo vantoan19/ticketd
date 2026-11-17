@@ -16,6 +16,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { Activity } from "@/features/tickets/Activity";
+import { OpenTicketFor } from "@/features/tickets/open-ticket/parts/activity-testing";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import type { Ticket } from "@/lib/api/client";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
@@ -350,14 +351,9 @@ test("Document capture autosaves inserted links while failed saves keep the draf
 test("Activity brief and details insert links without posting until explicit submit", async () => {
   bridge();
   render(
-    <Activity
-      reference="T-KQ1"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
+    <OpenTicketFor reference="T-KQ1">
+      <Activity reference="T-KQ1" projects={[]} active trashed={false} />
+    </OpenTicketFor>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   await insertInto("New update");
