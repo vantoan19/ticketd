@@ -361,3 +361,28 @@ fn deleting_an_automation_with_many_runs_ends_them_all_answered() {
     let (_, inbox, counted) = records(&many.workspace);
     assert_eq!((inbox, counted), (0, 0));
 }
+
+/// The person's Stop of a run that ended meanwhile (a restart ended it, or it
+/// finished as they pressed) is not an error: the run is returned as it ended.
+#[test]
+fn stopping_a_run_that_has_already_ended_returns_it_as_it_ended() {
+    for state in [
+        AutomationRunStatus::Completed,
+        AutomationRunStatus::NeedsAttention,
+        AutomationRunStatus::TakenOver,
+    ] {
+        let mut setup = run_in(state);
+        let before = setup.workspace.automation_run(&setup.run).unwrap();
+
+        let (run, chats) = setup.workspace.stop_automation_run(&setup.run).unwrap();
+
+        assert_eq!(run, before, "a run that is {state:?} stays as it is");
+        assert!(chats.is_empty(), "no agent was working in a run that ended");
+    }
+}
+
+#[test]
+fn stopping_a_run_that_does_not_exist_is_still_an_error() {
+    let mut setup = run_in(AutomationRunStatus::Queued);
+    assert!(setup.workspace.stop_automation_run("missing").is_err());
+}

@@ -1218,6 +1218,27 @@ async fn trashing_a_working_agents_chat_fails_the_step_and_runs_its_failure_path
     assert_eq!(*told.lock().unwrap(), 1);
 }
 
+/// A Stop or Delete that arrives after the run ended (it finished as the person pressed
+/// the button, or a restart ended it first) is not an error: the run is as it ended.
+#[tokio::test(start_paused = true)]
+async fn stopping_or_deleting_after_the_run_ended_leaves_it_as_it_ended() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    f.end_turn(problem(ProblemKind::Other, "The model refused."))
+        .await;
+    let ended = f.runs().remove(0);
+    assert_eq!(ended.status, AutomationRunStatus::NeedsAttention);
+
+    let stopped = f.runner.stop_run(&ended.id).await.unwrap();
+    assert_eq!(stopped, ended);
+    f.runner.delete_automation(&f.automation.id).await.unwrap();
+
+    let after = f.runs().remove(0);
+    assert_eq!(after.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(after.reason, ended.reason);
+    assert!(f.runner.stop_run("missing").await.is_err());
+}
+
 /// #387 M4: a run stopped while its agent's harness is still opening ends that
 /// harness as soon as it has opened; no idle agent waits for the time limit.
 #[tokio::test(start_paused = true)]

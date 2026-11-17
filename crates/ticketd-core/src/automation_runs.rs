@@ -629,19 +629,21 @@ impl Workspace {
     /// it. The step it was on is marked Failed and nothing after it runs, its
     /// failure path included: the outcome its executor reports later is refused.
     /// Also returns the Chats of the agents that were working, read in the same
-    /// transaction that ends the run, for the host to interrupt.
+    /// transaction that ends the run, for the host to interrupt. A run that has
+    /// already ended (it finished as the person pressed Stop, or a restart ended it)
+    /// is returned as it ended, with no Chats: that is not an error.
     pub fn stop_automation_run(
         &mut self,
         run_id: &str,
     ) -> Result<(AutomationRun, Vec<String>), Error> {
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
-        let Some(ended) = end(&transaction, run_id, Cause::Stopped)? else {
-            return Err(Error::AutomationRun("the run has already ended".into()));
-        };
+        let chats = end(&transaction, run_id, Cause::Stopped)?
+            .map(|ended| ended.chats)
+            .unwrap_or_default();
         let run = one(&transaction, run_id)?;
         transaction.commit()?;
-        Ok((run, ended.chats))
+        Ok((run, chats))
     }
 
     /// Queues a new run for the Workspace event that started a finished run. It

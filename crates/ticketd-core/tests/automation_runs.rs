@@ -538,8 +538,10 @@ fn stopping_a_running_run_ends_it_needing_attention_without_its_failure_path() {
         RunAction::Ended
     );
     assert_eq!(workspace.automation_run(&run.id).unwrap(), stopped);
-    // A run that has ended cannot be stopped again.
-    assert!(workspace.stop_automation_run(&run.id).is_err());
+    // Stopping it again is not an error: it is returned as it ended, with no agent
+    // left to close.
+    let (again, working) = workspace.stop_automation_run(&run.id).unwrap();
+    assert_eq!((again, working), (stopped, Vec::new()));
 }
 
 #[test]
