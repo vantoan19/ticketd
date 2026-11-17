@@ -67,8 +67,8 @@ export function usePlanView(planId: string, revision: number) {
   }, [planId, revision, changeVersion, loadAttempt]);
   const current = loaded?.id === planId ? loaded : null;
   /**
-   * Runs a change, then reports the write and refreshes this Plan. A change
-   * may return the Tickets it changed. A failure rejects, so the caller
+   * Runs a change, then reports the write, whose report reloads this Plan
+   * through the shared version. A change may return the Tickets it changed. A failure rejects, so the caller
    * reports it where it belongs (`usePlanAction`).
    */
   const apply = useCallback(
@@ -77,11 +77,6 @@ export function usePlanView(planId: string, revision: number) {
       try {
         const returned = await change();
         await changed(returned ?? null);
-        // Show this change now rather than at the next workspace poll.
-        await plansClient.show(planId).then(
-          (view) => setLoaded({ id: planId, view, error: null }),
-          () => {},
-        );
       } finally {
         setPending(false);
       }

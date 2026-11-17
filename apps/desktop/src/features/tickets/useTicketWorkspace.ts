@@ -188,6 +188,11 @@ export function useTicketWorkspace(
   // Advances on every successful poll, changed data or not, for views that poll their own sources.
   const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
+  // A click that must explain a failed reload sets this to the generation it
+  // was made at. Any list read started after it explains its failure, and the
+  // first of them to settle ends it: reads already in flight, which the click's
+  // own reload replaces, neither explain nor end it.
+  const explainAfter = useRef<number | null>(null);
   // Only the scope's own fields matter to a fetch; depending on the object would
   // refetch whenever the same scope is chosen again.
   const scopeKind = navigation.kind;
@@ -220,6 +225,12 @@ export function useTicketWorkspace(
   );
   const board = useTicketBoard(filterArgs, layout === "board", workspaceChange);
   const refreshBoard = board.refresh;
+  const takeExplanation = useCallback((request: number) => {
+    const explain =
+      explainAfter.current !== null && request > explainAfter.current;
+    if (explain) explainAfter.current = null;
+    return explain;
+  }, []);
   const refresh = useCallback(
     async (options?: RefreshOptions) => {
       const request = ++generation.current;
@@ -264,6 +275,7 @@ export function useTicketWorkspace(
           }),
         ]);
         if (request !== generation.current) return;
+        takeExplanation(request);
         listLoaded.current = true;
         setListKnown(true);
         setPollTick((value) => value + 1);
@@ -282,11 +294,12 @@ export function useTicketWorkspace(
         setRevision((value) => value + 1);
       } catch (reason) {
         if (request !== generation.current) return;
+        const explain = takeExplanation(request);
         lastSnapshot.current = "";
         if (listLoaded.current) setRefreshFailed(true);
         else setQueryError(true);
         // Polling keeps the saved list quiet; an explicit retry explains its failure.
-        if (!listLoaded.current || options?.reportFailure)
+        if (!listLoaded.current || options?.reportFailure || explain)
           setListFailure(describeFailure(reason, "load tickets"));
       } finally {
         window.clearTimeout(timeout);
@@ -302,6 +315,7 @@ export function useTicketWorkspace(
       layout,
       refreshBoard,
       refreshPlans,
+      takeExplanation,
     ],
   );
   useEffect(() => {
@@ -354,8 +368,10 @@ export function useTicketWorkspace(
    */
   async function refreshSources(ticket?: string) {
     setSourceRefresh({ running: true, report: null, error: "", errorAt: null });
+    let found = false;
     try {
       const report = await sourcesClient.refresh(ticket);
+      found = report.imported.length > 0 || report.updated.length > 0;
       setSourceRefresh({ running: false, report, error: "", errorAt: null });
     } catch (reason) {
       setSourceRefresh({
@@ -365,10 +381,15 @@ export function useTicketWorkspace(
         errorAt: new Date().toISOString(),
       });
     }
-    // The refresh may have imported or updated Tickets.
-    const reported = wrote();
-    await refresh({ reportFailure: true });
-    await reported;
+    // One list read per click, and a failed one is explained. When Tickets
+    // changed, the write report moves the shared version, which reloads the
+    // list; otherwise the click reloads it itself, for the sources' health.
+    if (found) {
+      explainAfter.current = generation.current;
+      await wrote();
+    } else {
+      await refresh({ reportFailure: true });
+    }
   }
   function setSource(next: string) {
     setSourceFilter(next);
