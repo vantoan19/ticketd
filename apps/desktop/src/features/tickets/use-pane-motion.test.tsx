@@ -24,7 +24,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function useTokens(tokens: Record<string, string>) {
+function setTokens(tokens: Record<string, string>) {
   restoreTokens();
   restoreTokens = applyTokens({ ...rootTokens, ...tokens });
 }
@@ -96,7 +96,7 @@ test("opening while the last ticket is still leaving cancels its exit", () => {
 
 test("reduced motion and a held key make every change instant", () => {
   for (const tokens of [reducedTokens, instantTokens]) {
-    useTokens(tokens);
+    setTokens(tokens);
     const view = pane("split");
     view.rerender({ mode: "closed" });
     expect(view.result.current).toEqual({ arrival: null, leaving: null });

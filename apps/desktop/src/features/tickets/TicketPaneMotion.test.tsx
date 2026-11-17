@@ -82,7 +82,9 @@ afterEach(() => {
   bridge.invoke.mockReset();
 });
 
-const api = { select: (_reference: string | null) => {} };
+const api: { select: (reference: string | null) => void } = {
+  select: () => {},
+};
 function Harness() {
   const workspace = useTicketWorkspace(vi.fn(), vi.fn());
   const bulk = useBulkEdit(workspace.refresh);
@@ -113,7 +115,7 @@ async function setUp() {
   );
   await waitFor(() => expect(group()).toBeTruthy());
 }
-function useTokens(tokens: Record<string, string>) {
+function setTokens(tokens: Record<string, string>) {
   restoreTokens();
   restoreTokens = applyTokens({ ...rootTokens, ...tokens });
 }
@@ -198,7 +200,7 @@ test.each([
   ["reduced motion", reducedTokens],
   ["a held key", instantTokens],
 ])("with %s every change is instant", async (_name, tokens) => {
-  useTokens(tokens);
+  setTokens(tokens);
   await setUp();
   open("T-KQ1");
   await screen.findByText("Title of T-KQ1");
