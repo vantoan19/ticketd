@@ -8184,6 +8184,65 @@ test.each([
   },
 );
 
+test("Inbox triage reports accepting a review as one write", async () => {
+  let first = bulkTicket(1, { status: "In review" });
+  const timestamp = "2026-11-15T00:00:00Z";
+  const entries = [
+    {
+      id: 201,
+      reference: "T-KQ1",
+      title: "First",
+      kind: "status",
+      from_value: "In progress",
+      to_value: "In review",
+      timestamp,
+      editing_agent: "codex",
+      read: false,
+    },
+  ];
+  await renderBulk({
+    attachment_workspace_id: () => "triage-test",
+    latest_update: () => null,
+    is_following: () => false,
+    find_tickets: () => [first],
+    show_ticket: () => first,
+    ticket_history: () => [
+      {
+        kind: "status",
+        from_value: "In progress",
+        to_value: first.status,
+        timestamp,
+        editing_agent: "codex",
+      },
+    ],
+    reminder: () => null,
+    inbox: () => entries,
+    change_ticket: ({ patch }: { patch: { status: string } }) => {
+      first = { ...first, status: patch.status };
+      return first;
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  await flush();
+  const review = screen.getByRole("button", {
+    name: /T-KQ1.*First.*waiting for you/,
+  });
+  review.focus();
+  fireEvent.keyDown(review, { key: "j" });
+  await flush();
+  // Each write report reads the change token once.
+  const before = tokenCalls;
+  fireEvent.keyDown(review, { key: "Enter", ctrlKey: true });
+  await flush();
+  await flush();
+  expect(first.status).toBe("Done");
+  expect(tokenCalls - before).toBe(1);
+});
+
 test("Inbox Retry preserves its operation identity and Undo restores Needs you after reload until a genuine later review", async () => {
   vi.useFakeTimers();
   let first = bulkTicket(1, { status: "In review" });

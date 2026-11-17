@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip } from "@/components/ui/tooltip";
-import { client, type Evidence } from "@/lib/api/client";
+import { client, type Evidence, type Ticket } from "@/lib/api/client";
 import { useTicket, useTicketChanged } from "./open-ticket";
 import { inboxClient } from "@/lib/api/inbox";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
@@ -131,9 +131,10 @@ export function InboxTriageCard() {
   }, [reference, evidenceAttempt]);
   const isReview = entry?.kind === "status" && entry.to_value === "In review";
   const isReminder = entry?.kind === "reminder";
-  async function reload() {
+  // The one report of a write, with the Ticket the write returned.
+  async function reload(returned?: Ticket) {
     attention?.reload();
-    await changed();
+    await changed(returned);
   }
   const { pending, perform } = useInboxAction(reload, triage?.line);
   function mark(next: boolean) {
@@ -201,19 +202,16 @@ export function InboxTriageCard() {
         `Moved ${reference} to Done`,
         async () => {
           before ??= (await client.showTicket(reference)).status;
-          void changed(
-            await client.changeTicket(reference, { status: "Done" }, id),
-          );
+          return client.changeTicket(reference, { status: "Done" }, id);
         },
         async () => {
-          void changed(
-            await client.changeTicket(
-              reference,
-              { status: before ?? "In review" },
-              undoId,
-            ),
+          const restored = await client.changeTicket(
+            reference,
+            { status: before ?? "In review" },
+            undoId,
           );
           await attention?.restoreReview?.(entry);
+          return restored;
         },
       );
     } else {
