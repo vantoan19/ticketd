@@ -844,6 +844,8 @@ test("offers refresh when the requested update was removed", async () => {
   expect(lookups()).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Refresh updates" }));
   await waitFor(() => expect(lookups()).toBe(2));
+  // The update is still gone, so the notice is dismissed rather than kept.
+  expect(screen.queryByText(/update is no longer available/i)).toBeNull();
 });
 
 test("restores the whole draft, brief, details and attached Document, from one object", async () => {

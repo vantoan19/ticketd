@@ -800,7 +800,16 @@ export function Activity({
           <AlertDescription>
             This update is no longer available.
           </AlertDescription>
-          <Button variant="ghost" size="sm" onClick={() => void changed()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              // The update is gone: the notice has been read, and the refresh
+              // looks for what else changed.
+              setLeftTargetKey(targetKey);
+              void changed();
+            }}
+          >
             Refresh updates
           </Button>
         </Alert>
