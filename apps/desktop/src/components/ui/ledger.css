@@ -8,9 +8,6 @@
 .ui-item-ledger:focus-within {
   background: var(--hover);
 }
-.ui-item-ledger:has(.ticket-row[aria-pressed="true"]) {
-  background: var(--accent);
-}
 .ticket-list .ticket-row {
   background: transparent;
   border-radius: var(--radius-card);
@@ -150,9 +147,6 @@
 .ui-item-navigator:focus-within {
   background: var(--hover);
 }
-.ui-item-navigator:has(.ticket-row[aria-pressed="true"]) {
-  background: var(--accent);
-}
 .ui-item-navigator .ticket-row {
   border-radius: var(--radius-card);
 }
@@ -183,19 +177,4 @@
 .latest-update-line:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-
-/* Regrouping is instant; only the arrival surface fades. */
-:is(.ui-item-ledger, .ui-item-navigator)[data-arriving] {
-  animation: ledger-arrival var(--dur-arrival) var(--ease-out);
-}
-@keyframes ledger-arrival {
-  from {
-    background-color: var(--hover);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  :is(.ui-item-ledger, .ui-item-navigator)[data-arriving] {
-    animation: none;
-  }
 }
