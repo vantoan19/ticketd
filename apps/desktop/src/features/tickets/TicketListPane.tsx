@@ -586,7 +586,6 @@ function TicketListBody({
       <MarkDuplicateDialog
         open={markingDuplicate}
         onOpenChange={setMarkingDuplicate}
-        refresh={refresh}
       />
       <ListOverlays>
         {showBulk && workspace.layout === "list" && (

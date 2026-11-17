@@ -365,7 +365,10 @@ export function useTicketWorkspace(
         errorAt: new Date().toISOString(),
       });
     }
+    // The refresh may have imported or updated Tickets.
+    const reported = wrote();
     await refresh({ reportFailure: true });
+    await reported;
   }
   function setSource(next: string) {
     setSourceFilter(next);
