@@ -83,33 +83,42 @@ type DocumentLinks = [outgoing: DocumentLink[], incoming: DocumentLink[]];
 const firstWindow = (record: Ticket) => ({ id: record.id, offset: 0 });
 
 /**
- * The fill for unlinking `documentId` from `record`: every outgoing link to it
- * leaves the Documents list. Pass it to `changed` after
+ * The fill for unlinking `documentId` from `record`: its explicit link leaves
+ * the Documents list, as in the core, which deletes only the attached row. A
+ * mention in the description or an update stays. Pass it to `changed` after
  * `documents.setTicketDocument(..., false)` succeeded.
  */
 export function unlinkedDocumentFill(record: Ticket, documentId: string): Fill {
   return updateRead(
     documentLinksRead,
     firstWindow(record),
-    ([outgoing, incoming]): DocumentLinks => [
-      outgoing.filter((link) => link.target_id !== documentId),
-      incoming,
-    ],
+    (cached): DocumentLinks => {
+      const [outgoing, incoming] = cached;
+      const kept = outgoing.filter(
+        (link) => !(link.target_id === documentId && link.explicit),
+      );
+      return kept.length === outgoing.length ? cached : [kept, incoming];
+    },
   );
 }
 
 /**
  * The fill for linking a Document again (Undo of an unlink): `link` goes back
- * among the outgoing links unless the Document is listed already. Pass it to
- * `changed` after `documents.setTicketDocument(..., true)` succeeded.
+ * among the outgoing links unless an explicit link to the Document is listed
+ * already (a mention does not count). Pass it to `changed` after
+ * `documents.setTicketDocument(..., true)` succeeded.
  */
 export function relinkedDocumentFill(record: Ticket, link: DocumentLink): Fill {
   return updateRead(
     documentLinksRead,
     firstWindow(record),
-    ([outgoing, incoming]): DocumentLinks =>
-      outgoing.some((known) => known.target_id === link.target_id)
-        ? [outgoing, incoming]
-        : [[...outgoing, link], incoming],
+    (cached): DocumentLinks => {
+      const [outgoing, incoming] = cached;
+      return outgoing.some(
+        (known) => known.target_id === link.target_id && known.explicit,
+      )
+        ? cached
+        : [[...outgoing, link], incoming];
+    },
   );
 }

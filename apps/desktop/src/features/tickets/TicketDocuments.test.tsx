@@ -325,3 +325,43 @@ test("Undo of a removal shows the Document again and keeps it when the re-read a
   expect(screen.getByRole("button", { name: "Linked" })).toBeTruthy();
   expect(attached).toBe(true);
 });
+
+test("Remove hides the Document at once and a second click sends no second write", async () => {
+  let finish: () => void = () => {};
+  const written = new Promise<null>((resolve) => {
+    finish = () => resolve(null);
+  });
+  vi.mocked(invoke).mockImplementation((command) =>
+    command === "document_context_links"
+      ? Promise.resolve([[link("d1", "Linked", true)], []])
+      : command === "set_ticket_document"
+        ? written
+        : Promise.resolve(command === "ticket_attachments" ? [] : null),
+  );
+  render(files());
+  const remove = await screen.findByRole("button", { name: "Remove Linked" });
+  act(() => {
+    remove.click();
+    remove.click();
+  });
+  expect(screen.queryByRole("button", { name: "Linked" })).toBeNull();
+  await act(async () => finish());
+  const writes = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "set_ticket_document");
+  expect(writes).toHaveLength(1);
+});
+
+test("a failed Remove shows the Document again with the error", async () => {
+  vi.mocked(invoke).mockImplementation((command) =>
+    command === "document_context_links"
+      ? Promise.resolve([[link("d1", "Linked", true)], []])
+      : command === "set_ticket_document"
+        ? Promise.reject({ code: "failed", message: "disk I/O error" })
+        : Promise.resolve(command === "ticket_attachments" ? [] : null),
+  );
+  render(files());
+  fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));
+  expect(await screen.findByRole("alert")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Linked" })).toBeTruthy();
+});

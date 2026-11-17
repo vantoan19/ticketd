@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   documents,
   type DocumentLink,
@@ -25,8 +25,15 @@ export function useTicketDocuments() {
   const read = useOpenTicket("documents");
   const [error, setError] = useState<FailureDescription | null>(null);
   const statusLine = useStatusLine();
+  // Documents being removed: hidden at once, and their Remove ignored until
+  // the write answers (the ref covers a second click before the next render).
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
+  const writing = useRef(new Set<string>());
   // Null until the first read answers: an unread list never reads as empty.
-  const links = read.links ?? null;
+  const links = useMemo(
+    () => read.links?.filter((link) => !removing.has(link.target_id)) ?? null,
+    [read.links, removing],
+  );
   /** `fills` is what the change set in the list, reported once it is saved. */
   async function change(id: string, present: boolean, fills: readonly Fill[]) {
     setError(null);
@@ -46,11 +53,18 @@ export function useTicketDocuments() {
   }
   /** Removes the link; the pane's status line offers Undo (P7). */
   async function unlink(link: DocumentLink) {
-    if (
-      !(await change(link.target_id, false, [
-        unlinkedDocumentFill(record, link.target_id),
-      ]))
-    ) {
+    const id = link.target_id;
+    if (writing.current.has(id)) return;
+    writing.current.add(id);
+    setRemoving((old) => new Set(old).add(id));
+    const removed = await change(id, false, [unlinkedDocumentFill(record, id)]);
+    writing.current.delete(id);
+    setRemoving((old) => {
+      const next = new Set(old);
+      next.delete(id);
+      return next;
+    });
+    if (!removed) {
       void read.retry();
       return;
     }
