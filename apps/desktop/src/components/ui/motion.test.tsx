@@ -101,6 +101,25 @@ it("Appear settles into place", async () => {
   });
 });
 
+it("Appear carries no filter once settled, so long lists keep no compositing layers", async () => {
+  render(<Shown show />);
+  await waitFor(() => {
+    const { opacity, filter } = screen.getByText("Hello").style;
+    expect(opacity).toBe("1");
+    expect(["", "none"]).toContain(filter);
+  });
+});
+
+it("Appear carries no filter once settled under reduced motion", async () => {
+  useReducedMotion();
+  render(<Shown show />);
+  await waitFor(() => {
+    const { opacity, filter } = screen.getByText("Hello").style;
+    expect(opacity).toBe("1");
+    expect(["", "none"]).toContain(filter);
+  });
+});
+
 it("Appear leaves in its own time, not at once", async () => {
   const { rerender } = render(<Shown show />);
   rerender(<Shown show={false} />);
