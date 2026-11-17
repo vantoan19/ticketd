@@ -816,16 +816,14 @@
 }
 .ui-segmented {
   background: var(--segmented-track);
+  /* The travelling thumb sits above the track and below the labels. */
+  isolation: isolate;
 }
 .ui-segmented :is([role="radio"], [role="tab"]) {
   font-size: var(--text-code);
   line-height: var(--text-ui-line);
 }
-.ui-segmented
-  :is(
-    [role="radio"][data-state="checked"],
-    [role="tab"][aria-selected="true"]
-  ) {
+.ui-segmented .ui-glide {
   background: var(--segmented-thumb);
   box-shadow: var(--shadow-segmented-thumb);
 }
@@ -837,8 +835,6 @@
   height: 28px;
   justify-content: flex-start;
   padding-inline: 0;
-  background: none;
-  box-shadow: none;
   font-size: var(--text-ui);
 }
 /* A disabled switch keeps its shape at full strength: a recessed track and a
