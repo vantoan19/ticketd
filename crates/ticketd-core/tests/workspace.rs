@@ -1280,20 +1280,42 @@ fn restore_rejects_open_workspace_and_invalid_backup_without_changing_data() {
 
 #[test]
 fn migration_preserves_workspace_and_recovers_from_failure() {
+    use ticketd_core::{WriteRequest, WriteResult};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
+    let request = || WriteRequest::CreateTicket {
+        title: "Saved".into(),
+        project_id: None,
+    };
+    // A request and the outcome it was recorded with, as a Workspace saves them.
+    let donor = dir.path().join("donor.sqlite3");
+    let original = Workspace::open(&donor)
+        .unwrap()
+        .write(Some("request-1"), request())
+        .unwrap();
+    let (recorded_request, recorded_outcome): (String, String) = rusqlite::Connection::open(&donor)
+        .unwrap()
+        .query_row(
+            "SELECT request, outcome FROM request_outcomes WHERE id = 'request-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     // A Workspace as format version 12 left it: a ticket, a tag and a recorded request.
     let seed = |path: &std::path::Path| {
         ticketd_core::create_workspace_at_format_version(path, 12).unwrap();
-        rusqlite::Connection::open(path)
-            .unwrap()
-            .execute_batch(
-                "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Saved', 'Todo');
-                 INSERT INTO tags (name) VALUES ('kept');
-                 INSERT INTO ticket_tags (ticket_id, tag_name) VALUES ('t1', 'kept');
-                 INSERT INTO request_outcomes (id, request, outcome) VALUES ('request-1', '{}', '{}');",
-            )
-            .unwrap();
+        let db = rusqlite::Connection::open(path).unwrap();
+        db.execute_batch(
+            "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Saved', 'Todo');
+             INSERT INTO tags (name) VALUES ('kept');
+             INSERT INTO ticket_tags (ticket_id, tag_name) VALUES ('t1', 'kept');",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO request_outcomes (id, request, outcome) VALUES ('request-1', ?1, ?2)",
+            [&recorded_request, &recorded_outcome],
+        )
+        .unwrap();
     };
     seed(&path);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1334,16 +1356,13 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
         workspaces[0].show_ticket("T-KQ1").unwrap().tags,
         vec!["kept"]
     );
+    // The same request ID after the migration returns the outcome recorded before it,
+    // not a second ticket.
+    let replayed = workspaces[0].write(Some("request-1"), request()).unwrap();
+    assert_eq!(replayed, original);
+    assert!(matches!(replayed, WriteResult::Ticket(_)));
+    assert_eq!(workspaces[0].list_tickets().unwrap().len(), 1);
     workspaces.clear();
-    let outcomes: i64 = rusqlite::Connection::open(&path)
-        .unwrap()
-        .query_row(
-            "SELECT count(*) FROM request_outcomes WHERE id = 'request-1'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(outcomes, 1, "a recorded request survives the migration");
 
     // A migration that fails changes nothing, names the copy saved first, and that copy
     // restores to a Workspace that migrates once the cause is gone. Here the cause is a
