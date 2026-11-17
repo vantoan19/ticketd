@@ -72,10 +72,10 @@ export function usePagedRead<A, V, P>(
   });
   // Retry repeats what failed: the page after a failed "Show more", the loaded
   // pages after a failed re-read.
-  const retry = useLatest(() => {
+  const retry = useLatest(async () => {
     if (!enabled) return;
     if (failedMore) reads.showMore(queryKey, true);
-    else void refetch();
+    else await refetch().catch(() => {});
   });
   // A page asked for while hidden is read when the view is shown again, and is
   // forgotten when the view goes away.

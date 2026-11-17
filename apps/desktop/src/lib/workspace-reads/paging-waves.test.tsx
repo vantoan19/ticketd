@@ -235,7 +235,9 @@ describe("Retry", () => {
     expect(result.current.failedMore).toBe(true);
 
     list.failing.clear();
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await list.flush();
     expect(list.offsets()).toEqual([0, 2, 2]);
     expect(result.current.value).toEqual(["g1-0", "g1-1", "g1-2", "g1-3"]);
@@ -260,7 +262,9 @@ describe("Retry", () => {
     expect(result.current.failedMore).toBe(false);
 
     list.failing.clear();
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await list.flush();
     expect(result.current.value).toEqual(["g2-0", "g2-1", "g2-2", "g2-3"]);
     expect(result.current.failure).toBeNull();

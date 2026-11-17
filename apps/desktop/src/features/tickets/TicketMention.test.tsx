@@ -187,10 +187,9 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
   act(() => api.select("T-KQ2"));
   await screen.findByText(passage);
   act(() => api.select("T-KQ1"));
-  // A CLI edit changes the body while T-KQ2 is hidden: the change makes the
-  // cached copy stale, and the page re-reads it when it is shown.
+  // A CLI edit changes the body while T-KQ2 is hidden, and the poll has not
+  // noticed yet: following the mention still judges it against a fresh read.
   fresh = true;
-  act(() => signal.change());
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
   // The cached body is on screen, but nothing is revealed or reported yet.
   expect(marked()).toBeNull();

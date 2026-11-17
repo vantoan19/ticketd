@@ -7,7 +7,7 @@ export type TicketState = {
   /** The Ticket; null when it no longer exists; undefined until it is known. */
   value: Ticket | null | undefined;
   failure: FailureDescription | null;
-  retry(): void;
+  retry(): Promise<void>;
   /** Whether `value` is as current as the last change. */
   readonly current: boolean;
 };

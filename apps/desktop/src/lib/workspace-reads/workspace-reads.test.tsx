@@ -203,9 +203,49 @@ describe("failure", () => {
     await settle();
     expect(call).toHaveBeenCalledTimes(1);
 
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await waitFor(() => expect(result.current.value).toBe("ok"));
     expect(result.current.failure).toBeNull();
+  });
+
+  it("resolves Retry when the read has settled, whether it succeeded or failed", async () => {
+    const answers = [deferred<string>(), deferred<string>()];
+    const call = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("first")
+      .mockImplementationOnce(() => answers[0]!.promise)
+      .mockImplementationOnce(() => answers[1]!.promise);
+    const spec = read({
+      key: "retry-promise",
+      call,
+      failure: "load the title",
+    });
+    const { result } = renderHook(() => useRead(spec, null), {
+      wrapper: wrap(),
+    });
+    await waitFor(() => expect(result.current.value).toBe("first"));
+
+    let settled = false;
+    let retried!: Promise<void>;
+    act(() => {
+      retried = result.current.retry().then(() => {
+        settled = true;
+      });
+    });
+    await settle();
+    expect(settled).toBe(false);
+    await act(async () => answers[0]!.resolve("second"));
+    await retried;
+    expect(result.current.value).toBe("second");
+
+    act(() => {
+      retried = result.current.retry();
+    });
+    await act(async () => answers[1]!.reject(new Error("disk is busy")));
+    await expect(retried).resolves.toBeUndefined();
+    expect(result.current.failure?.title).toBe("Couldn't load the title");
   });
 
   it("keeps a failed first read's failure while Retry runs, until a read succeeds", async () => {
@@ -230,7 +270,9 @@ describe("failure", () => {
     );
     await waitFor(() => expect(result.current.status).toBe("failed"));
 
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await settle();
     expect(call).toHaveBeenCalledTimes(2);
     expect(result.current.status).toBe("failed");
@@ -275,7 +317,9 @@ describe("failure", () => {
     expect(result.current.value).toBe("good");
     expect(call).toHaveBeenCalledTimes(2);
 
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await settle();
     expect(call).toHaveBeenCalledTimes(3);
     // Mid-attempt the failure is still there; it goes only when a read succeeds.
@@ -401,7 +445,9 @@ describe("skip", () => {
     expect(result.current.mine.status).toBe("idle");
     call.mockClear();
 
-    act(() => retry());
+    act(() => {
+      void retry();
+    });
     await settle();
     await settle();
     expect(call).not.toHaveBeenCalled();

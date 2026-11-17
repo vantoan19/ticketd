@@ -91,7 +91,9 @@ describe("paging", () => {
     call.mockClear();
 
     generation.n = 2;
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await waitFor(() => expect(result.current.value?.[0]).toBe("g2-0"));
     expect(result.current.value).toHaveLength(4);
     expect(call).toHaveBeenCalledTimes(2);
@@ -116,7 +118,9 @@ describe("paging", () => {
     await waitFor(() => expect(result.current.status).toBe("failed"));
     expect(result.current.failure?.title).toBe("Couldn't load the list");
 
-    act(() => result.current.retry());
+    act(() => {
+      void result.current.retry();
+    });
     await settle();
     expect(call).toHaveBeenCalledTimes(2);
     expect(result.current.status).toBe("failed");

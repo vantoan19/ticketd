@@ -11,8 +11,12 @@ export type ReadState<V> = {
   value: V | undefined;
   /** The last failure, kept (with `value`) until a read succeeds. */
   failure: FailureDescription | null;
-  /** Reads again now; for a paged read, every page loaded so far. */
-  retry(): void;
+  /**
+   * Reads again now; for a paged read, every page loaded so far. It resolves
+   * when that read has settled and never rejects (a failure shows as `failure`).
+   * It does nothing for a read that is skipped or hidden.
+   */
+  retry(): Promise<void>;
   status: ReadStatus;
   /**
    * Whether `value` is as current as the last change: false while a change
@@ -94,9 +98,9 @@ export function withCurrent<S extends object>(
  * A stable function that runs the latest render's `callback`, for buttons that
  * may be from an earlier render (a Retry kept after its Ticket closed).
  */
-export function useLatest<Args extends unknown[]>(
-  callback: (...args: Args) => void,
-): (...args: Args) => void {
+export function useLatest<Args extends unknown[], Result>(
+  callback: (...args: Args) => Result,
+): (...args: Args) => Result {
   const latest = useRef(callback);
   useEffect(() => {
     latest.current = callback;

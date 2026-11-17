@@ -40,8 +40,8 @@ export function useRead<A, V>(
   const refetch = query.refetch;
   // Retry reads only what is read now: a leftover button (for a Ticket that has
   // closed, or a hidden view) must not call the read or touch the entry.
-  const retry = useLatest(() => {
-    if (enabled) void refetch();
+  const retry = useLatest(async () => {
+    if (enabled) await refetch().catch(() => {});
   });
   // A skipped read is idle whatever its shared entry holds.
   const skipped = args === skip;
