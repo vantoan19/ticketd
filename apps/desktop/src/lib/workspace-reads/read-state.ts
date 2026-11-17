@@ -12,17 +12,22 @@ export type ReadState<V> = {
   /** The last failure, kept (with `value`) until a read succeeds. */
   failure: FailureDescription | null;
   /**
-   * Reads again now; for a paged read, every page loaded so far. It resolves
-   * when that read has settled and never rejects (a failure shows as `failure`).
-   * It does nothing for a read that is skipped or hidden.
+   * Reads again now; for a paged read, every loaded page, or the page after a
+   * failed "Show more". It resolves once a read started at or after the call has
+   * answered with a value or a failure: a read of the same entry that a change
+   * or an own write started in its place counts, one they cancelled does not. It
+   * never rejects (a failure shows as `failure`). It does nothing, and resolves
+   * at once, for a read that is skipped or hidden, and it resolves when the view
+   * goes away or is hidden while it waits.
    */
   retry(): Promise<void>;
   status: ReadStatus;
   /**
    * Whether `value` is as current as the last change: false while a change
-   * has made it stale and its re-read is not back. (A hidden read is not
-   * asked: it catches up when shown.) It is read when asked for, so a view
-   * that never asks does not re-render when it moves.
+   * has made it stale and its re-read is not back, and while its re-read has
+   * failed. (A hidden read that did not fail is not asked: it catches up when
+   * shown.) It is read when asked for, so a view that never asks does not
+   * re-render when it moves.
    */
   readonly current: boolean;
 };

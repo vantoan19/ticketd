@@ -672,7 +672,7 @@ The core owns migrations, export, backup/restore, and data access. Domain valida
 
 ## External changes
 
-The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Plan counts. It polls the core's change token every two seconds. Any change makes every visible read stale, a hidden view catches up once when shown, and the desktop's own write causes one refresh rather than two. Views move onto one reads module that owns this, the open Ticket first; see [desktop reads from one change token](adr/0013-desktop-reads-from-one-change-token.md). Unsaved editor drafts remain owned by the UI.
+The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Plan counts. It polls the core's change token every two seconds. Any change makes every visible read stale, a hidden view catches up once when shown, and the desktop's own write causes one refresh rather than two and shows what it set at once. A read that failed is read again only on Retry, on a change while it is visible, or when it is shown after a change it missed. Views move onto one reads module that owns this, the open Ticket first; see [desktop reads from one change token](adr/0013-desktop-reads-from-one-change-token.md). Unsaved editor drafts remain owned by the UI.
 
 ## Verification and future evolution
 
