@@ -61,6 +61,51 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+describe("the page that loads after its skeleton", () => {
+  function Fresh() {
+    const { record, fresh } = useOpenTicket();
+    return <h3 data-fresh={fresh || undefined}>{record.title}</h3>;
+  }
+  const gate = (props: { seed?: Ticket; hidden?: boolean }) => (
+    <TestReads>
+      <OpenTicket reference="T-1" {...props}>
+        <Fresh />
+      </OpenTicket>
+    </TestReads>
+  );
+
+  it("is fresh once the skeleton gives way, so the document can fade up", async () => {
+    const first = deferred<Ticket>();
+    bridge.invoke.mockReturnValue(first.promise);
+    render(gate({}));
+    expect(screen.getByRole("status", { name: "Loading ticket" })).toBeTruthy();
+    await act(async () => first.resolve(ticket("Fresh")));
+    const heading = await screen.findByRole("heading", { name: "Fresh" });
+    expect(heading.hasAttribute("data-fresh")).toBe(true);
+  });
+
+  it("is not fresh when a saved copy was shown at once", async () => {
+    const first = deferred<Ticket>();
+    bridge.invoke.mockReturnValue(first.promise);
+    render(gate({ seed: ticket("Saved copy") }));
+    await act(async () => first.resolve(ticket("Fresh")));
+    const heading = await screen.findByRole("heading", { name: "Fresh" });
+    expect(heading.hasAttribute("data-fresh")).toBe(false);
+  });
+
+  it("stops being fresh when the page is hidden, so showing it again does not fade it up again", async () => {
+    const first = deferred<Ticket>();
+    bridge.invoke.mockReturnValue(first.promise);
+    const view = render(gate({}));
+    await act(async () => first.resolve(ticket("Fresh")));
+    await screen.findByRole("heading", { name: "Fresh" });
+    view.rerender(gate({ hidden: true }));
+    expect(screen.getByRole("heading").hasAttribute("data-fresh")).toBe(false);
+    view.rerender(gate({}));
+    expect(screen.getByRole("heading").hasAttribute("data-fresh")).toBe(false);
+  });
+});
+
 describe("the gate", () => {
   it("shows the page skeleton until the first read answers, then the page", async () => {
     const first = deferred<Ticket>();
