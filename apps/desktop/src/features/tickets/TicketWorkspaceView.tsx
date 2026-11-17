@@ -114,7 +114,7 @@ export function TicketWorkspaceView({
     const rows = listRef.current?.querySelector(".ticket-scroll");
     if (rows) rows.scrollTop = 0;
   }, [planScope]);
-  const planState = usePlanView(planScope, workspace.revision);
+  const planState = usePlanView(planScope);
   const scopedPlan = workspace.plans.find((item) => item.id === planScope);
   // The Plan header's Filters menu and the list's chip row share one state.
   const filtersMenu = useFiltersMenu();

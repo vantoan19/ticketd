@@ -190,7 +190,7 @@ test("marking a duplicate from the list shows the new status on the page", async
 });
 
 function RemoveFromPlan() {
-  const state = usePlanView(plan.id, 0);
+  const state = usePlanView(plan.id);
   return (
     <button
       type="button"
@@ -230,7 +230,7 @@ test("a Plan action reads the Plan once: its write report already reloads it", a
 });
 
 function AddToPlan() {
-  const state = usePlanView(plan.id, 0);
+  const state = usePlanView(plan.id);
   return (
     <AddTicketsDialog
       plan={plan}

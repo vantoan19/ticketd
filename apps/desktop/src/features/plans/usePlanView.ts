@@ -16,11 +16,13 @@ import {
 
 /**
  * Loads one Plan's counts and members and runs its actions. The view reloads
- * whenever `revision` changes, so changes made with the CLI show up too. Each
- * change is reported as a write (`useTicketChanged`), so the Ticket list and
- * the open Ticket show it at once.
+ * whenever the Workspace changes (`useWorkspaceChange`), so changes made with
+ * the CLI show up too. That version also moves for every write and every list
+ * reload's cause, so the list's own revision is not a dependency. Each change
+ * is reported as a write (`useTicketChanged`), so the Ticket list and the open
+ * Ticket show it at once, and the Plan is read before the action resolves.
  */
-export function usePlanView(planId: string, revision: number) {
+export function usePlanView(planId: string) {
   const changed = useTicketChanged();
   const [loaded, setLoaded] = useState<{
     id: string;
@@ -45,43 +47,65 @@ export function usePlanView(planId: string, revision: number) {
     setActionError(null);
     setAdding(false);
   }
-  useEffect(() => {
+  // Only the latest read may set the view.
+  const readTurn = useRef(0);
+  const read = useCallback(async () => {
     if (!planId) return;
-    let active = true;
-    plansClient.show(planId).then(
-      (view) => {
-        if (active) setLoaded({ id: planId, view, error: null });
-      },
-      (reason: unknown) => {
-        if (active)
-          setLoaded({
-            id: planId,
-            view: null,
-            error: describeFailure(reason, "load this Plan"),
-          });
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [planId, revision, changeVersion, loadAttempt]);
+    const turn = (readTurn.current += 1);
+    try {
+      const view = await plansClient.show(planId);
+      if (turn === readTurn.current)
+        setLoaded({ id: planId, view, error: null });
+    } catch (reason: unknown) {
+      if (turn === readTurn.current)
+        setLoaded({
+          id: planId,
+          view: null,
+          error: describeFailure(reason, "load this Plan"),
+        });
+    }
+  }, [planId]);
+  // Each write report moves the shared version once, and the action reads the
+  // Plan itself right after the report, so that move must not read it again.
+  // These are the moves still to arrive.
+  const owed = useRef(0);
+  const handled = useRef({ planId, changeVersion, loadAttempt });
+  useEffect(() => {
+    const last = handled.current;
+    handled.current = { planId, changeVersion, loadAttempt };
+    const onlyVersion =
+      last.planId === planId &&
+      last.loadAttempt === loadAttempt &&
+      last.changeVersion !== changeVersion;
+    if (onlyVersion && owed.current > 0) {
+      owed.current = Math.max(
+        0,
+        owed.current - (changeVersion - last.changeVersion),
+      );
+      return;
+    }
+    void read();
+  }, [read, planId, changeVersion, loadAttempt]);
   const current = loaded?.id === planId ? loaded : null;
   /**
-   * Runs a change, then reports the write, whose report reloads this Plan
-   * through the shared version. A change may return the Tickets it changed. A failure rejects, so the caller
-   * reports it where it belongs (`usePlanAction`).
+   * Runs a change, reports the write, then reads this Plan once, so the view
+   * shows the change when this resolves. A change may return the Tickets it
+   * changed. A failure rejects, so the caller reports it where it belongs
+   * (`usePlanAction`).
    */
   const apply = useCallback(
     async (change: () => Promise<ReturnedTickets | void>) => {
       setPending(true);
       try {
         const returned = await change();
+        owed.current += 1;
         await changed(returned ?? null);
+        await read();
       } finally {
         setPending(false);
       }
     },
-    [changed],
+    [changed, read],
   );
   /**
    * Runs a change and reports whether it worked, keeping a failure as
