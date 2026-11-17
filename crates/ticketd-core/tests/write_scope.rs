@@ -355,7 +355,6 @@ fn a_ticket_in_trash_is_not_attached_a_document_but_keeps_the_ones_it_has() {
     );
 }
 
-#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 #[test]
 fn an_empty_title_or_tag_is_refused_at_once_even_while_another_connection_holds_the_write_lock() {
     let dir = tempfile::tempdir().unwrap();
@@ -392,6 +391,7 @@ fn an_empty_title_or_tag_is_refused_at_once_even_while_another_connection_holds_
     );
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn created_events(workspace: &Workspace, after: i64) -> Vec<WorkspaceEvent> {
     workspace
         .workspace_events_after(after, 100)

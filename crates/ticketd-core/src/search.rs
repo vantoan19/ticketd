@@ -4,7 +4,7 @@ pub struct TicketWithUpdate {
     pub latest_update: Option<crate::LatestUpdate>,
 }
 
-use crate::{Error, Ticket, Workspace, hierarchy, relationships, tags, listed_ticket_from_row};
+use crate::{Error, Ticket, Workspace, hierarchy, listed_ticket_from_row, relationships, tags};
 use crate::{Status, StatusCounts};
 use rusqlite::{params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};

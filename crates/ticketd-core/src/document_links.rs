@@ -133,7 +133,9 @@ impl References {
             Self::Stored => "SELECT id FROM tickets WHERE reference = ?1",
             Self::Numbered => "SELECT id FROM tickets WHERE 'T-' || number = ?1",
         };
-        Ok(tx.query_row(sql, [reference], |row| row.get(0)).optional()?)
+        Ok(tx
+            .query_row(sql, [reference], |row| row.get(0))
+            .optional()?)
     }
 }
 
