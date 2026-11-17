@@ -410,6 +410,48 @@ pub(crate) fn expire(connection: &Connection, now: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The ids of the Running runs that are not one of `going`.
+fn running_but_not(connection: &Connection, going: &[String]) -> Result<Vec<String>, Error> {
+    let going = serde_json::to_string(going)?;
+    let mut statement = connection.prepare(
+        "SELECT id FROM automation_runs WHERE status = 'running' AND id NOT IN (SELECT value FROM json_each(?1))",
+    )?;
+    Ok(statement
+        .query_map([going], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Whether some switched-on schedule is due at `now` or is seen for the first time, so
+/// that `queue_scheduled_automation_runs` has something to write. Read only; the write
+/// decides again under the lock.
+fn schedules_to_update(connection: &Connection, now: chrono::NaiveDateTime) -> Result<bool, Error> {
+    let on = {
+        let mut statement = connection
+            .prepare("SELECT automation_id, schedule_from FROM automation_device_state")?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for (automation_id, since) in on {
+        let definition = match crate::automations::one(connection, &automation_id) {
+            Ok(automation) => automation.definition,
+            Err(Error::InvalidAutomation(_)) => continue,
+            Err(error) => return Err(error),
+        };
+        let Some(Trigger::Schedule { schedule }) = &definition.trigger else {
+            continue;
+        };
+        let since =
+            since.and_then(|since| chrono::NaiveDateTime::parse_from_str(&since, LOCAL_TIME).ok());
+        if since.is_none_or(|since| due(schedule, since, now)) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 impl Workspace {
     /// Reads the Workspace events after each switched-on Automation's cursor, in
     /// order, creates a Queued run for each one that matches, and moves the cursor
@@ -417,6 +459,16 @@ impl Workspace {
     /// that already has an active run of the Automation gets no second one. Returns
     /// how many runs were created.
     pub fn queue_automation_runs(&mut self) -> Result<usize, Error> {
+        // The runner asks every few seconds: with no event past any cursor there is
+        // nothing to write, and the write lock stays free for everyone else.
+        let events_waiting: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM automation_device_state s WHERE EXISTS (SELECT 1 FROM workspace_events e WHERE e.id > s.cursor))",
+            [],
+            |row| row.get(0),
+        )?;
+        if !events_waiting {
+            return Ok(0);
+        }
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
         let cursors = {
@@ -482,6 +534,10 @@ impl Workspace {
                 .map_err(|error| Error::AutomationRun(format!("'{now}' is not a time: {error}")))?,
             None => chrono::Local::now().naive_local(),
         };
+        // As for events: nothing due and nothing first seen takes no write lock.
+        if !schedules_to_update(&self.connection, now)? {
+            return Ok(0);
+        }
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
         let on = {
@@ -555,6 +611,20 @@ impl Workspace {
     /// runs are Running. Returns the ones it started. The runs of a deleted
     /// Automation never start.
     pub fn start_automation_runs(&mut self, limit: usize) -> Result<Vec<AutomationRun>, Error> {
+        // Read first: with every slot taken or nothing queued, nothing is written.
+        let running: usize = self.connection.query_row(
+            "SELECT COUNT(*) FROM automation_runs WHERE status = 'running'",
+            [],
+            |row| row.get(0),
+        )?;
+        let queued: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE r.status = 'queued' AND a.trashed = 0)",
+            [],
+            |row| row.get(0),
+        )?;
+        if running >= limit || !queued {
+            return Ok(Vec::new());
+        }
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
         let running: usize = transaction.query_row(
@@ -593,17 +663,13 @@ impl Workspace {
         going: &[String],
         reason: &str,
     ) -> Result<usize, Error> {
+        // Read first: the runner looks every few seconds, and finds nothing nearly always.
+        if running_but_not(&self.connection, going)?.is_empty() {
+            return Ok(0);
+        }
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
-        let ids = {
-            let going = serde_json::to_string(going)?;
-            let mut statement = transaction.prepare(
-                "SELECT id FROM automation_runs WHERE status = 'running' AND id NOT IN (SELECT value FROM json_each(?1))",
-            )?;
-            statement
-                .query_map([going], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        let ids = running_but_not(&transaction, going)?;
         let (ended, _) = end_each(&transaction, &ids, Cause::Abandoned(reason))?;
         transaction.commit()?;
         Ok(ended)

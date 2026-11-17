@@ -188,3 +188,63 @@ fn stopping_and_switching_off_ends_every_active_run_as_needs_attention() {
         [AutomationRunStatus::Running, AutomationRunStatus::Queued]
     );
 }
+
+/// A pass of the runner that finds nothing to do must not take the write lock, which
+/// every other write of the Workspace waits for: passes come every few seconds. Another
+/// connection holds the write lock; each step of the pass still answers, having read
+/// that there is nothing to write. Were any of them to take the lock, it would wait and
+/// then fail as busy.
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_pass_with_nothing_to_do_takes_no_write_lock() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let agent = workspace
+        .create_automation_agent(AutomationAgentSettings::default())
+        .unwrap();
+    let every_day = workspace
+        .create_automation(AutomationDefinition {
+            name: "Daily".into(),
+            trigger: Some(Trigger::Schedule {
+                schedule: ticketd_core::Schedule::EveryHours { hours: 24 },
+            }),
+            conditions: Vec::new(),
+            steps: vec![Step {
+                id: "summarise".into(),
+                action: StepAction::RunAgent {
+                    agent_id: Some(agent.id),
+                    execution_folder: Some(folder()),
+                    on_failure: None,
+                },
+            }],
+        })
+        .unwrap();
+    workspace
+        .set_automation_enabled(&every_day.id, true)
+        .unwrap();
+    // Seen on, so its schedule counts from noon.
+    workspace
+        .queue_scheduled_automation_runs(Some("2026-11-15T12:00:00"))
+        .unwrap();
+    let holder = rusqlite::Connection::open(dir.path().join("background.sqlite3")).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+    assert_eq!(workspace.queue_automation_runs().unwrap(), 0);
+    assert_eq!(
+        workspace
+            .queue_scheduled_automation_runs(Some("2026-11-15T13:00:00"))
+            .unwrap(),
+        0
+    );
+    assert!(workspace.start_automation_runs(2).unwrap().is_empty());
+    assert_eq!(
+        workspace.end_running_automation_runs(&[], "gone").unwrap(),
+        0
+    );
+    assert!(
+        workspace
+            .end_runs_of_deleted_automations()
+            .unwrap()
+            .is_empty()
+    );
+}
