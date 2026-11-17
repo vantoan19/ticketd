@@ -356,6 +356,42 @@ fn a_ticket_in_trash_is_not_attached_a_document_but_keeps_the_ones_it_has() {
 }
 
 #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
+#[test]
+fn an_empty_title_or_tag_is_refused_at_once_even_while_another_connection_holds_the_write_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Kept").unwrap().reference;
+    let lock = rusqlite::Connection::open(&path).unwrap();
+    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        workspace.create_ticket("  "),
+        Err(Error::EmptyTitle)
+    ));
+    let blank_title = TicketPatch {
+        title: Some(" ".into()),
+        ..Default::default()
+    };
+    assert!(matches!(
+        workspace.change_ticket(&ticket, blank_title),
+        Err(Error::EmptyTitle)
+    ));
+    assert!(matches!(
+        workspace.add_tag(&ticket, " "),
+        Err(Error::EmptyTag)
+    ));
+    assert!(matches!(
+        workspace.remove_tag(&ticket, " "),
+        Err(Error::EmptyTag)
+    ));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "validation waited for the write lock"
+    );
+}
+
 fn created_events(workspace: &Workspace, after: i64) -> Vec<WorkspaceEvent> {
     workspace
         .workspace_events_after(after, 100)

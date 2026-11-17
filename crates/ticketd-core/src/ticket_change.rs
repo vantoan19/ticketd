@@ -121,6 +121,16 @@ pub(crate) fn commit(
     })
 }
 
+/// The trimmed title. A write checks this before it enters the write scope, so a blank
+/// title is refused at once instead of after waiting for another writer's lock.
+fn non_empty_title(title: &str) -> Result<&str, Error> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(Error::EmptyTitle);
+    }
+    Ok(title)
+}
+
 /// A new ticket, in a project and a Plan if given, read back.
 pub(crate) fn create(
     scope: &WriteScope<'_>,
@@ -128,10 +138,7 @@ pub(crate) fn create(
     project_id: Option<&str>,
     plan_id: Option<&str>,
 ) -> Result<Ticket, Error> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Err(Error::EmptyTitle);
-    }
+    let title = non_empty_title(title)?;
     if let Some(id) = project_id {
         projects::find(scope, id)?;
     }
@@ -163,10 +170,7 @@ pub(crate) fn edit(
     if mode == Mode::Bulk {
         refuse_leaving_duplicate(scope, reference, patch.status)?;
     }
-    let title = patch.title.as_deref().map(str::trim);
-    if title == Some("") {
-        return Err(Error::EmptyTitle);
-    }
+    let title = patch.title.as_deref().map(non_empty_title).transpose()?;
     let ticket = scope.editable_ticket(reference)?;
     let stale = |new: &Option<String>, expected: &Option<String>, stored: &str| {
         new.is_some()
@@ -374,6 +378,7 @@ impl Workspace {
         project_id: Option<&str>,
         plan_id: Option<&str>,
     ) -> Result<Ticket, Error> {
+        non_empty_title(title)?;
         write_scope::run(&self.connection, |scope| {
             create(scope, title, project_id, plan_id)
         })
@@ -381,6 +386,7 @@ impl Workspace {
 
     /// Change a ticket on its own. Leaving Duplicate clears the duplicate link.
     pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
+        patch.title.as_deref().map(non_empty_title).transpose()?;
         commit(&self.connection, reference, |scope| {
             edit(scope, reference, &patch, Mode::Single)
         })

@@ -23,6 +23,8 @@ pub(crate) fn for_ticket(connection: &Connection, id: &str) -> Result<Vec<String
         .collect::<Result<_, _>>()?)
 }
 
+/// The tag name as stored. A write checks this before it enters the write scope, so a
+/// blank name is refused at once instead of after waiting for another writer's lock.
 fn normalize(name: &str) -> Result<String, Error> {
     let name = name.trim().to_lowercase();
     if name.is_empty() {
@@ -46,6 +48,7 @@ impl Workspace {
 
     /// Add a normalized workspace tag without replacing other memberships.
     pub fn add_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
+        normalize(name)?;
         ticket_change::commit(&self.connection, reference, |scope| {
             add(scope, reference, name)
         })
@@ -53,6 +56,7 @@ impl Workspace {
 
     /// Remove one normalized tag without replacing other memberships.
     pub fn remove_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
+        normalize(name)?;
         ticket_change::commit(&self.connection, reference, |scope| {
             remove(scope, reference, name)
         })
