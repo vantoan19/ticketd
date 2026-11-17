@@ -238,8 +238,9 @@ test("a removed queue card stays in the flow, out of reach, while it fades; the 
       fireEvent.keyDown(box, { key: "Enter", metaKey: true });
       await screen.findByText(text);
     }
-    const cards = () =>
-      [...document.querySelectorAll<HTMLElement>(".chat-queue-card")];
+    const cards = () => [
+      ...document.querySelectorAll<HTMLElement>(".chat-queue-card"),
+    ];
     expect(cards()).toHaveLength(2);
     fireEvent.click(
       screen.getAllByRole("button", { name: "Remove from queue" })[0]!,
@@ -250,9 +251,9 @@ test("a removed queue card stays in the flow, out of reach, while it fades; the 
     const leaving = cards().find((card) => card.textContent === "first thing");
     expect(leaving).toBeTruthy();
     expect(document.querySelector("[data-motion-pop-id]")).toBeNull();
-    expect(leaving?.querySelector('[data-slot="appear"]')?.hasAttribute("inert")).toBe(
-      true,
-    );
+    expect(
+      leaving?.querySelector('[data-slot="appear"]')?.hasAttribute("inert"),
+    ).toBe(true);
     await clock.advance(200);
     expect(cards().map((card) => card.textContent)).toEqual(["second thing"]);
   } finally {

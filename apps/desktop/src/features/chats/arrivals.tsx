@@ -34,5 +34,7 @@ export function Arrives({
  */
 export function Rise(props: ComponentProps<typeof Appear>) {
   const present = useIsPresent();
-  return <Appear rise="overlay" {...props} {...(!present && { inert: true })} />;
+  return (
+    <Appear rise="overlay" {...props} {...(!present && { inert: true })} />
+  );
 }
