@@ -12,7 +12,6 @@ import { hasVisibleText } from "./brief-text";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import {
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -82,6 +81,8 @@ import { formatDateTime } from "@/lib/format";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
+import { useWorkspaceChange } from "@/lib/workspace-change";
+import { editedUpdateFills, useOpenTicket } from "./open-ticket";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "./activity.css";
 
@@ -108,6 +109,7 @@ const editDraftSchema = z.object({
 });
 const requestSchema = z.object({ payload: z.string(), id: z.string() });
 const drafts = new Map<string, Draft>();
+const noFeed: ActivityFeedEntry[] = [];
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
 
 /** A failure on this device's draft storage: plain words, nothing for Details. */
@@ -177,8 +179,6 @@ function quoteOf(brief: string): string {
 export function Activity({
   reference,
   ticketId = reference,
-  status,
-  revision,
   projects,
   active,
   trashed,
@@ -187,17 +187,13 @@ export function Activity({
   plans = [],
   sourceName,
   latestNoteId,
-  onChanged,
   foldEmpty = false,
 }: {
   foldEmpty?: boolean;
   sourceName?: string | undefined;
   latestNoteId?: string | undefined;
-  onChanged?: () => Promise<void>;
   reference: string;
   ticketId?: string;
-  status: string;
-  revision: number;
   projects: Project[];
   active: boolean;
   trashed: boolean;
@@ -206,69 +202,48 @@ export function Activity({
   plans?: Plan[];
 }) {
   const recovery = useDraftRecovery();
+  const targetId = target?.id;
+  const targetKey = target?.key;
   const recoveryOwner = `activity:${ticketId}`;
   const statusLine = useStatusLine();
   const submitHint = shortcutLabel("update-post");
-  const [loadError, setLoadError] = useState<FailureDescription | null>(null);
   const [deleteError, setDeleteError] = useState<FailureDescription | null>(
     null,
   );
-  const [targetMissing, setTargetMissing] = useState<string | null>(null);
-  const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
-  const targetRequest = useRef<{ id: string } | null>(null);
   const targetRef = useRef<HTMLLIElement>(null);
   const revealedTarget = useRef<{ id: string; key: number } | null>(null);
-  const targetId = target?.id;
-  const targetKey = target?.key;
-  // The target a visit already showed is not looked up again when the ticket is
-  // selected afresh; only a newly opened target (a new key) is.
-  const leftTargetKey = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (!active) return;
-    return () => {
-      leftTargetKey.current = targetKey;
-    };
-  }, [active, targetKey]);
-  useEffect(() => {
-    if (!active || targetId === undefined) return;
-    if (targetKey !== undefined && leftTargetKey.current === targetKey) return;
-    let current = true;
-    const request = { id: targetId };
-    targetRequest.current = request;
-    void client
-      .activity(reference, targetId)
-      .then((note) => {
-        if (current && targetRequest.current === request) {
-          setTargetNote(note);
-          setTargetMissing(note === null ? targetId : null);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (current && targetRequest.current === request)
-          setLoadError(describeFailure(reason, "load the linked update"));
-      });
-    return () => {
-      current = false;
-    };
-  }, [active, reference, revision, targetId, targetKey]);
-  // Leaving the ticket ends the "no longer available" notice for good, and
-  // the confirmation of a deletion belongs to the ticket it happened on.
+  const { changed, record } = useOpenTicket();
+  // Unmigrated readers below (Documents, Markdown) still follow the change signal.
+  const revision = useWorkspaceChange();
+  const activity = useOpenTicket("activity");
+  const note = useOpenTicket("activityNote", targetId);
+  const targetNote: AuthoredActivity | null = note.value ?? null;
+  // A target whose notice was dismissed by leaving the ticket stays dismissed
+  // until a new target (a new key) is opened.
+  const [leftTargetKey, setLeftTargetKey] = useState<number | undefined>();
   const [wasActive, setWasActive] = useState(active);
   const [wasReference, setWasReference] = useState(reference);
   if (wasActive !== active || wasReference !== reference) {
     setWasActive(active);
     setWasReference(reference);
-    if (!active || wasReference !== reference) setTargetMissing(null);
+    if (!active || wasReference !== reference) setLeftTargetKey(targetKey);
   }
-  const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
+  const targetMissing =
+    targetId !== undefined &&
+    note.value === null &&
+    (targetKey === undefined || leftTargetKey !== targetKey)
+      ? targetId
+      : null;
+  const feed = activity.value ?? noFeed;
   const notes = feed.flatMap((item) =>
     item.type === "authored" ? [item.activity] : [],
   );
   const history = feed.flatMap((item) =>
     item.type === "automatic" ? [item] : [],
   );
-  const [loading, setLoading] = useState(true);
+  const loading = activity.value === undefined && activity.failure === null;
   const [error, setError] = useState<FailureDescription | null>(null);
+  const loadError = activity.failure ?? note.failure;
   const [saved, setSaved] = useState<Draft>(
     () =>
       recovery.read(recoveryOwner, recoveryDraftSchema) ??
@@ -411,39 +386,6 @@ export function Activity({
   }, [edit, recovery, ticketId]);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
-  const pages = useRef(1);
-  const [more, setMore] = useState(false);
-  const loadNotes = useCallback(async () => {
-    const loaded: ActivityFeedEntry[] = [];
-    let page: ActivityFeedEntry[] = [];
-    for (let index = 0; index < pages.current; index++) {
-      page = await client.activityFeed(reference, index * 50);
-      loaded.push(...page);
-      if (page.length < 50) break;
-    }
-    setFeed(loaded);
-    setMore(page.length === 50);
-  }, [reference]);
-  useEffect(() => {
-    if (!active) return;
-    let current = true;
-    void Promise.resolve()
-      .then(() => loadNotes())
-      .then(() => {
-        if (current) {
-          setLoadError(null);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (current) setLoadError(describeFailure(reason, "load activity"));
-      })
-      .finally(() => {
-        if (current) setLoading(false);
-      });
-    return () => {
-      current = false;
-    };
-  }, [active, loadNotes, reference, revision, status]);
   function startDetails() {
     setDetails("");
     setPicking(false);
@@ -485,19 +427,18 @@ export function Activity({
     busy.current = true;
     setPending(true);
     setError(null);
+    let reported: Promise<void> | null = null;
     try {
       await recovery.flush();
       if (edit) {
-        const savedNote = await client.editActivity(
+        const updated = await client.editActivity(
           reference,
           edit.id,
           edit.content,
         );
-        if (targetRequest.current?.id === savedNote.id)
-          targetRequest.current = null;
-        setTargetNote((previous) =>
-          previous?.id === savedNote.id ? savedNote : previous,
-        );
+        // Reported as soon as it is saved, with the saved update: the pane
+        // shows it through the cache whatever the draft store does next.
+        reported = changed(undefined, editedUpdateFills(record, updated));
       } else {
         const payload = JSON.stringify([
           reference,
@@ -545,15 +486,18 @@ export function Activity({
         );
       }
       if (edit) {
-        await recovery.put(`activity-edit:${ticketId}`, null, []);
+        // The edit is saved: a draft store that fails to drop its draft is not
+        // a failure to save (the draft is dropped again when the editor closes).
+        await recovery
+          .put(`activity-edit:${ticketId}`, null, [])
+          .catch(() => {});
         setEdit(null);
       } else {
         clearDraft();
         if (recovery.active) await recovery.put(requestKey, null, []);
         setComposing(false);
       }
-      await loadNotes();
-      await onChanged?.();
+      await (reported ?? changed());
     } catch (reason) {
       setError(
         describeFailure(reason, edit ? "save the update" : "post the update"),
@@ -580,29 +524,9 @@ export function Activity({
           ? "Deleted the update. Its details stay in Documents."
           : "Deleted the update",
       });
-      if (targetRequest.current?.id === id) targetRequest.current = null;
-      setTargetNote((previous) => (previous?.id === id ? null : previous));
-      await loadNotes();
-      await onChanged?.();
+      await changed();
     } catch (reason) {
       setDeleteError(describeFailure(reason, "delete the update"));
-    } finally {
-      busy.current = false;
-      setPending(false);
-    }
-  }
-  async function loadMore() {
-    if (busy.current) return;
-    busy.current = true;
-    setPending(true);
-    setError(null);
-    try {
-      const page = await client.activityFeed(reference, feed.length);
-      pages.current += 1;
-      setFeed((previous) => [...previous, ...page]);
-      setMore(page.length === 50);
-    } catch (reason) {
-      setError(describeFailure(reason, "load more activity"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -892,8 +816,10 @@ export function Activity({
             variant="ghost"
             size="sm"
             onClick={() => {
-              setTargetMissing(null);
-              void onChanged?.();
+              // The update is gone: the notice has been read, and the refresh
+              // looks for what else changed.
+              setLeftTargetKey(targetKey);
+              void changed();
             }}
           >
             Refresh updates
@@ -908,10 +834,8 @@ export function Activity({
             size="compact"
             failure={loadError}
             onRetry={() => {
-              setLoadError(null);
-              void loadNotes().catch((reason: unknown) =>
-                setLoadError(describeFailure(reason, "load activity")),
-              );
+              if (activity.failure) activity.retry();
+              if (note.failure) note.retry();
             }}
           />
         )
@@ -1255,11 +1179,11 @@ export function Activity({
           )}
         </Timeline>
       )}
-      {more && (
+      {activity.more && (
         <Pager
           noun="activity"
-          loading={pending}
-          onMore={() => void loadMore()}
+          loading={pending || activity.loadingMore}
+          onMore={activity.showMore}
         />
       )}
     </section>

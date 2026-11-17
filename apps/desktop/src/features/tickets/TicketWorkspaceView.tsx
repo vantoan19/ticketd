@@ -33,6 +33,7 @@ import {
 } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
+import { Visibility } from "@/lib/workspace-reads";
 
 const DETAIL_PANEL_STYLE = {
   display: "flex",
@@ -113,11 +114,7 @@ export function TicketWorkspaceView({
     const rows = listRef.current?.querySelector(".ticket-scroll");
     if (rows) rows.scrollTop = 0;
   }, [planScope]);
-  const planState = usePlanView(
-    planScope,
-    workspace.revision,
-    workspace.refresh,
-  );
+  const planState = usePlanView(planScope);
   const scopedPlan = workspace.plans.find((item) => item.id === planScope);
   // The Plan header's Filters menu and the list's chip row share one state.
   const filtersMenu = useFiltersMenu();
@@ -251,7 +248,7 @@ export function TicketWorkspaceView({
     setNarrowDetail(false);
   }
   return (
-    <>
+    <Visibility hidden={hidden}>
       <div
         ref={workspaceRef}
         className="plan-workspace"
@@ -417,6 +414,6 @@ export function TicketWorkspaceView({
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-    </>
+    </Visibility>
   );
 }

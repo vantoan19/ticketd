@@ -2,6 +2,7 @@ import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { addableKinds } from "@/features/tickets/linked-work";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -15,7 +16,10 @@ import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
+import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 import type { Ticket } from "@/lib/api/client";
+import type { ChangeSignal } from "@/lib/workspace-reads";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 // The ticket picker (cmdk) needs these, which jsdom lacks.
@@ -119,16 +123,8 @@ function bridge(
   });
 }
 /** The rail's Relationships and the Subtickets section share one read. */
-function Section({
-  ticket,
-  refresh,
-  onOpenGraph,
-}: {
-  ticket: Ticket;
-  refresh: () => Promise<void>;
-  onOpenGraph: () => void;
-}) {
-  const work = useLinkedWork(ticket, 0, refresh);
+function Sections({ onOpenGraph }: { onOpenGraph: () => void }) {
+  const work = useLinkedWork();
   return (
     <>
       <Subtickets work={work} select={vi.fn()} />
@@ -137,16 +133,40 @@ function Section({
     </>
   );
 }
+function Section({
+  ticket,
+  signal,
+  onOpenGraph = vi.fn(),
+}: {
+  ticket: Ticket;
+  signal?: ChangeSignal;
+  onOpenGraph?: () => void;
+}) {
+  return (
+    <TestOpenTicket ticket={ticket} {...(signal && { signal })}>
+      <Sections onOpenGraph={onOpenGraph} />
+    </TestOpenTicket>
+  );
+}
 function renderSection(
   ticket: Ticket,
-  refresh = vi.fn(async () => {}),
   onOpenGraph = vi.fn(),
+  signal?: ChangeSignal,
 ) {
-  render(
-    <Section ticket={ticket} refresh={refresh} onOpenGraph={onOpenGraph} />,
+  return render(
+    <Section
+      ticket={ticket}
+      onOpenGraph={onOpenGraph}
+      {...(signal && { signal })}
+    />,
   );
-  return refresh;
 }
+/** How many times the relationships were read from the core. */
+const relationshipReads = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "contextual_relationships")
+    .length;
 
 test("a ticket with no links shows only Add relationship once the read succeeds", async () => {
   bridge();
@@ -165,7 +185,7 @@ test("a ticket with no links still offers its graph", async () => {
   const open = vi.fn();
   render(
     <ContextGraphNavigation.Provider value={open}>
-      <Section ticket={base} refresh={vi.fn()} onOpenGraph={vi.fn()} />
+      <Section ticket={base} />
     </ContextGraphNavigation.Provider>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Open graph" }));
@@ -189,9 +209,7 @@ test("a trashed ticket still shows its relationships, without actions to change 
 
 test("loading and a failed read are distinct from having no links", async () => {
   bridge({ never: true });
-  const view = render(
-    <Section ticket={base} refresh={async () => {}} onOpenGraph={() => {}} />,
-  );
+  const view = render(<Section ticket={base} />);
   expect(
     screen.getByRole("status", { name: "Loading relationships" }),
   ).toBeTruthy();
@@ -265,17 +283,86 @@ test("shows n+ and loads the next page when more links exist", async () => {
   ).toBeTruthy();
 });
 
+test("Show more reads one more page and adds its links to the list", async () => {
+  bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
+  renderSection(base);
+  await screen.findByText("Sibling");
+  vi.mocked(invoke).mockClear();
+  bridge({ related: [{ reference: "T-KQ5", title: "Cousin" }] });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show more relationships" }),
+  );
+  await screen.findByText("Cousin");
+  expect(screen.getByText("Sibling")).toBeTruthy();
+  expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith("contextual_relationships", {
+    reference: "T-KQ1",
+    offset: 20,
+  });
+  expect(
+    screen.queryByRole("button", { name: "Show more relationships" }),
+  ).toBeNull();
+});
+
+test("a change elsewhere re-reads every loaded page and keeps the extra ones", async () => {
+  const signal = fakeChangeSignal();
+  bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
+  renderSection(base, undefined, signal);
+  await screen.findByText("Sibling");
+  vi.mocked(invoke).mockClear();
+  bridge({ related: [{ reference: "T-KQ5", title: "Cousin" }] });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show more relationships" }),
+  );
+  await screen.findByText("Cousin");
+  vi.mocked(invoke).mockClear();
+
+  bridge({
+    related: [
+      { reference: "T-KQ4", title: "Sibling" },
+      { reference: "T-KQ6", title: "New neighbour" },
+    ],
+    more: 20,
+  });
+  await act(async () => signal.change());
+  await screen.findByText("New neighbour");
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "contextual_relationships")
+      .map(([, args]) => (args as { offset: number }).offset),
+  ).toEqual([0, 20]);
+});
+
+test("a row whose removal failed comes back, with the reason", async () => {
+  bridge({
+    prerequisites: [{ reference: "T-KQ2", title: "Blocker" }],
+    fail: { remove_dependency: "database busy" },
+  });
+  renderSection(base);
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Remove T-KQ2 from Blocked by",
+    }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't remove Blocked by T-KQ2",
+  );
+  expect(screen.getByText("Blocker")).toBeTruthy();
+  expect(relationshipReads()).toBe(1);
+});
+
 test("Open graph opens the ticket graph without a navigation provider", async () => {
   bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
   const onOpenGraph = vi.fn();
-  renderSection(base, undefined, onOpenGraph);
+  renderSection(base, onOpenGraph);
   fireEvent.click(await screen.findByRole("button", { name: "Open graph" }));
   expect(onOpenGraph).toHaveBeenCalled();
 });
 
 test("Remove relationship takes the link off the ticket", async () => {
   bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
-  const refresh = renderSection(base);
+  renderSection(base);
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Remove T-KQ2 from Blocked by",
@@ -287,14 +374,14 @@ test("Remove relationship takes the link off the ticket", async () => {
       dependent: "T-KQ1",
     }),
   );
-  await waitFor(() => expect(refresh).toHaveBeenCalled());
+  await waitFor(() => expect(relationshipReads()).toBe(2));
 });
 
 test("removing a duplicate link explains the result before anything changes", async () => {
   bridge({
     duplicate_of: { reference: "T-KQ9", title: "Original", status: "Todo" },
   });
-  const refresh = renderSection({ ...base, duplicate_of: "T-KQ9" });
+  renderSection({ ...base, duplicate_of: "T-KQ9" });
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Remove T-KQ9 from Duplicate of",
@@ -326,7 +413,7 @@ test("removing a duplicate link explains the result before anything changes", as
       expect.objectContaining({ source: "T-KQ1" }),
     ),
   );
-  await waitFor(() => expect(refresh).toHaveBeenCalled());
+  await waitFor(() => expect(relationshipReads()).toBe(2));
 });
 
 test("a double-click removes one relationship, not the next row's too", async () => {
@@ -385,7 +472,7 @@ async function chooseRelationship(kind: string) {
 
 test("Link ticket adds a relationship in the chosen direction", async () => {
   bridge();
-  const refresh = renderSection(base);
+  renderSection(base);
   await chooseTarget();
   await chooseRelationship("blocks");
   fireEvent.click(
@@ -399,7 +486,7 @@ test("Link ticket adds a relationship in the chosen direction", async () => {
       dependent: "T-KQ5",
     }),
   );
-  await waitFor(() => expect(refresh).toHaveBeenCalled());
+  await waitFor(() => expect(relationshipReads()).toBe(2));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
@@ -510,33 +597,21 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
       },
     }) as unknown as Ticket;
   const view = render(
-    <Section
-      ticket={duplicate(target({}))}
-      refresh={async () => {}}
-      onOpenGraph={() => {}}
-    />,
+    <Section key="external" ticket={duplicate(target({}))} />,
   );
   const row = (await screen.findByText("acme/api#9")).closest("section")!;
   expect(within(row).getByText("Duplicate of")).toBeTruthy();
   expect(within(row).getByText("Not imported into ticketd.")).toBeTruthy();
   expect(within(row).queryByRole("button")).toBeNull();
   view.rerender(
-    <Section
-      ticket={duplicate(target({ ticket: "T-KQ7" }))}
-      refresh={async () => {}}
-      onOpenGraph={() => {}}
-    />,
+    <Section key="resolved" ticket={duplicate(target({ ticket: "T-KQ7" }))} />,
   );
   const resolved = (
     await screen.findByRole("button", { name: "T-KQ7" })
   ).closest("section")!;
   expect(within(resolved).getByText("acme/api#9")).toBeTruthy();
   view.rerender(
-    <Section
-      ticket={duplicate({ kind: "unknown" })}
-      refresh={async () => {}}
-      onOpenGraph={() => {}}
-    />,
+    <Section key="unknown" ticket={duplicate({ kind: "unknown" })} />,
   );
   expect(
     await screen.findByText("The source did not name an accessible original."),

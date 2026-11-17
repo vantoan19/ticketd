@@ -3,15 +3,14 @@ import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useState } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureState } from "@/components/ui/failure-alert";
-import type { FailureDescription } from "@/lib/api/describe-failure";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { useContext, useEffect } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { type Project, type Ticket } from "@/lib/api/client";
+import { OpenTicket, useTicket } from "./open-ticket";
+import { useMentionReadiness } from "./use-mention-readiness";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
@@ -36,25 +35,19 @@ export function TicketDetails({
   onExpand,
   onReturn,
   setSelected,
-  details,
+  opened = [],
+  onMentionReady,
+  onClearMention,
   preview,
   projects,
   plans,
-  revision,
-  refresh,
-  updateTicket,
   position = null,
   onAdjacent,
   returnLabel,
   outsideResults = false,
-  failure = null,
-  onRetry,
 }: {
   outsideResults?: boolean;
   hidden?: boolean;
-  /** Why the selected ticket could not be fetched; shown in place of it. */
-  failure?: FailureDescription | null;
-  onRetry?: () => void;
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
   /** The list's name, for the expanded view's return crumb. */
@@ -69,14 +62,16 @@ export function TicketDetails({
   onExpand: () => void;
   onReturn: () => void;
   setSelected: (value: string | null, mention?: MentionTarget) => void;
-  details: Record<string, Ticket>;
+  /** The tickets opened so far, each kept as a page (hidden unless selected). */
+  opened?: string[];
+  /** The followed mention can be judged: the selected ticket's record is current. */
+  onMentionReady: (reference: string) => void;
+  /** The followed mention ends: the selected ticket moved to or from Trash. */
+  onClearMention: () => void;
   /** A complete Ticket already read for the list, retained while its fresh read runs. */
   preview?: Ticket | undefined;
   projects: Project[];
   plans: Plan[];
-  revision: number;
-  refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
 }) {
   const triage = useInboxTriage();
   // Relationship links unmount their focused control. Keep keyboard navigation
@@ -101,9 +96,17 @@ export function TicketDetails({
   };
   // Plain selection: it ends any mention being followed.
   const open = (reference: string | null) => setSelected(reference);
-  const ticket = Object.values(details).find(
-    (item) => item.reference === selected,
-  );
+  // The selected ticket's record, shared with its page; the header, the agent
+  // session and the triage card sit above the pages and read it from here.
+  const ticket = useTicket(selected).value ?? undefined;
+  useMentionReadiness({
+    selected,
+    mention,
+    onReady: onMentionReady,
+    onEnd: onClearMention,
+  });
+  const pages =
+    selected && !opened.includes(selected) ? [...opened, selected] : opened;
   return (
     <section
       ref={setBoundary}
@@ -114,21 +117,18 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       <OverlayBoundary element={boundary}>
-        <TicketAgentSession ticket={ticket ?? preview} revision={revision}>
+        <TicketAgentSession ticket={ticket ?? preview}>
           {(agentLoading) => (
             <>
               <TicketHeader
                 selected={selected}
                 ticket={ticket}
-                revision={revision}
                 scrolled={selected !== null && scrolledReference === selected}
                 expanded={expanded}
                 onExpand={onExpand}
                 onReturn={onReturn}
                 onClose={() => open(null)}
                 {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
-                refresh={refresh}
-                updateTicket={updateTicket}
                 position={position}
                 projects={projects}
                 {...(returnLabel && { returnLabel })}
@@ -160,11 +160,7 @@ export function TicketDetails({
                     Loading agent context.
                   </span>
                 )}
-                <InboxTriageCard
-                  ticket={ticket}
-                  refresh={refresh}
-                  updateTicket={updateTicket}
-                />
+                <InboxTriageCard />
                 {selected === null && !triage?.selection && (
                   <EmptyState
                     size="hint"
@@ -177,67 +173,40 @@ export function TicketDetails({
                     }
                   />
                 )}
-                {selected !== null && !ticket && failure && (
-                  <FailureState
-                    failure={failure}
-                    {...(onRetry && { onRetry })}
-                  />
-                )}
-                {selected !== null && !ticket && !preview && !failure && (
-                  <div
-                    className="detail-document"
-                    role="status"
-                    aria-label="Loading ticket"
+                {pages.map((reference) => (
+                  <OpenTicket
+                    key={reference}
+                    reference={reference}
+                    seed={reference === selected ? preview : undefined}
+                    hidden={hidden || reference !== selected}
                   >
-                    <Skeleton className="h-9 w-3/4" />
-                    <Skeleton className="mt-3 h-7 w-full" />
-                    <Skeleton className="mt-8 h-11 w-full" />
-                    <Skeleton className="mt-6 h-24 w-full" />
-                  </div>
-                )}
-                {selected && !ticket && !failure && preview && (
-                  <span className="sr-only" role="status">
-                    Loading the latest ticket. Showing its saved copy.
-                  </span>
-                )}
-                {[
-                  ...Object.values(details),
-                  ...(!ticket && !failure && preview ? [preview] : []),
-                ].map((item) => (
-                  <TicketPage
-                    key={item.id}
-                    ticket={item}
-                    opening={!ticket && item.reference === selected}
-                    active={item.reference === selected}
-                    outsideResults={
-                      outsideResults && item.reference === selected
-                    }
-                    projects={projects}
-                    plans={plans}
-                    revision={revision}
-                    refresh={refresh}
-                    updateTicket={updateTicket}
-                    select={open}
-                    onOpenGraph={() => showGraph(item.reference)}
-                    noteTarget={newest(
-                      inboxTarget?.reference === item.reference
-                        ? inboxTarget
-                        : null,
-                      mention?.reference === item.reference && mention.noteId
-                        ? { id: mention.noteId, key: mention.key }
-                        : null,
-                    )}
-                    mention={
-                      mention?.reference === item.reference &&
-                      !mention.noteId &&
-                      mention.ready
-                        ? mention
-                        : null
-                    }
-                    onMention={(target) =>
-                      setSelected(target.reference, target)
-                    }
-                  />
+                    <TicketPage
+                      active={reference === selected}
+                      outsideResults={outsideResults && reference === selected}
+                      projects={projects}
+                      plans={plans}
+                      select={open}
+                      onOpenGraph={() => showGraph(reference)}
+                      noteTarget={newest(
+                        inboxTarget?.reference === reference
+                          ? inboxTarget
+                          : null,
+                        mention?.reference === reference && mention.noteId
+                          ? { id: mention.noteId, key: mention.key }
+                          : null,
+                      )}
+                      mention={
+                        mention?.reference === reference &&
+                        !mention.noteId &&
+                        mention.ready
+                          ? mention
+                          : null
+                      }
+                      onMention={(target) =>
+                        setSelected(target.reference, target)
+                      }
+                    />
+                  </OpenTicket>
                 ))}
               </div>
             </>

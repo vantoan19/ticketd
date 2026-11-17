@@ -1,0 +1,600 @@
+// @vitest-environment jsdom
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { read, skip, type ReadSpec, type Skip } from "./catalog";
+import type { ReadState } from "./read-state";
+import { fakeChangeSignal } from "./fake-signal";
+import { deferred, settle, wrap } from "./test-support";
+import { TestReads } from "./testing";
+import { useRead } from "./use-read";
+import { Visibility } from "./Visibility";
+
+describe("sharing", () => {
+  it("serves any number of views of one read and arguments with one call", async () => {
+    const call = vi.fn(async (id: string) => `value of ${id}`);
+    const title = read({ key: "title", call, failure: "load the title" });
+    function Both() {
+      const first = useRead(title, "a");
+      const second = useRead(title, "a");
+      const other = useRead(title, "b");
+      return [first.value, second.value, other.value];
+    }
+    const { result } = renderHook(() => Both(), { wrapper: wrap() });
+    await waitFor(() =>
+      expect(result.current).toEqual([
+        "value of a",
+        "value of a",
+        "value of b",
+      ]),
+    );
+    expect(call.mock.calls).toEqual([["a"], ["b"]]);
+  });
+});
+
+describe("errors", () => {
+  it("throws a clear error when a hook is used outside WorkspaceReads", () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const title = read({
+      key: "outside",
+      call: async () => "x",
+      failure: "load",
+    });
+    expect(() => render(<Probe />)).toThrow(/WorkspaceReads/);
+    quiet.mockRestore();
+    function Probe() {
+      useRead(title, null);
+      return null;
+    }
+  });
+});
+
+describe("freshness", () => {
+  it("re-reads after a change and at no other time", async () => {
+    const signal = fakeChangeSignal();
+    let n = 0;
+    const call = vi.fn(async () => ++n);
+    const counter = read({ key: "counter", call, failure: "load" });
+    function Counter() {
+      return <output>{useRead(counter, null).value}</output>;
+    }
+    const tree = (second: boolean) => (
+      <TestReads signal={signal}>
+        <Counter />
+        {second && <Counter />}
+      </TestReads>
+    );
+    const { rerender, getAllByRole } = render(tree(false));
+    await waitFor(() =>
+      expect(getAllByRole("status")[0]?.textContent).toBe("1"),
+    );
+
+    // Focus, reconnect, a second view mounting: none of these is a reason to read.
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    rerender(tree(true));
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(getAllByRole("status")).toHaveLength(2);
+
+    act(() => signal.change());
+    await waitFor(() =>
+      expect(getAllByRole("status")[1]?.textContent).toBe("2"),
+    );
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits while the arguments are skipped", async () => {
+    const call = vi.fn(async (id: string) => id);
+    const item = read({ key: "item", call, failure: "load" });
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string | typeof skip }) => useRead(item, id),
+      { wrapper: wrap(), initialProps: { id: skip as string | typeof skip } },
+    );
+    await settle();
+    expect(call).not.toHaveBeenCalled();
+    expect(result.current.status).toBe("idle");
+    rerender({ id: "a" });
+    await waitFor(() => expect(result.current.value).toBe("a"));
+  });
+});
+
+describe("visibility", () => {
+  it("makes no calls while hidden, keeps the cached value and catches up once when shown", async () => {
+    const signal = fakeChangeSignal();
+    let n = 0;
+    const call = vi.fn(async () => ++n);
+    const counter = read({ key: "hidden", call, failure: "load" });
+    let hiddenNow = false;
+    const { result, rerender } = renderHook(() => useRead(counter, null), {
+      wrapper: ({ children }) => (
+        <TestReads signal={signal}>
+          <Visibility hidden={hiddenNow}>{children}</Visibility>
+        </TestReads>
+      ),
+    });
+    await waitFor(() => expect(result.current.value).toBe(1));
+
+    hiddenNow = true;
+    rerender();
+    act(() => signal.change());
+    act(() => signal.change());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(result.current.value).toBe(1);
+
+    hiddenNow = false;
+    rerender();
+    await waitFor(() => expect(result.current.value).toBe(2));
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a minimized window as hidden and an unfocused one as visible", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi.fn(async () => "x");
+    const spec = read({ key: "minimized", call, failure: "load" });
+    const { result } = renderHook(() => useRead(spec, null), {
+      wrapper: wrap(signal),
+    });
+    await waitFor(() => expect(result.current.value).toBe("x"));
+
+    const state = vi.spyOn(document, "visibilityState", "get");
+    state.mockReturnValue("hidden");
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    act(() => signal.change());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+
+    state.mockReturnValue("visible");
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(call).toHaveBeenCalledTimes(2));
+
+    window.dispatchEvent(new Event("blur"));
+    act(() => signal.change());
+    await waitFor(() => expect(call).toHaveBeenCalledTimes(3));
+    state.mockRestore();
+  });
+});
+
+describe("failure", () => {
+  it("gives a failure and no value for a failed first read, and reads again only on Retry", async () => {
+    const call = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error("disk is busy"))
+      .mockResolvedValue("ok");
+    const spec = read({
+      key: "first-failure",
+      call,
+      failure: "load the title",
+    });
+    const { result } = renderHook(() => useRead(spec, null), {
+      wrapper: wrap(),
+    });
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.value).toBeUndefined();
+    expect(result.current.failure?.title).toBe("Couldn't load the title");
+    expect(result.current.failure?.details).toContain("disk is busy");
+
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      void result.current.retry();
+    });
+    await waitFor(() => expect(result.current.value).toBe("ok"));
+    expect(result.current.failure).toBeNull();
+  });
+
+  it("resolves Retry when the read has settled, whether it succeeded or failed", async () => {
+    const answers = [deferred<string>(), deferred<string>()];
+    const call = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("first")
+      .mockImplementationOnce(() => answers[0]!.promise)
+      .mockImplementationOnce(() => answers[1]!.promise);
+    const spec = read({
+      key: "retry-promise",
+      call,
+      failure: "load the title",
+    });
+    const { result } = renderHook(() => useRead(spec, null), {
+      wrapper: wrap(),
+    });
+    await waitFor(() => expect(result.current.value).toBe("first"));
+
+    let settled = false;
+    let retried!: Promise<void>;
+    act(() => {
+      retried = result.current.retry().then(() => {
+        settled = true;
+      });
+    });
+    await settle();
+    expect(settled).toBe(false);
+    await act(async () => answers[0]!.resolve("second"));
+    await retried;
+    expect(result.current.value).toBe("second");
+
+    act(() => {
+      retried = result.current.retry();
+    });
+    await act(async () => answers[1]!.reject(new Error("disk is busy")));
+    await expect(retried).resolves.toBeUndefined();
+    expect(result.current.failure?.title).toBe("Couldn't load the title");
+  });
+
+  it("keeps a failed first read's failure while Retry runs, until a read succeeds", async () => {
+    const retried = deferred<string>();
+    const call = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error("disk is busy"))
+      .mockReturnValueOnce(retried.promise);
+    const spec = read({
+      key: "retry-first-failure",
+      call,
+      failure: "load the title",
+    });
+    const seen: string[] = [];
+    const { result } = renderHook(
+      () => {
+        const state = useRead(spec, null);
+        seen.push(`${state.status}:${state.failure?.title ?? "-"}`);
+        return state;
+      },
+      { wrapper: wrap() },
+    );
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+
+    act(() => {
+      void result.current.retry();
+    });
+    await settle();
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("failed");
+    expect(result.current.failure?.title).toBe("Couldn't load the title");
+    // Once failed, no render shows the read as loading again.
+    const failed = seen.indexOf("failed:Couldn't load the title");
+    expect(failed).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(failed)).not.toContain("loading:-");
+
+    await act(async () => retried.resolve("ok"));
+    await waitFor(() => expect(result.current.value).toBe("ok"));
+    expect(result.current.failure).toBeNull();
+    expect(result.current.status).toBe("ready");
+  });
+
+  it("keeps the last value and the failure through a failed re-read and the next attempt", async () => {
+    const signal = fakeChangeSignal();
+    const retried = deferred<string>();
+    const call = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("good")
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockReturnValueOnce(retried.promise);
+    const spec = read({
+      key: "refetch-failure",
+      call,
+      failure: "load the title",
+    });
+    const seen: (string | null)[] = [];
+    const { result } = renderHook(
+      () => {
+        const state = useRead(spec, null);
+        seen.push(state.failure?.title ?? null);
+        return state;
+      },
+      { wrapper: wrap(signal) },
+    );
+    await waitFor(() => expect(result.current.value).toBe("good"));
+
+    act(() => signal.change());
+    await waitFor(() => expect(result.current.failure).not.toBeNull());
+    expect(result.current.value).toBe("good");
+    expect(call).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      void result.current.retry();
+    });
+    await settle();
+    expect(call).toHaveBeenCalledTimes(3);
+    // Mid-attempt the failure is still there; it goes only when a read succeeds.
+    expect(result.current.failure).not.toBeNull();
+    expect(result.current.value).toBe("good");
+
+    await act(async () => retried.resolve("better"));
+    await waitFor(() => expect(result.current.value).toBe("better"));
+    expect(result.current.failure).toBeNull();
+    const failed = seen.indexOf("Couldn't load the title");
+    expect(seen.slice(failed, -1).every((title) => title !== null)).toBe(true);
+  });
+});
+
+describe("current", () => {
+  it("is false from a change until the read is back", async () => {
+    const signal = fakeChangeSignal();
+    const again = deferred<string>();
+    const call = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockResolvedValueOnce("first")
+      .mockReturnValueOnce(again.promise)
+      .mockResolvedValue("third");
+    const spec = read({ key: "current", call, failure: "load" });
+    function Probe({ hidden }: { hidden: boolean }) {
+      return (
+        <Visibility hidden={hidden}>
+          <Current />
+        </Visibility>
+      );
+    }
+    function Current() {
+      const state = useRead(spec, "a");
+      return <output>{`${state.value}:${state.current}`}</output>;
+    }
+    const view = (hidden: boolean) => (
+      <TestReads signal={signal}>
+        <Probe hidden={hidden} />
+      </TestReads>
+    );
+    const { rerender } = render(view(false));
+    expect(await screen.findByText("first:true")).toBeTruthy();
+
+    act(() => signal.change());
+    expect(await screen.findByText("first:false")).toBeTruthy();
+    await act(async () => again.resolve("second"));
+    expect(await screen.findByText("second:true")).toBeTruthy();
+
+    // A change while hidden is caught up on once shown, and current after that.
+    rerender(view(true));
+    act(() => signal.change());
+    rerender(view(false));
+    expect(await screen.findByText("third:true")).toBeTruthy();
+  });
+});
+
+describe("no needless renders", () => {
+  it("keeps the same value and does not re-render when a re-read returns equal data", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi.fn(async () => ({ title: "Same", labels: ["a", "b"] }));
+    const spec = read({ key: "equal", call, failure: "load" });
+    const values: unknown[] = [];
+    let renders = 0;
+    renderHook(
+      () => {
+        renders += 1;
+        const state = useRead(spec, null);
+        values.push(state.value);
+        return state;
+      },
+      { wrapper: wrap(signal) },
+    );
+    await waitFor(() => expect(values.at(-1)).toBeDefined());
+    const rendersAfterFirst = renders;
+    const first = values.at(-1);
+
+    act(() => signal.change());
+    await waitFor(() => expect(call).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(renders).toBe(rendersAfterFirst);
+    expect(values.at(-1)).toBe(first);
+  });
+});
+
+describe("current", () => {
+  it("survives a spread of the read's state", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi.fn(async () => "value");
+    const spec = read({ key: "spread", call, failure: "load" });
+    const { result } = renderHook(() => useRead(spec, null), {
+      wrapper: wrap(signal),
+    });
+    await waitFor(() => expect(result.current.value).toBe("value"));
+    const copy = { ...result.current };
+    expect(copy.value).toBe("value");
+    expect(copy.status).toBe("ready");
+    expect(copy.failure).toBeNull();
+    expect(typeof copy.retry).toBe("function");
+    expect(copy.current).toBe(true);
+  });
+});
+
+describe("skip", () => {
+  it("does nothing on Retry and never shows a failure for a skipped read", async () => {
+    const call = vi.fn(async (reference: string) => {
+      if (typeof reference !== "string") throw new Error("bad arguments");
+      throw new Error("locked");
+    });
+    const spec = read({ key: "skipped", call, failure: "load the update" });
+    const { result, rerender } = renderHook(
+      ({ args }: { args: string | Skip }) => ({
+        mine: useRead(spec, args),
+        other: useRead(spec, skip),
+      }),
+      { wrapper: wrap(), initialProps: { args: "T-1" as string | Skip } },
+    );
+    await waitFor(() => expect(result.current.mine.failure).not.toBeNull());
+    // A Retry button from before the Ticket closed is still around.
+    const retry = result.current.mine.retry;
+    rerender({ args: skip });
+    await settle();
+    expect(result.current.mine.failure).toBeNull();
+    expect(result.current.mine.status).toBe("idle");
+    call.mockClear();
+
+    act(() => {
+      void retry();
+    });
+    await settle();
+    await settle();
+    expect(call).not.toHaveBeenCalled();
+    expect(result.current.other.failure).toBeNull();
+    expect(result.current.other.status).toBe("idle");
+  });
+});
+
+describe("catching up after a failed first read", () => {
+  /** A view mounted only while its Ticket is selected, like a section. */
+  function Section({ spec }: { spec: ReadSpec<string, string> }) {
+    const state = useRead(spec, "T-1");
+    return <output>{state.value ?? state.failure?.title ?? "loading"}</output>;
+  }
+
+  it("reads again when the view returns after a change arrived while it was away", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockResolvedValue("evidence");
+    const spec = read({ key: "away", call, failure: "load evidence" });
+    const tree = (shown: boolean) => (
+      <TestReads signal={signal}>{shown && <Section spec={spec} />}</TestReads>
+    );
+    const { rerender } = render(tree(true));
+    await screen.findByText("Couldn't load evidence");
+    rerender(tree(false));
+    act(() => signal.change());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+
+    rerender(tree(true));
+    await screen.findByText("evidence");
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads again when a hidden read with no value is shown after a change", async () => {
+    const signal = fakeChangeSignal();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockResolvedValue("evidence");
+    const spec = read({ key: "hidden-failed", call, failure: "load evidence" });
+    const tree = (hidden: boolean) => (
+      <TestReads signal={signal}>
+        <Visibility hidden={hidden}>
+          <Section spec={spec} />
+        </Visibility>
+      </TestReads>
+    );
+    const { rerender } = render(tree(false));
+    await screen.findByText("Couldn't load evidence");
+    rerender(tree(true));
+    act(() => signal.change());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("evidence")).toBeNull();
+
+    rerender(tree(false));
+    await screen.findByText("evidence");
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a failed read", () => {
+  function setup(withValue: boolean) {
+    const signal = fakeChangeSignal();
+    const call = vi.fn<(reference: string) => Promise<string>>();
+    if (withValue) call.mockResolvedValueOnce("good");
+    call.mockRejectedValueOnce(new Error("locked")).mockResolvedValue("fresh");
+    const spec = read({
+      key: `failed-${withValue}`,
+      call,
+      failure: "load the title",
+    });
+    const latest: ReadState<string>[] = [];
+    function View({ index }: { index: number }) {
+      const state = useRead(spec, "T-1");
+      latest[index] = state;
+      const shown = `${state.value ?? "-"}:${state.failure ? "failed" : "ok"}`;
+      return <output>{`${index}:${shown}`}</output>;
+    }
+    const tree = ({ second = false, hidden = false } = {}) => (
+      <TestReads signal={signal}>
+        <Visibility hidden={hidden}>
+          <View index={0} />
+          {second && <View index={1} />}
+        </Visibility>
+      </TestReads>
+    );
+    return { signal, call, latest, tree, kept: withValue ? "good" : "-" };
+  }
+  /** The read has failed once: with no value, or after a good one. */
+  async function failedOnce(withValue: boolean) {
+    const test = setup(withValue);
+    const view = render(test.tree());
+    if (withValue) {
+      await screen.findByText("0:good:ok");
+      act(() => test.signal.change());
+    }
+    await screen.findByText(`0:${test.kept}:failed`);
+    return { ...test, ...view };
+  }
+  const cases = [
+    ["no value", false],
+    ["a kept value", true],
+  ] as const;
+
+  it.each(cases)(
+    "with %s is not read again because another view of it mounted",
+    async (_, withValue) => {
+      const { call, tree, rerender, kept } = await failedOnce(withValue);
+      const calls = call.mock.calls.length;
+      rerender(tree({ second: true }));
+      await screen.findByText(`1:${kept}:failed`);
+      await settle();
+      expect(call).toHaveBeenCalledTimes(calls);
+    },
+  );
+
+  it.each(cases)(
+    "with %s is not read again when shown again with no change since",
+    async (_, withValue) => {
+      const { call, tree, rerender } = await failedOnce(withValue);
+      const calls = call.mock.calls.length;
+      rerender(tree({ hidden: true }));
+      await settle();
+      rerender(tree());
+      await settle();
+      expect(call).toHaveBeenCalledTimes(calls);
+    },
+  );
+
+  it.each(cases)(
+    "with %s is read once after a change, whatever the number of views",
+    async (_, withValue) => {
+      const { call, signal, tree, rerender } = await failedOnce(withValue);
+      rerender(tree({ second: true }));
+      await settle();
+      const calls = call.mock.calls.length;
+      act(() => signal.change());
+      await screen.findByText("1:fresh:ok");
+      expect(call).toHaveBeenCalledTimes(calls + 1);
+    },
+  );
+
+  it.each(cases)(
+    "with %s is read on Retry, even though nothing else would read it",
+    async (_, withValue) => {
+      const { call, latest, tree, rerender } = await failedOnce(withValue);
+      rerender(tree({ second: true }));
+      await settle();
+      const calls = call.mock.calls.length;
+      await act(async () => latest[1]!.retry());
+      expect(call).toHaveBeenCalledTimes(calls + 1);
+      expect(screen.getByText("0:fresh:ok")).toBeTruthy();
+    },
+  );
+
+  it("is not current while its re-read has failed, however many views are mounted", async () => {
+    const { latest, tree, rerender } = await failedOnce(true);
+    expect(latest[0]!.value).toBe("good");
+    expect(latest[0]!.current).toBe(false);
+    rerender(tree({ second: true }));
+    await settle();
+    expect(latest[1]!.current).toBe(false);
+  });
+});

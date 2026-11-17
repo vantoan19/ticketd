@@ -44,6 +44,7 @@ import { externalSource } from "@/features/tickets/ticket-source";
 import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { useTicketTrash } from "./use-ticket-trash";
+import { useTicketChanged } from "./open-ticket";
 import "./ticket-detail.css";
 
 /** The shell command an agent runs to read this ticket's context. */
@@ -65,19 +66,15 @@ export function TicketHeader({
   onReturn,
   onClose,
   onOpenGraph,
-  refresh,
-  updateTicket,
   position = null,
   onAdjacent,
   projects = [],
   returnLabel = "All tickets",
   scrolled = false,
-  revision = 0,
 }: {
   /** The name of the list the ticket was opened from, for the return crumb. */
   returnLabel?: string;
   scrolled?: boolean;
-  revision?: number;
   /** For the Project folder a Chat about the ticket is offered. */
   projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
@@ -92,8 +89,6 @@ export function TicketHeader({
   onClose: () => void;
   /** Opens the ticket's graph; without it the menu leaves the entry out. */
   onOpenGraph?: () => void;
-  refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
 }) {
   const now = useNow();
   const chatAbout = useChatAboutTicket(
@@ -143,7 +138,8 @@ export function TicketHeader({
     else document.getElementById("detail-heading")?.focus();
   }, [selected, ticket, position]);
   const statusLine = useStatusLine();
-  const trash = useTicketTrash(updateTicket, refresh);
+  const changed = useTicketChanged();
+  const trash = useTicketTrash(changed);
   // An export that fails says so in the status line, like the menu's copies.
   const exportError = exporter.error;
   useEffect(() => {
@@ -292,11 +288,7 @@ export function TicketHeader({
                   </div>
                 )}
                 {!ticket.trashed && (
-                  <FollowToggle
-                    reference={ticket.reference}
-                    revision={revision}
-                    variant="strip"
-                  />
+                  <FollowToggle reference={ticket.reference} variant="strip" />
                 )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -433,7 +425,7 @@ export function TicketHeader({
         <PublishDialog
           ticket={ticket}
           provider={target.provider}
-          refresh={refresh}
+          refresh={changed}
           onOpenChange={(open) => {
             setPublishing(open);
             if (!open) returnToActions();
@@ -449,13 +441,13 @@ export function TicketHeader({
             setHistoryOpen(false);
             returnToActions();
           }}
-          onRestored={() => void refresh()}
+          onRestored={() => void changed()}
         />
       )}
       {ticket && duplicateOpen && (
         <Duplicates
           ticket={ticket}
-          refresh={refresh}
+          refresh={changed}
           open
           onOpenChange={setDuplicateOpen}
           title={`Mark ${ticket.reference} as a duplicate`}

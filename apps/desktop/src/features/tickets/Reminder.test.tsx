@@ -1,16 +1,29 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
+import type { Ticket } from "@/lib/api/client";
+import { TestOpenTicket } from "./open-ticket/testing";
 import { Reminder } from "./Reminder";
 import { reminderPresets } from "./reminder-presets";
 
 vi.mock("@tauri-apps/api/core", () => {
   let due: string | null = null;
   return {
-    invoke: vi.fn(async (command: string, args: { dueAt?: string | null }) => {
-      if (command === "set_reminder") due = args.dueAt ?? null;
-      if (command === "reminder") return due;
-    }),
+    invoke: vi.fn(
+      async (
+        command: string,
+        args: { dueAt?: string | null; reference?: string },
+      ) => {
+        if (command === "show_ticket")
+          return {
+            id: args.reference,
+            reference: args.reference,
+            trashed: false,
+          };
+        if (command === "set_reminder") due = args.dueAt ?? null;
+        if (command === "reminder") return due;
+      },
+    ),
   };
 });
 // The preset list (cmdk) and the clock-change select need these.
@@ -23,6 +36,16 @@ Element.prototype.scrollIntoView ??= () => {};
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.releasePointerCapture ??= () => {};
 
+/** The reminder of an open ticket, as the Open Ticket serves it. */
+function reminderOf(reference: string) {
+  const ticket = { id: reference, reference, trashed: false } as Ticket;
+  return (
+    <TestOpenTicket ticket={ticket}>
+      <Reminder />
+    </TestOpenTicket>
+  );
+}
+
 /** Opens the popover and reveals the date and time field. */
 async function openCustom() {
   fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
@@ -31,7 +54,7 @@ async function openCustom() {
 }
 
 test("schedules and dismisses a ticket reminder", async () => {
-  const view = render(<Reminder reference="T-KQ1" revision={0} />);
+  const view = render(reminderOf("T-KQ1"));
   const field = await openCustom();
   // Prefilled, so it never looks filled while being empty.
   expect((field as HTMLInputElement).value).not.toBe("");
@@ -43,9 +66,25 @@ test("schedules and dismisses a ticket reminder", async () => {
   view.unmount();
 });
 
+test("a change to the reminder is reported, so what is on screen is current", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const view = render(reminderOf("T-KQ5"));
+  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
+  vi.mocked(invoke).mockClear();
+  fireEvent.click(await screen.findByRole("option", { name: /^Tomorrow/ }));
+  await screen.findByText(/Scheduled for/);
+  // The write report re-reads what is visible, here the Ticket itself.
+  expect(invoke).toHaveBeenCalledWith("show_ticket", { reference: "T-KQ5" });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Dismiss reminder" }),
+  );
+  await waitFor(() => expect(screen.queryByText(/Scheduled for/)).toBeNull());
+  view.unmount();
+});
+
 test("a preset schedules at once at its resolved time", async () => {
   const { invoke } = await import("@tauri-apps/api/core");
-  const view = render(<Reminder reference="T-KQ4" revision={0} />);
+  const view = render(reminderOf("T-KQ4"));
   fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
   fireEvent.click(await screen.findByRole("option", { name: /^Tomorrow/ }));
   const tomorrow = reminderPresets(new Date()).find(
@@ -69,7 +108,7 @@ test("requires a choice for repeated local times and rejects skipped times", asy
   const original = process.env.TZ;
   process.env.TZ = "America/New_York";
   try {
-    const view = render(<Reminder reference="T-KQ1" revision={0} />);
+    const view = render(reminderOf("T-KQ1"));
     const input = await openCustom();
     fireEvent.change(input, { target: { value: "2030-03-10T02:30" } });
     expect(screen.getByRole("alert").textContent).toContain("skips this time");
@@ -97,7 +136,7 @@ test("requires a choice for repeated local times and rejects skipped times", asy
 });
 
 test("a year still being typed is not blamed on a clock change", async () => {
-  const view = render(<Reminder reference="T-KQ1" revision={0} />);
+  const view = render(reminderOf("T-KQ1"));
   fireEvent.change(await openCustom(), {
     target: { value: "0006-01-01T12:00" },
   });
@@ -134,7 +173,7 @@ test("retries a lost snooze response with the original request and instant", asy
       }
     }
   });
-  const view = render(<Reminder reference="T-KQ2" revision={0} />);
+  const view = render(reminderOf("T-KQ2"));
   fireEvent.click(
     await screen.findByRole("button", { name: "Manage reminder, due" }),
   );
@@ -170,7 +209,7 @@ test("prevents a second reminder change while a write is pending", async () => {
         complete = resolve;
       });
   });
-  const view = render(<Reminder reference="T-KQ3" revision={0} />);
+  const view = render(reminderOf("T-KQ3"));
   fireEvent.click(
     await screen.findByRole("button", { name: /^Manage reminder, scheduled/ }),
   );
@@ -195,7 +234,7 @@ test("legacy custom reminder refuses a past time and rechecks expiry before savi
   const now = vi
     .spyOn(Date, "now")
     .mockReturnValue(new Date(2030, 0, 1, 10).getTime());
-  const view = render(<Reminder reference="T-KQ9" revision={0} />);
+  const view = render(reminderOf("T-KQ9"));
   try {
     const field = await openCustom();
     fireEvent.change(field, { target: { value: "2030-01-01T09:00" } });

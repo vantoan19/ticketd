@@ -18,7 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip } from "@/components/ui/tooltip";
-import { client, type Ticket, type Evidence } from "@/lib/api/client";
+import { client, type Evidence, type Ticket } from "@/lib/api/client";
+import { useTicket, useTicketChanged } from "./open-ticket";
 import { inboxClient } from "@/lib/api/inbox";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useChatClient } from "@/features/chats/client";
@@ -34,17 +35,14 @@ import { Snooze } from "./Inbox";
 import { useInboxTriage } from "./inbox-triage-context";
 import { useInboxAttention } from "./use-inbox-attention";
 import { requestTicketUpdate } from "./activity-composer-request";
-import { summarize, snoozeInstant, type SnoozeChoice } from "./inboxModel";
+import {
+  summarize,
+  snoozeInstant,
+  ticketUnavailable,
+  type SnoozeChoice,
+} from "./inboxModel";
 
-export function InboxTriageCard({
-  ticket,
-  refresh,
-  updateTicket,
-}: {
-  ticket: Ticket | undefined;
-  refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
-}) {
+export function InboxTriageCard() {
   const triage = useInboxTriage();
   const attention = useInboxAttention();
   const chats = useChatClient();
@@ -66,16 +64,16 @@ export function InboxTriageCard({
     chat?.tickets[0]?.reference ??
     chat?.first_ticket ??
     null;
+  const record = useTicket(reference).value;
+  // Undefined until the Ticket is read; null once the core says it is gone.
+  const ticket = record ?? undefined;
+  const changed = useTicketChanged();
   const read = entry?.read ?? !chat?.status.unseen;
   const ticketReason =
     blocked ??
     (!reference
       ? "This Chat has no linked Ticket."
-      : !ticket
-        ? "The Ticket is still loading."
-        : ticket.trashed
-          ? "Restore the Ticket before changing it."
-          : null);
+      : ticketUnavailable(record));
   const agent = entry?.editing_agent ?? chat?.harness_name;
   const harness = chat?.harness_id ?? editingHarness(agent);
   const description = entry
@@ -88,12 +86,14 @@ export function InboxTriageCard({
     : entry?.kind === "activity"
       ? entry.to_value
       : (agentContext?.update?.brief.text ?? description);
+  // A Ticket the core says is gone has nothing left to wait for.
+  const gone = reference !== null && record === null;
+  const ready = !entry || gone || agentContext?.ready === true;
   const [bodySnapshot, setBodySnapshot] = useState({
     selection,
-    ready: !entry || agentContext?.ready === true,
+    ready,
     brief: latestBrief,
   });
-  const ready = !entry || agentContext?.ready === true;
   if (bodySnapshot.selection !== selection || (!bodySnapshot.ready && ready))
     setBodySnapshot({ selection, ready, brief: latestBrief });
   const brief =
@@ -136,9 +136,10 @@ export function InboxTriageCard({
   }, [reference, evidenceAttempt]);
   const isReview = entry?.kind === "status" && entry.to_value === "In review";
   const isReminder = entry?.kind === "reminder";
-  async function reload() {
+  // The one report of a write, with the Ticket the write returned.
+  async function reload(returned?: Ticket) {
     attention?.reload();
-    await refresh();
+    await changed(returned);
   }
   const { pending, perform } = useInboxAction(reload, triage?.line);
   function mark(next: boolean) {
@@ -206,19 +207,22 @@ export function InboxTriageCard({
         `Moved ${reference} to Done`,
         async () => {
           before ??= (await client.showTicket(reference)).status;
-          updateTicket(
-            await client.changeTicket(reference, { status: "Done" }, id),
-          );
+          return client.changeTicket(reference, { status: "Done" }, id);
         },
-        async () => {
-          updateTicket(
-            await client.changeTicket(
-              reference,
-              { status: before ?? "In review" },
-              undoId,
-            ),
-          );
-          await attention?.restoreReview?.(entry);
+        // The Ticket the Undo wrote is reported at once; the Inbox's own record
+        // that this review needs you again follows, and fails on its own.
+        () =>
+          client.changeTicket(
+            reference,
+            { status: before ?? "In review" },
+            undoId,
+          ),
+        undefined,
+        {
+          action: `show ${reference} under Needs you again`,
+          run: async () => {
+            await attention?.restoreReview?.(entry);
+          },
         },
       );
     } else {

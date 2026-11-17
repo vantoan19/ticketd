@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { Evidence } from "./Evidence";
+import { OpenEvidence } from "./evidence-test-support";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -9,11 +9,10 @@ afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
 });
-const props = { revision: 0, trashed: false, refresh: async () => {} };
 
 test("says an unfolded empty evidence section is empty, with one Add evidence action", async () => {
   bridge.invoke.mockResolvedValue([]);
-  render(<Evidence reference="T-KQ5" {...props} />);
+  render(<OpenEvidence reference="T-KQ5" />);
   expect(await screen.findByText("No evidence yet.")).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "Add evidence" })).toHaveLength(
     1,
@@ -38,7 +37,7 @@ test("copies any evidence value and keeps Edit and Delete in the row menu", asyn
       updated_at: "2026-10-31T10:00:00Z",
     },
   ]);
-  render(<Evidence reference="T-KQ6" {...props} />);
+  render(<OpenEvidence reference="T-KQ6" />);
   await screen.findByText("abc1234");
   fireEvent.click(screen.getByRole("button", { name: "Copy Fix" }));
   expect(copy).toHaveBeenCalledWith("abc1234");

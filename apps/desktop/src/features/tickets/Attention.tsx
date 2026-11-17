@@ -1,5 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { followingFill, useTicket, useTicketChanged } from "./open-ticket";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -19,76 +20,108 @@ import { inboxClient } from "@/lib/api/inbox";
  */
 export function FollowToggle({
   reference,
-  revision,
   variant = "rail",
 }: {
   reference: string;
-  revision: number;
   variant?: "rail" | "strip";
 }) {
   const blocked = editingBlockedReason(useWorkspaceState()) !== null;
   const line = useStatusLine();
-  const [readAttempt, setReadAttempt] = useState(0);
-  const [readFailed, setReadFailed] = useState(false);
-  const [following, setFollowing] = useState(false);
-  const [error, setError] = useState<FailureDescription | null>(null);
-  const [pending, setPending] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void inboxClient
-      .isFollowing(reference)
-      .then((value) => {
-        if (active) {
-          setReadFailed(false);
-          setFollowing(value);
-          setError(null);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setReadFailed(true);
-          setError(describeFailure(reason, "check Follow"));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [reference, revision, readAttempt]);
+  const read = useTicket(reference, "following");
+  const changed = useTicketChanged();
+  const following = read.value ?? false;
+  // Reading and changing Follow fail separately; a failed change wins until
+  // the next try. The toggle stays mounted when the header moves to another
+  // Ticket, so what is out and what failed are kept for each Ticket, and a
+  // Ticket's own write finishing touches only its own entry.
+  const [pendingReferences, setPendingReferences] = useState<
+    ReadonlySet<string>
+  >(new Set());
+  const [changeFailures, setChangeFailures] = useState<
+    Readonly<Record<string, FailureDescription>>
+  >({});
+  const pending = pendingReferences.has(reference);
+  const changeError = changeFailures[reference] ?? null;
+  const error = changeError ?? read.failure;
+  function setPending(target: string, on: boolean) {
+    setPendingReferences((current) => {
+      const next = new Set(current);
+      if (on) next.add(target);
+      else next.delete(target);
+      return next;
+    });
+  }
+  function setChangeFailure(
+    target: string,
+    failure: FailureDescription | null,
+  ) {
+    setChangeFailures((current) => {
+      const others = Object.entries(current).filter(([key]) => key !== target);
+      return Object.fromEntries(
+        failure ? [...others, [target, failure]] : others,
+      );
+    });
+  }
   async function toggle() {
-    setReadFailed(false);
-    setPending(true);
+    const target = reference;
+    const next = !following;
+    setPending(target, true);
     try {
-      await inboxClient.setFollowing(reference, !following);
-      setFollowing(!following);
-      setError(null);
+      await inboxClient.setFollowing(target, next);
     } catch (reason) {
-      setError(
+      setChangeFailure(
+        target,
         describeFailure(
           reason,
-          following ? `unfollow ${reference}` : `follow ${reference}`,
+          following ? `unfollow ${target}` : `follow ${target}`,
         ),
       );
+      setPending(target, false);
+      return;
+    }
+    setChangeFailure(target, null);
+    try {
+      await changed(undefined, [followingFill(target, next)]);
     } finally {
-      setPending(false);
+      setPending(target, false);
     }
   }
-  const retry = useEffectEvent(() =>
-    readFailed ? setReadAttempt((n) => n + 1) : void toggle(),
+  // A failed read offers a read again; a failed change offers sending it again.
+  // Both settle when that action does, so the status line stays busy until
+  // then.
+  const retry = (): Promise<void> => (changeError ? toggle() : read.retry());
+  // A line is about the Ticket it was shown for: once the header moves on it
+  // goes (below), and a Retry that still reaches here does nothing.
+  const retryFromLine = useEffectEvent((target: string) =>
+    target === reference ? retry() : Promise.resolve(),
   );
+  const shownFor = useRef<string | null>(null);
   useEffect(() => {
-    if (variant !== "strip" || !error) return;
+    if (variant !== "strip" || !error) {
+      shownFor.current = null;
+      return;
+    }
+    shownFor.current = reference;
     line.show({
       tone: "error",
       message: `${error.title}. ${error.sentence}`,
-      action: { label: "Retry", run: () => retry() },
+      action: { label: "Retry", run: () => retryFromLine(reference) },
     });
-  }, [error, variant, line]);
+  }, [error, variant, line, reference]);
+  useEffect(
+    () => () => {
+      if (shownFor.current !== reference) return;
+      shownFor.current = null;
+      line.dismiss();
+    },
+    [reference, line],
+  );
   const Icon = following ? Eye : EyeOff;
   const failure = error && (
     <FailureCaption
       failure={error}
-      label="Not saved"
-      onRetry={() => void toggle()}
+      label={changeError ? "Not saved" : "Not checked"}
+      onRetry={() => void retry()}
     />
   );
   if (variant === "strip")

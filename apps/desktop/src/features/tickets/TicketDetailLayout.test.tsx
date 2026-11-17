@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TicketDetails } from "./TicketDetails";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
@@ -31,6 +32,8 @@ beforeEach(() => {
   reminder = null;
   children = [];
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    // A reported change reads the open Ticket again.
+    if (command === "show_ticket") return ticket;
     if (command === "is_following") return following;
     if (command === "set_following")
       following = (args as { following: boolean }).following;
@@ -74,22 +77,23 @@ const ticket: Ticket = {
 };
 function renderDetails(item: Ticket = ticket) {
   render(
-    <TicketDetails
-      mention={null}
-      selected={item.reference}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ [item.reference]: item }}
-      projects={[]}
-      plans={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-      position={{ index: 2, total: 11 }}
-      onAdjacent={vi.fn()}
-    />,
+    <TestReads primed={{ ticket: item }}>
+      <TicketDetails
+        mention={null}
+        selected={item.reference}
+        expanded={false}
+        onExpand={vi.fn()}
+        onReturn={vi.fn()}
+        setSelected={vi.fn()}
+        opened={[item.reference]}
+        onMentionReady={vi.fn()}
+        onClearMention={vi.fn()}
+        projects={[]}
+        plans={[]}
+        position={{ index: 2, total: 11 }}
+        onAdjacent={vi.fn()}
+      />
+    </TestReads>,
   );
 }
 
@@ -289,12 +293,10 @@ test("showing another ticket starts its rail and document at the top", async () 
     onExpand: vi.fn(),
     onReturn: vi.fn(),
     setSelected: vi.fn(),
-    details: { "T-KQ1": ticket, "T-KQ2": other },
+    onMentionReady: vi.fn(),
+    onClearMention: vi.fn(),
     projects: [],
     plans: [],
-    revision: 0,
-    refresh: vi.fn(async () => {}),
-    updateTicket: vi.fn(),
     position: { index: 2, total: 11 },
     onAdjacent: vi.fn(),
   };
@@ -311,7 +313,16 @@ test("showing another ticket starts its rail and document at the top", async () 
   ) {
     offsets.set(this, value);
   });
-  const view = render(<TicketDetails {...props} selected="T-KQ2" />);
+  const details = (selected: string) => (
+    <TestReads primed={{ ticket: [ticket, other] }}>
+      <TicketDetails
+        {...props}
+        opened={["T-KQ1", "T-KQ2"]}
+        selected={selected}
+      />
+    </TestReads>
+  );
+  const view = render(details("T-KQ2"));
   await screen.findAllByRole("group", { hidden: true });
   const scrollers = () => {
     const [shown] = document.querySelectorAll<HTMLElement>(".detail-content");
@@ -321,7 +332,7 @@ test("showing another ticket starts its rail and document at the top", async () 
     ];
   };
   for (const node of scrollers()) node.scrollTop = 120;
-  view.rerender(<TicketDetails {...props} selected="T-KQ1" />);
+  view.rerender(details("T-KQ1"));
   for (const node of scrollers()) expect(node.scrollTop).toBe(0);
   vi.restoreAllMocks();
 });

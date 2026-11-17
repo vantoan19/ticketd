@@ -91,7 +91,8 @@ export function Duplicates({
   initialCanonical?: string;
   /** Opens on the separate dependency review rather than on marking a duplicate. */
   startSeparate?: boolean;
-  refresh: () => Promise<void>;
+  /** Reports the write, with the Ticket the core returned. */
+  refresh: (returned?: Ticket) => Promise<void>;
   /** Called after the duplicate and its dependency changes are saved. */
   onDone?: () => void;
   /** Called when Cancel discards the review (Escape keeps it). */
@@ -253,23 +254,22 @@ export function Duplicates({
       const decisions: DependencyDecision[] = preview.edges.map(
         (edge, index) => ({ edge, choice: choices[index] as Choice }),
       );
-      if (separate)
-        await client.editDependenciesReviewed(
-          target,
-          ticket.reference,
-          preview.canonical,
-          decisions,
-          id,
-        );
-      else
-        await client.markDuplicateReviewed(
-          ticket.reference,
-          target,
-          preview.canonical,
-          decisions,
-          id,
-        );
-      await refresh();
+      const returned = separate
+        ? await client.editDependenciesReviewed(
+            target,
+            ticket.reference,
+            preview.canonical,
+            decisions,
+            id,
+          )
+        : await client.markDuplicateReviewed(
+            ticket.reference,
+            target,
+            preview.canonical,
+            decisions,
+            id,
+          );
+      await refresh(returned);
       setAttempt(null);
       canonicalDrafts.delete(ticket.reference);
       onDone?.();

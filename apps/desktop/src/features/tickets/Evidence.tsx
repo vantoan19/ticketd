@@ -39,12 +39,13 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import "./evidence.css";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   client,
   type Evidence as EvidenceRecord,
   type EvidenceInput,
 } from "@/lib/api/client";
+import { useOpenTicket } from "@/features/tickets/open-ticket";
 
 const evidenceIcons = {
   pull_request: GitPullRequest,
@@ -54,6 +55,7 @@ const evidenceIcons = {
   verification: CheckCheck,
 };
 
+const noItems: EvidenceRecord[] = [];
 const blank: EvidenceInput = {
   kind: "pull_request",
   name: "",
@@ -104,18 +106,12 @@ function shortCommit(value: string): string {
 }
 
 export function Evidence({
-  reference,
-  revision,
   trashed,
-  refresh,
   folded = false,
   addRequest = 0,
   onCount,
 }: {
-  reference: string;
-  revision: number;
   trashed: boolean;
-  refresh: () => Promise<void>;
   /**
    * With no evidence the section folds away; the page's one quiet add row
    * offers "+ Evidence" instead (detB DB-30).
@@ -128,14 +124,21 @@ export function Evidence({
 }) {
   const formId = useId();
   const statusLine = useStatusLine();
-  const [loaded, setLoaded] = useState(false);
+  const { record, changed: ticketChanged } = useOpenTicket();
+  const reference = record.reference;
+  // The Open Ticket serves the records, a page at a time, and re-reads every
+  // page it has loaded whenever the workspace changes.
+  const read = useOpenTicket("evidence");
+  const loaded = read.value !== undefined;
+  const items = read.value ?? noItems;
   const [composing, setComposing] = useState(false);
-  const [items, setItems] = useState<EvidenceRecord[]>([]);
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
-  // The section's failures (load, delete, copy, open) and the dialog's own
-  // save failure are kept apart, so neither shows up in the other's place.
-  const [error, setError] = useState<FailureDescription | null>(null);
+  // The section's own failures (delete, open) and the dialog's own save
+  // failure are kept apart, so neither shows up in the other's place. A
+  // failure to read comes from the read and stays until a read succeeds.
+  const [ownError, setError] = useState<FailureDescription | null>(null);
+  const error = ownError ?? read.failure;
   const [dialogError, setDialogError] = useState<FailureDescription | null>(
     null,
   );
@@ -148,30 +151,8 @@ export function Evidence({
       request.current = { key, id: crypto.randomUUID() };
     return request.current.id;
   }
-  const [more, setMore] = useState(false);
-  const pages = useRef(1);
   const menuTriggers = useRef(new Map<string, HTMLElement>());
   const returnFocus = useRef<HTMLElement | null>(null);
-  const load = useCallback(async () => {
-    const all: EvidenceRecord[] = [];
-    let page: EvidenceRecord[] = [];
-    for (let index = 0; index < pages.current; index++) {
-      page = await client.evidence(reference, index * 50);
-      all.push(...page);
-      if (page.length < 50) break;
-    }
-    setItems(all);
-    setLoaded(true);
-    setMore(page.length === 50);
-  }, [reference]);
-  useEffect(() => {
-    void Promise.resolve()
-      .then(load)
-      .catch((reason: unknown) => {
-        setDeleteRetry(null);
-        setError(describeFailure(reason, "load evidence"));
-      });
-  }, [load, revision]);
   async function save() {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -187,8 +168,7 @@ export function Evidence({
       setEditing(null);
       setComposing(false);
       setDialogError(null);
-      await load();
-      await refresh();
+      await ticketChanged();
     } catch (reason) {
       setDialogError(saveFailure(reason, Boolean(editing)));
     } finally {
@@ -225,12 +205,10 @@ export function Evidence({
               restoreId,
             );
             setError(null);
-            await load();
-            await refresh();
+            await ticketChanged();
           },
         });
-      await load();
-      await refresh();
+      await ticketChanged();
     } catch (reason) {
       setDeleteRetry(id);
       setError(describeFailure(reason, "delete the evidence"));
@@ -317,9 +295,7 @@ export function Evidence({
               return;
             }
             setError(null);
-            void load().catch((reason: unknown) =>
-              setError(describeFailure(reason, "load evidence")),
-            );
+            read.retry();
           }}
         />
       )}
@@ -409,18 +385,7 @@ export function Evidence({
           </li>
         ))}
       </ol>
-      {more && (
-        <Pager
-          noun="evidence"
-          onMore={() => {
-            pages.current += 1;
-            void load().catch((reason: unknown) => {
-              setDeleteRetry(null);
-              setError(describeFailure(reason, "load more evidence"));
-            });
-          }}
-        />
-      )}
+      {read.more && <Pager noun="evidence" onMore={read.showMore} />}
       <DialogShell
         open={!trashed && composing}
         // Escape and an outside click keep the draft; Cancel or a save clears it.

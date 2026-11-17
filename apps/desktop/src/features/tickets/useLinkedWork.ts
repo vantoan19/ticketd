@@ -1,6 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { client, type Relationships, type Ticket } from "@/lib/api/client";
+import { useRef, useState } from "react";
+import type { Relationships } from "@/lib/api/client";
 import {
   describeFailure,
   type FailureDescription,
@@ -8,13 +8,12 @@ import {
 import {
   linkLabel,
   linkRows,
-  mergePage,
-  nextOffset,
   addLink,
   removeLink,
   type AddableKind,
   type LinkRow,
 } from "@/features/tickets/linked-work";
+import { useOpenTicket } from "@/features/tickets/open-ticket";
 
 type Loaded = {
   reference: string;
@@ -25,17 +24,13 @@ type Loaded = {
 
 /**
  * One bounded read of the core's relationships feeds the Subtickets section
- * under the description and the Relationships section of the rail. It reruns
- * whenever the workspace revision moves, so links made elsewhere appear.
+ * under the description and the Relationships section of the rail. The Open
+ * Ticket serves it and re-reads it whenever the workspace changes, so links
+ * made elsewhere appear; a write here reports itself with `changed()`.
  */
-export function useLinkedWork(
-  ticket: Ticket,
-  revision: number,
-  refresh: () => Promise<void>,
-  enabled = true,
-) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [reload, setReload] = useState(0);
+export function useLinkedWork() {
+  const { record: ticket, changed } = useOpenTicket();
+  const read = useOpenTicket("linkedWork");
   const [linking, setLinking] = useState<AddableKind | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
@@ -49,61 +44,39 @@ export function useLinkedWork(
   const statusLine = useStatusLine();
   const attempts = useRef(new Map<string, string>());
   const reference = ticket.reference;
+  const links = read.value ?? null;
 
-  // Rows removed but not yet re-read: they collapse at once, in place.
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    if (!enabled) return;
-    let active = true;
-    client.contextualRelationships(reference, 0).then(
-      (links) => {
-        if (active) {
-          setLoaded({ reference, links, failure: null });
-          // Optimistic hiding lasts only until this authoritative reread.
-          // Persistent tombstones would hide a link added again later.
-          setHidden(new Set());
-        }
-      },
-      (reason: unknown) => {
-        if (active)
-          setLoaded((previous) => {
-            // Keep what was shown for this ticket; say the refresh failed.
-            const links =
-              previous?.reference === reference ? previous.links : null;
-            return {
-              reference,
-              links,
-              failure: describeFailure(
-                reason,
-                links ? "refresh relationships" : "load relationships",
-              ),
-            };
-          });
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [enabled, reference, revision, reload]);
+  // Rows removed but not yet re-read: they collapse at once, in place. They
+  // belong to the links they were hidden from, so the next authoritative
+  // read (new links) brings them back unless it no longer has them. Persistent
+  // tombstones would hide a link added again later.
+  const [hiding, setHiding] = useState<{
+    from: Relationships | null;
+    keys: ReadonlySet<string>;
+  }>({ from: null, keys: new Set() });
+  const hidden = hiding.from === links ? hiding.keys : new Set<string>();
 
   // A removal hides a row and the next one slides under the pointer with its
   // × already showing, so clicks on that slot wait out 400ms: a double-click
   // never removes a second relationship.
   const settling = useRef(false);
-  const current = loaded?.reference === reference ? loaded : null;
+  // The read's failure keeps the links; a failed "Show more" is the action's
+  // own failure, shown under the list like any other.
+  const current: Loaded | null =
+    links || read.failure ? { reference, links, failure: read.failure } : null;
   const rowKey = (row: Pick<LinkRow, "kind" | "reference">) =>
     JSON.stringify([row.kind, row.reference]);
-  const rows: LinkRow[] = current?.links
-    ? linkRows(current.links).filter((row) => !hidden.has(rowKey(row)))
+  const rows: LinkRow[] = links
+    ? linkRows(links).filter((row) => !hidden.has(rowKey(row)))
     : [];
-  const more = current?.links ? nextOffset(current.links) : null;
-  const retry = useCallback(() => setReload((value) => value + 1), []);
+  const more = read.more;
+  const retry = read.retry;
   const show = (key: string, shown: boolean) =>
-    setHidden((old) => {
-      const next = new Set(old);
-      if (shown) next.delete(key);
-      else next.add(key);
-      return next;
+    setHiding((old) => {
+      const keys = new Set(old.from === links ? old.keys : []);
+      if (shown) keys.delete(key);
+      else keys.add(key);
+      return { from: links, keys };
     });
 
   async function remove(row: LinkRow) {
@@ -122,8 +95,7 @@ export function useLinkedWork(
     try {
       await removeLink(reference, row.kind, row.reference, id);
       attempts.current.delete(key);
-      setReload((value) => value + 1);
-      await refresh();
+      await changed();
       const kind = row.kind;
       // A duplicate link is undone through its own review, not by Undo.
       if (kind === "duplicate_of" || kind === "duplicates")
@@ -158,26 +130,9 @@ export function useLinkedWork(
     try {
       await addLink(reference, kind, target, crypto.randomUUID());
       show(rowKey({ kind, reference: target }), true);
-      setReload((value) => value + 1);
-      await refresh();
+      await changed();
     } finally {
       setPending(false);
-    }
-  }
-  async function showMore() {
-    if (!current?.links || more === null) return;
-    try {
-      const page = await client.contextualRelationships(reference, more);
-      setLoaded((previous) =>
-        previous?.links && previous.reference === reference
-          ? { ...previous, links: mergePage(previous.links, page) }
-          : previous,
-      );
-    } catch (reason) {
-      setError({
-        kind: null,
-        failure: describeFailure(reason, "load more links"),
-      });
     }
   }
   return {
@@ -186,12 +141,13 @@ export function useLinkedWork(
     current,
     rows,
     more,
-    error,
+    error:
+      error ?? (read.moreFailure && { kind: null, failure: read.moreFailure }),
     pending,
     remove,
-    showMore,
+    showMore: read.showMore,
     retry,
-    refresh,
+    changed,
     linking,
     openLink: (kind: AddableKind = "related") => setLinking(kind),
     closeLink: () => setLinking(null),

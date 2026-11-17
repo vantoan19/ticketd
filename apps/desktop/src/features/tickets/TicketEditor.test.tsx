@@ -12,6 +12,7 @@ import {
 import { test, vi, expect, afterEach } from "vitest";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import type { Ticket } from "@/lib/api/client";
+import { TestReads } from "@/lib/workspace-reads/testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -276,16 +277,18 @@ test("navigates references in Markdown text while leaving code and links alone",
   const select = vi.fn();
   bridge.invoke.mockResolvedValue({ ...initial, reference: "T-KQ2" });
   render(
-    <TicketEditor
-      ticket={
-        {
-          ...initial,
-          body: "See T-KQ2 and `T-KQ3` and [website](https://example.com/T-KQ4)",
-        } as never
-      }
-      onSaved={vi.fn()}
-      select={select}
-    />,
+    <TestReads>
+      <TicketEditor
+        ticket={
+          {
+            ...initial,
+            body: "See T-KQ2 and `T-KQ3` and [website](https://example.com/T-KQ4)",
+          } as never
+        }
+        onSaved={vi.fn()}
+        select={select}
+      />
+    </TestReads>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "T-KQ2" }));
   expect(select).toHaveBeenCalledWith("T-KQ2");

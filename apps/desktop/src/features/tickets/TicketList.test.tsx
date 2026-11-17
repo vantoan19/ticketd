@@ -4,8 +4,14 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
 import { TicketList } from "./TicketList";
 import type { RowScope } from "./ticket-row";
+import { TestReads } from "@/lib/workspace-reads/testing";
 
-afterEach(cleanup);
+const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => bridge);
+afterEach(() => {
+  cleanup();
+  bridge.invoke.mockReset();
+});
 
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "1",
@@ -33,16 +39,18 @@ const scope: RowScope = {
 };
 function renderList(tickets: Ticket[], props = {}) {
   return render(
-    <TicketList
-      tickets={tickets}
-      selected={null}
-      onOpen={vi.fn()}
-      bulkSelection={[]}
-      onToggle={vi.fn()}
-      selectable
-      scope={scope}
-      {...props}
-    />,
+    <TestReads>
+      <TicketList
+        tickets={tickets}
+        selected={null}
+        onOpen={vi.fn()}
+        bulkSelection={[]}
+        onToggle={vi.fn()}
+        selectable
+        scope={scope}
+        {...props}
+      />
+    </TestReads>,
   );
 }
 const prerequisite = (reference: string, status: string) => ({
@@ -392,4 +400,34 @@ test("a grouped Todo list says Ready once in its header and flags only Blocked r
   expect(screen.getByText("· 1 ready")).toBeTruthy();
   expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.getByText("Blocked by T-KQ9")).toBeTruthy();
+});
+
+test("the open Ticket's row that the list dropped follows the Ticket's own read", async () => {
+  const listed = ticket({
+    status: "In progress",
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+  const other = ticket({ id: "2", reference: "T-KQ2", status: "In progress" });
+  // The Ticket moved to In review; its read has the new copy.
+  bridge.invoke.mockResolvedValue({
+    ...listed,
+    status: "In review",
+    updated_at: "2026-01-02T00:00:00Z",
+  });
+  const view = (tickets: Ticket[]) => (
+    <TestReads>
+      <TicketList
+        tickets={tickets}
+        selected="T-KQ1"
+        onOpen={vi.fn()}
+        bulkSelection={[]}
+        onToggle={vi.fn()}
+        selectable
+        scope={scope}
+      />
+    </TestReads>
+  );
+  const { rerender } = render(view([listed, other]));
+  rerender(view([other]));
+  expect(await screen.findByRole("img", { name: "In review" })).toBeTruthy();
 });

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import type { Ticket } from "@/lib/api/client";
+import { useTicketChanged } from "./open-ticket";
 import { TicketPicker } from "./TicketPicker";
 
 /**
@@ -13,14 +14,13 @@ import { TicketPicker } from "./TicketPicker";
 export function MarkDuplicateDialog({
   open,
   onOpenChange,
-  refresh,
   onMarked,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  refresh: () => Promise<void>;
   onMarked?: (reference: string) => void;
 }) {
+  const changed = useTicketChanged();
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Ticket | null>(null);
   const [chosen, setChosen] = useState<Ticket | null>(null);
@@ -40,7 +40,7 @@ export function MarkDuplicateDialog({
     return (
       <Duplicates
         ticket={chosen}
-        refresh={refresh}
+        refresh={changed}
         open={open}
         // Escape keeps the typed search and chosen ticket for when it reopens.
         onOpenChange={onOpenChange}

@@ -14,6 +14,7 @@ import type { Ticket, TicketSource } from "@/lib/api/client";
 import type { SourceStatus } from "@/lib/api/sources";
 import { SourceFilter, SourceRefresh } from "./SourceFilter";
 import { SourceUnavailableNotice } from "./SourceUnavailableNotice";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { TicketList } from "./TicketList";
 import { TicketProperties } from "./TicketProperties";
 import { SourceActivityContext, type SourceActivity } from "./source-activity";
@@ -300,20 +301,22 @@ test("the state line and the row carry the orange Source unavailable cue", () =>
     tone: "attention",
   });
   const { container } = render(
-    <TicketList
-      tickets={[ticket({ source: unavailableSource() })]}
-      selected={null}
-      onOpen={vi.fn()}
-      bulkSelection={[]}
-      onToggle={vi.fn()}
-      selectable
-      scope={{
-        showPlan: false,
-        showProject: false,
-        plans: [],
-        projects: [],
-      }}
-    />,
+    <TestReads>
+      <TicketList
+        tickets={[ticket({ source: unavailableSource() })]}
+        selected={null}
+        onOpen={vi.fn()}
+        bulkSelection={[]}
+        onToggle={vi.fn()}
+        selectable
+        scope={{
+          showPlan: false,
+          showProject: false,
+          plans: [],
+          projects: [],
+        }}
+      />
+    </TestReads>,
   );
   const row = screen.getByRole("button", { name: /Imported issue/ });
   expect(within(row).getByText("Source unavailable")).toBeTruthy();

@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { Evidence } from "./Evidence";
+import { OpenEvidence } from "./evidence-test-support";
 
 afterEach(cleanup);
 
@@ -36,14 +36,7 @@ vi.mock("@tauri-apps/api/core", () => {
   };
 });
 test("adds and removes a verification result", async () => {
-  const view = render(
-    <Evidence
-      reference="T-KQ1"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  const view = render(<OpenEvidence reference="T-KQ1" />);
   Element.prototype.scrollIntoView = vi.fn();
   expect(screen.queryByLabelText(/^Type: /)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
@@ -90,14 +83,7 @@ test("retries a lost response with the same request ID and uses a new ID for a d
       };
     }
   });
-  const view = render(
-    <Evidence
-      reference="T-KQ2"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  const view = render(<OpenEvidence reference="T-KQ2" />);
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
   fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
@@ -151,14 +137,7 @@ test("disables evidence controls while a write is pending", async () => {
         complete = resolve;
       });
   });
-  const view = render(
-    <Evidence
-      reference="T-KQ3"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  const view = render(<OpenEvidence reference="T-KQ3" />);
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
   fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
@@ -205,14 +184,7 @@ test("copies any evidence value on explicit request", async () => {
         },
       ];
   });
-  const view = render(
-    <Evidence
-      reference="T-KQ4"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  const view = render(<OpenEvidence reference="T-KQ4" />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy Review" }));
   expect(copy).toHaveBeenCalledWith("https://example.com/pr/1");
   await screen.findByText("Copied");
@@ -238,28 +210,14 @@ test("a full commit hash is shown short, with the whole value on hover", async (
         ]
       : undefined,
   );
-  render(
-    <Evidence
-      reference="T-KQ2"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  render(<OpenEvidence reference="T-KQ2" />);
   const value = await screen.findByText("0123456789");
   fireEvent.pointerMove(value);
   expect((await screen.findByRole("tooltip")).textContent).toBe(full);
 });
 
 test("Add evidence stays disabled with its reason until name and evidence are filled", () => {
-  render(
-    <Evidence
-      reference="T-KQ1"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  render(<OpenEvidence reference="T-KQ1" />);
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   const primary = screen.getByRole("button", { name: "Add evidence" });
   expect(primary).toHaveProperty("disabled", true);
@@ -273,14 +231,7 @@ test("Add evidence stays disabled with its reason until name and evidence are fi
 });
 
 test("Cancel discards the draft but Escape keeps it", async () => {
-  render(
-    <Evidence
-      reference="T-KQ1"
-      revision={0}
-      trashed={false}
-      refresh={async () => {}}
-    />,
-  );
+  render(<OpenEvidence reference="T-KQ1" />);
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Draft name" },
@@ -295,4 +246,36 @@ test("Cancel discards the draft but Escape keeps it", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+});
+
+test("Show more evidence reads one more page and lists it after the first", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const mock = vi.mocked(invoke);
+  mock.mockClear();
+  const record = (name: string) => ({
+    id: name,
+    kind: "branch",
+    name,
+    value: "main",
+    editing_agent: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+  mock.mockImplementation(async (command, args) => {
+    if (command !== "list_evidence") return undefined;
+    return (args as { offset: number }).offset === 0
+      ? Array.from({ length: 50 }, (_, index) => record(`first-${index}`))
+      : [record("second-0")];
+  });
+  render(<OpenEvidence reference="T-KQ9" />);
+  await screen.findByText("first-49");
+  fireEvent.click(screen.getByRole("button", { name: "Show more evidence" }));
+  await screen.findByText("second-0");
+  expect(screen.getByText("first-0")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Show more evidence" }),
+  ).toBeNull();
+  expect(
+    mock.mock.calls.filter(([command]) => command === "list_evidence"),
+  ).toHaveLength(2);
 });

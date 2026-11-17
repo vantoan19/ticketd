@@ -40,41 +40,31 @@ import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useSourcesConfigured } from "@/features/tickets/use-publication-preview";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
-import type { Project, Ticket } from "@/lib/api/client";
+import type { Project } from "@/lib/api/client";
+import { useOpenTicket } from "./open-ticket";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
 
 /** The ticket document with its wrapping properties and linked context. */
 export function TicketPage({
-  ticket,
   active,
-  opening = false,
-
   outsideResults = false,
   projects,
   plans,
-  revision,
-  refresh,
-  updateTicket,
   select,
   onOpenGraph,
   noteTarget,
   mention,
   onMention,
 }: {
-  ticket: Ticket;
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
-  /** A known saved list copy reserves geometry until the fresh detail read settles. */
-  opening?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
   projects: Project[];
   plans: Plan[];
-  revision: number;
-  refresh: () => Promise<void>;
-  updateTicket: (ticket: Ticket) => void;
   select: (reference: string | null) => void;
   onOpenGraph: () => void;
   noteTarget: NoteTarget | null;
@@ -82,12 +72,18 @@ export function TicketPage({
   mention: (MentionTarget & { key: number }) | null;
   onMention: (target: MentionTarget) => void;
 }) {
+  // A known saved list copy (`opening`) reserves geometry until the fresh
+  // read of the record settles.
+  const { record: ticket, opening, changed } = useOpenTicket();
+  // Readers not yet on the Open Ticket (the source's conversation, rendered
+  // Markdown, the editor's conflict check) follow the Workspace's change.
+  const revision = useWorkspaceChange();
   const now = useNow();
   const openCommand = useContext(TicketCommandContext);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
-  const work = useLinkedWork(ticket, revision, refresh, active);
+  const work = useLinkedWork();
   const sourcesConfigured = useSourcesConfigured();
-  const trash = useTicketTrash(updateTicket, refresh);
+  const trash = useTicketTrash(changed);
   // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
   // row of adds under the description, and appear once they have content.
   const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
@@ -230,34 +226,22 @@ export function TicketPage({
       <>
         <Reminder
           key={`reminder-${ticket.reference}`}
-          reference={ticket.reference}
-          revision={revision}
           variant={variant}
-          ticket={ticket}
           projects={projects}
           plans={plans}
-          refresh={refresh}
         />
       </>
     );
   const files = active && (
     <TicketFiles
       key={ticket.reference}
-      ticket={ticket}
-      revision={revision}
-      refresh={refresh}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
       emptyTarget={fileAddTarget}
     />
   );
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
-      <Backlinks
-        ticketId={ticket.id}
-        reference={ticket.reference}
-        revision={revision}
-        select={onMention}
-      />
+      <Backlinks select={onMention} />
     </LinkedWork>
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
@@ -276,11 +260,10 @@ export function TicketPage({
       attention={attentionFor("strip")}
       ticket={ticket}
       active={active && !opening}
-      revision={revision}
       projects={projects}
       plans={plans}
-      onSaved={updateTicket}
-      refresh={refresh}
+      onSaved={changed}
+      refresh={changed}
       onOpenTicket={select}
       onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
     >
@@ -300,7 +283,7 @@ export function TicketPage({
             ticket={ticket}
             projects={projects}
             plans={plans}
-            refresh={refresh}
+            refresh={changed}
             scope="Reminder"
             open={reminderOpen}
             onOpenChange={setReminderOpen}
@@ -377,9 +360,9 @@ export function TicketPage({
           <NeedsReviewNotice kind="ticket" id={ticket.id} className="mb-6" />
         )}
         {active && (
-          <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
+          <SourceUnavailableNotice ticket={ticket} refresh={changed} />
         )}
-        {active && <PublicationNotice ticket={ticket} refresh={refresh} />}
+        {active && <PublicationNotice ticket={ticket} refresh={changed} />}
         {active && <RunNotices {...ticketRuns} />}
         {ticket.trashed || contentLocked ? (
           <>
@@ -420,7 +403,7 @@ export function TicketPage({
           <TicketEditor
             ticket={ticket}
             readOnly={opening}
-            onSaved={updateTicket}
+            onSaved={changed}
             select={select}
             revision={revision}
             mention={mention}
@@ -435,10 +418,7 @@ export function TicketPage({
         </RailPlacement>
         {active && (
           <Evidence
-            reference={ticket.reference}
-            revision={revision}
             trashed={ticket.trashed}
-            refresh={refresh}
             folded
             addRequest={evidenceRequest}
             onCount={setEvidenceCount}
@@ -470,15 +450,12 @@ export function TicketPage({
           }
           projects={projects}
           plans={plans}
-          status={ticket.status}
-          revision={revision}
           active={active}
           trashed={ticket.trashed}
           select={select}
           foldEmpty
           latestNoteId={ticket.latest_update?.activity_id}
           sourceName={source?.provider_name}
-          onChanged={refresh}
         />
       </div>
     </div>
