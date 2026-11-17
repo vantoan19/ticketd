@@ -617,7 +617,9 @@ function AppContent() {
           : null
       : null;
   const inboxTicket = useTicket(inboxReference ?? null).value ?? undefined;
-  const paletteTicket = useTicket(paletteReference).value ?? undefined;
+  // Read only while the palette is open: a closed one has no use for it.
+  const paletteTicket =
+    useTicket(paletteOpen ? paletteReference : null).value ?? undefined;
   return (
     // Runs open in the Automations page, which is there only while Chat is on.
     // Without it a run's Inbox entry opens its ticket instead.

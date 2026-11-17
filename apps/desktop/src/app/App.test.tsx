@@ -3091,6 +3091,43 @@ function paletteTickets(prefix = "KQ", status = "Todo") {
   return tickets;
 }
 
+test("a closed palette stops reading its Ticket when the workspace changes", async () => {
+  vi.useFakeTimers();
+  paletteTickets();
+  render(<App />);
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  await turn();
+  const row = screen.getByRole("button", { name: /Focused Ticket/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "k", ctrlKey: true });
+  await turn();
+  const input = screen.getByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  await turn();
+  fireEvent.keyDown(input, { key: "Escape" });
+  await turn();
+  expect(
+    screen.queryByRole("combobox", { name: "Search tickets and destinations" }),
+  ).toBeNull();
+  const reads = () =>
+    bridge.invoke.mock.calls.filter(
+      ([command, args]) =>
+        command === "show_ticket" &&
+        (args as { reference: string }).reference === "T-KQ2",
+    ).length;
+  const before = reads();
+  // Every poll sees a moved token, so each is a change made elsewhere.
+  for (let poll = 0; poll < 3; poll += 1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+  expect(reads()).toBe(before);
+});
+
 test("palette actions come first, > excludes ticket search, and Tab and Backspace stay in the palette", async () => {
   paletteTickets();
   render(<App />);
