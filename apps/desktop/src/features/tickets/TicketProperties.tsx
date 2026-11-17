@@ -81,6 +81,7 @@ function TagPills({ tags }: { tags: string[] }) {
               opacity: 1,
               scale: 1,
               filter: "blur(0px)",
+              transitionEnd: { filter: "none" },
               transition: {
                 default: enterTransition(),
                 scale: spring("smooth"),

@@ -141,12 +141,14 @@ function CommentRow({
   arriving?: boolean;
   children: React.ReactNode;
 }) {
+  // Decided when the row mounts: it keeps its arrival while it plays.
+  const [enters] = React.useState(arriving);
   return (
     <m.li
       data-slot="comment-row"
       className={cn("ui-comment-row", className)}
       {...glide()}
-      {...(arriving && arrival())}
+      {...(enters && arrival())}
       {...props}
     >
       <span data-slot="event-row-badge" className="ui-event-row-badge">

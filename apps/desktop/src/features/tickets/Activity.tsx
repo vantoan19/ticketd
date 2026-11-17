@@ -640,11 +640,14 @@ export function Activity({
   // An update newer than the newest already shown arrives with motion: yours
   // posted, or one an agent reports. The first list, older pages and a changed
   // filter appear without it.
-  const shownThrough = useRef<string | null>(null);
-  const arrivalAfter = shownThrough.current;
-  useEffect(() => {
-    shownThrough.current = entries[0]?.timestamp ?? shownThrough.current;
-  });
+  const newestEntry = entries[0]?.timestamp ?? null;
+  // shownThrough is the newest entry of the list before this one.
+  const [seenNewest, setSeenNewest] = useState<string | null>(null);
+  const [shownThrough, setShownThrough] = useState<string | null>(null);
+  if (newestEntry !== seenNewest) {
+    setSeenNewest(newestEntry);
+    setShownThrough(seenNewest);
+  }
   const lookups = {
     project: (id: string) =>
       projects.find((project) => project.id === id)?.name,
@@ -1050,7 +1053,7 @@ export function Activity({
               <CommentRow
                 key={`note-${item.note.id}`}
                 arriving={
-                  arrivalAfter !== null && item.timestamp > arrivalAfter
+                  shownThrough !== null && item.timestamp > shownThrough
                 }
                 icon={item.note.editing_agent ? Bot : MessageSquare}
                 mark={

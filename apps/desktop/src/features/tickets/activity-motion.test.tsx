@@ -1,11 +1,5 @@
 // @vitest-environment jsdom
-import {
-  act,
-  cleanup,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
