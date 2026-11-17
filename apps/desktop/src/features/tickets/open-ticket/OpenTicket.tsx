@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Ticket } from "@/lib/api/client";
@@ -6,7 +6,11 @@ import { BridgeFailure } from "@/lib/api/bridge-failure";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { ticketRead, useRead, Visibility } from "@/lib/workspace-reads";
 import { useTicketChanged } from "./changed";
-import { OpenTicketContext, type OpenTicketScope } from "./open-ticket-context";
+import {
+  OpenTicketContext,
+  createCurrency,
+  type OpenTicketScope,
+} from "./open-ticket-context";
 
 /**
  * A scope and a gate for one Ticket that is open: its children render once a
@@ -57,10 +61,17 @@ function Gate({
   const record = gone ? undefined : (state.value ?? kept);
   const opening = state.value === undefined;
   const { failure, retry } = state;
+  // The gate's read of the record is the only one: callers of
+  // `useOpenTicket().current` are served from it, so the gate tracks `current`
+  // (and re-renders for it) only once a caller asked.
+  const [currency] = useState(() => createCurrency(() => state.current));
+  useLayoutEffect(() => currency.update(() => state.current));
   const open = useMemo<OpenTicketScope | null>(
     () =>
-      record ? { reference, record, opening, failure, retry, changed } : null,
-    [reference, record, opening, failure, retry, changed],
+      record
+        ? { reference, record, opening, failure, retry, changed, currency }
+        : null,
+    [reference, record, opening, failure, retry, changed, currency],
   );
   const notFound = useMemo(
     () =>

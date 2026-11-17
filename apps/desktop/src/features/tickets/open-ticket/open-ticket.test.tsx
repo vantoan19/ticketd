@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
-import { Profiler } from "react";
+import { Profiler, useEffect } from "react";
 import {
   act,
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { useReads } from "@/lib/workspace-reads/reads-context";
 import { TestReads } from "@/lib/workspace-reads/testing";
-import { OpenTicket, useOpenTicket, useTicket } from ".";
+import { OpenTicket, useKnownTicket, useOpenTicket, useTicket } from ".";
 import { TestOpenTicket } from "./testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -330,6 +332,76 @@ describe("the record", () => {
     expect(commits).toHaveLength(before);
   });
 
+  it("holds one observer of the record for every caller of the Open Ticket, whatever they ask", async () => {
+    bridge.invoke.mockResolvedValue(ticket("Same"));
+    let observers = 0;
+    function Caller({ asks }: { asks: boolean }) {
+      const state = useOpenTicket();
+      useOpenTicket("reminder");
+      return <span>{asks ? String(state.current) : state.record.title}</span>;
+    }
+    function Count() {
+      const reads = useReads("test");
+      useEffect(() => {
+        observers =
+          reads.client
+            .getQueryCache()
+            .find({ queryKey: ["read", "ticket", "T-1"], exact: true })
+            ?.getObserversCount() ?? 0;
+      });
+      return null;
+    }
+    render(
+      <TestReads>
+        <OpenTicket reference="T-1">
+          <Caller asks />
+          <Caller asks={false} />
+          <Caller asks={false} />
+          <Count />
+        </OpenTicket>
+      </TestReads>,
+    );
+    await screen.findByText("true");
+    expect(observers).toBe(1);
+  });
+
+  it("re-renders only the callers that asked whether the record is current", async () => {
+    const signal = fakeChangeSignal();
+    const reread = deferred<Ticket>();
+    bridge.invoke
+      .mockResolvedValueOnce(ticket("Same"))
+      .mockReturnValueOnce(reread.promise);
+    const commits = { asking: 0, plain: 0 };
+    function Asking() {
+      const { current } = useOpenTicket();
+      return <output>{current ? "current" : "stale"}</output>;
+    }
+    function Plain() {
+      return <h3>{useOpenTicket().record.title}</h3>;
+    }
+    render(
+      <TestReads signal={signal}>
+        <OpenTicket reference="T-1">
+          <Profiler id="asking" onRender={() => (commits.asking += 1)}>
+            <Asking />
+          </Profiler>
+          <Profiler id="plain" onRender={() => (commits.plain += 1)}>
+            <Plain />
+          </Profiler>
+        </OpenTicket>
+      </TestReads>,
+    );
+    await screen.findByText("current");
+    const before = { ...commits };
+
+    act(() => signal.change());
+    expect(await screen.findByText("stale")).toBeTruthy();
+    await act(async () => reread.resolve(ticket("Same")));
+    expect(await screen.findByText("current")).toBeTruthy();
+    expect(commits.asking).toBeGreaterThan(before.asking);
+    expect(commits.plain).toBe(before.plain);
+  });
+
   it("shows a Ticket a write returned at once and re-reads once", async () => {
     const reread = deferred<Ticket>();
     bridge.invoke
@@ -426,5 +498,44 @@ describe("useTicket", () => {
     await act(async () => {});
     expect(screen.getByText("undefined")).toBeTruthy();
     expect(bridge.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("useKnownTicket", () => {
+  it("peeks at the newest copy cached without reading, observing or re-rendering", async () => {
+    const signal = fakeChangeSignal();
+    bridge.invoke
+      .mockResolvedValueOnce(ticket("First"))
+      .mockResolvedValue(ticket("Second"));
+    let chip = false;
+    let commits = 0;
+    function Chip() {
+      return <span>{useTicket("T-1").value?.title ?? "…"}</span>;
+    }
+    const { result, rerender } = renderHook(() => useKnownTicket(), {
+      wrapper: ({ children }) => (
+        <TestReads signal={signal}>
+          <Profiler id="peek" onRender={() => (commits += 1)}>
+            {children}
+          </Profiler>
+          {chip && <Chip />}
+        </TestReads>
+      ),
+    });
+    expect(result.current("T-1")).toBeUndefined();
+    await act(async () => {});
+    expect(bridge.invoke).not.toHaveBeenCalled();
+
+    chip = true;
+    rerender();
+    expect(await screen.findByText("First")).toBeTruthy();
+    expect(result.current("T-1")?.title).toBe("First");
+    const peeked = commits;
+    act(() => signal.change());
+    expect(await screen.findByText("Second")).toBeTruthy();
+    expect(result.current("T-1")?.title).toBe("Second");
+    expect(commits).toBe(peeked);
+    expect(result.current("T-2")).toBeUndefined();
+    expect(recordReads()).toHaveLength(2);
   });
 });

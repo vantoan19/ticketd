@@ -3,9 +3,16 @@
 export { OpenTicket } from "./OpenTicket";
 export { useOpenTicket } from "./open-ticket-context";
 export type { OpenTicketState } from "./open-ticket-context";
-export { useTicket } from "./use-ticket";
+export { useKnownTicket, useTicket } from "./use-ticket";
 export type { TicketState } from "./use-ticket";
 export type { Part } from "./parts";
 export { TicketListSync, useTicketChanged } from "./changed";
 export type { ReturnedTickets } from "./changed";
 export { useLatestUpdateOf } from "./parts/activity";
+export {
+  editedUpdateFills,
+  followingFill,
+  relinkedDocumentFill,
+  unlinkedDocumentFill,
+} from "./parts";
+export type { Fill } from "@/lib/workspace-reads";

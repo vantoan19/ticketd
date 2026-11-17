@@ -1,12 +1,15 @@
-import { client, type Ticket } from "@/lib/api/client";
+import { client, type AuthoredActivity, type Ticket } from "@/lib/api/client";
 import { latestUpdate } from "@/lib/api/progress";
 import {
   byOffset,
+  fillRead,
   pagedRead,
   read,
   skip,
+  updatePagedRead,
   usePagedRead,
   useRead,
+  type Fill,
 } from "@/lib/workspace-reads";
 
 // The Ticket page's Activity and the agent line: the feed, one update looked up
@@ -66,4 +69,34 @@ export function useLatestUpdateOf(reference: string | null) {
 /** The Ticket's latest authored update, or null when it has none. */
 export function useLatestUpdate(record: Ticket | undefined) {
   return useLatestUpdateOf(record?.reference ?? null);
+}
+
+/**
+ * The fills for an authored update of `record` that was edited: its linked
+ * update (the one a link into Activity opens) and its row in every loaded page
+ * of the feed. Pass them to `changed` after `client.editActivity` succeeded,
+ * with `note` as it returned.
+ */
+export function editedUpdateFills(
+  record: Ticket,
+  note: AuthoredActivity,
+): Fill[] {
+  return [
+    fillRead(
+      activityNoteRead,
+      { reference: record.reference, id: note.id },
+      note,
+    ),
+    updatePagedRead(activityRead, record.reference, (page) =>
+      page.some(
+        (item) => item.type === "authored" && item.activity.id === note.id,
+      )
+        ? page.map((item) =>
+            item.type === "authored" && item.activity.id === note.id
+              ? { ...item, activity: note }
+              : item,
+          )
+        : page,
+    ),
+  ];
 }

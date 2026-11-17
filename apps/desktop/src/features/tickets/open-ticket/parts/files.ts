@@ -2,7 +2,14 @@ import { useMemo } from "react";
 import { documents, type DocumentLink } from "@/features/documents/api";
 import { attachments } from "@/lib/api/attachments";
 import type { FailureDescription } from "@/lib/api/describe-failure";
-import { read, skip, useRead, type ReadStatus } from "@/lib/workspace-reads";
+import {
+  read,
+  skip,
+  updateRead,
+  useRead,
+  type Fill,
+  type ReadStatus,
+} from "@/lib/workspace-reads";
 import type { Ticket } from "@/lib/api/client";
 
 // The files of a Ticket: attached files, and the Documents it links to.
@@ -69,4 +76,40 @@ export function useDocuments(record: Ticket | undefined): TicketDocumentLinks {
     retry: state.retry,
     status: state.status,
   };
+}
+
+type DocumentLinks = [outgoing: DocumentLink[], incoming: DocumentLink[]];
+
+const firstWindow = (record: Ticket) => ({ id: record.id, offset: 0 });
+
+/**
+ * The fill for unlinking `documentId` from `record`: every outgoing link to it
+ * leaves the Documents list. Pass it to `changed` after
+ * `documents.setTicketDocument(..., false)` succeeded.
+ */
+export function unlinkedDocumentFill(record: Ticket, documentId: string): Fill {
+  return updateRead(
+    documentLinksRead,
+    firstWindow(record),
+    ([outgoing, incoming]): DocumentLinks => [
+      outgoing.filter((link) => link.target_id !== documentId),
+      incoming,
+    ],
+  );
+}
+
+/**
+ * The fill for linking a Document again (Undo of an unlink): `link` goes back
+ * among the outgoing links unless the Document is listed already. Pass it to
+ * `changed` after `documents.setTicketDocument(..., true)` succeeded.
+ */
+export function relinkedDocumentFill(record: Ticket, link: DocumentLink): Fill {
+  return updateRead(
+    documentLinksRead,
+    firstWindow(record),
+    ([outgoing, incoming]): DocumentLinks =>
+      outgoing.some((known) => known.target_id === link.target_id)
+        ? [outgoing, incoming]
+        : [[...outgoing, link], incoming],
+  );
 }

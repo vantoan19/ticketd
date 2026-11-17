@@ -3,9 +3,18 @@
 // "./testing" and "./fake-signal" and are imported by tests only.
 export { WorkspaceReads } from "./WorkspaceReads";
 export { Visibility } from "./Visibility";
-export { read, pagedRead, byOffset, skip } from "./catalog";
-export type { ReadSpec, PagedReadSpec, Returned, Skip } from "./catalog";
+export {
+  read,
+  pagedRead,
+  byOffset,
+  skip,
+  fillRead,
+  updateRead,
+  updatePagedRead,
+} from "./catalog";
+export type { ReadSpec, PagedReadSpec, Returned, Fill, Skip } from "./catalog";
 export { useRead } from "./use-read";
+export { useKnown } from "./use-known";
 export { usePagedRead } from "./use-paged-read";
 export type { PagedState } from "./use-paged-read";
 export type { ReadState, ReadStatus } from "./read-state";

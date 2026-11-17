@@ -1,6 +1,12 @@
 import type { Ticket } from "@/lib/api/client";
 import type { FailureDescription } from "@/lib/api/describe-failure";
-import { skip, ticketRead, useRead, withCurrent } from "@/lib/workspace-reads";
+import {
+  skip,
+  ticketRead,
+  useKnown,
+  useRead,
+  withCurrent,
+} from "@/lib/workspace-reads";
 import { usePart, type PartArgs, type PartName, type PartState } from "./parts";
 
 export type TicketState = {
@@ -40,4 +46,18 @@ export function useTicket<Name extends PartName>(
     },
     () => state.current,
   );
+}
+
+/**
+ * A peek at the newest copy known of a Ticket, for a row that is not the open
+ * one: `known(reference)` is the record, null when the Ticket is gone, and
+ * undefined when none was read. It reads what is cached now, starts no read and
+ * does not re-render the caller when the copy changes: ask again where it is
+ * needed (a render that happens anyway, or an event handler). The function is
+ * stable.
+ */
+export function useKnownTicket(): (
+  reference: string,
+) => Ticket | null | undefined {
+  return useKnown(ticketRead);
 }

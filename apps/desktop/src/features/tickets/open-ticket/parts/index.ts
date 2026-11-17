@@ -53,3 +53,8 @@ export function usePart<Name extends PartName>(
   if (name === undefined) return undefined;
   return parts[name](record, ...args);
 }
+
+// Fill builders: what a write of a section sets, for `changed(returned, fills)`.
+export { editedUpdateFills } from "./activity";
+export { followingFill } from "./attention";
+export { relinkedDocumentFill, unlinkedDocumentFill } from "./files";
