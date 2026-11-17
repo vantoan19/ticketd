@@ -217,7 +217,19 @@ export function Activity({
   const revision = useWorkspaceChange();
   const activity = useOpenTicket("activity");
   const note = useOpenTicket("activityNote", targetId);
-  const targetNote: AuthoredActivity | null = note.value ?? null;
+  // An update this window just edited shows its saved text at once; the read
+  // that follows the save replaces it once it has answered.
+  const [edited, setEdited] = useState<{
+    note: AuthoredActivity;
+    settled: boolean;
+  } | null>(null);
+  const editedShown =
+    edited !== null &&
+    edited.note.id === targetId &&
+    !(edited.settled && note.failure === null && note.current);
+  const targetNote: AuthoredActivity | null = editedShown
+    ? edited.note
+    : (note.value ?? null);
   // A target whose notice was dismissed by leaving the ticket stays dismissed
   // until a new target (a new key) is opened.
   const [leftTargetKey, setLeftTargetKey] = useState<number | undefined>();
@@ -430,7 +442,12 @@ export function Activity({
     try {
       await recovery.flush();
       if (edit) {
-        await client.editActivity(reference, edit.id, edit.content);
+        const updated = await client.editActivity(
+          reference,
+          edit.id,
+          edit.content,
+        );
+        setEdited({ note: updated, settled: false });
       } else {
         const payload = JSON.stringify([
           reference,
@@ -486,6 +503,7 @@ export function Activity({
         setComposing(false);
       }
       await changed();
+      setEdited((current) => (current ? { ...current, settled: true } : null));
     } catch (reason) {
       setError(
         describeFailure(reason, edit ? "save the update" : "post the update"),

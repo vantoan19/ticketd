@@ -14,6 +14,7 @@ import type { ChangeSignal } from "@/lib/workspace-reads";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { Activity as ActivitySection } from "./Activity";
 import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
+import { ticketFor } from "./open-ticket/parts/ticket-fixture";
 import { DocumentNavigation } from "@/features/documents/navigation";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -949,4 +950,69 @@ test("posting an update reads the feed again once", async () => {
   expect(
     bridge.invoke.mock.calls.filter(([command]) => command === "activity_feed"),
   ).toHaveLength(2);
+});
+
+test("an edited update that was reached by a link shows its new text at once, before the re-read returns", async () => {
+  const older = {
+    id: "older",
+    ticket_id: "ticket-1",
+    brief: "Earlier update",
+    reported_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+    supporting_document_id: null,
+  };
+  let saved = { ...older };
+  let held: Promise<typeof older> | null = null;
+  let release: () => void = () => {};
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { patch: { brief: string } }) => {
+      if (command === "get_activity") return held ?? saved;
+      if (command === "activity_feed") return [];
+      if (command === "show_ticket") return ticketFor("T-KQ1");
+      if (command === "edit_activity") {
+        saved = { ...saved, brief: args!.patch.brief };
+        // The read that follows the save is slow to answer.
+        held = new Promise((resolve) => {
+          release = () => resolve(saved);
+        });
+        return saved;
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  );
+  render(
+    <Activity
+      reference="T-KQ1"
+      projects={[]}
+      active
+      trashed={false}
+      target={{ id: "older", key: 1 }}
+    />,
+  );
+  await screen.findByText("Earlier update");
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for update from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
+  fireEvent.click(
+    await within(screen.getByRole("form", { name: "Edit update" })).findByRole(
+      "button",
+      { name: "Edit Markdown source" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Edit update source" }),
+    { target: { value: "Edited earlier update" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save update" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("form", { name: "Edit update" })).toBeNull(),
+  );
+  // The save is done and the re-read is still out: the new text shows now.
+  expect(screen.getByText("Edited earlier update")).toBeTruthy();
+  expect(screen.queryByText("Earlier update")).toBeNull();
+  await act(async () => release());
+  expect(await screen.findByText("Edited earlier update")).toBeTruthy();
 });
