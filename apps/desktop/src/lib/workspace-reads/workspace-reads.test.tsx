@@ -6,30 +6,13 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { read, skip, type ReadSpec, type Skip } from "./catalog";
 import { fakeChangeSignal } from "./fake-signal";
+import { deferred, settle, wrap } from "./test-support";
 import { TestReads } from "./testing";
 import { useRead } from "./use-read";
 import { Visibility } from "./Visibility";
-
-/** A call a test resolves by hand, in the order it chooses. */
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((ok, fail) => {
-    resolve = ok;
-    reject = fail;
-  });
-  return { promise, resolve, reject };
-}
-
-const wrap =
-  (signal = fakeChangeSignal()) =>
-  ({ children }: { children: ReactNode }) => (
-    <TestReads signal={signal}>{children}</TestReads>
-  );
 
 describe("sharing", () => {
   it("serves any number of views of one read and arguments with one call", async () => {
@@ -69,9 +52,6 @@ describe("errors", () => {
     }
   });
 });
-
-/** Lets pending promise callbacks and query notifications run. */
-const settle = () => act(async () => {});
 
 describe("freshness", () => {
   it("re-reads after a change and at no other time", async () => {

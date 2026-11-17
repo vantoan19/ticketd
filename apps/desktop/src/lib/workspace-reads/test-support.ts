@@ -1,5 +1,6 @@
-import { act } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
+import { afterEach } from "vitest";
 import type { ChangeSignal } from "./change-signal";
 import { fakeChangeSignal } from "./fake-signal";
 import { TestReads } from "./testing";
@@ -23,3 +24,8 @@ export const wrap =
 
 /** Lets pending promise callbacks and query notifications run. */
 export const settle = () => act(async () => {});
+
+// Vitest runs without globals, so Testing Library does not unmount by itself,
+// and a test would find the previous one's DOM. Importing this file (every
+// test of this module does) registers the cleanup once for its file.
+afterEach(cleanup);
