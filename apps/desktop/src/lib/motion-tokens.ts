@@ -78,6 +78,21 @@ export function exitTransition(): { duration: number; ease: Easing } {
   return { duration: seconds("--dur-exit"), ease: bezier("--ease-in") };
 }
 
+/** How long, in seconds, an exit takes: what an arrival waits for. */
+export function exitDuration(): number {
+  return exitTransition().duration;
+}
+
+/**
+ * An easing or spring token in CSS's own spelling, which the Web Animations
+ * API takes as it stands. A missing token reads as `linear`.
+ */
+export function cssEasing(
+  name: "--ease-out" | "--ease-in" | "--spring-smooth",
+): string {
+  return token(name) || "linear";
+}
+
 /** How far, in px, an entrance starts below its place. */
 export function rise(kind: "row" | "overlay"): number {
   return number(kind === "row" ? "--motion-rise" : "--motion-rise-overlay");

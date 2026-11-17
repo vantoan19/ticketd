@@ -2375,8 +2375,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .ticket-workspace[hidden] {
   display: none !important;
 }
-.ticket-workspace #list,
-.ticket-workspace #detail {
+.ticket-workspace :is(#list, [data-id="list"]),
+.ticket-workspace :is(#detail, [data-id="detail"]) {
   min-width: 0;
 }
 /* The pane clips; it is not the scroller. Title, toolbar, source tabs and chips
@@ -2398,9 +2398,15 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   overflow-x: hidden;
   overflow-y: auto;
 }
-/* Keeps the Projects page mounted while hidden; ManagementPage lays it out. */
+/* Keeps the Projects page mounted while hidden; ManagementPage lays it out.
+   It needs a box of its own (not `display: contents`) so a page switch can
+   take its picture and fade it. */
 .management-host:not([hidden]) {
-  display: contents;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 .search {
   display: flex;
@@ -2583,11 +2589,12 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 /* !important here and in the narrow block: the panel library sets flex and
    size inline on #list and #detail, so only !important wins. */
-.ticket-workspace.expanded:not([data-pane-leaving="list"]) #list,
+.ticket-workspace.expanded:not([data-pane-leaving="list"])
+  :is(#list, [data-id="list"]),
 .ticket-workspace.expanded .split-handle {
   display: none !important;
 }
-.ticket-workspace.expanded #detail {
+.ticket-workspace.expanded :is(#detail, [data-id="detail"]) {
   flex: 1 1 0 !important;
 }
 /* One content gutter for the management pages (Projects, Plans, Documents):
@@ -2958,17 +2965,18 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 /* Measured on the content panel (plan-workspace), so a collapsed sidebar keeps
    the split for longer. 880px is useNarrowPane’s STACK_MIN_WIDTH. */
 @container plan-workspace (max-width: 879px) {
-  .ticket-workspace #list {
+  .ticket-workspace :is(#list, [data-id="list"]) {
     flex: 1 1 0 !important;
   }
-  .ticket-workspace:not([data-pane-leaving="detail"]) #detail,
+  .ticket-workspace:not([data-pane-leaving="detail"])
+    :is(#detail, [data-id="detail"]),
   .ticket-workspace .split-handle {
     display: none !important;
   }
-  .ticket-workspace.narrow-detail #list {
+  .ticket-workspace.narrow-detail :is(#list, [data-id="list"]) {
     display: none !important;
   }
-  .ticket-workspace.narrow-detail #detail {
+  .ticket-workspace.narrow-detail :is(#detail, [data-id="detail"]) {
     display: flex !important;
     flex: 1 1 0 !important;
   }

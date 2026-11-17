@@ -211,11 +211,12 @@
    in a 520px peek over the right of the board, which never resizes (S5).
    !important: the panel library sets flex inline on the panels (see
    styles.css). */
-.ticket-workspace.unselected #list,
-.ticket-workspace[data-peek] #list {
+.ticket-workspace.unselected :is(#list, [data-id="list"]),
+.ticket-workspace[data-peek] :is(#list, [data-id="list"]) {
   flex: 1 1 0 !important;
 }
-.ticket-workspace.unselected:not([data-pane-leaving="detail"]) #detail,
+.ticket-workspace.unselected:not([data-pane-leaving="detail"])
+  :is(#detail, [data-id="detail"]),
 .ticket-workspace.unselected .split-handle,
 .ticket-workspace[data-peek] .split-handle {
   display: none !important;
@@ -223,7 +224,7 @@
 .ticket-workspace[data-peek] {
   position: relative;
 }
-.ticket-workspace[data-peek] #detail {
+.ticket-workspace[data-peek] :is(#detail, [data-id="detail"]) {
   /* The panel library supplies flex inline; an overlay owns its own width. */
   display: flex;
   position: absolute;
