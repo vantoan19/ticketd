@@ -1,7 +1,14 @@
 import { Check } from "lucide-react";
 import "./patterns.css";
-import { Children, createContext, useContext, type ReactNode } from "react";
+import {
+  Children,
+  createContext,
+  useContext,
+  useState,
+  type ReactNode,
+} from "react";
 import { cn } from "cn";
+import { DrawnPath } from "@/components/ui/motion";
 
 const StepNumber = createContext(0);
 
@@ -52,6 +59,9 @@ export function Step({
   state?: "done" | "current";
 }) {
   const number = useContext(StepNumber);
+  // A step that completes while it is on screen draws its check; one that
+  // arrives done just shows it.
+  const [completes] = useState(state !== "done");
   return (
     <li
       data-slot="step"
@@ -69,7 +79,23 @@ export function Step({
           !state && "bg-(--surface)",
         )}
       >
-        {state === "done" ? <Check aria-hidden="true" /> : number}
+        {state !== "done" ? (
+          number
+        ) : completes ? (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <DrawnPath d="M20 6 9 17l-5-5" />
+          </svg>
+        ) : (
+          <Check aria-hidden="true" />
+        )}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5 text-sm">
         <span className="flex flex-wrap items-center gap-2">

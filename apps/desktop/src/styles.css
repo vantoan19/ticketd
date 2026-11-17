@@ -2998,6 +2998,20 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
     flex-wrap: wrap;
   }
 }
+/* Changing the theme: `changeTheme` (lib/preferences) holds data-theme-fading
+   on <html> for --dur-theme, so every color moves together. The chosen tile
+   keeps its selection ring instant. */
+:root[data-theme-fading] *,
+:root[data-theme-fading] *::before,
+:root[data-theme-fading] *::after {
+  transition-property:
+    background-color, color, border-color, fill, stroke, box-shadow;
+  transition-duration: var(--dur-theme);
+  transition-timing-function: var(--ease-in-out);
+}
+:root[data-theme-fading] [data-slot^="choice-tile"] {
+  transition-property: background-color, color, border-color, fill, stroke;
+}
 /* !important is the point: reduced motion must beat every component's own
    transition and animation timing. */
 @media (prefers-reduced-motion: reduce) {
