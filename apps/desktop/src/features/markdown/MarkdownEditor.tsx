@@ -19,11 +19,12 @@ import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
 import {
   HighlightStyle,
+  LanguageSupport,
   syntaxHighlighting,
   syntaxTree,
 } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { markdown } from "@codemirror/lang-markdown";
+import { commonmarkLanguage } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
 import { RangeApi, TextApi, NodeApi, type Value } from "platejs";
 import {
@@ -192,7 +193,8 @@ const sourceHighlight = HighlightStyle.define([
 // Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
 // doubled and a closing fence never inherits indentation.
 const sourceExtensions = [
-  markdown({ addKeymap: false }),
+  // CommonMark alone: markdown()'s defaults add the HTML, CSS and JS parsers.
+  new LanguageSupport(commonmarkLanguage),
   syntaxHighlighting(sourceHighlight),
   EditorView.lineWrapping,
   Prec.highest(
@@ -453,24 +455,32 @@ function Diagram(props: PlateElementProps) {
   const readOnly = useEditorReadOnly();
   const source = String(props.element.source ?? "");
   const labels = diagramLabels(source);
+  // The source editor mounts only while open: a closed one costs nothing.
+  const [sourceOpen, setSourceOpen] = useState(false);
   return (
     <PlateElement {...props}>
       <div contentEditable={false} className="diagram-editor">
         <MermaidDiagram source={source} />
-        <Disclosure label={labels ? `Source · ${labels}` : "Source"}>
-          <CodeMirror
-            value={source}
-            readOnly={readOnly}
-            editable={!readOnly}
-            aria-label="Mermaid source"
-            theme="none"
-            extensions={sourceExtensions}
-            onChange={(next) => {
-              const path = editor.api.findPath(props.element);
-              if (!readOnly && path && next !== source)
-                editor.tf.setNodes({ source: next }, { at: path });
-            }}
-          />
+        <Disclosure
+          label={labels ? `Source · ${labels}` : "Source"}
+          open={sourceOpen}
+          onOpenChange={setSourceOpen}
+        >
+          {sourceOpen && (
+            <CodeMirror
+              value={source}
+              readOnly={readOnly}
+              editable={!readOnly}
+              aria-label="Mermaid source"
+              theme="none"
+              extensions={sourceExtensions}
+              onChange={(next) => {
+                const path = editor.api.findPath(props.element);
+                if (!readOnly && path && next !== source)
+                  editor.tf.setNodes({ source: next }, { at: path });
+              }}
+            />
+          )}
         </Disclosure>
       </div>
       {props.children}

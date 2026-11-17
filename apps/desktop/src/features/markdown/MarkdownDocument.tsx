@@ -25,7 +25,7 @@ import { writeClipboard } from "@/lib/clipboard";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
-import { codeLanguageLabel } from "./syntax-highlighting";
+import { codeLanguageLabel } from "./code-language";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { CopyButton } from "@/components/ui/copy-button";
