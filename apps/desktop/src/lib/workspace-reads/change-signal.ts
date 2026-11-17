@@ -9,11 +9,6 @@ import { changesClient } from "@/lib/api/changes";
 export type ChangeSignal = {
   subscribe(onChange: () => void): () => void;
   catchUp(): Promise<void>;
-  /**
-   * The Workspace was replaced: forget what was seen, so the next poll counts as
-   * a change even if the new token equals the old one.
-   */
-  forget(): void;
 };
 
 const POLL_MS = 2000;
@@ -28,7 +23,6 @@ const POLL_MS = 2000;
 export function pollWorkspaceChanges(everyMs = POLL_MS): ChangeSignal {
   const listeners = new Set<() => void>();
   let last: number | null = null;
-  let forgotten = false;
   let timer: number | undefined;
   // Answers can arrive out of order; only a newer read may replace `last`.
   let sent = 0;
@@ -40,8 +34,7 @@ export function pollWorkspaceChanges(everyMs = POLL_MS): ChangeSignal {
     const token = await changesClient.token();
     if (order < applied) return false;
     applied = order;
-    const moved = forgotten || (last !== null && token !== last);
-    forgotten = false;
+    const moved = last !== null && token !== last;
     last = token;
     return moved;
   };
@@ -70,9 +63,6 @@ export function pollWorkspaceChanges(everyMs = POLL_MS): ChangeSignal {
     },
     async catchUp() {
       await read();
-    },
-    forget() {
-      forgotten = true;
     },
   };
 }

@@ -50,9 +50,18 @@ type Kept = {
  * of a never-answered read starts, and `isFetchNextPageError` when any refetch
  * starts, so the failure is kept as it was first worded (for the same read)
  * until an answer succeeds.
+ *
+ * A read that is "pending" with a failure behind it (`errorUpdatedAt` is set) is
+ * a Retry of a read that never answered, so the failure stays. A reset puts a
+ * read back to pending with no failure behind it: the one kept from before is
+ * about a Workspace that is gone, and is not shown.
  */
 export function useFailure(
-  query: { status: "pending" | "error" | "success"; error: unknown },
+  query: {
+    status: "pending" | "error" | "success";
+    error: unknown;
+    errorUpdatedAt: number;
+  },
   identity: string,
   action: string,
   more = false,
@@ -64,10 +73,13 @@ export function useFailure(
       kept?.error === query.error
         ? kept
         : { identity, error: query.error, action, more };
-    // Only a new failure is stored (a store on success would render twice). A
-    // read that has answered never goes back to "pending", so this stays right.
+    // Only a new failure is stored (a store on success would render twice).
     if (shown !== kept) setKept(shown);
-  } else if (query.status === "pending" && kept?.identity === identity) {
+  } else if (
+    query.status === "pending" &&
+    query.errorUpdatedAt > 0 &&
+    kept?.identity === identity
+  ) {
     shown = kept;
   }
   const error = shown?.error ?? null;

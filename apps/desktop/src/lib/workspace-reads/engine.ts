@@ -196,7 +196,10 @@ export function createReads(signal: ChangeSignal, moved: () => void): Reads {
       await settled.catch(() => {});
     },
     async replaced() {
-      signal.forget();
+      // The new Workspace's token counts as seen before anything is read
+      // again, as for a write, so the poll starts no second wave.
+      await signal.catchUp().catch(() => {});
+      wanted.clear();
       // Resetting drops every value (and the late answer of a call in flight)
       // and reads again what is visible.
       const settled = client.resetQueries();

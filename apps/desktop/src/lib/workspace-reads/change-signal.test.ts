@@ -47,20 +47,6 @@ describe("pollWorkspaceChanges", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("counts the next poll as a change after forget, even when the token is the same", async () => {
-    token.mockResolvedValue(7);
-    const signal = pollWorkspaceChanges();
-    const onChange = vi.fn();
-    signal.subscribe(onChange);
-    await vi.advanceTimersByTimeAsync(0);
-
-    signal.forget(); // the Workspace was replaced by one with the same token
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(onChange).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(onChange).toHaveBeenCalledTimes(1);
-  });
-
   it("ignores a poll answer that arrives after a newer catchUp", async () => {
     token.mockResolvedValue(1);
     const signal = pollWorkspaceChanges();

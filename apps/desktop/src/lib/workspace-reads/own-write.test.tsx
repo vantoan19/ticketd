@@ -162,8 +162,9 @@ describe("own write", () => {
 });
 
 describe("a replaced Workspace", () => {
-  it("drops every cached value, reads what is visible again and makes the next poll count as a change", async () => {
-    const signal = fakeChangeSignal();
+  it("reads the new token first, then drops every cached value and reads what is visible again", async () => {
+    const catchUp = deferred<void>();
+    const signal = fakeChangeSignal(() => catchUp.promise);
     const call = vi
       .fn<(reference: string) => Promise<string>>()
       .mockResolvedValueOnce("Before")
@@ -180,10 +181,68 @@ describe("a replaced Workspace", () => {
     await waitFor(() => expect(result.current.read.value).toBe("Before"));
     const version = result.current.version;
 
-    await act(async () => result.current.replaced());
+    let done = false;
+    act(() => {
+      void result.current.replaced().then(() => {
+        done = true;
+      });
+    });
+    await settle();
+    // The poll must count the new Workspace's token as seen before anything
+    // is read again, so it starts no second wave.
+    expect(signal.catchUps).toBe(1);
+    expect(result.current.read.value).toBe("Before");
+    expect(call).toHaveBeenCalledTimes(1);
+
+    await act(async () => catchUp.resolve());
     await waitFor(() => expect(result.current.read.value).toBe("After"));
-    expect(signal.forgets).toBe(1);
+    expect(done).toBe(true);
     expect(result.current.version).toBe(version + 1);
+  });
+
+  it("shows no failure from before the replace while the read is read again", async () => {
+    const again = deferred<string>();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockResolvedValueOnce("Good")
+      .mockReturnValueOnce(again.promise);
+    const spec = titleRead(call, "replaced-failure");
+    const { result } = renderHook(
+      () => ({ read: useRead(spec, "T-1"), replaced: useReplaced() }),
+      { wrapper: wrap() },
+    );
+    await waitFor(() => expect(result.current.read.status).toBe("failed"));
+    await act(async () => result.current.read.retry());
+    expect(result.current.read.value).toBe("Good");
+
+    act(() => void result.current.replaced());
+    await settle();
+    expect(call).toHaveBeenCalledTimes(3);
+    expect(result.current.read.failure).toBeNull();
+    expect(result.current.read.status).toBe("loading");
+
+    await act(async () => again.resolve("Fresh"));
+    expect(result.current.read.value).toBe("Fresh");
+  });
+
+  it("shows no failure of a read that never succeeded once the Workspace is replaced", async () => {
+    const again = deferred<string>();
+    const call = vi
+      .fn<(reference: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockReturnValueOnce(again.promise);
+    const spec = titleRead(call, "replaced-never-answered");
+    const { result } = renderHook(
+      () => ({ read: useRead(spec, "T-1"), replaced: useReplaced() }),
+      { wrapper: wrap() },
+    );
+    await waitFor(() => expect(result.current.read.status).toBe("failed"));
+
+    act(() => void result.current.replaced());
+    await settle();
+    expect(result.current.read.failure).toBeNull();
+    expect(result.current.read.status).toBe("loading");
   });
 
   it("does not show a hidden read's old value when it is shown again", async () => {
