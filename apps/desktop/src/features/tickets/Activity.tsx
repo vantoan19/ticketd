@@ -82,7 +82,7 @@ import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useWorkspaceChange } from "@/lib/workspace-change";
-import { useOpenTicket } from "./open-ticket";
+import { editedUpdateFills, useOpenTicket } from "./open-ticket";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "./activity.css";
 
@@ -212,24 +212,12 @@ export function Activity({
   );
   const targetRef = useRef<HTMLLIElement>(null);
   const revealedTarget = useRef<{ id: string; key: number } | null>(null);
-  const { changed } = useOpenTicket();
+  const { changed, record } = useOpenTicket();
   // Unmigrated readers below (Documents, Markdown) still follow the change signal.
   const revision = useWorkspaceChange();
   const activity = useOpenTicket("activity");
   const note = useOpenTicket("activityNote", targetId);
-  // An update this window just edited shows its saved text at once; the read
-  // that follows the save replaces it once it has answered.
-  const [edited, setEdited] = useState<{
-    note: AuthoredActivity;
-    settled: boolean;
-  } | null>(null);
-  const editedShown =
-    edited !== null &&
-    edited.note.id === targetId &&
-    !(edited.settled && note.failure === null && note.current);
-  const targetNote: AuthoredActivity | null = editedShown
-    ? edited.note
-    : (note.value ?? null);
+  const targetNote: AuthoredActivity | null = note.value ?? null;
   // A target whose notice was dismissed by leaving the ticket stays dismissed
   // until a new target (a new key) is opened.
   const [leftTargetKey, setLeftTargetKey] = useState<number | undefined>();
@@ -439,6 +427,7 @@ export function Activity({
     busy.current = true;
     setPending(true);
     setError(null);
+    let reported: Promise<void> | null = null;
     try {
       await recovery.flush();
       if (edit) {
@@ -447,7 +436,9 @@ export function Activity({
           edit.id,
           edit.content,
         );
-        setEdited({ note: updated, settled: false });
+        // Reported as soon as it is saved, with the saved update: the pane
+        // shows it through the cache whatever the draft store does next.
+        reported = changed(undefined, editedUpdateFills(record, updated));
       } else {
         const payload = JSON.stringify([
           reference,
@@ -495,15 +486,18 @@ export function Activity({
         );
       }
       if (edit) {
-        await recovery.put(`activity-edit:${ticketId}`, null, []);
+        // The edit is saved: a draft store that fails to drop its draft is not
+        // a failure to save (the draft is dropped again when the editor closes).
+        await recovery
+          .put(`activity-edit:${ticketId}`, null, [])
+          .catch(() => {});
         setEdit(null);
       } else {
         clearDraft();
         if (recovery.active) await recovery.put(requestKey, null, []);
         setComposing(false);
       }
-      await changed();
-      setEdited((current) => (current ? { ...current, settled: true } : null));
+      await (reported ?? changed());
     } catch (reason) {
       setError(
         describeFailure(reason, edit ? "save the update" : "post the update"),

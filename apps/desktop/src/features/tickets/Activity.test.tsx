@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { ChangeSignal } from "@/lib/workspace-reads";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
@@ -16,6 +16,10 @@ import { Activity as ActivitySection } from "./Activity";
 import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { ticketFor } from "./open-ticket/parts/ticket-fixture";
 import { DocumentNavigation } from "@/features/documents/navigation";
+import {
+  DraftRecoveryContext,
+  type DraftRecovery,
+} from "@/lib/draft-recovery-context";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 // The Document picker's list (cmdk) scrolls the highlighted row into view.
@@ -1015,4 +1019,159 @@ test("an edited update that was reached by a link shows its new text at once, be
   expect(screen.queryByText("Earlier update")).toBeNull();
   await act(async () => release());
   expect(await screen.findByText("Edited earlier update")).toBeTruthy();
+});
+
+describe("an update this window edited", () => {
+  const original = {
+    id: "older",
+    ticket_id: "ticket-1",
+    brief: "Earlier update",
+    reported_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+    supporting_document_id: null,
+  };
+  let saved: typeof original;
+  let held: Promise<unknown> | null;
+  let release: () => void;
+  let failFeed: boolean;
+  /** The linked update is not on a loaded page of the feed. */
+  let feedEmpty: boolean;
+  beforeEach(() => {
+    saved = { ...original };
+    held = null;
+    release = () => {};
+    failFeed = false;
+    feedEmpty = false;
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: { patch: { brief: string } }) => {
+        if (command === "get_activity") return held ?? saved;
+        if (command === "activity_feed") {
+          if (failFeed) throw new Error("database is busy");
+          if (feedEmpty) return [];
+          return held ?? [{ type: "authored", activity: saved }];
+        }
+        if (command === "ticket_history") return [];
+        if (command === "show_ticket") return ticketFor("T-KQ1");
+        if (command === "edit_activity") {
+          saved = { ...saved, brief: args!.patch.brief };
+          return saved;
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+    );
+  });
+
+  async function edit(text: string) {
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: /Actions for update from/ }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Edit update" }),
+    );
+    fireEvent.click(
+      await within(
+        screen.getByRole("form", { name: "Edit update" }),
+      ).findByRole("button", { name: "Edit Markdown source" }),
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Edit update source" }),
+      { target: { value: text } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save update" }));
+  }
+
+  test("its feed row shows the new text at once, while the re-read is out", async () => {
+    const signal = fakeChangeSignal();
+    render(
+      <Activity
+        reference="T-KQ1"
+        projects={[]}
+        active
+        trashed={false}
+        signal={signal}
+      />,
+    );
+    await screen.findByText("Earlier update");
+    held = new Promise((resolve) => {
+      release = () => resolve([{ type: "authored", activity: saved }]);
+    });
+    await edit("Edited earlier update");
+    await waitFor(() =>
+      expect(screen.queryByRole("form", { name: "Edit update" })).toBeNull(),
+    );
+    expect(screen.getByText("Edited earlier update")).toBeTruthy();
+    expect(screen.queryByText("Earlier update")).toBeNull();
+    await act(async () => release());
+  });
+
+  test("a later outside edit replaces it, and a held or failed re-read then shows the outside edit", async () => {
+    feedEmpty = true;
+    const signal = fakeChangeSignal();
+    render(
+      <Activity
+        reference="T-KQ1"
+        projects={[]}
+        active
+        trashed={false}
+        target={{ id: "older", key: 1 }}
+        signal={signal}
+      />,
+    );
+    await screen.findByText("Earlier update");
+    await edit("My edit");
+    await screen.findByText("My edit");
+    await act(async () => {});
+
+    saved = { ...saved, brief: "Agent's later edit" };
+    await act(async () => signal.change());
+    await screen.findByText("Agent's later edit");
+
+    held = new Promise((resolve) => {
+      release = () => resolve(saved);
+    });
+    await act(async () => signal.change());
+    expect(screen.queryByText("My edit")).toBeNull();
+    expect(screen.getByText("Agent's later edit")).toBeTruthy();
+    await act(async () => {
+      held = null;
+      release();
+    });
+
+    failFeed = true;
+    await act(async () => signal.change());
+    expect(screen.queryByText("My edit")).toBeNull();
+    expect(screen.getByText("Agent's later edit")).toBeTruthy();
+  });
+
+  test("a draft store that fails after the edit was saved does not say the save failed", async () => {
+    const put = vi.fn().mockRejectedValue(new Error("draft store is full"));
+    const recovery: DraftRecovery = {
+      active: true,
+      retry: () => {},
+      read: () => null,
+      put,
+      flush: async () => {},
+      reloadAfterRestore: async () => {},
+    };
+    render(
+      <DraftRecoveryContext value={recovery}>
+        <Activity reference="T-KQ1" projects={[]} active trashed={false} />
+      </DraftRecoveryContext>,
+    );
+    await screen.findByText("Earlier update");
+    await edit("Edited earlier update");
+    expect(await screen.findByText("Edited earlier update")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.queryByRole("form", { name: "Edit update" })).toBeNull(),
+    );
+    expect(screen.queryByText(/Couldn't save the update/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "edit_activity",
+      ),
+    ).toHaveLength(1);
+  });
 });
