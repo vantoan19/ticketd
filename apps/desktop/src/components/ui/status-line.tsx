@@ -148,10 +148,12 @@ function LineSlot({ inset, ...props }: LineProps & { inset: number }) {
           : { visibility: "hidden" }
       }
     >
-      <Appear rise="overlay" className="ui-status-line">
-        <Presence initial={false}>
-          <FloatingLine key={shown.id} {...props} />
-        </Presence>
+      <Appear rise="overlay">
+        <div className="ui-status-line">
+          <Presence initial={false}>
+            <FloatingLine key={shown.id} {...props} />
+          </Presence>
+        </div>
       </Appear>
     </div>,
     document.body,

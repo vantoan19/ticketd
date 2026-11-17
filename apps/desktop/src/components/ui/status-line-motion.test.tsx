@@ -52,6 +52,10 @@ function region() {
 const post = (message: StatusLineMessage) =>
   act(() => postRef.current(message));
 const chrome = () => document.querySelectorAll<HTMLElement>(".ui-status-line");
+const rising = () =>
+  document.querySelector<HTMLElement>(
+    '.ui-status-line-slot [data-slot="appear"]',
+  )!;
 
 async function leaves(text: string): Promise<number> {
   const start = performance.now();
@@ -64,7 +68,7 @@ async function leaves(text: string): Promise<number> {
 it("rises 8px from a soft blur, and settles", async () => {
   region();
   post({ message: "Copied" });
-  const line = chrome()[0]!;
+  const line = rising();
   expect(line.style.opacity).toBe("0");
   expect(line.style.transform).toContain("translateY(8px)");
   expect(line.style.filter).toBe("blur(4px)");
