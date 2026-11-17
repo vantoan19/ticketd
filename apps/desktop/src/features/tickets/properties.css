@@ -92,6 +92,8 @@
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
+  /* A removed pill leaves the flow here while it fades (Presence popLayout). */
+  position: relative;
 }
 .rail-row:has(.rail-tags) {
   padding-block: 6px;
@@ -332,4 +334,15 @@
 }
 .property-strip .rail-tags {
   flex-wrap: nowrap;
+}
+
+/* A value that crossfades in its row (status, project, Plan) still truncates. */
+.rail-row-value > .ui-crossfade {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.rail-row-value > .ui-crossfade > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

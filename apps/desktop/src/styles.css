@@ -1554,9 +1554,6 @@ body:has([data-slot="dialog-overlay"])
   padding: 0;
   list-style: none;
 }
-.ui-event-group-details[hidden] {
-  display: none;
-}
 /* A comment: badge on the line, a header like an event row, the body beneath. No card. */
 .ui-comment-row {
   display: flex;
@@ -2695,11 +2692,25 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .markdown-check[data-checked] {
   background: var(--recessed);
   box-shadow: inset 0 0 0 1px var(--border);
+  /* Only checking moves: the box fills over time, unchecking is at once. */
+  transition:
+    background-color var(--dur-enter) var(--ease-out),
+    box-shadow var(--dur-enter) var(--ease-out);
 }
+/* The tick is always drawn and an empty box hides it, so checking pops it in. */
 .markdown-check svg {
   width: 12px;
   height: 12px;
   stroke-width: 3;
+  opacity: 0;
+  transform: scale(0.6);
+}
+.markdown-check[data-checked] svg {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-enter) var(--ease-out),
+    transform var(--spring-glide-t) var(--spring-glide);
 }
 /* An attachment picture in the text: up to the column's width; opens the preview. */
 .markdown-image {
@@ -2748,11 +2759,27 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 :is(.markdown-document, .rich-document) td {
   box-shadow: inset 0 -1px 0 var(--group-hairline);
 }
+/* A done item's words are muted and struck. A tight item's line is a
+   background that draws from the start of the text (text-decoration cannot be
+   drawn); the transition sits on the done state, so only checking moves and
+   unchecking is at once. This holds for the read-only document and for the
+   editor's task text. A loose item's paragraph keeps a plain strike. */
+.markdown-document .markdown-task-text,
+.rich-document li:has(> input[type="checkbox"]) > div[data-slate-node] {
+  background: linear-gradient(var(--faint), var(--faint)) no-repeat 0 55% / 0
+    1px;
+}
 .markdown-document
   li:has(> .markdown-check[data-checked])
   > .markdown-task-text,
-.markdown-document li > p:has(> .markdown-check[data-checked]),
 .rich-document li:has(> input[type="checkbox"]:checked) > div[data-slate-node] {
+  background-size: 100% 1px;
+  color: var(--muted-foreground);
+  transition:
+    background-size var(--dur-enter) var(--ease-out),
+    color var(--dur-enter) var(--ease-out);
+}
+.markdown-document li > p:has(> .markdown-check[data-checked]) {
   color: var(--muted-foreground);
   text-decoration: line-through;
   text-decoration-color: var(--faint);

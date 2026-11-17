@@ -36,6 +36,7 @@ import {
 import { RailRow, RailSection } from "@/features/tickets/RailSection";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { ReferenceRow } from "@/features/tickets/ReferenceRow";
+import { Presence } from "@/components/ui/motion";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
 
@@ -210,6 +211,7 @@ export function LinkedWork({
     <ReferenceRow
       key={`${row.kind}-${row.reference}`}
       kind={row.kind}
+      animated
       density={density}
       reference={row.reference}
       title={row.title}
@@ -316,7 +318,11 @@ export function LinkedWork({
               <span>{linkLabel(group.kind)}</span>
               {!document && addFor(group.kind)}
             </div>
-            <ul className="reference-rows">{group.rows.map(renderRow)}</ul>
+            <ul className="reference-rows">
+              <Presence initial={false} mode="popLayout">
+                {group.rows.map(renderRow)}
+              </Presence>
+            </ul>
           </section>
         ))}
         {external && <ExternalTarget target={external} select={select} />}
