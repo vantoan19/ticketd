@@ -81,7 +81,7 @@ export function usePlanView(planId: string, revision: number) {
         setPending(false);
       }
     },
-    [changed, planId],
+    [changed],
   );
   /**
    * Runs a change and reports whether it worked, keeping a failure as
