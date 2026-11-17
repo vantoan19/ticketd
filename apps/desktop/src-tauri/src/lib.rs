@@ -1532,6 +1532,34 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
     }
 }
 
+/// Delivers reminders to the Inbox as they come due while the desktop runs. Reads never
+/// deliver them, so the change poll stays off the write lock; this is the one writer, and
+/// it takes the lock only when a reminder is due. A delivery moves the change token, so
+/// the views follow at their next poll.
+fn start_reminder_poll() {
+    let spawned = std::thread::Builder::new()
+        .name("reminders".into())
+        .spawn(|| {
+            let mut reported: Option<String> = None;
+            loop {
+                match open_workspace().and_then(|mut w| w.deliver_due_reminders()) {
+                    Ok(()) => reported = None,
+                    Err(error) => {
+                        let message = error.to_string();
+                        if reported.as_deref() != Some(message.as_str()) {
+                            eprintln!("due reminders could not be delivered: {message}");
+                            reported = Some(message);
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("could not start the reminder poll: {error}");
+    }
+}
+
 const QUIT_MENU_ID: &str = "quit";
 
 /// Whether a request to exit the app must first go through the window's close
@@ -1665,6 +1693,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             start_periodic_refresh(coordinator);
+            start_reminder_poll();
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
                 guard_menu_quit(app.handle())?;

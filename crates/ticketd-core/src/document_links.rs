@@ -407,35 +407,37 @@ fn link_text(heading: &str) -> String {
 
 impl Workspace {
     pub fn context_link_markdown(&self, reference: &str) -> Result<String, Error> {
-        if reference.starts_with("T-") {
-            let ticket = self.show_ticket(reference)?;
-            return Ok(format!(
-                "[{}](ticketd://ticket/{})",
-                ticket.reference, ticket.reference
-            ));
-        }
-        let kind: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT kind FROM entities WHERE id = ?1",
-                [reference],
-                |r| r.get(0),
-            )
-            .optional()?;
-        match kind.as_deref() {
-            Some("document") => {
-                let heading = link_text(&self.show_document(reference)?.heading);
-                Ok(format!("[{heading}](ticketd://document/{reference})"))
+        self.read(|_| {
+            if reference.starts_with("T-") {
+                let ticket = self.show_ticket(reference)?;
+                return Ok(format!(
+                    "[{}](ticketd://ticket/{})",
+                    ticket.reference, ticket.reference
+                ));
             }
-            Some("plan") => {
-                let plan = crate::plans::get(&self.connection, reference)?;
-                Ok(format!(
-                    "[{}](ticketd://plan/{reference})",
-                    link_text(&plan.name)
-                ))
+            let kind: Option<String> = self
+                .connection
+                .query_row(
+                    "SELECT kind FROM entities WHERE id = ?1",
+                    [reference],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match kind.as_deref() {
+                Some("document") => {
+                    let heading = link_text(&self.show_document(reference)?.heading);
+                    Ok(format!("[{heading}](ticketd://document/{reference})"))
+                }
+                Some("plan") => {
+                    let plan = crate::plans::get(&self.connection, reference)?;
+                    Ok(format!(
+                        "[{}](ticketd://plan/{reference})",
+                        link_text(&plan.name)
+                    ))
+                }
+                _ => Err(Error::NotFound(reference.to_owned())),
             }
-            _ => Err(Error::NotFound(reference.to_owned())),
-        }
+        })
     }
     pub fn create_ticket_from_document(&mut self, id: &str, title: &str) -> Result<Ticket, Error> {
         self.create_ticket_from_document_following(id, title, false)
@@ -480,6 +482,7 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ContextLink>, Error> {
+        self.read(|_| {
         // Accept a Ticket reference as well as an entity ID.
         let id = &if id.starts_with("T-") {
             crate::relationships::id(&self.connection, id)?
@@ -514,6 +517,7 @@ impl Workspace {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(links)
+        })
     }
     pub fn context_links(
         &self,
@@ -537,6 +541,7 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<DocumentBacklink>, Error> {
+        self.read(|_| {
         self.show_document(id)?;
         let mut statement = self.connection.prepare(&format!("SELECT t.reference, t.title, m.passage FROM {DOCUMENT_MENTIONS} m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3"))?;
         let links = statement
@@ -549,5 +554,6 @@ impl Workspace {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(links)
+        })
     }
 }

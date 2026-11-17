@@ -170,92 +170,92 @@ impl Workspace {
         offset: u32,
         include_members: bool,
     ) -> Result<PlanView, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let plan = get(&tx, id)?;
-        let mut counts = PlanCounts::default();
-        {
-            let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status")?;
-            for row in stmt.query_map([id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
-            })? {
-                let (status, count) = row?;
-                match status.parse::<Status>()? {
-                    Status::Todo => counts.todo = count,
-                    Status::InProgress => counts.in_progress = count,
-                    Status::InReview => counts.in_review = count,
-                    Status::Done => counts.done = count,
-                    Status::Canceled => counts.canceled = count,
-                    Status::Duplicate => counts.duplicate = count,
+        crate::read_scope::run(&self.connection, |tx| {
+            let plan = get(tx, id)?;
+            let mut counts = PlanCounts::default();
+            {
+                let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status")?;
+                for row in stmt.query_map([id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+                })? {
+                    let (status, count) = row?;
+                    match status.parse::<Status>()? {
+                        Status::Todo => counts.todo = count,
+                        Status::InProgress => counts.in_progress = count,
+                        Status::InReview => counts.in_review = count,
+                        Status::Done => counts.done = count,
+                        Status::Canceled => counts.canceled = count,
+                        Status::Duplicate => counts.duplicate = count,
+                    }
                 }
             }
-        }
-        let bound = limit.map(i64::from).unwrap_or(-1);
-        let mut stmt = tx.prepare("SELECT reference FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT ?2 OFFSET ?3")?;
-        let references = stmt
-            .query_map(
-                params![id, if include_members { bound } else { 0 }, offset],
-                |r| r.get::<_, String>(0),
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(stmt);
-        let members = references
-            .into_iter()
-            .map(|reference| self.show_ticket(&reference))
-            .collect::<Result<Vec<_>, _>>()?;
-        let documents = {
-            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
-            stmt.query_map(params![id, bound, offset], |row| {
-                Ok(PlanDocument {
-                    id: row.get(0)?,
-                    heading: row.get(1)?,
-                    trashed: row.get(2)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?
-        };
-        tx.commit()?;
-        Ok(PlanView {
-            plan,
-            members,
-            counts,
-            documents,
+            let bound = limit.map(i64::from).unwrap_or(-1);
+            let mut stmt = tx.prepare("SELECT reference FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+            let references = stmt
+                .query_map(
+                    params![id, if include_members { bound } else { 0 }, offset],
+                    |r| r.get::<_, String>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(stmt);
+            let members = references
+                .into_iter()
+                .map(|reference| self.show_ticket(&reference))
+                .collect::<Result<Vec<_>, _>>()?;
+            let documents = {
+                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
+                stmt.query_map(params![id, bound, offset], |row| {
+                    Ok(PlanDocument {
+                        id: row.get(0)?,
+                        heading: row.get(1)?,
+                        trashed: row.get(2)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+            };
+            Ok(PlanView {
+                plan,
+                members,
+                counts,
+                documents,
+            })
         })
     }
     /// Bounded, snapshot-consistent Plan context for agents. Bodies are opt-in.
     pub fn plan_context(&self, id: &str, bodies: bool) -> Result<serde_json::Value, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let plan = get(&tx, id)?;
-        let mut counts = serde_json::Map::new();
-        {
-            let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status ORDER BY status")?;
-            for row in
-                stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))?
+        crate::read_scope::run(&self.connection, |tx| {
+            let plan = get(tx, id)?;
+            let mut counts = serde_json::Map::new();
             {
-                let (status, count) = row?;
-                counts.insert(status, count.into());
+                let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status ORDER BY status")?;
+                for row in
+                    stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))?
+                {
+                    let (status, count) = row?;
+                    counts.insert(status, count.into());
+                }
             }
-        }
-        let tickets = {
-            let mut stmt = tx.prepare("SELECT reference, substr(title, 1, 256), status, length(title) > 256 FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
-            stmt.query_map([id], |r| Ok(serde_json::json!({"reference": r.get::<_, String>(0)?, "title": r.get::<_, String>(1)?, "title_truncated": r.get::<_, bool>(3)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
-        };
-        let dependencies = {
-            let mut stmt = tx.prepare("SELECT b.reference, d.reference FROM dependencies x JOIN tickets b ON b.id = x.blocker_id JOIN tickets d ON d.id = x.dependent_id WHERE (b.plan_id = ?1 OR d.plan_id = ?1) AND (b.trashed = 0 OR d.trashed = 0) ORDER BY b.number, d.number LIMIT 21")?;
-            stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": r.get::<_, String>(0)?, "dependent": r.get::<_, String>(1)?})))?.collect::<Result<Vec<_>, _>>()?
-        };
-        let documents = {
-            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
-            stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document read {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
-        };
-        tx.commit()?;
-        Ok(serde_json::json!({
-            "plan": {"id": plan.id, "name": plan.name.chars().take(256).collect::<String>(), "purpose": plan.purpose.chars().take(4096).collect::<String>(), "archived": plan.archived, "spec_document_id": plan.spec_document_id, "name_truncated": plan.name.chars().count() > 256, "purpose_truncated": plan.purpose.chars().count() > 4096},
-            "counts": counts,
-            "tickets": &tickets[..tickets.len().min(20)], "tickets_omitted": tickets.len() > 20,
-            "dependencies": &dependencies[..dependencies.len().min(20)], "dependencies_omitted": dependencies.len() > 20,
-            "documents": &documents[..documents.len().min(20)], "documents_omitted": documents.len() > 20,
-            "fetch_more": format!("ticketd plan show {id}")
-        }))
+            let tickets = {
+                let mut stmt = tx.prepare("SELECT reference, substr(title, 1, 256), status, length(title) > 256 FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
+                stmt.query_map([id], |r| Ok(serde_json::json!({"reference": r.get::<_, String>(0)?, "title": r.get::<_, String>(1)?, "title_truncated": r.get::<_, bool>(3)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
+            };
+            let dependencies = {
+                let mut stmt = tx.prepare("SELECT b.reference, d.reference FROM dependencies x JOIN tickets b ON b.id = x.blocker_id JOIN tickets d ON d.id = x.dependent_id WHERE (b.plan_id = ?1 OR d.plan_id = ?1) AND (b.trashed = 0 OR d.trashed = 0) ORDER BY b.number, d.number LIMIT 21")?;
+                stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": r.get::<_, String>(0)?, "dependent": r.get::<_, String>(1)?})))?.collect::<Result<Vec<_>, _>>()?
+            };
+            let documents = {
+                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
+                stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document read {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
+            };
+            Ok(serde_json::json!({
+                "plan": {"id": plan.id, "name": plan.name.chars().take(256).collect::<String>(), "purpose": plan.purpose.chars().take(4096).collect::<String>(), "archived": plan.archived, "spec_document_id": plan.spec_document_id, "name_truncated": plan.name.chars().count() > 256, "purpose_truncated": plan.purpose.chars().count() > 4096},
+                "counts": counts,
+                "tickets": &tickets[..tickets.len().min(20)], "tickets_omitted": tickets.len() > 20,
+                "dependencies": &dependencies[..dependencies.len().min(20)], "dependencies_omitted": dependencies.len() > 20,
+                "documents": &documents[..documents.len().min(20)], "documents_omitted": documents.len() > 20,
+                "fetch_more": format!("ticketd plan show {id}")
+            }))
+        })
     }
     pub fn set_plan_document(
         &mut self,

@@ -214,73 +214,73 @@ impl Workspace {
         reference: &str,
         options: ContextOptions,
     ) -> Result<TicketContext, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let id = relationships::id(&tx, reference)?;
-        let ticket = tx.query_row("SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
-        let availability = crate::readiness::indicator(&tx, &id)?;
-        let tags = {
-            let mut stmt = tx.prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name LIMIT ?2 OFFSET ?3")?;
-            let rows = stmt
-                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
-                    Ok(text(r.get(0)?, LABEL))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            page(rows, options.offset)
-        };
-        let project = if options.project {
-            Some(match ticket.project_id {
-                Some(id) => Some(
-                    tx.query_row("SELECT id, name FROM projects WHERE id = ?1", [&id], |r| {
-                        Ok(ContextLink {
-                            id: r.get(0)?,
-                            name: text(r.get(1)?, LABEL),
-                            archived: None,
-                        })
-                    })
-                    .optional()?
-                    .ok_or(Error::ProjectNotFound(id))?,
-                ),
-                None => None,
-            })
-        } else {
-            None
-        };
-        let plan = if options.plan {
-            Some(match ticket.plan_id {
-                Some(id) => Some(
-                    tx.query_row(
-                        "SELECT id, name, archived FROM plans WHERE id = ?1",
-                        [&id],
-                        |r| {
+        crate::read_scope::run(&self.connection, |tx| {
+            let id = relationships::id(tx, reference)?;
+            let ticket = tx.query_row("SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
+            let availability = crate::readiness::indicator(tx, &id)?;
+            let tags = {
+                let mut stmt = tx.prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name LIMIT ?2 OFFSET ?3")?;
+                let rows = stmt
+                    .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
+                        Ok(text(r.get(0)?, LABEL))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                page(rows, options.offset)
+            };
+            let project = if options.project {
+                Some(match ticket.project_id {
+                    Some(id) => Some(
+                        tx.query_row("SELECT id, name FROM projects WHERE id = ?1", [&id], |r| {
                             Ok(ContextLink {
                                 id: r.get(0)?,
                                 name: text(r.get(1)?, LABEL),
-                                archived: Some(r.get(2)?),
+                                archived: None,
                             })
-                        },
-                    )
-                    .optional()?
-                    .ok_or(Error::PlanNotFound(id))?,
-                ),
-                None => None,
-            })
-        } else {
-            None
-        };
-        let relationships = if options.relationships {
-            let missing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_parents p LEFT JOIN tickets t ON t.id = CASE WHEN p.child_id = ?1 THEN p.parent_id ELSE p.child_id END WHERE (p.child_id = ?1 OR p.parent_id = ?1) AND t.id IS NULL UNION ALL SELECT 1 FROM dependencies d LEFT JOIN tickets t ON t.id = CASE WHEN d.blocker_id = ?1 THEN d.dependent_id ELSE d.blocker_id END WHERE (d.blocker_id = ?1 OR d.dependent_id = ?1) AND t.id IS NULL)", [&id], |r| r.get(0))?;
-            if missing {
-                return Err(Error::MissingRelatedTicket);
-            }
-            let parent = related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
-            Some(ContextRelationships {
+                        })
+                        .optional()?
+                        .ok_or(Error::ProjectNotFound(id))?,
+                    ),
+                    None => None,
+                })
+            } else {
+                None
+            };
+            let plan = if options.plan {
+                Some(match ticket.plan_id {
+                    Some(id) => Some(
+                        tx.query_row(
+                            "SELECT id, name, archived FROM plans WHERE id = ?1",
+                            [&id],
+                            |r| {
+                                Ok(ContextLink {
+                                    id: r.get(0)?,
+                                    name: text(r.get(1)?, LABEL),
+                                    archived: Some(r.get(2)?),
+                                })
+                            },
+                        )
+                        .optional()?
+                        .ok_or(Error::PlanNotFound(id))?,
+                    ),
+                    None => None,
+                })
+            } else {
+                None
+            };
+            let relationships = if options.relationships {
+                let missing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_parents p LEFT JOIN tickets t ON t.id = CASE WHEN p.child_id = ?1 THEN p.parent_id ELSE p.child_id END WHERE (p.child_id = ?1 OR p.parent_id = ?1) AND t.id IS NULL UNION ALL SELECT 1 FROM dependencies d LEFT JOIN tickets t ON t.id = CASE WHEN d.blocker_id = ?1 THEN d.dependent_id ELSE d.blocker_id END WHERE (d.blocker_id = ?1 OR d.dependent_id = ?1) AND t.id IS NULL)", [&id], |r| r.get(0))?;
+                if missing {
+                    return Err(Error::MissingRelatedTicket);
+                }
+                let parent = related(tx, "SELECT t.reference,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
+                Some(ContextRelationships {
                 parent,
-                related: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.kind='related' AND (r.source_id=?1 OR r.target_id=?1) ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
-                discovered_while: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
-                discoveries: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
-                duplicate_of: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
-                external_duplicate_of: crate::source::duplicate_target(&tx, &id)?,
-                duplicates: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                related: related(tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.kind='related' AND (r.source_id=?1 OR r.target_id=?1) ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discovered_while: related(tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discoveries: related(tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                duplicate_of: related(tx, "SELECT t.reference,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
+                external_duplicate_of: crate::source::duplicate_target(tx, &id)?,
+                duplicates: related(tx, "SELECT t.reference,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 children_progress: {
                     let (total, done) = tx.query_row(
                         "SELECT COUNT(*), COALESCE(SUM(t.status = 'Done'), 0) FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1",
@@ -290,178 +290,178 @@ impl Workspace {
                     ContextProgress { total, done }
                 },
                 children: related(
-                    &tx,
+                    tx,
                     "SELECT t.reference,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
                     &id,
                     options.offset,
                 )?,
                 prerequisites: related(
-                    &tx,
+                    tx,
                     "SELECT t.reference,t.title,t.status,t.trashed FROM dependencies d JOIN tickets t ON t.id=d.blocker_id WHERE d.dependent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
                     &id,
                     options.offset,
                 )?,
                 blocking: related(
-                    &tx,
+                    tx,
                     "SELECT t.reference,t.title,t.status,t.trashed FROM dependencies d JOIN tickets t ON t.id=d.dependent_id WHERE d.blocker_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
                     &id,
                     options.offset,
                 )?,
             })
-        } else {
-            None
-        };
-        let activities = if options.activities {
-            let mut stmt = tx.prepare("SELECT id,brief,reported_at,updated_at,editing_agent,supporting_document_id FROM activities WHERE ticket_id=?1 ORDER BY number DESC LIMIT ?2 OFFSET ?3")?;
-            let rows = stmt
-                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
-                    let supporting_document_id: Option<String> = r.get(5)?;
-                    let activity_id: String = r.get(0)?;
-                    let brief = text(r.get(1)?, TEXT);
-                    Ok(ContextActivity {
-                        fetch_brief: brief
-                            .truncated
-                            .then(|| format!("ticketd activity show {reference} {activity_id}")),
-                        id: activity_id,
-                        fetch_details: supporting_document_id
-                            .as_ref()
-                            .map(|id| format!("ticketd document read {id}")),
-                        supporting_document_id,
-                        brief,
-                        reported_at: r.get(2)?,
-                        updated_at: r.get(3)?,
-                        editing_agent: r.get::<_, Option<String>>(4)?.map(|v| text(v, LABEL)),
+            } else {
+                None
+            };
+            let activities = if options.activities {
+                let mut stmt = tx.prepare("SELECT id,brief,reported_at,updated_at,editing_agent,supporting_document_id FROM activities WHERE ticket_id=?1 ORDER BY number DESC LIMIT ?2 OFFSET ?3")?;
+                let rows = stmt
+                    .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
+                        let supporting_document_id: Option<String> = r.get(5)?;
+                        let activity_id: String = r.get(0)?;
+                        let brief = text(r.get(1)?, TEXT);
+                        Ok(ContextActivity {
+                            fetch_brief: brief.truncated.then(|| {
+                                format!("ticketd activity show {reference} {activity_id}")
+                            }),
+                            id: activity_id,
+                            fetch_details: supporting_document_id
+                                .as_ref()
+                                .map(|id| format!("ticketd document read {id}")),
+                            supporting_document_id,
+                            brief,
+                            reported_at: r.get(2)?,
+                            updated_at: r.get(3)?,
+                            editing_agent: r.get::<_, Option<String>>(4)?.map(|v| text(v, LABEL)),
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(page(rows, options.offset))
+            } else {
+                None
+            };
+            let evidence = if options.evidence {
+                let mut stmt = tx.prepare("SELECT id,kind,name,value,created_at,updated_at,editing_agent FROM evidence WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+                let rows = stmt
+                    .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
+                        Ok(ContextEvidence {
+                            id: r.get(0)?,
+                            kind: r.get(1)?,
+                            name: text(r.get(2)?, LABEL),
+                            value: text(r.get(3)?, TEXT),
+                            created_at: r.get(4)?,
+                            updated_at: r.get(5)?,
+                            editing_agent: r.get::<_, Option<String>>(6)?.map(|v| text(v, LABEL)),
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(page(rows, options.offset))
+            } else {
+                None
+            };
+            let backlinks = if options.backlinks {
+                Some(page(
+                    crate::backlinks::query(tx, reference, PAGE as u32 + 1, options.offset)?,
+                    options.offset,
+                ))
+            } else {
+                None
+            };
+            let documents = if options.documents {
+                // One row per Document, by the strongest source: attached, then
+                // mentioned in the description, then mentioned in an update.
+                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, x.source, x.activity_id FROM (SELECT document_id AS did, 'explicit' AS source, NULL AS activity_id, 0 AS rank, rowid AS position FROM ticket_documents WHERE ticket_id = ?1 UNION ALL SELECT target_id, 'description', NULL, 1, rowid FROM context_mentions WHERE source_id = ?1 UNION ALL SELECT m.target_id, 'update', m.activity_id, 2, m.rowid FROM activity_mentions m JOIN activities a ON a.id = m.activity_id WHERE a.ticket_id = ?1) x JOIN documents d ON d.id = x.did ORDER BY x.rank, x.position", crate::documents::HEADING))?;
+                let mut seen = std::collections::HashSet::new();
+                let mut rows = Vec::new();
+                for row in stmt.query_map(params![id], |r| {
+                    let document_id: String = r.get(0)?;
+                    Ok(ContextDocument {
+                        fetch: format!("ticketd document read {document_id}"),
+                        id: document_id,
+                        heading: text(r.get(1)?, LABEL),
+                        trashed: r.get(2)?,
+                        source: r.get(3)?,
+                        activity_id: r.get(4)?,
                     })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Some(page(rows, options.offset))
-        } else {
-            None
-        };
-        let evidence = if options.evidence {
-            let mut stmt = tx.prepare("SELECT id,kind,name,value,created_at,updated_at,editing_agent FROM evidence WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
-            let rows = stmt
-                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
-                    Ok(ContextEvidence {
-                        id: r.get(0)?,
-                        kind: r.get(1)?,
-                        name: text(r.get(2)?, LABEL),
-                        value: text(r.get(3)?, TEXT),
-                        created_at: r.get(4)?,
-                        updated_at: r.get(5)?,
-                        editing_agent: r.get::<_, Option<String>>(6)?.map(|v| text(v, LABEL)),
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Some(page(rows, options.offset))
-        } else {
-            None
-        };
-        let backlinks = if options.backlinks {
-            Some(page(
-                crate::backlinks::query(&tx, reference, PAGE as u32 + 1, options.offset)?,
-                options.offset,
-            ))
-        } else {
-            None
-        };
-        let documents = if options.documents {
-            // One row per Document, by the strongest source: attached, then
-            // mentioned in the description, then mentioned in an update.
-            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, x.source, x.activity_id FROM (SELECT document_id AS did, 'explicit' AS source, NULL AS activity_id, 0 AS rank, rowid AS position FROM ticket_documents WHERE ticket_id = ?1 UNION ALL SELECT target_id, 'description', NULL, 1, rowid FROM context_mentions WHERE source_id = ?1 UNION ALL SELECT m.target_id, 'update', m.activity_id, 2, m.rowid FROM activity_mentions m JOIN activities a ON a.id = m.activity_id WHERE a.ticket_id = ?1) x JOIN documents d ON d.id = x.did ORDER BY x.rank, x.position", crate::documents::HEADING))?;
-            let mut seen = std::collections::HashSet::new();
-            let mut rows = Vec::new();
-            for row in stmt.query_map(params![id], |r| {
-                let document_id: String = r.get(0)?;
-                Ok(ContextDocument {
-                    fetch: format!("ticketd document read {document_id}"),
-                    id: document_id,
-                    heading: text(r.get(1)?, LABEL),
-                    trashed: r.get(2)?,
-                    source: r.get(3)?,
-                    activity_id: r.get(4)?,
-                })
-            })? {
-                let row = row?;
-                if seen.insert(row.id.clone()) {
-                    rows.push(row);
+                })? {
+                    let row = row?;
+                    if seen.insert(row.id.clone()) {
+                        rows.push(row);
+                    }
                 }
-            }
-            let rows = rows
-                .into_iter()
-                .skip(options.offset as usize)
-                .take(PAGE + 1)
-                .collect::<Vec<_>>();
-            Some(page(rows, options.offset))
-        } else {
-            None
-        };
-        let source_conversation = if options.conversation {
-            let entries = crate::source::conversation_entries(&tx, &id)?
-                .into_iter()
-                .skip(options.offset as usize)
-                .take(PAGE + 1)
-                .map(|entry| match entry {
-                    crate::source::ConversationEntry::Comment {
-                        id,
-                        author,
-                        body,
-                        url,
-                        created_at,
-                        edited_at,
-                    } => ContextSourceEntry::Comment {
-                        id,
-                        author: text(author, LABEL).text,
-                        body: text(body, TEXT),
-                        url,
-                        created_at,
-                        edited_at,
-                    },
-                    crate::source::ConversationEntry::Event {
-                        id,
-                        event,
-                        actor,
-                        subject,
-                        created_at,
-                    } => ContextSourceEntry::Event {
-                        id,
-                        event,
-                        actor,
-                        subject,
-                        created_at,
-                    },
-                })
-                .collect();
-            Some(page(entries, options.offset))
-        } else {
-            None
-        };
-        let latest_update = if options.latest_update {
-            Some(crate::activities::latest(&tx, &id)?)
-        } else {
-            None
-        };
-        tx.commit()?;
-        Ok(TicketContext {
-            ticket: ContextTicket {
-                id: ticket.id,
-                reference: ticket.reference,
-                title: text(ticket.title, LABEL),
-                body: text(ticket.body, TEXT),
-                status: ticket.status,
-                trashed: ticket.trashed,
-                availability,
-                tags,
-            },
-            project,
-            plan,
-            relationships,
-            activities,
-            latest_update,
-            evidence,
-            backlinks,
-            documents,
-            source_conversation,
+                let rows = rows
+                    .into_iter()
+                    .skip(options.offset as usize)
+                    .take(PAGE + 1)
+                    .collect::<Vec<_>>();
+                Some(page(rows, options.offset))
+            } else {
+                None
+            };
+            let source_conversation = if options.conversation {
+                let entries = crate::source::conversation_entries(tx, &id)?
+                    .into_iter()
+                    .skip(options.offset as usize)
+                    .take(PAGE + 1)
+                    .map(|entry| match entry {
+                        crate::source::ConversationEntry::Comment {
+                            id,
+                            author,
+                            body,
+                            url,
+                            created_at,
+                            edited_at,
+                        } => ContextSourceEntry::Comment {
+                            id,
+                            author: text(author, LABEL).text,
+                            body: text(body, TEXT),
+                            url,
+                            created_at,
+                            edited_at,
+                        },
+                        crate::source::ConversationEntry::Event {
+                            id,
+                            event,
+                            actor,
+                            subject,
+                            created_at,
+                        } => ContextSourceEntry::Event {
+                            id,
+                            event,
+                            actor,
+                            subject,
+                            created_at,
+                        },
+                    })
+                    .collect();
+                Some(page(entries, options.offset))
+            } else {
+                None
+            };
+            let latest_update = if options.latest_update {
+                Some(crate::activities::latest(tx, &id)?)
+            } else {
+                None
+            };
+            Ok(TicketContext {
+                ticket: ContextTicket {
+                    id: ticket.id,
+                    reference: ticket.reference,
+                    title: text(ticket.title, LABEL),
+                    body: text(ticket.body, TEXT),
+                    status: ticket.status,
+                    trashed: ticket.trashed,
+                    availability,
+                    tags,
+                },
+                project,
+                plan,
+                relationships,
+                activities,
+                latest_update,
+                evidence,
+                backlinks,
+                documents,
+                source_conversation,
+            })
         })
     }
 }

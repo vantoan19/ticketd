@@ -20,10 +20,9 @@ impl Workspace {
     /// prerequisite, where only Done satisfies one, and not held by their source. Trashed
     /// tickets are excluded from both ticket counts.
     pub fn sidebar_counts(&self) -> Result<SidebarCounts, Error> {
-        self.deliver_due_reminders()?;
         let ready = readiness::ready_sql("t");
         let needs_you = crate::automation_runs::NEEDS_YOU;
-        let counts = self.connection.query_row(
+        let counts = self.connection.prepare_cached(
             &format!(
                 "SELECT \
                (SELECT COUNT(*) FROM inbox_entries WHERE person = ?1 AND read = 0), \
@@ -31,6 +30,7 @@ impl Workspace {
                (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress'), (SELECT COUNT(*) FROM tickets WHERE trashed = 0), \
                (SELECT COUNT(*) FROM automation_runs WHERE {needs_you})"
             ),
+        )?.query_row(
             [crate::inbox::LOCAL_PERSON],
             |row| {
                 Ok(SidebarCounts {

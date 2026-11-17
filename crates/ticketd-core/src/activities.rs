@@ -175,12 +175,10 @@ pub struct ReportedUpdate {
 }
 
 pub(crate) fn populate_update(conn: &Connection, ticket: &mut crate::Ticket) -> Result<(), Error> {
-    ticket.updated_at = conn.query_row(
-        "SELECT updated_at FROM tickets WHERE id = ?1",
-        [&ticket.id],
-        |row| row.get(0),
-    )?;
-    ticket.latest_update = conn.query_row("SELECT id, reported_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [&ticket.id], |row| Ok(ReportedUpdate { activity_id: row.get(0)?, reported_at: row.get(1)?, editing_agent: row.get(2)? })).optional()?;
+    ticket.updated_at = conn
+        .prepare_cached("SELECT updated_at FROM tickets WHERE id = ?1")?
+        .query_row([&ticket.id], |row| row.get(0))?;
+    ticket.latest_update = conn.prepare_cached("SELECT id, reported_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1")?.query_row([&ticket.id], |row| Ok(ReportedUpdate { activity_id: row.get(0)?, reported_at: row.get(1)?, editing_agent: row.get(2)? })).optional()?;
     Ok(())
 }
 

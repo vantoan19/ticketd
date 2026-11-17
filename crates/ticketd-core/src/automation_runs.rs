@@ -864,29 +864,33 @@ impl Workspace {
     }
 
     pub fn automation_run(&self, id: &str) -> Result<AutomationRun, Error> {
-        one(&self.connection, id)
+        self.read(|_| one(&self.connection, id))
     }
 
     /// An Automation's runs, newest first.
     // ponytail: unpaged; the 90-day retention bounds it. Page it when one Automation
     // makes thousands of runs in that time.
     pub fn automation_runs(&self, automation_id: &str) -> Result<Vec<AutomationRun>, Error> {
-        read(&self.connection, "r.automation_id = ?1", automation_id)
+        self.read(|_| read(&self.connection, "r.automation_id = ?1", automation_id))
     }
 
     /// The runs of every Automation, newest first.
     // ponytail: unpaged like the list above; the same retention bounds it.
     pub fn all_automation_runs(&self) -> Result<Vec<AutomationRun>, Error> {
-        // `read` filters on one value; this filter passes every run.
-        read(&self.connection, "?1 = ''", "")
+        self.read(|_| {
+            // `read` filters on one value; this filter passes every run.
+            read(&self.connection, "?1 = ''", "")
+        })
     }
 
     /// The runs that acted on a ticket, newest first.
     pub fn ticket_automation_runs(&self, reference: &str) -> Result<Vec<AutomationRun>, Error> {
-        read(
-            &self.connection,
-            "r.ticket_id = (SELECT id FROM tickets WHERE reference = ?1)",
-            reference,
-        )
+        self.read(|_| {
+            read(
+                &self.connection,
+                "r.ticket_id = (SELECT id FROM tickets WHERE reference = ?1)",
+                reference,
+            )
+        })
     }
 }

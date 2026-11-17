@@ -91,36 +91,38 @@ impl Workspace {
         folder: Option<&Path>,
         skip: HashSet<String>,
     ) -> Result<Vec<ChatSuggestion>, Error> {
-        let project_id = match folder {
-            Some(folder) => self.project_for_folder(folder)?.map(|project| project.id),
-            None => None,
-        };
-        let tickets = self
-            .list_tickets()?
-            .into_iter()
-            .map(|ticket| Candidate {
-                id: ticket.id,
-                reference: ticket.reference,
-                title: ticket.title,
-                status: ticket.status,
-                project_id: ticket.project_id,
-                updated_at: ticket.updated_at,
-            })
-            .collect();
-        let unread = self
-            .inbox_page(100, 0, true)?
-            .into_iter()
-            .map(|entry| Unread {
-                reference: entry.reference,
-                timestamp: entry.timestamp,
-            })
-            .collect();
-        Ok(suggest(&Records {
-            tickets,
-            unread,
-            project_id,
-            skip,
-        }))
+        self.read(|_| {
+            let project_id = match folder {
+                Some(folder) => self.project_for_folder(folder)?.map(|project| project.id),
+                None => None,
+            };
+            let tickets = self
+                .list_tickets()?
+                .into_iter()
+                .map(|ticket| Candidate {
+                    id: ticket.id,
+                    reference: ticket.reference,
+                    title: ticket.title,
+                    status: ticket.status,
+                    project_id: ticket.project_id,
+                    updated_at: ticket.updated_at,
+                })
+                .collect();
+            let unread = self
+                .inbox_page(100, 0, true)?
+                .into_iter()
+                .map(|entry| Unread {
+                    reference: entry.reference,
+                    timestamp: entry.timestamp,
+                })
+                .collect();
+            Ok(suggest(&Records {
+                tickets,
+                unread,
+                project_id,
+                skip,
+            }))
+        })
     }
 }
 

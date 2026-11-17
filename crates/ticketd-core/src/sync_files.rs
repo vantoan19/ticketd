@@ -1770,13 +1770,9 @@ impl Workspace {
     /// One record as its sync file's fields, read in a single snapshot. Device-local
     /// data (checkout folders, inbox state, credentials) is never part of it.
     pub fn export_sync_record(&self, kind: SyncKind, id: &str) -> Result<SyncRecord, Error> {
-        // Inside a write that is already under way the read is part of that transaction.
-        let record = if self.connection.is_autocommit() {
-            let snapshot = self.connection.unchecked_transaction()?;
-            read_record(&snapshot, kind, id)?
-        } else {
-            read_record(&self.connection, kind, id)?
-        };
+        let record = crate::read_scope::run(&self.connection, |connection| {
+            read_record(connection, kind, id)
+        })?;
         record.ok_or_else(|| match kind {
             SyncKind::Project => Error::ProjectNotFound(id.to_owned()),
             SyncKind::Document => Error::DocumentNotFound(id.to_owned()),
