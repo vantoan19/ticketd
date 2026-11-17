@@ -227,8 +227,16 @@ fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
     let Ok(inspection) = open().and_then(|workspace| workspace.inspect_backup(backup)) else {
         return Ok(());
     };
-    Err(match inspection.check {
-        BackupCheck::Valid { .. } => return Ok(()),
+    match refusal(inspection.check) {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    }
+}
+
+/// Why a backup that was inspected cannot be restored, or `None` when it can.
+fn refusal(check: BackupCheck) -> Option<String> {
+    Some(match check {
+        BackupCheck::Valid { .. } => return None,
         BackupCheck::NewerFormat {
             backup_version,
             supported_version,
@@ -236,10 +244,13 @@ fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
             "This backup can't be restored by this version. It was saved by a newer ticketd (workspace format {backup_version}; this app reads up to {supported_version})."
         ),
         BackupCheck::NotTicketd => "This isn't a ticketd backup.".to_owned(),
-        BackupCheck::MissingTables { tables } => format!(
-            "This backup is incomplete. It is missing tables ticketd needs: {}.",
-            tables.join(", ")
-        ),
+        // What is missing is tables, columns, triggers and unique indexes alike.
+        BackupCheck::MissingTables { tables } => {
+            format!(
+                "This backup is incomplete. It is missing: {}.",
+                tables.join(", ")
+            )
+        }
         BackupCheck::CurrentWorkspace => "This is the current workspace.".to_owned(),
         BackupCheck::Damaged { reason } => {
             format!("This backup is damaged. It failed ticketd's checks: {reason}.")
@@ -840,6 +851,11 @@ impl Chats {
                 "The workspace is being restored from a backup. Try again when it has finished.",
             ));
         }
+        Ok(self.started_or_start()?)
+    }
+
+    /// The one host, started if it has not been yet.
+    fn started_or_start(&self) -> Result<ChatHost, HostError> {
         let mut host = lock(&self.host);
         if let Some(host) = host.as_ref() {
             return Ok(host.clone());
@@ -853,10 +869,17 @@ impl Chats {
         Ok(started)
     }
 
-    /// The host for Automation runs, or `None` while nothing may run: Chat is off,
-    /// a backup is being restored, or the host could not start.
-    pub fn automation_host(&self) -> Option<ChatHost> {
-        self.host().ok()
+    /// The host for Automation runs, or why nothing may run: Chat is off
+    /// (`HostError::TurnedOff`), a backup is being restored (`HostError::Restoring`), or
+    /// the host could not start. A run whose agent cannot start says which.
+    pub fn automation_host(&self) -> Result<ChatHost, HostError> {
+        if !self.enabled() {
+            return Err(HostError::TurnedOff);
+        }
+        if self.restoring.load(Ordering::SeqCst) {
+            return Err(HostError::Restoring);
+        }
+        self.started_or_start()
     }
 
     /// Starts the host if Chat is on, so its change signal can be watched.

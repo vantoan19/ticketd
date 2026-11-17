@@ -32,7 +32,17 @@ fn agent_stopped(reason: Option<StopReason>) -> &'static str {
         Some(StopReason::Quit) => "ticketd quit while this run was going.",
         Some(StopReason::TurnedOff) => "Chat was turned off while this run was going.",
         Some(StopReason::Restore) => "A backup was restored while this run was going.",
-        Some(_) | None => "ticketd stopped this run's agent before it finished.",
+        // Reasons that end a run's agent by other means, which end the run themselves or
+        // are not known: the general words.
+        Some(
+            StopReason::TakenOver
+            | StopReason::TimeLimit
+            | StopReason::RunEnded
+            | StopReason::Trashed
+            | StopReason::ExplicitResume
+            | StopReason::StorageFailed,
+        )
+        | None => "ticketd stopped this run's agent before it finished.",
     }
 }
 
@@ -49,11 +59,12 @@ enum Ran {
     StorageFailed(String),
 }
 
-/// The Chat host, while there is one to run agents on. The host answers `None`
-/// while nothing may run: Chat is off, a backup is being restored, or it could not
-/// start. Asked each time it is needed, so the runner follows Chat being switched off
-/// and on.
-pub type HostSource = Arc<dyn Fn() -> Option<ChatHost> + Send + Sync>;
+/// The Chat host, while there is one to run agents on. The host answers why not
+/// while nothing may run: Chat is off (`HostError::TurnedOff`), a backup is being
+/// restored (`HostError::Restoring`), or it could not start. A run whose agent cannot
+/// start for that reason ends saying so. Asked each time it is needed, so the runner
+/// follows Chat being switched off and on.
+pub type HostSource = Arc<dyn Fn() -> Result<ChatHost, HostError> + Send + Sync>;
 
 /// Shows a desktop notification, or says why it could not. The host supplies it: the
 /// runner knows what to say, not how a desktop shows it.
@@ -119,7 +130,7 @@ impl Runner {
     /// first failure is returned for the host to report.
     pub fn tick(&self) -> Result<(), Error> {
         // Chat off or a restore under way: nothing is matched, and each cursor holds.
-        if (self.inner.host)().is_none() {
+        if (self.inner.host)().is_err() {
             return Ok(());
         }
         let recovered = self.recover();
@@ -162,7 +173,7 @@ impl Runner {
     /// quitting, restoring): they wait until it is again (#387 M3).
     fn start_queued(&self) -> Result<(), Error> {
         match (self.inner.host)() {
-            Some(host) if host.serving().is_ok() => {}
+            Ok(host) if host.serving().is_ok() => {}
             _ => return Ok(()),
         }
         let started = {
@@ -255,9 +266,11 @@ impl Runner {
         };
         let time_limit = Duration::from_secs(u64::from(settings.time_limit_minutes) * 60);
         let message = first_message(&settings.instructions, &start.started_by);
-        // Chat went off between the pass that started the run and its agent.
-        let Some(host) = (self.inner.host)() else {
-            return Ran::AgentStopped(None);
+        // Chat went off, or a restore began, between the pass that started the run and
+        // its agent: the run says which.
+        let host = match (self.inner.host)() {
+            Ok(host) => host,
+            Err(why) => return Ran::AgentStopped(StopReason::of(&why)),
         };
         let ended = host
             .run_unattended(&start.chat_id, &message, unattended, time_limit)
@@ -336,7 +349,7 @@ impl Runner {
             return;
         }
         // Chat off: turning it off already stopped every agent.
-        let Some(host) = (self.inner.host)() else {
+        let Ok(host) = (self.inner.host)() else {
             return;
         };
         for unconfirmed in host.end_run_agents(chats).await {

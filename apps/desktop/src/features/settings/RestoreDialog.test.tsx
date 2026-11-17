@@ -210,9 +210,9 @@ test.each([
     /Not a ticketd backup/,
   ],
   [
-    "missing tables",
-    { status: "missing_tables", tables: ["notes", "evidence"] },
-    /missing tables ticketd needs: notes, evidence/,
+    "an incomplete backup",
+    { status: "missing_tables", tables: ["notes", "chat_turns.ending"] },
+    /This backup is incomplete.*It is missing: notes, chat_turns\.ending\./,
   ],
   [
     "the current workspace",

@@ -39,6 +39,16 @@ pub(crate) fn end_active_runs(
     Ok(end_each(connection, &ids, cause)?.1)
 }
 
+/// The Queued and Running runs of Automations that are deleted.
+fn active_runs_of_deleted(connection: &Connection) -> Result<Vec<String>, Error> {
+    let mut statement = connection.prepare(
+        "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE a.trashed = 1 AND r.status IN ('queued', 'running')",
+    )?;
+    Ok(statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
 impl Workspace {
     /// How many Automation runs execute at once on this device. The rest wait in
     /// the queue.
@@ -94,16 +104,13 @@ impl Workspace {
     /// Workspace sync has runs that will no longer run. Returns the Chats of the
     /// agents that were working, for the host to interrupt.
     pub fn end_runs_of_deleted_automations(&mut self) -> Result<Vec<String>, Error> {
+        // Read first: the runner looks every few seconds, and finds nothing nearly always.
+        if active_runs_of_deleted(&self.connection)?.is_empty() {
+            return Ok(Vec::new());
+        }
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
-        let ids = {
-            let mut statement = transaction.prepare(
-                "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE a.trashed = 1 AND r.status IN ('queued', 'running')",
-            )?;
-            statement
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        let ids = active_runs_of_deleted(&transaction)?;
         let (_, chats) = end_each(&transaction, &ids, Cause::Deleted)?;
         transaction.commit()?;
         Ok(chats)

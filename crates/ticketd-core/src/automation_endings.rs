@@ -118,12 +118,64 @@ pub(crate) struct Ended {
     pub chats: Vec<String>,
 }
 
+/// What ending runs asks of the rest of the Workspace, gathered so that ending many
+/// runs does it once: the inbox is scanned for every run that needs the person, not
+/// once per run, and the answered runs are updated together.
+#[derive(Default)]
+struct Reactions {
+    /// Some run that ended needs the person, so the inbox says so.
+    announce: bool,
+    /// Runs that ended already answered.
+    answered: Vec<String>,
+}
+
+impl Reactions {
+    fn add(&mut self, run_id: &str, reaction: Reaction) {
+        match reaction {
+            Reaction::Announce => self.announce = true,
+            Reaction::Answered => self.answered.push(run_id.to_owned()),
+            Reaction::Quiet => {}
+        }
+    }
+
+    fn apply(self, connection: &Connection) -> Result<(), Error> {
+        if self.announce {
+            announce(connection)?;
+        }
+        if !self.answered.is_empty() {
+            let ids = serde_json::to_string(&self.answered)?;
+            connection.execute(
+                "UPDATE automation_runs SET attention_cleared = ?2 WHERE attention_cleared = 0 AND id IN (SELECT value FROM json_each(?1))",
+                params![ids, DISMISSED],
+            )?;
+            connection.execute(
+                "UPDATE inbox_entries SET read = 1 WHERE kind = 'automation_run' AND read = 0 AND from_value IN (SELECT value FROM json_each(?1))",
+                [ids],
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Ends the run `run_id` for `cause`, or returns `None` and changes nothing when the
 /// cause cannot end a run in its status.
 pub(crate) fn end(
     connection: &Connection,
     run_id: &str,
     cause: Cause,
+) -> Result<Option<Ended>, Error> {
+    let mut reactions = Reactions::default();
+    let ended = end_without_reacting(connection, run_id, cause, &mut reactions)?;
+    reactions.apply(connection)?;
+    Ok(ended)
+}
+
+/// Ends the run, leaving what it asks of the rest of the Workspace in `reactions`.
+fn end_without_reacting(
+    connection: &Connection,
+    run_id: &str,
+    cause: Cause,
+    reactions: &mut Reactions,
 ) -> Result<Option<Ended>, Error> {
     let status: String = connection
         .query_row(
@@ -155,31 +207,24 @@ pub(crate) fn end(
     // A run the person took over from Needs attention keeps the time it ended.
     let ended_at = match cause {
         Cause::TakenOver => format!("COALESCE(ended_at, {NOW})"),
-        _ => NOW.to_owned(),
+        Cause::Path(_)
+        | Cause::Stopped
+        | Cause::TurnedOff
+        | Cause::Deleted
+        | Cause::Abandoned(_) => NOW.to_owned(),
     };
     connection.execute(
         &format!("UPDATE automation_runs SET status = ?2, reason = ?3, ended_at = {ended_at} WHERE id = ?1"),
         params![run_id, ending.status.as_str(), ending.reason],
     )?;
-    match ending.reaction {
-        Reaction::Announce => announce(connection)?,
-        Reaction::Answered => {
-            connection.execute(
-                "UPDATE automation_runs SET attention_cleared = ?2 WHERE id = ?1 AND attention_cleared = 0",
-                params![run_id, DISMISSED],
-            )?;
-            connection.execute(
-                "UPDATE inbox_entries SET read = 1 WHERE kind = 'automation_run' AND from_value = ?1 AND read = 0",
-                [run_id],
-            )?;
-        }
-        Reaction::Quiet => {}
-    }
+    reactions.add(run_id, ending.reaction);
     Ok(Some(Ended { chats }))
 }
 
 /// Ends each of the runs `ids` for `cause` that it can end. Returns how many ended
-/// and the Chats of the agents that were working in them.
+/// and the Chats of the agents that were working in them. What the runs ask of the
+/// rest of the Workspace (the inbox, the answered runs) is done once, after them all,
+/// so ending many runs does not scan the Workspace for each one.
 pub(crate) fn end_each(
     connection: &Connection,
     ids: &[String],
@@ -187,11 +232,13 @@ pub(crate) fn end_each(
 ) -> Result<(usize, Vec<String>), Error> {
     let mut count = 0;
     let mut chats = Vec::new();
+    let mut reactions = Reactions::default();
     for id in ids {
-        if let Some(ended) = end(connection, id, cause)? {
+        if let Some(ended) = end_without_reacting(connection, id, cause, &mut reactions)? {
             count += 1;
             chats.extend(ended.chats);
         }
     }
+    reactions.apply(connection)?;
     Ok((count, chats))
 }

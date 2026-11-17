@@ -10,9 +10,9 @@ use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    InteractionKind, InteractionRequest, NativeRequestId, NativeSessionId, NativeTurnId, Problem,
-    ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey, SettingOutcome,
-    StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
+    HostError, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
+    SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -140,7 +140,7 @@ impl Fixture {
         let serving = host.clone();
         let runner = Runner::new(
             opener(&path),
-            Arc::new(move || Some(serving.clone())),
+            Arc::new(move || Ok(serving.clone())),
             Arc::new(|_| Ok(())),
         )
         .unwrap();
@@ -606,7 +606,7 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
     let host = ChatHost::new(opener(&f.path), Vec::new()).unwrap();
     Runner::new(
         opener(&f.path),
-        Arc::new(move || Some(host.clone())),
+        Arc::new(move || Ok(host.clone())),
         Arc::new(|_| Ok(())),
     )
     .unwrap();
@@ -1017,7 +1017,7 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
     let host = f.host.clone();
     let runner = Runner::new(
         flaky,
-        Arc::new(move || Some(host.clone())),
+        Arc::new(move || Ok(host.clone())),
         Arc::new(|_| Ok(())),
     )
     .unwrap();
@@ -1085,7 +1085,7 @@ async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_p
     let counted = told.clone();
     let runner = Runner::new(
         opener(&f.path),
-        Arc::new(move || Some(host.clone())),
+        Arc::new(move || Ok(host.clone())),
         Arc::new(move |_| {
             *counted.lock().unwrap() += 1;
             Ok(())
@@ -1104,6 +1104,176 @@ async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_p
     assert!(reason.contains("the disk is gone"), "{reason}");
     assert_eq!(run.steps.len(), 1, "no failure path step ran");
     assert_eq!(*told.lock().unwrap(), 0);
+}
+
+impl Fixture {
+    /// Gives the agent step a failure path that notifies, so a step failure is told apart
+    /// from a run that ended some other way.
+    #[allow(clippy::unwrap_used)]
+    fn notify_when_the_agent_fails(&self) {
+        let mut definition = self.automation.definition.clone();
+        if let StepAction::RunAgent { on_failure, .. } = &mut definition.steps[0].action {
+            *on_failure = Some(vec![Step {
+                id: "tell".into(),
+                action: StepAction::Notify {
+                    text: "The agent failed.".into(),
+                    opens: NotifyTarget::Ticket,
+                    on_failure: None,
+                },
+            }]);
+        }
+        self.core()
+            .update_automation(&self.automation.id, definition)
+            .unwrap();
+    }
+
+    /// A runner over `host` that counts the notifications it shows.
+    #[allow(clippy::unwrap_used)]
+    fn counting_runner(&self, host: ChatHost) -> (Runner, Arc<Mutex<usize>>) {
+        let told = Arc::new(Mutex::new(0_usize));
+        let counted = told.clone();
+        let runner = Runner::new(
+            opener(&self.path),
+            Arc::new(move || Ok(host.clone())),
+            Arc::new(move |_| {
+                *counted.lock().unwrap() += 1;
+                Ok(())
+            }),
+        )
+        .unwrap();
+        (runner, told)
+    }
+}
+
+/// #422 item 4, mid-turn: Chat storage fails while the agent works. What happened to
+/// the agent is unknown, so the step's failure path must not run; the run ends as Needs
+/// attention with a reason.
+#[tokio::test(start_paused = true)]
+async fn a_storage_failure_while_the_agent_works_ends_the_run_without_its_failure_path() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    f.notify_when_the_agent_fails();
+    // Fails once, at the supervisor's next write, and works again after: the Chat
+    // host's later reads of the Workspace succeed, so what it reports is the Chat's
+    // own storage-failure problem.
+    let broken = Arc::new(AtomicBool::new(false));
+    let (path, flag) = (f.path.clone(), broken.clone());
+    let flaky: WorkspaceOpener = Arc::new(move || {
+        if flag.swap(false, Ordering::SeqCst) {
+            return Err(ticketd_core::Error::AutomationRun(
+                "the disk is gone".into(),
+            ));
+        }
+        Workspace::open(&path)
+    });
+    let host = ChatHost::new(
+        flaky,
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+    )
+    .unwrap();
+    let (runner, told) = f.counting_runner(host);
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+
+    // The agent's next event cannot be recorded.
+    broken.store(true, Ordering::SeqCst);
+    f.fake
+        .emit(EventKind::MessageCompleted {
+            turn: NativeTurnId::new("turn-1"),
+            item: NativeItemId::new("message-1"),
+            text: "lost".to_owned(),
+        })
+        .await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+    let reason = run.reason.unwrap();
+    assert!(reason.contains("ticketd could not keep"), "{reason}");
+    assert_eq!(run.steps.len(), 1, "no failure path step ran");
+    assert_eq!(*told.lock().unwrap(), 0);
+}
+
+/// Trashing the Chat of a working agent stops its turn, which is the step failing, not
+/// the person taking the run over or ticketd closing it: the failure path runs.
+#[tokio::test(start_paused = true)]
+async fn trashing_a_working_agents_chat_fails_the_step_and_runs_its_failure_path() {
+    let f = Fixture::new();
+    f.notify_when_the_agent_fails();
+    let (runner, told) = f.counting_runner(f.host.clone());
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+
+    f.host.trash(&f.chat()).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::Completed, "{run:?}");
+    assert_eq!(run.steps[0].status, AutomationStepStatus::Failed);
+    assert_eq!(*told.lock().unwrap(), 1);
+}
+
+/// The host source says why there is no host when the run's agent is about to start:
+/// the run ends saying that, not with the wording for a reason nobody knows.
+#[tokio::test(start_paused = true)]
+async fn a_run_whose_agent_cannot_start_for_want_of_a_host_says_why() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    const SERVING: u8 = 0;
+    const OFF: u8 = 1;
+    const RESTORING: u8 = 2;
+    for (state, said) in [
+        (OFF, "Chat was turned off while this run was going."),
+        (RESTORING, "A backup was restored while this run was going."),
+    ] {
+        let f = Fixture::new();
+        let answer = Arc::new(AtomicU8::new(SERVING));
+        let (host, asked) = (f.host.clone(), answer.clone());
+        let runner = Runner::new(
+            opener(&f.path),
+            Arc::new(move || match asked.load(Ordering::SeqCst) {
+                SERVING => Ok(host.clone()),
+                OFF => Err(HostError::TurnedOff),
+                _ => Err(HostError::Restoring),
+            }),
+            Arc::new(|_| Ok(())),
+        )
+        .unwrap();
+        f.tag("Fix login");
+        // The pass starts the run; Chat changes before its agent does.
+        runner.tick().unwrap();
+        answer.store(state, Ordering::SeqCst);
+        settle().await;
+
+        assert_eq!(f.needs_attention(), said);
+        assert_eq!(f.fake.opens().len(), 0);
+    }
+}
+
+/// A Stop or Delete that arrives after the run ended (it finished as the person pressed
+/// the button, or a restart ended it first) is not an error: the run is as it ended.
+#[tokio::test(start_paused = true)]
+async fn stopping_or_deleting_after_the_run_ended_leaves_it_as_it_ended() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    f.end_turn(problem(ProblemKind::Other, "The model refused."))
+        .await;
+    let ended = f.runs().remove(0);
+    assert_eq!(ended.status, AutomationRunStatus::NeedsAttention);
+
+    let stopped = f.runner.stop_run(&ended.id).await.unwrap();
+    assert_eq!(stopped, ended);
+    f.runner.delete_automation(&f.automation.id).await.unwrap();
+
+    let after = f.runs().remove(0);
+    assert_eq!(after.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(after.reason, ended.reason);
+    assert!(f.runner.stop_run("missing").await.is_err());
 }
 
 /// #387 M4: a run stopped while its agent's harness is still opening ends that
@@ -1546,7 +1716,12 @@ async fn with_chat_off_ending_a_run_changes_only_its_record() {
     assert_eq!(f.runs()[0].status, AutomationRunStatus::Queued);
 
     // A runner with no Chat host to reach: Chat is off in this process.
-    let off = Runner::new(opener(&f.path), Arc::new(|| None), Arc::new(|_| Ok(()))).unwrap();
+    let off = Runner::new(
+        opener(&f.path),
+        Arc::new(|| Err(HostError::TurnedOff)),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
     off.tick().unwrap();
     let stopped = off.stop_run(&f.runs()[0].id).await.unwrap();
 
