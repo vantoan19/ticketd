@@ -57,6 +57,11 @@ export function useTicketDocuments() {
       message: `Removed ${link.target_label} from ${reference}`,
       undo: async () => {
         await documents.setTicketDocument(reference, link.target_id, true);
+        // Show it again now, whatever the next read holds.
+        setRemoved((current) => ({
+          ...current,
+          ids: current.ids.filter((id) => id !== link.target_id),
+        }));
         await changed();
       },
     });

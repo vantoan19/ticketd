@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,6 +13,10 @@ import { TicketFiles as TicketDocuments } from "@/features/tickets/TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 import { Backlinks } from "@/features/tickets/Backlinks";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
+import {
+  StatusLineContext,
+  type StatusLineMessage,
+} from "@/components/ui/use-status-line";
 
 window.ResizeObserver ??= class {
   observe() {}
@@ -245,4 +250,42 @@ test("a Document whose removal failed comes back", async () => {
     "Couldn't remove the Document",
   );
   expect(screen.getByRole("button", { name: "Linked" })).toBeTruthy();
+});
+
+test("Undo of a removal shows the Document again even when the re-read after the removal failed", async () => {
+  let attached = true;
+  let failNextRead = false;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "document_context_links") {
+      if (failNextRead) {
+        failNextRead = false;
+        throw new Error("database is busy");
+      }
+      return [attached ? [link("d1", "Linked", true)] : [], []];
+    }
+    if (command === "set_ticket_document") {
+      attached = (args as { present: boolean }).present;
+      // The re-read right after the removal fails, so the list read still holds
+      // the Document and the read after Undo returns the very same data.
+      failNextRead = !attached;
+      return null;
+    }
+    return command === "ticket_attachments" ? [] : null;
+  });
+  let message: StatusLineMessage | null = null;
+  const line = {
+    show: (next: StatusLineMessage) => {
+      message = next;
+    },
+    dismiss: () => {},
+    setInset: () => {},
+  };
+  render(<StatusLineContext value={line}>{files()}</StatusLineContext>);
+  fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));
+  await waitFor(() => expect(message?.undo).toBeTruthy());
+  expect(screen.queryByRole("button", { name: "Linked" })).toBeNull();
+  await act(async () => {
+    await (message as StatusLineMessage | null)?.undo?.();
+  });
+  expect(await screen.findByRole("button", { name: "Linked" })).toBeTruthy();
 });
