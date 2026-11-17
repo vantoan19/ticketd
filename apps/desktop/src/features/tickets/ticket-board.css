@@ -200,7 +200,7 @@
 .ticket-workspace[data-peek] #list {
   flex: 1 1 0 !important;
 }
-.ticket-workspace.unselected #detail,
+.ticket-workspace.unselected:not([data-pane-leaving="detail"]) #detail,
 .ticket-workspace.unselected .split-handle,
 .ticket-workspace[data-peek] .split-handle {
   display: none !important;

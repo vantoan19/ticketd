@@ -2459,7 +2459,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 /* !important here and in the narrow block: the panel library sets flex and
    size inline on #list and #detail, so only !important wins. */
-.ticket-workspace.expanded #list,
+.ticket-workspace.expanded:not([data-pane-leaving="list"]) #list,
 .ticket-workspace.expanded .split-handle {
   display: none !important;
 }
@@ -2807,7 +2807,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   .ticket-workspace #list {
     flex: 1 1 0 !important;
   }
-  .ticket-workspace #detail,
+  .ticket-workspace:not([data-pane-leaving="detail"]) #detail,
   .ticket-workspace .split-handle {
     display: none !important;
   }

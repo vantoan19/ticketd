@@ -143,12 +143,11 @@ test("closing keeps the document on screen as it was while it fades out", async 
   expect(document.querySelector(".ticket-detail")?.hasAttribute("inert")).toBe(
     true,
   );
-  // The list has the width at once.
-  expect(group().classList.contains("unselected")).toBe(false);
+  // The list has the width at once; only the document is kept for its exit.
+  expect(group().classList.contains("unselected")).toBe(true);
   await waitFor(() =>
     expect(group().getAttribute("data-pane-leaving")).toBeNull(),
   );
-  expect(group().classList.contains("unselected")).toBe(true);
   expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
 });
 

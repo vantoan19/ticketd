@@ -61,19 +61,13 @@
     backwards;
 }
 
-/* Close: the list takes the width at once and the document fades out over it,
-   drifting right, where it was. */
+/* Close: the list has the width at once (the unselected rules) and the document
+   fades out over it, drifting right, where it was. The panel library gives the
+   panel an inline width of auto, so the leaving pane is placed with its edges. */
 .ticket-workspace[data-pane-leaving] {
   position: relative;
 }
-.ticket-workspace[data-pane-leaving="detail"] #list {
-  flex: 1 1 0 !important;
-}
-.ticket-workspace[data-pane-leaving="detail"] .split-handle {
-  display: none !important;
-}
 .ticket-workspace[data-pane-leaving="detail"] #detail {
-  display: flex !important;
   pointer-events: none;
 }
 .ticket-workspace[data-pane-leaving="detail"]:not([data-peek]) #detail {
@@ -81,8 +75,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: var(--pane-leaving-width, 100%) !important;
-  flex: none !important;
+  left: calc(100% - var(--pane-leaving-width, 100%));
 }
 .ticket-workspace[data-pane-leaving="detail"] #detail .ticket-detail {
   animation: ticket-pane-out var(--dur-exit) var(--ease-in) forwards;
@@ -91,14 +84,12 @@
 /* Full width: the list slides left as it fades, over the document that has
    taken its place. */
 .ticket-workspace.expanded[data-pane-leaving="list"] #list {
-  display: block !important;
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
+  right: calc(100% - var(--pane-leaving-width, 100%));
   z-index: 1;
-  width: var(--pane-leaving-width, 100%) !important;
-  flex: none !important;
   pointer-events: none;
 }
 .ticket-workspace[data-pane-leaving="list"] #list > * {
