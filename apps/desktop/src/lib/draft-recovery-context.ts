@@ -25,6 +25,15 @@ export const DraftRecoveryContext = createContext<DraftRecovery>({
   reloadAfterRestore: async () => {},
 });
 export const DraftRecoveryGenerationContext = createContext(0);
+/** Whether stored recovery has loaded; outside the provider there is none to wait for. */
+export const DraftRecoveryReadyContext = createContext(true);
+/**
+ * Renders an editor host once stored recovery has loaded, so the host reads its
+ * recovered draft when it mounts. Views without drafts never wait for it.
+ */
+export function DraftRecoveryGate({ children }: { children: ReactNode }) {
+  return useContext(DraftRecoveryReadyContext) ? children : null;
+}
 export const DraftRecoveryErrorContext = createContext("");
 export const useDraftRecovery = () => useContext(DraftRecoveryContext);
 export const useDraftRecoveryGeneration = () =>

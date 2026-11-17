@@ -28,7 +28,10 @@ import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
-import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import {
+  DraftRecoveryGate,
+  useDraftRecovery,
+} from "@/lib/draft-recovery-context";
 
 /**
  * A backlink's passage, and the span of its mention as the core reports it: chars
@@ -113,16 +116,8 @@ function restore(
   }
   return { draft: current, saved: current };
 }
-export function TicketEditor({
-  ticket,
-  readOnly = false,
-  onSaved,
-  stateLine,
-  children,
-  select,
-  revision,
-  mention = null,
-}: {
+
+type TicketEditorProps = {
   ticket: Ticket;
   /** Keep the saved copy's geometry while a fresh read is pending. */
   readOnly?: boolean;
@@ -137,7 +132,27 @@ export function TicketEditor({
   revision?: number;
   /** A description passage the person navigated here to read; null once they move on. */
   mention?: Mention | null;
-}) {
+};
+
+/** Opens once stored recovery has loaded, so an unsaved draft comes back with it. */
+export function TicketEditor(props: TicketEditorProps) {
+  return (
+    <DraftRecoveryGate>
+      <RecoveredTicketEditor {...props} />
+    </DraftRecoveryGate>
+  );
+}
+
+function RecoveredTicketEditor({
+  ticket,
+  readOnly = false,
+  onSaved,
+  stateLine,
+  children,
+  select,
+  revision,
+  mention = null,
+}: TicketEditorProps) {
   const recovery = useDraftRecovery();
   const recoveryOwner = `ticket:${ticket.id}`;
   const workspaceBlockedReason = editingBlockedReason(useWorkspaceState());
@@ -152,6 +167,7 @@ export function TicketEditor({
     ),
   );
   const [draft, setDraft] = useState<Content>(restored.draft);
+  const [editorPending, setEditorPending] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const title = titleRef.current;
@@ -346,7 +362,9 @@ export function TicketEditor({
   // refuse it), the last saved title stays, and the field says why.
   const titleInvalid = titleDirty && draft.title.trim() === "";
   const unsent = (titleDirty && !titleInvalid) || draft.body !== saved.body;
-  const bodyDirty = draft.body !== saved.body;
+  // Typing the editor has not reported yet counts as an edit, so an outside
+  // change never replaces it.
+  const bodyDirty = draft.body !== saved.body || editorPending;
   const externalChange =
     (titleDirty && ticket.title !== saved.title) ||
     (bodyDirty && ticket.body !== saved.body);
@@ -745,6 +763,7 @@ export function TicketEditor({
               recoveryOwner={recoveryOwner}
               attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
+              onPendingChange={setEditorPending}
               label="Description"
               placeholder="Add a description — type / for blocks"
               chrome="floating"
