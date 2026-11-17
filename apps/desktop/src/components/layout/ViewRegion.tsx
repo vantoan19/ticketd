@@ -1,5 +1,6 @@
 import { Component, createRef, type ReactNode } from "react";
-import { arrive, exitDuration, leave } from "./arrive";
+import { exitDuration } from "@/lib/motion-tokens";
+import { arrivePage, leave } from "./arrive";
 
 type Props = {
   /** Names the page on show; a new value is a switch of pages. */
@@ -22,9 +23,12 @@ type Departing = {
  * way the old page is gone from the document by the time the new one commits,
  * so this region keeps a picture of it: before React updates the DOM it copies
  * what is on show, and afterwards lays the copy over the panel to fade out
- * (150ms, slight blur) while the new page waits that long and then fades up.
- * The copy is only a picture: inert, hidden from assistive technology, without
- * ids, and it never takes the pointer.
+ * (150ms, slight blur) while the new page waits that long and then arrives:
+ * its header fades up, then its visible rows follow a stagger step apart
+ * (`arrivePage`). A page that choreographs its own entrance marks its root
+ * `data-own-entrance` and is left to do so. The copy is only a picture: inert,
+ * hidden from assistive technology, out of `getElementById` (its ids become
+ * `data-id`), and it never takes the pointer.
  *
  * It is a layout-free wrapper (`display: contents`), so pages lay out exactly
  * as they would without it. With reduced motion, or while a key repeats or
@@ -80,8 +84,12 @@ export class ViewRegion extends Component<Props> {
     if (panel && departing)
       for (const { image, ...box } of departing) show(panel, image, box);
     for (const page of region.children)
-      if (page instanceof HTMLElement && page.getClientRects().length > 0)
-        arrive(page, { delay: exitDuration() });
+      if (
+        page instanceof HTMLElement &&
+        page.getClientRects().length > 0 &&
+        !ownsEntrance(page)
+      )
+        arrivePage(page, exitDuration());
   }
 
   render() {
@@ -104,9 +112,8 @@ function show(
   frame.setAttribute("aria-hidden", "true");
   frame.setAttribute("inert", "");
   frame.style.cssText = `left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px`;
-  for (const element of image.querySelectorAll("[id]"))
-    element.removeAttribute("id");
-  image.removeAttribute("id");
+  for (const element of [image, ...image.querySelectorAll("[id]")])
+    hideId(element);
   frame.append(image);
   // Scrolling only takes once the copy is laid out.
   panel.append(frame);
@@ -116,4 +123,25 @@ function show(
     if (scrollLeft) element.scrollLeft = Number(scrollLeft);
   }
   leave(frame, () => frame.remove());
+}
+
+/** A page that choreographs its own entrance marks its root (arrival contract rule 2). */
+function ownsEntrance(page: HTMLElement): boolean {
+  return (
+    page.hasAttribute("data-own-entrance") ||
+    page.querySelector(":scope > [data-own-entrance]") !== null
+  );
+}
+
+/**
+ * The picture lays out like the page it copies, so its ids stay available to
+ * CSS as `data-id` (the rules that key on `#list` also match `[data-id="list"]`),
+ * but they leave `getElementById`. SVG ids stay: `url(#…)` resolves inside the
+ * picture and nothing looks an SVG element up by id.
+ */
+function hideId(element: Element) {
+  const id = element.getAttribute("id");
+  if (id === null || element instanceof SVGElement) return;
+  element.setAttribute("data-id", id);
+  element.removeAttribute("id");
 }

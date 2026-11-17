@@ -43,20 +43,28 @@
 
 /* Open, and full width: the document glides in from the right and comes into
    focus. Coming back, it glides in from the left beside the list. */
-.ticket-workspace[data-pane-arrival] #detail .ticket-detail {
+.ticket-workspace[data-pane-arrival]
+  :is(#detail, [data-id="detail"])
+  .ticket-detail {
   animation: ticket-pane-in var(--spring-smooth-t) var(--spring-smooth)
     backwards;
 }
-.ticket-workspace[data-pane-arrival="open"] #detail .ticket-detail {
+.ticket-workspace[data-pane-arrival="open"]
+  :is(#detail, [data-id="detail"])
+  .ticket-detail {
   --pane-from: var(--pane-glide);
 }
-.ticket-workspace[data-pane-arrival="expand"] #detail .ticket-detail {
+.ticket-workspace[data-pane-arrival="expand"]
+  :is(#detail, [data-id="detail"])
+  .ticket-detail {
   --pane-from: var(--pane-glide-wide);
 }
-.ticket-workspace[data-pane-arrival="return"] #detail .ticket-detail {
+.ticket-workspace[data-pane-arrival="return"]
+  :is(#detail, [data-id="detail"])
+  .ticket-detail {
   --pane-from: calc(var(--pane-glide-wide) * -1);
 }
-.ticket-workspace[data-pane-arrival="return"] #list > * {
+.ticket-workspace[data-pane-arrival="return"] :is(#list, [data-id="list"]) > * {
   animation: ticket-list-in var(--spring-smooth-t) var(--spring-smooth)
     backwards;
 }
@@ -67,23 +75,27 @@
 .ticket-workspace[data-pane-leaving] {
   position: relative;
 }
-.ticket-workspace[data-pane-leaving="detail"] #detail {
+.ticket-workspace[data-pane-leaving="detail"] :is(#detail, [data-id="detail"]) {
   pointer-events: none;
 }
-.ticket-workspace[data-pane-leaving="detail"]:not([data-peek]) #detail {
+.ticket-workspace[data-pane-leaving="detail"]:not([data-peek])
+  :is(#detail, [data-id="detail"]) {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   left: calc(100% - var(--pane-leaving-width, 100%));
 }
-.ticket-workspace[data-pane-leaving="detail"] #detail .ticket-detail {
+.ticket-workspace[data-pane-leaving="detail"]
+  :is(#detail, [data-id="detail"])
+  .ticket-detail {
   animation: ticket-pane-out var(--dur-exit) var(--ease-in) forwards;
 }
 
 /* Full width: the list slides left as it fades, over the document that has
    taken its place. */
-.ticket-workspace.expanded[data-pane-leaving="list"] #list {
+.ticket-workspace.expanded[data-pane-leaving="list"]
+  :is(#list, [data-id="list"]) {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -92,6 +104,6 @@
   z-index: 1;
   pointer-events: none;
 }
-.ticket-workspace[data-pane-leaving="list"] #list > * {
+.ticket-workspace[data-pane-leaving="list"] :is(#list, [data-id="list"]) > * {
   animation: ticket-list-out var(--dur-exit) var(--ease-in) forwards;
 }

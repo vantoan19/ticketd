@@ -65,7 +65,7 @@ export function PageHeader({
   toolbar?: ReactNode;
 }) {
   return (
-    <header data-slot="page-header">
+    <header data-slot="page-header" data-arrive="header">
       <div className="ui-page-header">
         <div className="ui-page-header-text">
           <div className="ui-page-header-title">

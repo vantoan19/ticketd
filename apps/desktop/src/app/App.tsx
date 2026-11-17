@@ -243,7 +243,7 @@ function AppContent() {
   const workspaceRoot = useRef<HTMLDivElement>(null);
   const [launches, setLaunches] = useState(0);
   useEffect(() => {
-    if (workspaceRoot.current) return launch(workspaceRoot.current);
+    if (workspaceRoot.current) launch(workspaceRoot.current);
   }, [launches]);
   const [counts, setCounts] = useState<SidebarCounts | null>(null);
   const loadCounts = useRef(() => {});
@@ -450,6 +450,9 @@ function AppContent() {
     !workspace.tags.length &&
     !workspace.availability &&
     workspace.source === "all";
+  // The guide is a page of its own: when the first ticket exists it fades out
+  // and the list arrives in its place, which `ViewRegion` plays as a switch.
+  const guideShown = firstRun && view === "tickets" && graphOrigin === null;
   const goTo = (target: GoTo) => {
     if ((target === "chats" || target === "automations") && !chat.enabled)
       return;
@@ -556,11 +559,13 @@ function AppContent() {
   // selection, the opened pages and a failed bulk change describe the old one.
   // The report reloads the list through the shared version.
   const replaceWorkspace = async () => {
-    setLaunches((count) => count + 1);
     setSelected(null);
     clearOpened();
     bulk.reset();
     await workspaceReplaced();
+    // After the reads are dropped, so the launch does not animate the old
+    // Workspace's rows; the new ones arrive as their list loads.
+    setLaunches((count) => count + 1);
   };
   const openNotifiedTicket = (reference: string) => {
     setInboxTarget(null);
@@ -1065,7 +1070,7 @@ function AppContent() {
                                   create={create}
                                 />
                                 <ViewRegion
-                                  page={`${view}:${graphOrigin ?? ""}`}
+                                  page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : ""}`}
                                 >
                                   {view === "settings" &&
                                     graphOrigin === null && (
@@ -1275,22 +1280,17 @@ function AppContent() {
                                     }}
                                   >
                                     <Presence>
-                                      {firstRun &&
-                                        view === "tickets" &&
-                                        graphOrigin === null && (
-                                          <FirstRunGuide
-                                            key="first-run"
-                                            disabledReason={
-                                              createDisabledReason
-                                            }
-                                            onCreate={(trigger) => {
-                                              createTriggerRef.current =
-                                                trigger;
-                                              setCreateStatus(undefined);
-                                              setCreating(true);
-                                            }}
-                                          />
-                                        )}
+                                      {guideShown && (
+                                        <FirstRunGuide
+                                          key="first-run"
+                                          disabledReason={createDisabledReason}
+                                          onCreate={(trigger) => {
+                                            createTriggerRef.current = trigger;
+                                            setCreateStatus(undefined);
+                                            setCreating(true);
+                                          }}
+                                        />
+                                      )}
                                     </Presence>
                                     <TicketListSync value={patchTicket}>
                                       <InboxTriageProvider

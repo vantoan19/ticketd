@@ -122,7 +122,7 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.ticket-workspace[data-peek] #detail {
+.ticket-workspace[data-peek] :is(#detail, [data-id="detail"]) {
   border-radius: var(--radius-panel) 0 0 var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-modal);

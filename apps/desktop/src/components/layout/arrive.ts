@@ -1,5 +1,6 @@
 import {
   blur,
+  cssEasing,
   enterTransition,
   exitTransition,
   rise,
@@ -22,17 +23,6 @@ type Options = {
   /** Fade in place, without rising. */
   fade?: boolean;
 };
-
-function css(name: string): string {
-  return getComputedStyle(document.documentElement)
-    .getPropertyValue(name)
-    .trim();
-}
-
-/** Easing in the CSS tokens' own spelling, which the Web Animations API takes. */
-function easing(name: string): string {
-  return css(name) || "linear";
-}
 
 const seconds = (value: number) => value * 1000;
 
@@ -57,7 +47,7 @@ export function arrive(
       {
         duration: seconds(enter.duration),
         delay: wait,
-        easing: easing("--ease-out"),
+        easing: cssEasing("--ease-out"),
         fill: "backwards",
       },
     ),
@@ -73,7 +63,7 @@ export function arrive(
         {
           duration: seconds(settle.duration),
           delay: wait,
-          easing: easing("--spring-smooth"),
+          easing: cssEasing("--spring-smooth"),
           fill: "backwards",
         },
       ),
@@ -98,7 +88,7 @@ export function leave(element: Element, done: () => void): void {
     ],
     {
       duration: seconds(exit.duration),
-      easing: easing("--ease-in"),
+      easing: cssEasing("--ease-in"),
       fill: "forwards",
     },
   );
@@ -106,7 +96,67 @@ export function leave(element: Element, done: () => void): void {
   animation.oncancel = done;
 }
 
-/** How long, in seconds, an exit takes: what a new page waits for. */
-export function exitDuration(): number {
-  return exitTransition().duration;
+const latest = new WeakMap<Element, symbol>();
+
+/**
+ * The header and the visible rows marked `data-arrive` inside `root`: headers
+ * first at step `first`, then the rows one stagger step apart in document
+ * order. Rows below the fold are left alone and rows past the last step arrive
+ * with it. Placeholders carry no marker, so they never join.
+ */
+function cascade(root: HTMLElement, first: number, delay: number): Animation[] {
+  const frame = root.getBoundingClientRect();
+  const shown = (element: Element) => {
+    const box = element.getBoundingClientRect();
+    return (
+      element.getClientRects().length > 0 &&
+      box.bottom > frame.top &&
+      box.top < frame.bottom
+    );
+  };
+  const marked = (kind: "header" | "row") =>
+    [...root.querySelectorAll(`[data-arrive="${kind}"]`)].filter(shown);
+  return [
+    ...marked("header").flatMap((header) =>
+      arrive(header, { index: first, delay }),
+    ),
+    ...marked("row").flatMap((row, step) =>
+      arrive(row, { index: first + 1 + step, delay }),
+    ),
+  ];
+}
+
+/** `root` carries `data-arriving` until the last of `animations` has settled. */
+function holdArriving(root: HTMLElement, animations: Animation[]) {
+  if (animations.length === 0) return;
+  const mine = Symbol("arrival");
+  latest.set(root, mine);
+  root.setAttribute("data-arriving", "");
+  void Promise.allSettled(animations.map((one) => one.finished)).then(() => {
+    // A newer arrival on the same root owns the marker now.
+    if (latest.get(root) === mine) root.removeAttribute("data-arriving");
+  });
+}
+
+/**
+ * A page arrives (DESIGN.md section 12): its header fades up, then its visible
+ * rows follow a stagger step apart. A page with neither marker fades up whole.
+ * `delay` is how long the old page takes to leave.
+ */
+export function arrivePage(page: HTMLElement, delay = 0): void {
+  const parts = cascade(page, 0, delay);
+  holdArriving(page, parts.length > 0 ? parts : arrive(page, { delay }));
+}
+
+/**
+ * The window opening (DESIGN.md section 12): the sidebar fades in, the pane
+ * follows a step later, then the header and visible rows inside it.
+ */
+export function arriveWorkspace(
+  sidebar: Element | null,
+  pane: HTMLElement | null,
+): void {
+  if (sidebar) arrive(sidebar, { fade: true });
+  if (pane)
+    holdArriving(pane, [...arrive(pane, { index: 1 }), ...cascade(pane, 2, 0)]);
 }
