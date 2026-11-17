@@ -157,7 +157,10 @@ function usePrefetch() {
   useEffect(() => {
     const prefetch = () => {
       for (const view of PREFETCHED) void view.preload().catch(() => {});
-      void import("@/features/markdown/MarkdownEditor").catch(() => {});
+      // CodeMirror follows the editor: source mode is its less common path.
+      void import("@/features/markdown/MarkdownEditor")
+        .then((editor) => editor.LazySourceEditor.preload())
+        .catch(() => {});
     };
     if ("requestIdleCallback" in window) {
       const idle = requestIdleCallback(prefetch);

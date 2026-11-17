@@ -22,9 +22,13 @@ import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import { Activity } from "@/features/tickets/Activity";
 import { OpenTicketFor } from "@/features/tickets/open-ticket/parts/activity-testing";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { LazySourceEditor, MarkdownEditor } from "./MarkdownEditor";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import type { Ticket } from "@/lib/api/client";
+
+// Source mode's editor loads lazily (see SourceEditorLoading.test.tsx); load it
+// up front so these tests can read it at once.
+beforeAll(() => LazySourceEditor.preload());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 beforeAll(async () => {
