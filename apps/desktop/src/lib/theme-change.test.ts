@@ -43,6 +43,15 @@ test("a theme change fades while --dur-theme runs, then settles", () => {
   expect(fading()).toBe(false);
 });
 
+test("the fade lasts the token's length whatever unit it is written in", () => {
+  root.style.setProperty("--dur-theme", "0.28s");
+  changeTheme("dark");
+  vi.advanceTimersByTime(279);
+  expect(fading()).toBe(true);
+  vi.advanceTimersByTime(1);
+  expect(fading()).toBe(false);
+});
+
 test("a second change restarts the fade instead of ending it early", () => {
   changeTheme("dark");
   vi.advanceTimersByTime(200);
@@ -86,5 +95,19 @@ test("the fade is plain CSS transitions, not view transitions", () => {
     "box-shadow",
   ]) {
     expect(rule).toContain(property);
+  }
+});
+
+test("choice tiles fade their hairlines with the theme; only a chosen tile's ring is instant", () => {
+  const css = readFileSync(join(__dirname, "..", "styles.css"), "utf8");
+  const instant = [
+    ...css.matchAll(
+      /(:root\[data-theme-fading\][^{}]*\[data-slot\^?="choice-tile[^{}]*)\{([^}]*)\}/g,
+    ),
+  ].filter(([, , body]) => !body?.includes("var(--dur-theme)"));
+  expect(instant.length).toBeGreaterThan(0);
+  for (const [selector, , body] of instant) {
+    expect(selector).toContain('[data-state="checked"]');
+    expect(body).not.toContain("box-shadow");
   }
 });

@@ -92,3 +92,8 @@ export function blur(direction: "in" | "out"): number {
 export function staggerDelay(index: number): number {
   return Math.min(Math.max(index, 0), STAGGER_STEPS) * seconds("--stagger");
 }
+
+/** Seconds the whole window takes to crossfade to another theme. */
+export function themeFade(): number {
+  return seconds("--dur-theme");
+}
