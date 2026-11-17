@@ -16,7 +16,6 @@
 //! the events.
 
 use std::ops::Deref;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use rusqlite::Connection;
 
@@ -111,55 +110,61 @@ pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), E
 /// that is not yet inside a write transaction only begins one deferred; touching a table
 /// without changing a row upgrades it to the write lock.
 pub(crate) fn lock(connection: &Connection) -> Result<(), Error> {
-    connection.execute("UPDATE tickets SET number = number WHERE 0", [])?;
+    connection
+        .prepare_cached("UPDATE tickets SET number = number WHERE 0")?
+        .execute([])?;
     Ok(())
 }
 
+// Every scope uses one savepoint name. Scopes nest strictly, and `RELEASE` and
+// `ROLLBACK TO` act on the innermost savepoint of a name, which is the scope's own.
+const OPEN: &str = "SAVEPOINT write_scope";
+const RELEASE: &str = "RELEASE write_scope";
+const ROLL_BACK: &str = "ROLLBACK TO write_scope; RELEASE write_scope";
+
 /// A savepoint that has been opened and locked.
 struct Open {
-    name: String,
     /// The Workspace event head when the scope opened: events after it are this write's.
     head: i64,
 }
 
 fn enter(connection: &Connection) -> Result<Open, Error> {
-    static SCOPES: AtomicU64 = AtomicU64::new(0);
-    let name = format!("write_scope_{}", SCOPES.fetch_add(1, Ordering::Relaxed));
     // rusqlite's savepoint guard borrows the connection mutably, which would keep a write
     // from calling other writes; a named savepoint nests however deeply they do.
-    connection.execute_batch(&format!("SAVEPOINT {name}"))?;
-    let open = Open { name, head: 0 };
+    connection.execute_batch(OPEN)?;
     match lock(connection).and_then(|()| events::head(connection)) {
-        Ok(head) => Ok(Open { head, ..open }),
+        Ok(head) => Ok(Open { head }),
         Err(error) => {
-            roll_back(connection, &open);
+            roll_back(connection);
             Err(error)
         }
     }
 }
 
-fn roll_back(connection: &Connection, open: &Open) {
-    let name = &open.name;
+fn roll_back(connection: &Connection) {
     // The error that sent the write here is the one worth reporting.
-    let _ = connection.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"));
+    let _ = connection.execute_batch(ROLL_BACK);
 }
 
 fn leave<T>(connection: &Connection, open: Open, result: Result<T, Error>) -> Result<T, Error> {
-    // A write may create a ticket and then fill it in; it counts as one creation.
+    // A write may create a ticket and then fill it in; it counts as one creation. A write
+    // that logged no event has nothing to fold.
     let result = result.and_then(|value| {
-        events::fold_into_creation(connection, open.head)?;
+        if events::head(connection)? != open.head {
+            events::fold_into_creation(connection, open.head)?;
+        }
         Ok(value)
     });
     match result {
         Ok(value) => {
-            if let Err(error) = connection.execute_batch(&format!("RELEASE {}", open.name)) {
-                roll_back(connection, &open);
+            if let Err(error) = connection.execute_batch(RELEASE) {
+                roll_back(connection);
                 return Err(error.into());
             }
             Ok(value)
         }
         Err(error) => {
-            roll_back(connection, &open);
+            roll_back(connection);
             Err(error)
         }
     }

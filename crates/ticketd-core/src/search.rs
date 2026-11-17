@@ -6,7 +6,7 @@ pub struct TicketWithUpdate {
 
 use crate::{Error, Ticket, Workspace, listed_ticket_from_row, read_scope, relationships};
 use crate::{Status, StatusCounts};
-use rusqlite::{params, params_from_iter, types::Value};
+use rusqlite::{Connection, params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -79,10 +79,196 @@ pub struct TicketMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prerequisites: Option<Vec<relationships::Prerequisite>>,
 }
+/// A ticket as a list or board row shows it: its own values without the body, and
+/// what the row says about its relationships. The detail pane reads the whole Ticket.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TicketRow {
+    pub id: String,
+    pub reference: String,
+    pub title: String,
+    pub status: Status,
+    pub trashed: bool,
+    pub project_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub availability: Option<String>,
+    pub updated_at: Option<String>,
+    pub tags: Vec<String>,
+    /// The latest Activity, with the start of its brief.
+    pub latest_update: Option<crate::LatestUpdate>,
+    /// Set only while an external source owns the ticket.
+    pub source: Option<SourcePill>,
+    pub parent: Option<crate::hierarchy::RelatedTicket>,
+    pub duplicate_of: Option<String>,
+    pub prerequisites: PrerequisiteCounts,
+}
+
+/// A ticket offered to pick up or link: who it is and when it last changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ActiveTicket {
+    pub id: String,
+    pub reference: String,
+    pub title: String,
+    pub status: Status,
+    pub project_id: Option<String>,
+    /// Last content or organization change; unknown for legacy tickets with no dated records.
+    pub updated_at: Option<String>,
+}
+
+const ACTIVE_COLUMNS: &str = "id, reference, title, status, project_id, updated_at";
+
+pub(crate) fn active_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActiveTicket> {
+    Ok(ActiveTicket {
+        id: row.get(0)?,
+        reference: row.get(1)?,
+        title: row.get(2)?,
+        status: row.get::<_, String>(3)?.parse().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        project_id: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
+/// For New Chat's suggestions, out of the Trash, newest first and each once: for each of
+/// `under_way`, the first `count` tickets with that status, the tickets of `project` first
+/// and then the ones changed last; and the tickets named in the JSON array `references`.
+pub(crate) fn suggestion_candidates(
+    connection: &Connection,
+    project: Option<&str>,
+    under_way: [(Status, usize); 2],
+    references: &str,
+) -> Result<Vec<ActiveTicket>, Error> {
+    let first = |status: &str, count: &str| {
+        format!(
+            "SELECT * FROM (SELECT {ACTIVE_COLUMNS}, number FROM tickets WHERE trashed = 0 AND status = {status}
+               ORDER BY (?1 IS NULL OR project_id IS NOT ?1), updated_at DESC, number DESC LIMIT {count})"
+        )
+    };
+    let mut statement = connection.prepare_cached(&format!(
+        "{} UNION {} UNION SELECT {ACTIVE_COLUMNS}, number FROM tickets WHERE trashed = 0 AND reference IN (SELECT value FROM json_each(?6))
+         ORDER BY number DESC",
+        first("?2", "?3"),
+        first("?4", "?5"),
+    ))?;
+    let [(first_status, first_count), (second_status, second_count)] = under_way;
+    let count = |count: usize| i64::try_from(count).unwrap_or(i64::MAX);
+    Ok(statement
+        .query_map(
+            params![
+                project,
+                first_status.to_string(),
+                count(first_count),
+                second_status.to_string(),
+                count(second_count),
+                references
+            ],
+            active_from_row,
+        )?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Who owns an externally owned ticket, as its row names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourcePill {
+    pub provider: String,
+    /// What people call the provider, such as "GitHub".
+    pub provider_name: String,
+    /// Where the issue lives, such as "owner/repo".
+    pub place: String,
+    /// The provider's short number for the issue, such as "#98".
+    pub number: String,
+    pub display: String,
+}
+
+/// How many blockers a ticket has, and how many of them still have to be Done.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct PrerequisiteCounts {
+    pub total: usize,
+    pub unresolved: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TicketMetadataPage {
     pub items: Vec<TicketMetadata>,
     pub omitted: bool,
+}
+
+/// Format version 84: trigram indexes over what ticket search matches, a ticket's title,
+/// reference and body and its Activity briefs, kept in step by triggers. A trigram index
+/// finds every row holding a substring of three or more characters, folding case more
+/// widely than the ASCII-only `lower` the search has always used, so it narrows the
+/// candidates and the old comparison still decides.
+pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS ticket_search_fts USING fts5(title, reference, body, content='tickets', content_rowid='rowid', tokenize='trigram');
+         INSERT INTO ticket_search_fts(ticket_search_fts) VALUES ('rebuild');
+         CREATE TRIGGER IF NOT EXISTS ticket_search_fts_insert AFTER INSERT ON tickets BEGIN
+             INSERT INTO ticket_search_fts(rowid, title, reference, body) VALUES (new.rowid, new.title, new.reference, new.body);
+         END;
+         CREATE TRIGGER IF NOT EXISTS ticket_search_fts_delete AFTER DELETE ON tickets BEGIN
+             INSERT INTO ticket_search_fts(ticket_search_fts, rowid, title, reference, body) VALUES ('delete', old.rowid, old.title, old.reference, old.body);
+         END;
+         CREATE TRIGGER IF NOT EXISTS ticket_search_fts_update AFTER UPDATE OF title, reference, body ON tickets
+         WHEN OLD.title IS NOT NEW.title OR OLD.reference IS NOT NEW.reference OR OLD.body IS NOT NEW.body BEGIN
+             INSERT INTO ticket_search_fts(ticket_search_fts, rowid, title, reference, body) VALUES ('delete', old.rowid, old.title, old.reference, old.body);
+             INSERT INTO ticket_search_fts(rowid, title, reference, body) VALUES (new.rowid, new.title, new.reference, new.body);
+         END;
+         CREATE VIRTUAL TABLE IF NOT EXISTS activity_search_fts USING fts5(brief, content='activities', content_rowid='rowid', tokenize='trigram');
+         INSERT INTO activity_search_fts(activity_search_fts) VALUES ('rebuild');
+         CREATE TRIGGER IF NOT EXISTS activity_search_fts_insert AFTER INSERT ON activities BEGIN
+             INSERT INTO activity_search_fts(rowid, brief) VALUES (new.rowid, new.brief);
+         END;
+         CREATE TRIGGER IF NOT EXISTS activity_search_fts_delete AFTER DELETE ON activities BEGIN
+             INSERT INTO activity_search_fts(activity_search_fts, rowid, brief) VALUES ('delete', old.rowid, old.brief);
+         END;
+         CREATE TRIGGER IF NOT EXISTS activity_search_fts_update AFTER UPDATE OF brief ON activities
+         WHEN OLD.brief IS NOT NEW.brief BEGIN
+             INSERT INTO activity_search_fts(activity_search_fts, rowid, brief) VALUES ('delete', old.rowid, old.brief);
+             INSERT INTO activity_search_fts(rowid, brief) VALUES (new.rowid, new.brief);
+         END;",
+    )?;
+    Ok(())
+}
+
+/// The tickets whose title, reference, body or an Activity brief the trigram indexes
+/// say may hold the phrase bound to the parameter `phrase` names, which is read twice. Every one of them is then
+/// checked with the comparison search has always made.
+fn trigram_hits(phrase: &str) -> String {
+    format!(
+        "SELECT ht.id FROM ticket_search_fts JOIN tickets ht ON ht.rowid = ticket_search_fts.rowid WHERE ticket_search_fts MATCH {phrase}
+         UNION SELECT ha.ticket_id FROM activity_search_fts JOIN activities ha ON ha.rowid = activity_search_fts.rowid WHERE activity_search_fts MATCH {phrase}"
+    )
+}
+
+/// What a search for some text reads. A trigram index can only narrow a search for three
+/// or more characters; a shorter one matches only what every row shows, the title (and
+/// for `search_tickets` the reference), instead of reading every body.
+enum SearchQuery<'a> {
+    Empty,
+    Short(&'a str),
+    Long {
+        text: &'a str,
+        /// The text as one FTS5 phrase: quoted, its quotes doubled, so no character in
+        /// it is read as query syntax.
+        phrase: String,
+    },
+}
+
+impl<'a> SearchQuery<'a> {
+    fn of(text: &'a str) -> Self {
+        match text.chars().count() {
+            0 => Self::Empty,
+            1 | 2 => Self::Short(text),
+            _ => Self::Long {
+                text,
+                phrase: format!("\"{}\"", text.replace('"', "\"\"")),
+            },
+        }
+    }
 }
 
 impl Workspace {
@@ -106,10 +292,19 @@ impl Workspace {
             .transpose()?;
         let mut sql = String::new();
         let mut values: Vec<Value> = Vec::new();
-        if !filter.query.is_empty() {
-            sql.push_str(" AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?)) > 0))");
-            for _ in 0..3 {
-                values.push(filter.query.clone().into());
+        match SearchQuery::of(&filter.query) {
+            SearchQuery::Empty => {}
+            SearchQuery::Short(query) => {
+                sql.push_str(" AND instr(lower(t.title), lower(?)) > 0");
+                values.push(query.to_owned().into());
+            }
+            SearchQuery::Long { text, phrase } => {
+                sql.push_str(&format!(" AND t.id IN ({}) AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?)) > 0))", trigram_hits("?")));
+                values.push(phrase.clone().into());
+                values.push(phrase.into());
+                for _ in 0..3 {
+                    values.push(text.to_owned().into());
+                }
             }
         }
         if let Some(project) = &filter.project {
@@ -183,10 +378,72 @@ impl Workspace {
             let mut tickets = statement
                 .query_map(params_from_iter(values), listed_ticket_from_row)?
                 .collect::<Result<Vec<_>, _>>()?;
-            for ticket in &mut tickets {
-                crate::hydrate(connection, ticket)?;
-            }
+            crate::hydrate::hydrate(connection, &mut tickets)?;
             Ok(tickets)
+        })
+    }
+
+    /// The `limit` tickets out of the Trash whose content or organization changed last,
+    /// most recent first.
+    pub fn active_tickets(&self, limit: usize) -> Result<Vec<ActiveTicket>, Error> {
+        let mut statement = self.connection.prepare_cached(&format!(
+            "SELECT {ACTIVE_COLUMNS} FROM tickets WHERE trashed = 0 ORDER BY updated_at DESC, number DESC LIMIT ?1"
+        ))?;
+        Ok(statement
+            .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], active_from_row)?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// The page [`Workspace::find_tickets`] finds, as the rows of a list or board: no
+    /// bodies, and each relationship read once for the page.
+    pub fn find_ticket_rows(&self, filter: &TicketFilter) -> Result<Vec<TicketRow>, Error> {
+        read_scope::run(&self.connection, |connection| {
+            let (conditions, mut values) = self.filter_conditions(filter)?;
+            let mut sql = format!(
+                "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE t.trashed = 0{conditions}",
+                crate::readiness::indicator_sql("t")
+            );
+            match filter.order {
+                TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
+                TicketOrder::Workflow => sql.push_str(&format!(
+                    " ORDER BY {}, t.number DESC",
+                    Status::workflow_order_sql("t.status")
+                )),
+            }
+            sql.push_str(" LIMIT ? OFFSET ?");
+            values.push(i64::from(filter.limit.clamp(1, 100)).into());
+            values.push(i64::from(filter.offset).into());
+            let mut statement = connection.prepare_cached(&sql)?;
+            let mut rows = statement
+                .query_map(params_from_iter(values), |row| {
+                    Ok(TicketRow {
+                        id: row.get(0)?,
+                        reference: row.get(1)?,
+                        title: row.get(2)?,
+                        status: row.get::<_, String>(3)?.parse().map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                3,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                        trashed: row.get(4)?,
+                        project_id: row.get(5)?,
+                        plan_id: row.get(6)?,
+                        updated_at: row.get(7)?,
+                        availability: row.get(8)?,
+                        tags: Vec::new(),
+                        latest_update: None,
+                        source: None,
+                        parent: None,
+                        duplicate_of: None,
+                        prerequisites: PrerequisiteCounts::default(),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            crate::hydrate::rows(connection, &mut rows)?;
+            Ok(rows)
         })
     }
 
@@ -326,26 +583,42 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Ticket>, Error> {
-        if query.is_empty() {
-            return Ok(Vec::new());
-        }
+        let (matched, phrase) = match SearchQuery::of(query) {
+            SearchQuery::Empty => return Ok(Vec::new()),
+            SearchQuery::Short(_) => (
+                "(instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0)"
+                    .to_owned(),
+                None,
+            ),
+            SearchQuery::Long { phrase, .. } => (
+                format!(
+                    "t.id IN ({}) AND (instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0))",
+                    trigram_hits("?6")
+                ),
+                Some(phrase),
+            ),
+        };
         read_scope::run(&self.connection, |connection| {
             if let Some(id) = project {
                 self.show_project(id)?;
             }
-            let mut statement = connection.prepare(&format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.reference), lower(?1)) > 0 OR instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5",
+            let mut statement = connection.prepare_cached(&format!(
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND {matched} ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5",
             crate::readiness::indicator_sql("t")
         ))?;
-            let mut tickets = statement
-                .query_map(
-                    params![query, project, unlinked, limit.clamp(1, 100), offset],
+            let limit = limit.clamp(1, 100);
+            let rows = match &phrase {
+                Some(phrase) => statement.query_map(
+                    params![query, project, unlinked, limit, offset, phrase],
                     listed_ticket_from_row,
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            for ticket in &mut tickets {
-                crate::hydrate(connection, ticket)?;
-            }
+                )?,
+                None => statement.query_map(
+                    params![query, project, unlinked, limit, offset],
+                    listed_ticket_from_row,
+                )?,
+            };
+            let mut tickets = rows.collect::<Result<Vec<_>, _>>()?;
+            crate::hydrate::hydrate(connection, &mut tickets)?;
             Ok(tickets)
         })
     }

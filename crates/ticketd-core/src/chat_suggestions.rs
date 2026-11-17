@@ -6,6 +6,7 @@ use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::search::ActiveTicket;
 use crate::{Error, Status, Workspace};
 
 /// At most this many suggestions show.
@@ -16,16 +17,7 @@ const CONTINUE_MOST: usize = 2;
 const TRIAGE_LINKS: usize = 20;
 
 /// A ticket as the suggestions weigh it.
-#[derive(Debug, Clone)]
-struct Candidate {
-    pub id: String,
-    pub reference: String,
-    pub title: String,
-    pub status: Status,
-    pub project_id: Option<String>,
-    /// Last content or organization change, as an RFC 3339 timestamp.
-    pub updated_at: Option<String>,
-}
+type Candidate = ActiveTicket;
 
 /// One unread Inbox entry: the ticket it is about and when it arrived.
 #[derive(Debug, Clone)]
@@ -96,19 +88,7 @@ impl Workspace {
                 Some(folder) => self.project_for_folder(folder)?.map(|project| project.id),
                 None => None,
             };
-            let tickets = self
-                .list_tickets()?
-                .into_iter()
-                .map(|ticket| Candidate {
-                    id: ticket.id,
-                    reference: ticket.reference,
-                    title: ticket.title,
-                    status: ticket.status,
-                    project_id: ticket.project_id,
-                    updated_at: ticket.updated_at,
-                })
-                .collect();
-            let unread = self
+            let unread: Vec<Unread> = self
                 .inbox_page(100, 0, true)?
                 .into_iter()
                 .map(|entry| Unread {
@@ -116,6 +96,24 @@ impl Workspace {
                     timestamp: entry.timestamp,
                 })
                 .collect();
+            // Only the tickets a suggestion can name: the first of those under way in the
+            // order `suggest` weighs them, enough to remain once `skip` is left out, and
+            // those the unread entries are about.
+            let references = serde_json::to_string(
+                &unread
+                    .iter()
+                    .map(|entry| entry.reference.as_str())
+                    .collect::<Vec<_>>(),
+            )?;
+            let tickets = crate::search::suggestion_candidates(
+                &self.connection,
+                project_id.as_deref(),
+                [
+                    (Status::InProgress, CONTINUE_MOST + skip.len()),
+                    (Status::InReview, 1 + skip.len()),
+                ],
+                &references,
+            )?;
             Ok(suggest(&Records {
                 tickets,
                 unread,

@@ -4,8 +4,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 use ticketd_core::{
     Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationExample,
-    AutomationRun, AutomationRunStatus, AutomationRunTicket, DEFAULT_AUTOMATION_RUNS_AT_ONCE,
-    MOST_AUTOMATION_RUNS_AT_ONCE, RunAnswer,
+    AutomationRun, AutomationRunScope, AutomationRunSummary, DEFAULT_AUTOMATION_RUNS_AT_ONCE,
+    MOST_AUTOMATION_RUNS_AT_ONCE,
 };
 
 use crate::automation_runner::AutomationRunner;
@@ -153,67 +153,53 @@ pub fn automation_text_preview(
 }
 
 /// A run as a list shows it. The run view reads the whole run.
-#[derive(serde::Serialize)]
-pub struct ListedRun {
-    id: String,
-    automation_id: String,
-    /// The Automation as it is called now.
-    automation_name: String,
-    status: AutomationRunStatus,
-    /// Why it needs attention.
-    reason: Option<String>,
-    /// It needs attention and the person has not yet acted on it.
-    needs_you: bool,
-    /// How the person answered it, once it no longer needs them.
-    answer: Option<RunAnswer>,
-    /// Its Automation was deleted: it cannot be run again.
-    automation_deleted: bool,
-    ticket: Option<AutomationRunTicket>,
-    created_at: String,
-}
+pub type ListedRun = AutomationRunSummary;
 
-fn listed(runs: Vec<AutomationRun>) -> Vec<ListedRun> {
-    runs.into_iter()
-        .map(|run| ListedRun {
-            id: run.id,
-            automation_id: run.automation_id,
-            automation_name: run.automation_name,
-            status: run.status,
-            reason: run.reason,
-            needs_you: run.needs_you,
-            answer: run.answer,
-            automation_deleted: run.automation_deleted,
-            ticket: run.ticket,
-            created_at: run.created_at,
+/// A page of the runs in `scope`. A list that passes no `limit` reads them all, as
+/// before lists were paged; the 90-day retention bounds them.
+fn run_page(
+    scope: AutomationRunScope,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<ListedRun>, String> {
+    open_workspace()
+        .and_then(|workspace| {
+            workspace.automation_run_summaries(
+                &scope,
+                limit.unwrap_or(u32::MAX),
+                offset.unwrap_or(0),
+            )
         })
-        .collect()
+        .map_err(|error| error.to_string())
 }
 
 /// An Automation's runs on this device, newest first.
 #[tauri::command]
-pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, String> {
-    open_workspace()
-        .and_then(|workspace| workspace.automation_runs(&automation_id))
-        .map(listed)
-        .map_err(|error| error.to_string())
+pub fn automation_run_list(
+    automation_id: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<ListedRun>, String> {
+    run_page(AutomationRunScope::Automation(automation_id), limit, offset)
 }
 
 /// The runs of every Automation on this device, newest first.
 #[tauri::command]
-pub fn automation_run_list_all() -> Result<Vec<ListedRun>, String> {
-    open_workspace()
-        .and_then(|workspace| workspace.all_automation_runs())
-        .map(listed)
-        .map_err(|error| error.to_string())
+pub fn automation_run_list_all(
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<ListedRun>, String> {
+    run_page(AutomationRunScope::All, limit, offset)
 }
 
 /// The runs that acted on a ticket, newest first.
 #[tauri::command]
-pub fn automation_run_list_for_ticket(reference: String) -> Result<Vec<ListedRun>, String> {
-    open_workspace()
-        .and_then(|workspace| workspace.ticket_automation_runs(&reference))
-        .map(listed)
-        .map_err(|error| error.to_string())
+pub fn automation_run_list_for_ticket(
+    reference: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<ListedRun>, String> {
+    run_page(AutomationRunScope::Ticket(reference), limit, offset)
 }
 
 /// The run the person took over through this Chat, if they did.
@@ -221,7 +207,7 @@ pub fn automation_run_list_for_ticket(reference: String) -> Result<Vec<ListedRun
 pub fn automation_run_taken_over_in(chat_id: String) -> Result<Option<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_run_taken_over_in(&chat_id))
-        .map(|run| listed(run.into_iter().collect()).pop())
+        .map(|run| run.map(ListedRun::from))
         .map_err(|error| error.to_string())
 }
 

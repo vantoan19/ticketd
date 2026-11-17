@@ -1,8 +1,8 @@
 use ticketd_core::{
-    Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunStatus,
-    AutomationStepStatus, ChatLink, ChatLinkKind, ChatListFilter, Check, Condition, NewChat,
-    NotifyTarget, RunAction, RunAnswer, RunEnd, Step, StepAction, StepOutcome, Ticket, Trigger,
-    Workspace,
+    Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunScope,
+    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatLink, ChatLinkKind,
+    ChatListFilter, Check, Condition, NewChat, NotifyTarget, RunAction, RunAnswer, RunEnd,
+    RunningAutomationRuns, Step, StepAction, StepOutcome, Ticket, Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -1327,4 +1327,88 @@ fn the_previous_format_keeps_its_runs_and_the_ones_needing_attention_still_need_
 
     assert!(workspace.automation_run(&run.id).unwrap().needs_you);
     assert_eq!(needing_you(&workspace), 1);
+}
+
+fn summary(run: AutomationRun) -> AutomationRunSummary {
+    AutomationRunSummary {
+        id: run.id,
+        automation_id: run.automation_id,
+        automation_name: run.automation_name,
+        status: run.status,
+        reason: run.reason,
+        needs_you: run.needs_you,
+        answer: run.answer,
+        automation_deleted: run.automation_deleted,
+        ticket: run.ticket,
+        created_at: run.created_at,
+    }
+}
+
+#[test]
+fn run_summaries_and_running_runs_say_what_the_full_runs_say() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let other = triage(&mut workspace);
+    let first = tagged(&mut workspace, "First");
+    for title in ["Second", "Third"] {
+        tagged(&mut workspace, title);
+    }
+    workspace.queue_automation_runs().unwrap();
+    let started = workspace.start_automation_runs(3).unwrap();
+    // One agent step under way, with its Chat; one run ended as Needs attention.
+    workspace
+        .advance_automation_run(&started[0].id, None)
+        .unwrap();
+    workspace
+        .advance_automation_run(&started[1].id, None)
+        .unwrap();
+    workspace
+        .advance_automation_run(&started[1].id, failed("No answer"))
+        .unwrap();
+    workspace.delete_automation(&other.id).unwrap();
+
+    let scopes = [
+        AutomationRunScope::All,
+        AutomationRunScope::Automation(automation.id.clone()),
+        AutomationRunScope::Ticket(first.reference.clone()),
+    ];
+    for scope in &scopes {
+        let full = match scope {
+            AutomationRunScope::All => workspace.all_automation_runs(),
+            AutomationRunScope::Automation(id) => workspace.automation_runs(id),
+            AutomationRunScope::Ticket(reference) => workspace.ticket_automation_runs(reference),
+        }
+        .unwrap();
+        let expected: Vec<_> = full.into_iter().map(summary).collect();
+        assert_eq!(
+            workspace.automation_run_summaries(scope, 100, 0).unwrap(),
+            expected,
+            "{scope:?}"
+        );
+        assert_eq!(
+            workspace.automation_run_summaries(scope, 2, 1).unwrap(),
+            expected.into_iter().skip(1).take(2).collect::<Vec<_>>(),
+            "{scope:?}, second page"
+        );
+    }
+
+    let running: Vec<AutomationRun> = workspace
+        .all_automation_runs()
+        .unwrap()
+        .into_iter()
+        .filter(|run| run.status == AutomationRunStatus::Running)
+        .collect();
+    let chat_ids: Vec<String> = running
+        .iter()
+        .flat_map(|run| &run.steps)
+        .filter_map(|step| step.chat_id.clone())
+        .collect();
+    assert!(!chat_ids.is_empty());
+    assert_eq!(
+        workspace.running_automation_runs().unwrap(),
+        RunningAutomationRuns {
+            runs: running.len(),
+            chat_ids,
+        }
+    );
 }

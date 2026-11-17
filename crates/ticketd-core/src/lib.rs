@@ -53,9 +53,13 @@ mod projects;
 mod relationships;
 pub use relationships::RelationshipKind;
 mod search;
-pub use search::{Availability, TicketFilter, TicketOrder};
+pub use search::{
+    ActiveTicket, Availability, PrerequisiteCounts, SourcePill, TicketFilter, TicketOrder,
+    TicketRow,
+};
 mod sync_files;
 pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
+mod hydrate;
 mod read_scope;
 mod tags;
 mod ticket_documents;
@@ -76,7 +80,7 @@ mod history;
 mod readiness;
 pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
-pub use inbox::InboxEntry;
+pub use inbox::{AttentionEntry, InboxAttention, InboxEntry, ReminderState, ReviewState};
 mod activities;
 mod attachment_cleanup;
 mod attachment_library;
@@ -127,8 +131,9 @@ pub use automation_agents::{
 pub use automation_examples::AutomationExample;
 pub use automation_run_machine::{RunEnd, StepOutcome};
 pub use automation_runs::{
-    AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
-    AutomationStepStatus, RunAnswer,
+    AutomationRun, AutomationRunScope, AutomationRunStatus, AutomationRunStep,
+    AutomationRunSummary, AutomationRunTicket, AutomationStepStatus, RunAnswer,
+    RunningAutomationRuns,
 };
 pub use automation_steps::AutomationNotification;
 pub use automations::{
@@ -143,8 +148,8 @@ pub use chats::{
     ChatInputStanding, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
     ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter, ChatMessage, ChatNotice,
     ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin, ChatSnapshot,
-    ChatSubmissionAttempt, ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
-    NewChat,
+    ChatSubmissionAttempt, ChatSubmissionIntent, ChatSummary, ChatTool, ChatToolState, ChatTurn,
+    ChatTurnState, FolderChat, NewChat,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
@@ -810,15 +815,6 @@ impl Workspace {
         self.list_by_trash(false)
     }
 
-    /// The `limit` tickets out of the trash whose content or organization changed
-    /// last, most recent first.
-    pub fn recently_updated_tickets(&self, limit: usize) -> Result<Vec<Ticket>, Error> {
-        let mut tickets = self.list_tickets()?;
-        tickets.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        tickets.truncate(limit);
-        Ok(tickets)
-    }
-
     pub fn list_trash(&self) -> Result<Vec<Ticket>, Error> {
         self.list_by_trash(true)
     }
@@ -832,9 +828,7 @@ impl Workspace {
             let mut tickets = statement
                 .query_map([trashed], listed_ticket_from_row)?
                 .collect::<Result<Vec<_>, _>>()?;
-            for ticket in &mut tickets {
-                hydrate(connection, ticket)?;
-            }
+            hydrate::hydrate(connection, &mut tickets)?;
             Ok(tickets)
         })
     }
@@ -846,29 +840,10 @@ impl Workspace {
     }
 }
 
-/// Everything shown about a listed ticket beyond its own row and availability.
-pub(crate) fn hydrate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    ticket.tags = tags::for_ticket(connection, &ticket.id)?;
-    relationships::populate(connection, ticket)?;
-    hierarchy::populate(connection, ticket)?;
-    duplicates::populate(connection, ticket)?;
-    source::populate(connection, ticket)?;
-    activities::populate_update(connection, ticket)
-}
-
 /// A ticket with everything shown about it. A write calls this at the end of its scope, so
 /// the result is what the write left behind.
 pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
-    let ticket = connection
-        .prepare_cached(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
-        )?
-        .query_row([reference], ticket_from_row)
-        .optional()?;
-    let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-    ticket.availability = readiness::indicator(connection, &ticket.id)?;
-    hydrate(connection, &mut ticket)?;
-    Ok(ticket)
+    hydrate::one(connection, reference)
 }
 
 /// A ticket from a list query that selected `readiness::indicator_sql` as its ninth

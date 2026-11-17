@@ -188,12 +188,19 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
 
 pub(crate) use tracking::{availability_projection, guard_change, guard_duplicate, held_sql};
 
-/// Fills the ticket's external side and any blocking publication attempt.
-pub(crate) fn populate(
+/// Fills the external side of a ticket that has one.
+pub(crate) fn populate_tracking(
     connection: &rusqlite::Connection,
     ticket: &mut crate::Ticket,
 ) -> Result<(), Error> {
-    tracking::populate(connection, ticket)?;
+    tracking::populate(connection, ticket)
+}
+
+/// Fills the publication attempt that blocks publishing a ticket, if any.
+pub(crate) fn populate_publication(
+    connection: &rusqlite::Connection,
+    ticket: &mut crate::Ticket,
+) -> Result<(), Error> {
     publication::populate(connection, ticket)
 }
 

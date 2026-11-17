@@ -575,6 +575,20 @@ fn find_tickets_with_updates(
         })
         .map_err(BridgeFailure::from)
 }
+/// Every Inbox entry with whether it still needs the person, in one read.
+#[tauri::command]
+fn inbox_attention() -> Result<ticketd_core::InboxAttention, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.inbox_attention())
+        .map_err(BridgeFailure::from)
+}
+/// A page of list or board rows: what `find_tickets_with_updates` finds, without bodies.
+#[tauri::command]
+fn find_ticket_rows(filter: TicketFilter) -> Result<Vec<ticketd_core::TicketRow>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.find_ticket_rows(&filter))
+        .map_err(BridgeFailure::from)
+}
 #[tauri::command]
 fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, BridgeFailure> {
     open_workspace()
@@ -1852,6 +1866,8 @@ pub fn run() -> Result<(), tauri::Error> {
             show_ticket,
             search_tickets,
             find_tickets_with_updates,
+            find_ticket_rows,
+            inbox_attention,
             count_tickets,
             context_graph,
             workspace_graph,

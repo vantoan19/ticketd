@@ -18,9 +18,9 @@ use ticketd_chat_host::{
     TurnEnding, UnconfirmedCleanup, WorkspaceOpener, harness_key,
 };
 use ticketd_core::{
-    AutomationRunStatus, BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding,
-    ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
-    ChatSubmissionIntent, ChatTurnState, NewChat, Workspace,
+    BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
+    ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
+    ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -947,23 +947,17 @@ impl Chats {
             .map(|host| host.live())
             .unwrap_or_default();
         live.retain(|_, live| live.activity != Activity::Idle);
-        let runs = self
+        let going = self
             .workspace()
             .ok()
-            .and_then(|workspace| workspace.all_automation_runs().ok())
+            .and_then(|workspace| workspace.running_automation_runs().ok())
             .unwrap_or_default();
-        let going: Vec<_> = runs
-            .iter()
-            .filter(|run| run.status == AutomationRunStatus::Running)
-            .collect();
-        for step in going.iter().flat_map(|run| &run.steps) {
-            if let Some(chat_id) = &step.chat_id {
-                live.remove(chat_id);
-            }
+        for chat_id in &going.chat_ids {
+            live.remove(chat_id);
         }
         Stopping {
             chats: live.len(),
-            runs: going.len(),
+            runs: going.runs,
         }
     }
 
@@ -1901,7 +1895,7 @@ impl Chats {
         let workspace = self.workspace()?;
         if query.is_empty() {
             let mut found = Vec::new();
-            for ticket in workspace.recently_updated_tickets(4)? {
+            for ticket in workspace.active_tickets(4)? {
                 found.push(LinkedRecord::Ticket {
                     status: status_name(ticket.status)?,
                     id: ticket.id,

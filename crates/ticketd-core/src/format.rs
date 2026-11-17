@@ -22,20 +22,20 @@ use crate::{
     Error, activities, attachment_cleanup, attachment_retention, attachments, automation_agents,
     automation_background, automation_runs, automations, change_token, chats, device,
     document_links, documents, drive, duplicates, embedded_attachments, events, hierarchy, history,
-    inbox, plans, projects, relationships, source, sync, tags, ticket_documents,
+    inbox, plans, projects, relationships, search, source, sync, tags, ticket_documents,
     upload_destination, versions,
 };
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 83;
+pub const FORMAT_VERSION: i64 = 84;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
 type Step = fn(&Transaction<'_>, i64) -> Result<(), Error>;
 
 /// Every step in order. Entry `n` takes a Workspace from format version `n - 1` to `n`.
-const LADDER: [(i64, Step); 83] = [
+const LADDER: [(i64, Step); 84] = [
     (1, |tx, _| tx.execute_batch(TICKETS).map_err(Into::into)),
     (2, |tx, _| tx.execute_batch(TICKET_BODY).map_err(Into::into)),
     (3, |tx, _| history::migrate(tx)),
@@ -143,6 +143,7 @@ const LADDER: [(i64, Step); 83] = [
     }),
     (82, |tx, _| source::migrate_read_partitions(tx)),
     (83, |tx, _| chats::migrate_turn_ending(tx)),
+    (84, |tx, _| read_models(tx)),
 ];
 
 /// Takes a Workspace at format version `from` to the current one, or creates it when
@@ -489,6 +490,32 @@ fn graph_search(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
         CREATE TRIGGER IF NOT EXISTS plan_graph_fts_delete AFTER DELETE ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); END;
         CREATE TRIGGER IF NOT EXISTS plan_graph_fts_update AFTER UPDATE OF name, purpose ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); INSERT INTO plan_graph_fts(rowid, name, purpose) VALUES (new.rowid, new.name, new.purpose); END;")?;
     Ok(())
+}
+
+/// Step 84: what the read models need. Indexes for the counts and for the duplicates of
+/// a ticket; full-text indexes that skip an update leaving the indexed text as it was, and
+/// a Ticket upload mark that skips one leaving the row as it was; and the trigram index
+/// that ticket search reads (`search::migrate`).
+fn read_models(tx: &Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS duplicate_tickets_canonical ON duplicate_tickets(canonical_id, source_id);
+         CREATE INDEX IF NOT EXISTS tickets_trashed_status ON tickets(trashed, status);
+         CREATE INDEX IF NOT EXISTS tickets_recent ON tickets(trashed, updated_at, number);
+         DROP TRIGGER IF EXISTS ticket_graph_fts_update;
+         CREATE TRIGGER ticket_graph_fts_update AFTER UPDATE OF title, body ON tickets
+         WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body BEGIN
+             INSERT INTO ticket_graph_fts(ticket_graph_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
+             INSERT INTO ticket_graph_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+         END;
+         DROP TRIGGER IF EXISTS document_fts_update;
+         CREATE TRIGGER document_fts_update AFTER UPDATE OF title, body ON documents
+         WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body BEGIN
+             INSERT INTO document_fts(document_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
+             INSERT INTO document_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+         END;",
+    )?;
+    sync::migrate_unchanged_tickets(tx)?;
+    search::migrate(tx)
 }
 
 #[cfg(test)]

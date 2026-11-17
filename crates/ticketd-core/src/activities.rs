@@ -157,12 +157,21 @@ pub struct UpdateBrief {
     pub truncated: bool,
 }
 
-pub(crate) fn latest(conn: &Connection, ticket: &str) -> Result<Option<LatestUpdate>, Error> {
-    Ok(conn.query_row("SELECT id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [ticket], |row| {
-        let brief: String = row.get(1)?;
+impl UpdateBrief {
+    /// The start of `brief` a list or rail shows: its first 1024 characters.
+    pub(crate) fn of(brief: &str) -> Self {
         let mut chars = brief.chars();
         let text = chars.by_ref().take(1024).collect();
-        Ok(LatestUpdate { activity_id: row.get(0)?, supporting_document_id: row.get(5)?, brief: UpdateBrief { text, truncated: chars.next().is_some() }, reported_at: row.get(2)?, updated_at: row.get(3)?, editing_agent: row.get(4)? })
+        Self {
+            text,
+            truncated: chars.next().is_some(),
+        }
+    }
+}
+
+pub(crate) fn latest(conn: &Connection, ticket: &str) -> Result<Option<LatestUpdate>, Error> {
+    Ok(conn.query_row("SELECT id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [ticket], |row| {
+        Ok(LatestUpdate { activity_id: row.get(0)?, supporting_document_id: row.get(5)?, brief: UpdateBrief::of(&row.get::<_, String>(1)?), reported_at: row.get(2)?, updated_at: row.get(3)?, editing_agent: row.get(4)? })
     }).optional()?)
 }
 
@@ -172,14 +181,6 @@ pub struct ReportedUpdate {
     pub activity_id: String,
     pub reported_at: String,
     pub editing_agent: Option<String>,
-}
-
-pub(crate) fn populate_update(conn: &Connection, ticket: &mut crate::Ticket) -> Result<(), Error> {
-    ticket.updated_at = conn
-        .prepare_cached("SELECT updated_at FROM tickets WHERE id = ?1")?
-        .query_row([&ticket.id], |row| row.get(0))?;
-    ticket.latest_update = conn.prepare_cached("SELECT id, reported_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1")?.query_row([&ticket.id], |row| Ok(ReportedUpdate { activity_id: row.get(0)?, reported_at: row.get(1)?, editing_agent: row.get(2)? })).optional()?;
-    Ok(())
 }
 
 pub(crate) fn migrate_updates(tx: &Transaction<'_>) -> Result<(), Error> {
