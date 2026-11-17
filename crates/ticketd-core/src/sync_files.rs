@@ -1821,7 +1821,7 @@ impl Workspace {
     pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
         record.validate()?;
         let transaction = self.connection.savepoint()?;
-        crate::transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let mut apply = Apply {
             c: &transaction,
             record,

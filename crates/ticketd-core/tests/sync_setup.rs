@@ -13,89 +13,9 @@ use ticketd_core::{
     },
 };
 
-const BYTES: &[u8] = b"the bytes of the attached file";
-
-struct Desks {
-    directory: tempfile::TempDir,
-    remote: FakeRemote,
-}
-
-fn desks() -> Desks {
-    Desks {
-        directory: tempfile::tempdir().unwrap(),
-        remote: FakeRemote::new(),
-    }
-}
-
-impl Desks {
-    /// A Workspace signed in to the storage under a desktop name.
-    fn desk(&self, name: &str) -> Workspace {
-        let mut workspace = Workspace::open(self.directory.path().join(name)).unwrap();
-        workspace
-            .set_sync_settings(name, 60, AttachmentDownload::Automatic)
-            .unwrap();
-        workspace
-            .sync_connect("connection-1", "person@example.com")
-            .unwrap();
-        workspace
-    }
-
-    /// A desk whose Workspace is uploaded to a folder of its own, holding one
-    /// ticket with an Attachment that its description also links.
-    fn uploaded(&self, name: &str) -> (Workspace, String, String) {
-        let mut desk = self.desk(name);
-        let reference = desk.create_ticket("Login").unwrap().reference;
-        let attachment = desk
-            .import_attachment_bytes("request-1", "notes.txt", BYTES, |_, _| true)
-            .unwrap()
-            .id;
-        desk.set_ticket_attachment(&reference, &attachment, true)
-            .unwrap();
-        let link = format!("[notes]({})", desk.attachment_uri(&attachment).unwrap());
-        desk.change_ticket(
-            &reference,
-            TicketPatch {
-                body: Some(link),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        desk.sync_upload_workspace(&self.remote, "ticketd Home")
-            .unwrap();
-        desk.sync_now(&self.remote).unwrap();
-        (desk, reference, attachment)
-    }
-
-    /// Another desk that replaced its Workspace with the one in the storage.
-    fn joined(&self, name: &str, mode: AttachmentDownload) -> Workspace {
-        let mut desk = self.desk(name);
-        desk.set_sync_settings(name, 60, mode).unwrap();
-        let folder = self.folder();
-        desk.sync_download_workspace(&self.remote, &folder)
-            .unwrap()
-            .0
-    }
-
-    fn folder(&self) -> String {
-        self.remote.folders().unwrap()[0].id.clone()
-    }
-
-    fn file(&self, key: &RemoteKey) -> (String, Vec<u8>) {
-        let folder = self.folder();
-        let file = self
-            .remote
-            .list(&folder)
-            .unwrap()
-            .into_iter()
-            .find(|file| file.key == *key)
-            .unwrap();
-        let mut bytes = Vec::new();
-        self.remote
-            .download(&folder, key, &file.version, &mut bytes)
-            .unwrap();
-        (file.version, bytes)
-    }
-}
+#[path = "support/sync_desks.rs"]
+mod sync_desks;
+use sync_desks::{BYTES, Desks, desks};
 
 fn retitle(workspace: &mut Workspace, reference: &str, title: &str) {
     workspace
@@ -1279,8 +1199,6 @@ fn a_workspace_file_copied_to_another_desktop_joins_as_a_desktop_of_its_own() {
     let mut copy = Workspace::open(path("Desk C")).unwrap();
     let shared = a.device_code().unwrap();
     assert_eq!(copy.device_code().unwrap(), shared);
-    // The app is launched on the copy.
-    copy.start_sync_session().unwrap();
 
     // Whichever of the two runs after the other has synced is the one that
     // finds out and gives way.
@@ -1616,7 +1534,6 @@ fn tickets_made_on_both_copies_before_the_copy_is_detected_are_reported_not_merg
     std::fs::copy(path("Desk A"), path("Desk C")).unwrap();
     let mut a = Workspace::open(path("Desk A")).unwrap();
     let mut copy = Workspace::open(path("Desk C")).unwrap();
-    copy.start_sync_session().unwrap();
     let from_a = a.create_ticket("From A").unwrap().reference;
     let from_copy = copy.create_ticket("From the copy").unwrap().reference;
     assert_eq!(from_a, from_copy);
@@ -1655,7 +1572,7 @@ fn runs_with_nothing_to_send_write_nothing_after_the_first_of_an_app_session() {
 
     // The next launch writes this desk's run token once.
     let token = registered(&desks)["devices"].clone();
-    a.start_sync_session().unwrap();
+    a = desks.launched_again("Desk A");
     for _ in 0..3 {
         a.sync_now(&desks.remote).unwrap();
     }
@@ -1681,7 +1598,7 @@ fn a_run_token_write_that_fails_or_whose_answer_is_lost_does_not_make_a_desktop_
     assert_eq!(before.0.len(), 1);
 
     // The write arrives, its answer does not.
-    a.start_sync_session().unwrap();
+    a = desks.launched_again("Desk A");
     desks.remote.drop_write(1, RemoteError::Offline);
     let status = a.sync_now(&desks.remote).unwrap();
     assert_eq!(status.recovery, Some(SyncRecovery::Offline));
@@ -1689,7 +1606,7 @@ fn a_run_token_write_that_fails_or_whose_answer_is_lost_does_not_make_a_desktop_
     assert_eq!(identity(&desks, &a), before);
 
     // The write does not arrive.
-    a.start_sync_session().unwrap();
+    a = desks.launched_again("Desk A");
     desks.remote.fail(RemoteOp::Write, 1, RemoteError::Offline);
     let status = a.sync_now(&desks.remote).unwrap();
     assert_eq!(status.recovery, Some(SyncRecovery::Offline));
@@ -1703,7 +1620,7 @@ fn two_processes_on_one_workspace_file_starting_together_stay_one_desktop() {
     let desks = desks();
     let (mut a, _, _) = desks.uploaded("Desk A");
     let before = identity(&desks, &a);
-    a.start_sync_session().unwrap();
+    a = desks.launched_again("Desk A");
     // A second process runs its first sync between this run reading what the
     // Workspace stores and reading the registry.
     let once = std::sync::atomic::AtomicBool::new(false);
@@ -1713,7 +1630,7 @@ fn two_processes_on_one_workspace_file_starting_together_stay_one_desktop() {
         halfway: None,
         during_listing: Some(Box::new(|| {
             if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                let mut other = Workspace::open(desks.directory.path().join("Desk A")).unwrap();
+                let mut other = desks.launched_again("Desk A");
                 assert_eq!(other.sync_now(&desks.remote).unwrap().recovery, None);
             }
         })),
@@ -1723,6 +1640,94 @@ fn two_processes_on_one_workspace_file_starting_together_stay_one_desktop() {
     assert_eq!(a.sync_now(&desks.remote).unwrap().recovery, None);
 
     assert_eq!(identity(&desks, &a), before);
+}
+
+#[test]
+fn a_run_never_overlaps_another_run_of_the_same_workspace_file() {
+    let desks = desks();
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    retitle(&mut a, &reference, "Renamed");
+    // While `a` lists the folder, another handle on the same file asks to run.
+    let refused: std::sync::Mutex<Option<(SyncStatus, usize)>> = std::sync::Mutex::new(None);
+    let overlapping = Hooked {
+        remote: desks.remote.clone(),
+        during_download: Box::new(|| {}),
+        halfway: None,
+        during_listing: Some(Box::new(|| {
+            let mut guard = refused.lock().unwrap();
+            if guard.is_none() {
+                let mut other = Workspace::open(desks.directory.path().join("Desk A")).unwrap();
+                let calls = desks.remote.calls().len();
+                let status = other.sync_now(&desks.remote).unwrap();
+                *guard = Some((status, desks.remote.calls().len() - calls));
+            }
+        })),
+    };
+
+    let status = a.sync_now(&overlapping).unwrap();
+    assert!(!status.run_in_progress);
+    assert_eq!(status.pending_uploads, []);
+
+    // The second run did nothing: no call to the storage, the change still
+    // waiting, and the status says why.
+    let (second, calls) = refused.lock().unwrap().take().unwrap();
+    assert_eq!(calls, 0);
+    assert!(second.run_in_progress);
+    assert_eq!(second.pending_total, 1);
+    assert_eq!(second.recovery, None);
+
+    // Once the run has ended, the Workspace file can run again.
+    let mut again = Workspace::open(desks.directory.path().join("Desk A")).unwrap();
+    assert!(!again.sync_now(&desks.remote).unwrap().run_in_progress);
+}
+
+#[test]
+fn a_run_ending_in_a_recovery_state_gives_the_workspace_file_back() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    desks.remote.fail(RemoteOp::List, 1, RemoteError::Offline);
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, Some(SyncRecovery::Offline));
+    assert!(!status.run_in_progress);
+
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!((status.recovery, status.run_in_progress), (None, false));
+}
+
+#[test]
+fn the_first_run_after_a_launch_begins_the_session_without_being_asked() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    b.set_sync_settings("Desk B", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    drop(b);
+    // What a download leaves when the app stops in the middle of it.
+    let cut_off = || {
+        rusqlite::Connection::open(desks.directory.path().join("Desk B"))
+            .unwrap()
+            .execute("UPDATE sync_attachments SET state = 'downloading'", [])
+            .unwrap();
+    };
+    let state = |workspace: &Workspace| {
+        workspace
+            .attachment_availability(std::slice::from_ref(&attachment))
+            .unwrap()[0]
+            .state
+    };
+    cut_off();
+    let mut launched = desks.launched_again("Desk B");
+    assert_eq!(state(&launched), AttachmentAvailabilityState::Downloading);
+
+    launched.sync_now(&desks.remote).unwrap();
+    assert_eq!(state(&launched), AttachmentAvailabilityState::Downloaded);
+
+    // Only the first run of a launch does that: a download under way later
+    // may belong to another connection.
+    cut_off();
+    launched.sync_now(&desks.remote).unwrap();
+    assert_eq!(state(&launched), AttachmentAvailabilityState::Downloading);
 }
 
 #[test]

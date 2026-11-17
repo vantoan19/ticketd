@@ -21,7 +21,6 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
         INSERT OR IGNORE INTO attachment_upload_destination VALUES (1, '{\"kind\":\"local\"}');
         CREATE TABLE IF NOT EXISTS attachment_upload_destinations (request_id TEXT PRIMARY KEY, destination TEXT NOT NULL);")?;
     crate::change_token::migrate(tx)?;
-    tx.pragma_update(None, "user_version", 55)?;
     Ok(())
 }
 

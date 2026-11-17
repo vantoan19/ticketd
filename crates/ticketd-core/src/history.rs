@@ -81,79 +81,6 @@ impl Status {
     }
 }
 
-/// SQL for a blocker, named by its table alias, that does not yet satisfy a
-/// dependency. Set-based readiness queries (counts, search, graph) use it; it is
-/// the SQL form of [`Status::satisfies_dependency`], which [`readiness`] and
-/// [`unresolved_blockers`] use for one ticket held in memory.
-pub(crate) fn unresolved_blocker_sql(alias: &str) -> String {
-    format!("{alias}.status != 'Done'")
-}
-
-/// Whether a ticket can be picked up now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Readiness {
-    /// Todo with every blocker Done.
-    Ready,
-    /// Todo with an unresolved blocker.
-    Blocked,
-    /// Started, finished, or in the trash: no Ready or Blocked indicator, matching the
-    /// Ready list, which leaves trashed tickets out.
-    NoReadyState,
-}
-
-/// The one in-memory readiness rule, given the statuses of a ticket's blockers.
-pub(crate) fn readiness(
-    status: Status,
-    trashed: bool,
-    blockers: impl IntoIterator<Item = Status>,
-) -> Readiness {
-    if trashed || status != Status::Todo {
-        Readiness::NoReadyState
-    } else if blockers.into_iter().all(Status::satisfies_dependency) {
-        Readiness::Ready
-    } else {
-        Readiness::Blocked
-    }
-}
-
-/// The "Ready" or "Blocked" indicator of the ticket `id`, read from its blockers' current
-/// statuses through [`readiness`]; none when the ticket has no Ready state.
-pub(crate) fn availability(
-    connection: &Connection,
-    id: &str,
-    status: Status,
-    trashed: bool,
-) -> Result<Option<String>, Error> {
-    let unresolved: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = ?1 AND b.status <> 'Done')",
-        [id], |row| row.get(0),
-    )?;
-    // A ticket whose issue the source closed for an unrecognized reason awaits a
-    // local decision; it is neither Ready nor Blocked.
-    if crate::source::closure_held(connection, id)? {
-        return Ok(None);
-    }
-    Ok(
-        match readiness(status, trashed, unresolved.then_some(Status::Todo)) {
-            Readiness::Ready => Some("Ready".into()),
-            Readiness::Blocked => Some("Blocked".into()),
-            Readiness::NoReadyState => None,
-        },
-    )
-}
-
-/// The blockers, with their statuses, that do not satisfy a dependency.
-pub(crate) fn unresolved_blockers(
-    blockers: impl IntoIterator<Item = (String, Status)>,
-) -> Vec<String> {
-    blockers
-        .into_iter()
-        .filter(|(_, status)| !status.satisfies_dependency())
-        .map(|(reference, _)| reference)
-        .collect()
-}
-
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -195,7 +122,7 @@ pub struct HistoryEntry {
 }
 
 pub(crate) fn migrate(transaction: &Transaction<'_>) -> Result<(), Error> {
-    transaction.execute_batch("CREATE TABLE ticket_history (number INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), editing_agent TEXT); PRAGMA user_version = 3;")?;
+    transaction.execute_batch("CREATE TABLE ticket_history (number INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), editing_agent TEXT);")?;
     Ok(())
 }
 

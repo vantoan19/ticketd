@@ -27,12 +27,12 @@ pub struct RemoteAttachmentRemoval {
 }
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
-    tx.execute_batch("ALTER TABLE attachments ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1) AND (quarantined=0 OR kind='local_snapshot')); ALTER TABLE attachments ADD COLUMN added_at TEXT; PRAGMA user_version=53;")?;
+    tx.execute_batch("ALTER TABLE attachments ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1) AND (quarantined=0 OR kind='local_snapshot')); ALTER TABLE attachments ADD COLUMN added_at TEXT;")?;
     Ok(())
 }
 
 pub(crate) fn migrate_purge(tx: &Connection) -> Result<(), Error> {
-    tx.execute_batch("ALTER TABLE attachments ADD COLUMN purge_state TEXT NOT NULL DEFAULT 'retained' CHECK(purge_state IN ('retained','pending','purged') AND (purge_state='retained' OR (kind='local_snapshot' AND quarantined=1))); PRAGMA user_version=54;")?;
+    tx.execute_batch("ALTER TABLE attachments ADD COLUMN purge_state TEXT NOT NULL DEFAULT 'retained' CHECK(purge_state IN ('retained','pending','purged') AND (purge_state='retained' OR (kind='local_snapshot' AND quarantined=1)));")?;
     Ok(())
 }
 
@@ -98,7 +98,7 @@ impl Workspace {
     /// Record-only cleanup: no provider or credential capability is involved.
     pub fn remove_remote_attachment(&mut self, id: &str) -> Result<RemoteAttachmentRemoval, Error> {
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let current = review(&tx, id)?;
         if current.attachment.kind != AttachmentKind::ExternalReference {
             return Err(Error::Attachment("Remove from ticketd is for remote records. Use reversible quarantine for local snapshots.".into()));
@@ -131,7 +131,7 @@ impl Workspace {
     pub fn purge_attachment(&mut self, id: &str) -> Result<Attachment, Error> {
         let _files = self.attachment_backup_lock()?;
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let file = attachments::read_attachment(&tx, id)?;
         if file.kind != AttachmentKind::LocalSnapshot {
             return Err(Error::Attachment(
@@ -172,7 +172,7 @@ impl Workspace {
         self.delete_purged_bytes(&file).map_err(|error| Error::Attachment(format!("Permanent purge is pending, not confirmed: {error}. Retry explicit purge for '{id}' after repairing managed storage; do not restore individual bytes.")))?;
         (|| {
             let tx = self.connection.savepoint()?;
-            crate::transaction_write_lock(&tx)?;
+            crate::write_scope::lock(&tx)?;
             tx.execute("UPDATE attachments SET purge_state='purged' WHERE id=?1", [id])?;
             let file = attachments::read_attachment(&tx, id)?;
             tx.commit()?;
@@ -269,7 +269,7 @@ impl Workspace {
 
     pub(crate) fn quarantine_attachment_locked(&mut self, id: &str) -> Result<Attachment, Error> {
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let current = review(&tx, id)?;
         if current.attachment.quarantined {
             return Ok(current.attachment);
@@ -291,7 +291,7 @@ impl Workspace {
 
     pub(crate) fn restore_attachment_locked(&mut self, id: &str) -> Result<Attachment, Error> {
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let file = attachments::read_attachment(&tx, id)?;
         if file.kind != AttachmentKind::LocalSnapshot {
             return Err(Error::Attachment("External references have no local bytes to restore. Remote files remain unchanged.".into()));

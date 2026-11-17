@@ -90,20 +90,25 @@ impl Workspace {
         if name == Some("") {
             return Err(Error::EmptyPlanName);
         }
-        let current = get(&self.connection, id)?;
-        if current.archived && archived != Some(false) {
-            return Err(Error::PlanArchived);
-        }
-        self.connection.execute("UPDATE plans SET name = COALESCE(?1, name), archived = COALESCE(?2, archived) WHERE id = ?3", params![name, archived, id])?;
-        get(&self.connection, id)
+        // The archived check and the write share one locked transaction.
+        crate::write_scope::run(&self.connection, |scope| {
+            let current = get(scope, id)?;
+            if current.archived && archived != Some(false) {
+                return Err(Error::PlanArchived);
+            }
+            scope.execute("UPDATE plans SET name = COALESCE(?1, name), archived = COALESCE(?2, archived) WHERE id = ?3", params![name, archived, id])?;
+            get(scope, id)
+        })
     }
     pub fn set_plan_purpose(&mut self, id: &str, purpose: &str) -> Result<Plan, Error> {
-        ensure_active(&self.connection, id)?;
-        self.connection.execute(
-            "UPDATE plans SET purpose = ?1 WHERE id = ?2",
-            params![purpose, id],
-        )?;
-        get(&self.connection, id)
+        crate::write_scope::run(&self.connection, |scope| {
+            ensure_active(scope, id)?;
+            scope.execute(
+                "UPDATE plans SET purpose = ?1 WHERE id = ?2",
+                params![purpose, id],
+            )?;
+            get(scope, id)
+        })
     }
     pub fn list_plans(&self, include_archived: bool) -> Result<Vec<Plan>, Error> {
         self.list_plans_bounded(include_archived, None, 0)
@@ -258,73 +263,47 @@ impl Workspace {
         document_id: &str,
         present: bool,
     ) -> Result<Plan, Error> {
-        self.connection.execute_batch("SAVEPOINT plan_document")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            ensure_active(&self.connection, plan_id)?;
-            let document = self.show_document(document_id)?;
+        self.in_write_scope(|workspace| {
+            ensure_active(&workspace.connection, plan_id)?;
+            let document = workspace.show_document(document_id)?;
             if present && document.trashed {
                 return Err(Error::DocumentTrashed(document_id.to_owned()));
             }
             if present {
-                self.connection.execute(
+                workspace.connection.execute(
                     "INSERT OR IGNORE INTO plan_documents(plan_id, document_id) VALUES (?1, ?2)",
                     params![plan_id, document_id],
                 )?;
             } else {
-                self.connection.execute("UPDATE plans SET spec_document_id = NULL WHERE id = ?1 AND spec_document_id = ?2", params![plan_id, document_id])?;
-                self.connection.execute(
+                workspace.connection.execute("UPDATE plans SET spec_document_id = NULL WHERE id = ?1 AND spec_document_id = ?2", params![plan_id, document_id])?;
+                workspace.connection.execute(
                     "DELETE FROM plan_documents WHERE plan_id = ?1 AND document_id = ?2",
                     params![plan_id, document_id],
                 )?;
             }
-            get(&self.connection, plan_id)
-        })();
-        match result {
-            Ok(plan) => {
-                self.connection.execute_batch("RELEASE plan_document")?;
-                Ok(plan)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO plan_document; RELEASE plan_document")?;
-                Err(error)
-            }
-        }
+            get(&workspace.connection, plan_id)
+        })
     }
     pub fn set_plan_spec(
         &mut self,
         plan_id: &str,
         document_id: Option<&str>,
     ) -> Result<Plan, Error> {
-        self.connection.execute_batch("SAVEPOINT plan_spec")?;
-        let result = (|| {
-            crate::transaction_write_lock(&self.connection)?;
-            ensure_active(&self.connection, plan_id)?;
+        self.in_write_scope(|workspace| {
+            ensure_active(&workspace.connection, plan_id)?;
             if let Some(id) = document_id {
-                self.keep_document(id)?;
-                self.connection.execute(
+                workspace.keep_document(id)?;
+                workspace.connection.execute(
                     "INSERT OR IGNORE INTO plan_documents(plan_id, document_id) VALUES (?1, ?2)",
                     params![plan_id, id],
                 )?;
             }
-            self.connection.execute(
+            workspace.connection.execute(
                 "UPDATE plans SET spec_document_id = ?2 WHERE id = ?1",
                 params![plan_id, document_id],
             )?;
-            get(&self.connection, plan_id)
-        })();
-        match result {
-            Ok(plan) => {
-                self.connection.execute_batch("RELEASE plan_spec")?;
-                Ok(plan)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO plan_spec; RELEASE plan_spec")?;
-                Err(error)
-            }
-        }
+            get(&workspace.connection, plan_id)
+        })
     }
     pub fn set_plan(
         &mut self,

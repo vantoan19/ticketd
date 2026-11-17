@@ -22,12 +22,12 @@ pub struct InboxEntry {
 }
 
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE TABLE ticket_follows (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(person, ticket_id)); CREATE TABLE inbox_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), read INTEGER NOT NULL DEFAULT 0); CREATE INDEX inbox_person_id ON inbox_entries(person, id DESC); PRAGMA user_version = 14;")?;
+    tx.execute_batch("CREATE TABLE ticket_follows (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(person, ticket_id)); CREATE TABLE inbox_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), read INTEGER NOT NULL DEFAULT 0); CREATE INDEX inbox_person_id ON inbox_entries(person, id DESC);")?;
     Ok(())
 }
 
 pub(crate) fn migrate_reminders(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE TABLE ticket_reminders (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), due_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(person, ticket_id)); PRAGMA user_version = 18;")?;
+    tx.execute_batch("CREATE TABLE ticket_reminders (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), due_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(person, ticket_id));")?;
     Ok(())
 }
 
@@ -92,22 +92,25 @@ impl Workspace {
                     })
             })
             .transpose()?;
-        let ticket = self.show_ticket(reference)?;
-        // Snoozing or dismissing answers the reminder already delivered, so it
-        // must not keep claiming to be due in the inbox.
-        self.connection.execute(
-            "UPDATE inbox_entries SET read = 1 WHERE person = ?1 AND ticket_id = ?2 AND kind = 'reminder' AND read = 0",
-            params![LOCAL_PERSON, ticket.id],
-        )?;
-        if let Some(due_at) = due_at {
-            self.connection.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?1, ?2, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![LOCAL_PERSON, ticket.id, due_at])?;
-        } else {
-            self.connection.execute(
-                "DELETE FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
-                params![LOCAL_PERSON, ticket.id],
+        // A reminder is the person's own, so a ticket in Trash may have one.
+        crate::write_scope::run(&self.connection, |scope| {
+            let ticket_id = scope.even_if_trashed(reference)?;
+            // Snoozing or dismissing answers the reminder already delivered, so it
+            // must not keep claiming to be due in the inbox.
+            scope.execute(
+                "UPDATE inbox_entries SET read = 1 WHERE person = ?1 AND ticket_id = ?2 AND kind = 'reminder' AND read = 0",
+                params![LOCAL_PERSON, ticket_id],
             )?;
-        }
-        Ok(())
+            if let Some(due_at) = due_at {
+                scope.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?1, ?2, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![LOCAL_PERSON, ticket_id, due_at])?;
+            } else {
+                scope.execute(
+                    "DELETE FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+                    params![LOCAL_PERSON, ticket_id],
+                )?;
+            }
+            Ok(())
+        })
     }
 
     pub fn is_following(&self, reference: &str) -> Result<bool, Error> {
@@ -119,38 +122,26 @@ impl Workspace {
         )?)
     }
     pub fn set_following(&mut self, reference: &str, following: bool) -> Result<(), Error> {
-        let tx = self.connection.savepoint()?;
-        super::transaction_write_lock(&tx)?;
-        let id: String = tx
-            .query_row(
-                "SELECT id FROM tickets WHERE reference = ?1",
-                [reference],
-                |row| row.get(0),
-            )
-            .map_err(|e| {
-                if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
-                    Error::NotFound(reference.into())
-                } else {
-                    e.into()
-                }
-            })?;
-        if following {
-            follow(&tx, &id)?;
-        } else {
-            tx.execute(
-                "DELETE FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2",
-                params![LOCAL_PERSON, id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        // Following is the person's own, so a ticket in Trash may be followed.
+        crate::write_scope::run(&self.connection, |scope| {
+            let id = scope.even_if_trashed(reference)?;
+            if following {
+                follow(scope, &id)?;
+            } else {
+                scope.execute(
+                    "DELETE FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2",
+                    params![LOCAL_PERSON, id],
+                )?;
+            }
+            Ok(())
+        })
     }
     /// Due reminders become inbox entries when someone looks, so every read of
     /// the inbox or its counts delivers them first. Insertion and marking
     /// delivered commit together, including across processes.
     pub(crate) fn deliver_due_reminders(&self) -> Result<(), Error> {
         let tx = self.connection.unchecked_transaction()?;
-        super::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let now: String =
             tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
                 row.get(0)
@@ -209,14 +200,14 @@ impl Workspace {
                 "at most 100 inbox entries may be changed at once".into(),
             ));
         }
-        let tx = self.connection.savepoint()?;
-        for id in ids {
-            tx.execute(
-                "UPDATE inbox_entries SET read = ?1 WHERE person = ?2 AND id = ?3",
-                params![read, LOCAL_PERSON, id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        crate::write_scope::run(&self.connection, |scope| {
+            for id in ids {
+                scope.execute(
+                    "UPDATE inbox_entries SET read = ?1 WHERE person = ?2 AND id = ?3",
+                    params![read, LOCAL_PERSON, id],
+                )?;
+            }
+            Ok(())
+        })
     }
 }

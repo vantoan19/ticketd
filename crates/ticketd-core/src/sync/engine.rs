@@ -60,21 +60,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-/// What one sync run did.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SyncReport {
-    /// Files written to the storage.
-    pub uploaded: usize,
-    /// Files changed elsewhere that were merged into this Workspace.
-    pub downloaded: usize,
-    /// Fields newly waiting for review.
-    pub conflicts: usize,
-    /// Files skipped as unreadable, each with a notice.
-    pub skipped: usize,
-    /// Records still waiting to upload after the run.
-    pub pending: usize,
-}
-
 /// One field of a record that this device and another changed differently.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncConflictField {
@@ -779,35 +764,22 @@ fn replaced_revision(
 }
 
 impl Workspace {
-    /// One sync run against the Workspace folder `folder` of `remote`, as the
-    /// desktop named `device`. Safe to repeat and to interrupt: a storage
+    /// The record-syncing step of a run, over a listing of the folder that the
+    /// caller already holds: merge what changed elsewhere, then send what
+    /// changed here. Returns how many files it wrote to the storage. A storage
     /// failure returns the error with every unsent change still pending.
-    pub fn sync(
-        &mut self,
-        remote: &dyn RemoteStorage,
-        folder: &str,
-        device: &str,
-    ) -> Result<SyncReport, Error> {
-        let listing = remote.list(folder)?;
-        self.sync_listed(remote, folder, device, listing)
-    }
-
-    /// A sync run over a listing of the folder that the caller already holds.
     pub(super) fn sync_listed(
         &mut self,
         remote: &dyn RemoteStorage,
         folder: &str,
         device: &str,
         listing: Vec<RemoteFile>,
-    ) -> Result<SyncReport, Error> {
-        let mut report = SyncReport::default();
-        let arrived = self.download(remote, folder, listing, &mut report)?;
+    ) -> Result<usize, Error> {
+        let arrived = self.download(remote, folder, listing)?;
         self.withdraw_agreed_conflicts()?;
         self.retry_waiting(&arrived)?;
         self.drop_loops()?;
-        self.upload(remote, folder, device, &mut report)?;
-        report.pending = self.dirty_records()?.len();
-        Ok(report)
+        self.upload(remote, folder, device)
     }
 
     fn download(
@@ -815,7 +787,6 @@ impl Workspace {
         remote: &dyn RemoteStorage,
         folder: &str,
         listing: Vec<RemoteFile>,
-        report: &mut SyncReport,
     ) -> Result<BTreeSet<String>, Error> {
         // The records this run brought to this desktop for the first time.
         let mut arrived = BTreeSet::new();
@@ -841,7 +812,6 @@ impl Workspace {
                 continue;
             }
             if file.size > MAX_FILE_BYTES {
-                report.skipped += 1;
                 let reason = format!(
                     "the file is larger than {} MiB, the most a record's file may be",
                     MAX_FILE_BYTES / (1024 * 1024)
@@ -863,14 +833,11 @@ impl Workspace {
             };
             match merged {
                 Ok(conflicts) => {
-                    report.downloaded += 1;
-                    report.conflicts += conflicts;
                     if conflicts > 0 {
                         self.time_conflicts(remote, folder, kind, &file)?;
                     }
                 }
                 Err(error) if is_file_fault(&error) => {
-                    report.skipped += 1;
                     let newer = matches!(error, Error::SyncFile(_))
                         && text.as_deref().is_ok_and(from_newer_version);
                     self.skip(kind, &file, &error, newer)?;
@@ -969,7 +936,7 @@ impl Workspace {
     ///
     /// A file only a `newer` ticketd reads is different: it is never replaced
     /// from here, and it is read again after each launch of the app (see
-    /// `start_sync_session`), so this desktop takes it once it is updated.
+    /// `begin_session`), so this desktop takes it once it is updated.
     fn skip(
         &mut self,
         kind: SyncKind,
@@ -1243,8 +1210,8 @@ impl Workspace {
         remote: &dyn RemoteStorage,
         folder: &str,
         device: &str,
-        report: &mut SyncReport,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
+        let mut uploaded = 0;
         // A record that never synced uploads even if it predates change capture.
         for kind in SyncKind::ALL {
             let mut statement = self.connection.prepare(&format!(
@@ -1335,10 +1302,7 @@ impl Workspace {
                             &text,
                             &mut BTreeSet::new(),
                         ) {
-                            Ok(conflicts) => {
-                                report.downloaded += 1;
-                                report.conflicts += conflicts;
-                            }
+                            Ok(_) => {}
                             Err(error) if is_file_fault(&error) => {}
                             Err(error) => return Err(error),
                         }
@@ -1351,7 +1315,7 @@ impl Workspace {
                         merged.base = Some(local);
                         store(&self.connection, kind, &dirty.id, &merged)?;
                         mark_dirty(&self.connection, dirty.kind, &dirty.id)?;
-                        report.uploaded += 1;
+                        uploaded += 1;
                         continue;
                     }
                     stored.version = Some(file.version);
@@ -1361,14 +1325,14 @@ impl Workspace {
                     store(&self.connection, kind, &dirty.id, &stored)?;
                     // False when the record changed during the upload: it stays pending.
                     self.clear_dirty(&dirty)?;
-                    report.uploaded += 1;
+                    uploaded += 1;
                 }
                 // Changed elsewhere since the download: the next run merges it first.
                 Err(RemoteError::PreconditionFailed { .. }) => {}
                 Err(error) => return Err(error.into()),
             }
         }
-        Ok(())
+        Ok(uploaded)
     }
 
     /// The records that need review, most recently detected first.

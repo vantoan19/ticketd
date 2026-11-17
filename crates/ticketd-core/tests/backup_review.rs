@@ -97,10 +97,7 @@ fn a_pre_document_backup_reports_zero_documents() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let backup = dir.path().join("old.sqlite3");
-    Connection::open(&backup)
-        .unwrap()
-        .execute_batch("CREATE TABLE tickets (id TEXT PRIMARY KEY); PRAGMA user_version = 1;")
-        .unwrap();
+    ticketd_core::create_workspace_at_format_version(&backup, 1).unwrap();
     let BackupCheck::Valid { summary, .. } = workspace.inspect_backup(&backup).unwrap().check
     else {
         panic!("expected a valid old backup")
@@ -350,6 +347,31 @@ fn incomplete_context_schema_cannot_replace_healthy_workspace() {
     }
 }
 
+/// Data safety comes first: a Workspace that earlier builds left without a schema object
+/// of its format version can still be backed up. Inspecting or restoring that backup
+/// still names what is missing, which protects the Workspace a restore would replace.
+#[test]
+fn a_workspace_missing_a_schema_object_can_still_be_backed_up_but_not_restored_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let workspace = populated(&path);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("ALTER TABLE inbox_entries DROP COLUMN editing_agent")
+        .unwrap();
+
+    workspace.backup(&backup).unwrap();
+
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("a backup missing a column was called valid")
+    };
+    assert_eq!(tables, ["inbox_entries.editing_agent"]);
+    assert!(Workspace::restore(&path, &backup).is_err());
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
 #[test]
 fn backup_missing_search_maintenance_trigger_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
@@ -417,4 +439,76 @@ fn restore_names_a_missing_backup_and_creates_a_missing_workspace() {
             .show_ticket("T-KQ1")
             .is_ok()
     );
+}
+
+/// Automations and their agents synchronize from format version 76, so their tables
+/// have no capture triggers in a Workspace saved at 70–75. A backup in one of those
+/// formats, such as the copy saved before such a Workspace is migrated, restores.
+#[test]
+fn backups_from_before_automations_synchronize_are_valid_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = populated(&dir.path().join("workspace.sqlite3"));
+    for version in [72, 75] {
+        // A Workspace as that format version left it, built by the real migration ladder.
+        let backup = dir.path().join(format!("v{version}.sqlite3"));
+        ticketd_core::create_workspace_at_format_version(&backup, version).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO tickets (id, reference, title, status) VALUES ('t1', 'T-KQ1', 'First', 'Todo'), ('t2', 'T-KQ2', 'Second', 'Todo');",
+            )
+            .unwrap();
+
+        let check = workspace.inspect_backup(&backup).unwrap().check;
+        let BackupCheck::Valid { format_version, .. } = check else {
+            panic!("expected a valid backup at format version {version}, got {check:?}");
+        };
+        assert_eq!(i64::from(format_version), version);
+        // It restores as it is, and opening it migrates it to the current format.
+        let restored = dir.path().join(format!("restored-v{version}.sqlite3"));
+        Workspace::restore(&restored, &backup).unwrap();
+        assert_eq!(
+            Workspace::open(&restored)
+                .unwrap()
+                .list_tickets()
+                .unwrap()
+                .len(),
+            2
+        );
+        let migrated: i64 = Connection::open(&restored)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(migrated, FORMAT_VERSION);
+    }
+}
+
+/// A Workspace without a sync capture trigger would silently stop uploading edits to
+/// that table once restored, so a backup missing one is refused even at the current
+/// format version.
+#[test]
+fn a_current_backup_missing_one_sync_capture_trigger_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for trigger in [
+        "sync_capture_tickets_update",
+        "sync_capture_documents_insert",
+        "sync_capture_automation_agents_delete",
+    ] {
+        let backup = dir.path().join(format!("{trigger}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TRIGGER {trigger}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("a backup without {trigger} was accepted")
+        };
+        assert_eq!(tables, [trigger]);
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
 }

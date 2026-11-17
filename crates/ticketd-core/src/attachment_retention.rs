@@ -39,8 +39,7 @@ pub(crate) fn migrate(tx: &Connection, existing_workspace: bool) -> Result<(), E
             owner TEXT NOT NULL REFERENCES attachment_drafts(owner), uri TEXT NOT NULL,
             attachment_id TEXT REFERENCES attachments(id), PRIMARY KEY(owner, uri));
          CREATE INDEX IF NOT EXISTS attachment_draft_uses ON attachment_draft_references(attachment_id);
-         CREATE TABLE IF NOT EXISTS attachment_draft_cutover (singleton INTEGER PRIMARY KEY CHECK(singleton=1), pending INTEGER NOT NULL CHECK(pending IN (0,1)));
-         PRAGMA user_version=50;",
+         CREATE TABLE IF NOT EXISTS attachment_draft_cutover (singleton INTEGER PRIMARY KEY CHECK(singleton=1), pending INTEGER NOT NULL CHECK(pending IN (0,1)));",
     )?;
     let retained_files: bool =
         tx.query_row("SELECT EXISTS(SELECT 1 FROM attachments)", [], |r| r.get(0))?;
@@ -50,7 +49,6 @@ pub(crate) fn migrate(tx: &Connection, existing_workspace: bool) -> Result<(), E
     )?;
     // Usage is visible to library consumers and workspace change pollers.
     crate::change_token::migrate(tx)?;
-    tx.pragma_update(None, "user_version", 50)?;
     Ok(())
 }
 
@@ -110,7 +108,7 @@ impl Workspace {
             ));
         }
         let tx = self.connection.savepoint()?;
-        crate::transaction_write_lock(&tx)?;
+        crate::write_scope::lock(&tx)?;
         let previous: Option<i64> = tx
             .query_row(
                 "SELECT revision FROM attachment_drafts WHERE owner=?1",

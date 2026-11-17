@@ -35,7 +35,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     for table in tables.iter().filter(|table| !is_untracked(table)) {
         track(connection, table)?;
     }
-    connection.execute_batch("PRAGMA user_version = 45;")?;
     Ok(())
 }
 

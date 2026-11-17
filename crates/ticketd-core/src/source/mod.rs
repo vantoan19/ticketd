@@ -51,7 +51,7 @@ pub use tracking::{
     TicketSource,
 };
 
-use crate::{Error, Workspace, transaction_write_lock};
+use crate::{Error, Workspace};
 
 /// A source's validated configuration as saved in the workspace.
 ///
@@ -76,7 +76,7 @@ pub struct SaveOutcome {
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), Error> {
     connection.execute_batch(
-        "CREATE TABLE source_configurations (provider TEXT PRIMARY KEY, configuration TEXT NOT NULL, account TEXT NOT NULL, contract_version INTEGER NOT NULL, saved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))); PRAGMA user_version = 22;",
+        "CREATE TABLE source_configurations (provider TEXT PRIMARY KEY, configuration TEXT NOT NULL, account TEXT NOT NULL, contract_version INTEGER NOT NULL, saved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
     )?;
     Ok(())
 }
@@ -183,13 +183,10 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
             ))?;
         }
     }
-    connection.execute_batch("PRAGMA user_version = 27;")?;
     Ok(())
 }
 
-pub(crate) use tracking::{
-    availability_projection, closure_held, guard_change, guard_duplicate, held_sql,
-};
+pub(crate) use tracking::{availability_projection, guard_change, guard_duplicate, held_sql};
 
 /// Fills the ticket's external side and any blocking publication attempt.
 pub(crate) fn populate(
@@ -256,7 +253,7 @@ impl Workspace {
         let preview = self.preview_source(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
         let transaction = self.connection.savepoint()?;
-        transaction_write_lock(&transaction)?;
+        crate::write_scope::lock(&transaction)?;
         let previous: Option<String> = transaction
             .query_row(
                 "SELECT configuration FROM source_configurations WHERE provider = ?1",

@@ -36,12 +36,14 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crate
 
 ## Module responsibilities
 
-| Module        | Responsibility                                                                                                                           |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                    |
-| Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                         |
-| CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and map errors to exit codes |
-| Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly            |
+| Module        | Responsibility                                                                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                                         |
+| Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                                              |
+| CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and report any error on stderr with exit status 1 |
+| Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly                                 |
+
+Every CLI error exits with status 1; the CLI does not tell failures apart by kind. The core classifies a failure as a `FailureKind` (`failure.rs`) so an interface can choose its words and next step, and only the desktop uses it.
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 
@@ -82,6 +84,17 @@ and runtime lifetime. Adapters translate protocols and report capabilities and
 observations. They coordinate with the supervisor around submission and approval
 responses; they do not write workspace storage. The supervisor calls core
 workflows, which own validation, transactions and durable Chat records.
+
+Adapters also do not decide how a turn or its tools read. They report what the
+harness said plus the evidence they saw: that an interrupt was written before a
+failure, that an unattended session's allowed tools denied something, that a command
+could not start. One supervisor-side module (`outcome`) turns outcome and evidence
+into the turn's `TurnEnding` and its tools' states, so every harness is read by the
+same rules. The fake, the Claude transport and the Codex adapter are held to one
+conformance suite for the contract's guarantees: a stale generation is refused, a
+process lost after a write leaves the submission unknown, evidence arriving after a
+timeout settles the written submission, each request takes one answer, and a new
+turn is acknowledged as the adapter declares.
 
 Use an internal adapter interface with installation/capability inspection,
 new-session or explicit native-resume opening, input submission (new turn or
@@ -145,7 +158,14 @@ again whatever is observed later, and a resend the harness refuses returns the
 message to awaiting a decision with the earlier uncertainty intact. A failed turn
 keeps the kind of failure the adapter reported and, for a usage limit, the reset
 time the provider gave. Such a failure describes the turn that ended; it does not
-block the next message, which only a condition observed now does. An optional
+block the next message, which only a condition observed now does. How a turn ended
+is one typed fact, `TurnEnding` in `ticketd-chat-host`: completed, failed (with the
+kind, message and reset time), stopped by the person, stopped by ticketd for a named
+reason (quit, Chat turned off, a restore, a run taken over, a time limit, the run's step
+ending, the Chat trashed, an explicit resume, or storage failing), or contact lost. The
+supervisor stores it in `chat_turns.ending` beside the turn's state and wording, and the
+Chats list, the transcript and Automation runs read it from there; a turn recorded before
+format 83 has no ending and is read from its state and wording. An optional
 tool, MCP server or model that is unavailable is a typed problem of the running
 session that blocks nothing. Warnings, retries and unmodelled provider traffic
 are stored as bounded notices, and the settings a harness reports as in effect
@@ -236,6 +256,16 @@ the provider that owns it now (`github`) or `local`, the same rule as the ticket
 list's source filter. Matching and the run state
 machine are functions with no SQL: the state machine takes the run's steps and how
 the step it was on ended, and answers with the next step or how the run ends.
+The executor drives a run with one core call, `advance_automation_run`, which
+records how its step ended and answers with the next piece of work that needs a
+process: an agent to run in its Chat, a notification to show, or the end of the
+run. The core runs Change ticket and If steps itself, inside the transaction that
+records the step before them, so a run that was stopped or taken over meanwhile
+makes none of their changes; a run that has already ended answers `Ended`.
+Every way a run can end (its steps ran out, Stop, turning the Automation off,
+deleting it, taking it over, an executor that cannot go on) goes through one
+function in the core, which decides from the run's status and the cause whether it
+may end, what happens to the step it was on, and whether it needs the person.
 Runs are local to the device, kept 90 days, and a run left Running by a process
 that is gone ends as Needs attention when the next one starts; nothing retries.
 
@@ -258,8 +288,19 @@ is told so in its first message, and a Notify me step there opens the run.
 
 The person can stop a Queued or Running run, which ends it as Needs attention: the
 core marks the step it was on Failed and refuses the outcome its executor reports
-later, so not even the step's failure path runs, and the desktop interrupts the
-agent's Chat. Run again on a finished run queues a new run for the same Workspace
+later, so not even the step's failure path runs. The runner owns ending runs for
+a cause the person states (Stop of the run, "Stop it and turn off", Delete): the
+core ends the runs in one transaction and returns the Chats of the steps that had an
+agent working, so a step that started meanwhile is stopped too, and the runner then
+asks the Chat host to close those agents (`ChatHost::end_run_agents`), which
+records the turn as stopped by ticketd (`StopReason::RunEnded`). The desktop
+commands make one call into the runner each. The desktop creates the runner when it
+starts, before any command is served and whether or not Chat is on: creating it ends
+the runs a process that is gone left Running. A Stop of a run that has already ended
+(it finished as the person pressed the button, or a restart ended it) returns the run
+as it ended, not an error. With Chat off the runner only changes the record. An Automation deleted on another desktop and brought here by Workspace
+sync is treated the same at the runner's next pass: its Queued runs never start
+and its Running runs end as after a local Delete. Run again on a finished run queues a new run for the same Workspace
 event, from the first step of the Automation as it is now; the finished run stays
 as history. The run view draws a run from the definition the run keeps, so it shows
 the steps as they were even after the Automation is edited.
@@ -277,10 +318,10 @@ The person takes a run over in the Chat of one of its agent steps.
 core first: a message makes the Chat an ordinary one in the Chat list, and a run
 that was Running or needed attention ends as Taken over, with the step it was on
 ended there and nothing after it run. Stop takes over only a Running run, since
-nothing is going in the Chat of one that ended; that is also why stopping a run
-from the run view, which ends the run before it interrupts the Chat, stays Needs
-attention; its Stop then ends the Chat's unattended session as well, which closes
-an agent still opening. A Completed run stays Completed when the person replies in its Chat.
+nothing is going in the Chat of one that ended. `ChatHost::stop` always means the
+person's Stop and infers nothing from the database; when ticketd itself closes an
+agent because its run ended, the runner uses `ChatHost::end_run_agents`, so such a
+run stays Needs attention and the close also ends an agent still opening. A Completed run stays Completed when the person replies in its Chat.
 Taking over a run that is going also ends its agents' unattended sessions at once:
 a harness cannot change how it runs in place, so the host interrupts the turn and
 closes the harness process of every Chat the run had working, and the wait in
@@ -298,9 +339,12 @@ agent's: a run taken over or stopped just after a step's Chat was created starts
 no agent in it. Retention
 deletes a run with the Chats it still owns, so a Chat the person took over is kept.
 
-A Run agent step is an ordinary Chat, created in the step's folder, linked to the
-ticket and owned by the run (`chats.automation_run_id`), which keeps it out of the
-Chat list. The host opens its harness with an `Unattended` request: the agent's
+A Run agent step is an ordinary Chat, created by the core as the run reaches the
+step (the step's folder is checked first, so a folder that is gone fails the step
+and leaves no Chat), linked to the ticket and owned by the run
+(`chats.automation_run_id`), which keeps it out of the Chat list. The core also
+hands over what started the run, with the ticket's own words already fenced as data;
+the runner words the first message around it and cannot place them raw. The host opens its harness with an `Unattended` request: the agent's
 model, allowed tools and turn limit. An adapter given one never asks for approval
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
@@ -346,11 +390,12 @@ from their Codex configuration (`on-request` and `read-only` when it sets none).
 has no turn limit to set, so the agent editor hides the Turns field for Codex. `ChatHost::run_unattended` sends the first
 message, stops a turn still going at the agent's time limit, reports how the turn
 ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
-and closes the harness process. An unattended harness that asks for approval
+and closes the harness process. It waits on a signal kept for that Chat, so another
+Chat's steps do not wake it. An unattended harness that asks for approval
 anyway is stopped and counted as denied.
 
-A Change ticket step is one core call, `apply_automation_change`: it logs its
-write with actor `automation`, so the change starts no Automation, and signs a
+A Change ticket step is the core's own work, done inside `advance_automation_run`: it
+logs its write with actor `automation`, so the change starts no Automation, and signs a
 status change or a posted update with the Automation's name. Text in a posted
 update or a notification holds field references (`{{ticket.reference}}`,
 `{{ticket.title}}`, `{{ticket.status}}`, `{{event.tag}}`) that the core fills in
@@ -360,7 +405,7 @@ runner's host. The desktop shows it from the Rust side, not from the page, becau
 a run goes on while the window is hidden to the tray; a click brings the window
 back and the page opens the ticket or the Automation's runs.
 
-An If step is one core read, `automation_if_passes`: it tests the step's checks
+An If step is also the core's own work: it tests the step's checks
 (tags, status, project) against the run's ticket as it is at that moment, so it
 sees what the steps before it and their agents recorded. The run goes down the
 Yes path when every check passes and down the No path otherwise. Paths never
@@ -373,6 +418,9 @@ fails, the run marks it Failed with its reason and goes down that path to its en
 and the run ends Completed: the failure was handled, so nothing asks for the
 person. A path with no steps handles the failure by ending the run. A step that
 fails with no failure path ends the run as Needs attention with the step's reason.
+Only a refusal by the Workspace fails a step: when storage itself fails, or the
+runner cannot open the Workspace, nothing is recorded and the executor gets the
+error. The run then ends as Needs attention saying so, never through a failure path.
 Only a step's own failure takes the path: a run the person stops, switches off
 with "Stop it and turn off" or takes over has left Running, so the outcome its
 executor reports later is refused and the path does not run.
@@ -423,7 +471,7 @@ Automation on, closing the window exits as before.
 
 Switching an Automation off stops matching and leaves its active runs to finish.
 "Stop it and turn off" also ends its Queued and Running runs as Needs attention in
-the same transaction, and the runner then interrupts the agents they were
+the same transaction, and the runner then closes the agents they were
 running; what those turns report afterwards is refused.
 
 "Start ticketd when you sign in" registers the app with the system through
@@ -514,6 +562,12 @@ database snapshotting and file packaging. Files with no reference, files in
 Trash, recovery manifests, and retained quarantine are included; incomplete
 upload staging and coordination locks are excluded. Remote records remain
 references and metadata; credentials and implicit remote downloads are excluded.
+
+The format of a Workspace is defined by the migration ladder in
+`crates/ticketd-core/src/format.rs` and nothing else (ADR 0014): a Workspace at
+format version V is what steps 1 through V leave behind. Restore and inspection
+check a backup's tables, columns, triggers and unique indexes against a scratch
+Workspace built at the backup's version.
 
 Restore validates the database and all retained bytes before changing the
 workspace. It stages a live database without archive-only tables and a separate
@@ -660,7 +714,11 @@ Desktop `create_ticket` submits initial content, status, project, Plan, tags, fo
 
 For each write, the core coordinates request-ID replay checks, validation against current data, persistence, history, and the saved request outcome. Changes and their successful request outcome commit together. Batches either commit completely or persist nothing.
 
-Record versions and stale-edit rejection are outside the MVP. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
+Inside the core, every ticket write runs in one write scope (`write_scope.rs`), so the order is kept in one place: a savepoint with the write lock, the Ticket reference resolved and checked for editability, the operation's own rule, history, Workspace events folded so a ticket created by the write logs one `ticket.created` with its final values, then the read back. A ticket in Trash is refused by default; a write that the Workspace allows on a ticket in Trash (restoring it, detaching a link to it from a visible ticket, following it, a reminder) says so explicitly. Scopes nest, so a write made of other writes, such as a batch, runs them inside its own.
+
+Inside that scope every way of changing a ticket is one ticket change (`ticket_change.rs`): `change_ticket`, the combined `TicketChange`, batches, tag, parent, dependency and Plan changes, ticket creation and the `WriteRequest` that names each. They share the rules (editability, the external owner of a ticket's content, an archived Plan, entering and leaving Duplicate, history and the inbox) and one read back; a combined change or batch makes all its steps in one scope. One rule still depends on the way in, named by the change's mode: a change on its own that leaves Duplicate clears the duplicate link, while a change in a batch, and so the combined single-ticket change, is refused.
+
+Record versions are outside the MVP. An editor may send the title, body or Document `updated_at` it last loaded, and the core rejects its save if that value has since changed ([ADR 0015](adr/0015-optional-expected-values-guard-editor-saves.md)); a caller that omits them, such as the CLI, keeps last-successful-write wins. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
 
 Request IDs prevent repeated execution after a lost response; they do not prevent overwrites by different requests. Successful request outcomes are retained indefinitely in the MVP and included in backups. Replays return original results, not current ticket state.
 
@@ -710,9 +768,11 @@ The code lives in `ticketd_core::source`, from the inside out:
   with deterministic fixtures in tests. GitHub uses the person's own credential
   (environment token or `gh auth token`), which is never stored, exported,
   backed up, logged, or sent to any host other than the API.
-- **Workflows** (`source/mod.rs`): methods on `Workspace` that call the engine
-  first and then write in one short transaction, so no network I/O happens while
-  the database is locked. `save_source` validates and previews before it saves.
+- **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
+  `conversation.rs`, `freshness.rs`, and `mod.rs` for saved configuration):
+  methods on `Workspace` that call the engine first and then write in one short
+  transaction, so no network I/O happens while the database is locked.
+  `save_source` validates and previews before it saves.
 
 Saved source configuration is workspace data (`source_configurations`), is
 included in export and backups, and is separate from any imported ticket.
@@ -793,6 +853,7 @@ A future server may call the same core workflow interface. Personal sync between
 - [Domain glossary](../GLOSSARY.md)
 - [Atomic writes and retries](adr/0002-atomic-writes-and-retries.md)
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
+- [Optional expected values guard editor saves](adr/0015-optional-expected-values-guard-editor-saves.md)
 - [Shared core and local workspace](adr/0004-shared-core-local-workspace.md)
 - [Workspace sync through Google Drive](adr/0011-markdown-file-sync-through-google-drive.md)
 - [Sync file format](sync-file-format.md)
@@ -1009,6 +1070,16 @@ store, under `ticketd.google-drive.v1`, keyed by the opaque connection handle.
 Windows uses Credential Manager, macOS Keychain, and Linux encrypted Secret
 Service. There is no plaintext fallback. Cross-process file locks outside the
 workspace serialize refresh-token rotation; access tokens stay in memory.
+
+Every Drive request, from Attachments and from Workspace sync alike, goes through
+one crate-private Drive client over the transport interface. It caches the access
+token and renews it once when Drive refuses it, using the credential stored at that
+moment, so a later sign-in needs no cache reset. It also owns the classification of
+Google's errors, `generateIds`, resumable sessions, ranged reads that require an
+exact `Content-Range`, pagination, and retry with backoff for the requests that opt
+in. Only Workspace sync opts in; an uploaded copy is never retried automatically.
+The Attachment providers and the sync adapter translate its answers into their own
+results: per-file guidance on one side, recovery states on the other.
 Transport diagnostics omit URLs, headers and bodies, and Google redirects are
 not followed. Workspace backups/JSON export contain reference metadata, never
 credentials or remote bytes. The standalone CLI uses the same core/vault namespace;
@@ -1129,19 +1200,24 @@ Google Drive adapter
 ```
 
 Each device keeps its own SQLite Workspace and Attachment files, which remain the
-working copy. The live database is never placed in Drive. All sync logic lives in
-the core; the desktop only schedules it and shows its state.
+working copy. The live database is never placed in Drive. The sync rules live in
+the core: what is captured, how files convert, and how versions merge. The desktop
+schedules runs and shows their state, and holds two things the core does not:
+reading Drive's revisions for History (it supplies the Drive connection when
+asked), and the rule for resolving a conflict by hand, where only Markdown body
+text may be edited and an Automation is taken whole from one desktop
+(`sync_commands.rs`).
 
-| Part                     | Responsibility                                                                                                                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                                 |
-| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.         |
-| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                    |
-| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop.                                      |
-| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests. |
-| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                         |
-| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.   |
-| Workspace event log      | `events.rs` logs each committed ticket change through database triggers, with its previous and current values and actor kind; device-local, read by cursor, kept 90 days (ADR 0012).       |
+| Part                     | Responsibility                                                                                                                                                                                                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                                                                                                                                   |
+| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.                                                                                                           |
+| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                                                                                                                      |
+| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop. The rest are in `sync/engine.rs`: merging a record's sections by GUID, and the later refresh of a tracker's fields winning as a whole. |
+| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests.                                                                                                   |
+| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                                                                                                                           |
+| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.                                                                                                     |
+| Workspace event log      | `events.rs` logs each committed ticket change through database triggers, with its previous and current values and actor kind; device-local, read by cursor, kept 90 days (ADR 0012).                                                                                                         |
 
 A captured mark names a record, not a change. The file is produced from current
 state at upload time and compared with the last-synced copy, so a mark for a
@@ -1168,6 +1244,16 @@ Sync runs only in the desktop process, while the app is open. The CLI stays
 independent: it writes locally, its changes are captured with the write, and they
 upload when the desktop next runs. No background service is involved.
 
-[ADR 0003](adr/0003-defer-record-versioning.md) continues to govern local edits.
+`Workspace::sync_now` is the one way to run sync, and the engine and its tests
+use no other. The first run of a Workspace file in a process begins the app
+session itself (the run token, the downloads cut off when the app last stopped,
+files held back as from a newer ticketd), so the host has nothing to call at
+launch. A run does not overlap another run of the same Workspace file in the
+process: it returns at once with the status marked `run_in_progress` and makes no
+call to the storage. The host keeps two rules of its own: hold runs while
+`sync_download_workspace` replaces the Workspace file, and read `retry_after`
+from the status a run returns, since it is not stored.
+
+[ADR 0003](adr/0003-defer-record-versioning.md) and [ADR 0015](adr/0015-optional-expected-values-guard-editor-saves.md) govern local edits.
 The last-synced copy is internal to sync and is not a record version in the
 workflow interface.
