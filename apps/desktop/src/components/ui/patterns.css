@@ -50,13 +50,31 @@
   }
 }
 
-/* Skeleton: still, in the final geometry, and only after 300ms so a fast
-   read never flashes placeholders. */
+/* Skeleton: in the final geometry, and only after 300ms so a fast read never
+   flashes placeholders. A soft sheen of --hover then travels across it. */
 .ui-skeleton {
   border-radius: var(--radius);
-  background: var(--accent);
-  animation: skeleton-appear var(--dur-instant) linear var(--dur-loading-delay)
-    both;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent) 35%,
+    var(--hover) 50%,
+    var(--accent) 65%,
+    var(--accent) 100%
+  );
+  background-size: 300% 100%;
+  animation:
+    skeleton-appear var(--dur-instant) linear var(--dur-loading-delay) both,
+    skeleton-sheen var(--dur-sheen) var(--ease-in-out) var(--dur-loading-delay)
+      infinite;
+}
+@keyframes skeleton-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
 }
 @keyframes skeleton-appear {
   /* Keep a hidden layout reserve hidden when its skeletons finish loading. */
