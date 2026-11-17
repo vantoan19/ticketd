@@ -152,7 +152,7 @@ function motionFindings(source: string): string[] {
     );
     const allowed = /-(?:duration|delay)$/.test(property)
       ? /^--dur-/
-      : /^--(?:dur-|ease-|animate-spin$|motion-swift$)/;
+      : /^--(?:dur-|ease-|spring-|animate-spin$|motion-swift$)/;
     if (names.some((name) => !allowed.test(name))) offenders.push(match[0]);
   }
   return offenders;

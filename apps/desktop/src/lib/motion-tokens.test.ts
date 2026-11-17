@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it } from "vitest";
-import {
-  applyTokens,
-  reducedTokens,
-  rootTokens,
-} from "@/test/motion-tokens";
+import { applyTokens, reducedTokens, rootTokens } from "@/test/motion-tokens";
 import {
   blur,
   enterTransition,

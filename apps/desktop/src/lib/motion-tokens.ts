@@ -31,7 +31,10 @@ function seconds(name: string): number {
 function bezier(name: string): Easing {
   const points = /^cubic-bezier\(([^)]*)\)$/.exec(token(name))?.[1];
   const [a, b, c, d] = (points ?? "").split(",").map(Number);
-  return a === undefined || b === undefined || c === undefined || d === undefined
+  return a === undefined ||
+    b === undefined ||
+    c === undefined ||
+    d === undefined
     ? "linear"
     : [a, b, c, d];
 }

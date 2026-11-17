@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import { instantTokens, reducedTokens, rootTokens } from "./motion-tokens";
 
@@ -56,4 +58,39 @@ it("a held key zeroes the same tokens, except those that are not motion", () => 
   );
   for (const name of Object.keys(instantTokens))
     expect(instantTokens[name], name).toMatch(/^0(ms|px)?$/);
+});
+
+// The CSS primitives name no time of their own: every motion token they use is
+// one reduced motion zeroes, and one a held key zeroes unless it is kept.
+const KEPT = ["--dur-loading-delay", "--dur-spin"];
+const primitiveCss = ["components/ui/motion.css", "components/ui/patterns.css"];
+
+function stylesheet(file: string): string {
+  return readFileSync(join(__dirname, "..", file), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+}
+
+it.each(primitiveCss)("%s takes its timing only from the tokens", (file) => {
+  const timing = [
+    ...stylesheet(file).matchAll(/(?:animation|transition)[\w-]*:\s*([^;]+);/g),
+  ]
+    .map((m) => m[1] ?? "")
+    .join(" ");
+  expect(timing, "a literal time").not.toMatch(/(?<![\w-])[1-9][\d.]*m?s\b/);
+  for (const [, name = ""] of timing.matchAll(/var\((--[\w-]+)/g)) {
+    if (!MOTION.test(name)) continue;
+    expect(reducedTokens[name], `${name} under reduced motion`).toBeDefined();
+    if (!KEPT.includes(name))
+      expect(instantTokens[name], `${name} while a key repeats`).toBeDefined();
+  }
+});
+
+it("a skeleton shows a sheen on the sheen token", () => {
+  const skeleton =
+    /\.ui-skeleton\s*\{([^}]*)\}/.exec(
+      stylesheet("components/ui/patterns.css"),
+    )?.[1] ?? "";
+  expect(skeleton).toContain("var(--dur-sheen)");
 });
