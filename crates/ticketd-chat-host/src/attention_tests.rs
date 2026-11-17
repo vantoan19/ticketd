@@ -344,3 +344,28 @@ fn a_turn_ticketd_stopped_is_idle_in_its_own_words_for_every_reason() {
         assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, words));
     }
 }
+
+/// A turn stopped by the format-82 build kept no ending and an `unknown` state: the
+/// reason is only in its wording. Every reason that build wrote still reads as
+/// ticketd's stop, not as lost contact.
+#[test]
+fn a_turn_ticketd_stopped_before_endings_existed_is_idle_in_its_own_words() {
+    let live = idle();
+    for reason in StopReason::ALL {
+        let old = ChatTurn {
+            ending: None,
+            state: ChatTurnState::Unknown,
+            detail: Some(reason.detail().to_owned()),
+            ..turn(3, TurnEnding::Completed)
+        };
+        assert_eq!(
+            TurnEnding::of(&old),
+            Some(TurnEnding::StoppedByTicketd(reason))
+        );
+        let status = status(&facts(&chat(2), &live, Some(&old)));
+        assert_eq!(
+            (status.rank, status.word.as_str()),
+            (Rank::Idle, reason.words())
+        );
+    }
+}

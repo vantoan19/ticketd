@@ -114,18 +114,13 @@ impl StopReason {
         }
     }
 
-    /// The reason a turn recorded before endings were stored names in its `detail`.
-    /// Only the five reasons that existed then are recognized.
+    /// The reason a turn recorded before endings were stored names in its `detail`. The
+    /// build before them already recorded every reason's wording, byte for byte as
+    /// [`Self::detail`] gives it, so all of them are recognized.
     fn legacy(detail: Option<&str>) -> Option<Self> {
-        [
-            Self::Quit,
-            Self::TurnedOff,
-            Self::TakenOver,
-            Self::TimeLimit,
-            Self::RunEnded,
-        ]
-        .into_iter()
-        .find(|reason| Some(reason.detail()) == detail)
+        Self::ALL
+            .into_iter()
+            .find(|reason| Some(reason.detail()) == detail)
     }
 }
 
