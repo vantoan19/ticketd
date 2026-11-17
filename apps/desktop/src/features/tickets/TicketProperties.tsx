@@ -193,7 +193,8 @@ export function TicketProperties({
   ticket: Ticket;
   projects: Project[];
   plans: Plan[];
-  onSaved: (ticket: Ticket) => void;
+  /** Reports the saved Ticket (the write report); awaited before the property settles. */
+  onSaved: (ticket: Ticket) => void | Promise<void>;
   refresh: () => Promise<void>;
   /** Sections that follow Attention in the rail: Relationships and Files. */
   children?: ReactNode;
@@ -297,9 +298,9 @@ export function TicketProperties({
       restoreFocus();
       return;
     }
-    onSaved(updated);
     try {
-      await refresh();
+      // The report shows the saved Ticket and refreshes what follows from it.
+      await onSaved(updated);
     } catch (reason) {
       setErrors((old) => ({
         ...old,

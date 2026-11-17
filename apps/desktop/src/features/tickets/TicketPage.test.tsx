@@ -1,10 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { TickingChanges } from "@/test/ticking-changes";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { OpenTicket } from "./open-ticket";
+import { TestOpenTicket } from "./open-ticket/testing";
 import { TicketPage } from "./TicketPage";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -85,4 +94,43 @@ test("a change made by the CLI appears in a section of the open page", async () 
   expect(
     await screen.findByText("Unit tests passed", {}, { timeout: 5000 }),
   ).toBeTruthy();
+});
+
+test("saving a property reports the write once", async () => {
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "show_ticket" || command === "change_ticket")
+      return { ...ticket, project_id: "p" };
+    if (command === "is_following") return false;
+    if (command === "reminder") return null;
+    return bridgeDefault(command, args as { reference?: string });
+  });
+  const signal = fakeChangeSignal();
+  render(
+    <TestOpenTicket ticket={ticket} signal={signal}>
+      <TicketPage
+        active
+        projects={[{ id: "p", name: "Project", path: "/p", paths: [] }]}
+        plans={[]}
+        select={vi.fn()}
+        onOpenGraph={vi.fn()}
+        noteTarget={null}
+        mention={null}
+        onMention={vi.fn()}
+      />
+    </TestOpenTicket>,
+  );
+  await screen.findByDisplayValue("Ship the rail");
+  for (let turn = 0; turn < 4; turn += 1) await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
+  const search = await screen.findByLabelText("Search projects");
+  fireEvent.change(search, { target: { value: "Project" } });
+  fireEvent.keyDown(search, { key: "Enter" });
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "change_ticket",
+      expect.anything(),
+    ),
+  );
+  for (let turn = 0; turn < 6; turn += 1) await act(async () => {});
+  expect(signal.catchUps).toBe(1);
 });
