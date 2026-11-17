@@ -54,8 +54,15 @@ catches drift only after the test is written for each list, and leaves five list
 to maintain; it is what was there, and it had already drifted: backups saved at
 format versions 70 to 75 were refused, and the JSON export had no Automations.
 
-Building the expected schema on every backup check costs the time to run the
-ladder in memory, which is small next to copying and verifying the backup.
+Building the expected schema costs the time to run the ladder in memory. It is
+built once per format version and kept for the life of the process, because the
+ladder does not change while ticketd runs.
+
+Inspecting or restoring a backup requires every object of its version, which
+protects the Workspace a restore would replace. Making a backup does not: it
+keeps the integrity, foreign-key and attachment checks but saves a live
+Workspace that earlier builds left without an object, because a copy that
+inspection will flag is better than no copy.
 
 Comparing by name misses a column whose type or default changed, a constraint
 and a different trigger body. Comparing those would reject backups that are

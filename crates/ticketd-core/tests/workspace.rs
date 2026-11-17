@@ -1280,20 +1280,42 @@ fn restore_rejects_open_workspace_and_invalid_backup_without_changing_data() {
 
 #[test]
 fn migration_preserves_workspace_and_recovers_from_failure() {
+    use ticketd_core::{WriteRequest, WriteResult};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
+    let request = || WriteRequest::CreateTicket {
+        title: "Saved".into(),
+        project_id: None,
+    };
+    // A request and the outcome it was recorded with, as a Workspace saves them.
+    let donor = dir.path().join("donor.sqlite3");
+    let original = Workspace::open(&donor)
+        .unwrap()
+        .write(Some("request-1"), request())
+        .unwrap();
+    let (recorded_request, recorded_outcome): (String, String) = rusqlite::Connection::open(&donor)
+        .unwrap()
+        .query_row(
+            "SELECT request, outcome FROM request_outcomes WHERE id = 'request-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     // A Workspace as format version 12 left it: a ticket, a tag and a recorded request.
     let seed = |path: &std::path::Path| {
         ticketd_core::create_workspace_at_format_version(path, 12).unwrap();
-        rusqlite::Connection::open(path)
-            .unwrap()
-            .execute_batch(
-                "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Saved', 'Todo');
-                 INSERT INTO tags (name) VALUES ('kept');
-                 INSERT INTO ticket_tags (ticket_id, tag_name) VALUES ('t1', 'kept');
-                 INSERT INTO request_outcomes (id, request, outcome) VALUES ('request-1', '{}', '{}');",
-            )
-            .unwrap();
+        let db = rusqlite::Connection::open(path).unwrap();
+        db.execute_batch(
+            "INSERT INTO tickets (id, title, status) VALUES ('t1', 'Saved', 'Todo');
+             INSERT INTO tags (name) VALUES ('kept');
+             INSERT INTO ticket_tags (ticket_id, tag_name) VALUES ('t1', 'kept');",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO request_outcomes (id, request, outcome) VALUES ('request-1', ?1, ?2)",
+            [&recorded_request, &recorded_outcome],
+        )
+        .unwrap();
     };
     seed(&path);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1334,16 +1356,13 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
         workspaces[0].show_ticket("T-KQ1").unwrap().tags,
         vec!["kept"]
     );
+    // The same request ID after the migration returns the outcome recorded before it,
+    // not a second ticket.
+    let replayed = workspaces[0].write(Some("request-1"), request()).unwrap();
+    assert_eq!(replayed, original);
+    assert!(matches!(replayed, WriteResult::Ticket(_)));
+    assert_eq!(workspaces[0].list_tickets().unwrap().len(), 1);
     workspaces.clear();
-    let outcomes: i64 = rusqlite::Connection::open(&path)
-        .unwrap()
-        .query_row(
-            "SELECT count(*) FROM request_outcomes WHERE id = 'request-1'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(outcomes, 1, "a recorded request survives the migration");
 
     // A migration that fails changes nothing, names the copy saved first, and that copy
     // restores to a Workspace that migrates once the cause is gone. Here the cause is a
@@ -2388,6 +2407,61 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
     );
+}
+
+#[test]
+fn a_version_thirty_four_workspace_whose_text_links_a_ticket_migrates_to_the_current_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 34).unwrap();
+    // At version 34 a ticket is known by its number: the references of device codes
+    // arrive at version 56, and the steps between index text that links the ticket.
+    let link = "[x](ticketd://ticket/T-1)";
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO tickets (id, title, status, body) VALUES ('t1', 'Linked', 'Todo', ?1)",
+        [format!("See {link}")],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO activities (id, ticket_id, brief) VALUES ('a1', 't1', ?1)",
+        [format!("Reported {link}, T-1 and T-KQ1")],
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.show_ticket("T-KQ1").unwrap().body,
+        format!("See {link}")
+    );
+}
+
+#[test]
+fn a_foreign_database_stamped_with_a_negative_version_is_refused_and_left_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("foreign.sqlite3");
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = -1;")
+        .unwrap();
+
+    let error = Workspace::open(&path).err().expect("a foreign file opens");
+    assert!(error.to_string().contains("not a ticketd"), "{error}");
+
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(tables, ["photos"], "no ticketd table was added");
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, -1);
 }
 
 #[test]

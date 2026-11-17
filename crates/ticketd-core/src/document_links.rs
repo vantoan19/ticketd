@@ -51,13 +51,18 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
 /// an empty passage (there is no text to quote) and `explicit` set.
 const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.reference = n.reference WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
 
-/// The mention index as Workspaces at format versions 35 to 55 had it, keyed by the ticket
-/// number as written. Format version 56 gave tickets device references and replaced it with
-/// [`MENTION_INDEX_SCHEMA`], without carrying the numbers over. The ladder builds the old shape
-/// so that a Workspace of those versions, and a backup of one, is checked against what it had.
-pub(crate) const LEGACY_MENTION_INDEX_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage));
-    CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);
-    CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
+/// The numeric mention index as Workspaces at format versions 41 to 55 had it, keyed by the
+/// ticket number as written. Format version 56 gave tickets device references and replaced it
+/// with [`MENTION_INDEX_SCHEMA`], without carrying the numbers over. The ladder builds the old
+/// shape at step 41, where the builds that wrote that version made it, so that a Workspace of
+/// those versions, and a backup of one, is checked against what it had.
+pub(crate) const LEGACY_NUMERIC_MENTIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage));
+    CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);";
+
+/// The per-ticket Activity projection of [`LEGACY_NUMERIC_MENTIONS_SCHEMA`], with the triggers
+/// that keep it, as Workspaces at format versions 42 to 55 had it. The ladder builds it at
+/// step 42; format version 56 drops it with the index it follows.
+pub(crate) const LEGACY_ACTIVITY_GRAPH_NUMBERS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
     CREATE INDEX IF NOT EXISTS activity_graph_numbers_source ON activity_graph_numbers(activity_id, number, passage);
     CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_insert AFTER INSERT ON numeric_mentions WHEN NEW.activity=1 BEGIN INSERT OR IGNORE INTO activity_graph_numbers SELECT ticket_id, NEW.source_id, NEW.number, NEW.passage FROM activities WHERE id=NEW.source_id; END;
     CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_delete AFTER DELETE ON numeric_mentions WHEN OLD.activity=1 BEGIN DELETE FROM activity_graph_numbers WHERE activity_id=OLD.source_id AND number=OLD.number AND passage=OLD.passage; END;";
@@ -112,21 +117,44 @@ fn passage(body: &str, at: usize) -> String {
         .collect()
 }
 
+/// How a ticket reference in text finds its ticket. Format versions before 56 have no
+/// `tickets.reference`: a ticket is known by its number, as `T-<number>`.
+#[derive(Clone, Copy)]
+enum References {
+    /// The Workspace is current, or at least at version 56.
+    Stored,
+    /// The Workspace is at a version before 56, as the steps that index text see it.
+    Numbered,
+}
+
+impl References {
+    fn ticket_id(self, tx: &Connection, reference: &str) -> Result<Option<String>, Error> {
+        let sql = match self {
+            Self::Stored => "SELECT id FROM tickets WHERE reference = ?1",
+            Self::Numbered => "SELECT id FROM tickets WHERE 'T-' || number = ?1",
+        };
+        Ok(tx
+            .query_row(sql, [reference], |row| row.get(0))
+            .optional()?)
+    }
+}
+
 pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     crate::embedded_attachments::index(tx, id, body)?;
     index_numbers(tx, id, body, false)?;
-    index_text(tx, id, body, false)
+    index_text(tx, id, body, false, References::Stored)
 }
 
 /// Indexes a ticket or Document body for the migration steps that run before ticket references
 /// exist (format versions 35 to 55): the mention index then held ticket numbers, which are not
-/// backfilled and, as before, are not carried into the reference-keyed index.
+/// backfilled and, as before, are not carried into the reference-keyed index. A link to
+/// `T-<number>` still resolves, by the ticket's number.
 pub(crate) fn index_body_before_references(
     tx: &Connection,
     id: &str,
     body: &str,
 ) -> Result<(), Error> {
-    index_text(tx, id, body, false)
+    index_text(tx, id, body, false, References::Numbered)
 }
 
 /// [`index_body_before_references`] for an Activity brief.
@@ -135,13 +163,13 @@ pub(crate) fn index_activity_before_references(
     id: &str,
     body: &str,
 ) -> Result<(), Error> {
-    index_activity_text(tx, id, body)
+    index_activity_text(tx, id, body, References::Numbered)
 }
 
 pub(crate) fn index_external_body(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     crate::embedded_attachments::index_external(tx, id, body)?;
     index_numbers(tx, id, body, false)?;
-    index_text(tx, id, body, false)
+    index_text(tx, id, body, false, References::Stored)
 }
 
 pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
@@ -157,23 +185,21 @@ pub(crate) fn index_external_activity(tx: &Connection, id: &str, body: &str) -> 
 
 fn index_activity_mentions(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     index_numbers(tx, id, body, true)?;
-    index_activity_text(tx, id, body)
+    index_activity_text(tx, id, body, References::Stored)
 }
 
-fn index_activity_text(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
-    index_text(tx, id, body, true)?;
+fn index_activity_text(
+    tx: &Connection,
+    id: &str,
+    body: &str,
+    references: References,
+) -> Result<(), Error> {
+    index_text(tx, id, body, true, references)?;
     // Backlinks recognize visible ticket references even in link text and
     // decoded Markdown runs; retain those established references here too.
     for (text, range) in crate::backlinks::text_runs(body) {
         for (at, len) in ticket_references(&text) {
-            let target: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM tickets WHERE reference = ?1",
-                    [&text[at..at + len]],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(target) = target {
+            if let Some(target) = references.ticket_id(tx, &text[at..at + len])? {
                 let offset = body[range.clone()]
                     .find(&text[at..at + len])
                     .map_or(range.start, |n| range.start + n);
@@ -210,7 +236,13 @@ fn index_numbers(tx: &Connection, id: &str, body: &str, activity: bool) -> Resul
     Ok(())
 }
 
-fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(), Error> {
+fn index_text(
+    tx: &Connection,
+    id: &str,
+    body: &str,
+    activity: bool,
+    references: References,
+) -> Result<(), Error> {
     let (delete, insert) = if activity {
         (
             "DELETE FROM activity_mentions WHERE activity_id = ?1",
@@ -233,14 +265,7 @@ fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(
             Event::End(TagEnd::CodeBlock) => in_code = false,
             Event::Text(text) if activity && !in_link && !in_code => {
                 for (at, len) in ticket_references(text) {
-                    let target = tx
-                        .query_row(
-                            "SELECT id FROM tickets WHERE reference = ?1",
-                            [&text[at..at + len]],
-                            |r| r.get::<_, String>(0),
-                        )
-                        .optional()?;
-                    if let Some(target) = target {
+                    if let Some(target) = references.ticket_id(tx, &text[at..at + len])? {
                         let at = body[range.clone()]
                             .find(&text[at..at + len])
                             .map_or(range.start, |offset| range.start + offset);
@@ -257,12 +282,7 @@ fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(
                 })
                 .optional()?
             } else if let Some(reference) = dest_url.strip_prefix("ticketd://ticket/") {
-                tx.query_row(
-                    "SELECT id FROM tickets WHERE reference = ?1",
-                    [reference],
-                    |r| r.get::<_, String>(0),
-                )
-                .optional()?
+                references.ticket_id(tx, reference)?
             } else if let Some(plan) = dest_url.strip_prefix("ticketd://plan/") {
                 tx.query_row("SELECT id FROM plans WHERE id = ?1", [plan], |r| {
                     r.get::<_, String>(0)

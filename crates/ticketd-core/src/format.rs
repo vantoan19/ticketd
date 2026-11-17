@@ -13,7 +13,8 @@
 //! the code that shipped it stops validating. `format-ledger.txt` and the fixtures in
 //! `tests/fixtures/format` exist to make such an edit show up in review.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
@@ -88,11 +89,7 @@ const LADDER: [(i64, Step); 83] = [
         tx.execute_batch(PLAN_SCOPE_INDEX).map_err(Into::into)
     }),
     (34, document_trashed),
-    (35, |tx, _| {
-        // The mention index the backfill writes into: see `document_links`.
-        tx.execute_batch(document_links::LEGACY_MENTION_INDEX_SCHEMA)?;
-        document_links::migrate(tx)
-    }),
+    (35, |tx, _| document_links::migrate(tx)),
     (36, |tx, _| documents::migrate_search(tx)),
     (37, activity_support),
     (38, document_kept),
@@ -151,6 +148,13 @@ const LADDER: [(i64, Step); 83] = [
 /// Takes a Workspace at format version `from` to the current one, or creates it when
 /// `from` is `0`. All or nothing: one immediate transaction, rolled back on any error.
 pub(crate) fn migrate(connection: &mut Connection, from: i64) -> Result<(), Error> {
+    // Many unrelated databases use `user_version`. Ticketd never wrote a negative one, so
+    // the ladder would build over somebody else's file; leave it as it is.
+    if from < 0 {
+        return Err(Error::Backup(format!(
+            "not a ticketd workspace: its format version is {from}"
+        )));
+    }
     migrate_to(connection, from, FORMAT_VERSION, |_, _| Ok(()))
 }
 
@@ -309,8 +313,27 @@ impl Objects {
 }
 
 /// The schema objects a Workspace at `version` must have, from the ladder.
+///
+/// The ladder is fixed for the life of the process, so each version is built once and kept:
+/// every backup check asks, and building one takes dozens of migration steps.
 pub(crate) fn objects_at(version: i64) -> Result<Objects, Error> {
-    Objects::read(&scratch(version)?)
+    static BUILT: OnceLock<Mutex<HashMap<i64, Objects>>> = OnceLock::new();
+    let built = BUILT.get_or_init(Default::default);
+    // A cache entry is written whole, so a panic elsewhere cannot leave one half-built.
+    if let Some(objects) = built
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&version)
+    {
+        return Ok(objects.clone());
+    }
+    // Built outside the lock: two checks that race both build it and store the same value.
+    let objects = Objects::read(&scratch(version)?)?;
+    built
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(version, objects.clone());
+    Ok(objects)
 }
 
 const TICKETS: &str = "CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL);";
@@ -394,7 +417,6 @@ fn plan_documents(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 }
 
 fn activity_mentions(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
-    tx.execute_batch(document_links::LEGACY_MENTION_INDEX_SCHEMA)?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS activity_mentions (activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, target_id TEXT NOT NULL REFERENCES entities(id), passage TEXT NOT NULL, PRIMARY KEY(activity_id, target_id, passage)); CREATE INDEX IF NOT EXISTS activity_mentions_target ON activity_mentions(target_id, activity_id); CREATE INDEX IF NOT EXISTS activities_support_ticket ON activities(ticket_id, supporting_document_id, id); CREATE INDEX IF NOT EXISTS activities_support_document ON activities(supporting_document_id, ticket_id, id);")?;
     let mut statement = tx.prepare("SELECT id, brief FROM activities")?;
     let activities = statement
@@ -410,7 +432,8 @@ fn activity_mentions(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 }
 
 fn mention_triggers(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
-    tx.execute_batch(document_links::LEGACY_MENTION_INDEX_SCHEMA)?;
+    // The builds that wrote version 41 made the numeric mention index here.
+    tx.execute_batch(document_links::LEGACY_NUMERIC_MENTIONS_SCHEMA)?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_identity ON activities(ticket_id, id); CREATE TRIGGER IF NOT EXISTS numeric_mentions_activity_delete AFTER DELETE ON activities BEGIN DELETE FROM numeric_mentions WHERE source_id = OLD.id AND activity = 1; END;")?;
     let mut statement = tx.prepare("SELECT id, body, 0 FROM tickets UNION ALL SELECT id, body, 0 FROM documents UNION ALL SELECT id, brief, 1 FROM activities")?;
     let records = statement
@@ -436,8 +459,10 @@ fn mention_triggers(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
 fn activity_graph_projections(tx: &Transaction<'_>, _: i64) -> Result<(), Error> {
     // Rebuildable, ordered projections let graph reads stop after a bounded
     // number of Activity mentions without walking unrelated Activities. The projection of
-    // ticket numbers is not filled: the ladder does not backfill them (see
-    // `document_links::LEGACY_MENTION_INDEX_SCHEMA`) and format version 56 drops them.
+    // ticket numbers is made here, as the builds that wrote version 42 made it, but is not
+    // filled: the ladder does not backfill them (see
+    // `document_links::LEGACY_NUMERIC_MENTIONS_SCHEMA`) and format version 56 drops them.
+    tx.execute_batch(document_links::LEGACY_ACTIVITY_GRAPH_NUMBERS_SCHEMA)?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
         INSERT OR IGNORE INTO activity_graph_targets SELECT a.ticket_id, m.activity_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id=m.activity_id;
         CREATE TRIGGER IF NOT EXISTS activity_graph_targets_insert AFTER INSERT ON activity_mentions BEGIN INSERT OR IGNORE INTO activity_graph_targets SELECT ticket_id, NEW.activity_id, NEW.target_id, NEW.passage FROM activities WHERE id=NEW.activity_id; END;

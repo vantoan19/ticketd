@@ -239,6 +239,65 @@ fn server_failures_are_retried_then_reported_as_offline() {
 }
 
 #[test]
+fn a_revision_listing_that_fails_for_a_transient_reason_is_not_a_missing_file() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let pauses = Mutex::new(Vec::new());
+    let timed = timed(&sim, &pauses);
+    let ticket = key("a");
+    put(&remote, &ticket, None, b"a").unwrap();
+    timed.list(FOLDER).unwrap();
+    let lookups = sim.count("GET", "/drive/v3/files?");
+
+    sim.fault(Fault {
+        times: 5,
+        ..Fault::new("GET", "/revisions?", 503)
+    });
+    assert_eq!(timed.revisions(FOLDER, &ticket), Err(RemoteError::Offline));
+
+    sim.fault(Fault {
+        times: 5,
+        headers: vec![("Retry-After".into(), "30".into())],
+        ..Fault::new("GET", "/revisions?", 429)
+    });
+    assert_eq!(
+        timed.revisions(FOLDER, &ticket),
+        Err(RemoteError::RateLimited {
+            retry_after: Some(Duration::from_secs(30))
+        })
+    );
+
+    sim.fault(Fault {
+        times: 2,
+        ..Fault::new("GET", "/revisions?", 401)
+    });
+    assert_eq!(
+        timed.revisions(FOLDER, &ticket),
+        Err(RemoteError::Unauthorized)
+    );
+
+    assert_eq!(timed.revisions(FOLDER, &ticket).unwrap().len(), 1);
+    assert_eq!(
+        sim.count("GET", "/drive/v3/files?"),
+        lookups,
+        "the file's ID stayed cached through every failure"
+    );
+}
+
+#[test]
+fn a_revision_listing_of_a_file_drive_no_longer_has_is_missing() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let ticket = key("a");
+    put(&remote, &ticket, None, b"a").unwrap();
+    sim.fault(Fault::new("GET", "/revisions?", 404));
+    assert_eq!(
+        remote.revisions(FOLDER, &ticket),
+        Err(RemoteError::NotFound)
+    );
+}
+
+#[test]
 fn full_storage_no_network_and_a_removed_folder_are_reported_without_waiting() {
     let sim = DriveSim::default();
     let remote = connected(&sim);

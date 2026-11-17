@@ -810,11 +810,12 @@ impl Workspace {
     }
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
-        )?;
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
+            readiness::indicator_sql("t")
+        ))?;
         let mut tickets = statement
-            .query_map([trashed], ticket_from_row)?
+            .query_map([trashed], listed_ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         for ticket in &mut tickets {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
@@ -845,10 +846,19 @@ pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ti
     let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
     ticket.tags = tags::for_ticket(connection, &ticket.id)?;
     relationships::populate(connection, &mut ticket)?;
+    ticket.availability = readiness::indicator(connection, &ticket.id)?;
     hierarchy::populate(connection, &mut ticket)?;
     duplicates::populate(connection, &mut ticket)?;
     source::populate(connection, &mut ticket)?;
     activities::populate_update(connection, &mut ticket)?;
+    Ok(ticket)
+}
+
+/// A ticket from a list query that selected `readiness::indicator_sql` as its ninth
+/// column, after the eight of [`ticket_from_row`]: its availability needs no query of its own.
+pub(crate) fn listed_ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
+    let mut ticket = ticket_from_row(row)?;
+    ticket.availability = row.get(8)?;
     Ok(ticket)
 }
 

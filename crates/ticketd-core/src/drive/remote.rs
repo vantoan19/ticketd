@@ -806,9 +806,15 @@ impl RemoteStorage for DriveRemote<'_> {
                 url(&format!("files/{id}/revisions"), &parameters)
             },
             &mut |response| {
-                if response.status != 200 {
-                    self.forget(folder, key);
-                    return Err(RemoteError::NotFound);
+                match response.status {
+                    200 => {}
+                    // Only a missing file clears the cached ID; a rate limit, an outage or
+                    // an expired grant says nothing about the file.
+                    404 => {
+                        self.forget(folder, key);
+                        return Err(RemoteError::NotFound);
+                    }
+                    _ => return Err(refusal(&response)),
                 }
                 let page: Page = json(&response)?;
                 revisions.extend(page.revisions.into_iter().map(|revision| {
