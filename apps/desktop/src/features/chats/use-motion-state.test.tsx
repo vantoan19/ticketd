@@ -94,6 +94,28 @@ test("a Chat that appears while the list is held goes on top of its group", () =
     ({ chats, held }) => usePlaced(chats, held),
     { initialProps: { chats: [a], held: true } },
   );
-  rerender({ chats: [a, summary("n", "working")], held: true });
-  expect(result.current.map((one) => one.chat.id)).toEqual(["a", "n"]);
+  rerender({ chats: [summary("n", "working"), a], held: true });
+  // The list is newest first, so it lands where it will settle: above the held rows.
+  expect(result.current.map((one) => one.chat.id)).toEqual(["n", "a"]);
+});
+
+test("a Chat that appears while held and needs you goes above the whole list", () => {
+  const a = summary("a", "working");
+  const { result, rerender } = renderHook(
+    ({ chats, held }) => usePlaced(chats, held),
+    { initialProps: { chats: [a], held: true } },
+  );
+  rerender({ chats: [summary("n", "approval"), a], held: true });
+  expect(result.current.map((one) => one.chat.id)).toEqual(["n", "a"]);
+});
+
+test("a new Recent Chat goes below the held Needs you ones and above the held Recent ones", () => {
+  const needing = summary("a", "approval");
+  const recent = summary("b", "working");
+  const { result, rerender } = renderHook(
+    ({ chats, held }) => usePlaced(chats, held),
+    { initialProps: { chats: [needing, recent], held: true } },
+  );
+  rerender({ chats: [needing, summary("n", "working"), recent], held: true });
+  expect(result.current.map((one) => one.chat.id)).toEqual(["a", "n", "b"]);
 });

@@ -178,10 +178,7 @@ test("an approval request fades up in the tray and leaves once answered", async 
 });
 
 test("queued messages open and close their own space; the queue leaves with its last card", async () => {
-  const client = await open(
-    { id: "c1", title: "Limiter", activity: "working" },
-    [],
-  );
+  await open({ id: "c1", title: "Limiter", activity: "working" }, []);
   expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
   const box = screen.getByLabelText(
     /Steer Codex|Message Codex|Queue for Codex/,
@@ -190,7 +187,6 @@ test("queued messages open and close their own space; the queue leaves with its 
   fireEvent.keyDown(box, { key: "Enter", metaKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(queue.querySelector('[data-slot="appear"]')).toBeTruthy();
-  void client;
   fireEvent.click(screen.getByRole("button", { name: "Remove from queue" }));
   await waitFor(() =>
     expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull(),

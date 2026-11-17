@@ -31,14 +31,18 @@ export function usePlaced(
     const chat = byId.get(id);
     return chat ? [{ chat, needs }] : [];
   });
-  // A Chat that appeared while the list was held goes on top of its group.
+  // A Chat that appeared while the list was held goes on top of its group: the
+  // list is newest first, so that is where it settles when the pointer leaves.
   const unplaced = current.flatMap(({ id, needs }) => {
     const chat = byId.get(id);
     return chat && !shown.some((one) => one.id === id) ? [{ chat, needs }] : [];
   });
+  const heldNeeds = placed.filter((one) => one.needs);
+  const heldRecent = placed.filter((one) => !one.needs);
   return [
     ...unplaced.filter((one) => one.needs),
-    ...placed,
+    ...heldNeeds,
     ...unplaced.filter((one) => !one.needs),
+    ...heldRecent,
   ];
 }
