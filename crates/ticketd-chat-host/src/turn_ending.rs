@@ -82,6 +82,23 @@ impl StopReason {
         }
     }
 
+    /// What stopped it, for the Chats list after "Stopped": "ticketd quit". A few words,
+    /// because beside a Project the row has room for about a dozen characters; past
+    /// that it shortens this with an ellipsis, never the word before it.
+    pub const fn cause(self) -> &'static str {
+        match self {
+            Self::Quit => "ticketd quit",
+            Self::TurnedOff => "Chat turned off",
+            Self::Restore => "backup restored",
+            Self::TakenOver => "you took over",
+            Self::TimeLimit => "time limit",
+            Self::RunEnded => "step ended",
+            Self::Trashed => "trashed",
+            Self::ExplicitResume => "Chat resumed",
+            Self::StorageFailed => "storage failed",
+        }
+    }
+
     /// The transcript's marker for it. Also the key stored after `stopped_by_ticketd:`
     /// in `chat_turns.ending`, so stored endings and markers cannot differ.
     pub const fn marker(self) -> &'static str {

@@ -203,8 +203,13 @@ pub fn status(facts: &Facts<'_>) -> Status {
             "Failed".to_owned(),
             Some(failure_detail(kind, facts.harness)),
         ),
-        // ticketd stopped it, whether or not the harness reported the turn.
-        TurnEnding::StoppedByTicketd(reason) => (Rank::Idle, reason.words().to_owned(), None),
+        // ticketd stopped it, whether or not the harness reported the turn. The cause is
+        // the detail, so a narrow row shortens it and never the word.
+        TurnEnding::StoppedByTicketd(reason) => (
+            Rank::Idle,
+            "Stopped".to_owned(),
+            Some(reason.cause().to_owned()),
+        ),
         TurnEnding::ContactLost(_) => (
             Rank::Failed,
             "Interrupted".to_owned(),

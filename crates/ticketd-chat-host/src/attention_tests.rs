@@ -307,41 +307,53 @@ fn the_app_icon_count_stops_at_99() {
     assert_eq!(badge_text(120).as_deref(), Some("99+"));
 }
 
-/// Every reason ticketd stops a Chat for reads as ticketd's stop: idle, in its own words,
-/// and never as the harness failing mid-turn (whether or not the harness reported it).
+/// What the Chats list says after "Stopped" for each reason ticketd stops a Chat: a
+/// few words, at most 15 characters. The transcript says it in full.
+const STOP_CAUSES: [(StopReason, &str); 9] = [
+    (StopReason::Quit, "ticketd quit"),
+    (StopReason::TurnedOff, "Chat turned off"),
+    (StopReason::Restore, "backup restored"),
+    (StopReason::TakenOver, "you took over"),
+    (StopReason::TimeLimit, "time limit"),
+    (StopReason::RunEnded, "step ended"),
+    (StopReason::Trashed, "trashed"),
+    (StopReason::ExplicitResume, "Chat resumed"),
+    (StopReason::StorageFailed, "storage failed"),
+];
+
+/// The status as a row draws it: the word, which is never shortened, and the line.
+fn shown(status: &Status) -> (Rank, &str, String) {
+    (status.rank, status.word.as_str(), status.line())
+}
+
+/// Every reason ticketd stops a Chat for reads as ticketd's stop: idle, "Stopped" with
+/// the cause after it, and never as the harness failing mid-turn (whether or not the
+/// harness reported it). The cause is the detail, which a narrow row shortens with an
+/// ellipsis; the word is never shortened, so a long one was cut off mid-sentence.
 #[test]
-fn a_turn_ticketd_stopped_is_idle_in_its_own_words_for_every_reason() {
+fn a_turn_ticketd_stopped_reads_stopped_then_its_cause_for_every_reason() {
+    assert_eq!(STOP_CAUSES.map(|(reason, _)| reason), StopReason::ALL);
+    assert!(
+        STOP_CAUSES
+            .iter()
+            .all(|(_, cause)| cause.chars().count() <= 15)
+    );
     let live = idle();
-    for (reason, words) in [
-        (StopReason::Quit, "Stopped when ticketd quit"),
-        (StopReason::TurnedOff, "Stopped when Chat was turned off"),
-        (StopReason::Restore, "Stopped when a backup was restored"),
-        (StopReason::TakenOver, "You took this run over"),
-        (StopReason::TimeLimit, "Stopped at the run's time limit"),
-        (StopReason::RunEnded, "Stopped when its run step ended"),
-        (
-            StopReason::Trashed,
-            "Stopped when the Chat was moved to the trash",
-        ),
-        (
-            StopReason::ExplicitResume,
-            "Stopped when the Chat was resumed",
-        ),
-        (
-            StopReason::StorageFailed,
-            "Stopped when Chat storage failed",
-        ),
-    ] {
+    for (reason, cause) in STOP_CAUSES {
+        let row = (Rank::Idle, "Stopped", format!("Stopped · {cause}"));
         let stopped = turn(3, TurnEnding::StoppedByTicketd(reason));
-        let status = status(&facts(&chat(2), &live, Some(&stopped)));
-        assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, words));
+        // Unseen and seen, it reads the same.
+        assert_eq!(shown(&status(&facts(&chat(2), &live, Some(&stopped)))), row);
+        assert_eq!(shown(&status(&facts(&chat(3), &live, Some(&stopped)))), row);
         // Settled by lost contact instead of the harness's report, it reads the same.
         let unreported = ChatTurn {
             state: ChatTurnState::Unknown,
             ..stopped
         };
-        let status = super::status(&facts(&chat(2), &live, Some(&unreported)));
-        assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, words));
+        assert_eq!(
+            shown(&status(&facts(&chat(2), &live, Some(&unreported)))),
+            row
+        );
     }
 }
 
@@ -349,9 +361,9 @@ fn a_turn_ticketd_stopped_is_idle_in_its_own_words_for_every_reason() {
 /// reason is only in its wording. Every reason that build wrote still reads as
 /// ticketd's stop, not as lost contact.
 #[test]
-fn a_turn_ticketd_stopped_before_endings_existed_is_idle_in_its_own_words() {
+fn a_turn_ticketd_stopped_before_endings_existed_reads_stopped_then_its_cause() {
     let live = idle();
-    for reason in StopReason::ALL {
+    for (reason, cause) in STOP_CAUSES {
         let old = ChatTurn {
             ending: None,
             state: ChatTurnState::Unknown,
@@ -362,10 +374,9 @@ fn a_turn_ticketd_stopped_before_endings_existed_is_idle_in_its_own_words() {
             TurnEnding::of(&old),
             Some(TurnEnding::StoppedByTicketd(reason))
         );
-        let status = status(&facts(&chat(2), &live, Some(&old)));
         assert_eq!(
-            (status.rank, status.word.as_str()),
-            (Rank::Idle, reason.words())
+            shown(&status(&facts(&chat(2), &live, Some(&old)))),
+            (Rank::Idle, "Stopped", format!("Stopped · {cause}"))
         );
     }
 }
