@@ -104,14 +104,19 @@ export function useBoardStatus(workspace: {
     });
   }
   /**
-   * Reads the Ticket anew and shows it. `wrote` says a write of this Ticket
-   * succeeded, so it is reported (which also reloads the list); otherwise it
-   * only shows what was read, since nothing was written.
+   * Reads the Ticket anew and shows it. `written` says whether a write of this
+   * Ticket succeeded: `true` is known, and `landed` says whether the read shows
+   * a write that failed was committed anyway. A write that landed is reported,
+   * which also reloads the list; otherwise the read is only shown, since
+   * nothing was written.
    */
-  async function reconcile(reference: string, wrote: boolean) {
+  async function reconcile(
+    reference: string,
+    written: boolean | { landed: (read: Ticket) => boolean },
+  ) {
     // Successful request replays contain historical results, so only a new read is current.
     const current = await client.showTicket(reference);
-    if (wrote) {
+    if (written === true || (written && written.landed(current))) {
       const reported = latest.current.changed(current);
       latest.current.board.confirmTicket(current);
       await reported;
@@ -163,7 +168,10 @@ export function useBoardStatus(workspace: {
       let placement =
         "Its saved status couldn't be checked. Retry to check again.";
       try {
-        const current = await reconcile(reference, false);
+        // The reply may have been lost after the core committed the move.
+        const current = await reconcile(reference, {
+          landed: (read) => read.status === attempt.status,
+        });
         putBack(current, move);
         placement =
           current.status === attempt.ticket.status
@@ -285,7 +293,10 @@ export function useBoardStatus(workspace: {
     completeDuplicate: () =>
       review ? saved(review.ticket.reference, true) : Promise.resolve(),
     reconcileDuplicate: async () => {
-      if (review) await reconcile(review.ticket.reference, false);
+      if (review)
+        await reconcile(review.ticket.reference, {
+          landed: (read) => read.status === review.status,
+        });
     },
     retry(reference: string) {
       if (busy.current.has(reference)) return;

@@ -28,14 +28,18 @@ const ticket = (status: string): Ticket => ({
 // What the core holds, and how its write answers.
 let stored: Ticket;
 let writeFails: boolean;
+// A write whose reply is lost: the core commits it, the desktop sees a failure.
+let replyLost: boolean;
 beforeEach(() => {
   stored = ticket("Todo");
   writeFails = false;
+  replyLost = false;
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "show_ticket") return stored;
     if (command === "change_ticket") {
       if (writeFails) throw { code: "failed", message: "disk I/O error" };
       stored = ticket("In progress");
+      if (replyLost) throw { code: "unavailable", message: "lost reply" };
       return stored;
     }
     throw new Error(`Unexpected ${command}`);
@@ -59,7 +63,7 @@ function mount() {
   return { hook, workspace };
 }
 
-test("a confirmed move reports one write, and the write report reloads the list", async () => {
+test("a confirmed move is reported once with the confirmed Ticket and does not reload the list itself", async () => {
   const { hook, workspace } = mount();
   await act(async () =>
     hook.result.current.choose(ticket("Todo"), "In progress"),
@@ -92,4 +96,39 @@ test("a move to the status the Ticket already has does not report a write", asyn
   );
   await waitFor(() => expect(hook.result.current.notice).toContain("T-KQ1"));
   expect(workspace.changed).not.toHaveBeenCalled();
+});
+
+test("a failed move that the confirming read shows was committed is reported", async () => {
+  replyLost = true;
+  const { hook, workspace } = mount();
+  await act(async () =>
+    hook.result.current.choose(ticket("Todo"), "In progress"),
+  );
+  await waitFor(() =>
+    expect(hook.result.current.failures["T-KQ1"]).toBeTruthy(),
+  );
+  // The open Ticket's page shows the move at once, and `changed` reloads the list.
+  expect(workspace.changed).toHaveBeenCalledTimes(1);
+  expect(workspace.changed).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "In progress" }),
+  );
+  expect(workspace.refresh).not.toHaveBeenCalled();
+});
+
+test("a review's failed write is reported only when the read shows it landed", async () => {
+  const { hook, workspace } = mount();
+  await act(async () =>
+    hook.result.current.choose(ticket("Todo"), "Duplicate"),
+  );
+  expect(hook.result.current.review?.status).toBe("Duplicate");
+  await act(() => hook.result.current.reconcileDuplicate());
+  // Nothing changed: shown, not reported.
+  expect(workspace.changed).not.toHaveBeenCalled();
+  expect(workspace.patchTicket).toHaveBeenCalled();
+  stored = ticket("Duplicate");
+  await act(() => hook.result.current.reconcileDuplicate());
+  expect(workspace.changed).toHaveBeenCalledTimes(1);
+  expect(workspace.changed).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "Duplicate" }),
+  );
 });
