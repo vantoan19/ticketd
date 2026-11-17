@@ -77,6 +77,9 @@ export function Appear({
         opacity: 1,
         y: 0,
         filter: "blur(0px)",
+        // Once settled, drop the filter itself: a resting blur(0px) still keeps
+        // a compositing layer on every row of a long list.
+        transitionEnd: { filter: "none" },
         transition: {
           default: enterTransition(),
           y: spring("smooth"),
