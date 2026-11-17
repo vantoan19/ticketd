@@ -21,7 +21,6 @@ import {
   ShieldQuestion,
   X,
 } from "lucide-react";
-import { useIsPresent } from "motion/react";
 import { Presence } from "@/components/ui/motion";
 import { Rise } from "@/features/chats/arrivals";
 import { Button } from "@/components/ui/button";
@@ -52,9 +51,7 @@ function Request({
   onAnswered,
   name,
   focusTitle = false,
-  ref,
 }: {
-  ref?: Ref<HTMLDivElement>;
   request: PendingRequest;
   /** Names the Chat's linked records by their titles. */
   name: RecordName;
@@ -70,8 +67,6 @@ function Request({
 }) {
   const titleId = useId();
   const reasonId = useId();
-  // Once answered it fades out where it was; nothing in it can be reached.
-  const present = useIsPresent();
   const title = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (focusTitle) title.current?.focus();
@@ -126,8 +121,6 @@ function Request({
   const Icon = question ? MessageCircleQuestion : ShieldQuestion;
   return (
     <Rise
-      ref={ref}
-      inert={!present}
       role="group"
       data-request={request.request}
       aria-labelledby={titleId}
@@ -323,9 +316,7 @@ function QueueCard({
   onSendNow,
   onEdit,
   onRemove,
-  ref,
 }: {
-  ref?: Ref<HTMLLIElement>;
   queued: Queued;
   canSendNow: boolean;
   onSendNow: () => Promise<void>;
@@ -334,10 +325,9 @@ function QueueCard({
 }) {
   const textId = useId();
   const [sending, setSending] = useState(false);
-  const present = useIsPresent();
   return (
-    <li ref={ref} className="chat-queue-card">
-      <Rise inert={!present} className="flex w-full items-center min-h-8">
+    <li className="chat-queue-card">
+      <Rise className="flex w-full items-center min-h-8">
         <span className="chat-queue-main">
           <span id={textId} className="chat-queue-text">
             {queued.text}
@@ -430,7 +420,7 @@ export function ActivityDock({
   // fades out here while the tray closes its space (DockSlot).
   return (
     <div ref={dockRef} className="chat-activity">
-      <Presence mode="popLayout" initial={false}>
+      <Presence initial={false}>
         {request && (
           <Request
             key={request.id}
@@ -446,7 +436,7 @@ export function ActivityDock({
         )}
       </Presence>
       {plan && <section className="chat-activity-slot">{plan}</section>}
-      <Presence mode="popLayout" initial={false}>
+      <Presence initial={false}>
         {queue.length > 0 && (
           <QueueSection key="queue">
             <div className="chat-queue-head">
@@ -466,7 +456,7 @@ export function ActivityDock({
               )}
             </div>
             <ol aria-label="Queued messages">
-              <Presence mode="popLayout" initial={false}>
+              <Presence initial={false}>
                 {queue.map((queued) => (
                   <QueueCard
                     key={queued.id}
@@ -487,16 +477,9 @@ export function ActivityDock({
 }
 
 /** The queue's section: it fades up with its first card and out with its last. */
-function QueueSection({
-  ref,
-  children,
-}: {
-  ref?: Ref<HTMLDivElement>;
-  children: ReactNode;
-}) {
-  const present = useIsPresent();
+function QueueSection({ children }: { children: ReactNode }) {
   return (
-    <Rise ref={ref} inert={!present}>
+    <Rise>
       <section className="chat-queue">{children}</section>
     </Rise>
   );

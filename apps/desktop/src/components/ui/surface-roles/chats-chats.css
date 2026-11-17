@@ -214,19 +214,19 @@ button.chat-steps:hover {
 .chat-steps .ui-reference {
   color: var(--foreground);
 }
-/* Streamed text: each new chunk fades up from a soft blur. */
-.chat-chunk {
-  animation: chat-chunk var(--dur-enter) var(--ease-out) both;
-}
-@keyframes chat-chunk {
+/* Fades up from a soft blur: each new chunk of streamed text, and a status dot. */
+@keyframes chat-soft-in {
   from {
     opacity: 0;
     filter: blur(var(--motion-blur-in));
   }
 }
-/* A Chat that starts needing you: its dot arrives as the words crossfade. */
+.chat-chunk {
+  animation: chat-soft-in var(--dur-enter) var(--ease-out) both;
+}
+/* A Chat that starts needing you: its dot arrives, then the words crossfade. */
 .chat-status[data-arrived] > [data-slot="status-dot"] {
-  animation: chat-chunk var(--dur-enter) var(--ease-out) both;
+  animation: chat-soft-in var(--dur-enter) var(--ease-out) both;
 }
 .chat-fold[data-fresh] {
   animation: chat-fade-in var(--dur-lift) var(--ease-out);

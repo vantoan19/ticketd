@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { useIsPresent } from "motion/react";
 import { Appear } from "@/components/ui/motion";
 import { useArrived } from "@/features/chats/use-arrivals";
 
@@ -28,8 +29,10 @@ export function Arrives({
 
 /**
  * An element of the Chat that fades up from a soft blur when it mounts and out
- * when it leaves (inside `Presence`). Takes the Chat's own class names.
+ * when it leaves (inside `Presence`). Takes the Chat's own class names. While
+ * it leaves nothing in it can be reached: it is `inert`.
  */
 export function Rise(props: ComponentProps<typeof Appear>) {
-  return <Appear rise="overlay" {...props} />;
+  const present = useIsPresent();
+  return <Appear rise="overlay" {...props} {...(!present && { inert: true })} />;
 }

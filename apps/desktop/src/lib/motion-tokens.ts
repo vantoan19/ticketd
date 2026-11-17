@@ -97,3 +97,8 @@ export function staggerDelay(index: number): number {
 export function themeFade(): number {
   return seconds("--dur-theme");
 }
+
+/** Seconds one change leads another: the dot that arrives before its word. */
+export function lead(): number {
+  return seconds("--dur-1");
+}

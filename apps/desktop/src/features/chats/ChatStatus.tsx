@@ -4,12 +4,13 @@ import { CrossfadeText } from "@/components/ui/motion";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Activity, ChatStatus as Status } from "@/features/chats/client";
 import { needsYou } from "@/features/chats/model";
+import { lead } from "@/lib/motion-tokens";
 
 /**
  * A Chat's ranked status as one line: an 8px dot (orange needsYou for you, blue
  * unread) or the 12px spinner while it works, the word, then the muted detail,
  * which truncates first. The host words it; this only draws it. When the status
- * changes in view the dot arrives and the word crossfades.
+ * changes in view the dot arrives first, then the word crossfades.
  */
 export function ChatStatus({
   status,
@@ -41,7 +42,9 @@ export function ChatStatus({
         )
       )}
       <span className="chat-status-word">
-        <CrossfadeText>{status.word}</CrossfadeText>
+        <CrossfadeText delay={arrived ? lead() : 0}>
+          {status.word}
+        </CrossfadeText>
       </span>
       {status.detail && (
         <span className="chat-status-detail">

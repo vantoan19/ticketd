@@ -118,14 +118,17 @@ export function Glide({ id, className }: { id: string; className?: string }) {
 
 /**
  * Text that changes in place: the old words fade out while the new fade in.
- * Put it inside `MotionProvider`.
+ * `delay` (seconds) holds the new words back, for something else to arrive
+ * first. Put it inside `MotionProvider`.
  */
 export function CrossfadeText({
   children,
   className,
+  delay = 0,
 }: {
   children: string;
   className?: string;
+  delay?: number;
 }) {
   return (
     <span data-slot="crossfade" className={cn("ui-crossfade", className)}>
@@ -133,7 +136,7 @@ export function CrossfadeText({
         <m.span
           key={children}
           initial={{ opacity: 0 }}
-          animate={{ opacity: 1, transition: enterTransition() }}
+          animate={{ opacity: 1, transition: { ...enterTransition(), delay } }}
           exit={{ opacity: 0, transition: exitTransition() }}
         >
           {children}
