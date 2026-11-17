@@ -1,0 +1,38 @@
+/* A page's own entrance (DESIGN.md section 12, "Switching pages"). A page that
+   choreographs itself marks its root `data-own-entrance`; ViewRegion fades the
+   old page out and leaves the new one to it. Its parts carry `data-enter` with
+   `--enter-step` (see enter.ts) and fade up from a soft blur a stagger step
+   apart, eight steps at most.
+
+   These are CSS animations on purpose: one starts when the element mounts and
+   starts again whenever a page that stays mounted comes back from `hidden`, so
+   there is no replay code. Every duration is a token, so reduced motion and a
+   held key reach it as they reach everything else.
+
+   The rules only reach the live page (`.view-region`). The still picture of the
+   page that is leaving is a clone of it and must not play its entrance again. */
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+    filter: blur(var(--motion-blur-in));
+  }
+}
+@keyframes enter-rise {
+  from {
+    transform: translateY(var(--motion-rise));
+  }
+}
+.view-region [data-own-entrance] [data-enter] {
+  animation:
+    enter-fade var(--dur-enter) var(--ease-out) backwards,
+    enter-rise var(--spring-smooth-t) var(--spring-smooth) backwards;
+  animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), 7));
+}
+
+/* While the old page is still fading (ViewRegion keeps its picture as a sibling
+   of the region), hold every animation of the new page where it starts. They run
+   when the picture is gone: the new page begins once the old one has left, and a
+   page that mounts with no switch begins at once. */
+.content-panel:has(> .view-departing) > .view-region [data-own-entrance] * {
+  animation-play-state: paused;
+}

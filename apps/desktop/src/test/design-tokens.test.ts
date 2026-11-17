@@ -150,9 +150,13 @@ function motionFindings(source: string): string[] {
     const names = [...value.matchAll(/var\((--[\w-]+)/g)].map(
       (m) => m[1] ?? "",
     );
-    const allowed = /-(?:duration|delay)$/.test(property)
-      ? /^--dur-/
-      : /^--(?:dur-|ease-|spring-|animate-spin$|motion-swift$)/;
+    // A delay may also be whole cascade steps: --stagger times the step the
+    // element holds (--enter-step, set by components/ui/enter.ts).
+    const allowed = /-delay$/.test(property)
+      ? /^--(?:dur-|stagger$|enter-step$)/
+      : /-duration$/.test(property)
+        ? /^--dur-/
+        : /^--(?:dur-|ease-|spring-|animate-spin$|motion-swift$)/;
     if (names.some((name) => !allowed.test(name))) offenders.push(match[0]);
   }
   return offenders;
@@ -176,6 +180,21 @@ it("rejects raw times and unrelated tokens in motion declarations", () => {
   expect(
     motionFindings("a { transition: color var(--dur-1) var(--ease-out); }"),
   ).toEqual([]);
+});
+
+it("allows whole stagger steps in a delay, and nowhere else", () => {
+  expect(
+    motionFindings(
+      "a { animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), 7)); }",
+    ),
+  ).toEqual([]);
+  expect(motionFindings("a { animation-delay: var(--stagger); }")).toEqual([]);
+  expect(
+    motionFindings("a { transition-duration: var(--stagger); }"),
+  ).not.toEqual([]);
+  expect(
+    motionFindings("a { animation: fade var(--stagger) var(--ease-out); }"),
+  ).not.toEqual([]);
 });
 
 function componentMotionFindings(source: string): string[] {

@@ -12,6 +12,7 @@ import "./patterns.css";
 export function ManagementPage({
   className,
   layout = "default",
+  ownEntrance = false,
   children,
   "aria-labelledby": labelledBy,
   "aria-label": label,
@@ -20,6 +21,8 @@ export function ManagementPage({
   ref?: Ref<HTMLElement>;
   className?: string;
   layout?: "default" | "centered" | "guide";
+  /** The page arranges its own entrance (enter.ts); the shell only fades the old page out. */
+  ownEntrance?: boolean;
   children: ReactNode;
   "aria-labelledby"?: string;
   "aria-label"?: string;
@@ -28,6 +31,7 @@ export function ManagementPage({
     <section
       ref={ref}
       data-slot="management-page"
+      data-own-entrance={ownEntrance || undefined}
       aria-labelledby={labelledBy}
       aria-label={label}
       className={cn(

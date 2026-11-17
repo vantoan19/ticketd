@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Appear } from "@/components/ui/motion";
+import { enter } from "@/components/ui/enter";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -463,11 +463,11 @@ export function AutomationsView({
       role="group"
       aria-label="Start from an example"
     >
-      <Appear index={1}>
+      <div {...enter(1)}>
         <p className="auto-starters-label">Start from an example</p>
-      </Appear>
+      </div>
       {EXAMPLES.map(({ example, icon: Icon, title, sub }, index) => (
-        <Appear key={example} index={index + 2}>
+        <div key={example} {...enter(index + 2)}>
           <button
             type="button"
             className="auto-starter"
@@ -478,7 +478,7 @@ export function AutomationsView({
             <span className="auto-starter-sub">{sub}</span>
             <ArrowRight size={16} aria-hidden />
           </button>
-        </Appear>
+        </div>
       ))}
     </div>
   );
@@ -734,13 +734,13 @@ export function AutomationsView({
     >
       {empty && tab === "automations" ? (
         <div className="auto-empty auto-start">
-          <Appear>
+          <div {...enter(0)}>
             <EmptyState
               icon={<Workflow />}
               title="Let agents act on tickets for you"
               description="Run a sequence of steps when a ticket changes, on a schedule, or whenever you choose."
             />
-          </Appear>
+          </div>
           {!narrow && examples}
         </div>
       ) : (
@@ -759,7 +759,7 @@ export function AutomationsView({
   );
   const open = openAgent ?? openAutomation ?? listedRun;
   return (
-    <div ref={workspaceRef} className="plan-workspace">
+    <div ref={workspaceRef} className="plan-workspace" data-own-entrance="">
       {failure && (
         <div className="auto-failure">
           <Alert size="compact" tone="error">

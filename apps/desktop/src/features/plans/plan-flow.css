@@ -29,16 +29,23 @@
   z-index: 1;
   overflow: visible;
 }
-/* The lines draw once both ends are in place (two entrances after the lane
-   cascade begins) and take longer than an entrance (1.75 times --dur-enter,
-   420ms). Their arrowheads fade in as they draw. All of it is zero under
-   reduced motion and a held key. */
+/* The lines draw once both ends are in place and take longer than an entrance.
+   Those two ratios are the only times here that no token names, so they are
+   named: a line starts two entrances after the lane cascade begins and takes
+   1.75 entrances to draw (480ms and 420ms with --dur-enter at 240ms). Their
+   arrowheads fade in as they draw. All of it is zero under reduced motion and a
+   held key, because the durations scale --dur-enter. */
+.plan-flow-edges {
+  --edge-wait-entrances: 2;
+  --edge-draw-entrances: 1.75;
+  --dur-edge-wait: calc(var(--dur-enter) * var(--edge-wait-entrances));
+  --dur-edge-draw: calc(var(--dur-enter) * var(--edge-draw-entrances));
+}
 .plan-flow-edges .ui-drawn {
   animation:
-    ui-draw calc(var(--dur-enter) * 1.75) var(--ease-out)
-      calc(var(--dur-enter) * 2) both,
-    plan-flow-edge-in calc(var(--dur-enter) * 1.75) var(--ease-out)
-      calc(var(--dur-enter) * 2) both;
+    ui-draw var(--dur-edge-draw) var(--ease-out) var(--dur-edge-wait) both,
+    plan-flow-edge-in var(--dur-edge-draw) var(--ease-out) var(--dur-edge-wait)
+      both;
 }
 @keyframes plan-flow-edge-in {
   from {

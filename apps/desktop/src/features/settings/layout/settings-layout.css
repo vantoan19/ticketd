@@ -1,5 +1,4 @@
 @import "../../../components/ui/surface-roles/settings-layout-settings-layout.css";
-
 /* Settings page shell, section, list and row. Geometry from the Settings
    boards; every color, radius and shadow is a token from styles.css. */
 .settings-shell {
@@ -193,19 +192,26 @@
   text-underline-offset: 2px;
 }
 
-/* A page arrives from a soft blur, its header first. This runs when a page
+/* A page arrives from a soft blur, its header first (the enter-fade and
+   enter-rise keyframes of components/ui/enter.css). This runs when a page
    mounts and when a kept-mounted source page is shown again (display none to
-   shown replays it). The page before it fades out first (SettingsView). */
-.settings-shell:not([hidden]) > .settings-page-column > * {
-  animation: settings-page-enter var(--dur-enter) var(--ease-out) both;
+   shown replays it). The page before it fades out first (SettingsView), or the
+   shell does while it is the Settings page itself that opens (enter.css holds
+   the animation until then). It is limited to the live page: the shell's still
+   picture of the page that left is a clone and must not play it again. */
+.view-region
+  [data-own-entrance]
+  .settings-shell:not([hidden])
+  > .settings-page-column
+  > * {
+  animation:
+    enter-fade var(--dur-enter) var(--ease-out) backwards,
+    enter-rise var(--spring-smooth-t) var(--spring-smooth) backwards;
 }
-.settings-shell:not([hidden]) > .settings-page-column > :not(header) {
-  animation-delay: var(--dur-1);
-}
-@keyframes settings-page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--motion-rise));
-    filter: blur(var(--motion-blur-in));
-  }
+.view-region
+  [data-own-entrance]
+  .settings-shell:not([hidden])
+  > .settings-page-column
+  > :not(header) {
+  animation-delay: var(--stagger);
 }

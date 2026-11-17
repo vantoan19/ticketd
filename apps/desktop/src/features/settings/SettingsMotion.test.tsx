@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   act,
   cleanup,
@@ -111,6 +113,38 @@ test("the open page fades out first, then the next one arrives", async () => {
   await waitFor(() => expect(title("Attention")).toBeTruthy());
   expect(title("Appearance")).toBeNull();
   expect(page().dataset.leaving).toBeUndefined();
+});
+
+test("the page that is fading out cannot be reached, and the next one can", async () => {
+  render(<Settings />);
+  await act(async () => {});
+  expect(page().hasAttribute("inert")).toBe(false);
+  fireEvent.click(row(/^Attention/));
+  expect(page().hasAttribute("inert")).toBe(true);
+  await waitFor(() => expect(title("Attention")).toBeTruthy());
+  expect(page().hasAttribute("inert")).toBe(false);
+});
+
+test("the Settings page arranges its own entrance", async () => {
+  render(<Settings />);
+  await act(async () => {});
+  expect(page().hasAttribute("data-own-entrance")).toBe(true);
+});
+
+test("the page's cascade delays its rows by whole stagger steps and only reaches the live page", () => {
+  const css = readFileSync(
+    join(__dirname, "layout", "settings-layout.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(css).toMatch(
+    /:not\(header\)\s*\{\s*animation-delay: var\(--stagger\);/,
+  );
+  // Every selector that plays the entrance starts at the live region, so the
+  // shell's still picture of the page that left (a clone) never replays it.
+  for (const rule of css.matchAll(/([^{}]+)\{[^{}]*animation[^{}]*\}/g))
+    expect(rule[1]?.trim().replace(/\s+/g, " ")).toMatch(
+      /^\.view-region \[data-own-entrance\] /,
+    );
 });
 
 test.each([

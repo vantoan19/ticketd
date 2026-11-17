@@ -8,21 +8,29 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "cn";
+import { enter } from "@/components/ui/enter";
 import { DrawnPath } from "@/components/ui/motion";
 
-const StepNumber = createContext(0);
+/** A step's place in its list, and its step in the page's entrance if it has one. */
+const StepPlace = createContext<{ number: number; enter?: number }>({
+  number: 0,
+});
 
 /**
  * A numbered list of things to do in order, joined by a thin line. Compose
- * `Step`s as children; they are numbered from 1.
+ * `Step`s as children; they are numbered from 1. On a page with its own
+ * entrance (enter.ts), `enterFrom` makes each step arrive in turn, the first
+ * at that step of the page's cascade.
  */
 export function Steps({
   className,
   children,
   variant = "default",
+  enterFrom,
 }: {
   variant?: "default" | "settings";
   className?: string;
+  enterFrom?: number;
   children: ReactNode;
 }) {
   return (
@@ -32,9 +40,15 @@ export function Steps({
       className={cn("m-0 flex list-none flex-col p-0", className)}
     >
       {Children.toArray(children).map((child, index) => (
-        <StepNumber.Provider key={index} value={index + 1}>
+        <StepPlace.Provider
+          key={index}
+          value={{
+            number: index + 1,
+            ...(enterFrom !== undefined && { enter: enterFrom + index }),
+          }}
+        >
           {child}
-        </StepNumber.Provider>
+        </StepPlace.Provider>
       ))}
     </ol>
   );
@@ -45,25 +59,32 @@ export function Steps({
  * button) at the end of the title line. `state` marks a finished step "done"
  * or the one to do now "current"; the number carries the order and the
  * marker's color the state, so give a done or current step words as well
- * where the state matters.
+ * where the state matters. A state that is read asynchronously passes
+ * `settled={false}` until the read is back, so a step that was already done
+ * shows its check instead of drawing it.
  */
 export function Step({
   title,
   description,
   action,
   state,
+  settled = true,
 }: {
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
   state?: "done" | "current";
+  settled?: boolean;
 }) {
-  const number = useContext(StepNumber);
-  // A step that completes while it is on screen draws its check; one that
-  // arrives done just shows it.
-  const [completes] = useState(state !== "done");
+  const { number, enter: entering } = useContext(StepPlace);
+  // A step that completes while it is on screen draws its check; one that was
+  // already done when its state first settled just shows it.
+  const [arrivedDone, setArrivedDone] = useState<boolean | null>(null);
+  if (settled && arrivedDone === null) setArrivedDone(state === "done");
+  const completes = arrivedDone === false;
   return (
     <li
+      {...(entering !== undefined && enter(entering))}
       data-slot="step"
       data-state={state}
       aria-current={state === "current" ? "step" : undefined}

@@ -14,12 +14,16 @@
 }
 
 /* On the Plans page each bar fills on the travel spring once its card has
-   arrived (--dur-enter is the card's entrance). The tokens are zero under
-   reduced motion and a held key, and the stylesheet drops animations. */
+   arrived: the card's own step of the page's cascade (--enter-step, set on the
+   card's wrapper by enter.ts), then its entrance (--dur-enter). The tokens are
+   zero under reduced motion and a held key, and the stylesheet drops
+   animations. */
 .plan-index-list .plan-split-bar > span {
   transform-origin: 0 50%;
-  animation: plan-bar-fill var(--spring-travel-t) var(--spring-travel)
-    var(--dur-enter) backwards;
+  animation: plan-bar-fill var(--spring-travel-t) var(--spring-travel) backwards;
+  animation-delay: calc(
+    var(--stagger) * min(var(--enter-step, 0), 7) + var(--dur-enter)
+  );
 }
 @keyframes plan-bar-fill {
   from {

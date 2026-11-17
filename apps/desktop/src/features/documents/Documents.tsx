@@ -27,8 +27,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Appear } from "@/components/ui/motion";
-import { useReopened } from "@/lib/use-reopened";
+import { enter } from "@/components/ui/enter";
 import {
   ArrowLeft,
   Clock,
@@ -127,8 +126,6 @@ export function Documents({
   const openGraph = useContext(ContextGraphNavigation);
   const [readerCloseRequest, setReaderCloseRequest] = useState(0);
   const page = useRef<HTMLDivElement>(null);
-  // The page stays mounted while another is shown: its lists arrive again on return.
-  const reopened = useReopened(page);
   const navigator = useRef<HTMLDivElement>(null);
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -754,8 +751,11 @@ export function Documents({
         ? allLoaded
         : browseLoaded;
   return (
+    // The page stays mounted while another is shown; its entrance (enter.ts)
+    // plays again each time it comes back from `hidden`.
     <div
       className="documents-page"
+      data-own-entrance=""
       data-reading={selected !== null || opening !== null || undefined}
       ref={page}
     >
@@ -797,53 +797,55 @@ export function Documents({
           }
         }}
       >
-        <PaneHeader
-          title="Documents"
-          count={countKnown ? <Count>{shownCount}</Count> : undefined}
-          titleEditor={
-            searchOpen ? (
-              <NavigatorSearch
-                aria-label="Search Documents"
-                placeholder="Search Documents…"
-                value={query}
-                onValueChange={(value) => {
-                  setQuery(value);
-                  setOffset(0);
-                }}
-              />
-            ) : undefined
-          }
-          actions={
-            <>
-              {!searchOpen && (
-                <IconButton
-                  ref={searchTrigger}
-                  label="Search Documents"
-                  shortcut={shortcutLabel("documents-search")}
-                  aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
-                  onClick={() => {
-                    setSearchOpen(true);
-                    if (showTrash) setView("recent");
+        <div className="documents-list-head" {...enter(0)}>
+          <PaneHeader
+            title="Documents"
+            count={countKnown ? <Count>{shownCount}</Count> : undefined}
+            titleEditor={
+              searchOpen ? (
+                <NavigatorSearch
+                  aria-label="Search Documents"
+                  placeholder="Search Documents…"
+                  value={query}
+                  onValueChange={(value) => {
+                    setQuery(value);
+                    setOffset(0);
                   }}
-                >
-                  <Search />
-                </IconButton>
-              )}
-              {onCapture && (
-                <IconButton
-                  label="New Document"
-                  shortcut={shortcutLabel("capture")}
-                  aria-keyshortcuts={ariaKeyShortcuts("capture")}
-                  onClick={onCapture}
-                >
-                  <Plus />
-                </IconButton>
-              )}
-            </>
-          }
-        />
+                />
+              ) : undefined
+            }
+            actions={
+              <>
+                {!searchOpen && (
+                  <IconButton
+                    ref={searchTrigger}
+                    label="Search Documents"
+                    shortcut={shortcutLabel("documents-search")}
+                    aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
+                    onClick={() => {
+                      setSearchOpen(true);
+                      if (showTrash) setView("recent");
+                    }}
+                  >
+                    <Search />
+                  </IconButton>
+                )}
+                {onCapture && (
+                  <IconButton
+                    label="New Document"
+                    shortcut={shortcutLabel("capture")}
+                    aria-keyshortcuts={ariaKeyShortcuts("capture")}
+                    onClick={onCapture}
+                  >
+                    <Plus />
+                  </IconButton>
+                )}
+              </>
+            }
+          />
+        </div>
         {/* One toolbar in every view: it never collapses or moves (DL-01, DL-02). */}
-        <div className="documents-toolbar">
+        <div className="documents-toolbar" {...enter(1)}>
           <SegmentedControl
             aria-label="Documents view"
             value={searching && !showTrash ? ("" as typeof view) : view}
@@ -895,7 +897,7 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        <Appear key={reopened}>
+        <div {...enter(2)}>
           {listError?.kind === "load" && !countKnown ? (
             <FailureState
               failure={listError.failure}
@@ -1055,7 +1057,7 @@ export function Documents({
               )}
             </>
           )}
-        </Appear>
+        </div>
         <label
           className="documents-include"
           data-hidden={showTrash || undefined}
