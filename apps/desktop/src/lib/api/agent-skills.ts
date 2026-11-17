@@ -1,26 +1,31 @@
 import { invoke } from "@/lib/api/bridge-failure";
+import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 
-const agentSkillSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  path: z.string(),
-  detected: z.boolean(),
-  /** Null when the folder could not be read; `error` says why. */
-  state: z
-    .enum([
-      "installed",
-      "update_available",
-      "not_installed",
-      "edited",
-      "other",
-      "not_a_file",
-    ])
-    .nullable(),
-  error: z.string().nullable(),
-});
+const agentSkillSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    path: z.string(),
+    detected: z.boolean(),
+    /** Null when the folder could not be read; `error` says why. */
+    state: z
+      .enum([
+        "installed",
+        "update_available",
+        "not_installed",
+        "edited",
+        "other",
+        "not_a_file",
+      ])
+      .nullable(),
+    error: z.string().nullable(),
+  }),
+);
 
-const installSchema = z.object({ backup: z.string().nullable() });
+const installSchema = lazySchema(() =>
+  z.object({ backup: z.string().nullable() }),
+);
 
 export type AgentSkill = z.infer<typeof agentSkillSchema>;
 

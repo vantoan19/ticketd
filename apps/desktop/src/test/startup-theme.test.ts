@@ -74,18 +74,24 @@ it("a module-load failure has a visible restart step when the native watchdog re
 it("prepares the native frame even if application modules never load", async () => {
   const calls: [string, unknown][] = [];
   const root = { dataset: {}, classList: { toggle() {} }, style: {} };
-  runInNewContext(bootstrap, {
-    localStorage: { getItem: () => '{"theme":"dark"}' },
-    matchMedia: () => ({ matches: false }),
-    document: { documentElement: root },
-    __TAURI_INTERNALS__: {
-      metadata: { currentWindow: { label: "main" } },
-      invoke: async (command: string, args: unknown) => {
-        calls.push([command, args]);
+  const context: { ticketdThemePainted?: Promise<unknown> } = {};
+  runInNewContext(
+    bootstrap,
+    Object.assign(context, {
+      localStorage: { getItem: () => '{"theme":"dark"}' },
+      matchMedia: () => ({ matches: false }),
+      document: { documentElement: root },
+      __TAURI_INTERNALS__: {
+        metadata: { currentWindow: { label: "main" } },
+        invoke: async (command: string, args: unknown) => {
+          calls.push([command, args]);
+        },
       },
-    },
-  });
-  await Promise.resolve();
+    }),
+  );
+  // main.tsx reveals the window once the paint settles.
+  expect(context.ticketdThemePainted).toBeDefined();
+  await context.ticketdThemePainted;
   expect(calls).toContainEqual([
     "plugin:window|set_theme",
     { label: "main", value: "dark" },

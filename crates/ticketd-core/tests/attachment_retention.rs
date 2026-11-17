@@ -212,3 +212,58 @@ fn attachment_free_upgrade_keeps_new_cli_uploads_eligible_without_a_desktop() {
     let file = w.import_attachment("new", source, None).unwrap();
     assert!(w.attachment_usage(&file.id).unwrap().eligible);
 }
+
+#[test]
+fn released_editor_history_leaves_no_row_and_a_replayed_release_still_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"history bytes").unwrap();
+    let file = w.import_attachment("upload", &source, None).unwrap();
+    let body = format!("[Trace]({})", w.attachment_uri(&file.id).unwrap());
+    let history = w
+        .retain_draft(&DraftRetention {
+            owner: "undo:Description:mount-1".into(),
+            kind: "undo".into(),
+            revision: 0,
+            payload: None,
+            markdown: vec![body],
+        })
+        .unwrap();
+    assert!(!w.attachment_usage(&file.id).unwrap().eligible);
+    // A stale release still cannot clear newer history.
+    assert!(w.release_draft(&history.owner, 0).is_err());
+    let released = w.release_draft(&history.owner, history.revision).unwrap();
+    assert_eq!(released.revision, 0);
+    assert!(w.draft_retentions().unwrap().is_empty());
+    assert!(w.attachment_usage(&file.id).unwrap().eligible);
+    // A retried release whose answer was lost finds nothing left to release.
+    w.release_draft(&history.owner, history.revision).unwrap();
+    assert!(w.draft_retentions().unwrap().is_empty());
+}
+
+#[test]
+fn startup_read_skips_empty_history_rows_but_keeps_draft_tombstones() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for owner in ["undo:Description:old-mount", "ticket:t1"] {
+        // How earlier versions released both: an empty draft-kind row.
+        let kept = w
+            .retain_draft(&DraftRetention {
+                owner: owner.into(),
+                kind: "draft".into(),
+                revision: 0,
+                payload: Some(json!({"body": "text"})),
+                markdown: vec!["text".into()],
+            })
+            .unwrap();
+        w.release_draft(owner, kept.revision).unwrap();
+    }
+    let owners: Vec<_> = w
+        .draft_retentions()
+        .unwrap()
+        .into_iter()
+        .map(|record| record.owner)
+        .collect();
+    assert_eq!(owners, ["ticket:t1"]);
+}

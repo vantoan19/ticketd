@@ -1,5 +1,4 @@
 import { createLowlight } from "lowlight";
-import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -11,7 +10,13 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 
-const languages = {
+export { codeLanguageLabel } from "./code-language";
+
+/**
+ * The one highlighting engine, for reading (SyntaxCode) and for Plate's code
+ * blocks. Unknown languages and unusually large fences stay plain text.
+ */
+const lowlight = createLowlight({
   bash,
   css,
   javascript,
@@ -22,15 +27,7 @@ const languages = {
   sql,
   typescript,
   xml,
-};
-for (const [name, language] of Object.entries(languages))
-  hljs.registerLanguage(name, language);
-
-export const syntaxHighlighter = hljs;
-
-// Plate decorates its existing text leaves. Use the same grammars and bound as
-// reading, keeping unknown languages and unusually large fences as plain text.
-const lowlight = createLowlight(languages);
+});
 export const codeLowlight: ReturnType<typeof createLowlight> = {
   ...lowlight,
   highlight(language, value, options) {
@@ -44,28 +41,3 @@ export const codeLowlight: ReturnType<typeof createLowlight> = {
     return lowlight.highlightAuto(value, options);
   },
 };
-
-const languageLabels = new Map([
-  ["typescript", "TypeScript"],
-  ["ts", "TypeScript"],
-  ["javascript", "JavaScript"],
-  ["js", "JavaScript"],
-  ["json", "JSON"],
-  ["rust", "Rust"],
-  ["python", "Python"],
-  ["py", "Python"],
-  ["bash", "Bash"],
-  ["sh", "Bash"],
-  ["shell", "Bash"],
-  ["sql", "SQL"],
-  ["html", "HTML"],
-  ["xml", "XML"],
-  ["css", "CSS"],
-  ["markdown", "Markdown"],
-  ["md", "Markdown"],
-]);
-
-/** Display names do not replace the fence's stored language token. */
-export function codeLanguageLabel(language: string): string {
-  return languageLabels.get(language.toLowerCase()) ?? language;
-}

@@ -41,6 +41,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     request: ChatRequest;
     n: number;
   } | null>(null);
+  // Turning Chat off drops its requests: the Chats screen, mounted again when
+  // Chat comes back, must not replay them.
+  if (!enabled && (openRequest || chatRequest)) {
+    setOpenRequest(null);
+    setChatRequest(null);
+  }
   const { notifyChats } = usePreferences();
   const [quitting, setQuitting] = useState<Stopping | null>(null);
 

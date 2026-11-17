@@ -1,5 +1,11 @@
 import { useDialogPresence } from "@/components/ui/use-dialog-presence";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CloudCheck,
   ArrowLeft,
@@ -72,7 +78,10 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
 import { RecordHistory } from "@/features/sync-review/RecordHistory";
 import { useConflicts } from "@/features/sync-review/use-conflicts";
-import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import {
+  DraftRecoveryGate,
+  useDraftRecovery,
+} from "@/lib/draft-recovery-context";
 import { useRecordSyncState } from "@/features/sync/record-sync";
 
 /**
@@ -208,21 +217,7 @@ const recoverySchema = z.object({
   external: snapshotSchema.nullable(),
   externalRevision: z.string().nullable(),
 });
-export function DocumentEditor({
-  initial,
-  onClose,
-  currentTicket,
-  onOpenDocument,
-  onOpenTicket,
-  onOpenPlan,
-  onOpenGraph,
-  active = true,
-  pinned = false,
-  onTogglePin,
-  closeRequest = 0,
-  backLabel = "Back to work",
-  children,
-}: {
+type DocumentEditorProps = {
   initial: Document | null;
   onClose: () => void;
   currentTicket?: string | null;
@@ -240,7 +235,32 @@ export function DocumentEditor({
   /** Label of the reader's footer button; the Documents list says where it returns to. */
   backLabel?: string;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
-}) {
+};
+
+/** Opens once stored recovery has loaded, so an unsaved draft comes back with it. */
+export function DocumentEditor(props: DocumentEditorProps) {
+  return (
+    <DraftRecoveryGate>
+      <RecoveredDocumentEditor {...props} />
+    </DraftRecoveryGate>
+  );
+}
+
+function RecoveredDocumentEditor({
+  initial,
+  onClose,
+  currentTicket,
+  onOpenDocument,
+  onOpenTicket,
+  onOpenPlan,
+  onOpenGraph,
+  active = true,
+  pinned = false,
+  onTogglePin,
+  closeRequest = 0,
+  backLabel = "Back to work",
+  children,
+}: DocumentEditorProps) {
   const { conflicts } = useConflicts();
   const needsReview = conflicts.some(
     (item) => item.kind === "document" && item.id === initial?.id,
@@ -356,6 +376,9 @@ export function DocumentEditor({
   }, [discarded]);
   const externalRef = useRef<Snapshot | null>(recovered?.external ?? null);
   const draft = useRef<Snapshot>({ title, body, suggestion });
+  // The editor holds typing it has not reported yet: an outside change must
+  // not replace the body meanwhile.
+  const editorPending = useRef(false);
   const saved = useRef<Snapshot>(
     recovered?.saved ?? { title, body, suggestion: null },
   );
@@ -403,9 +426,25 @@ export function DocumentEditor({
         : [],
     );
   };
-  useEffect(() => {
+  // The payload reads refs that change together with this state: the draft
+  // (title, body, suggestion), Reload's offer, the outside change, and a save
+  // or refresh (savedDocument, status).
+  const persistChanged = useEffectEvent(() => {
     void persistRecovery().catch(() => {});
   });
+  useEffect(
+    () => persistChanged(),
+    [
+      recovery,
+      title,
+      body,
+      suggestion,
+      discarded,
+      external,
+      savedDocument,
+      status,
+    ],
+  );
   useEffect(() => {
     if (initial) return;
     let active = true;
@@ -670,6 +709,7 @@ export function DocumentEditor({
     }
     const titleDirty = storedTitle(draft.current.title) !== saved.current.title;
     const bodyDirty =
+      editorPending.current ||
       draft.current.body !== saved.current.body ||
       draft.current.suggestion !== saved.current.suggestion;
     const conflict =
@@ -1372,6 +1412,9 @@ export function DocumentEditor({
                 const next = head + value;
                 draft.current = { ...draft.current, body: next };
                 setBody(next);
+              }}
+              onPendingChange={(pending) => {
+                editorPending.current = pending;
               }}
               label={capture ? "Your thought" : "Document"}
               placeholder={

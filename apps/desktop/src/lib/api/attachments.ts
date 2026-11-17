@@ -1,120 +1,135 @@
 import { Channel, convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@/lib/api/bridge-failure";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 
-export const attachmentSchema = z.object({
-  id: z.string(),
-  display_name: z.string(),
-  original_filename: z.string(),
-  size_bytes: z.number().nonnegative().nullable(),
-  kind: z.enum(["local_snapshot", "external_reference"]),
-  uploaded_copy: z.boolean().optional(),
-  locator: z.string(),
-  quarantined: z.boolean().optional(),
-  purge_state: z.enum(["retained", "pending", "purged"]).optional(),
-  added_at: z.string().nullable().optional(),
-});
+export const attachmentSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    display_name: z.string(),
+    original_filename: z.string(),
+    size_bytes: z.number().nonnegative().nullable(),
+    kind: z.enum(["local_snapshot", "external_reference"]),
+    uploaded_copy: z.boolean().optional(),
+    locator: z.string(),
+    quarantined: z.boolean().optional(),
+    purge_state: z.enum(["retained", "pending", "purged"]).optional(),
+    added_at: z.string().nullable().optional(),
+  }),
+);
 export type Attachment = z.infer<typeof attachmentSchema>;
-export const attachmentUsageSchema = z.object({
-  eligible: z.boolean(),
-  legacy_drafts_pending: z.boolean(),
-  protections: z.array(
-    z.object({
-      kind: z.string(),
-      owner: z.string(),
-      ticket_id: z.string().nullable(),
-      trashed: z.boolean(),
-    }),
-  ),
-});
-export type AttachmentUsage = z.infer<typeof attachmentUsageSchema>;
-export type AttachmentState = "all" | "in_use" | "unused" | "quarantined";
-const cleanupReviewSchema = z.object({
-  attachment: attachmentSchema,
-  eligible: z.boolean(),
-  purge_eligible: z.boolean().optional(),
-  remove_eligible: z.boolean().optional(),
-  reason: z.string(),
-  usage: attachmentUsageSchema,
-});
-export type AttachmentCleanupReview = z.infer<typeof cleanupReviewSchema>;
-const attachmentSearchResultSchema = z.object({
-  attachment: attachmentSchema,
-  usage: attachmentUsageSchema,
-  related: z.boolean(),
-  /** A kept local file whose stored copy is no longer on this computer. */
-  missing: z.boolean().optional(),
-});
-export type AttachmentSearchResult = z.infer<
-  typeof attachmentSearchResultSchema
->;
-const previewSchema = z.object({
-  attachment: attachmentSchema,
-  uploaded_copy: z.boolean().optional(),
-  status: z.enum([
-    "available",
-    "unsupported",
-    "missing",
-    "incomplete",
-    "unavailable",
-    "too_large",
-  ]),
-  media_type: z
-    .enum([
-      "image/png",
-      "image/jpeg",
-      "image/gif",
-      "image/webp",
-      "image/bmp",
-      "audio/mpeg",
-      "audio/wav",
-      "audio/ogg",
-      "audio/mp4",
-      "video/mp4",
-      "video/webm",
-      "video/ogg",
-    ])
-    .nullable(),
-  message: z.string().nullable(),
-  can_open: z.boolean(),
-  /** The start of a plain-text file, shown in place of a media preview. */
-  text_excerpt: z
-    .object({ text: z.string(), truncated: z.boolean() })
-    .nullable()
-    .optional(),
-  usage: z.object({
-    total: z.number().int().nonnegative(),
+export const attachmentUsageSchema = lazySchema(() =>
+  z.object({
+    eligible: z.boolean(),
     legacy_drafts_pending: z.boolean(),
-    entries: z.array(
+    protections: z.array(
       z.object({
         kind: z.string(),
         owner: z.string(),
-        label: z.string(),
+        ticket_id: z.string().nullable(),
         trashed: z.boolean(),
-        target: z
-          .object({ kind: z.enum(["ticket", "document"]), id: z.string() })
-          .nullable()
-          .optional(),
       }),
     ),
   }),
-});
+);
+export type AttachmentUsage = z.infer<typeof attachmentUsageSchema>;
+export type AttachmentState = "all" | "in_use" | "unused" | "quarantined";
+const cleanupReviewSchema = lazySchema(() =>
+  z.object({
+    attachment: attachmentSchema,
+    eligible: z.boolean(),
+    purge_eligible: z.boolean().optional(),
+    remove_eligible: z.boolean().optional(),
+    reason: z.string(),
+    usage: attachmentUsageSchema,
+  }),
+);
+export type AttachmentCleanupReview = z.infer<typeof cleanupReviewSchema>;
+const attachmentSearchResultSchema = lazySchema(() =>
+  z.object({
+    attachment: attachmentSchema,
+    usage: attachmentUsageSchema,
+    related: z.boolean(),
+    /** A kept local file whose stored copy is no longer on this computer. */
+    missing: z.boolean().optional(),
+  }),
+);
+export type AttachmentSearchResult = z.infer<
+  typeof attachmentSearchResultSchema
+>;
+const previewSchema = lazySchema(() =>
+  z.object({
+    attachment: attachmentSchema,
+    uploaded_copy: z.boolean().optional(),
+    status: z.enum([
+      "available",
+      "unsupported",
+      "missing",
+      "incomplete",
+      "unavailable",
+      "too_large",
+    ]),
+    media_type: z
+      .enum([
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "audio/mpeg",
+        "audio/wav",
+        "audio/ogg",
+        "audio/mp4",
+        "video/mp4",
+        "video/webm",
+        "video/ogg",
+      ])
+      .nullable(),
+    message: z.string().nullable(),
+    can_open: z.boolean(),
+    /** The start of a plain-text file, shown in place of a media preview. */
+    text_excerpt: z
+      .object({ text: z.string(), truncated: z.boolean() })
+      .nullable()
+      .optional(),
+    usage: z.object({
+      total: z.number().int().nonnegative(),
+      legacy_drafts_pending: z.boolean(),
+      entries: z.array(
+        z.object({
+          kind: z.string(),
+          owner: z.string(),
+          label: z.string(),
+          trashed: z.boolean(),
+          target: z
+            .object({ kind: z.enum(["ticket", "document"]), id: z.string() })
+            .nullable()
+            .optional(),
+        }),
+      ),
+    }),
+  }),
+);
 export type PreviewInfo = z.infer<typeof previewSchema>;
-const progressSchema = z.object({
-  copied: z.number().nonnegative(),
-  total: z.number().nonnegative(),
-});
+const progressSchema = lazySchema(() =>
+  z.object({
+    copied: z.number().nonnegative(),
+    total: z.number().nonnegative(),
+  }),
+);
 export type UploadProgress = z.infer<typeof progressSchema>;
 export type CaptureSource = string | File;
 
-const draftRetentionSchema = z.object({
-  owner: z.string(),
-  kind: z.enum(["draft", "undo"]),
-  revision: z.number().int().nonnegative(),
-  payload: z.unknown().nullable(),
-  markdown: z.array(z.string()),
-});
+const draftRetentionSchema = lazySchema(() =>
+  z.object({
+    owner: z.string(),
+    kind: z.enum(["draft", "undo"]),
+    revision: z.number().int().nonnegative(),
+    payload: z.unknown().nullable(),
+    markdown: z.array(z.string()),
+  }),
+);
 export type DraftRetention = z.infer<typeof draftRetentionSchema>;
 
 export const draftRetention = {
@@ -134,84 +149,92 @@ export const draftRetention = {
   },
 };
 
-const driveReferenceSchema = z.object({
-  connection_id: z.string(),
-  metadata: z.object({
-    id: z.string(),
-    name: z.string(),
-    mime_type: z.string(),
-    size_bytes: z.number().nonnegative().nullable(),
-    web_url: z.string(),
+const driveReferenceSchema = lazySchema(() =>
+  z.object({
+    connection_id: z.string(),
+    metadata: z.object({
+      id: z.string(),
+      name: z.string(),
+      mime_type: z.string(),
+      size_bytes: z.number().nonnegative().nullable(),
+      web_url: z.string(),
+      resource_key: z.string().nullable(),
+    }),
+  }),
+);
+export type DriveReference = z.infer<typeof driveReferenceSchema>;
+export const driveCopyStatusSchema = lazySchema(() =>
+  z.enum(["unchanged", "changed", "unknown", "unsupported", "unavailable"]),
+);
+const driveCopyInspectionSchema = lazySchema(() =>
+  z.object({
+    status: driveCopyStatusSchema,
+    message: z.string(),
+    last_known: driveReferenceSchema.shape.metadata,
+    current: z
+      .object({
+        metadata: driveReferenceSchema.shape.metadata,
+        sha256_checksum: z.string().nullable(),
+        version: z.string().nullable(),
+        can_download: z.boolean().nullable(),
+      })
+      .nullable(),
+    error_kind: z.string().nullable(),
+  }),
+);
+export type DriveCopyInspection = z.infer<typeof driveCopyInspectionSchema>;
+const driveAccessSchema = lazySchema(() =>
+  z.object({
+    reference: driveReferenceSchema,
+    failure: z
+      .object({
+        kind: z.enum([
+          "unconfigured",
+          "reauthorize",
+          "select_file",
+          "permission_denied",
+          "missing",
+          "inaccessible_or_missing",
+          "offline",
+          "rate_limited",
+          "unsupported",
+          "invalid_response",
+          "cancelled",
+          "uncertain",
+        ]),
+        message: z.string(),
+      })
+      .nullable(),
+  }),
+);
+export type DriveAccess = z.infer<typeof driveAccessSchema>;
+export const driveDestinationSchema = lazySchema(() =>
+  z.object({
+    connection_id: z.string(),
+    folder_id: z.string(),
     resource_key: z.string().nullable(),
   }),
-});
-export type DriveReference = z.infer<typeof driveReferenceSchema>;
-export const driveCopyStatusSchema = z.enum([
-  "unchanged",
-  "changed",
-  "unknown",
-  "unsupported",
-  "unavailable",
-]);
-const driveCopyInspectionSchema = z.object({
-  status: driveCopyStatusSchema,
-  message: z.string(),
-  last_known: driveReferenceSchema.shape.metadata,
-  current: z
-    .object({
-      metadata: driveReferenceSchema.shape.metadata,
-      sha256_checksum: z.string().nullable(),
-      version: z.string().nullable(),
-      can_download: z.boolean().nullable(),
-    })
-    .nullable(),
-  error_kind: z.string().nullable(),
-});
-export type DriveCopyInspection = z.infer<typeof driveCopyInspectionSchema>;
-const driveAccessSchema = z.object({
-  reference: driveReferenceSchema,
-  failure: z
-    .object({
-      kind: z.enum([
-        "unconfigured",
-        "reauthorize",
-        "select_file",
-        "permission_denied",
-        "missing",
-        "inaccessible_or_missing",
-        "offline",
-        "rate_limited",
-        "unsupported",
-        "invalid_response",
-        "cancelled",
-        "uncertain",
-      ]),
-      message: z.string(),
-    })
-    .nullable(),
-});
-export type DriveAccess = z.infer<typeof driveAccessSchema>;
-export const driveDestinationSchema = z.object({
-  connection_id: z.string(),
-  folder_id: z.string(),
-  resource_key: z.string().nullable(),
-});
+);
 export type DriveUploadDestination = z.infer<typeof driveDestinationSchema>;
-export const attachmentUploadDestinationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("local") }),
-  z.object({
-    kind: z.literal("google_drive"),
-    destination: driveDestinationSchema,
-    folder_name: z.string(),
-  }),
-]);
+export const attachmentUploadDestinationSchema = lazySchema(() =>
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("local") }),
+    z.object({
+      kind: z.literal("google_drive"),
+      destination: driveDestinationSchema,
+      folder_name: z.string(),
+    }),
+  ]),
+);
 export type AttachmentUploadDestination = z.infer<
   typeof attachmentUploadDestinationSchema
 >;
-const driveConfigurationSchema = z.object({
-  configured: z.boolean(),
-  message: z.string(),
-});
+const driveConfigurationSchema = lazySchema(() =>
+  z.object({
+    configured: z.boolean(),
+    message: z.string(),
+  }),
+);
 export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
 export const attachments = {
