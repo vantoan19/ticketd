@@ -14,7 +14,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { FileText, Layers } from "lucide-react";
-import { graphMotionDuration, GRAPH_ZOOM } from "@/components/ui/graph-zoom";
+import { graphGlide, GRAPH_ZOOM } from "@/components/ui/graph-zoom";
 import {
   GraphCanvas,
   AvailabilityMark,
@@ -41,6 +41,8 @@ const MIN_ZOOM = GRAPH_ZOOM.min;
 const MAX_ZOOM = GRAPH_ZOOM.max;
 /** One press of the zoom buttons multiplies the zoom by this (React Flow's own step). */
 const ZOOM_STEP = 1.2;
+/** Focusing a card zooms in this much past the current (or readable) zoom. */
+const FOCUS_ZOOM_IN = 1.6;
 /** A lone card must not be blown up to fill the view. */
 const MAX_FIT_ZOOM = 1;
 /** Fit never zooms out past 100%, so card text stays legible; the user pans. */
@@ -51,7 +53,8 @@ const FULL_MARGIN_WIDTH = 1000;
 /**
  * Fit options for a container this wide. Margins shrink with a narrow window so
  * they do not swallow the canvas; top and bottom keep the legend row and the
- * zoom control clear of the cards.
+ * zoom control clear of the cards. The fit is instant: a window resize must not
+ * animate; the callers that move the view on purpose add `graphGlide()`.
  */
 function fitOptions(width: number): FitViewOptions {
   const scale = Math.min(1, Math.max(0.4, width / FULL_MARGIN_WIDTH));
@@ -62,7 +65,6 @@ function fitOptions(width: number): FitViewOptions {
       bottom: "56px",
       left: `${Math.round(24 * scale)}px`,
     },
-    duration: graphMotionDuration(),
     minZoom: MIN_FIT_ZOOM,
     maxZoom: MAX_FIT_ZOOM,
   };
@@ -134,6 +136,8 @@ export type WorkspaceIsland = {
   y: number;
   width: number;
   height: number;
+  /** The cards inside it, which stay lit when the island is focused. */
+  memberIds?: string[];
 };
 function IslandNode({
   data,
@@ -184,6 +188,8 @@ export function ContextGraphCanvas({
   onFitted,
   centerId,
   centerOn = null,
+  focusId = null,
+  onShowAll,
   loading = false,
   notice,
   footnote,
@@ -215,6 +221,12 @@ export function ContextGraphCanvas({
   centerId?: string | undefined;
   /** Ask the canvas to centre the viewport on this card at the current zoom; reported by onFitted. */
   centerOn?: string | null;
+  /**
+   * The ticket or island being focused: the view zooms in on it when centred
+   * and everything else dims. Showing everything (Fit) reports `onShowAll`.
+   */
+  focusId?: string | null;
+  onShowAll?: () => void;
   /** The items have not arrived yet: the canvas stays unseen rather than flashing an empty grid. */
   loading?: boolean;
   /** An empty or failed state centred in the canvas. */
@@ -339,15 +351,35 @@ export function ContextGraphCanvas({
       }
       setFitting(!shownRef.current);
       const target = centerOn ? positions[centerOn] : undefined;
-      if (centerOn && target && instance.current) {
-        // Centre on the card's middle without changing the zoom.
+      const island = centerOn
+        ? islands?.find((each) => each.id === centerOn)
+        : undefined;
+      if (centerOn && island && instance.current) {
+        // A focused island fills the view.
         autoFitted.current = false;
+        void instance.current.fitBounds(
+          {
+            x: island.x,
+            y: island.y,
+            width: island.width,
+            height: island.height,
+          },
+          { padding: 0.1, ...graphGlide() },
+        );
+        setFitting(false);
+        setShown(true);
+      } else if (centerOn && target && instance.current) {
+        // Centre on the card's middle; a focused card is also zoomed in on.
+        autoFitted.current = false;
+        const zoom = instance.current.getZoom();
         void instance.current.setCenter(
           target.x + CARD_WIDTH / 2,
           target.y + CARD_HEIGHT / 2,
           {
-            zoom: centerZoom(instance.current.getZoom()),
-            duration: graphMotionDuration(),
+            zoom: focusId
+              ? Math.min(MAX_ZOOM, centerZoom(zoom) * FOCUS_ZOOM_IN)
+              : centerZoom(zoom),
+            ...graphGlide(),
           },
         );
         setFitting(false);
@@ -360,7 +392,7 @@ export function ContextGraphCanvas({
         const first = !shownRef.current;
         autoFitted.current = true;
         const applied = instance.current?.fitView(
-          first ? { ...options, duration: 0 } : options,
+          first ? options : { ...options, ...graphGlide() },
         );
         fitSized.current = sized;
         // Reveal once the viewport the fit chose has been painted into place.
@@ -376,15 +408,14 @@ export function ContextGraphCanvas({
         // more so a card is never left cut at the edge.
         window.clearTimeout(settleTimer.current);
         settleTimer.current = window.setTimeout(() => {
-          if (autoFitted.current)
-            void instance.current?.fitView({ ...options, duration: 0 });
+          if (autoFitted.current) void instance.current?.fitView(options);
         }, 400);
       }
       onFittedRef.current?.();
     };
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit, centerOn, placed, ready, positions]);
+  }, [fit, centerOn, focusId, islands, placed, ready, positions]);
   const container = useRef<HTMLElement | null>(null);
   // Steps from the zoom the person sees, so repeated presses always move by one
   // step and never restart from a half-finished animation.
@@ -459,9 +490,7 @@ export function ContextGraphCanvas({
       next.y !== viewportRef.current.y ||
       next.zoom !== viewportRef.current.zoom
     )
-      void instance.current.setViewport(next, {
-        duration: graphMotionDuration(),
-      });
+      void instance.current.setViewport(next, graphGlide());
   }, [positions, nodes, fit, centerOn, ready]);
   const [size, setSize] = useState({ width: 0, height: 0 });
   // Fit again when the panel is resized, so the map never stays clipped.
@@ -520,6 +549,13 @@ export function ContextGraphCanvas({
     if (seen.length)
       setSizes((before) => ({ ...before, ...Object.fromEntries(seen) }));
   }
+  // What stays at full strength while something is focused: it and, for an
+  // island, the cards inside it. Everything else carries `is-dim`.
+  const lit = useMemo(() => {
+    if (!focusId) return null;
+    const island = islands?.find((each) => each.id === focusId);
+    return new Set([focusId, ...(island?.memberIds ?? [])]);
+  }, [focusId, islands]);
   // Every line names its relationship. Lines bend around the cards in their way
   // and each label sits clear of every card and of the other labels.
   const shownEdges = useMemo<Edge[]>(() => {
@@ -556,6 +592,10 @@ export function ContextGraphCanvas({
     // pile up over the map; the legend and the panel name the rest.
     return edges.map((edge) => ({
       ...edge,
+      ...(lit &&
+        !(lit.has(edge.source) && lit.has(edge.target)) && {
+          className: "is-dim",
+        }),
       ...(selected !== edge.source &&
         selected !== edge.target && {
           label: undefined,
@@ -569,12 +609,17 @@ export function ContextGraphCanvas({
         }),
       },
     }));
-  }, [edges, nodes, positions, sizes, selected, islands]);
+  }, [edges, nodes, positions, sizes, selected, islands, lit]);
   const flowNodes = useMemo<Node[]>(
     () => [
       ...(islands ?? []).map((island) => ({
         id: island.id,
         type: "island",
+        ...(lit &&
+          !lit.has(island.id) &&
+          !island.memberIds?.some((id) => lit.has(id)) && {
+            className: "is-dim",
+          }),
         position: { x: island.x, y: island.y },
         style: { width: island.width, height: island.height },
         measured: { width: island.width, height: island.height },
@@ -598,6 +643,7 @@ export function ContextGraphCanvas({
             id: node.id,
             position: positions[node.id]!,
             type: "card",
+            ...(lit && !lit.has(node.id) && { className: "is-dim" }),
             data: {
               label: node.label,
               ref: node.ref ?? "",
@@ -629,7 +675,7 @@ export function ContextGraphCanvas({
           };
         }),
     ],
-    [nodes, positions, selected, sizes, islands, onSelect],
+    [nodes, positions, selected, sizes, islands, onSelect, lit],
   );
   const kindByLabel = Object.fromEntries(
     Object.entries(edgeLineLabels).map(([kind, label]) => [label, kind]),
@@ -642,9 +688,11 @@ export function ContextGraphCanvas({
   );
   const fitAll = () => {
     autoFitted.current = true;
-    void instance.current?.fitView(
-      fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-    );
+    void instance.current?.fitView({
+      ...fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+      ...graphGlide(),
+    });
+    onShowAll?.();
   };
   return (
     <GraphCanvas
