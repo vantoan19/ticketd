@@ -78,3 +78,44 @@ test("overlapping cycles identify every mutually blocking member", () => {
   for (const item of flow.lanes[2]!)
     expect(flow.reason(item)).toContain("(they block each other)");
 });
+
+test("a Canceled blocker still holds its dependent back, and the reason names its status", () => {
+  const canceled = ticket("T-FV1", [], "Canceled");
+  const started = {
+    ...ticket("T-FV2", ["T-FV1"], "In progress"),
+    prerequisites: [
+      {
+        reference: "T-FV1",
+        title: "T-FV1",
+        status: "Canceled",
+        trashed: false,
+        unresolved: true,
+      },
+      {
+        reference: "T-FV9",
+        title: "T-FV9",
+        status: "Done",
+        trashed: false,
+        unresolved: false,
+      },
+    ],
+  };
+  const flow = planFlow([canceled, started]);
+  expect(flow.lanes.map((lane) => lane.map((item) => item.reference))).toEqual([
+    [],
+    ["T-FV2"],
+    [],
+  ]);
+  expect(flow.reason(started)).toBe("Waits on T-FV1 (Canceled)");
+});
+
+test("links between tickets that share a lane are counted as not drawn", () => {
+  const flow = planFlow([
+    ticket("T-FV1"),
+    ticket("T-FV2", ["T-FV1"]),
+    ticket("T-FV3", ["T-FV2"]),
+    ticket("T-FV4", ["T-FV3"]),
+  ]);
+  expect(flow.edges).toHaveLength(3);
+  expect(flow.undrawn).toBe(1);
+});
