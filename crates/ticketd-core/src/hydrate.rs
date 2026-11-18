@@ -307,7 +307,7 @@ pub(crate) fn rows(connection: &Connection, rows: &mut [TicketRow]) -> Result<()
 pub(crate) fn one(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
     let found = connection
         .prepare_cached(&format!(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed, {} FROM tickets WHERE reference = ?1",
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed, {}, number AS local_number FROM tickets WHERE reference = ?1",
             crate::source::held_sql("tickets.id")
         ))?
         .query_row([reference], |row| {

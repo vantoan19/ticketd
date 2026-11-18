@@ -68,7 +68,7 @@ impl<'a> WriteScope<'a> {
         use rusqlite::OptionalExtension;
         self.connection
             .query_row(
-                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+                "SELECT id, reference, title, status, body, project_id, plan_id, trashed, number AS local_number FROM tickets WHERE reference = ?1",
                 [reference],
                 ticket_from_row,
             )

@@ -27,6 +27,7 @@ import { useStatusLine } from "@/components/ui/use-status-line";
 import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { codeLanguageLabel } from "./code-language";
+import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -365,7 +366,7 @@ function CheckGlyph({
       role="img"
       aria-label={checked ? "Done" : "Not done"}
     >
-      {checked && <Check aria-hidden="true" />}
+      <Check aria-hidden="true" />
     </span>
   );
 }
@@ -428,6 +429,7 @@ export function MarkdownDocument({
   revision,
   mention,
   onChange,
+  chunkStarts,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -436,6 +438,8 @@ export function MarkdownDocument({
   mention?: MentionMark | undefined;
   onChange?:
     ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
+  /** Streamed text: source offsets where each newly arrived chunk began; each fades in. */
+  chunkStarts?: readonly number[] | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
@@ -481,19 +485,23 @@ export function MarkdownDocument({
       );
     };
   }
-  // Parsing is the cost (about 70 ms at 50 kB): only a new source parses again.
+  // Parsing is the cost (about 70 ms at 50 kB): cache the text and fade marks.
   // What a block needs besides its text reaches it through the providers below.
   const rendered = useMemo(
     () => (
       <ReactMarkdown
-        remarkPlugins={remarkPlugins}
+        remarkPlugins={
+          chunkStarts?.length
+            ? [...remarkPlugins, [chunkFade, chunkStarts]]
+            : remarkPlugins
+        }
         urlTransform={urlTransform}
         components={components}
       >
         {source}
       </ReactMarkdown>
     ),
-    [source],
+    [source, chunkStarts],
   );
   return (
     <div className="markdown-document">

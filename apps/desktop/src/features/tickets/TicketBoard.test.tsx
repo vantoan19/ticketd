@@ -13,8 +13,17 @@ import { Profiler } from "react";
 import { App } from "@/app/App";
 import type { FindFilter, Ticket, TicketSource } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { applyTokens, rootTokens } from "@/test/motion-tokens";
+import { spring } from "@/lib/motion-tokens";
+import { MotionProvider } from "@/components/ui/motion";
+import { freezeMotionClock, frames } from "@/test/motion-clock";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+// Counts reads of the spring tokens; each one still reads the real tokens.
+vi.mock("@/lib/motion-tokens", async (original) => {
+  const actual = await original<typeof import("@/lib/motion-tokens")>();
+  return { ...actual, spring: vi.fn(actual.spring) };
+});
 vi.mock("@tauri-apps/api/core", () => bridge);
 vi.mock("@uiw/react-codemirror", () => ({ default: () => null }));
 window.ResizeObserver = class {
@@ -34,6 +43,7 @@ Element.prototype.scrollIntoView = () => {};
 function ticket(id: number, status = "Todo"): Ticket {
   return {
     id: String(id),
+    local_number: id,
     reference: `T-KQ${id}`,
     title: `Ticket ${id}`,
     body: "",
@@ -1705,4 +1715,252 @@ test("board arrows reach adjacent cards and S opens the shared status drill for 
       "Ticket 2",
     ),
   ).toBeTruthy();
+});
+
+test("opening a folded column marks it to reveal and scrolls it into view; folding marks it to fade", async () => {
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  render(<App />);
+  await settle();
+  await showBoard();
+  const canceled = screen.getByRole("region", { name: "Canceled column" });
+  expect(canceled.getAttribute("data-reveal")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
+  expect(canceled.getAttribute("data-reveal")).toBe("open");
+  expect(canceled.hasAttribute("data-folded")).toBe(false);
+  await settle();
+  expect(scroll).toHaveBeenCalledWith(
+    expect.objectContaining({ inline: "nearest" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Fold Canceled" }));
+  expect(canceled.getAttribute("data-reveal")).toBe("fold");
+  expect(canceled.hasAttribute("data-folded")).toBe(true);
+});
+
+test("column counts are Counts, so the shared Count owns their crossfade", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  const todo = screen.getByRole("region", { name: "Todo column" });
+  const count = within(todo).getByLabelText("1 matching tickets");
+  expect(count.getAttribute("data-slot")).toBe("count");
+});
+
+async function springReadsPerPointerMove(cards: number) {
+  saved = Array.from({ length: cards }, (_, index) => ticket(index + 1));
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(150);
+  vi.mocked(spring).mockClear();
+  movePointer(160);
+  const reads = vi.mocked(spring).mock.calls.length;
+  releasePointer(160);
+  cleanup();
+  return reads;
+}
+
+test("a pointer move during a drag reads the spring once, however many cards the board holds", async () => {
+  const one = await springReadsPerPointerMove(1);
+  const many = await springReadsPerPointerMove(8);
+  expect(many).toBe(one);
+});
+
+test("opening a folded column glides the columns to its right", async () => {
+  // Motion reads the real animation frame, so this test runs on real timers
+  // and a clock it owns.
+  vi.useRealTimers();
+  const clock = freezeMotionClock();
+  const restore = applyTokens(rootTokens);
+  render(
+    <MotionProvider>
+      <App />
+    </MotionProvider>,
+  );
+  await frames(8);
+  chooseLayout("Board");
+  await frames(8);
+  const board = screen.getByRole("region", { name: "Ticket status board" });
+  const sections = within(board).getAllByRole("region");
+  const canceled = screen.getByRole("region", { name: "Canceled column" });
+  const duplicate = screen.getByRole("region", { name: "Duplicate column" });
+  // Columns are 280px wide; a folded one is 40px, so what follows it moves 240.
+  for (const [index, section] of sections.entries())
+    vi.spyOn(section, "getBoundingClientRect").mockImplementation(
+      () =>
+        new DOMRect(
+          index * 280 -
+            (index > sections.indexOf(canceled) &&
+            canceled.hasAttribute("data-folded")
+              ? 240
+              : 0),
+          0,
+          280,
+          600,
+        ),
+    );
+  await clock.advance(3000); // the columns have entered
+  expect(duplicate.style.transform).toMatch(/^(none)?$/);
+  fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
+  await clock.advance(50);
+  expect(duplicate.style.transform).toMatch(/translate3d[(]-/);
+  await clock.advance(3000);
+  expect(duplicate.style.transform).toMatch(/^(none)?$/);
+  restore();
+  clock.restore();
+});
+
+// The Board as the app opens it: the saved layout is Board, so the board is
+// mounted in the pane's first Presence render, which skips the entrance of
+// everything below it unless the board lifts that (board-motion). These tests
+// look at where a motion starts; `board-motion.test` runs one to its end.
+async function launchBoard(options: { scrolled?: string[] } = {}) {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ ticketLayout: "board" }),
+  );
+  const restore = applyTokens(rootTokens);
+  // Columns are 300px apart and their bodies 300px tall; cards stand 90px
+  // apart, or far below the body when their column has scrolled them away.
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: Element) {
+      const column = this.closest<HTMLElement>("[data-board-status]");
+      const left = column
+        ? [...document.querySelectorAll("[data-board-status]")].indexOf(
+            column,
+          ) * 300
+        : 0;
+      if (this.classList.contains("board-column-body"))
+        return new DOMRect(left, 40, 280, 300);
+      if (!column || !this.hasAttribute("data-ticket-reference"))
+        return new DOMRect();
+      const place = [
+        ...column.querySelectorAll("[data-ticket-reference]"),
+      ].indexOf(this);
+      const away = options.scrolled?.includes(column.dataset.boardStatus!);
+      return new DOMRect(left + 10, away ? 900 : 50 + place * 90, 240, 80);
+    },
+  );
+  render(<App />);
+  await settle(200);
+  return restore;
+}
+/** Runs the fake clock in small steps until something is there to see. */
+async function until(found: () => unknown) {
+  for (let step = 0; step < 60 && !found(); step++) await settle(50);
+  expect(found()).toBeTruthy();
+}
+const container = (reference: string) =>
+  document.querySelector<HTMLElement>(
+    `.ticket-board [data-ticket-reference="${reference}"]`,
+  )!;
+
+test("a card another hand moves flies from its old slot, even when the board opened with the app", async () => {
+  const end = await launchBoard();
+  saved = [ticket(1, "In progress"), ticket(2, "In review")];
+  change++;
+  await until(() => document.querySelector("[data-board-flight]"));
+  const flight = document.querySelector<HTMLElement>("[data-board-flight]")!;
+  expect(flight.dataset.boardFlight).toBe("T-KQ1");
+  // In Todo it stood at x 10; in In progress it stands at x 310: it is on its
+  // way from the left, not already there.
+  expect(flight.style.transform).toMatch(/translateX\(-\d/);
+  end();
+});
+
+test("a card that arrives while the board is open enters, even when the board opened with the app", async () => {
+  const end = await launchBoard();
+  saved = [ticket(1), ticket(2, "In review"), ticket(3)];
+  change++;
+  await until(() => container("T-KQ3"));
+  expect(Number(container("T-KQ3").style.opacity)).toBeLessThan(1);
+  expect(container("T-KQ3").style.height).not.toMatch(/^(auto)?$/);
+  end();
+});
+
+test("a card that arrives from a column scrolled out of sight enters instead of flying", async () => {
+  const end = await launchBoard({ scrolled: ["Todo"] });
+  saved = [ticket(1, "In progress"), ticket(2, "In review")];
+  change++;
+  await until(() =>
+    document.querySelector(
+      '[aria-label="In progress column"] [data-ticket-reference="T-KQ1"]',
+    ),
+  );
+  expect(document.querySelector("[data-board-flight]")).toBeNull();
+  expect(Number(container("T-KQ1").style.opacity)).toBeLessThan(1);
+  // Not again: the next change of columns leaves the card as it is, not
+  // mounted anew (which would start its entrance over).
+  const card = container("T-KQ1");
+  change++;
+  saved = [ticket(1, "In progress"), ticket(2, "In review"), ticket(4)];
+  await until(() => container("T-KQ4"));
+  expect(container("T-KQ1")).toBe(card);
+  end();
+});
+
+test("a mixed-device card takes its core slot at once and stays there on confirmation", async () => {
+  let resolve!: () => void;
+  writeOverride = async ({ status }) => {
+    await new Promise<void>((done) => {
+      resolve = done;
+    });
+    saved = saved.map((item) =>
+      item.reference === "T-ZZ900" ? { ...item, status } : item,
+    );
+    return [saved.find((item) => item.reference === "T-ZZ900")!];
+  };
+  // The mock core lists a column in the order saved, so keep it highest first.
+  saved = [
+    { ...ticket(40, "In review"), reference: "T-AA1" },
+    ticket(37, "In review"),
+    { ...ticket(36), reference: "T-ZZ900" },
+    ticket(34, "In review"),
+  ];
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-ZZ900", "In review");
+  const order = () =>
+    [
+      ...document
+        .querySelector('[aria-label="In review column"]')!
+        .querySelectorAll("[data-board-reference]"),
+    ].map((card) => card.getAttribute("data-board-reference"));
+  // The local numbers are 40, 37, 36, 34; the reference counters do not compare.
+  expect(order()).toEqual(["T-AA1", "T-KQ37", "T-ZZ900", "T-KQ34"]);
+  resolve();
+  await settle();
+  expect(order()).toEqual(["T-AA1", "T-KQ37", "T-ZZ900", "T-KQ34"]);
+});
+
+test("dragging a card says nothing of refusal in its own column, and Add waits", async () => {
+  saved[0] = { ...ticket(1), source: external() };
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(100); // over its own column
+  const todo = screen.getByRole("region", { name: "Todo column" });
+  expect(within(todo).queryByText("Can't move here")).toBeNull();
+  expect(todo.getAttribute("data-drop-allowed")).toBeNull();
+  movePointer(1000);
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByText(
+      "Can't move here",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("region", { name: "Ticket status board" })
+      .hasAttribute("data-dragging"),
+  ).toBe(true);
+  releasePointer(1000);
+  expect(
+    screen
+      .getByRole("region", { name: "Ticket status board" })
+      .hasAttribute("data-dragging"),
+  ).toBe(false);
 });

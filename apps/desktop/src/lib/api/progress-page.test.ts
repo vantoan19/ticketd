@@ -19,6 +19,7 @@ test("reads and validates one filtered page with its authored summaries", async 
   };
   const ticket = {
     id: "1",
+    local_number: 37,
     trashed: false,
     reference: "T-KQ1",
     title: "Work",
@@ -47,6 +48,17 @@ test("reads and validates one filtered page with its authored summaries", async 
     filter,
   });
   expect(page[0]?.progress_summary).toEqual(latest);
+  expect(page[0]).toMatchObject({ local_number: 37 });
+  const legacy = { ...ticket };
+  Reflect.deleteProperty(legacy, "local_number");
+  bridge.invoke.mockResolvedValueOnce([
+    { ticket: legacy, latest_update: latest },
+  ]);
+  expect((await client.findTickets(filter))[0]?.local_number).toBeUndefined();
+  bridge.invoke.mockResolvedValueOnce([
+    { ticket: { ...ticket, local_number: null }, latest_update: latest },
+  ]);
+  expect((await client.findTickets(filter))[0]?.local_number).toBeNull();
   bridge.invoke.mockResolvedValueOnce([
     { ticket, latest_update: { ...latest, brief: "invalid" } },
   ]);

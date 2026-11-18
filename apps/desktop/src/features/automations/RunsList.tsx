@@ -9,6 +9,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { enter } from "@/components/ui/enter";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   automationsClient,
@@ -151,7 +152,7 @@ export function AllRunsList({
   if (runs.length === 0) return <p className="chat-list-empty">No runs yet.</p>;
   return (
     <>
-      <div className="chat-rows">
+      <div className="chat-rows" {...enter(1)}>
         {runsByNeed(runs).map((group) => (
           <section key={group.label} aria-label={group.label}>
             <h3 className="auto-group">{group.label}</h3>

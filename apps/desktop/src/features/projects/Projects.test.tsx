@@ -270,3 +270,26 @@ test("a long checkout path keeps all its text for the middle to truncate", () =>
   const path = document.querySelector('[data-slot="path-text"]');
   expect(path?.textContent).toBe(long);
 });
+
+test("arranges its own entrance: the header, then each project, a stagger step apart", () => {
+  const { container } = render(
+    <Projects
+      {...props}
+      projects={[project, { ...project, id: "p2", name: "Second" }]}
+    />,
+  );
+  expect(
+    container
+      .querySelector('[data-slot="management-page"]')
+      ?.hasAttribute("data-own-entrance"),
+  ).toBe(true);
+  const steps = [...container.querySelectorAll<HTMLElement>("[data-enter]")];
+  expect(
+    steps.map((step) => step.style.getPropertyValue("--enter-step")),
+  ).toEqual(["0", "1", "2"]);
+  expect(steps[0]?.querySelector("h1")?.textContent).toBe("Projects");
+  expect(steps.slice(1).map((step) => step.textContent)).toEqual([
+    expect.stringContaining("Original"),
+    expect.stringContaining("Second"),
+  ]);
+});

@@ -7,6 +7,7 @@ import {
 // @vitest-environment jsdom
 import { chooseFilter } from "@/test/filters";
 import { setPreference } from "@/lib/preferences";
+import * as webviewScale from "@/lib/webview-scale";
 import {
   act,
   cleanup,
@@ -24,6 +25,7 @@ import "@/features/documents/ContextGraph";
 import "@/features/documents/WorkspaceGraph";
 import "@/features/attachments/AttachmentLibrary";
 import "@/features/automations/AutomationsView";
+import { launch } from "@/components/layout/launch";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
 
@@ -117,6 +119,9 @@ vi.mock("@/lib/sync-api", async (original) => ({
   },
 }));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
+// The launch cascade is the shell's (components/layout/arrive); what App owes
+// it is when it runs, so a test can watch the calls.
+vi.mock("@/components/layout/launch", () => ({ launch: vi.fn() }));
 
 vi.mock("@uiw/react-codemirror", () => ({
   default: ({
@@ -194,6 +199,14 @@ async function openManageMenu(label: string, item: string) {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
+}
+
+/** Collapse the sidebar and let the groups finish folding into their icons. */
+async function foldSidebar() {
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
 }
 
 /** One ticket for an unfiltered read, none once a search or filter narrows it. */
@@ -557,6 +570,27 @@ test("lists No project after the named projects and shows a quiet hint with noth
   expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
 });
 
+test("the project names are sidebar labels, so the rail's fade and the unfold's hold reach them", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) =>
+      command === "list_projects"
+        ? [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }]
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const names = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  ).getAllByRole("button");
+  for (const row of names)
+    expect(row.querySelector(".sidebar-label")?.textContent).toBe(
+      row.textContent?.trim(),
+    );
+});
+
 test("changing the scope drops an open ticket that is outside it", async () => {
   vi.useFakeTimers();
   const ticket = {
@@ -676,6 +710,89 @@ test("first run shows the title and one New ticket action, no tools over nothing
   expect(header.querySelector('[data-slot="count"]')).toBeNull();
   const action = screen.getAllByRole("button", { name: "New ticket" })[1]!;
   expect(action.getAttribute("aria-keyshortcuts")).toBe("C");
+});
+
+test('the first-run guide stays until the list holds the first ticket, so "No tickets yet" never shows in between', async () => {
+  // The workspace counts the ticket (and the new ticket opens) before the list
+  // has read it; the test holds the list's answer back.
+  let created = false;
+  let listed = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "find_tickets") return listed ? [bulkTicket(1)] : [];
+      if (command === "create_ticket") {
+        created = true;
+        return bulkTicket(1);
+      }
+      if (command === "show_ticket") return bulkTicket(1);
+      if (command === "workspace_info")
+        return {
+          ...((await bridgeDefault(command)) as object),
+          tickets: created ? 1 : 0,
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const guide = await screen.findByRole("region", {
+    name: "Your workspace is ready",
+  });
+  // The list stays mounted behind \`hidden\` while the guide is up.
+  const emptyShown = () => {
+    const empty = screen.queryByText("No tickets yet");
+    return empty !== null && empty.closest("[hidden]") === null;
+  };
+  fireEvent.click(within(guide).getByRole("button", { name: /New ticket/ }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "First" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await vi.waitFor(() => expect(created).toBe(true));
+  // Let the workspace's own reads catch up while the list has not.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).not.toBeNull();
+  expect(emptyShown()).toBe(false);
+  // The list holds the ticket: the guide goes, the row is there.
+  listed = true;
+  fireEvent.focus(window);
+  await screen.findByRole("button", { name: /First/ }, { timeout: 5000 });
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).toBeNull();
+  expect(emptyShown()).toBe(false);
+});
+
+test('a new Workspace shows neither placeholders nor "No tickets yet" while it is still unknown, only the guide', async () => {
+  // The list's own read finishes (nothing in it) before the Workspace says how
+  // many tickets it has; in between the list must show nothing of its own.
+  let release = () => {};
+  const infoRead = new Promise<void>((resolve) => (release = resolve));
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "workspace_info") await infoRead;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const onShow = (text: string | RegExp) => {
+    const found = screen.queryAllByText(text);
+    return found.some((node) => node.closest("[hidden]") === null);
+  };
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(onShow("No tickets yet")).toBe(false);
+  expect(onShow("Loading tickets…")).toBe(false);
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).toBeNull();
+  release();
+  await screen.findByRole("region", { name: "Your workspace is ready" });
+  expect(onShow("No tickets yet")).toBe(false);
 });
 
 test("Settings' way back names the view it returns to", async () => {
@@ -1599,6 +1716,74 @@ test("a restore reads the list once, during the restore", async () => {
   expect(lists - before).toBe(1);
 });
 
+test("a restore plays the launch cascade once, after the new Workspace's change token is read and the old reads are dropped", async () => {
+  const backup = "/tmp/restore-launch.ticketd-backup";
+  const summary = {
+    last_change: null,
+    tickets: 1,
+    documents: 0,
+    activities: 0,
+    evidence: 0,
+    projects: 0,
+    plans: 0,
+  };
+  const order: string[] = [];
+  vi.mocked(launch).mockReset();
+  vi.mocked(launch).mockImplementation(() => void order.push("launch"));
+  const nextToken = bridge.token.next;
+  bridge.token.next = () => {
+    order.push("token");
+    return nextToken();
+  };
+  await renderReplaceable({
+    find_tickets: () => [bulkTicket(1)],
+    safety_backups: [
+      {
+        path: backup,
+        kind: "safety",
+        saved_at: "2026-11-01T00:00:00Z",
+        size_bytes: 1024,
+      },
+    ],
+    inspect_backup: {
+      path: backup,
+      current: summary,
+      check: { status: "valid", format_version: 19, summary },
+    },
+    restore_workspace: { safety_path: "/tmp/safety.sqlite3" },
+    draft_retentions: [],
+    draft_cutover_pending: false,
+  });
+  const turn = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  // The window opening played it once.
+  expect(order.filter((step) => step === "launch")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await turn();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Backups" }),
+  );
+  for (let i = 0; i < 3; i += 1) await turn();
+  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  for (let i = 0; i < 3; i += 1) await turn();
+  const before = order.length;
+  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  for (let i = 0; i < 6; i += 1) await turn();
+  for (let i = 0; i < 6; i += 1) await turn();
+  bridge.token.next = nextToken;
+  expect(screen.getByText("Workspace restored")).toBeTruthy();
+  // One launch, after the new Workspace's token was read (the first step of
+  // dropping the old reads), never before it.
+  const after = order.slice(before);
+  expect(after.filter((step) => step === "launch")).toHaveLength(1);
+  expect(after.indexOf("token")).toBeGreaterThanOrEqual(0);
+  expect(after.indexOf("launch")).toBeGreaterThan(after.lastIndexOf("token"));
+});
+
 test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
   const changes: unknown[] = [];
   await renderBulk({
@@ -1968,7 +2153,7 @@ test("totals and group counts describe the whole result, not the loaded page", a
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
   expect(
     screen.getByText("120", {
-      selector: '.ui-pane-header [data-slot="count"]',
+      selector: '.ui-pane-header [data-slot="count"] span',
     }),
   ).toBeTruthy();
   // The Todo header counts all 119 in the result, not the one shown.
@@ -2833,7 +3018,7 @@ test("the ticket detail bounds one document scroller and keeps properties in the
 test("the folded sidebar opens Projects and Plans as one menu each", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
-  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await foldSidebar();
   // The rail holds one entry per group, not a row per project or Plan.
   expect(screen.queryByRole("button", { name: "All projects" })).toBeNull();
   await openManageMenu("Projects", "All projects");
@@ -2845,7 +3030,7 @@ test("the folded sidebar opens Projects and Plans as one menu each", async () =>
 test("every icon on the folded rail names itself in a tooltip", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
-  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await foldSidebar();
   const rail = document.querySelector<HTMLElement>(".sidebar")!;
   const unnamed = within(rail)
     .getAllByRole("button")
@@ -4398,7 +4583,7 @@ test("sticky ledger keeps palette mutations in place until J leaves, then target
   expect(list.querySelector("li")?.getAttribute("data-status")).toBe(
     "In review",
   );
-  expect(target.closest("li")?.getAttribute("data-arriving")).toBe("true");
+  expect(target.closest("li")?.getAttribute("data-arrival-fill")).toBe("true");
   await changeStatus(next, "4");
   expect(bridge.invoke).toHaveBeenCalledWith(
     "change_ticket",
@@ -4439,12 +4624,12 @@ test.each([false, true])(
     fireEvent.click(screen.getByRole("heading", { name: "All tickets" }));
     expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
-    expect(row.closest("li")?.getAttribute("data-arriving")).toBe("true");
+    expect(row.closest("li")?.getAttribute("data-arrival-fill")).toBe("true");
     if (reducedMotion) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(row.closest("li")?.hasAttribute("data-arriving")).toBe(false);
+      expect(row.closest("li")?.hasAttribute("data-arrival-fill")).toBe(false);
     }
   },
 );
@@ -5892,7 +6077,11 @@ test("Workspace graph opens Graph, groups Plan members and keeps identical items
   expect(screen.getByLabelText("Search")).toBeTruthy();
 });
 
-test("Workspace graph pages a large Plan without losing membership when connections expand", async () => {
+test("Workspace graph pages a large Plan without losing membership when connections expand", async ({
+  onTestFinished,
+}) => {
+  const token = vi.spyOn(bridge.token, "next").mockReturnValue(0);
+  onTestFinished(() => token.mockRestore());
   const user = userEvent.setup();
   const plan = { id: "P-window", name: "Windowed Plan", archived: false };
   const members = Array.from({ length: 130 }, (_, index) =>
@@ -5963,7 +6152,7 @@ test("Workspace graph pages a large Plan without losing membership when connecti
   await user.click(
     await screen.findByRole("button", { name: "Workspace graph" }),
   );
-  const graph = screen.getByRole("region", { name: "Workspace graph" });
+  const graph = await screen.findByRole("region", { name: "Workspace graph" });
   await within(graph).findByText("119 tickets, 0 Documents");
   expect(
     within(graph).getByText(/Some Plan tickets or Documents are not loaded/),
@@ -6865,7 +7054,12 @@ test("leaving a focused filter submenu cancels the earlier pointer hover opening
   }
 });
 
-test("filter drafts keep every tag and Status when keyboard selection closes a pointer-opened menu", async () => {
+test("filter drafts keep every tag and Status when keyboard selection closes a pointer-opened menu", async ({
+  onTestFinished,
+}) => {
+  // Only opening the list and applying the filters should trigger reads here.
+  const token = vi.spyOn(bridge.token, "next").mockReturnValue(0);
+  onTestFinished(() => token.mockRestore());
   const user = userEvent.setup();
   const tickets = [
     bulkTicket(1, {
@@ -6995,9 +7189,12 @@ test("filter checks stay staged until the menu closes, then the bar follows the 
     await act(async () => {});
   }
   const bar = await screen.findByLabelText("Active filters");
-  expect(bar.previousElementSibling?.getAttribute("data-slot")).toBe(
-    "pane-header",
-  );
+  // The bar sits in its Expand, which follows the header.
+  expect(
+    bar
+      .closest('[data-slot="expand"]')
+      ?.previousElementSibling?.getAttribute("data-slot"),
+  ).toBe("pane-header");
   await vi.waitFor(() =>
     expect(
       screen.queryByRole("button", { name: /Second retained row/ }),
@@ -12593,7 +12790,14 @@ test("Settings Escape and palette Reset return to visible section navigation wit
   }
 });
 
-test("zoom keys wait for retained native scale and keep the latest Reset while initialization is pending", async () => {
+test("zoom keys wait for retained native scale and keep the latest Reset while initialization is pending", async ({
+  onTestFinished,
+}) => {
+  // The background size check also reads the scale and can race initialization.
+  const watcher = vi
+    .spyOn(webviewScale, "keepWebviewInStep")
+    .mockReturnValue(undefined);
+  onTestFinished(() => watcher.mockRestore());
   let finishScale: ((scale: number) => void) | undefined;
   let actualZoom = 2;
   const dpr = vi

@@ -5,6 +5,9 @@ import { cn } from "cn";
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
+import { scrollHost } from "@/components/ui/scroll-host";
+import { HighlightGroup } from "@/components/ui/highlight-group";
+import { RowHighlight } from "@/components/ui/row-highlight";
 
 function DropdownMenu({
   ...props
@@ -19,6 +22,11 @@ function DropdownMenuPortal({
     <DropdownMenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />
   );
 }
+
+// The lists scroll their rows, so they are `layoutScroll` hosts: the highlight
+// Glide measures its old row against the scroll (DESIGN.md section 12).
+const ScrollingContent = scrollHost(DropdownMenuPrimitive.Content);
+const ScrollingSubContent = scrollHost(DropdownMenuPrimitive.SubContent);
 
 function DropdownMenuTrigger({
   ...props
@@ -44,13 +52,16 @@ function DropdownMenuContent({
   collisionPadding = 16,
   collisionBoundary,
   onCloseAutoFocus,
+  children,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();
+  const group = React.useId();
   return (
     <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.Content
+      <ScrollingContent
+        layoutScroll
         ref={contentRef}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
@@ -65,7 +76,9 @@ function DropdownMenuContent({
           onCloseAutoFocus?.(event);
           if (!event.defaultPrevented) preserveNewerFocus(event);
         }}
-      />
+      >
+        <HighlightGroup value={group}>{children}</HighlightGroup>
+      </ScrollingContent>
     </DropdownMenuPrimitive.Portal>
   );
 }
@@ -104,7 +117,7 @@ function DropdownMenuItem({
       data-reason={reason ? "" : undefined}
       {...(reason && { "aria-describedby": reasonId })}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:*:[svg]:text-destructive!",
+        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:*:[svg]:text-destructive!",
         className,
       )}
       {...props}
@@ -115,6 +128,8 @@ function DropdownMenuItem({
           {reason}
         </span>
       )}
+      {/* After the children: styles.css reads `> svg:first-child` for the reason's indent. */}
+      <RowHighlight />
     </DropdownMenuPrimitive.Item>
   );
 }
@@ -134,7 +149,7 @@ function DropdownMenuCheckboxItem({
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       checked={checked}
@@ -145,6 +160,7 @@ function DropdownMenuCheckboxItem({
       }}
       {...props}
     >
+      <RowHighlight />
       {children}
       {/* One selection mark across the app: a trailing check (P3). */}
       <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
@@ -176,11 +192,12 @@ function DropdownMenuRadioItem({
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
     >
+      <RowHighlight />
       {children}
       {/* The current value wears a trailing check, as in every choice list (P3). */}
       <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
@@ -261,11 +278,12 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:text-accent-foreground data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       {...props}
     >
+      <RowHighlight />
       {children}
       <ChevronRightIcon className="ml-auto size-4" />
     </DropdownMenuPrimitive.SubTrigger>
@@ -278,13 +296,16 @@ function DropdownMenuSubContent({
   ref,
   collisionPadding = 16,
   collisionBoundary,
+  children,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();
+  const group = React.useId();
   return (
     <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.SubContent
+      <ScrollingSubContent
+        layoutScroll
         ref={contentRef}
         data-slot="dropdown-menu-sub-content"
         collisionPadding={collisionPadding}
@@ -294,7 +315,9 @@ function DropdownMenuSubContent({
           className,
         )}
         {...props}
-      />
+      >
+        <HighlightGroup value={group}>{children}</HighlightGroup>
+      </ScrollingSubContent>
     </DropdownMenuPrimitive.Portal>
   );
 }

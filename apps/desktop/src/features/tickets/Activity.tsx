@@ -59,6 +59,9 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import { m } from "motion/react";
+import { Presence } from "@/components/ui/motion";
+import { exitTransition } from "@/lib/motion-tokens";
 import { Badge } from "@/components/ui/badge";
 import {
   CommentRow,
@@ -642,12 +645,27 @@ function RecoveredActivity({
     }
     return rows;
   }, []);
+  // Rows glide only when this changes, not on every keystroke in the composer.
+  const order = entries
+    .map((item) => (item.type === "note" ? `n${item.note.id}` : `h${item.id}`))
+    .join();
   // The newest update still in the list, so deleting the latest one moves the label.
   const newestNoteId = displayedNotes.reduce<AuthoredActivity | null>(
     (best, note) =>
       best === null || note.reported_at > best.reported_at ? note : best,
     null,
   )?.id;
+  // An update newer than the newest already shown arrives with motion: yours
+  // posted, or one an agent reports. The first list, older pages and a changed
+  // filter appear without it.
+  const newestEntry = entries[0]?.timestamp ?? null;
+  // shownThrough is the newest entry of the list before this one.
+  const [seenNewest, setSeenNewest] = useState<string | null>(null);
+  const [shownThrough, setShownThrough] = useState<string | null>(null);
+  if (newestEntry !== seenNewest) {
+    setSeenNewest(newestEntry);
+    setShownThrough(seenNewest);
+  }
   const lookups = {
     project: (id: string) =>
       projects.find((project) => project.id === id)?.name,
@@ -1052,6 +1070,10 @@ function RecoveredActivity({
             item.type === "note" ? (
               <CommentRow
                 key={`note-${item.note.id}`}
+                layoutDependency={order}
+                arriving={
+                  shownThrough !== null && item.timestamp > shownThrough
+                }
                 icon={item.note.editing_agent ? Bot : MessageSquare}
                 mark={
                   editingHarness(item.note.editing_agent) ? (
@@ -1101,9 +1123,16 @@ function RecoveredActivity({
                         </Tooltip>
                       </>
                     )}
-                    {item.note.id === (newestNoteId ?? latestNoteId) && (
-                      <Badge size="sm">Latest</Badge>
-                    )}
+                    <Presence initial={false}>
+                      {item.note.id === (newestNoteId ?? latestNoteId) && (
+                        <m.span
+                          key="latest"
+                          exit={{ opacity: 0, transition: exitTransition() }}
+                        >
+                          <Badge size="sm">Latest</Badge>
+                        </m.span>
+                      )}
+                    </Presence>
                   </span>
                 }
                 actions={
@@ -1168,6 +1197,7 @@ function RecoveredActivity({
             ) : (
               <EventGroup
                 key={`history-${item.id}`}
+                layoutDependency={order}
                 icon={History}
                 summary={changeSummary(item.changes)}
                 time={<Time value={item.timestamp} format="compact" />}

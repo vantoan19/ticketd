@@ -20,6 +20,20 @@
   min-height: 100%;
   min-width: 904px;
 }
+/* A lane's panel arrives with its heading, not before it: the well fades in on
+   the same step as the heading (graph-kit sets --enter-step from the lane's
+   index), so no empty panel waits on screen for its contents. */
+@keyframes plan-flow-lane-in {
+  from {
+    background-color: transparent;
+  }
+}
+.plan-flow-lanes > .ui-graph-flow-lane {
+  animation: plan-flow-lane-in var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(
+    var(--stagger) * min(var(--enter-step, 0), var(--stagger-steps))
+  );
+}
 .plan-flow-edges {
   position: absolute;
   inset: 0;
@@ -28,6 +42,29 @@
   pointer-events: none;
   z-index: 1;
   overflow: visible;
+}
+/* The lines draw once both ends are in place and take longer than an entrance.
+   Those two ratios are the only times here that no token names, so they are
+   named: a line starts two entrances after the lane cascade begins and takes
+   1.75 entrances to draw (480ms and 420ms with --dur-enter at 240ms). Their
+   arrowheads fade in as they draw. All of it is zero under reduced motion and a
+   held key, because the durations scale --dur-enter. */
+.plan-flow-edges {
+  --edge-wait-entrances: 2;
+  --edge-draw-entrances: 1.75;
+  --dur-edge-wait: calc(var(--dur-enter) * var(--edge-wait-entrances));
+  --dur-edge-draw: calc(var(--dur-enter) * var(--edge-draw-entrances));
+}
+.plan-flow-edges .ui-drawn {
+  animation:
+    ui-draw var(--dur-edge-draw) var(--ease-out) var(--dur-edge-wait) both,
+    plan-flow-edge-in var(--dur-edge-draw) var(--ease-out) var(--dur-edge-wait)
+      both;
+}
+@keyframes plan-flow-edge-in {
+  from {
+    opacity: 0;
+  }
 }
 .plan-flow-footer {
   display: flex;

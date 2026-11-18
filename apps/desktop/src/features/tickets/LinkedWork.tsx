@@ -36,6 +36,7 @@ import {
 import { RailRow, RailSection } from "@/features/tickets/RailSection";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { ReferenceRow } from "@/features/tickets/ReferenceRow";
+import { Presence } from "@/components/ui/motion";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
 
@@ -206,10 +207,14 @@ export function LinkedWork({
     if (last?.kind === row.kind) last.rows.push(row);
     else groups.push({ kind: row.kind, rows: [row] });
   }
+  // Rows glide only when this changes, not on every render of the pane.
+  const order = rows.map((row) => `${row.kind}-${row.reference}`).join();
   const renderRow = (row: LinkRow) => (
     <ReferenceRow
       key={`${row.kind}-${row.reference}`}
       kind={row.kind}
+      animated
+      layoutDependency={order}
       density={density}
       reference={row.reference}
       title={row.title}
@@ -316,7 +321,11 @@ export function LinkedWork({
               <span>{linkLabel(group.kind)}</span>
               {!document && addFor(group.kind)}
             </div>
-            <ul className="reference-rows">{group.rows.map(renderRow)}</ul>
+            <ul className="reference-rows">
+              <Presence initial={false} mode="popLayout">
+                {group.rows.map(renderRow)}
+              </Presence>
+            </ul>
           </section>
         ))}
         {external && <ExternalTarget target={external} select={select} />}

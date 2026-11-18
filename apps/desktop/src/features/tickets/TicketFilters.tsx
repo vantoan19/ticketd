@@ -17,6 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { FilterChip } from "@/components/ui/badge";
+import { Expand } from "@/components/ui/motion";
+import { useHeldExpand } from "@/components/ui/use-held-expand";
 import { PaneHeaderButton } from "@/components/ui/list-header";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
@@ -34,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { client, type StatusCounts } from "@/lib/api/client";
+import { spring } from "@/lib/motion-tokens";
 import { ticketStatuses } from "@/lib/statuses";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketPicker } from "./TicketPicker";
@@ -529,12 +532,14 @@ function MenuCount({ value }: { value: number | undefined }) {
 /**
  * The active filters on one line: a chip per dimension, "+N more" for the
  * ones that do not fit (it opens the menu), then Clear filters. A search is a
- * chip too, so a closed search still shows what narrows the list.
+ * chip too, so a closed search still shows what narrows the list. The row
+ * opens and closes with `Expand`, so the list below glides instead of jumping
+ * a row's height; while it closes it still shows the chips it had.
  */
 function FilterChips(p: Props & { menu: FiltersMenuState }) {
   const { chips } = dimensions(p);
   const query = p.query.trim();
-  const all = [
+  const current = [
     ...(query
       ? [
           {
@@ -549,6 +554,23 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
       : []),
     ...chips,
   ];
+  const open = current.length > 0;
+  // The row mounts closed and opens a frame later: applying a filter redraws
+  // the list in this same task, and a row opening in that frame is late on its
+  // own clock and arrives already most of the way open (a 44px jump).
+  const { expanded } = useHeldExpand(open);
+  // The chips last shown, kept while the row closes and until it is gone.
+  const [held, setHeld] = useState(current);
+  if (open && held !== current && !sameChips(held, current)) setHeld(current);
+  const all = open ? current : held;
+  useEffect(() => {
+    if (open || held.length === 0) return;
+    const timer = setTimeout(
+      () => setHeld([]),
+      spring("smooth").duration * 1000,
+    );
+    return () => clearTimeout(timer);
+  }, [open, held]);
   const row = useRef<HTMLDivElement>(null);
   const [fits, setFits] = useState(all.length);
   const key = all.map((chip) => `${chip.dimension}:${chip.value}`).join("|");
@@ -594,7 +616,6 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
       observer?.disconnect();
     };
   }, [key, all.length]);
-  if (all.length === 0) return null;
   const hidden = all.length - fits;
   function returnToFilters() {
     row.current
@@ -603,54 +624,80 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
       ?.focus({ preventScroll: true });
   }
   return (
-    <div ref={row} className="filter-chips" aria-label="Active filters">
-      {all.slice(0, fits).map((chip) => (
-        <span key={chip.dimension} data-filter-chip="">
-          <FilterChip
-            dimension={chip.dimension}
-            value={chip.value}
-            removeLabel={
-              chip.dimension === "Search"
-                ? `Remove Search: ${chip.value}`
-                : `Remove ${chip.dimension} filter`
-            }
-            onRemove={() => {
-              returnToFilters();
-              chip.clear();
-            }}
-            {...(chip.dimension !== "Search" && {
-              onEdit: () => {
-                p.menu.setOpen(true);
-                p.menu.setSub(chip.dimension as Dimension);
-              },
-            })}
-          />
-        </span>
-      ))}
-      {hidden > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={`${hidden} more ${hidden === 1 ? "filter" : "filters"}`}
-          onClick={() => p.menu.setOpen(true)}
+    <Expand open={expanded}>
+      {all.length > 0 && (
+        <div
+          ref={row}
+          className="filter-chips"
+          // A closing row is on its way out: not a landmark to reach, and not
+          // there for assistive technology (Expand also makes it inert).
+          aria-label={open ? "Active filters" : undefined}
+          aria-hidden={open ? undefined : true}
         >
-          +{hidden} more
-        </Button>
+          {all.slice(0, fits).map((chip) => (
+            <span key={chip.dimension} data-filter-chip="">
+              <FilterChip
+                dimension={chip.dimension}
+                value={chip.value}
+                removeLabel={
+                  chip.dimension === "Search"
+                    ? `Remove Search: ${chip.value}`
+                    : `Remove ${chip.dimension} filter`
+                }
+                onRemove={() => {
+                  returnToFilters();
+                  chip.clear();
+                }}
+                {...(chip.dimension !== "Search" && {
+                  onEdit: () => {
+                    p.menu.setOpen(true);
+                    p.menu.setSub(chip.dimension as Dimension);
+                  },
+                })}
+              />
+            </span>
+          ))}
+          {hidden > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`${hidden} more ${hidden === 1 ? "filter" : "filters"}`}
+              onClick={() => p.menu.setOpen(true)}
+            >
+              +{hidden} more
+            </Button>
+          )}
+          {all.some((chip) => chip.dimension !== "Search") && (
+            <span data-filter-tail="" className="filter-chips-tail">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  returnToFilters();
+                  p.clearFilters();
+                }}
+              >
+                Clear filters
+              </Button>
+            </span>
+          )}
+        </div>
       )}
-      {chips.length > 0 && (
-        <span data-filter-tail="" className="filter-chips-tail">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              returnToFilters();
-              p.clearFilters();
-            }}
-          >
-            Clear filters
-          </Button>
-        </span>
-      )}
-    </div>
+    </Expand>
+  );
+}
+
+/** Whether two rows of chips say the same thing (their closures are new each render). */
+function sameChips(
+  a: { dimension: string; value: string }[],
+  b: { dimension: string; value: string }[],
+) {
+  return (
+    a.length === b.length &&
+    a.every(
+      (chip, index) =>
+        chip.dimension === b[index]?.dimension &&
+        chip.value === b[index]?.value,
+    )
   );
 }

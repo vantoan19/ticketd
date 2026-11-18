@@ -93,7 +93,8 @@
   gap: 4px;
   min-width: 0;
 }
-.rail-row:has(.rail-tags) {
+/* Only a row with pills takes the pill padding, not the "No tags" words. */
+.rail-row:has(.rail-tags > *) {
   padding-block: 6px;
 }
 
@@ -228,7 +229,7 @@
   padding-inline: 8px;
   gap: 7px;
 }
-.property-strip .rail-row:has(.rail-tags) {
+.property-strip .rail-row:has(.rail-tags > *) {
   height: auto;
   padding-block: 4px;
 }
@@ -326,10 +327,21 @@
   gap: 12px;
   padding: 8px;
 }
-.property-strip .rail-row:has(.rail-tags) {
+.property-strip .rail-row:has(.rail-tags > *) {
   height: 28px;
   padding: 0 6px;
 }
 .property-strip .rail-tags {
   flex-wrap: nowrap;
+}
+
+/* A value that crossfades in its row (status, project, Plan) still truncates. */
+.rail-row-value > .ui-crossfade {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.rail-row-value > .ui-crossfade > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

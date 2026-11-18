@@ -17,6 +17,7 @@ import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
+import { usePageSwap } from "./use-page-swap";
 type NoteTarget = { id: string; key: number };
 type InboxTarget = { reference: string; id: string; key: number };
 
@@ -51,8 +52,11 @@ export function TicketDetails({
   onAdjacent,
   returnLabel,
   outsideResults = false,
+  leaving = false,
 }: {
   outsideResults?: boolean;
+  /** The pane is fading out after the ticket closed: it takes no input. */
+  leaving?: boolean;
   hidden?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
@@ -125,6 +129,9 @@ export function TicketDetails({
     const id = known(reference)?.id;
     return id !== undefined && hasTicketDraft(recovery, id);
   });
+  // A ticket closed a moment ago is still held on screen: it is not one to
+  // move from, so reopening inside the close is not a swap.
+  const swap = usePageSwap(leaving ? null : selected);
   const pages =
     selected && !kept.includes(selected) ? [...kept, selected] : kept;
   // Pages are memoized, so what they call is the same object on every render.
@@ -142,6 +149,7 @@ export function TicketDetails({
       ref={setBoundary}
       className="ticket-detail"
       hidden={hidden}
+      inert={leaving}
       data-expanded={expanded || undefined}
       data-empty={selected === null || undefined}
       aria-labelledby="detail-heading"
@@ -169,7 +177,7 @@ export function TicketDetails({
                 onScroll={(event) => {
                   const scroller = event.currentTarget;
                   const title = scroller.querySelector<HTMLElement>(
-                    ".detail-content:not([hidden]) .editor-title, .detail-content:not([hidden]) .detail-title",
+                    ".detail-content:not([hidden], [data-leaving]) .editor-title, .detail-content:not([hidden], [data-leaving]) .detail-title",
                   );
                   const titleBottom = title
                     ? title.getBoundingClientRect().bottom -
@@ -209,6 +217,8 @@ export function TicketDetails({
                     reference={reference}
                     active={reference === selected}
                     hidden={hidden || reference !== selected}
+                    swap={swap.swapped && reference === selected}
+                    leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
                     outsideResults={outsideResults && reference === selected}
                     projects={projects}
@@ -243,6 +253,8 @@ const OpenedPage = memo(function OpenedPage({
   reference,
   active,
   hidden,
+  swap,
+  leaving,
   seed,
   outsideResults,
   projects,
@@ -254,6 +266,8 @@ const OpenedPage = memo(function OpenedPage({
   reference: string;
   active: boolean;
   hidden: boolean;
+  swap: boolean;
+  leaving: boolean;
   seed: Ticket | undefined;
   outsideResults: boolean;
   projects: Project[];
@@ -268,6 +282,8 @@ const OpenedPage = memo(function OpenedPage({
     <OpenTicket reference={reference} seed={seed} hidden={hidden}>
       <TicketPage
         active={active}
+        swap={swap}
+        leaving={leaving}
         outsideResults={outsideResults}
         projects={projects}
         plans={plans}

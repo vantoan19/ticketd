@@ -161,7 +161,7 @@ test("while a turn runs, Enter steers, Cmd+Enter queues, and the caret holds bot
   fireEvent.keyDown(composer("Steer Codex"), { key: "Enter", metaKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("also cover the admin login")).toBeTruthy();
-  expect(screen.getByText("Queued 1 · After this turn")).toBeTruthy();
+  expect(queueHead("Queued 1 · After this turn")).toBeTruthy();
 
   type("use Redis", "Steer Codex");
   fireEvent.keyDown(composer("Steer Codex"), { key: "Enter" });
@@ -255,7 +255,7 @@ test("Esc stops the turn from an empty box and pauses the queue, which waits for
     ),
   ).toBeTruthy();
   // The queue shows it is paused.
-  expect(screen.getByText(/^Queued \d+ · Paused$/)).toBeTruthy();
+  expect(queueHead(/^Queued \d+ · Paused$/)).toBeTruthy();
   expect(screen.getByText("then add tests")).toBeTruthy();
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
   fireEvent.click(button("Resume"));
@@ -926,9 +926,12 @@ test("a view that missed changes resyncs from a snapshot instead of showing a br
     client.streamText("c1", "r1", " then the tests,");
     client.streamText("c1", "r1", " then writing.");
   });
-  expect(
-    await screen.findByText("Reading the spec, then the tests, then writing."),
-  ).toBeTruthy();
+  // Each streamed chunk is a span of its own, so read the whole reply.
+  await waitFor(() =>
+    expect(document.querySelector(".chat-ai")?.textContent).toContain(
+      "Reading the spec, then the tests, then writing.",
+    ),
+  );
 });
 
 test("a large transcript keeps up with many small streamed updates", async () => {
@@ -957,7 +960,13 @@ test("a large transcript keeps up with many small streamed updates", async () =>
         client.streamText("c1", "live", `${batch * 25 + part} `);
     });
   const expected = Array.from({ length: 500 }, (_, index) => index).join(" ");
-  expect(await screen.findByText(expected)).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll(".chat-ai")].some((reply) =>
+        reply.textContent?.endsWith(expected),
+      ),
+    ).toBe(true),
+  );
   expect(screen.getByText("Reply 299")).toBeTruthy();
 });
 
@@ -1364,6 +1373,16 @@ test("a finished turn's record changes are one receipt row under it, whose more 
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
   ).toContain("Created the Document Reset email copy");
 });
+
+/** The queue's head line; its count is an element of its own. */
+const queueHead = (text: string | RegExp) =>
+  screen.getByText((_, element) => {
+    const said = element?.textContent ?? "";
+    return (
+      element?.tagName === "SPAN" &&
+      (typeof text === "string" ? said === text : text.test(said))
+    );
+  });
 
 /** Sizes a transcript as a browser would, which jsdom does not. */
 function sized(scroller: HTMLElement, height: number, content: number) {

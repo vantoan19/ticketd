@@ -187,12 +187,10 @@
   --dur-2: 140ms;
   --dur-3: 180ms;
   --dur-4: 240ms;
-  --dur-exit: 100ms;
+  --dur-exit: 150ms;
   --overlay-slide: 4px;
   --overlay-scale: 0.98;
-  --dialog-rise: 8px;
   --dialog-scale: 0.985;
-  --sheet-scale: 0.96;
   --dur-lift: 120ms;
   --dur-settle: 160ms;
   --dur-arrival: 1200ms;
@@ -203,6 +201,200 @@
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --motion-swift: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+  /* The Refined language (DESIGN.md section 12). Springs are critically damped
+     (bounce 0), sampled into linear(); each -t is the time the curve takes to
+     settle, which is what a duration means for it. The motion library reads
+     these through lib/motion-tokens, so JS never copies a value. */
+  --spring-glide: linear(
+    0,
+    0.0086,
+    0.0313,
+    0.0644,
+    0.1049,
+    0.1504,
+    0.1989,
+    0.2489,
+    0.2992,
+    0.3489,
+    0.3974,
+    0.4441,
+    0.4887,
+    0.531,
+    0.5709,
+    0.6082,
+    0.643,
+    0.6753,
+    0.7052,
+    0.7328,
+    0.7581,
+    0.7813,
+    0.8026,
+    0.8219,
+    0.8396,
+    0.8556,
+    0.8702,
+    0.8834,
+    0.8954,
+    0.9062,
+    0.9159,
+    0.9247,
+    0.9326,
+    0.9398,
+    0.9462,
+    0.9519,
+    0.9571,
+    0.9617,
+    0.9658,
+    0.9696,
+    0.9729,
+    0.9758,
+    0.9785,
+    0.9809,
+    0.983,
+    0.9849,
+    0.9866,
+    0.9881,
+    0.9894,
+    0.9906,
+    0.9916,
+    0.9926,
+    0.9934,
+    0.9942,
+    0.9948,
+    0.9954,
+    1
+  );
+  --spring-glide-t: 366ms;
+  --spring-smooth: linear(
+    0,
+    0.0086,
+    0.0314,
+    0.0646,
+    0.1053,
+    0.1508,
+    0.1994,
+    0.2495,
+    0.2999,
+    0.3497,
+    0.3982,
+    0.445,
+    0.4897,
+    0.532,
+    0.5719,
+    0.6092,
+    0.644,
+    0.6763,
+    0.7062,
+    0.7337,
+    0.759,
+    0.7822,
+    0.8034,
+    0.8227,
+    0.8403,
+    0.8563,
+    0.8709,
+    0.884,
+    0.8959,
+    0.9067,
+    0.9164,
+    0.9252,
+    0.9331,
+    0.9402,
+    0.9465,
+    0.9523,
+    0.9574,
+    0.962,
+    0.9661,
+    0.9698,
+    0.9731,
+    0.9761,
+    0.9787,
+    0.981,
+    0.9831,
+    0.985,
+    0.9867,
+    0.9882,
+    0.9895,
+    0.9907,
+    0.9917,
+    0.9927,
+    0.9935,
+    0.9942,
+    0.9949,
+    0.9955,
+    1
+  );
+  --spring-smooth-t: 440ms;
+  --spring-travel: linear(
+    0,
+    0.0086,
+    0.0314,
+    0.0646,
+    0.1052,
+    0.1507,
+    0.1993,
+    0.2494,
+    0.2997,
+    0.3495,
+    0.398,
+    0.4448,
+    0.4895,
+    0.5318,
+    0.5717,
+    0.609,
+    0.6438,
+    0.6761,
+    0.706,
+    0.7335,
+    0.7588,
+    0.782,
+    0.8032,
+    0.8225,
+    0.8402,
+    0.8562,
+    0.8707,
+    0.8839,
+    0.8958,
+    0.9066,
+    0.9163,
+    0.9251,
+    0.933,
+    0.9401,
+    0.9464,
+    0.9522,
+    0.9573,
+    0.9619,
+    0.9661,
+    0.9697,
+    0.9731,
+    0.976,
+    0.9786,
+    0.981,
+    0.9831,
+    0.985,
+    0.9867,
+    0.9882,
+    0.9895,
+    0.9907,
+    0.9917,
+    0.9926,
+    0.9935,
+    0.9942,
+    0.9949,
+    0.9955,
+    1
+  );
+  --spring-travel-t: 562ms;
+  --dur-enter: 240ms;
+  --motion-blur-in: 4px;
+  --motion-blur-out: 2px;
+  --motion-rise: 6px;
+  --motion-rise-overlay: 8px;
+  --stagger: 24ms;
+  --stagger-steps: 7;
+  --dur-sheen: 1.6s;
+  --dur-shimmer: 1.8s;
+  --dur-theme: 280ms;
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -624,16 +816,14 @@
 }
 .ui-segmented {
   background: var(--segmented-track);
+  /* The travelling thumb sits above the track and below the labels. */
+  isolation: isolate;
 }
 .ui-segmented :is([role="radio"], [role="tab"]) {
   font-size: var(--text-code);
   line-height: var(--text-ui-line);
 }
-.ui-segmented
-  :is(
-    [role="radio"][data-state="checked"],
-    [role="tab"][aria-selected="true"]
-  ) {
+.ui-segmented .ui-glide {
   background: var(--segmented-thumb);
   box-shadow: var(--shadow-segmented-thumb);
 }
@@ -645,8 +835,6 @@
   height: 28px;
   justify-content: flex-start;
   padding-inline: 0;
-  background: none;
-  box-shadow: none;
   font-size: var(--text-ui);
 }
 /* A disabled switch keeps its shape at full strength: a recessed track and a
@@ -743,7 +931,7 @@
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 .ui-overlay[data-state="open"] {
-  animation: palette-scrim var(--dur-2) var(--ease-out);
+  animation: palette-scrim var(--dur-3) var(--ease-out);
 }
 .ui-overlay[data-state="closed"] {
   animation: overlay-leave var(--dur-exit) var(--ease-in);
@@ -755,6 +943,8 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover,
 .ui-menu {
+  /* The row highlight's Glide sits under the rows, inside this surface. */
+  isolation: isolate;
   --overlay-offset-x: 0px;
   --overlay-offset-y: calc(-1 * var(--overlay-slide));
 }
@@ -775,7 +965,7 @@ body:has([data-slot="dialog-overlay"])
 }
 .ui-popover[data-state="closed"],
 .ui-menu[data-state="closed"] {
-  animation: menu-leave var(--dur-exit) var(--ease-in);
+  animation: menu-leave var(--dur-2) var(--ease-in);
 }
 :is(
   .ui-popover,
@@ -787,37 +977,77 @@ body:has([data-slot="dialog-overlay"])
   pointer-events: none;
 }
 .ui-dialog[data-state="open"] {
-  animation: palette-enter var(--dur-4) var(--ease-out);
+  animation: dialog-enter var(--spring-smooth-t) var(--spring-smooth);
 }
 .ui-dialog[data-state="closed"] {
   animation: dialog-leave var(--dur-exit) var(--ease-in);
 }
+/* A sheet glides in from its edge on the smooth spring and slides back out
+   faster, over a scrim that fades with it (section 12). Radix Presence still
+   waits for the animation name to change on close. */
 .ui-sheet[data-state="open"] {
-  animation: overlay-enter var(--dur-4) var(--ease-out);
+  animation: sheet-in var(--spring-smooth-t) var(--spring-smooth) both;
 }
 .ui-sheet[data-state="closed"] {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
+  animation: sheet-out var(--dur-exit) var(--ease-in) both;
 }
+.ui-sheet[data-side="right"] {
+  --sheet-from: 100%;
+}
+.ui-sheet[data-side="left"] {
+  --sheet-from: -100%;
+}
+[data-slot="sheet-overlay"][data-state="open"] {
+  animation: sheet-scrim-in var(--dur-4) var(--ease-out) both;
+}
+[data-slot="sheet-overlay"][data-state="closed"] {
+  animation: sheet-scrim-out var(--dur-exit) var(--ease-in) both;
+}
+@keyframes sheet-in {
+  from {
+    transform: translateX(var(--sheet-from, 0));
+  }
+}
+@keyframes sheet-out {
+  to {
+    transform: translateX(var(--sheet-from, 0));
+  }
+}
+@keyframes sheet-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sheet-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+/* A menu or popover grows out of its trigger: a short slide from the trigger's
+   side, a slight scale and blur. It leaves in place, faster. */
 @keyframes menu-enter {
   from {
     opacity: 0;
     transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
       scale(var(--overlay-scale));
+    filter: blur(var(--motion-blur-out));
   }
   to {
     opacity: 1;
     transform: translate(0, 0) scale(1);
+    filter: blur(0px);
   }
 }
 @keyframes menu-leave {
   from {
     opacity: 1;
-    transform: translate(0, 0) scale(1);
+    transform: scale(1);
+    filter: blur(0px);
   }
   to {
     opacity: 0;
-    transform: translate(var(--overlay-offset-x), var(--overlay-offset-y))
-      scale(var(--overlay-scale));
+    transform: scale(var(--overlay-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 /* Radix Presence waits for a changed animation name before unmounting. */
@@ -829,24 +1059,29 @@ body:has([data-slot="dialog-overlay"])
     opacity: 0;
   }
 }
+/* A dialog rises from its top anchor out of a soft blur, and leaves in place. */
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise-overlay)) scale(var(--dialog-scale));
+    filter: blur(var(--motion-blur-in));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0px);
+  }
+}
 @keyframes dialog-leave {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
-  }
-}
-@keyframes overlay-enter {
-  from {
-    opacity: 0;
-    transform: scale(var(--sheet-scale));
-  }
-  to {
-    opacity: 1;
     transform: scale(1);
+    filter: blur(0px);
+  }
+  to {
+    opacity: 0;
+    transform: scale(var(--dialog-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 .ui-select[data-variant="ghost"] {
@@ -866,6 +1101,14 @@ body:has([data-slot="dialog-overlay"])
   text-wrap: balance;
 }
 /* A choice list's search row (P3): 32px, a hairline under it. */
+/* The row highlight's Glide sits under the rows, inside the list, and fills
+   with the highlight colour (row-highlight.tsx). */
+[data-slot="command-list"] {
+  isolation: isolate;
+}
+:is(.ui-menu, .ui-popover, [data-slot="command-list"]) [data-slot="glide"] {
+  background: var(--accent);
+}
 [data-slot="command-input-wrapper"] {
   height: 32px;
   padding-inline: 8px;
@@ -1361,9 +1604,6 @@ body:has([data-slot="dialog-overlay"])
   padding: 0;
   list-style: none;
 }
-.ui-event-group-details[hidden] {
-  display: none;
-}
 /* A comment: badge on the line, a header like an event row, the body beneath. No card. */
 .ui-comment-row {
   display: flex;
@@ -1673,8 +1913,19 @@ html[data-window-bar] {
   flex-direction: column;
   /* 208px rows inside the 232px navigation column (C-Sidebar). */
   padding: 0 12px;
+  /* Labels clip as the sidebar narrows to the rail. */
+  overflow-x: clip;
+  /* The width is the clock for what the rail drops: see the container rule
+     below. The width is fixed, so nothing inside sizes it. */
+  container-name: sidebar;
+  container-type: inline-size;
   background: var(--background);
   color: var(--foreground);
+  /* Collapsing and expanding glide on the smooth spring (section 12). Only the
+     preference changes this width, so resizing the window never animates it. */
+  transition:
+    width var(--spring-smooth-t) var(--spring-smooth),
+    padding-inline var(--spring-smooth-t) var(--spring-smooth);
 }
 .sidebar-header,
 .sidebar-body,
@@ -1738,12 +1989,39 @@ html[data-window-bar] {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
+/* The top row holds the wordmark and two buttons, which the rail stacks. Each
+   sits at an explicit place so the move between the two arrangements is a
+   transition and the rows below follow the height: the New ticket button drops
+   a step and the collapse button takes its place. */
 .sidebar-top {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  --top-step: calc(var(--header-control-height) + 4px);
+  position: relative;
   height: 48px;
-  gap: 4px;
+  transition: height var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-top > button {
+  position: absolute;
+  top: calc((48px - var(--header-control-height)) / 2);
+  right: 0;
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-top > button:not(:last-child) {
+  right: var(--top-step);
+}
+/* The two buttons cross paths, so they never move at once: unfolding, the
+   collapse button leaves the corner first and New ticket climbs after it. */
+.sidebar-top > button:not(:last-child) {
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right calc(var(--spring-smooth-t) * 0.5) var(--spring-smooth);
+}
+.sidebar-top > button:last-child {
+  transition:
+    top calc(var(--spring-smooth-t) * 0.6) var(--spring-smooth)
+      calc(var(--spring-smooth-t) * 0.4),
+    right var(--spring-smooth-t) var(--spring-smooth);
 }
 .sidebar-top .ui-button,
 .sidebar-footer-actions .ui-button {
@@ -1751,9 +2029,9 @@ html[data-window-bar] {
   height: var(--header-control-height);
 }
 .sidebar-wordmark {
-  flex: none;
-  margin-left: 12px;
-  margin-right: auto;
+  position: absolute;
+  top: 14px;
+  left: 12px;
   font-size: var(--text-wordmark);
   line-height: 20px;
   font-weight: 600;
@@ -1765,6 +2043,8 @@ html[data-window-bar] {
   margin: 2px 0 14px;
   padding: 0 6px 0 10px;
   justify-content: flex-start;
+  overflow: hidden;
+  white-space: nowrap;
   border-radius: var(--radius-card);
   color: var(--disabled-foreground);
   background: var(--surface);
@@ -1772,37 +2052,115 @@ html[data-window-bar] {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* What the rail drops fades with a slight blur: out first, in once the width
+   has arrived. The elements stay in the row and the narrowing clips them. The
+   fade back in has no delay of its own: it starts when the container rule
+   below stops holding the elements hidden. */
+.sidebar-label,
+.sidebar-wordmark,
+.sidebar-heading,
+.sidebar-count:not(:has([data-slot="status-dot"])),
+.sidebar-count > :not([data-slot="status-dot"]),
+.ui-button-jump > span,
+.ui-button-jump kbd {
+  transition:
+    opacity var(--dur-enter) var(--ease-out),
+    filter var(--dur-enter) var(--ease-out);
+}
+.sidebar[data-collapsed] :is(.sidebar-label, .sidebar-wordmark),
+.sidebar[data-collapsed] .ui-button-jump > span,
+.sidebar[data-collapsed] .ui-button-jump kbd {
+  opacity: 0;
+  filter: blur(var(--motion-blur-out));
+  pointer-events: none;
+  transition:
+    opacity var(--dur-exit) var(--ease-in),
+    filter var(--dur-exit) var(--ease-in);
+}
 .ui-button-jump kbd {
   margin-left: auto;
 }
+/* Expanding: the width first, then these fade back in. They stay hidden, at
+   once, until the sidebar is nearly open; the width itself is the clock, so a
+   busy main thread cannot let them run ahead of it (a timed delay did, and
+   labels showed beside the 56px rail). Elements that mount as the rail opens
+   (the Context heading, a count) start hidden the same way. Only words are
+   held: the dot a count carries is what the rail already shows, and it stays. */
+@container sidebar (max-width: 184px) {
+  .sidebar:not([data-collapsed])
+    :is(
+      .sidebar-label,
+      .sidebar-wordmark,
+      .sidebar-heading,
+      .sidebar-count:not(:has([data-slot="status-dot"])),
+      .sidebar-count > :not([data-slot="status-dot"]),
+      .ui-button-jump > span,
+      .ui-button-jump kbd
+    ) {
+    opacity: 0;
+    filter: blur(var(--motion-blur-out));
+    transition: none;
+  }
+}
+/* A folding group's side that is closing is gone before its height reaches the
+   icon. On the Expand's usual exit fade the icon was still faintly there when
+   the height had clipped it to its top edge, which showed as a dash. */
+.sidebar-group .ui-expand[data-open="false"] > .ui-expand-body {
+  transition-duration: var(--dur-1);
+}
+/* Settings and Trash sit at explicit places, like the top row, so the rail's
+   column and the row's pair are one transition on the smooth spring. */
 .sidebar-footer-actions {
-  display: flex;
-  align-items: center;
+  position: relative;
   height: 48px;
-  padding: 0 0 4px 10px;
+  transition: height var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-footer-actions > button {
+  position: absolute;
+  top: calc((44px - var(--header-control-height)) / 2);
+  left: 10px;
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    left var(--spring-smooth-t) var(--spring-smooth);
+}
+.sidebar-footer-actions > button:last-child {
+  left: calc(10px + var(--header-control-height));
 }
 .sidebar-footer-actions [aria-current="page"] {
   background: var(--accent);
 }
 .sidebar[data-collapsed] .sidebar-top {
-  height: auto;
-  flex-direction: column;
-  padding-block: 10px;
+  --top-step: 0px;
+  height: calc(20px + 2 * var(--header-control-height) + 4px);
 }
-.sidebar[data-collapsed] .sidebar-wordmark {
-  display: none;
+.sidebar[data-collapsed] .sidebar-top > button {
+  top: 10px;
+  right: 4px;
 }
-.sidebar[data-collapsed] .ui-button-jump {
-  padding: 0;
-  justify-content: center;
+.sidebar[data-collapsed] .sidebar-top > button:last-child {
+  top: calc(10px + var(--header-control-height) + 4px);
 }
-.sidebar[data-collapsed] .ui-button-jump > span {
-  display: none;
+/* Folding: New ticket drops first and the collapse button slides over after it. */
+.sidebar[data-collapsed] .sidebar-top > button:not(:last-child) {
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right calc(var(--spring-smooth-t) * 0.65) var(--spring-smooth)
+      calc(var(--spring-smooth-t) * 0.35);
+}
+.sidebar[data-collapsed] .sidebar-top > button:last-child {
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right var(--spring-smooth-t) var(--spring-smooth);
 }
 .sidebar[data-collapsed] .sidebar-footer-actions {
-  padding-inline: 0;
-  height: auto;
-  flex-direction: column;
+  height: calc(2 * var(--header-control-height) + 4px);
+}
+.sidebar[data-collapsed] .sidebar-footer-actions > button {
+  top: 0;
+  left: calc(50% - var(--header-control-height) / 2);
+}
+.sidebar[data-collapsed] .sidebar-footer-actions > button:last-child {
+  top: var(--header-control-height);
 }
 .sidebar-nav {
   display: grid;
@@ -1850,8 +2208,25 @@ html[data-window-bar] {
   background: var(--recessed);
   color: var(--foreground);
 }
-.sidebar-nav button[data-active="true"] {
+/* The current row's fill is the Glide beside its button, which travels from
+   the previous row; the button itself only changes its text color. */
+.sidebar-nav li {
+  position: relative;
+}
+/* One stacking context for the whole body, so the travelling highlight sits
+   under every row it crosses, not only under the row it lands in. */
+.sidebar-body {
+  isolation: isolate;
+}
+.sidebar-nav li > [data-slot="glide"] {
+  border-radius: var(--radius);
   background: var(--accent);
+}
+.sidebar-nav button {
+  transition: color var(--dur-3) var(--ease-out);
+}
+.sidebar-nav button[data-active="true"] {
+  background: transparent;
   color: var(--foreground);
 }
 /* Back from Settings: no hover fill until the pointer moves (App.tsx). */
@@ -1927,14 +2302,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .sidebar[data-collapsed] .brand strong + button {
   margin-left: 0;
 }
+/* The icon stays where it is; the label, already faded, is clipped by the row. */
 .sidebar[data-collapsed] .sidebar-nav button {
   position: relative;
-  justify-content: center;
-  width: 36px;
-  margin: 0 auto;
-  padding: 0;
-  gap: 0;
-  font-size: 0;
 }
 /* The dot alone, centred on the icon's top-right corner, cut out of the row
    by a 2px ring in the row's own fill (DESIGN.md section 6). */
@@ -2016,6 +2386,20 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .content-panel:focus {
   outline: none;
 }
+/* The pages sit in a wrapper that adds no box (ViewRegion). A page that has
+   just been switched away from fades out over the panel as a still picture. */
+.view-region {
+  display: contents;
+}
+.view-departing {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--surface);
+}
 /* The narrow window's navigation button in a header's leading slot, with what
    waits in the sheet as a dot on its corner, cut out by the panel's fill. */
 .shell-nav {
@@ -2058,8 +2442,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .ticket-workspace[hidden] {
   display: none !important;
 }
-.ticket-workspace #list,
-.ticket-workspace #detail {
+.ticket-workspace :is(#list, [data-view-id="list"]),
+.ticket-workspace :is(#detail, [data-view-id="detail"]) {
   min-width: 0;
 }
 /* The pane clips; it is not the scroller. Title, toolbar, source tabs and chips
@@ -2081,9 +2465,15 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   overflow-x: hidden;
   overflow-y: auto;
 }
-/* Keeps the Projects page mounted while hidden; ManagementPage lays it out. */
+/* Keeps the Projects page mounted while hidden; ManagementPage lays it out.
+   It needs a box of its own (not `display: contents`) so a page switch can
+   take its picture and fade it. */
 .management-host:not([hidden]) {
-  display: contents;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 .search {
   display: flex;
@@ -2266,11 +2656,12 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 /* !important here and in the narrow block: the panel library sets flex and
    size inline on #list and #detail, so only !important wins. */
-.ticket-workspace.expanded #list,
+.ticket-workspace.expanded:not([data-pane-leaving="list"])
+  :is(#list, [data-view-id="list"]),
 .ticket-workspace.expanded .split-handle {
   display: none !important;
 }
-.ticket-workspace.expanded #detail {
+.ticket-workspace.expanded :is(#detail, [data-view-id="detail"]) {
   flex: 1 1 0 !important;
 }
 /* One content gutter for the management pages (Projects, Plans, Documents):
@@ -2502,11 +2893,92 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .markdown-check[data-checked] {
   background: var(--recessed);
   box-shadow: inset 0 0 0 1px var(--border);
+  /* Only checking moves: the box fills over time, unchecking is at once. */
+  transition:
+    background-color var(--dur-enter) var(--ease-out),
+    box-shadow var(--dur-enter) var(--ease-out);
 }
+/* The tick is always drawn and an empty box hides it, so checking pops it in. */
 .markdown-check svg {
   width: 12px;
   height: 12px;
   stroke-width: 3;
+  opacity: 0;
+  transform: scale(0.6);
+}
+.markdown-check[data-checked] svg {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-enter) var(--ease-out),
+    transform var(--spring-glide-t) var(--spring-glide);
+}
+/* The editor's box is the same drawing on a native checkbox (appearance: none),
+   so ticking it fills the box and pops the tick on the same transitions. They
+   sit on the checked state alone: an item that is already checked has nothing
+   to run on mount, and unchecking is at once. The tick is a mask of the same
+   Check icon, drawn in the text colour. */
+.rich-document li > input[type="checkbox"] {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-segment);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+  cursor: pointer;
+}
+.rich-document li > input[type="checkbox"]:disabled {
+  cursor: default;
+}
+.rich-document li > input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.rich-document li > input[type="checkbox"]:checked {
+  background: var(--recessed);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    background-color var(--dur-enter) var(--ease-out),
+    box-shadow var(--dur-enter) var(--ease-out);
+}
+.rich-document li > input[type="checkbox"]::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: var(--foreground);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  opacity: 0;
+  transform: scale(0.6);
+}
+.rich-document li > input[type="checkbox"]:checked::after {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-enter) var(--ease-out),
+    transform var(--spring-glide-t) var(--spring-glide);
+}
+/* Forced colours drop backgrounds and box shadows, and the tick's mask takes its
+   colour from a background: the box would vanish. Like .ui-progress, the box
+   gets an edge and the tick a system colour. */
+@media (forced-colors: active) {
+  .markdown-check,
+  .rich-document li > input[type="checkbox"] {
+    border: 1px solid CanvasText;
+  }
+  .rich-document li > input[type="checkbox"]::after {
+    background: CanvasText;
+  }
+  /* A done item's strike is a background, which forced colours remove: a
+     plain line-through takes its place. */
+  .markdown-document
+    li:has(> .markdown-check[data-checked])
+    > .markdown-task-text,
+  .rich-document
+    li:has(> input[type="checkbox"]:checked)
+    > div[data-slate-node] {
+    text-decoration: line-through;
+  }
 }
 /* An attachment picture in the text: up to the column's width; opens the preview. */
 .markdown-image {
@@ -2555,11 +3027,27 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 :is(.markdown-document, .rich-document) td {
   box-shadow: inset 0 -1px 0 var(--group-hairline);
 }
+/* A done item's words are muted and struck. A tight item's line is a
+   background that draws from the start of the text (text-decoration cannot be
+   drawn); the transition sits on the done state, so only checking moves and
+   unchecking is at once. This holds for the read-only document and for the
+   editor's task text. A loose item's paragraph keeps a plain strike. */
+.markdown-document .markdown-task-text,
+.rich-document li:has(> input[type="checkbox"]) > div[data-slate-node] {
+  background: linear-gradient(var(--faint), var(--faint)) no-repeat 0 55% / 0
+    1px;
+}
 .markdown-document
   li:has(> .markdown-check[data-checked])
   > .markdown-task-text,
-.markdown-document li > p:has(> .markdown-check[data-checked]),
 .rich-document li:has(> input[type="checkbox"]:checked) > div[data-slate-node] {
+  background-size: 100% 1px;
+  color: var(--muted-foreground);
+  transition:
+    background-size var(--dur-enter) var(--ease-out),
+    color var(--dur-enter) var(--ease-out);
+}
+.markdown-document li > p:has(> .markdown-check[data-checked]) {
   color: var(--muted-foreground);
   text-decoration: line-through;
   text-decoration-color: var(--faint);
@@ -2608,29 +3096,35 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   max-height: 320px;
 }
 
-/* Measured on the content panel (plan-workspace), so a collapsed sidebar keeps
-   the split for longer. 880px is useNarrowPane’s STACK_MIN_WIDTH. */
-@container plan-workspace (max-width: 879px) {
-  .ticket-workspace #list {
-    flex: 1 1 0 !important;
-  }
-  .ticket-workspace #detail,
-  .ticket-workspace .split-handle {
-    display: none !important;
-  }
-  .ticket-workspace.narrow-detail #list {
-    display: none !important;
-  }
-  .ticket-workspace.narrow-detail #detail {
-    display: flex !important;
-    flex: 1 1 0 !important;
-  }
-  .ticket-workspace.narrow-detail .return-to-list {
-    display: inline-flex;
-  }
-  .ticket-workspace .expand-ticket {
-    display: none;
-  }
+/* Measured on the content panel, so a collapsed sidebar keeps the split for
+   longer, and followed once its width has settled: `data-narrow` is
+   useNarrowPane's state (880px is its STACK_MIN_WIDTH), the one source for the
+   stacked layout. A container query here read the live width, so the sidebar's
+   width spring flipped the panes halfway through its motion, ahead of the
+   state that decides which pane shows. `:where` keeps each selector's
+   specificity what the container query's was. */
+.ticket-workspace:where([data-narrow]) :is(#list, [data-view-id="list"]) {
+  flex: 1 1 0 !important;
+}
+.ticket-workspace:where([data-narrow]):not([data-pane-leaving="detail"])
+  :is(#detail, [data-view-id="detail"]),
+.ticket-workspace:where([data-narrow]) .split-handle {
+  display: none !important;
+}
+.ticket-workspace:where([data-narrow]).narrow-detail
+  :is(#list, [data-view-id="list"]) {
+  display: none !important;
+}
+.ticket-workspace:where([data-narrow]).narrow-detail
+  :is(#detail, [data-view-id="detail"]) {
+  display: flex !important;
+  flex: 1 1 0 !important;
+}
+.ticket-workspace:where([data-narrow]).narrow-detail .return-to-list {
+  display: inline-flex;
+}
+.ticket-workspace:where([data-narrow]) .expand-ticket {
+  display: none;
 }
 @media (max-width: 767px) {
   [data-mobile="true"].sidebar {
@@ -2657,6 +3151,24 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
     flex-wrap: wrap;
   }
 }
+/* Changing the theme: `changeTheme` (lib/preferences) holds data-theme-fading
+   on <html> for --dur-theme, so every color moves together, the tiles'
+   hairlines included. Only a chosen tile's selection ring and radio dot stay
+   instant: choosing is the click that changes the theme. */
+:root[data-theme-fading] *,
+:root[data-theme-fading] *::before,
+:root[data-theme-fading] *::after {
+  transition-property:
+    background-color, color, border-color, fill, stroke, box-shadow;
+  transition-duration: var(--dur-theme);
+  transition-timing-function: var(--ease-in-out);
+}
+:root[data-theme-fading] [data-slot="choice-tile"][data-state="checked"],
+:root[data-theme-fading]
+  [data-slot="choice-tile"][data-state="checked"]
+  [data-slot="choice-tile-radio"] {
+  transition-property: background-color, color, border-color, fill, stroke;
+}
 /* !important is the point: reduced motion must beat every component's own
    transition and animation timing. */
 @media (prefers-reduced-motion: reduce) {
@@ -2673,6 +3185,18 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
     --dur-loading-delay: 0ms;
     --dur-spin: 0ms;
     --dur-instant: 0ms;
+    --dur-enter: 0ms;
+    --dur-sheen: 0ms;
+    --dur-shimmer: 0ms;
+    --dur-theme: 0ms;
+    --spring-glide-t: 0ms;
+    --spring-smooth-t: 0ms;
+    --spring-travel-t: 0ms;
+    --stagger: 0ms;
+    --motion-blur-in: 0px;
+    --motion-blur-out: 0px;
+    --motion-rise: 0px;
+    --motion-rise-overlay: 0px;
   }
   *,
   *::before,
@@ -2681,6 +3205,32 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
     transition-delay: var(--dur-instant) !important;
     animation: none !important;
   }
+}
+/* A held key or rapid clicks (lib/motion-guard): the same tokens, so motion
+   already running finishes at once and the next change skips its motion.
+   Skeleton delay and spinner stay, so a fast read never flashes a placeholder. */
+:root[data-motion="instant"] {
+  --dur-1: 0ms;
+  --dur-2: 0ms;
+  --dur-3: 0ms;
+  --dur-4: 0ms;
+  --dur-exit: 0ms;
+  --dur-lift: 0ms;
+  --dur-settle: 0ms;
+  --dur-arrival: 0ms;
+  --dur-instant: 0ms;
+  --dur-enter: 0ms;
+  --dur-sheen: 0ms;
+  --dur-shimmer: 0ms;
+  --dur-theme: 0ms;
+  --spring-glide-t: 0ms;
+  --spring-smooth-t: 0ms;
+  --spring-travel-t: 0ms;
+  --stagger: 0ms;
+  --motion-blur-in: 0px;
+  --motion-blur-out: 0px;
+  --motion-rise: 0px;
+  --motion-rise-overlay: 0px;
 }
 
 .sidebar-nav button[data-active="true"] {
@@ -2769,13 +3319,23 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
 }
-.ui-tooltip[data-state="delayed-open"],
-.ui-tooltip[data-state="instant-open"] {
+/* After the hover delay the label fades in from a slight scale and blur. Moving
+   to a neighbouring control opens its label at once (instant-open): no fade in,
+   while the one it leaves still fades out. */
+.ui-tooltip {
+  --tooltip-scale: 0.96;
+}
+.ui-tooltip[data-state="delayed-open"] {
   animation: tooltip-enter var(--dur-2) var(--ease-out);
+}
+.ui-tooltip[data-state="closed"] {
+  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 @keyframes tooltip-enter {
   from {
     opacity: 0;
+    transform: scale(var(--tooltip-scale));
+    filter: blur(var(--motion-blur-out));
   }
 }
 /* A tooltip only labels; its positioning wrapper must not cover the controls
@@ -3046,25 +3606,10 @@ kbd,
   background: var(--popover);
   overflow: hidden;
 }
+/* Open and close come from the shared dialog and its scrim (dialog.tsx); the
+   palette only sets its own size and soft scrim color. */
 .ui-overlay:has(+ .ui-dialog[data-size="palette"]) {
   background: var(--scrim-soft);
-  animation: palette-scrim var(--dur-2) var(--ease-out);
-}
-.ui-dialog[data-size="palette"][data-state="open"] {
-  animation: palette-enter var(--dur-3) var(--ease-out);
-}
-.ui-dialog[data-size="palette"][data-state="closed"] {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
-}
-@keyframes palette-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--dialog-rise)) scale(var(--dialog-scale));
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 @keyframes palette-scrim {
   from {
@@ -3137,9 +3682,6 @@ kbd,
   [data-variant="palette"] [data-slot="command-item"] {
     min-height: 44px;
   }
-}
-.ui-overlay:has(+ .ui-dialog[data-size="palette"][data-state="closed"]) {
-  animation: overlay-leave var(--dur-exit) var(--ease-in);
 }
 
 [data-variant="palette"] [data-slot="command-shortcut"] {
@@ -3516,9 +4058,6 @@ kbd,
 /* Documents use the shared pane, navigator and reading roles (S13). */
 .documents-list-view {
   box-shadow: inset -1px 0 0 var(--border);
-}
-.documents-list-view > [data-slot="pane-header"] {
-  background: var(--surface);
 }
 .documents-group {
   background: var(--recessed);
@@ -3953,6 +4492,21 @@ kbd,
   width: min(560px, calc(100vw - 32px));
   background: var(--popover);
 }
+:where(.ui-dialog[data-surface="create"]) {
+  /* Excluding size properties cancels the glide; theme colors still win. */
+  transition-property: none;
+}
+.ui-dialog[data-surface="create"][data-resizing] {
+  /* Expand and collapse glide, and only then: a window resize must not (the
+     dialog sets data-resizing for the length of the spring). The top anchor
+     stays, so it never re-centres vertically. Height between auto and a length
+     interpolates where the webview supports interpolate-size; elsewhere it
+     snaps, as it did. */
+  interpolate-size: allow-keywords;
+  transition:
+    width var(--spring-smooth-t) var(--spring-smooth),
+    height var(--spring-smooth-t) var(--spring-smooth);
+}
 .ui-dialog[data-surface="create"][data-expanded] {
   width: min(760px, calc(100vw - 32px));
   height: calc(100dvh - var(--dialog-top) - 16px);
@@ -4097,9 +4651,24 @@ kbd,
 .ui-button-attention svg {
   color: var(--status-blocked);
 }
+/* The slot opens by height (Expand). The 40px is held by a block inside the
+   Expand body, not by the body's own min-height, which would start the track
+   at 40px and leave nothing to animate. The block stays when the condition
+   has cleared, so nothing moves under the pointer. */
 .workspace-band-slot {
   flex: none;
-  height: 40px;
+}
+.workspace-band-reserve {
+  min-height: 40px;
+}
+.workspace-band-slot .workspace-band {
+  animation: band-in var(--dur-enter) var(--ease-out) var(--dur-1) backwards;
+}
+@keyframes band-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--motion-blur-in));
+  }
 }
 .ui-popover[data-variant="workspace"] .workspace-band {
   height: auto;

@@ -382,7 +382,7 @@ impl Workspace {
             let (conditions, mut values) = self.filter_conditions(filter)?;
             let trashed = trashed_column(filter.order);
             let mut sql = format!(
-                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE {trashed} = 0{conditions}",
+                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {}, t.number AS local_number FROM tickets t WHERE {trashed} = 0{conditions}",
                 crate::readiness::indicator_sql("t")
             );
             match filter.order {
@@ -626,7 +626,7 @@ impl Workspace {
                 self.show_project(id)?;
             }
             let mut statement = connection.prepare_cached(&format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND {matched} ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5",
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {}, t.number AS local_number FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND {matched} ORDER BY CASE WHEN lower(t.reference) = lower(?1) OR lower(substr(t.reference, 3)) = lower(?1) THEN 0 WHEN instr(lower(t.reference), lower(?1)) > 0 THEN 1 ELSE 2 END, t.number DESC LIMIT ?4 OFFSET ?5",
             crate::readiness::indicator_sql("t")
         ))?;
             let limit = limit.clamp(1, 100);

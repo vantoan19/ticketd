@@ -7,12 +7,17 @@
 .ticket-rows {
   margin: 0;
   padding: 4px 0 64px;
+  transition: padding var(--spring-smooth-t) var(--spring-smooth);
 }
 .ticket-rows li {
   display: flex;
   align-items: flex-start;
   column-gap: 0;
   min-width: 0;
+  /* No height floor (the Item's 36px, and 44px for touch): a row closes its
+     space as it leaves (row-motion `space`), and a floor would hold it open.
+     The selection cell sets the height of a row, and a header has its own. */
+  min-height: 0;
   margin: 0 8px;
   padding: 0 10px 0 4px;
 }
@@ -148,11 +153,9 @@
   align-items: center;
   gap: 8px;
   height: 36px;
-  margin: 6px 8px 0;
+  /* The 6px above a group is its margin-top, which the header's motion opens and
+     closes with its height (row-motion `gap`); the first header has none. */
   padding: 0 10px 0 12px;
-}
-.ticket-rows li.ticket-group-header:first-child {
-  margin-top: 0;
 }
 .ticket-group-header svg {
   flex: none;
@@ -320,6 +323,11 @@
 .ticket-list .ticket-rows {
   padding-bottom: calc(64px + var(--list-overlays-height));
 }
+/* Close the overlay and bulk-bar insets with the last rows, so the empty state
+   does not snap up when the list goes. */
+.ticket-list .ticket-rows[data-empty] {
+  padding: 0;
+}
 
 .ticket-navigator-caption {
   display: none;
@@ -337,7 +345,7 @@
   width: 16px;
   height: 20px;
   margin: 8px 10px;
-  z-index: 1;
+  z-index: 0;
 }
 .ui-item-navigator:has(.ticket-select:hover) .ticket-row-status {
   visibility: hidden;
@@ -383,7 +391,6 @@
 }
 
 @media (pointer: coarse) {
-  .ticket-rows > li:not(.ticket-group-header),
   .ticket-select {
     min-height: 44px;
   }
@@ -396,4 +403,36 @@
   .bulk-bar {
     height: 48px;
   }
+}
+
+/* Row motion (DESIGN.md section 12). A row is the containing block for the
+   highlight that glides to it and the fill that fades behind it. It clips only
+   while its space opens or closes (row-motion sets overflow then), so the
+   highlight can glide in from the row it left. */
+.ticket-rows {
+  /* One stacking context for every row: the travelling highlight sits under
+     all the rows it crosses (Glide). */
+  isolation: isolate;
+}
+.ticket-rows li {
+  position: relative;
+}
+/* The Glide's fill is the open row's background; the row's own hover fill
+   would paint over it, now that the Glide sits under all the rows. */
+.ticket-rows li:has(> [data-slot="glide"]) {
+  background: transparent;
+}
+.ticket-rows:empty {
+  /* Keep closing padding in flow after the last row leaves, without exposing
+     an empty list to assistive technology. */
+  visibility: hidden;
+}
+.ticket-rows [data-slot="glide"] {
+  background: var(--accent);
+}
+/* The arrival fill waits for the glide to settle, then fades. */
+.ticket-rows .ui-arrival {
+  opacity: 0;
+  animation: ui-arrival var(--dur-arrival) var(--ease-out)
+    var(--spring-travel-t) forwards;
 }

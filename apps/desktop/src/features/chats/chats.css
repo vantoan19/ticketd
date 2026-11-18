@@ -2,8 +2,8 @@
 
 /* Chat screens: the ticket list + detail split with one quiet conversation
    column. Layout only; every color, radius, shadow and size is a token. */
-.chats-workspace #chat-list,
-.chats-workspace #chat-detail {
+.chats-workspace :is(#chat-list, [data-view-id="chat-list"]),
+.chats-workspace :is(#chat-detail, [data-view-id="chat-detail"]) {
   min-width: 0;
 }
 /* One pane at a time below 840px and in Expanded. Both panes stay mounted
@@ -17,8 +17,10 @@
 .chats-workspace[data-single] [data-slot="resizable-handle"] {
   display: none;
 }
-.chats-workspace[data-single="list"] #chat-detail,
-.chats-workspace[data-single="detail"] #chat-list {
+.chats-workspace[data-single="list"]
+  :is(#chat-detail, [data-view-id="chat-detail"]),
+.chats-workspace[data-single="detail"]
+  :is(#chat-list, [data-view-id="chat-list"]) {
   position: absolute;
   inset: 0;
   visibility: hidden;
@@ -48,6 +50,8 @@
 /* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
 .chat-row-item {
   position: relative;
+  /* The arrival fill sits behind the row (Arrival's contract). */
+  isolation: isolate;
 }
 .chat-row-more {
   position: absolute;
@@ -251,8 +255,8 @@
   overflow-anchor: none;
 }
 /* Jump to latest: in its own 40px strip between the transcript and the dock,
-   so it never covers text. It opens only once the reader scrolled up, and fades
-   and closes in 120ms. */
+   so it never covers text. It opens only once the reader scrolled up; its button
+   fades up and out (Appear), and the strip closes after it. */
 .chat-jump {
   flex: none;
   display: flex;
@@ -291,7 +295,7 @@
   max-width: 760px;
   margin: 0 auto;
 }
-/* A dock part whose height glides (DockSlot): 150ms ease-out, clipped only
+/* A dock part whose height glides (DockSlot) on the smooth spring, clipped only
    while it moves. */
 .chat-dock-slot {
   flex: none;
@@ -317,9 +321,9 @@
    show under it on hover or focus. */
 .chat-you-part {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+}
+/* Its box is the animated element (Arrives), so the spacing is set on it. */
+.chat-you-part > * {
   gap: 4px;
   padding-bottom: 6px;
 }
@@ -370,7 +374,7 @@
 /* Touch keeps message actions visible in normal flow, with room for the
    shared 44px targets before the next turn. */
 @media (pointer: coarse) {
-  .chat-you-part {
+  .chat-you-part > * {
     padding-bottom: 0;
   }
   .chat-you-actions {
@@ -384,9 +388,7 @@
 .chat-ai p br {
   display: none;
 }
-.chat-turn {
-  display: flex;
-  flex-direction: column;
+.chat-turn > * {
   gap: 20px;
 }
 .chat-actions {
@@ -833,31 +835,35 @@
 .chat-picker-body > [data-slot="alert"] {
   padding-inline: 0;
 }
+.chat-activity:empty {
+  display: none;
+}
 .chat-activity {
   position: relative;
   max-height: 45vh;
   overflow-y: auto;
 }
-.chat-activity > section {
+.chat-activity > :is(section, [data-request]),
+.chat-activity .chat-queue {
   padding: 12px 16px;
 }
 .chat-activity > .chat-activity-slot {
   padding: 8px 12px;
 }
-.chat-activity > .chat-request[data-request="approval"] {
+.chat-activity > [data-request="approval"] {
   padding-inline: 14px;
 }
-.chat-request[data-request="approval"] .chat-request-body {
+[data-request="approval"] .chat-request-body {
   padding-left: 0;
 }
-.chat-request[data-request="approval"] .chat-request-body > .chat-out {
+[data-request="approval"] .chat-request-body > .chat-out {
   margin: 8px 0 0;
   padding-block: 8px;
 }
-.chat-request[data-request="approval"] .chat-request-reason {
+[data-request="approval"] .chat-request-reason {
   margin-top: 8px;
 }
-.chat-activity .chat-request[data-request="approval"] .chat-request-buttons {
+.chat-activity [data-request="approval"] .chat-request-buttons {
   margin-block: 12px -12px;
   padding-top: 0;
 }
@@ -869,9 +875,7 @@
 .chat-approval-feedback > * {
   grid-area: 1 / 1;
 }
-.chat-request[data-request="approval"]
-  .chat-approval-feedback
-  .chat-request-reason {
+[data-request="approval"] .chat-approval-feedback .chat-request-reason {
   margin-top: 0;
 }
 .chat-request-head {
@@ -975,14 +979,12 @@
   margin-top: -6px;
 }
 .chat-queue ol {
+  position: relative;
   margin: 0 -8px;
   padding: 0;
 }
-.chat-queue-card {
-  display: flex;
-  align-items: center;
+.chat-queue-card > * {
   gap: 8px;
-  min-height: 32px;
   padding-left: 8px;
 }
 /* The card's words: its text, then why a refused steer waits here. */

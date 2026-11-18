@@ -1,5 +1,9 @@
 /* The Automations page reuses the Chats panes and rows (chats.css). */
 
+/* The header sits in a wrapper that takes step 0 of the page's entrance. */
+.auto-list-head {
+  flex: none;
+}
 .auto-list-pane[data-empty] > .chat-rows {
   flex: none;
   padding: 0;
@@ -154,7 +158,7 @@
   padding-top: 0;
   overflow-y: auto;
 }
-.auto-start > [data-slot="empty-state"] {
+.auto-start [data-slot="empty-state"] {
   flex: none;
   padding-bottom: 0;
 }
@@ -310,6 +314,10 @@
   background: var(--surface);
   color: var(--foreground);
   box-shadow: var(--shadow-border-base);
+}
+/* A step added to an open flow: the card fades up, then its line draws. */
+.flow-canvas .react-flow__edge-path.ui-drawn {
+  animation-delay: var(--dur-enter);
 }
 .flow-card[data-selected] {
   background: var(--recessed);

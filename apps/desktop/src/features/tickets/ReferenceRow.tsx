@@ -1,3 +1,5 @@
+import { m } from "motion/react";
+import { arrival, departure, glide } from "@/components/ui/row-motion";
 import type { ReactNode } from "react";
 import { Reference } from "@/components/ui/reference";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -26,6 +28,8 @@ export function ReferenceRow({
   onOpen,
   action,
   kind,
+  animated = false,
+  layoutDependency,
 }: {
   reference: string;
   title: string;
@@ -39,10 +43,20 @@ export function ReferenceRow({
   action?: ReactNode;
   /** The relationship the row stands for, for styling and tests. */
   kind?: string;
+  /** Fades up when it arrives, fades out when it leaves and glides when a
+   *  neighbour does; the list puts its rows in a `Presence`. */
+  animated?: boolean;
+  /** Changes when the list's order does, so the row is measured then only. */
+  layoutDependency?: string;
 }) {
   return (
-    <li
+    <m.li
       className="reference-row"
+      {...(animated && {
+        ...arrival(),
+        ...departure(),
+        ...glide(layoutDependency),
+      })}
       data-density={density}
       data-kind={kind}
       data-action={action ? "" : undefined}
@@ -64,6 +78,6 @@ export function ReferenceRow({
         {caption}
       </span>
       {action && <span className="reference-row-action">{action}</span>}
-    </li>
+    </m.li>
   );
 }
