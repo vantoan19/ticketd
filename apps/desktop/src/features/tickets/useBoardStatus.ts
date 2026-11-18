@@ -15,8 +15,8 @@ type Notice = { message: string; undo?: () => unknown };
 
 /**
  * One status action shared by the card menu and pointer moves. Core owns every
- * write; the board shows the move at once (P10): the card leads its new
- * column with "Saving…" while a dashed slot holds its old place, and a
+ * write; the board shows the move at once (P10): the card takes its slot in
+ * its new column with "Saving…" while a dashed slot holds its old place, and a
  * failure puts it back with the reason on the card. A confirmed move is said
  * in the pane's status line with Undo.
  */
