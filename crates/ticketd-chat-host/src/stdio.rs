@@ -157,8 +157,7 @@ impl LogLines {
 
     fn finish(&mut self, harness: &str) {
         let line = std::mem::take(&mut self.0);
-        if !tracing::enabled!(target: "ticketd_chat_host::harness_stderr", tracing::Level::DEBUG)
-        {
+        if !tracing::enabled!(target: "ticketd_chat_host::harness_stderr", tracing::Level::DEBUG) {
             return;
         }
         let text = strip_terminal_codes(&String::from_utf8_lossy(&line));
