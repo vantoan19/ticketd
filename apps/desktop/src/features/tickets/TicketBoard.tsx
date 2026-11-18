@@ -15,7 +15,6 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import { arrival } from "@/components/ui/row-motion";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
 import { useInboxAttention } from "./use-inbox-attention";
@@ -60,7 +59,13 @@ import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import type { BoardMove } from "./useBoardStatus";
 import { useBoardDrag } from "./useBoardDrag";
-import { FlightCard, MoveWatch, type Flight } from "./board-motion";
+import {
+  FlightCard,
+  MoveWatch,
+  TakesItsInitial,
+  type Flight,
+} from "./board-motion";
+import { columnArrivals } from "./column-motion";
 import "./ticket-board.css";
 
 /** Cards the board reads per column at a time (useTicketBoard). */
@@ -156,6 +161,29 @@ export function TicketBoard({
       new Map(old).set(landed.reference, (old.get(landed.reference) ?? 0) + 1),
     );
   }, []);
+  // Cards that arrive from out of sight enter (MoveWatch). `now` is the ones
+  // of the last change of columns; a card that enters is mounted anew, once,
+  // which `serials` keeps from repeating on later changes.
+  const [entering, setEntering] = useState<{
+    serials: ReadonlyMap<string, number>;
+    now: ReadonlySet<string>;
+  }>({ serials: new Map(), now: new Set() });
+  const enter = useCallback((references: readonly string[]) => {
+    setEntering((old) =>
+      references.length === 0 && old.now.size === 0
+        ? old
+        : {
+            now: new Set(references),
+            serials: new Map([
+              ...old.serials,
+              ...references.map(
+                (reference) =>
+                  [reference, (old.serials.get(reference) ?? 0) + 1] as const,
+              ),
+            ]),
+          },
+    );
+  }, []);
   // A folded column opens by revealing from its 40px; folding fades the 40px
   // header in. The mark stays until another column changes.
   const [reveal, setReveal] = useState<{
@@ -237,7 +265,7 @@ export function TicketBoard({
         ?.focus();
   }, [lengthKey, workspace.board.columns, boardRef]);
   // Choosing Board: the columns fade up left to right.
-  const columnEnter = arrival;
+  const columnEnter = columnArrivals(workspace.board.columns.length);
   // The smooth spring, read once for the render and handed to every card: a
   // drag re-renders the board on each pointer move, and a card reading its own
   // tokens would cost a style read per card. It is not kept between renders, so
@@ -283,6 +311,7 @@ export function TicketBoard({
         ref={boardRef}
         hidden={Boolean(empty)}
         className="ticket-board"
+        data-dragging={drag ? "" : undefined}
         role="region"
         aria-label="Ticket status board"
         tabIndex={-1}
@@ -328,10 +357,11 @@ export function TicketBoard({
       >
         {workspace.board.columns.map((column, position) => {
           const { status, tickets: items, total, loading, error } = column;
-          const allowed = drag
-            ? ticketStatusChoices(drag.ticket).includes(status) &&
-              status !== drag.ticket.status
-            : undefined;
+          // The card's own column is not refused, only not a place to drop.
+          const allowed =
+            drag && status !== drag.ticket.status
+              ? ticketStatusChoices(drag.ticket).includes(status)
+              : undefined;
           const folded = FOLDED_BY_DEFAULT.has(status) && !unfolded.has(status);
           const columnProps = {
             "data-board-status": status,
@@ -344,7 +374,7 @@ export function TicketBoard({
             return (
               <Card variant="well" asChild key={status}>
                 <m.section
-                  {...columnEnter(position)}
+                  {...columnEnter[position]}
                   layout="position"
                   layoutDependency={unfoldedKey}
                   transition={{ layout: smooth }}
@@ -397,10 +427,13 @@ export function TicketBoard({
           ].filter(([, move]) => move.status === status);
           const cards = items.map((ticket, index) => (
             <BoardCard
-              key={ticket.id}
+              key={`${ticket.id}:${entering.serials.get(ticket.reference) ?? 0}`}
               ticket={ticket}
               place={`${status}:${index}`}
-              fresh={workspace.board.fresh.has(ticket.id)}
+              fresh={
+                workspace.board.fresh.has(ticket.id) ||
+                entering.now.has(ticket.reference)
+              }
               flying={flights.some((f) => f.reference === ticket.reference)}
               arrival={arrivals.get(ticket.reference)}
               workspace={workspace}
@@ -445,7 +478,7 @@ export function TicketBoard({
             <Card variant="well" asChild key={status}>
               <m.section
                 className="board-column"
-                {...columnEnter(position)}
+                {...columnEnter[position]}
                 layout="position"
                 layoutDependency={unfoldedKey}
                 transition={{ layout: smooth }}
@@ -590,6 +623,7 @@ export function TicketBoard({
         holding={Boolean(drag)}
         board={boardRef}
         onFlights={addFlights}
+        onEntering={enter}
       />
       {flights.map((flight) => {
         const ticket = workspace.board.columns
@@ -711,166 +745,170 @@ function BoardCard({
   const pending = statusAction.pending.has(ticket.reference);
   const failure = statusAction.failures[ticket.reference];
   return (
-    <m.div
-      className="board-card-container"
-      data-ticket-reference={ticket.reference}
-      data-dragging={dragging || undefined}
-      data-flying={flying || undefined}
-      aria-busy={pending}
-      data-failed={failure ? "" : undefined}
-      // Cards around a move make room by gliding; layout is measured only
-      // when the card's place changes.
-      layout={copy ? false : "position"}
-      layoutDependency={place}
-      transition={{ layout: smooth }}
-      initial={entrance ? entrance.from : false}
-      animate={entrance ? entrance.to : {}}
-      onAnimationComplete={() => setEntered(true)}
-    >
-      <Button
-        variant="card"
-        size="card"
-        data-board-reference={ticket.reference}
-        aria-pressed={selected}
-        onPointerDown={onPointerDown}
-        onDragStart={(event) => event.preventDefault()}
-        aria-keyshortcuts={ariaKeyShortcuts("board-move")}
-        onClick={onClick}
+    <TakesItsInitial>
+      <m.div
+        className="board-card-container"
+        data-ticket-reference={ticket.reference}
+        data-dragging={dragging || undefined}
+        data-flying={flying || undefined}
+        aria-busy={pending}
+        data-failed={failure ? "" : undefined}
+        // Cards around a move make room by gliding; layout is measured only
+        // when the card's place changes.
+        layout={copy ? false : "position"}
+        layoutDependency={place}
+        transition={{ layout: smooth }}
+        initial={entrance ? entrance.from : false}
+        animate={entrance ? entrance.to : {}}
+        onAnimationComplete={() => setEntered(true)}
       >
-        <Arrival {...arrivedAt(arrival, entrance && entered)} />
-        {failure && (
-          <span className="sr-only">
-            {ticket.status} {ticket.reference}
-          </span>
-        )}
-        <span className="board-card-top">
-          <StatusIcon status={ticket.status} size={14} decorative />
-          <Reference>{ticket.reference}</Reference>{" "}
-          <span className="sr-only">{ticket.status}</span>{" "}
-          <SourcePill ticket={ticket} />
-          {harness && agentState && (
-            <span className="board-card-agent">
-              <HarnessMark
-                harness={harness}
-                name={
-                  chat?.harness_name ??
-                  ticket.progress_summary?.editing_agent ??
-                  "Harness"
-                }
-              />
-              {chat?.status.rank === "working" && (
-                <Loader2 size={12} className="chat-spin" aria-hidden="true" />
-              )}
+        <Button
+          variant="card"
+          size="card"
+          data-board-reference={ticket.reference}
+          aria-pressed={selected}
+          onPointerDown={onPointerDown}
+          onDragStart={(event) => event.preventDefault()}
+          aria-keyshortcuts={ariaKeyShortcuts("board-move")}
+          onClick={onClick}
+        >
+          <Arrival {...arrivedAt(arrival, entrance && entered)} />
+          {failure && (
+            <span className="sr-only">
+              {ticket.status} {ticket.reference}
             </span>
           )}
-          {pending && (
-            <span className="board-card-pending" role="status">
-              <Loader2 aria-hidden="true" className="animate-spin" />
-              Saving…
-            </span>
-          )}
-        </span>{" "}
-        <Tooltip content={ticket.title} overflowOnly>
-          <span className="board-card-title">{ticket.title}</span>
-        </Tooltip>{" "}
-        <span className="board-card-meta">
-          {agentState && <span className="board-card-state">{agentState}</span>}
-          {needsReview ? (
-            <span className="board-card-state">
-              <StatusDot tone="attention" size={10} />
-              Needs review
-            </span>
-          ) : source?.unavailable ? (
-            <span className="board-card-state">
-              <StatusDot tone="attention" size={10} />
-              Source unavailable
-            </span>
-          ) : (
-            // Ready is the column's norm; only Blocked is news (list R-10).
-            state.kind === "blocked" && (
-              <span className="board-card-state">
-                <StatusDot tone="blocked" size={10} />
-                {readinessLabel(state)}
-              </span>
-            )
-          )}
-          {due && (
-            <span className="board-card-state">
-              <AlarmClock size={12} aria-hidden="true" />
-              Reminder due
-            </span>
-          )}
-          {!context && !ticket.project_id && <span>No project</span>}
-          {context && (
-            <span className="board-card-context">
-              <ContextIcon kind={context.kind} />
-              <span>{context.label}</span>
-            </span>
-          )}
-          <RowTags tags={ticket.tags} />
-        </span>
-      </Button>
-      <span className="board-card-status">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild disabled={ticket.trashed || pending}>
-            <IconButton
-              variant="outline"
-              size="icon-card"
-              data-board-status-reference={ticket.reference}
-              label={`Change status of ${ticket.reference}, current status: ${ticket.status}`}
-              tooltipSide="top"
-              shortcut={shortcutLabel("ticket-status")}
-              aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
-              disabled={ticket.trashed || pending}
-            >
-              <StatusIcon status={ticket.status} size={14} decorative />
-            </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            aria-label={`Change status of ${ticket.reference}`}
-          >
-            <DropdownMenuLabel>Status</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={ticket.status}
-              onValueChange={(status) =>
-                void statusAction.choose(ticket, status)
-              }
-            >
-              {ticketStatuses.map((choice) => (
-                <DropdownMenuRadioItem
-                  key={choice}
-                  value={choice}
-                  disabled={
-                    choice !== ticket.status &&
-                    !ticketStatusChoices(ticket).includes(choice)
+          <span className="board-card-top">
+            <StatusIcon status={ticket.status} size={14} decorative />
+            <Reference>{ticket.reference}</Reference>{" "}
+            <span className="sr-only">{ticket.status}</span>{" "}
+            <SourcePill ticket={ticket} />
+            {harness && agentState && (
+              <span className="board-card-agent">
+                <HarnessMark
+                  harness={harness}
+                  name={
+                    chat?.harness_name ??
+                    ticket.progress_summary?.editing_agent ??
+                    "Harness"
                   }
-                >
-                  <StatusIcon status={choice} decorative />
-                  {choice}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            {source && (
-              <p className="status-menu-caption">
-                Status choices follow {source.provider_name}.
-              </p>
+                />
+                {chat?.status.rank === "working" && (
+                  <Loader2 size={12} className="chat-spin" aria-hidden="true" />
+                )}
+              </span>
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
-      {failure && (
-        <div className="board-card-failure">
-          <FailureCaption
-            failure={failure}
-            retryLabel={`Retry status change for ${ticket.reference}`}
-            detailsVariant="popover"
-            detailsIconOnly
-            onRetry={() => statusAction.retry(ticket.reference)}
-          />
-        </div>
-      )}
-    </m.div>
+            {pending && (
+              <span className="board-card-pending" role="status">
+                <Loader2 aria-hidden="true" className="animate-spin" />
+                Saving…
+              </span>
+            )}
+          </span>{" "}
+          <Tooltip content={ticket.title} overflowOnly>
+            <span className="board-card-title">{ticket.title}</span>
+          </Tooltip>{" "}
+          <span className="board-card-meta">
+            {agentState && (
+              <span className="board-card-state">{agentState}</span>
+            )}
+            {needsReview ? (
+              <span className="board-card-state">
+                <StatusDot tone="attention" size={10} />
+                Needs review
+              </span>
+            ) : source?.unavailable ? (
+              <span className="board-card-state">
+                <StatusDot tone="attention" size={10} />
+                Source unavailable
+              </span>
+            ) : (
+              // Ready is the column's norm; only Blocked is news (list R-10).
+              state.kind === "blocked" && (
+                <span className="board-card-state">
+                  <StatusDot tone="blocked" size={10} />
+                  {readinessLabel(state)}
+                </span>
+              )
+            )}
+            {due && (
+              <span className="board-card-state">
+                <AlarmClock size={12} aria-hidden="true" />
+                Reminder due
+              </span>
+            )}
+            {!context && !ticket.project_id && <span>No project</span>}
+            {context && (
+              <span className="board-card-context">
+                <ContextIcon kind={context.kind} />
+                <span>{context.label}</span>
+              </span>
+            )}
+            <RowTags tags={ticket.tags} />
+          </span>
+        </Button>
+        <span className="board-card-status">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={ticket.trashed || pending}>
+              <IconButton
+                variant="outline"
+                size="icon-card"
+                data-board-status-reference={ticket.reference}
+                label={`Change status of ${ticket.reference}, current status: ${ticket.status}`}
+                tooltipSide="top"
+                shortcut={shortcutLabel("ticket-status")}
+                aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
+                disabled={ticket.trashed || pending}
+              >
+                <StatusIcon status={ticket.status} size={14} decorative />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              aria-label={`Change status of ${ticket.reference}`}
+            >
+              <DropdownMenuLabel>Status</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={ticket.status}
+                onValueChange={(status) =>
+                  void statusAction.choose(ticket, status)
+                }
+              >
+                {ticketStatuses.map((choice) => (
+                  <DropdownMenuRadioItem
+                    key={choice}
+                    value={choice}
+                    disabled={
+                      choice !== ticket.status &&
+                      !ticketStatusChoices(ticket).includes(choice)
+                    }
+                  >
+                    <StatusIcon status={choice} decorative />
+                    {choice}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              {source && (
+                <p className="status-menu-caption">
+                  Status choices follow {source.provider_name}.
+                </p>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
+        {failure && (
+          <div className="board-card-failure">
+            <FailureCaption
+              failure={failure}
+              retryLabel={`Retry status change for ${ticket.reference}`}
+              detailsVariant="popover"
+              detailsIconOnly
+              onRetry={() => statusAction.retry(ticket.reference)}
+            />
+          </div>
+        )}
+      </m.div>
+    </TakesItsInitial>
   );
 }
 

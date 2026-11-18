@@ -64,3 +64,60 @@ it("a drop or status choice ends the news, so a moved card never re-enters", asy
   });
   expect(result.current.fresh.size).toBe(0);
 });
+
+// The core lists a column highest number first, so a card shown at once in
+// its new column must take that slot, or it moves when the core confirms.
+const done = (result: { current: ReturnType<typeof useTicketBoard> }) =>
+  result.current.columns
+    .find((column) => column.status === "Done")
+    ?.tickets.map((item) => item.reference);
+
+it("a card placed at once takes its slot in the column's order, not the top", async () => {
+  read.tickets = [
+    ticket(10, "Done"),
+    ticket(8, "Done"),
+    ticket(2, "Done"),
+    ticket(5),
+    ticket(12),
+    ticket(1),
+  ];
+  const { result } = renderHook(() => useTicketBoard(filter, true, 0));
+  await settled(result);
+  await act(async () => {
+    result.current.placeTicket({ ...ticket(5), status: "Done" });
+  });
+  expect(done(result)).toEqual(["T-10", "T-8", "T-5", "T-2"]);
+  await act(async () => {
+    result.current.placeTicket({ ...ticket(12), status: "Done" });
+  });
+  expect(done(result)).toEqual(["T-12", "T-10", "T-8", "T-5", "T-2"]);
+  await act(async () => {
+    result.current.placeTicket({ ...ticket(1), status: "Done" });
+  });
+  expect(done(result)).toEqual(["T-12", "T-10", "T-8", "T-5", "T-2", "T-1"]);
+});
+
+it("the slot is the one the core confirms, so a refresh moves nothing", async () => {
+  read.tickets = [ticket(10, "Done"), ticket(2, "Done"), ticket(5)];
+  const { result } = renderHook(() => useTicketBoard(filter, true, 0));
+  await settled(result);
+  await act(async () => {
+    result.current.placeTicket({ ...ticket(5), status: "Done" });
+  });
+  const placed = done(result);
+  read.tickets = [ticket(10, "Done"), ticket(5, "Done"), ticket(2, "Done")];
+  await act(async () => {
+    await result.current.refresh();
+  });
+  expect(done(result)).toEqual(placed);
+});
+
+it("putting a card back uses the place it was given", async () => {
+  read.tickets = [ticket(10, "Done"), ticket(2, "Done"), ticket(5)];
+  const { result } = renderHook(() => useTicketBoard(filter, true, 0));
+  await settled(result);
+  await act(async () => {
+    result.current.placeTicket({ ...ticket(5), status: "Done" }, 0);
+  });
+  expect(done(result)).toEqual(["T-5", "T-10", "T-2"]);
+});
