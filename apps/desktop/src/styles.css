@@ -3064,30 +3064,35 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   max-height: 320px;
 }
 
-/* Measured on the content panel (plan-workspace), so a collapsed sidebar keeps
-   the split for longer. 880px is useNarrowPane’s STACK_MIN_WIDTH. */
-@container plan-workspace (max-width: 879px) {
-  .ticket-workspace :is(#list, [data-id="list"]) {
-    flex: 1 1 0 !important;
-  }
-  .ticket-workspace:not([data-pane-leaving="detail"])
-    :is(#detail, [data-id="detail"]),
-  .ticket-workspace .split-handle {
-    display: none !important;
-  }
-  .ticket-workspace.narrow-detail :is(#list, [data-id="list"]) {
-    display: none !important;
-  }
-  .ticket-workspace.narrow-detail :is(#detail, [data-id="detail"]) {
-    display: flex !important;
-    flex: 1 1 0 !important;
-  }
-  .ticket-workspace.narrow-detail .return-to-list {
-    display: inline-flex;
-  }
-  .ticket-workspace .expand-ticket {
-    display: none;
-  }
+/* Measured on the content panel, so a collapsed sidebar keeps the split for
+   longer, and followed once its width has settled: `data-narrow` is
+   useNarrowPane's state (880px is its STACK_MIN_WIDTH), the one source for the
+   stacked layout. A container query here read the live width, so the sidebar's
+   width spring flipped the panes halfway through its motion, ahead of the
+   state that decides which pane shows. `:where` keeps each selector's
+   specificity what the container query's was. */
+.ticket-workspace:where([data-narrow]) :is(#list, [data-id="list"]) {
+  flex: 1 1 0 !important;
+}
+.ticket-workspace:where([data-narrow]):not([data-pane-leaving="detail"])
+  :is(#detail, [data-id="detail"]),
+.ticket-workspace:where([data-narrow]) .split-handle {
+  display: none !important;
+}
+.ticket-workspace:where([data-narrow]).narrow-detail
+  :is(#list, [data-id="list"]) {
+  display: none !important;
+}
+.ticket-workspace:where([data-narrow]).narrow-detail
+  :is(#detail, [data-id="detail"]) {
+  display: flex !important;
+  flex: 1 1 0 !important;
+}
+.ticket-workspace:where([data-narrow]).narrow-detail .return-to-list {
+  display: inline-flex;
+}
+.ticket-workspace:where([data-narrow]) .expand-ticket {
+  display: none;
 }
 @media (max-width: 767px) {
   [data-mobile="true"].sidebar {

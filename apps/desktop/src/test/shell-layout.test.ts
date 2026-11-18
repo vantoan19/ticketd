@@ -43,7 +43,7 @@ it("the Plan summary reserves its two rows and truncates the purpose", () => {
   expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });
 
-it("the split switches on the content panel's width, not the window's", () => {
+it("the split switches on the content panel's settled width, not the window's", () => {
   const read = (path: string) =>
     readFileSync(join(__dirname, "..", path), "utf8");
   for (const file of [
@@ -52,9 +52,32 @@ it("the split switches on the content panel's width, not the window's", () => {
     "features/tickets/TicketWorkspaceView.tsx",
   ])
     expect(read(file)).not.toMatch(/1071/);
-  expect(read("styles.css")).toMatch(
-    /@container plan-workspace [(]max-width: 879px[)]/,
-  );
+  // useNarrowPane measures the content panel and waits for its width to hold
+  // still; the layout follows that one state (data-narrow), never a live
+  // container query, which would flip it every frame of the sidebar's spring.
+  const view = read("features/tickets/TicketWorkspaceView.tsx");
+  expect(view).toMatch(/useNarrowPane\(workspaceRef, STACK_MIN_WIDTH\)/);
+  expect(view).toMatch(/data-narrow=\{narrow \|\| undefined\}/);
+});
+
+it("the stacked panes follow the settled narrow state, not a container query", () => {
+  const styles = readFileSync(join(__dirname, "..", "styles.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, " ");
+  // No container query flips the ticket workspace's panes.
+  expect(styles).not.toMatch(/@container plan-workspace \(max-width: 879px\)/);
+  // Each stacked rule is keyed on data-narrow, at no added specificity (:where),
+  // so it competes with the other layouts' rules exactly as before.
+  for (const selector of [
+    '.ticket-workspace:where([data-narrow]) :is(#list, [data-id="list"]) {',
+    '.ticket-workspace:where([data-narrow]):not([data-pane-leaving="detail"]) :is(#detail, [data-id="detail"]),',
+    ".ticket-workspace:where([data-narrow]) .split-handle {",
+    '.ticket-workspace:where([data-narrow]).narrow-detail :is(#list, [data-id="list"]) {',
+    '.ticket-workspace:where([data-narrow]).narrow-detail :is(#detail, [data-id="detail"]) {',
+    ".ticket-workspace:where([data-narrow]).narrow-detail .return-to-list {",
+    ".ticket-workspace:where([data-narrow]) .expand-ticket {",
+  ])
+    expect(styles).toContain(selector);
 });
 
 it("Progress stays visible under forced colours", () => {
