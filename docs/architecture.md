@@ -446,13 +446,17 @@ The desktop owns one `ChatHost` for the life of the process
 screens reach it through `chat_*` commands with validated arguments. Opening a
 Chat returns a snapshot and a per-view channel of changes numbered one apart,
 already translated into the view model (`chat_view.rs`); a view that falls behind
-or cannot be served receives one `resync` entry and reads a new snapshot. The view
+or cannot be served receives one `resync` entry and reads a new snapshot. Each
+update's changes arrive as one array, and an item already sent unchanged is not
+sent again. Steps carry the last lines of their output; an opened row reads the
+whole of it with `chat_step_output`. The view
 model only shapes what the host and core decided: attention and notification
 rules, step classification and what blocks Send live in `ticketd-chat-host`
 (`attention`, `step_kind`, `conditions`), and record queries such as New Chat's
 suggestions and a folder's Project live in the core. List
 rows and counts follow the `chat-overview` event, which comes from the host and
-not from the workspace poll. The Experimental switch is a per-computer
+not from the workspace poll. Each wake rebuilds only the rows of Chats written
+since the last one or whose live state moved. The Experimental switch is a per-computer
 preference kept by the interface; the backend starts with Chat off and is told
 the choice at startup.
 
