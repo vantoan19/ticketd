@@ -19,6 +19,7 @@ import {
 
 type Played = {
   element: Element;
+  keyframes: Keyframe[];
   options: KeyframeAnimationOptions;
   onfinish: null | (() => void);
   oncancel: null | (() => void);
@@ -29,7 +30,7 @@ type Played = {
 const played: Played[] = [];
 const animate = vi.fn(function (
   this: Element,
-  _keyframes: unknown,
+  keyframes: Keyframe[],
   options: KeyframeAnimationOptions,
 ) {
   let settle = () => {};
@@ -38,6 +39,7 @@ const animate = vi.fn(function (
   );
   const animation = {
     element: this,
+    keyframes,
     options,
     onfinish: null,
     oncancel: null,
@@ -72,8 +74,17 @@ function useTokens(tokens: Record<string, string>) {
 const fades = () =>
   played.filter((one) => one.options.easing?.startsWith("cubic-bezier"));
 const delayOf = (one: Played) => Math.round(one.options.delay ?? 0);
+// A page's own opacity (the veil that holds its unmarked parts back) is a fade
+// with no blur; the header and rows, and a whole page that arrives, blur.
+const veils = () =>
+  fades().filter(
+    (one) =>
+      one.options.fill === "backwards" && !("filter" in one.keyframes[0]!),
+  );
 const arrivals = () =>
-  fades().filter((one) => one.options.fill === "backwards");
+  fades().filter(
+    (one) => one.options.fill === "backwards" && "filter" in one.keyframes[0]!,
+  );
 
 function Panel({
   page,
@@ -187,6 +198,55 @@ it("the new page's header arrives first, then its rows a stagger step apart", ()
   expect(arrivals().map(delayOf)).toEqual([150, 174, 198, 222]);
   expect(arrivals()[0]?.element.getAttribute("data-arrive")).toBe("header");
   expect(arrivals()[1]?.element.textContent).toBe("0");
+});
+
+it("the new page stays hidden until its arrival starts, and what has no marker fades in with the header", () => {
+  layOut();
+  const { container, rerender } = render(<Panel page="tickets" />);
+  rerender(
+    <Panel page="plans">
+      <section>
+        <header data-arrive="header" />
+        <h2>Group heading</h2>
+      </section>
+    </Panel>,
+  );
+  const [veil] = veils();
+  expect(veils()).toHaveLength(1);
+  expect(veil?.element).toBe(container.querySelector("section"));
+  // It holds the page at nothing through the old page's exit, then fades in
+  // over the header's own entrance.
+  expect(veil?.options).toMatchObject({ delay: 150, fill: "backwards" });
+  expect(veil?.options.duration).toBe(arrivals()[0]?.options.duration);
+  expect(delayOf(veil!)).toBe(delayOf(arrivals()[0]!));
+});
+
+it("a page that arrives whole needs no veil of its own", () => {
+  giveBoxes();
+  const { rerender } = render(<Panel page="tickets" />);
+  rerender(<Panel page="plans" />);
+  expect(veils()).toHaveLength(0);
+});
+
+it("with no old page on show there is nothing to wait for", () => {
+  layOut();
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
+    function (this: HTMLElement) {
+      return (this.textContent === "pending"
+        ? []
+        : [{}]) as unknown as DOMRectList;
+    },
+  );
+  const { rerender } = render(<Panel page="pending" />);
+  rerender(
+    <Panel page="list">
+      <Rows count={1} />
+    </Panel>,
+  );
+  expect(played.every((one) => one.options.fill === "backwards")).toBe(true);
+  expect([
+    ...new Set(arrivals().map(delayOf).concat(veils().map(delayOf))),
+  ]).toEqual([0, 24]);
 });
 
 it("a cascade stops after eight steps, and later rows arrive with the last", () => {

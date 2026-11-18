@@ -99,7 +99,8 @@ export class ViewRegion extends Component<Props> {
         !page.hasAttribute("data-leaving") &&
         !ownsEntrance(page)
       )
-        arrivePage(page, exitDuration());
+        // With no picture there is no old page to wait for.
+        arrivePage(page, departing?.length ? exitDuration() : 0);
   }
 
   render() {
