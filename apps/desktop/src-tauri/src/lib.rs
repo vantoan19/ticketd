@@ -10,6 +10,7 @@ mod chat_ticketd;
 mod chat_view;
 mod chats;
 mod cli_status;
+mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
 #[cfg(test)]
@@ -2052,6 +2053,10 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::restore_record_version,
             sync_commands::sync_flush_on_exit,
             sync_commands::sync_status,
+            diagnostics_commands::diagnostics_recent_errors,
+            diagnostics_commands::diagnostics_export_file_name,
+            diagnostics_commands::diagnostics_summary,
+            diagnostics_commands::diagnostics_export,
             sync_commands::sync_connect,
             sync_commands::sync_setup_options,
             sync_commands::sync_upload_workspace,
