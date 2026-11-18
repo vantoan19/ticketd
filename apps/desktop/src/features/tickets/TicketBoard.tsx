@@ -546,7 +546,11 @@ export function TicketBoard({
                   )}
                   {cards}
                   {loading && total === null && (
-                    <p className="board-column-note" role="status">
+                    <p
+                      className="board-column-note"
+                      data-loading=""
+                      role="status"
+                    >
                       Loading tickets…
                     </p>
                   )}
