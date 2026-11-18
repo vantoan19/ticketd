@@ -31,7 +31,8 @@ T-KQ1` or `document restore DOCUMENT_ID`, which restore items from trash.
 
 `inbox --limit 20 --offset 0` reads the local person's attention inbox.
 `reminder show`, `set`, `snooze`, and `dismiss` operate on a ticket's personal
-reminder; times require RFC 3339 with an offset. Following and inbox read state
+reminder; times require RFC 3339 with an offset, and `snooze` only moves an
+existing reminder to a later time. Following and inbox read state
 use the JSON write operations below. This state belongs to `local-person`, not
 to the agent named by `--agent`.
 

@@ -942,8 +942,15 @@ edges; a retained duplicate prerequisite remains unresolved.
 Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
 `ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
 Set and snooze take an RFC 3339 instant with an explicit offset; show displays
-local time and UTC. The retryable `set_reminder` write takes `reference` and
-`due_at` (or null to dismiss). Reading the inbox atomically delivers due
+local time and UTC. Times are stored as whole-second UTC instants (fractions are
+dropped, a leap second reads as the second before it, years 0000 to 9999).
+`snooze` needs an existing reminder and a later time; `dismiss` says when there
+was nothing to dismiss. The retryable `set_reminder` write takes `reference` and
+`due_at` (or null to dismiss) and reschedules freely; it answers
+`{"kind":"reminder","value":<due time or null>}`. `set_following` answers
+`{"kind":"following","value":<bool>}` and `set_inbox_read` answers
+`{"kind":"inbox_read","value":<read>}`; an inbox ID that was never issued is refused.
+Reading the inbox atomically delivers due
 occurrences; reopening the inbox catches up after downtime without a daemon.
 
 Inbox entries for new Activities retain the Activity ID and its original brief in

@@ -116,6 +116,66 @@ pub(crate) fn follow(connection: &rusqlite::Connection, ticket_id: &str) -> Resu
     Ok(())
 }
 
+/// A reminder time as stored: a whole-second UTC instant, so stored times compare
+/// correctly as text. Sub-second parts are dropped, and a leap second (`23:59:60`) reads
+/// as the second before it.
+fn parse_reminder_time(value: &str) -> Result<String, Error> {
+    use chrono::{Datelike, Timelike, format::ParseErrorKind};
+    let invalid = |reason: String| Error::InvalidReminderTime(reason);
+    let instant = chrono::DateTime::parse_from_rfc3339(value).map_err(|error| {
+        invalid(match error.kind() {
+            ParseErrorKind::OutOfRange | ParseErrorKind::Impossible => {
+                format!("'{value}' is not a valid date and time")
+            }
+            _ if chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f").is_ok() => {
+                format!(
+                    "'{value}' has no UTC offset; add one, for example {value}Z or {value}+07:00"
+                )
+            }
+            _ => format!(
+                "'{value}' is not an RFC 3339 time with an offset, for example 2030-01-01T09:00:00Z or 2030-01-01T09:00:00+07:00"
+            ),
+        })
+    })?;
+    let utc = instant.with_timezone(&chrono::Utc);
+    if !(0..=9999).contains(&utc.year()) {
+        return Err(invalid(format!(
+            "'{value}' is outside the years 0000 to 9999"
+        )));
+    }
+    let whole = utc.with_nanosecond(0).unwrap_or(utc);
+    Ok(whole.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
+/// Schedule (`Some`) or remove (`None`) the local person's reminder, and answer the one
+/// already delivered. Returns whether the ticket had a reminder before.
+fn store_reminder(
+    scope: &Connection,
+    ticket_id: &str,
+    due_at: Option<&str>,
+) -> Result<bool, Error> {
+    let existed: bool = scope.query_row(
+        "SELECT EXISTS(SELECT 1 FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2)",
+        params![LOCAL_PERSON, ticket_id],
+        |row| row.get(0),
+    )?;
+    // Snoozing or dismissing answers the reminder already delivered, so it
+    // must not keep claiming to be due in the inbox.
+    scope.execute(
+        "UPDATE inbox_entries SET read = 1 WHERE person = ?1 AND ticket_id = ?2 AND kind = 'reminder' AND read = 0",
+        params![LOCAL_PERSON, ticket_id],
+    )?;
+    if let Some(due_at) = due_at {
+        scope.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?1, ?2, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![LOCAL_PERSON, ticket_id, due_at])?;
+    } else {
+        scope.execute(
+            "DELETE FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+            params![LOCAL_PERSON, ticket_id],
+        )?;
+    }
+    Ok(existed)
+}
+
 impl Workspace {
     /// Marks this connection as the local person's own hands (the desktop):
     /// their unattributed changes create no inbox entries for themselves.
@@ -139,41 +199,55 @@ impl Workspace {
         })
     }
 
-    /// Set or dismiss a reminder. Every set schedules a new occurrence.
+    /// Set, reschedule or dismiss a reminder. Every set schedules a new occurrence.
+    /// Dismissing a ticket that has no reminder changes nothing; use
+    /// [`Workspace::dismiss_reminder`] to learn whether there was one.
     pub fn set_reminder(&mut self, reference: &str, due_at: Option<&str>) -> Result<(), Error> {
-        let due_at = due_at
-            .map(|value| {
-                chrono::DateTime::parse_from_rfc3339(value)
-                    .map(|date| {
-                        date.with_timezone(&chrono::Utc)
-                            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
-                    })
-                    .map_err(|_| {
-                        Error::InvalidBatch(
-                            "reminder time must be an RFC 3339 instant with an explicit offset"
-                                .into(),
-                        )
-                    })
-            })
-            .transpose()?;
+        let due_at = due_at.map(parse_reminder_time).transpose()?;
         // A reminder is the person's own, so a ticket in Trash may have one.
         crate::write_scope::run(&self.connection, |scope| {
             let ticket_id = scope.even_if_trashed(reference)?;
-            // Snoozing or dismissing answers the reminder already delivered, so it
-            // must not keep claiming to be due in the inbox.
-            scope.execute(
-                "UPDATE inbox_entries SET read = 1 WHERE person = ?1 AND ticket_id = ?2 AND kind = 'reminder' AND read = 0",
-                params![LOCAL_PERSON, ticket_id],
-            )?;
-            if let Some(due_at) = due_at {
-                scope.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?1, ?2, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![LOCAL_PERSON, ticket_id, due_at])?;
-            } else {
-                scope.execute(
-                    "DELETE FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
-                    params![LOCAL_PERSON, ticket_id],
-                )?;
-            }
+            store_reminder(scope, &ticket_id, due_at.as_deref())?;
             Ok(())
+        })
+    }
+
+    /// Move the ticket's existing reminder to a later time. A ticket without a reminder,
+    /// or a time that is not after the current one, is refused: snoozing postpones, it
+    /// neither creates a reminder nor brings one forward.
+    pub fn snooze_reminder(&mut self, reference: &str, due_at: &str) -> Result<(), Error> {
+        let due_at = parse_reminder_time(due_at)?;
+        crate::write_scope::run(&self.connection, |scope| {
+            let ticket_id = scope.even_if_trashed(reference)?;
+            let current: Option<String> = scope
+                .query_row(
+                    "SELECT due_at FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+                    params![LOCAL_PERSON, ticket_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let current = current.ok_or_else(|| Error::NoReminder(reference.to_owned()))?;
+            // Stored times are whole-second UTC, but a reminder from an older version may
+            // not be, so compare instants rather than strings.
+            let is_later = chrono::DateTime::parse_from_rfc3339(&current)
+                .map(|current| chrono::DateTime::parse_from_rfc3339(&due_at).ok() > Some(current))
+                .unwrap_or(true);
+            if !is_later {
+                return Err(Error::SnoozeNotLater {
+                    reference: reference.to_owned(),
+                    current,
+                });
+            }
+            store_reminder(scope, &ticket_id, Some(&due_at))?;
+            Ok(())
+        })
+    }
+
+    /// Remove the ticket's reminder. Returns whether there was one to remove.
+    pub fn dismiss_reminder(&mut self, reference: &str) -> Result<bool, Error> {
+        crate::write_scope::run(&self.connection, |scope| {
+            let ticket_id = scope.even_if_trashed(reference)?;
+            store_reminder(scope, &ticket_id, None)
         })
     }
 
@@ -343,6 +417,20 @@ impl Workspace {
             ));
         }
         crate::write_scope::run(&self.connection, |scope| {
+            // An entry can disappear after it was listed (its Activity or Automation run
+            // is deleted), and marking it is then a no-op. An ID that was never issued
+            // is a mistake, and nothing changes when any ID is one.
+            for id in ids {
+                let issued: bool = scope.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM inbox_entries WHERE person = ?1 AND id = ?2)
+                         OR ?2 BETWEEN 1 AND COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'inbox_entries'), 0)",
+                    params![LOCAL_PERSON, id],
+                    |row| row.get(0),
+                )?;
+                if !issued {
+                    return Err(Error::InboxEntryNotFound(*id));
+                }
+            }
             for id in ids {
                 scope.execute(
                     "UPDATE inbox_entries SET read = ?1 WHERE person = ?2 AND id = ?3",

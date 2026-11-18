@@ -1337,14 +1337,20 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => "No reminder".into(),
             },
-            ReminderCommand::Set { reference, due_at }
-            | ReminderCommand::Snooze { reference, due_at } => {
+            ReminderCommand::Set { reference, due_at } => {
                 workspace.set_reminder(&reference, Some(&due_at))?;
                 "Reminder scheduled".into()
             }
+            ReminderCommand::Snooze { reference, due_at } => {
+                workspace.snooze_reminder(&reference, &due_at)?;
+                "Reminder snoozed".into()
+            }
             ReminderCommand::Dismiss { reference } => {
-                workspace.set_reminder(&reference, None)?;
-                "Reminder dismissed".into()
+                if workspace.dismiss_reminder(&reference)? {
+                    "Reminder dismissed".into()
+                } else {
+                    "No reminder to dismiss".into()
+                }
             }
         },
         Command::Inbox { limit, offset } => {
