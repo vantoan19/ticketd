@@ -142,7 +142,7 @@ pub struct UploadStatus {
     state: DriveUploadState,
     attachment: Option<Attachment>,
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_drive_upload(app: tauri::AppHandle, request_id: String) -> Result<(), BridgeFailure> {
     let url = open_workspace()
         .and_then(|w| w.drive_upload_open_url(&request_id))
@@ -194,7 +194,7 @@ pub struct DriveConfiguration {
     message: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drive_reference(id: String) -> Result<ticketd_core::drive::DriveReference, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.drive_reference(&id))

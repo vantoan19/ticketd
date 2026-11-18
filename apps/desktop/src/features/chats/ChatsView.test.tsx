@@ -1478,7 +1478,10 @@ test("the New marker follows the read-through position the host kept, also after
     .mockReturnValue(600);
   const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
   try {
+    const sent = client.readThroughs.length;
     fireEvent.scroll(document.querySelector<HTMLElement>(".chat-scroll")!);
+    // Kept once scrolling pauses, not on every scroll event.
+    expect(client.readThroughs).toHaveLength(sent);
     await waitFor(() => expect(client.readThroughs.at(-1)).toBe("r2"));
   } finally {
     height.mockRestore();

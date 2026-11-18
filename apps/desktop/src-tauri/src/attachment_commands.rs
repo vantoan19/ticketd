@@ -200,19 +200,19 @@ pub fn cancel_attachment_upload(request_id: String) -> Result<(), BridgeFailure>
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_upload_limit() -> Result<u64, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.attachment_upload_limit())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_workspace_id() -> Result<String, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.attachment_workspace_id())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_attachment_upload_limit(bytes: u64) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|w| w.set_attachment_upload_limit(bytes))
@@ -340,7 +340,7 @@ pub async fn import_attachment(
     .map_err(BridgeFailure::from)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_attachments(limit: u32, offset: u32) -> Result<Vec<Attachment>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.attachments(limit, offset))
@@ -384,21 +384,21 @@ pub async fn rename_attachment(
     .map_err(BridgeFailure::from)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn inspect_attachment(id: String) -> Result<Attachment, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.attachment(&id))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ticket_attachments(reference: String) -> Result<Vec<Attachment>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.ticket_attachments(&reference))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_ticket_attachment(
     reference: String,
     attachment_id: String,
@@ -423,7 +423,7 @@ pub fn set_ticket_attachment(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn replace_ticket_attachment(
     reference: String,
     previous_id: String,
@@ -456,7 +456,7 @@ pub async fn export_attachment(id: String, destination: String) -> Result<(), Br
     .map_err(BridgeFailure::from)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_attachment(app: tauri::AppHandle, id: String) -> Result<(), BridgeFailure> {
     let target = open_workspace()
         .and_then(|workspace| workspace.attachment_open_target(&id))
@@ -473,14 +473,14 @@ pub fn open_attachment(app: tauri::AppHandle, id: String) -> Result<(), BridgeFa
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_uri(id: String) -> Result<String, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.attachment_uri(&id))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_attachment_uri(uri: String) -> Result<Attachment, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.resolve_attachment_uri(&uri))

@@ -235,7 +235,10 @@ trigger Automations. The value itself is not stored.
 
 `crates/ticketd-automation-runner` owns the loop and depends only on the core and
 the Chat host, so it is tested without the desktop. The desktop calls one pass at
-start and every five seconds while Chat is on. A pass asks the core to queue a run
+start, off the main thread (its Automation commands wait for it), then every five
+seconds while Chat is on and an Automation is on or a run is Queued or Running;
+otherwise when the Workspace changes, and at least every 30 seconds. A pass is one
+use of the Workspace. A pass asks the core to queue a run
 for each Workspace event after a switched-on Automation's cursor that matches its
 trigger and conditions, and to start queued runs, oldest event first, until as
 many are running as the device's "Runs at once" setting allows (2 unless changed,
@@ -728,7 +731,7 @@ Inside the core, every ticket write runs in one write scope (`write_scope.rs`), 
 
 Inside that scope every way of changing a ticket is one ticket change (`ticket_change.rs`): `change_ticket`, the combined `TicketChange`, batches, tag, parent, dependency and Plan changes, ticket creation and the `WriteRequest` that names each. They share the rules (editability, the external owner of a ticket's content, an archived Plan, entering and leaving Duplicate, history and the inbox) and one read back; a combined change or batch makes all its steps in one scope. One rule still depends on the way in, named by the change's mode: a change on its own that leaves Duplicate clears the duplicate link, while a change in a batch, and so the combined single-ticket change, is refused.
 
-Reads never write. A read of several statements runs in the read scope (`read_scope.rs`), beside the write scope: one deferred transaction, so it sees one snapshot, takes SQLite's shared lock once instead of once per statement, and never waits behind a writer that has not begun to commit. Inside a transaction already under way it runs as part of it, and `Workspace::read` lets an adapter combine several reads in one snapshot. Due reminders reach the Inbox through their own write, `deliver_due_reminders`, which the desktop's reminder poll and the CLI's `inbox` command call; it takes the write lock only when a reminder is due.
+Reads never write. A read of several statements runs in the read scope (`read_scope.rs`), beside the write scope: one deferred transaction, so it sees one snapshot, takes SQLite's shared lock once instead of once per statement, and never waits behind a writer that has not begun to commit. Inside a transaction already under way it runs as part of it, and `Workspace::read` lets an adapter combine several reads in one snapshot. Due reminders reach the Inbox through their own write, `deliver_due_reminders`, which the desktop's reminder timer (set to the next due reminder) and the CLI's `inbox` command call; it takes the write lock only when a reminder is due.
 
 Record versions are outside the MVP. An editor may send the title, body or Document `updated_at` it last loaded, and the core rejects its save if that value has since changed ([ADR 0015](adr/0015-optional-expected-values-guard-editor-saves.md)); a caller that omits them, such as the CLI, keeps last-successful-write wins. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
 
