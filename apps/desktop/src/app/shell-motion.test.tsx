@@ -323,7 +323,37 @@ it("what the rail drops stays hidden until the width has opened", () => {
 });
 
 it("the labels fade back in with no delay of their own", () => {
-  const rule = css.match(/\.sidebar-label,\s*\.sidebar-wordmark[^{]*\{([^}]*)\}/);
+  const rule = css.match(
+    /\.sidebar-label,\s*\.sidebar-wordmark[^{]*\{([^}]*)\}/,
+  );
   expect(rule?.[1]).toMatch(/transition:/);
   expect(rule?.[1]).not.toMatch(/var\(--dur-4\)/);
+});
+
+it("the two header buttons cross paths one after the other, never together", () => {
+  const transition = (selector: RegExp) =>
+    css.match(selector)?.[1]?.replace(/\s+/g, " ") ?? "";
+  // Folding: New ticket drops at once, the collapse button slides over after it.
+  expect(
+    transition(
+      /\.sidebar\[data-collapsed\] \.sidebar-top > button:not\(:last-child\)\s*\{\s*transition:([^}]*)\}/,
+    ),
+  ).toMatch(
+    /right calc\(var\(--spring-smooth-t\) \* [\d.]+\) [^;]*calc\(var\(--spring-smooth-t\) \* 0\.\d+\)/,
+  );
+  expect(
+    transition(
+      /\.sidebar\[data-collapsed\] \.sidebar-top > button:last-child\s*\{\s*transition:([^}]*)\}/,
+    ).trim(),
+  ).toBe(
+    "top var(--spring-smooth-t) var(--spring-smooth), right var(--spring-smooth-t) var(--spring-smooth);",
+  );
+  // Unfolding: the collapse button leaves the corner, New ticket climbs after.
+  expect(
+    transition(
+      /\n\.sidebar-top > button:last-child\s*\{\s*transition:([^}]*)\}/,
+    ),
+  ).toMatch(
+    /top calc\(var\(--spring-smooth-t\) \* [\d.]+\) [^;]*calc\(var\(--spring-smooth-t\) \* 0\.\d+\)/,
+  );
 });

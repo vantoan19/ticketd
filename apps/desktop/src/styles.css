@@ -2009,6 +2009,19 @@ html[data-window-bar] {
 .sidebar-top > button:not(:last-child) {
   right: var(--top-step);
 }
+/* The two buttons cross paths, so they never move at once: unfolding, the
+   collapse button leaves the corner first and New ticket climbs after it. */
+.sidebar-top > button:not(:last-child) {
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right calc(var(--spring-smooth-t) * 0.5) var(--spring-smooth);
+}
+.sidebar-top > button:last-child {
+  transition:
+    top calc(var(--spring-smooth-t) * 0.6) var(--spring-smooth)
+      calc(var(--spring-smooth-t) * 0.4),
+    right var(--spring-smooth-t) var(--spring-smooth);
+}
 .sidebar-top .ui-button,
 .sidebar-footer-actions .ui-button {
   width: var(--header-control-height);
@@ -2116,6 +2129,18 @@ html[data-window-bar] {
 }
 .sidebar[data-collapsed] .sidebar-top > button:last-child {
   top: calc(10px + var(--header-control-height) + 4px);
+}
+/* Folding: New ticket drops first and the collapse button slides over after it. */
+.sidebar[data-collapsed] .sidebar-top > button:not(:last-child) {
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right calc(var(--spring-smooth-t) * 0.65) var(--spring-smooth)
+      calc(var(--spring-smooth-t) * 0.35);
+}
+.sidebar[data-collapsed] .sidebar-top > button:last-child {
+  transition:
+    top var(--spring-smooth-t) var(--spring-smooth),
+    right var(--spring-smooth-t) var(--spring-smooth);
 }
 .sidebar[data-collapsed] .sidebar-footer-actions {
   height: calc(2 * var(--header-control-height) + 4px);
