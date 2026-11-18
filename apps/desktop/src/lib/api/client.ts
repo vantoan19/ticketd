@@ -80,6 +80,8 @@ const ticketSourceSchema = z.object({
 export type TicketSource = z.infer<typeof ticketSourceSchema>;
 const ticketSchema = z.object({
   id: z.string(),
+  /** Core's device-local insertion order; absent in older saved outcomes. */
+  local_number: z.number().int().positive().nullish(),
   trashed: z.boolean(),
   reference: z.string(),
   title: z.string(),

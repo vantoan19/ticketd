@@ -14,6 +14,48 @@ fn ticket_survives_reopening_workspace() {
 }
 
 #[test]
+fn ticket_reads_expose_the_local_order_used_by_newest_lists() {
+    use ticketd_core::{SyncKind, TicketFilter};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let first = workspace.create_ticket("First ordered ticket").unwrap();
+    let mut remote = Workspace::open(dir.path().join("remote.sqlite3")).unwrap();
+    remote.renew_device_code().unwrap();
+    remote.create_ticket("Not imported").unwrap();
+    remote.create_ticket("Also not imported").unwrap();
+    let imported = remote.create_ticket("Second ordered ticket").unwrap();
+    let record = remote
+        .export_sync_record(SyncKind::Ticket, &imported.id)
+        .unwrap();
+    workspace.apply_sync_record(&record).unwrap();
+    let last = workspace.create_ticket("Last ordered ticket").unwrap();
+    assert_eq!(serde_json::to_value(&first).unwrap()["local_number"], 1);
+    assert_eq!(serde_json::to_value(&last).unwrap()["local_number"], 3);
+
+    let shown = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(serde_json::to_value(shown).unwrap()["local_number"], 1);
+    for tickets in [
+        workspace.list_tickets().unwrap(),
+        workspace.find_tickets(&TicketFilter::default()).unwrap(),
+        workspace
+            .search_tickets("ordered ticket", None, false, 50, 0)
+            .unwrap(),
+    ] {
+        let numbers: Vec<_> = tickets
+            .iter()
+            .map(|ticket| serde_json::to_value(ticket).unwrap()["local_number"].clone())
+            .collect();
+        assert_eq!(numbers, vec![3, 2, 1]);
+    }
+
+    let mut legacy = serde_json::to_value(first).unwrap();
+    legacy.as_object_mut().unwrap().remove("local_number");
+    let decoded: ticketd_core::Ticket = serde_json::from_value(legacy).unwrap();
+    assert!(serde_json::to_value(decoded).unwrap()["local_number"].is_null());
+}
+
+#[test]
 fn content_patch_preserves_omitted_fields_and_survives_restart() {
     use ticketd_core::TicketPatch;
     let dir = tempfile::tempdir().unwrap();
