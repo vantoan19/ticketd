@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use crate::{CloseOutcome, EventKind, Harness};
+use crate::{CloseOutcome, EventKind, Harness, harness_key};
 
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -103,11 +103,7 @@ impl StderrTail {
 
     /// Drains `stderr` to its end, keeping only the tail and logging each line at `debug`.
     pub async fn drain<R: AsyncRead + Unpin>(self, mut stderr: R, harness: Harness) {
-        let harness = match harness {
-            Harness::ClaudeCode => "claude_code",
-            Harness::Codex => "codex",
-        };
-        let mut lines = LogLines::default();
+        let mut lines = LogLines::new(harness);
         let mut buffer = [0u8; 4096];
         while let Ok(read) = stderr.read(&mut buffer).await {
             if read == 0 {
@@ -119,9 +115,9 @@ impl StderrTail {
                 let excess = tail.len().saturating_sub(MAX_STDERR_TAIL_BYTES);
                 tail.drain(..excess);
             }
-            lines.push(&buffer[..read], harness);
+            lines.push(&buffer[..read]);
         }
-        lines.finish(harness);
+        lines.finish();
     }
 
     /// The raw tail, kept exactly for the diagnostic detail.
@@ -141,22 +137,33 @@ impl StderrTail {
 
 /// Splits stderr into lines for the log. A line longer than the tail is cut: the log needs
 /// the gist, and the tail keeps the raw bytes.
-#[derive(Default)]
-struct LogLines(Vec<u8>);
+struct LogLines {
+    line: Vec<u8>,
+    /// The Harness key the lines are logged under, as the Chat's `harness` value spells it.
+    harness: &'static str,
+}
 
 impl LogLines {
-    fn push(&mut self, bytes: &[u8], harness: &str) {
+    fn new(harness: Harness) -> Self {
+        Self {
+            line: Vec::new(),
+            harness: harness_key(harness),
+        }
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
         for piece in bytes.split_inclusive(|byte| *byte == b'\n') {
-            let room = MAX_STDERR_TAIL_BYTES.saturating_sub(self.0.len());
-            self.0.extend_from_slice(&piece[..piece.len().min(room)]);
+            let room = MAX_STDERR_TAIL_BYTES.saturating_sub(self.line.len());
+            self.line.extend_from_slice(&piece[..piece.len().min(room)]);
             if piece.ends_with(b"\n") {
-                self.finish(harness);
+                self.finish();
             }
         }
     }
 
-    fn finish(&mut self, harness: &str) {
-        let line = std::mem::take(&mut self.0);
+    fn finish(&mut self) {
+        let line = std::mem::take(&mut self.line);
+        let harness = self.harness;
         if !tracing::enabled!(target: "ticketd_chat_host::harness_stderr", tracing::Level::DEBUG) {
             return;
         }
@@ -167,7 +174,7 @@ impl LogLines {
                 target: "ticketd_chat_host::harness_stderr",
                 harness,
                 line = %text,
-                "harness stderr"
+                "Harness stderr line"
             );
         }
     }
@@ -552,7 +559,7 @@ mod tests {
                 let chat = tracing::info_span!("chat", chat_id = "chat-1");
                 let drain = chat.in_scope(|| {
                     tail.clone()
-                        .spawn_drain(stderr.as_bytes(), crate::Harness::Codex)
+                        .spawn_drain(stderr.as_bytes(), crate::Harness::ClaudeCode)
                 });
                 drain.await.expect("drain");
             });
@@ -575,7 +582,7 @@ mod tests {
             .collect();
         let events: Vec<_> = lines
             .iter()
-            .filter(|line| line["message"] == "harness stderr")
+            .filter(|line| line["message"] == "Harness stderr line")
             .collect();
         let seen: Vec<_> = events
             .iter()
@@ -591,7 +598,7 @@ mod tests {
         );
         for event in events {
             assert_eq!(event["level"], "DEBUG");
-            assert_eq!(event["harness"], "codex");
+            assert_eq!(event["harness"], "claude-code");
             assert_eq!(event["target"], "ticketd_chat_host::harness_stderr");
             assert_eq!(event["spans"][0]["name"], "chat");
             assert_eq!(event["spans"][0]["chat_id"], "chat-1");
