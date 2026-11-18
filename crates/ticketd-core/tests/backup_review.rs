@@ -281,6 +281,24 @@ fn a_truncated_backup_is_never_called_valid_or_newer() {
 }
 
 #[test]
+fn a_backup_whose_full_text_index_cannot_load_is_damaged() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let workspace = populated(&path);
+    workspace.backup(&backup).unwrap();
+    // The FTS5 module refuses to load an index whose shadow config lost its version.
+    Connection::open(&backup)
+        .unwrap()
+        .execute_batch("DELETE FROM ticket_search_fts_config")
+        .unwrap();
+    let BackupCheck::Damaged { reason } = workspace.inspect_backup(&backup).unwrap().check else {
+        panic!("expected a damaged backup");
+    };
+    assert!(reason.contains("fts5"), "{reason}");
+}
+
+#[test]
 fn restore_accepts_what_inspection_calls_valid_and_refuses_the_rest() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

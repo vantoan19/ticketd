@@ -252,9 +252,14 @@ impl Workspace {
                 {
                     BackupCheck::NotTicketd
                 }
-                // A SQLite file that cannot be read through; keep SQLite's reason.
+                // A SQLite file that cannot be read through, or whose schema cannot be
+                // loaded (such as a full-text index whose module refuses its shadow
+                // tables, which SQLite reports as a generic error); keep SQLite's reason.
                 Err(Error::Database(rusqlite::Error::SqliteFailure(failure, message)))
-                    if failure.code == rusqlite::ErrorCode::DatabaseCorrupt =>
+                    if matches!(
+                        failure.code,
+                        rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::Unknown
+                    ) =>
                 {
                     BackupCheck::Damaged {
                         reason: message.unwrap_or_else(|| failure.to_string()),
