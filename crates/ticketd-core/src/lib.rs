@@ -238,6 +238,14 @@ pub enum Error {
     },
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
+    #[error("invalid reminder time: {0}")]
+    InvalidReminderTime(String),
+    #[error("{0} has no reminder to snooze; set one first")]
+    NoReminder(String),
+    #[error("{reference} is already due at {current}; a snooze must move the reminder later")]
+    SnoozeNotLater { reference: String, current: String },
+    #[error("inbox entry {0} was not found")]
+    InboxEntryNotFound(i64),
     #[error("plan name must not be empty")]
     EmptyPlanName,
     #[error("plan '{0}' was not found")]

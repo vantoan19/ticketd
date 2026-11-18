@@ -291,6 +291,12 @@ pub enum WriteResult {
     Evidence(Evidence),
     Project(Project),
     Plan(Plan),
+    /// A reminder now: the due time as stored, or none after a dismissal.
+    Reminder(Option<String>),
+    /// Whether the ticket is now followed.
+    Following(bool),
+    /// The read state the given inbox entries now have.
+    InboxRead(bool),
     Deleted,
 }
 
@@ -463,18 +469,18 @@ impl Workspace {
             }
             WriteRequest::SetReminder { reference, due_at } => {
                 self.set_reminder(&reference, due_at.as_deref())?;
-                WriteResult::Deleted
+                WriteResult::Reminder(self.reminder(&reference)?)
             }
             WriteRequest::SetFollowing {
                 reference,
                 following,
             } => {
                 self.set_following(&reference, following)?;
-                WriteResult::Deleted
+                WriteResult::Following(following)
             }
             WriteRequest::SetInboxRead { ids, read } => {
                 self.set_inbox_read(&ids, read)?;
-                WriteResult::Deleted
+                WriteResult::InboxRead(read)
             }
             WriteRequest::CreateTicket { title, project_id } => {
                 WriteResult::Ticket(self.create_ticket_in_project(&title, project_id.as_deref())?)

@@ -117,7 +117,8 @@ impl Error {
             | Self::ActivityNotFound(_)
             | Self::AutomationAgentNotFound(_)
             | Self::AutomationNotFound(_)
-            | Self::AutomationRunNotFound(_) => FailureKind::NotFound,
+            | Self::AutomationRunNotFound(_)
+            | Self::InboxEntryNotFound(_) => FailureKind::NotFound,
             Self::DependencyCycle { .. }
             | Self::DependencySelf(_)
             | Self::DuplicateCycle
@@ -138,6 +139,9 @@ impl Error {
             | Self::LegacyEffortWorkspace
             | Self::Serialization(_)
             | Self::InvalidBatch(_)
+            | Self::InvalidReminderTime(_)
+            | Self::NoReminder(_)
+            | Self::SnoozeNotLater { .. }
             | Self::EmptyPlanName
             | Self::AmbiguousProject
             | Self::CheckoutTaken(_)
