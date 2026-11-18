@@ -219,6 +219,9 @@ test("clearing the last filter closes the row while it still shows what it had, 
   // Closing, not gone: the chips fade as the row's height closes.
   expect(chipRow()?.textContent).toContain("api");
   expect(chipRow()?.hasAttribute("inert")).toBe(true);
+  expect(
+    chipRow()?.querySelector(".filter-chips")?.getAttribute("aria-hidden"),
+  ).toBe("true");
   expect(screen.queryByLabelText("Active filters")).toBeNull();
   act(() => vi.advanceTimersByTime(2000));
   expect(chipRow()?.textContent).toBe("");

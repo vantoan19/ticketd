@@ -624,8 +624,10 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
         <div
           ref={row}
           className="filter-chips"
-          // A closing row is on its way out: not a landmark to reach.
+          // A closing row is on its way out: not a landmark to reach, and not
+          // there for assistive technology (Expand also makes it inert).
           aria-label={open ? "Active filters" : undefined}
+          aria-hidden={open ? undefined : true}
         >
           {all.slice(0, fits).map((chip) => (
             <span key={chip.dimension} data-filter-chip="">

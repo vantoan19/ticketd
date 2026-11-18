@@ -6984,9 +6984,12 @@ test("filter checks stay staged until the menu closes, then the bar follows the 
     await act(async () => {});
   }
   const bar = await screen.findByLabelText("Active filters");
-  expect(bar.previousElementSibling?.getAttribute("data-slot")).toBe(
-    "pane-header",
-  );
+  // The bar sits in its Expand, which follows the header.
+  expect(
+    bar
+      .closest('[data-slot="expand"]')
+      ?.previousElementSibling?.getAttribute("data-slot"),
+  ).toBe("pane-header");
   await vi.waitFor(() =>
     expect(
       screen.queryByRole("button", { name: /Second retained row/ }),
