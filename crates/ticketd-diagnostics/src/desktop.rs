@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::SecondsFormat;
+use serde::Serialize;
 use tracing::Dispatch;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
@@ -53,6 +54,17 @@ impl Default for Config {
             max_export_bytes: 5 * 1024 * 1024,
         }
     }
+}
+
+/// The level the Diagnostics page shows, and whether its Debug logging switch does anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LogLevel {
+    /// `info`, `debug` while Debug logging is on, or the `TICKETD_LOG` filter itself.
+    pub level: String,
+    /// Debug logging is on. Always false while `TICKETD_LOG` decides the level.
+    pub debug: bool,
+    /// The `TICKETD_LOG` filter that overrides the switch, if one was set at launch.
+    pub env_override: Option<String>,
 }
 
 /// The desktop's logs: JSON lines in a daily file, with the level changeable at runtime.
@@ -165,6 +177,24 @@ impl DesktopLogs {
     /// recently seen first. This includes earlier runs that are still on disk.
     pub fn recent_errors(&self) -> Vec<ErrorGroup> {
         errors::recent_errors(&self.dir)
+    }
+
+    /// The folder the log files are written to.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// The current level, for the Diagnostics page.
+    pub fn log_level(&self) -> LogLevel {
+        let debug = self.debug.load(Ordering::Relaxed);
+        LogLevel {
+            level: self
+                .filter_override
+                .clone()
+                .unwrap_or_else(|| if debug { "debug" } else { "info" }.to_string()),
+            debug,
+            env_override: self.filter_override.clone(),
+        }
     }
 
     /// The level as the summary states it: `info`, `debug` while Debug logging is on, or the

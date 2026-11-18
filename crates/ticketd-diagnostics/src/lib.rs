@@ -23,7 +23,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt};
 
 pub use crash::{UncleanExit, install_panic_hook};
-pub use desktop::{Config, DesktopLogs};
+pub use desktop::{Config, DesktopLogs, LogLevel};
 pub use errors::ErrorGroup;
 pub use export::{Export, Facts, HarnessVersion, KnownValues, WorkspaceHealth, export_file_name};
 pub use webview::{WebviewError, record_webview_error};

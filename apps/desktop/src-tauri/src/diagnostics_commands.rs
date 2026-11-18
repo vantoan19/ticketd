@@ -1,5 +1,6 @@
-//! What Settings → Diagnostics asks of the desktop: the recent kinds of error, a summary to
-//! paste into an issue, and the redacted export.
+//! What Settings → Diagnostics asks of the desktop: the log level and Debug logging switch,
+//! the logs folder, the recent kinds of error, a summary to paste into an issue, and the
+//! redacted export.
 //!
 //! The logging crate knows the logs; this module knows the app. It gathers the facts the
 //! logs cannot give (versions, sync state, Harnesses, the Workspace's health) and hands
@@ -11,11 +12,42 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 use ticketd_core::sync::SyncConnection;
 use ticketd_diagnostics::{
-    ErrorGroup, Export, Facts, HarnessVersion, KnownValues, WorkspaceHealth,
+    ErrorGroup, Export, Facts, HarnessVersion, KnownValues, LogLevel, WorkspaceHealth,
 };
 
 use crate::Logs;
 use crate::chat_commands::{ChatBridge, chat_harnesses};
+
+/// The log level, whether Debug logging is on, and the `TICKETD_LOG` filter that overrides it.
+#[tauri::command]
+pub fn diagnostics_log_level(logs: State<'_, Logs>) -> Result<LogLevel, String> {
+    with_logs(&logs, |logs| logs.log_level())
+}
+
+/// Turns Debug logging on or off for the rest of this run and returns the resulting level.
+/// It is off again at the next launch. Does nothing while `TICKETD_LOG` decides the level.
+#[tauri::command]
+pub fn diagnostics_set_debug(logs: State<'_, Logs>, enabled: bool) -> Result<LogLevel, String> {
+    with_logs(&logs, |logs| {
+        logs.set_debug(enabled);
+        let level = logs.log_level();
+        tracing::info!(debug = level.debug, "debug logging changed");
+        level
+    })
+}
+
+/// Shows the folder the log files are written to in the file manager.
+#[tauri::command]
+pub fn diagnostics_open_logs_folder(app: AppHandle, logs: State<'_, Logs>) -> Result<(), String> {
+    let folder = with_logs(&logs, |logs| logs.dir().to_path_buf())?;
+    if !folder.is_dir() {
+        // Logging fell back to stderr: there is no folder to show.
+        return Err("There is no logs folder on this computer".to_string());
+    }
+    app.opener()
+        .open_path(folder.to_string_lossy(), None::<&str>)
+        .map_err(|error| format!("Could not open the logs folder: {error}"))
+}
 
 /// The warnings and errors in the log folder grouped by kind, most recent first. The page
 /// shows the first few.

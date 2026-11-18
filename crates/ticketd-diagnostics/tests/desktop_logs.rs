@@ -165,6 +165,43 @@ fn a_filter_override_wins_over_the_debug_switch() {
 }
 
 #[test]
+fn the_level_reports_the_default_debug_and_the_environment_override() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = open(dir.path());
+    let level = logs.log_level();
+    assert_eq!(
+        (level.level.as_str(), level.debug, level.env_override),
+        ("info", false, None)
+    );
+    logs.set_debug(true);
+    let level = logs.log_level();
+    assert_eq!((level.level.as_str(), level.debug), ("debug", true));
+    logs.set_debug(false);
+    assert_eq!(logs.log_level().level, "info");
+
+    let pinned = DesktopLogs::open(
+        tempfile::tempdir().unwrap().path(),
+        Config {
+            filter_override: Some("ticketd=trace".into()),
+            ..Config::default()
+        },
+    );
+    pinned.set_debug(true);
+    let level = pinned.log_level();
+    // The override decides, and the switch has nothing to turn on.
+    assert_eq!(level.level, "ticketd=trace");
+    assert!(!level.debug);
+    assert_eq!(level.env_override.as_deref(), Some("ticketd=trace"));
+}
+
+#[test]
+fn the_logs_folder_is_the_one_the_files_are_written_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = open(dir.path());
+    assert_eq!(logs.dir(), dir.path());
+}
+
+#[test]
 fn opening_removes_files_older_than_seven_days_by_modified_time() {
     let dir = tempfile::tempdir().unwrap();
     // A name from last week with a fresh mtime stays: age is the modified time.
