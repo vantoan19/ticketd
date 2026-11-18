@@ -121,3 +121,66 @@ it("putting a card back uses the place it was given", async () => {
   });
   expect(done(result)).toEqual(["T-5", "T-10", "T-2"]);
 });
+
+// A reference is a device code plus that device's own counter, so counters of
+// different devices say nothing about the core's order: only one device's are
+// compared, and a card with no kin in the column leads.
+it("compares counters within one device code only", async () => {
+  const at = (reference: string, status = "Done") =>
+    ({ id: reference, reference, status }) as Ticket;
+  read.tickets = [
+    at("T-AB90"),
+    at("T-CD5"),
+    at("T-AB3"),
+    at("T-CD2"),
+    at("T-AB50", "Todo"),
+    at("T-CD40", "Todo"),
+    at("T-EF7", "Todo"),
+    at("T-AB1", "Todo"),
+  ];
+  const { result } = renderHook(() => useTicketBoard(filter, true, 0));
+  await settled(result);
+  const place = async (reference: string) => {
+    await act(async () => {
+      result.current.placeTicket(at(reference));
+    });
+    return done(result);
+  };
+  // Not by the digits alone: those would put 50 above CD5 and 40 above AB50.
+  expect(await place("T-AB50")).toEqual([
+    "T-AB90",
+    "T-CD5",
+    "T-AB50",
+    "T-AB3",
+    "T-CD2",
+  ]);
+  expect(await place("T-CD40")).toEqual([
+    "T-AB90",
+    "T-CD40",
+    "T-CD5",
+    "T-AB50",
+    "T-AB3",
+    "T-CD2",
+  ]);
+  // No ticket of its device is there: the lead.
+  expect(await place("T-EF7")).toEqual([
+    "T-EF7",
+    "T-AB90",
+    "T-CD40",
+    "T-CD5",
+    "T-AB50",
+    "T-AB3",
+    "T-CD2",
+  ]);
+  // Older than every ticket of its device: after the last of them.
+  expect(await place("T-AB1")).toEqual([
+    "T-EF7",
+    "T-AB90",
+    "T-CD40",
+    "T-CD5",
+    "T-AB50",
+    "T-AB3",
+    "T-AB1",
+    "T-CD2",
+  ]);
+});

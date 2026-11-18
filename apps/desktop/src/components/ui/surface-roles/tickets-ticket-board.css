@@ -6,6 +6,11 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* The loading rule: nothing for the loading delay, then a fade in. */
+.board-column-note[data-loading] {
+  animation: skeleton-appear var(--dur-enter) var(--ease-out)
+    var(--dur-loading-delay) both;
+}
 .board-column-fold {
   border-radius: var(--radius);
   color: var(--muted-foreground);
