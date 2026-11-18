@@ -1,8 +1,9 @@
 //! Installs the bundled ticketd discovery skill into agent harnesses' skill folders.
 //!
 //! Each installed copy has a marker beside it holding the hash of the `SKILL.md`
-//! ticketd wrote. Install and update only touch copies ticketd wrote and nobody
-//! changed; any other copy is replaced only on request, after a backup.
+//! ticketd wrote and the version that wrote it. Install and update only touch
+//! copies an older or the same ticketd wrote and nobody changed; any other copy
+//! is replaced only on request, after a backup.
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
@@ -14,6 +15,8 @@ pub const DISCOVERY_SKILL: &str = include_str!("../../../skills/ticketd/SKILL.md
 const SKILL_FILE: &str = "SKILL.md";
 const MARKER_FILE: &str = ".ticketd-managed";
 const SKILL_NAME: &str = "ticketd";
+/// The version recorded in the marker, so a newer copy is never downgraded.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A harness that loads skills from a per-user folder.
 pub struct Agent {
@@ -52,17 +55,20 @@ impl Agent {
         AGENTS.iter().find(|agent| agent.id == id)
     }
 
-    fn home(&self, user_home: &Path, env: &impl Fn(&str) -> Option<OsString>) -> PathBuf {
+    fn home(&self, user_home: &Path, env: impl Fn(&str) -> Option<OsString>) -> PathBuf {
         self.home_env
             .and_then(env)
             .filter(|value| !value.is_empty())
             .map_or_else(|| user_home.join(self.home), PathBuf::from)
     }
 
-    fn skill_directory_with(
+    /// The folder that holds this harness's copy of the ticketd skill. `env`
+    /// looks up the variables that relocate a harness home, such as
+    /// `std::env::var_os`.
+    pub fn skill_directory(
         &self,
         user_home: &Path,
-        env: &impl Fn(&str) -> Option<OsString>,
+        env: impl Fn(&str) -> Option<OsString>,
     ) -> PathBuf {
         match self.skills {
             Some(skills) => skills
@@ -73,15 +79,12 @@ impl Agent {
         .join(SKILL_NAME)
     }
 
-    /// The folder that holds this harness's copy of the ticketd skill.
-    pub fn skill_directory(&self, user_home: &Path) -> PathBuf {
-        self.skill_directory_with(user_home, &|name| std::env::var_os(name))
-    }
-
-    /// Whether the harness appears to be set up for this user.
-    pub fn detected(&self, user_home: &Path) -> bool {
-        self.home(user_home, &|name| std::env::var_os(name))
-            .is_dir()
+    /// Whether the harness has run for this user: its home folder holds
+    /// something besides the skills folder, which installing may create itself.
+    pub fn detected(&self, user_home: &Path, env: impl Fn(&str) -> Option<OsString>) -> bool {
+        std::fs::read_dir(self.home(user_home, env)).is_ok_and(|mut entries| {
+            entries.any(|entry| entry.is_ok_and(|entry| entry.file_name() != "skills"))
+        })
     }
 }
 
@@ -92,6 +95,8 @@ pub enum SkillState {
     Installed,
     /// ticketd wrote the copy, nobody changed it, and this build ships another version.
     UpdateAvailable,
+    /// A newer ticketd wrote the copy and nobody changed it; this build leaves it alone.
+    Newer,
     NotInstalled,
     /// ticketd wrote the copy and someone changed it since.
     Edited,
@@ -147,14 +152,34 @@ pub fn skill_state(directory: &Path) -> std::io::Result<SkillState> {
     }
     // A marker that is missing, unreadable, or not text proves nothing about
     // who wrote the copy, so the copy is treated as someone else's.
-    let Ok(written) = std::fs::read_to_string(directory.join(MARKER_FILE)) else {
+    let Ok(marker) = std::fs::read_to_string(directory.join(MARKER_FILE)) else {
         return Ok(SkillState::Other);
     };
-    Ok(if written.trim() == hash(&content) {
-        SkillState::UpdateAvailable
-    } else {
-        SkillState::Edited
+    // Line one is the hash of what ticketd wrote; line two, when present, the
+    // version that wrote it. Markers from before versions were recorded have none.
+    let mut lines = marker.lines().map(str::trim);
+    if lines.next() != Some(hash(&content).as_str()) {
+        return Ok(SkillState::Edited);
+    }
+    Ok(match lines.next() {
+        Some(written_by) if is_newer(written_by, VERSION) => SkillState::Newer,
+        _ => SkillState::UpdateAvailable,
     })
+}
+
+/// Whether release `version` comes after `than`, comparing their numeric
+/// `major.minor.patch` parts. A version that does not parse is not newer, so
+/// the copy updates as it did before versions were recorded.
+fn is_newer(version: &str, than: &str) -> bool {
+    fn release(version: &str) -> Option<Vec<u64>> {
+        version
+            .split(['-', '+'])
+            .next()?
+            .split('.')
+            .map(|part| part.parse().ok())
+            .collect()
+    }
+    matches!((release(version), release(than)), (Some(version), Some(than)) if version > than)
 }
 
 /// Copies `SKILL.md` to a backup name no existing file uses.
@@ -200,6 +225,8 @@ pub fn install_skill(directory: &Path, replace: bool) -> Result<InstallOutcome, 
             write_marker(directory);
             return Ok(InstallOutcome::Unchanged);
         }
+        // Its marker stays as the newer ticketd wrote it.
+        SkillState::Newer => return Ok(InstallOutcome::Unchanged),
         SkillState::NotAFile => return Err(InstallError::NotAFile),
         SkillState::NotInstalled | SkillState::UpdateAvailable => None,
         SkillState::Edited if !replace => {
@@ -241,7 +268,7 @@ pub fn install_skill(directory: &Path, replace: bool) -> Result<InstallOutcome, 
 fn write_marker(directory: &Path) {
     let _ignored = std::fs::write(
         directory.join(MARKER_FILE),
-        format!("{}\n", hash(DISCOVERY_SKILL.as_bytes())),
+        format!("{}\n{VERSION}\n", hash(DISCOVERY_SKILL.as_bytes())),
     );
 }
 
@@ -300,6 +327,76 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_written_by_a_newer_ticketd_is_never_downgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = dir.path().join(SKILL_FILE);
+        let marker = dir.path().join(MARKER_FILE);
+        std::fs::write(&skill, "newer ticketd skill").unwrap();
+        let written_by = |version: &str| {
+            std::fs::write(
+                &marker,
+                format!("{}\n{version}\n", hash(b"newer ticketd skill")),
+            )
+            .unwrap();
+        };
+
+        written_by("999.0.0");
+        assert_eq!(skill_state(dir.path()).unwrap(), SkillState::Newer);
+        for replace in [false, true] {
+            assert_eq!(
+                install_skill(dir.path(), replace).unwrap(),
+                InstallOutcome::Unchanged
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(&skill).unwrap(),
+            "newer ticketd skill"
+        );
+        assert_eq!(skill_state(dir.path()).unwrap(), SkillState::Newer);
+
+        // The same or an older version, or none recorded, updates as before.
+        for version in [VERSION, "0.0.1", "not a version"] {
+            written_by(version);
+            assert_eq!(
+                skill_state(dir.path()).unwrap(),
+                SkillState::UpdateAvailable
+            );
+        }
+
+        // Installing records this build's version beside the hash.
+        install_skill(dir.path(), false).unwrap();
+        let marker = std::fs::read_to_string(&marker).unwrap();
+        assert_eq!(
+            marker.lines().collect::<Vec<_>>(),
+            [hash(DISCOVERY_SKILL.as_bytes()).as_str(), VERSION]
+        );
+    }
+
+    #[test]
+    fn versions_compare_by_their_release_numbers() {
+        assert!(is_newer("0.10.0", "0.9.3"));
+        assert!(is_newer("1.0.0-beta.1", "0.9.0"));
+        assert!(!is_newer("0.1.0", "0.1.0"));
+        assert!(!is_newer("0.1.0", "0.2.0"));
+        assert!(!is_newer("garbage", "0.1.0"));
+    }
+
+    #[test]
+    fn a_harness_is_detected_by_its_own_files_not_by_the_skills_folder() {
+        let home = tempfile::tempdir().unwrap();
+        let unset = |_: &str| None;
+        let claude = Agent::find("claude-code").unwrap();
+        assert!(!claude.detected(home.path(), unset));
+
+        // Installing creates ~/.claude/skills; that alone is not Claude Code.
+        install_skill(&claude.skill_directory(home.path(), unset), false).unwrap();
+        assert!(!claude.detected(home.path(), unset));
+
+        std::fs::write(home.path().join(".claude").join("settings.json"), "{}").unwrap();
+        assert!(claude.detected(home.path(), unset));
+    }
+
+    #[test]
     fn a_foreign_or_unprovable_copy_needs_replacement_and_every_replacement_keeps_its_backup() {
         let dir = tempfile::tempdir().unwrap();
         let skill = dir.path().join(SKILL_FILE);
@@ -343,16 +440,16 @@ mod tests {
         let config = |name: &str| (name == "CLAUDE_CONFIG_DIR").then(|| "/profile".into());
         let claude = Agent::find("claude-code").unwrap();
         assert_eq!(
-            claude.skill_directory_with(home, &unset),
+            claude.skill_directory(home, unset),
             home.join(".claude").join("skills").join("ticketd")
         );
         assert_eq!(
-            claude.skill_directory_with(home, &config),
+            claude.skill_directory(home, config),
             Path::new("/profile").join("skills").join("ticketd")
         );
         let codex = Agent::find("codex").unwrap();
         assert_eq!(
-            codex.skill_directory_with(home, &config),
+            codex.skill_directory(home, config),
             home.join(".agents").join("skills").join("ticketd")
         );
     }

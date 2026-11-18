@@ -43,6 +43,7 @@ export function FirstRunGuide({
             skills.some(
               (skill) =>
                 skill.state === "installed" ||
+                skill.state === "newer" ||
                 skill.state === "update_available",
             ),
           );

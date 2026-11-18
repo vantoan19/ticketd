@@ -92,6 +92,17 @@ test("an agent missing from this computer is left out of the action", async () =
   ).toBeTruthy();
 });
 
+test("a copy a newer ticketd wrote counts as installed, with nothing to update", async () => {
+  invoke.mockResolvedValueOnce([
+    { ...claude, state: "newer" },
+    { ...codex, state: "not_installed", detected: false },
+  ]);
+  render(<AgentSkillsCard />);
+  await waitFor(() => expect(skillStatus()).toContain("Installed"));
+  expect(screen.getByText("Up to date for Claude Code.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /for Claude Code/ })).toBeNull();
+});
+
 test("an edited copy is replaced only through the review, which names the backup", async () => {
   invoke
     .mockResolvedValueOnce([

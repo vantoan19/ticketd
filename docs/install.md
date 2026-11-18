@@ -73,10 +73,13 @@ Codex from `~/.agents/skills/ticketd`. To install for one project instead, pass 
 skill directory, for example `ticketd skills install .claude/skills/ticketd` or
 `.agents/skills/ticketd`. Other harnesses can use the same portable `SKILL.md` in
 their skill directory, or load the guide directly with `ticketd skills get`.
+Settings uses the app's own `CLAUDE_CONFIG_DIR`, or your login shell's when the app
+was started from the Finder or Dock.
 
-ticketd writes a `.ticketd-managed` marker beside each `SKILL.md` it installs.
-Re-running installation updates a copy ticketd wrote and nobody changed, and leaves
-an identical one alone. A copy edited after installation, or one ticketd did not
+ticketd writes a `.ticketd-managed` marker beside each `SKILL.md` it installs,
+holding the hash of what it wrote and its version. Re-running installation updates a
+copy an older or the same ticketd wrote and nobody changed, and leaves an identical
+one, or one a newer ticketd wrote, alone. A copy edited after installation, or one ticketd did not
 write, is reported and left intact. Review it, then choose Replace in Settings or
 pass `--replace`: the existing `SKILL.md` is saved beside the new one as
 `SKILL.md.backup-<seconds>`. Adjacent files and project instructions are preserved.
