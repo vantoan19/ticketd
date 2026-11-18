@@ -34,11 +34,19 @@ export type Shortcut = {
   label: string;
   /** One sentence where the label alone would surprise. */
   note?: string;
+  /** The key only works while Chat is on; Settings hides it otherwise. */
+  needs?: "chat";
 };
+
+/** Whether the key does nothing while Chat is off (the default). */
+export function requiresChat(item: Pick<Shortcut, "scope" | "needs">) {
+  return item.scope === "Chat" || item.needs === "chat";
+}
 
 export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
   Everywhere: "These work wherever you are in ticketd.",
-  Lists: "In any list of tickets. The list is one stop for Tab.",
+  Lists:
+    "In ticket lists and boards, the Inbox, Attachments, Documents and the Workspace graph. A list is one stop for Tab.",
   Ticket: "On the open ticket.",
   Plans: "On a Plan or the Plans page, as noted.",
   Chat: "In a Chat's message box and its requests.",
@@ -91,21 +99,8 @@ export const SHORTCUTS = [
     keys: [[...keys]],
     scope: "Lists" as const,
     label,
+    ...(id === "inbox-open" && { needs: "chat" as const }),
   })),
-  {
-    id: "workspace-notice",
-    keys: [],
-    scope: "Everywhere",
-    label: "Review workspace notice",
-    note: "Available in the command palette while a workspace notice waits for a safe layout boundary.",
-  },
-  {
-    id: "go-automations",
-    keys: [],
-    scope: "Everywhere",
-    label: "Go to Automations",
-    note: "Available in the command palette while Chat is enabled.",
-  },
   {
     id: "command-palette",
     keys: [["Mod", "K"]],
@@ -129,10 +124,8 @@ export const SHORTCUTS = [
     sequences: [[["G"], [key]]],
     scope: "Everywhere" as const,
     label,
-    note:
-      id === "go-chats"
-        ? "Not while typing or using an overlay. Requires Chat to be enabled."
-        : "Not while typing or using an overlay.",
+    note: "Not while typing or using an overlay.",
+    ...(id === "go-chats" && { needs: "chat" as const }),
   })),
   {
     id: "new-ticket",
@@ -152,6 +145,7 @@ export const SHORTCUTS = [
     keys: [["Mod", "L"]],
     scope: "Everywhere",
     label: "Add the selected text to a Chat",
+    needs: "chat",
     note: "Select text in a Document, a description or an update first.",
   },
   {
@@ -262,18 +256,6 @@ export const SHORTCUTS = [
     keys: [["Mod", "A"]],
     scope: "Lists",
     label: "Select every listed ticket",
-  },
-  {
-    id: "inbox-mark",
-    keys: [["E"]],
-    scope: "Lists",
-    label: "Mark the focused Inbox entry read or unread",
-  },
-  {
-    id: "inbox-snooze",
-    keys: [["H"]],
-    scope: "Lists",
-    label: "Snooze the focused Inbox reminder",
   },
   {
     id: "list-clear-selection",
@@ -414,12 +396,6 @@ export const SHORTCUTS = [
     keys: [["Mod", "Z"]],
     scope: "Chat",
     label: "Take back a suggestion you just chose",
-  },
-  {
-    id: "create-expand",
-    keys: [],
-    scope: "Dialogs and menus",
-    label: "Expand the New ticket draft",
   },
   {
     id: "palette-drill",
