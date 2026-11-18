@@ -135,15 +135,28 @@ const CAPTURE_PLACEHOLDER: &str = "Write a thought…";
 fn plain_snippet(body: &str, heading: &str, query: Option<&str>) -> String {
     const LIMIT: usize = 160;
     use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let body = body.strip_prefix('\u{feff}').unwrap_or(body);
     let mut text = String::new();
     let mut in_code_block = false;
+    let mut in_metadata = false;
     // A leading heading is the Document's own heading, which the list already shows.
     let mut skipping_heading = false;
     let mut started = false;
     for event in Parser::new_ext(
         body,
-        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES,
+        crate::document_links::HEADING_OPTIONS | Options::ENABLE_TABLES,
     ) {
+        match event {
+            Event::Start(Tag::MetadataBlock(_)) => in_metadata = true,
+            Event::End(TagEnd::MetadataBlock(_)) => {
+                in_metadata = false;
+                continue;
+            }
+            _ => {}
+        }
+        if in_metadata {
+            continue;
+        }
         if !started && matches!(event, Event::Start(_)) {
             started = true;
             skipping_heading = matches!(event, Event::Start(Tag::Heading { .. }));

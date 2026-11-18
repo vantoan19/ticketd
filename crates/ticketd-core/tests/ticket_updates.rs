@@ -269,3 +269,50 @@ fn a_stale_editor_cannot_overwrite_a_description_changed_elsewhere() {
     );
     assert!(matches!(stale_title, Err(Error::TicketChanged(_))));
 }
+
+#[test]
+fn saving_an_activity_unchanged_keeps_its_update_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("updates.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Progress").unwrap();
+    let activity = workspace
+        .add_activity(&ticket.reference, "Report", Some("agent"))
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    for patch in [
+        ActivityPatch::default(),
+        ActivityPatch {
+            brief: Some("Report".into()),
+            editing_agent: Some("agent".into()),
+        },
+    ] {
+        let saved = workspace
+            .edit_activity(&ticket.reference, &activity.id, patch)
+            .unwrap();
+        assert_eq!(saved.updated_at, activity.updated_at);
+    }
+}
+
+#[test]
+fn context_latest_update_bounds_the_editing_agent_like_every_other_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("updates.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Progress").unwrap();
+    workspace
+        .add_activity(&ticket.reference, "Report", Some(&"a".repeat(300)))
+        .unwrap();
+    let context = workspace
+        .ticket_context(
+            &ticket.reference,
+            ticketd_core::ContextOptions {
+                latest_update: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let agent =
+        serde_json::to_value(context.latest_update.unwrap().unwrap()).unwrap()["editing_agent"]
+            .clone();
+    assert_eq!(agent["text"].as_str().unwrap().chars().count(), 256);
+    assert_eq!(agent["truncated"], true);
+}

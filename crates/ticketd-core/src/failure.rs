@@ -142,7 +142,9 @@ impl Error {
             | Self::InvalidReminderTime(_)
             | Self::NoReminder(_)
             | Self::SnoozeNotLater { .. }
+            | Self::InvalidGraphRequest(_)
             | Self::EmptyPlanName
+            | Self::PlanNameTooLong(_)
             | Self::AmbiguousProject
             | Self::CheckoutTaken(_)
             | Self::InvalidCheckoutPath

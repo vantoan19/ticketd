@@ -5169,3 +5169,16 @@ fn the_next_reminder_is_due_when_its_time_comes_and_none_after_delivery() {
         workspace.next_reminder_due_in().unwrap().unwrap() > std::time::Duration::from_secs(3590)
     );
 }
+
+#[test]
+fn evidence_kind_is_accepted_in_the_command_line_and_the_written_spelling() {
+    use ticketd_core::EvidenceKind;
+    for spelling in ["pull-request", "pull_request"] {
+        let kind: EvidenceKind = serde_json::from_value(serde_json::json!(spelling)).unwrap();
+        assert_eq!(kind, EvidenceKind::PullRequest);
+    }
+    assert_eq!(
+        serde_json::to_value(EvidenceKind::PullRequest).unwrap(),
+        "pull_request"
+    );
+}

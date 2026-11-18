@@ -246,8 +246,12 @@ pub enum Error {
     SnoozeNotLater { reference: String, current: String },
     #[error("inbox entry {0} was not found")]
     InboxEntryNotFound(i64),
+    #[error("invalid graph request: {0}")]
+    InvalidGraphRequest(String),
     #[error("plan name must not be empty")]
     EmptyPlanName,
+    #[error("plan name must be at most {0} characters")]
+    PlanNameTooLong(usize),
     #[error("plan '{0}' was not found")]
     PlanNotFound(String),
     #[error(

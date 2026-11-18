@@ -891,6 +891,8 @@ enum ProjectCommand {
 
 #[derive(Clone, ValueEnum)]
 enum EvidenceType {
+    // Output spells it `pull_request`; accept that spelling on input too.
+    #[value(alias = "pull_request")]
     PullRequest,
     Commit,
     Branch,
@@ -1226,6 +1228,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 body_file,
                 request_id,
             } => {
+                if title
+                    .as_deref()
+                    .is_some_and(|title| title.trim().is_empty())
+                {
+                    return Err("document title must not be empty; omit --title to use the first line of the body".into());
+                }
                 let body = read_content(body, body_file)?.unwrap_or_default();
                 match request_id {
                     None => {
@@ -1305,6 +1313,14 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 body_file,
                 request_id,
             } => {
+                if title
+                    .as_deref()
+                    .is_some_and(|title| title.trim().is_empty())
+                {
+                    return Err(
+                        "document title must not be empty; use --clear-title to remove it".into(),
+                    );
+                }
                 let patch = DocumentPatch {
                     title: if clear_title {
                         Some(None)
@@ -1314,6 +1330,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     body: read_content(body, body_file)?,
                     expected_updated_at: None,
                 };
+                if patch.title.is_none() && patch.body.is_none() {
+                    return Err("provide --title, --clear-title, --body or --body-file".into());
+                }
                 match request_id {
                     None => serde_json::to_string(&workspace.change_document(&id, patch)?)?,
                     Some(request) => bare(
@@ -1566,6 +1585,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     brief: read_content(brief, file)?,
                     editing_agent: agent,
                 };
+                if patch.brief.is_none() && patch.editing_agent.is_none() {
+                    return Err("provide --brief or --file (or --agent) to change".into());
+                }
                 if request_id.is_some() {
                     bare(workspace.write(
                         request_id.as_deref(),
