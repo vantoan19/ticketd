@@ -197,6 +197,14 @@ function Tooltip({
         // Radix composes this with the child's own ref.
         ref={setTrigger}
         onPointerEnter={(event) => measure(event.currentTarget)}
+        // A label that cannot open must not tell the provider it did: the
+        // provider would wait for a close that never comes, and open the next
+        // control's label at once, with no delay and no fade. Radix skips its
+        // own open when the event is default-prevented.
+        onPointerMove={(event) => {
+          if (disabled || coveredByOverlay(trigger.current))
+            event.preventDefault();
+        }}
         onFocus={(event) => {
           measure(event.currentTarget);
           // Radix skips its own open when the event is default-prevented.
