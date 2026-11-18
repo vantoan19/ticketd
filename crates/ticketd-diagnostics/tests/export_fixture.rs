@@ -38,16 +38,22 @@ fn nothing_planted_in_a_field_the_export_does_not_allow_survives() {
 
         // Events from the crash and forwarding work: a panic, a WebView error and a Harness
         // stderr line, with the words of the person or the Harness in their fields.
-        tracing::error!(target: "ticketd_diagnostics::panic", location = SECRET, thread = SECRET, panic_message = SECRET, "panic");
-        tracing::error!(target: "webview", name = SECRET, stack = SECRET, route = SECRET, repeats = 3, "uncaught error");
-        tracing::debug!(target: "ticketd_chat_host::harness_stderr", chat_id = "chat-1", line = SECRET, "harness stderr");
+        tracing::error!(target: "ticketd_diagnostics::crash", location = "crates/core/src/lib.rs:10:5", thread = "main", panic_message = "static literal", "panic");
+        tracing::error!(target: "ticketd_diagnostics::crash", location = "crates/core/src/lib.rs:10:5", thread = "main", "panic");
+        tracing::warn!(target: "ticketd_diagnostics::desktop", previous_started_at = "2026-11-18T07:45:00.000Z", extra = SECRET, "previous session ended unexpectedly");
+        tracing::error!(target: "webview", error_kind = "TypeError", error = SECRET, route = "/tickets", repeat_count = 3, frames = "at render (app.js:1:1)", name = SECRET, stack = SECRET, "uncaught WebView error");
+        tracing::debug!(target: "ticketd_chat_host::harness_stderr", harness = "codex", line = SECRET, "harness stderr");
+        tracing::info!(target: "ticketd_desktop_lib::diagnostics_commands", bytes = 1024, path = SECRET, "diagnostics exported");
 
         // Spans carry IDs, and may carry more than they should.
         let pass = tracing::info_span!(target: "ticketd_desktop_lib::sync_scheduler", "sync_pass", source_id = "src-1", title = SECRET);
         let turn = tracing::info_span!(target: "ticketd_chat_host", "chat_turn", chat_id = "chat-1", prompt = SECRET);
         let run = tracing::info_span!(target: "ticketd_automation_runner", "automation_run", automation_run_id = "run-1", ticket_title = SECRET);
         let command = tracing::info_span!(target: "ticketd_desktop_lib", "command", request_id = "req-1", ticket_ref = "TK-1", args = SECRET);
-        for span in [&pass, &turn, &run, &command] {
+        let desktop_command = tracing::debug_span!(target: "ticketd_desktop_lib", "command", command = "list_tickets", payload = SECRET);
+        let chat = tracing::info_span!(target: "ticketd_chat_host", "chat", chat_id = "chat-1", automation_run_id = "run-1", prompt = SECRET);
+        let refresh = tracing::info_span!(target: "ticketd_core::source", "source_refresh", ticket_ref = "TK-1", query = SECRET);
+        for span in [&pass, &turn, &run, &command, &desktop_command, &chat, &refresh] {
             span.in_scope(|| {
                 tracing::warn!(target: "ticketd_core::sync", error_kind = "offline", error = SECRET, body = SECRET, "sync pass failed");
             });
@@ -69,12 +75,25 @@ fn nothing_planted_in_a_field_the_export_does_not_allow_survives() {
         "periodic source refresh could not run",
         "Automation run ended",
         "sync pass failed",
-        "uncaught error",
+        "uncaught WebView error",
         "\"chat_id\":\"chat-1\"",
         "\"request_id\":\"req-1\"",
         "\"automation_run_id\":\"run-1\"",
         "\"error_kind\":\"offline\"",
         "\"name\":\"sync_pass\"",
+        "\"name\":\"chat_turn\"",
+        "\"ticket_ref\":\"TK-1\"",
+        "\"source_id\":\"src-1\"",
+        "\"location\":\"crates/core/src/lib.rs:10:5\"",
+        "\"panic_message\":\"static literal\"",
+        "\"previous_started_at\":\"2026-11-18T07:45:00.000Z\"",
+        "\"route\":\"/tickets\"",
+        "\"repeat_count\":3",
+        "\"frames\":\"at render (app.js:1:1)\"",
+        "\"error_kind\":\"TypeError\"",
+        "\"harness\":\"codex\"",
+        "\"command\":\"list_tickets\"",
+        "harness stderr",
     ] {
         assert!(all.contains(kept), "{kept} missing from the bundle");
     }

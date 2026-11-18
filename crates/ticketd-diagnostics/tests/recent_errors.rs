@@ -122,3 +122,18 @@ fn a_folder_with_no_problems_has_no_recent_errors() {
 
     assert!(logs.recent_errors().is_empty());
 }
+
+#[test]
+fn a_previous_session_that_ended_unexpectedly_is_among_the_recent_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    // The marker an earlier session left behind because it never shut down.
+    fs::write(dir.path().join("session.lock"), "2026-11-18T07:45:00.000Z").unwrap();
+    let logs = DesktopLogs::open(dir.path(), Config::default());
+
+    let groups = logs.recent_errors();
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].kind, "previous session ended unexpectedly");
+    assert_eq!(groups[0].level, "WARN");
+    assert_eq!(groups[0].count, 1);
+}

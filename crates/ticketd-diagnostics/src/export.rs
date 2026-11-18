@@ -33,8 +33,24 @@ const ID_FIELDS: [&str; 5] = [
 
 /// The other fields a line or span may carry into the bundle: error kinds, counts,
 /// durations and state names. Anything else is dropped.
-const SAFE_FIELDS: [&str; 9] = [
+const SAFE_FIELDS: [&str; 19] = [
     "error_kind",
+    // A panic: where and on which thread, and the message only when the hook judged it a
+    // literal. The previous session's start time on an unexpected end.
+    "location",
+    "thread",
+    "panic_message",
+    "previous_started_at",
+    // An uncaught WebView error: the view, how often, and its stack frames. Its message
+    // (`error`) stays out, like every other error text.
+    "route",
+    "repeat_count",
+    "frames",
+    // Which Harness wrote to stderr (the line itself is dropped) and which desktop
+    // command a span is for.
+    "harness",
+    "command",
+    "bytes",
     "count",
     "attempt",
     "duration_ms",
