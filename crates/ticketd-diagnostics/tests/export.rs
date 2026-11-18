@@ -94,7 +94,8 @@ fn names(files: &[(String, String)]) -> Vec<&str> {
 fn the_bundle_holds_a_summary_the_workspace_health_the_errors_and_the_last_three_days() {
     let logs_dir = tempfile::tempdir().unwrap();
     let out = tempfile::tempdir().unwrap();
-    for age in [5, 3, 2, 1, 0] {
+    // The day 9 days ago is older than the errors look back, whatever its modified time.
+    for age in [9, 5, 3, 2, 1, 0] {
         day_file(
             logs_dir.path(),
             &days_ago(age),
@@ -236,7 +237,7 @@ fn a_line_is_rebuilt_from_allowed_fields_and_ids_are_kept() {
             "timestamp": format!("{day}T10:00:00.000Z"), "level": "WARN",
             "target": "ticketd_core::sync", "message": "sync pass failed",
             "ticket_ref": "TK-7", "chat_id": "chat-9f2", "automation_run_id": "run-1",
-            "source_id": "src-3", "request_id": "req-5", "error_kind": "offline", "count": 3,
+            "source_id": "src-3", "request_id": "req-5", "error_kind": "offline", "repeat_count": 3, "count": 3, "state": "x", "attempt": 2, "duration_ms": 5,
             "title": "Quarterly plan", "error": "could not reach the drive",
             "nested": {"title": "Quarterly plan"}, "list": ["Quarterly plan"],
             "spans": [{"name": "sync_pass", "source_id": "src-3", "title": "Quarterly plan"}],
@@ -255,7 +256,7 @@ fn a_line_is_rebuilt_from_allowed_fields_and_ids_are_kept() {
             "timestamp": format!("{day}T10:00:00.000Z"), "level": "WARN",
             "target": "ticketd_core::sync", "message": "sync pass failed",
             "ticket_ref": "TK-7", "chat_id": "chat-9f2", "automation_run_id": "run-1",
-            "source_id": "src-3", "request_id": "req-5", "error_kind": "offline", "count": 3,
+            "source_id": "src-3", "request_id": "req-5", "error_kind": "offline", "repeat_count": 3,
             "spans": [{"name": "sync_pass", "source_id": "src-3"}],
         })
     );

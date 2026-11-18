@@ -8,8 +8,16 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::NaiveDate;
+use chrono::{Days, NaiveDate, Utc};
 use serde::Serialize;
+
+/// How many days back (today included) recent errors look.
+pub(crate) const ERROR_DAYS: u64 = 7;
+
+/// The line the desktop writes when the previous session did not end cleanly, which
+/// [`recent_errors`] also takes from the handle's own state.
+pub(crate) const UNCLEAN_TARGET: &str = "ticketd_diagnostics::desktop";
+pub(crate) const UNCLEAN_MESSAGE: &str = "previous session ended unexpectedly";
 
 /// One kind of warning or error: everything the log holds for one target and error kind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -69,9 +77,16 @@ pub(crate) fn json_lines(path: &Path) -> Vec<serde_json::Map<String, serde_json:
         .collect()
 }
 
-pub(crate) fn recent_errors(dir: &Path) -> Vec<ErrorGroup> {
+/// The warnings and errors of the last [`ERROR_DAYS`] days in `dir`. `unclean_exit_at` is
+/// the time this session opened, when the one before it ended unexpectedly: that is listed
+/// even if the log filter kept its warning out of the file, and once if the line is there.
+pub(crate) fn recent_errors(dir: &Path, unclean_exit_at: Option<&str>) -> Vec<ErrorGroup> {
+    let today = Utc::now().date_naive();
+    let oldest = today
+        .checked_sub_days(Days::new(ERROR_DAYS - 1))
+        .unwrap_or(today);
     let mut groups: HashMap<(String, String), ErrorGroup> = HashMap::new();
-    for file in day_files(dir) {
+    for file in day_files(dir).into_iter().filter(|file| file.day >= oldest) {
         for line in json_lines(&file.path) {
             let text = |key: &str| line.get(key).and_then(serde_json::Value::as_str);
             let level = match text("level") {
@@ -105,6 +120,23 @@ pub(crate) fn recent_errors(dir: &Path) -> Vec<ErrorGroup> {
             if timestamp > group.last_seen.as_str() {
                 group.last_seen = timestamp.to_string();
             }
+        }
+    }
+    if let Some(opened_at) = unclean_exit_at {
+        let group = groups
+            .entry((UNCLEAN_TARGET.to_string(), UNCLEAN_MESSAGE.to_string()))
+            .or_insert_with(|| ErrorGroup {
+                target: UNCLEAN_TARGET.to_string(),
+                kind: UNCLEAN_MESSAGE.to_string(),
+                level: "WARN".to_string(),
+                count: 0,
+                first_seen: opened_at.to_string(),
+                last_seen: opened_at.to_string(),
+            });
+        // A line written since this session opened is this very event.
+        if group.count == 0 || group.last_seen.as_str() < opened_at {
+            group.count += 1;
+            group.last_seen = opened_at.to_string();
         }
     }
     let mut groups: Vec<_> = groups.into_values().collect();

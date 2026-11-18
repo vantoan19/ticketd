@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use chrono::SecondsFormat;
+use chrono::{SecondsFormat, Utc};
 use serde::Serialize;
 use tracing::Dispatch;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -76,6 +76,8 @@ pub struct DesktopLogs {
     filter: reload::Handle<EnvFilter, Registry>,
     pinned: bool,
     unclean_exit: Option<UncleanExit>,
+    /// When this handle was opened, in the lines' timestamp format.
+    opened_at: String,
     /// Removes the session marker when the handle is dropped.
     _session: Option<SessionMarker>,
     debug: AtomicBool,
@@ -90,6 +92,7 @@ impl DesktopLogs {
     /// A folder that cannot hold logs falls back to readable lines on stderr. Nothing here
     /// returns an error: logging must never be the reason the app does not start.
     pub fn open(dir: impl AsRef<Path>, config: Config) -> Self {
+        let opened_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         let limits = Limits {
             max_age: config.max_age,
             max_total_bytes: config.max_total_bytes,
@@ -137,6 +140,7 @@ impl DesktopLogs {
             filter,
             pinned,
             unclean_exit,
+            opened_at,
             _session: session,
             debug: AtomicBool::new(false),
             filter_override: override_spec,
@@ -180,7 +184,10 @@ impl DesktopLogs {
     /// The warnings and errors in the log folder, grouped by target and error kind, most
     /// recently seen first. This includes earlier runs that are still on disk.
     pub fn recent_errors(&self) -> Vec<ErrorGroup> {
-        errors::recent_errors(&self.dir)
+        errors::recent_errors(
+            &self.dir,
+            self.unclean_exit.as_ref().map(|_| self.opened_at.as_str()),
+        )
     }
 
     /// The folder the log files are written to.

@@ -31,9 +31,10 @@ const ID_FIELDS: [&str; 5] = [
     "request_id",
 ];
 
-/// The other fields a line or span may carry into the bundle: error kinds, counts,
-/// durations and state names. Anything else is dropped.
-const SAFE_FIELDS: [&str; 19] = [
+/// The other fields a line or span may carry into the bundle: the ones our code emits that
+/// hold no content (error kinds, positions, sizes, durations). Anything else is dropped,
+/// and a field is added here on purpose when code starts emitting it.
+const SAFE_FIELDS: [&str; 15] = [
     "error_kind",
     // A panic: where and on which thread, and the message only when the hook judged it a
     // literal. The previous session's start time on an unexpected end.
@@ -50,11 +51,8 @@ const SAFE_FIELDS: [&str; 19] = [
     // command a span is for.
     "harness",
     "command",
+    // The size of an export, the Chat action that failed and the app version at start.
     "bytes",
-    "count",
-    "attempt",
-    "duration_ms",
-    "state",
     "action",
     "version",
     "time.busy",
