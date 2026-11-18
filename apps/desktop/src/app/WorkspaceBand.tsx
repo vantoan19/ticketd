@@ -1,6 +1,6 @@
 import { workspaceMessages } from "./workspace-messages";
 import { useRef, useState, type ReactNode } from "react";
-import { m } from "motion/react";
+import { m, useIsPresent } from "motion/react";
 import { Expand, Presence } from "@/components/ui/motion";
 import { blur, exitTransition } from "@/lib/motion-tokens";
 import { useHeldExpand } from "@/components/ui/use-held-expand";
@@ -68,11 +68,13 @@ export function WorkspaceBand({
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
   const current = useWorkspaceState();
-  // While the band fades out the condition has already cleared; keep saying
-  // what it said until the band is gone.
+  // While the band fades out (BandSlot's Presence) the condition has already
+  // cleared; keep saying what it said until the band is gone. Anywhere else a
+  // cleared condition leaves no band.
+  const present = useIsPresent();
   const [last, setLast] = useState(current);
   if (current && current !== last) setLast(current);
-  const state = current ?? last;
+  const state = current ?? (present ? null : last);
   if (!state) return null;
   return (
     <div role="status" data-slot="workspace-band" className="workspace-band">
