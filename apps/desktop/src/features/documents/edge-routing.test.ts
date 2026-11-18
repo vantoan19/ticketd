@@ -34,6 +34,42 @@ test("a diagonal that clips a card's corner is rerouted", () => {
     expect(segmentHitsRect(points[i]!, points[i + 1]!, near)).toBe(false);
 });
 
+test("a line goes the long way round a wall of cards instead of through it", () => {
+  // A column of cards, closer together than the clearance, between the ends.
+  const wall = [-3, -2, -1, 0, 1, 2, 3].map((row) => card(200, row * 80));
+  const points = routeEdge(card(0, 0), card(500, 0), wall);
+  expect(points.length).toBeGreaterThan(2);
+  for (let i = 0; i < points.length - 1; i++)
+    for (const rect of wall)
+      expect(segmentHitsRect(points[i]!, points[i + 1]!, rect)).toBe(false);
+});
+
+test("a card enclosed by close neighbours still gets a line out between them", () => {
+  const around = [
+    card(-200, -80),
+    card(-200, 80),
+    card(200, -80),
+    card(200, 80),
+    card(0, -80),
+    card(0, 80),
+  ];
+  const points = routeEdge(card(0, 0), card(600, 0), around);
+  for (let i = 0; i < points.length - 1; i++)
+    for (const rect of around)
+      expect(segmentHitsRect(points[i]!, points[i + 1]!, rect)).toBe(false);
+});
+
+test("only edges with a label take room for one", () => {
+  const cards = { a: card(0, 0), b: card(400, 0) };
+  const routes = routeAll(cards, [
+    { id: "1", source: "a", target: "b", label: "mentions" },
+    { id: "2", source: "b", target: "a" },
+  ]);
+  // The unlabelled line has nothing to keep clear of, so it may share a midpoint.
+  expect(routes["2"]!.points).toHaveLength(2);
+  expect(routes["1"]!.label.x).toBeGreaterThan(180);
+});
+
 test("borderPoint leaves through the side facing the target", () => {
   expect(borderPoint(card(0, 0), { x: 1000, y: 36 })).toEqual({
     x: 180,

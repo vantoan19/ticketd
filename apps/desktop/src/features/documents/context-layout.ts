@@ -1,4 +1,4 @@
-import { labelSize } from "./edge-routing";
+import { labelSize, segmentHitsRect } from "./edge-routing";
 
 export type Point = { x: number; y: number };
 export type LayoutRequest = {
@@ -213,6 +213,139 @@ function settle(
   }
 }
 
+/** What one card position costs the lines: each line through another card counts heavily, length lightly. */
+const THROUGH_CARD = 400;
+/** How many nearby cards each card tries swapping places with. */
+const PARTNERS = 8;
+
+/**
+ * Swaps the places of pairs of free cards while that leaves fewer lines
+ * running through cards that are not theirs (shorter lines break ties). The
+ * force layout only pulls neighbours together, so it leaves such lines behind;
+ * a swap keeps every card on a spot already known to be clear, so nothing
+ * overlaps afterwards. Positioned cards stay put. Deterministic.
+ */
+function untangle(
+  ids: string[],
+  edges: LayoutEdge[],
+  points: Record<string, Point>,
+  fixed: Set<string>,
+) {
+  const free = ids.flatMap((id, i) => (fixed.has(id) ? [] : [i]));
+  if (free.length < 2) return;
+  // Plain arrays by card number: this runs thousands of times.
+  const index = new Map(ids.map((id, i) => [id, i]));
+  const x = ids.map((id) => points[id]!.x);
+  const y = ids.map((id) => points[id]!.y);
+  const lines: [number, number][] = [];
+  for (const edge of edges) {
+    const from = index.get(edge.source);
+    const to = index.get(edge.target);
+    if (from !== undefined && to !== undefined && from !== to)
+      lines.push([from, to]);
+  }
+  const touching = ids.map(() => [] as number[]);
+  lines.forEach(([from, to], line) => {
+    touching[from]!.push(line);
+    touching[to]!.push(line);
+  });
+  const halfW = CARD_WIDTH / 2;
+  const halfH = CARD_HEIGHT / 2;
+  const through = (line: number, card: number) => {
+    const [from, to] = lines[line]!;
+    if (card === from || card === to) return false;
+    // Most lines are nowhere near most cards: their boxes tell that cheaply.
+    if (
+      Math.max(x[from]!, x[to]!) <= x[card]! - halfW ||
+      Math.min(x[from]!, x[to]!) >= x[card]! + halfW ||
+      Math.max(y[from]!, y[to]!) <= y[card]! - halfH ||
+      Math.min(y[from]!, y[to]!) >= y[card]! + halfH
+    )
+      return false;
+    return segmentHitsRect(
+      { x: x[from]!, y: y[from]! },
+      { x: x[to]!, y: y[to]! },
+      {
+        x: x[card]! - halfW,
+        y: y[card]! - halfH,
+        width: CARD_WIDTH,
+        height: CARD_HEIGHT,
+      },
+    );
+  };
+  const stamp = new Int32Array(lines.length).fill(-1);
+  let round = 0;
+  // Cost of the lines a swap of `a` and `b` can change: theirs, and any other
+  // line that may now run through either card.
+  const local = (a: number, b: number) => {
+    round++;
+    let total = 0;
+    for (const card of [a, b])
+      for (const line of touching[card]!) {
+        if (stamp[line] === round) continue;
+        stamp[line] = round;
+        for (let other = 0; other < ids.length; other++)
+          if (through(line, other)) total += THROUGH_CARD;
+        const [from, to] = lines[line]!;
+        total += Math.hypot(x[to]! - x[from]!, y[to]! - y[from]!);
+      }
+    for (let line = 0; line < lines.length; line++) {
+      if (stamp[line] === round) continue;
+      if (through(line, a)) total += THROUGH_CARD;
+      if (through(line, b)) total += THROUGH_CARD;
+    }
+    return total;
+  };
+  const swap = (a: number, b: number) => {
+    [x[a], x[b]] = [x[b]!, x[a]!];
+    [y[a], y[b]] = [y[b]!, y[a]!];
+  };
+  // Where a card wants to be is beside its neighbours: its swap partners are
+  // the free cards sitting nearest their middle.
+  const near = (a: number) => {
+    const around = touching[a]!.map((line) => {
+      const [from, to] = lines[line]!;
+      return from === a ? to : from;
+    });
+    if (!around.length) return [];
+    const mx = around.reduce((sum, card) => sum + x[card]!, 0) / around.length;
+    const my = around.reduce((sum, card) => sum + y[card]!, 0) / around.length;
+    return free
+      .filter((card) => card !== a)
+      .map((card) => ({ card, away: Math.hypot(x[card]! - mx, y[card]! - my) }))
+      .sort((p, q) => p.away - q.away || p.card - q.card)
+      .slice(0, PARTNERS)
+      .map((each) => each.card);
+  };
+  // Cards worth moving: those a line runs through, or whose own lines run through a card.
+  const troubled = () => {
+    const bad = new Set<number>();
+    for (let line = 0; line < lines.length; line++)
+      for (let card = 0; card < ids.length; card++)
+        if (through(line, card)) {
+          bad.add(lines[line]![0]);
+          bad.add(lines[line]![1]);
+          bad.add(card);
+        }
+    return free.filter((card) => bad.has(card));
+  };
+  for (let sweep = 0; sweep < 6; sweep++) {
+    let improved = false;
+    for (const a of troubled()) {
+      for (const b of near(a)) {
+        const before = local(a, b);
+        swap(a, b);
+        if (local(a, b) < before - 1) improved = true;
+        else swap(a, b);
+      }
+    }
+    if (!improved) break;
+  }
+  ids.forEach((id, i) => {
+    points[id] = { x: x[i]!, y: y[i]! };
+  });
+}
+
 // A bounded force layout accepts cycles and leaves already positioned nodes fixed.
 export function layoutContextGraph(
   request: LayoutRequest,
@@ -274,6 +407,7 @@ export function layoutContextGraph(
   );
   separate(ids, points, fixed);
   settle(ids, points, fixed);
+  untangle(ids, request.edges, points, fixed);
   // Cards pushed apart for a label can collide with others, and the reverse.
   for (let round = 0; round < 60; round++) {
     const spaced = spaceEdges(request.edges, points, fixed);
