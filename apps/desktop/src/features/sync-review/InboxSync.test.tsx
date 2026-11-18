@@ -114,9 +114,45 @@ test("notices need no decision: a removed dependency opens its ticket, an unread
     ),
   ).toBeTruthy();
   expect(screen.queryByRole("dialog")).toBeNull();
+  // Nothing to open: the row does not act on a click, nor look clickable.
+  fireEvent.click(file.getByText(/^tickets\/T-MW21\.md was skipped/));
+  expect(select).toHaveBeenCalledTimes(1);
+  expect(syncReview.setRead).toHaveBeenCalledTimes(1);
+  const row = screen
+    .getByText("A Drive file could not be read")
+    .closest(".inbox-entry");
+  expect(row?.hasAttribute("data-static")).toBe(true);
+  // Its summary names a path, so it wraps rather than being cut off.
+  expect(row?.hasAttribute("data-wrap")).toBe(true);
   // Already read, so its action marks it unread.
   fireEvent.click(file.getByRole("button", { name: /Mark .* unread/ }));
   expect(syncReview.setRead).toHaveBeenCalledWith(["notice-2"], false);
+});
+
+test("a Drive file notice opens the Ticket it belongs to when that Ticket is here", async () => {
+  vi.mocked(syncReview.conflicts).mockResolvedValue([]);
+  vi.mocked(syncReview.notices).mockResolvedValue([
+    {
+      kind: "unreadable_file",
+      id: "notice-4",
+      timestamp: hours(1),
+      read: false,
+      path: "tickets/T-MW21 Fix login.md",
+      reason: "unknown field 'priority' in a ticket",
+      ticket_reference: "T-MW21",
+    },
+  ]);
+  open();
+  await screen.findByText("A Drive file could not be read");
+  const file = entryOf("A Drive file could not be read");
+  expect(file.getByText("T-MW21")).toBeTruthy();
+  fireEvent.click(file.getByText(/was skipped/));
+  expect(select).toHaveBeenCalledWith("T-MW21");
+  expect(syncReview.setRead).toHaveBeenCalledWith(["notice-4"], true);
+  const row = screen
+    .getByText("A Drive file could not be read")
+    .closest(".inbox-entry");
+  expect(row?.hasAttribute("data-static")).toBe(false);
 });
 
 test("a replaced file and a record too large to sync are worded as what they are", async () => {

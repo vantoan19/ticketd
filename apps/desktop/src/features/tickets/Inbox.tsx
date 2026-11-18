@@ -264,6 +264,8 @@ function InboxRow({
   snooze,
   disabledReason,
   arriving = false,
+  opens = true,
+  wrap = false,
 }: {
   reference: string | null;
   title: string;
@@ -279,6 +281,13 @@ function InboxRow({
   snooze?: (openRequest: number) => React.ReactNode;
   /** A new entry opens its space; one already shown just renders. */
   arriving?: boolean;
+  /**
+   * False for an entry with nothing to open: it does not look or act
+   * clickable, though it still takes focus so E marks it.
+   */
+  opens?: boolean;
+  /** The summary wraps instead of being cut, for one naming a file path. */
+  wrap?: boolean;
 }) {
   const now = useNow();
   const [snoozeRequest, setSnoozeRequest] = useState(0);
@@ -287,6 +296,8 @@ function InboxRow({
       <div
         className="inbox-entry"
         data-read={read}
+        data-static={!opens || undefined}
+        data-wrap={wrap || undefined}
         aria-current={current || undefined}
       >
         <span className="inbox-dot">
@@ -297,6 +308,7 @@ function InboxRow({
           className="inbox-ticket"
           aria-keyshortcuts={snooze ? "E H" : "E"}
           onClick={(event) => {
+            if (!opens) return;
             onOpen();
             // Opening the detail must leave entry shortcuts on the entry.
             event.currentTarget.focus();
@@ -403,6 +415,8 @@ function SyncRow({
       current={false}
       arriving={arriving}
       disabledReason={disabledReason ?? null}
+      opens={!!(entry.conflict || entry.reference)}
+      wrap={entry.file ?? false}
       markLabel={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
       onOpen={() => {
         if (!entry.read) mark(true);

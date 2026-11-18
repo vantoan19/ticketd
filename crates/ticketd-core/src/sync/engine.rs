@@ -146,6 +146,10 @@ pub struct SyncNotice {
     pub id: String,
     pub timestamp: String,
     pub read: bool,
+    /// For a notice about a Ticket's file, that Ticket's reference while the
+    /// Ticket is in this Workspace, so the notice can open it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_reference: Option<String>,
     #[serde(flatten)]
     pub notice: SyncNoticeKind,
 }
@@ -278,6 +282,20 @@ fn notify_once(
         touch(connection)?;
     }
     Ok(recorded > 0)
+}
+
+/// The Ticket whose file a notice's cause is about: an unreadable, replaced
+/// or oversized Ticket file (see `skip`, `note_replaced`, `withdraw_oversized`).
+fn ticket_file_of(cause: &str) -> Option<&str> {
+    let mut parts = cause.split(':');
+    match (parts.next()?, parts.next()?, parts.next()?) {
+        ("unreadable" | "replaced" | "oversized", kind, id)
+            if kind == name(SyncKind::Ticket) && !id.is_empty() =>
+        {
+            Some(id)
+        }
+        _ => None,
+    }
 }
 
 /// Take back the notices about a record's file in the storage that could not
@@ -1477,7 +1495,7 @@ impl Workspace {
     /// What sync did that needs no decision, newest first.
     pub fn sync_notices(&self) -> Result<Vec<SyncNotice>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT id, timestamp, read, notice FROM sync_notices ORDER BY timestamp DESC, rowid DESC",
+            "SELECT id, timestamp, read, notice, cause FROM sync_notices ORDER BY timestamp DESC, rowid DESC",
         )?;
         let rows = statement
             .query_map([], |row| {
@@ -1486,15 +1504,24 @@ impl Workspace {
                     row.get::<_, String>(1)?,
                     row.get::<_, bool>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        let mut reference = self
+            .connection
+            .prepare("SELECT reference FROM tickets WHERE id = ?1")?;
         rows.into_iter()
-            .map(|(id, timestamp, read, notice)| {
+            .map(|(id, timestamp, read, notice, cause)| {
+                let ticket_reference = match ticket_file_of(&cause) {
+                    Some(ticket) => reference.query_row([ticket], |row| row.get(0)).optional()?,
+                    None => None,
+                };
                 Ok(SyncNotice {
                     id,
                     timestamp,
                     read,
+                    ticket_reference,
                     notice: serde_json::from_str(&notice)
                         .map_err(|error| Error::SyncFile(error.to_string()))?,
                 })

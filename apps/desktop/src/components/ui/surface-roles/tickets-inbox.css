@@ -22,6 +22,10 @@
 .inbox-entry:hover {
   background: var(--hover);
 }
+/* An entry with nothing to open does not hover like a selectable row. */
+.inbox-entry[data-static]:hover {
+  background: transparent;
+}
 .inbox-entry[aria-current="true"] {
   background: var(--accent);
 }

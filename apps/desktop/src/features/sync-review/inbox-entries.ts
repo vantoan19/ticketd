@@ -19,6 +19,11 @@ export type SyncEntry = {
   /** Present on a conflict: opening the entry opens its comparison. */
   conflict?: ConflictSummary;
   icon: "review" | "dependency" | "file";
+  /**
+   * A notice about a Drive file: its summary names a path and wraps rather
+   * than being cut off.
+   */
+  file?: true;
 };
 
 function fromConflict(conflict: ConflictSummary): SyncEntry {
@@ -34,27 +39,53 @@ function fromConflict(conflict: ConflictSummary): SyncEntry {
   };
 }
 
+type FileNotice = Extract<
+  Notice,
+  { kind: "unreadable_file" | "replaced_file" | "oversized_record" }
+>;
+
+const fileSummary: Record<
+  FileNotice["kind"],
+  [string, (n: FileNotice) => string]
+> = {
+  unreadable_file: [
+    "A Drive file could not be read",
+    (n) => `${n.path} was skipped · ${n.reason}`,
+  ],
+  replaced_file: [
+    "A Drive file was replaced",
+    (n) =>
+      `${n.path} could not be read and was replaced by this desktop's version · ${n.reason} · the earlier file is in Drive's version history`,
+  ],
+  oversized_record: [
+    "A record is too large to sync",
+    (n) => `${n.path} was not uploaded · ${n.reason} · shorten it to sync it`,
+  ],
+};
+
+/** A file notice opens the Ticket it belongs to when that Ticket is here. */
+function fromFileNotice(notice: FileNotice): SyncEntry {
+  const [title, summary] = fileSummary[notice.kind];
+  return {
+    id: notice.id,
+    timestamp: notice.timestamp,
+    read: notice.read,
+    reference: notice.ticket_reference ?? null,
+    title,
+    summary: summary(notice),
+    icon: "file",
+    file: true,
+  };
+}
+
 function fromNotice(notice: Notice): SyncEntry {
   const { id, timestamp, read } = notice;
-  const file = { id, timestamp, read, reference: null, icon: "file" as const };
-  if (notice.kind === "unreadable_file")
-    return {
-      ...file,
-      title: "A Drive file could not be read",
-      summary: `${notice.path} was skipped · ${notice.reason}`,
-    };
-  if (notice.kind === "replaced_file")
-    return {
-      ...file,
-      title: "A Drive file was replaced",
-      summary: `${notice.path} could not be read and was replaced by this desktop's version · ${notice.reason} · the earlier file is in Drive's version history`,
-    };
-  if (notice.kind === "oversized_record")
-    return {
-      ...file,
-      title: "A record is too large to sync",
-      summary: `${notice.path} was not uploaded · ${notice.reason} · shorten it to sync it`,
-    };
+  if (
+    notice.kind === "unreadable_file" ||
+    notice.kind === "replaced_file" ||
+    notice.kind === "oversized_record"
+  )
+    return fromFileNotice(notice);
   if (notice.kind === "parent_removed")
     return {
       id,
