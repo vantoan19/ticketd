@@ -62,6 +62,12 @@ export interface BridgeDeps {
   diagnostic: (text: string) => void;
   /** Runs `<executable> --version` and returns its output. Starts no session. */
   readClaudeVersion: (executable: string) => Promise<string>;
+  /**
+   * Settles once the host has taken what was written; SDK output is read no
+   * further meanwhile, so a slow host holds Claude Code back instead of the
+   * bridge buffering without bound.
+   */
+  writable: () => Promise<void>;
 }
 
 type Json = Record<string, unknown>;
@@ -787,6 +793,7 @@ export function createBridge(deps: BridgeDeps) {
           );
           unmapped(current, message);
         }
+        await deps.writable();
       }
       endSession(current, "output_ended", null);
     } catch (error) {

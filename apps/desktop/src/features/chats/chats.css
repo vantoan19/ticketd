@@ -474,6 +474,13 @@
   flex-direction: column;
   min-width: 0;
 }
+/* Turns out of view skip layout and paint; a long Chat holds hundreds. The
+   margin keeps focus rings unclipped. */
+.chat-turnpart {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 40px;
+  overflow-clip-margin: 8px;
+}
 .chat-fold + .chat-turn-rows {
   margin-top: 8px;
 }

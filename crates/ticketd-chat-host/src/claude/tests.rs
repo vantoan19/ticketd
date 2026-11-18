@@ -1486,3 +1486,74 @@ impl Provider for Bridge {
         self.peer.assert_nothing_written().await;
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn claude_code_s_version_is_asked_once_until_the_executable_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let claude = dir.path().join("claude");
+    std::fs::write(&claude, "v1").unwrap();
+    let path = claude.to_string_lossy().into_owned();
+    let hello = json!({"client": {"id": "c1", "cmd": "hello", "protocol": 1}});
+    let welcome = json!({"server": {"v": 1, "event": "hello", "id": "c1", "protocol": 1,
+        "sdk_version": "0.3.322", "sdk_claude_code_version": "2.1.322"}});
+    let inspect = |id: &str| {
+        [
+            json!({"client": {"id": id, "cmd": "inspect", "claude_executable": path}}),
+            json!({"server": {"v": 1, "event": "inspection", "id": id, "claude_executable": path,
+                "claude_version": "2.1.322", "sdk_version": "0.3.322",
+                "sdk_claude_code_version": "2.1.322", "pairing": "matched", "error": null}}),
+        ]
+    };
+    let open = |id: &str| {
+        [
+            json!({"client": {"id": id, "cmd": "open", "generation": 7, "cwd": "/work/chat-1",
+                "claude_executable": path}}),
+            json!({"server": {"v": 1, "event": "session_opened", "generation": 7, "id": id}}),
+            json!({"server": {"v": 1, "event": "session_initialized", "generation": 7,
+                "claude_code_version": "2.1.322"}}),
+        ]
+    };
+    let lines = |frames: Vec<Value>| {
+        frames
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let asked = lines(
+        [
+            vec![hello.clone(), welcome.clone()],
+            inspect("c2").into(),
+            open("c3").into(),
+        ]
+        .concat(),
+    );
+    let cached = lines([vec![hello, welcome], open("c2").into()].concat());
+    let options = Options::default();
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    let session = |fixture: String| {
+        let options = options.clone();
+        let (claude, request) = (claude.clone(), request.clone());
+        async move {
+            let (mut peer, io) = pipes();
+            peer.load(&fixture);
+            let (opened, ()) = tokio::join!(open_over(io, &request, &claude, options), peer.play());
+            assert!(opened.is_ok(), "the session opens: {:?}", opened.err());
+        }
+    };
+
+    session(asked.clone()).await;
+    session(cached).await;
+    // A replaced executable is asked again.
+    std::fs::write(&claude, "version 2").unwrap();
+    session(asked).await;
+}

@@ -234,10 +234,10 @@ fn watch_overview(app: &AppHandle) {
         let (mut seen, mut shown) = (None, None);
         let mut notifier = Notifier::default();
         // The first reading sets what is already there; nothing in it is announced.
-        if let Ok((overview, digest, rows)) = chats.overview_digest() {
-            shown = Some(digest);
-            set_badge(&app, overview.app_icon);
+        if let Ok((overview, rows, trashed)) = chats.overview_digest() {
             notify(&app, &chats, &mut notifier, &rows);
+            shown = Some((rows, trashed));
+            set_badge(&app, overview.app_icon);
         }
         loop {
             // A quiet window that ends is a reason to read again, like a change.
@@ -261,10 +261,11 @@ fn watch_overview(app: &AppHandle) {
                 continue;
             }
             seen = written;
-            let Ok((overview, digest, rows)) = chats.overview_digest() else {
+            let Ok((overview, rows, trashed)) = chats.overview_digest() else {
                 continue;
             };
             notify(&app, &chats, &mut notifier, &rows);
+            let digest = (rows, trashed);
             // Lists are fetched again on this event, so it fires only when a row or the
             // counts would read differently; a text checkpoint alone changes neither.
             if shown.as_ref() != Some(&digest) {
@@ -431,7 +432,8 @@ pub async fn chat_create(bridge: State<'_, ChatBridge>, input: NewChatInput) -> 
 }
 
 /// Attaches a view. Changes after the snapshot arrive on `changes` in order, numbered
-/// one apart from the snapshot's cursor; a `resync` entry is the last one.
+/// one apart from the snapshot's cursor, each update's as one array; a `resync` entry is
+/// the last one.
 #[tauri::command]
 pub async fn chat_open(
     bridge: State<'_, ChatBridge>,
@@ -481,6 +483,17 @@ pub async fn chat_files(
 #[tauri::command]
 pub async fn chat_linked_to(bridge: State<'_, ChatBridge>, link: LinkRef) -> Outcome<Vec<Summary>> {
     bridge.chats.linked_to(&link)
+}
+
+/// The whole output of one step, which views carry only the last lines of until its
+/// row opens.
+#[tauri::command(async)]
+pub fn chat_step_output(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    tool_id: String,
+) -> Outcome<Option<String>> {
+    bridge.chats.step_output(&chat_id, &tool_id)
 }
 
 #[tauri::command]

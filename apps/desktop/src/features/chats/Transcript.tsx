@@ -242,7 +242,7 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   );
 }
 
-function Response({
+const Response = memo(function Response({
   item,
   harness,
   readOnly,
@@ -280,7 +280,7 @@ function Response({
       )}
     </div>
   );
-}
+});
 
 /** The current time, ticking each second while `on`. */
 function useNow(on: boolean) {
@@ -351,9 +351,25 @@ function StepDetail({
   const words = stepWords(step);
   // Opened, a command shows exactly what ran.
   const command = step.kind === "run" ? step.command : undefined;
-  const { folder } = useContext(ChatFilesContext);
+  const { folder, output: readOutput } = useContext(ChatFilesContext);
   const [failure, setFailure] = useState("");
   const files = opensFiles(step);
+  // A step carries only its output's end; opened, it reads the whole of it.
+  const toolId = step.full_output?.tool_id;
+  const [whole, setWhole] = useState<{ toolId: string; text: string }>();
+  useEffect(() => {
+    if (!toolId || !readOutput) return;
+    let current = true;
+    readOutput(toolId).then(
+      (text) => current && text !== null && setWhole({ toolId, text }),
+      // The end it has stays shown.
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [toolId, readOutput]);
+  const output = whole && whole.toolId === toolId ? whole.text : step.output;
   // A command says where it ran: its own folder, or the Chat's.
   const detail =
     command && !step.folder && folder
@@ -362,7 +378,13 @@ function StepDetail({
   return (
     <div className="chat-steplist" id={command ? undefined : id}>
       {command ? (
-        <OutputBox id={id} command={command} output={step.output} />
+        // Remounted when the whole output arrives, so it opens at its last line again.
+        <OutputBox
+          key={output === step.output ? "end" : "whole"}
+          id={id}
+          command={command}
+          output={output}
+        />
       ) : targets.length > 2 ? (
         <ul>
           {targets.map((target, index) => (
@@ -387,9 +409,7 @@ function StepDetail({
           ))}
         </ul>
       ) : (
-        step.output && (
-          <pre className="chat-out">{plainOutput(step.output)}</pre>
-        )
+        output && <pre className="chat-out">{plainOutput(output)}</pre>
       )}
       {failure && (
         <p className="chat-fine" role="alert">
@@ -433,7 +453,7 @@ function RowLine({
  * counts from the host's start time. `decision` is the answered approval the step
  * waited on, shown as its tooltip and description.
  */
-export function StepRow({
+export const StepRow = memo(function StepRow({
   step,
   harness,
   decision,
@@ -594,7 +614,7 @@ export function StepRow({
       {open && <StepDetail id={id} step={step} harness={harness} />}
     </>
   );
-}
+});
 
 /** A record the agent changed, as a step row: verb first, the reference in mono. */
 function RecordStep({ change }: { change: RecordChange }) {
@@ -812,7 +832,7 @@ const toggles = new Map<string, boolean>();
  * person is reading in, or that holds focus, folds once it is out of view; a stop
  * that was not confirmed stays open.
  */
-function TurnView({
+const TurnView = memo(function TurnView({
   turn,
   chatId,
   harness,
@@ -994,7 +1014,7 @@ function TurnView({
       )}
     </>
   );
-}
+});
 
 function markerText(item: ItemOf<"marker">, harness: string) {
   const detail = item.message ? ` ${sentence(item.message)}` : "";
@@ -1288,8 +1308,19 @@ export function Transcript({
       ...(!missing && {
         open: (path: string) => client.openFile(chatId, path),
       }),
+      output: (toolId: string) => client.stepOutput(chatId, toolId),
     }),
     [client, chatId, folder, missing],
+  );
+  // Every chat change brings new arrays; the value moves only when the links
+  // read differently, so the rows reading them are not drawn again.
+  const linksKey = JSON.stringify({
+    links: chat.links,
+    trashed: chat.trashed_links,
+  });
+  const sentLinks = useMemo(
+    () => JSON.parse(linksKey) as { links: LinkedRecord[]; trashed: string[] },
+    [linksKey],
   );
   if (picked)
     return (
@@ -1323,7 +1354,6 @@ export function Transcript({
     );
   const parts = turns(items, chat);
   const live = !chat.catching_up;
-  const sentLinks = { links: chat.links, trashed: chat.trashed_links };
   const stepRuns = parts.some(
     (part) =>
       part.kind === "turn" &&

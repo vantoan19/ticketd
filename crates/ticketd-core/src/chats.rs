@@ -2418,6 +2418,32 @@ impl Workspace {
         })
     }
 
+    /// The Chats written after change `after`, each with its latest change: what an
+    /// overview reads again, leaving the other Chats as they were.
+    pub fn chats_changed_since(&self, after: i64) -> Result<Vec<(String, i64)>, Error> {
+        let mut statement = self.connection.prepare_cached(
+            "SELECT chat_id, MAX(sequence) FROM chat_changes WHERE sequence > ?1 GROUP BY chat_id",
+        )?;
+        let changed = statement
+            .query_map([after], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(changed)
+    }
+
+    /// The whole stored output of one of the Chat's tool calls; `None` when it has none
+    /// or the call is not the Chat's. Views carry only its last lines.
+    pub fn chat_tool_output(&self, chat_id: &str, tool_id: &str) -> Result<Option<String>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT output FROM chat_tools WHERE chat_id = ?1 AND id = ?2",
+                params![chat_id, tool_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     /// The latest change sequence across all Chats; it moves on every Chat write.
     pub fn chat_change_sequence(&self) -> Result<i64, Error> {
         head(&self.connection)

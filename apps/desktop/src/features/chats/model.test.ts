@@ -947,3 +947,37 @@ test("LIVE-9: the harness's warnings fold as one line per turn; a step waiting o
   expect(turn?.rows[0]).toMatchObject({ items: [{ id: "w1" }, { id: "w2" }] });
   expect(turn?.rows[0]?.kept).toBeFalsy();
 });
+
+test("streaming into the latest turn leaves every earlier turn the same object", () => {
+  const inTurn = (turnId: string, item: TranscriptItem): TranscriptItem => ({
+    ...item,
+    turn_id: turnId,
+  });
+  const items: TranscriptItem[] = [
+    you("u1", at),
+    inTurn("t1", did("s1", read("a.ts"))),
+    inTurn("t1", said("r1", "Done.")),
+    you("u2", at),
+    inTurn("t2", did("s2", read("b.ts"))),
+    {
+      id: "r2",
+      at: "",
+      kind: "response",
+      text: "Wor",
+      state: "streaming",
+      turn_id: "t2",
+    },
+  ];
+  const working = { activity: "working", problem: null } as const;
+  const before = turnsOf(turns(items, working));
+  const streamed = applyChange(
+    { chat: chatState({ id: "c1", title: "Limiter" }), items, cursor: 1 },
+    { seq: 2, kind: "text", item_id: "r2", text: "king" },
+  );
+  if (streamed === "resync") throw new Error("expected the change to apply");
+  const after = turnsOf(turns(streamed.items, working));
+  expect(after).toHaveLength(2);
+  expect(after[0]).toBe(before[0]);
+  expect(after[1]).not.toBe(before[1]);
+  expect(after[1]?.rows.at(-1)).toMatchObject({ item: { text: "Working" } });
+});

@@ -5,9 +5,9 @@
 //! write; they never read the protocol stream themselves.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -47,7 +47,13 @@ pub(super) struct Options {
     pub open_timeout: Duration,
     /// How long `close` waits for the bridge to exit after its input closes.
     pub close_timeout: Duration,
+    /// What `inspect` reported, shared by every bridge the adapter starts.
+    pub inspected: Inspected,
 }
+
+/// What `inspect` reported about an executable, by its path, size and modified time:
+/// running `claude --version` takes 130–210 ms, and a replaced file is asked again.
+pub(super) type Inspected = Arc<Mutex<HashMap<(PathBuf, u64, SystemTime), Value>>>;
 
 impl Default for Options {
     fn default() -> Self {
@@ -55,6 +61,7 @@ impl Default for Options {
             reply_timeout: Duration::from_secs(30),
             open_timeout: Duration::from_secs(90),
             close_timeout: ADAPTER_CLOSE_TIMEOUT,
+            inspected: Inspected::default(),
         }
     }
 }
@@ -314,9 +321,29 @@ impl Connection {
             CallOutcome::Event(hello) if hello["protocol"] == PROTOCOL => {}
             failure => return Err(self.startup_problem("hello", failure)),
         }
+        let key = std::fs::metadata(claude)
+            .ok()
+            .and_then(|file| Some((claude.to_owned(), file.len(), file.modified().ok()?)));
+        let inspected = || {
+            self.options
+                .inspected
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        if let Some(known) = key.as_ref().and_then(|key| inspected().get(key).cloned()) {
+            return Ok(known);
+        }
         let inspect = json!({"cmd": "inspect", "claude_executable": claude.to_string_lossy()});
         match self.call(|_| Ok((inspect, Kind::Plain))).await {
-            CallOutcome::Event(inspection) => Ok(inspection),
+            CallOutcome::Event(inspection) => {
+                // A version that could not be read is asked for again next time.
+                if let Some(key) = key
+                    && inspection["error"].is_null()
+                {
+                    inspected().insert(key, inspection.clone());
+                }
+                Ok(inspection)
+            }
             failure => Err(self.startup_problem("inspect", failure)),
         }
     }
