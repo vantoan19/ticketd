@@ -68,6 +68,27 @@ function useRead<T>(read: () => Promise<T>, what: string) {
   return [state, setState, reload] as const;
 }
 
+/** What the Debug logging row says, for each state its level can be in. */
+function debugDescription(level: Loaded<LogLevel>, current: LogLevel | null) {
+  if (level.status === "loading") {
+    return (
+      <span className="flex h-4 items-center">
+        <Skeleton className="h-2 w-70" />
+      </span>
+    );
+  }
+  if (level.status === "failed") return "The log level could not be read.";
+  if (current?.env_override != null) {
+    return (
+      <>
+        <code className="font-mono">TICKETD_LOG={current.env_override}</code>{" "}
+        sets the level for this launch, so this switch has no effect.
+      </>
+    );
+  }
+  return `Level: ${current?.level}. Records more detail until ticketd restarts.`;
+}
+
 function LogsSection() {
   const [level, setLevel, reload] = useRead(readLogLevel, "read the log level");
   const [pending, setPending] = useState<boolean | null>(null);
@@ -103,24 +124,7 @@ function LogsSection() {
           title="Debug logging"
           titleId="debug-logging-label"
           descriptionId="debug-logging-description"
-          description={
-            level.status === "loading" ? (
-              <span className="flex h-4 items-center">
-                <Skeleton className="h-2 w-70" />
-              </span>
-            ) : level.status === "failed" ? (
-              "The log level could not be read."
-            ) : overridden ? (
-              <>
-                <code className="font-mono">
-                  TICKETD_LOG={current?.env_override}
-                </code>{" "}
-                sets the level for this launch, so this switch has no effect.
-              </>
-            ) : (
-              `Level: ${current?.level}. Records more detail until ticketd restarts.`
-            )
-          }
+          description={debugDescription(level, current)}
           trailing={
             <Switch
               aria-labelledby="debug-logging-label"
@@ -133,7 +137,7 @@ function LogsSection() {
         />
         <SettingsRow
           title="Log files"
-          description="One file per day, kept for 7 days. They stay on this computer."
+          description="One file per day, and the oldest are removed automatically. They stay on this computer."
           trailing={
             <Button
               type="button"
@@ -293,9 +297,25 @@ function kindTitle(kind: string) {
   return kind.charAt(0).toUpperCase() + kind.slice(1);
 }
 
-/** The last segment of a module path: `ticketd_desktop_lib::sync_scheduler` is `sync_scheduler`. */
-function shortTarget(target: string) {
-  return target.split("::").pop() || target;
+/**
+ * The area of the app a log target belongs to, by the start of its module path. The
+ * first match wins; anything else is the app itself.
+ */
+const AREAS: ReadonlyArray<readonly [prefix: string, area: string]> = [
+  ["ticketd_desktop_lib::sync", "Workspace sync"],
+  ["ticketd_core::sync", "Workspace sync"],
+  ["ticketd_desktop_lib::automation", "Automations"],
+  ["ticketd_automation_runner", "Automations"],
+  ["ticketd_core::automation", "Automations"],
+  ["ticketd_desktop_lib::chat", "Chats"],
+  ["ticketd_chat_host", "Chats"],
+  ["ticketd_core::chat", "Chats"],
+  ["ticketd_core::source", "Sources"],
+  ["ticketd_core::inbox", "Reminders"],
+];
+
+function areaOf(target: string) {
+  return AREAS.find(([prefix]) => target.startsWith(prefix))?.[1] ?? "App";
 }
 
 function RecentErrorsSection() {
@@ -338,7 +358,7 @@ function RecentErrorsSection() {
               key={`${group.target}:${group.kind}`}
               role="listitem"
               title={kindTitle(group.kind)}
-              description={`${group.level === "ERROR" ? "Error" : "Warning"} in ${shortTarget(group.target)}`}
+              description={`${group.level === "ERROR" ? "Error" : "Warning"} in ${areaOf(group.target)}`}
               trailing={
                 <span className="text-xs leading-4 whitespace-nowrap text-muted-foreground tabular-nums">
                   {plural(group.count, "time")}, last{" "}

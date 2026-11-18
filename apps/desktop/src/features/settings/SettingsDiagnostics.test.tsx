@@ -335,7 +335,7 @@ test("Recent errors lists each kind with how often and when it last happened", a
       level: "WARN",
     }),
     group({
-      target: "webview",
+      target: "ticketd::webview",
       kind: "TypeError",
       level: "ERROR",
       count: 12,
@@ -347,14 +347,33 @@ test("Recent errors lists each kind with how often and when it last happened", a
   const rows = within(list).getAllByRole("listitem");
   expect(rows).toHaveLength(3);
   expect(rows[0]?.textContent).toContain("Sync pass failed");
-  expect(rows[0]?.textContent).toContain("Warning in sync_scheduler");
+  expect(rows[0]?.textContent).toContain("Warning in Workspace sync");
   expect(rows[0]?.textContent).toContain("3 times, last");
   expect(rows[1]?.textContent).toContain("Previous session ended unexpectedly");
+  expect(rows[1]?.textContent).toContain("Warning in App");
   expect(rows[1]?.textContent).toContain("1 time, last");
   expect(rows[2]?.textContent).toContain("TypeError");
-  expect(rows[2]?.textContent).toContain("Error in webview");
+  expect(rows[2]?.textContent).toContain("Error in App");
   expect(rows[2]?.textContent).toContain("12 times, last");
   expect(screen.queryByText("No recent errors")).toBeNull();
+});
+
+test("Recent errors names the area of the app, not the module", async () => {
+  errors = [
+    "ticketd_desktop_lib::sync_scheduler",
+    "ticketd_automation_runner",
+    "ticketd_chat_host::supervisor",
+    "ticketd_core::source::tracking",
+    "ticketd_core::inbox",
+  ].map((target, index) => group({ target, kind: `kind ${index}` }));
+  answer();
+  await renderPage();
+  const list = screen.getByRole("list", { name: "Recent errors" });
+  const rows = within(list).getAllByRole("listitem");
+  ["Workspace sync", "Automations", "Chats", "Sources", "Reminders"].forEach(
+    (area, index) =>
+      expect(rows[index]?.textContent).toContain(`Warning in ${area}`),
+  );
 });
 
 test("Recent errors shows only the five most recent kinds", async () => {

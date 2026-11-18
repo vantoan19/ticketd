@@ -273,7 +273,8 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Log files",
-    description: "One file per day, kept for 7 days. Open the logs folder.",
+    description:
+      "One file per day, and the oldest are removed automatically. Open the logs folder.",
     keywords: "diagnostics logs folder open finder",
     section: "diagnostics",
   },
