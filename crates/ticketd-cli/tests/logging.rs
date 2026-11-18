@@ -50,6 +50,7 @@ fn a_failing_command_keeps_its_error_line_and_adds_no_log_line_by_default() {
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
 }
 
+#[allow(clippy::unwrap_used)]
 fn run_with_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ticketd"));
     command
