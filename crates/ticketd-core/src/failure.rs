@@ -161,6 +161,7 @@ impl Error {
             | Self::ExternalContent { .. }
             | Self::ExternalStatus { .. }
             | Self::NotSynchronized(_)
+            | Self::AlreadyLocal(_)
             | Self::SourceAvailable { .. }
             | Self::Source(_)
             | Self::Publication(_)

@@ -1842,9 +1842,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     failure.code,
                     failure.message,
                     if failure.code == "unauthenticated" {
-                        TOKEN_HINT
+                        format!(" {}", token_hint())
                     } else {
-                        ""
+                        String::new()
                     }
                 )
                 .into());
@@ -1995,10 +1995,29 @@ fn source_command(
                 .unwrap_or_default());
         }
         let schema = engine.descriptor(provider)?.schema;
-        let mut values = match read_content(None, settings.config_file)? {
-            Some(text) => match serde_json::from_str(&text)? {
-                serde_json::Value::Object(values) => values,
-                _ => return Err("the configuration file must hold a JSON object".into()),
+        // Name the file in every failure, so a script knows which option caused it.
+        let file = settings.config_file.clone().unwrap_or_default();
+        let name = if file == "-" { "standard input" } else { &file };
+        let text = match read_content(None, settings.config_file) {
+            Ok(text) => text,
+            Err(error) => {
+                return Err(format!("could not read the --config-file {name}: {error}").into());
+            }
+        };
+        let mut values = match text {
+            Some(text) => match serde_json::from_str(&text) {
+                Ok(serde_json::Value::Object(values)) => values,
+                Ok(_) => {
+                    return Err(format!(
+                        "the --config-file {name} must hold a JSON object of settings"
+                    )
+                    .into());
+                }
+                Err(error) => {
+                    return Err(
+                        format!("the --config-file {name} is not valid JSON: {error}").into(),
+                    );
+                }
             },
             None => ConfigValues::new(),
         };
@@ -2060,9 +2079,10 @@ fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
     Err("refresh and publish are handled before source configuration commands".into())
 }
 
-/// The command line's own way to sign in; the desktop app's guidance leaves it out.
-const TOKEN_HINT: &str =
-    " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
+/// The command line's own way to sign in; the desktop app has its own guidance.
+fn token_hint() -> &'static str {
+    ticketd_core::source::SourceError::sign_in_hint(ticketd_core::source::Surface::Terminal)
+}
 
 fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
@@ -2074,8 +2094,11 @@ fn main() {
                 Some(SourceError::Unauthenticated(_))
             ),
         };
-        let hint = if unauthenticated { TOKEN_HINT } else { "" };
-        eprintln!("error: {error}{hint}");
+        if unauthenticated {
+            eprintln!("error: {error} {}", token_hint());
+        } else {
+            eprintln!("error: {error}");
+        }
         std::process::exit(1);
     }
 }

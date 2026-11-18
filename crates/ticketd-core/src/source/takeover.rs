@@ -36,7 +36,7 @@ impl Workspace {
                 |row| row.get(0),
             )?;
             if !linked {
-                return Err(Error::NotSynchronized(reference.to_owned()));
+                return Err(Error::AlreadyLocal(reference.to_owned()));
             }
             if let Authority::External { provider, .. } = authority(transaction, &id)? {
                 let failure: Option<String> = transaction

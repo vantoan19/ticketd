@@ -346,6 +346,8 @@ pub enum Error {
     },
     #[error("{0} is not owned by an external source, so there is nothing to refresh")]
     NotSynchronized(String),
+    #[error("{0} is already a local ticket, so there is nothing to take over")]
+    AlreadyLocal(String),
     #[error(
         "{reference} can still be read from {provider}, so ticketd cannot take ownership of it; refresh it or retry later"
     )]
