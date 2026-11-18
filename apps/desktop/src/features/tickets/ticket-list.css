@@ -417,7 +417,9 @@
   background: transparent;
 }
 .ticket-rows:empty {
-  display: none;
+  /* Keep closing padding in flow after the last row leaves, without exposing
+     an empty list to assistive technology. */
+  visibility: hidden;
 }
 .ticket-rows [data-slot="glide"] {
   background: var(--accent);

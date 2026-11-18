@@ -238,7 +238,7 @@ test("the list's own spacing closes with its last rows", async () => {
 });
 
 test.each([false, true])(
-  "the empty list closes its padding with pane overlays (bulk bar: %s)",
+  "the empty list closes its padding without removing its box (bulk bar: %s)",
   async (bulkBar) => {
     const css = readFileSync(
       join(__dirname, "ticket-list.css"),
@@ -266,6 +266,14 @@ test.each([false, true])(
     const style = getComputedStyle(rows);
     expect(style.paddingBottom).toBe("0px");
     expect(style.paddingTop).toBe("0px");
+    await testbed.advance(SETTLED_MS);
+    expect(rows.childElementCount).toBe(0);
+    // jsdom does not interpolate padding. Keeping the box after the rows leave
+    // lets that CSS transition finish in a browser, without exposing an empty
+    // list to assistive technology.
+    expect(getComputedStyle(rows).display).not.toBe("none");
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.getByText("No tickets match")).toBeTruthy();
   },
 );
 
