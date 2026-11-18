@@ -115,6 +115,11 @@
 .chat-dock-slot {
   transition: height var(--spring-smooth-t) var(--spring-smooth);
 }
+/* A Space inside is animating its own height: the slot is that height, not a
+   spring after it. */
+.chat-dock-slot[data-following] {
+  transition: none;
+}
 .chat-you {
   border-radius: var(--radius-panel) var(--radius-panel) var(--radius-segment)
     var(--radius-panel);
@@ -222,11 +227,11 @@ button.chat-steps:hover {
   }
 }
 .chat-chunk {
-  animation: chat-soft-in var(--dur-enter) var(--ease-out) both;
+  animation: chat-soft-in var(--dur-enter) var(--ease-out);
 }
 /* A Chat that starts needing you: its dot arrives, then the words crossfade. */
 .chat-status[data-arrived] > [data-slot="status-dot"] {
-  animation: chat-soft-in var(--dur-enter) var(--ease-out) both;
+  animation: chat-soft-in var(--dur-enter) var(--ease-out);
 }
 .chat-fold[data-fresh] {
   animation: chat-fade-in var(--dur-lift) var(--ease-out);
@@ -530,6 +535,11 @@ button.chat-file-name:focus-visible {
 .chat-queue-card:hover,
 .chat-queue-card:focus-within {
   background: var(--accent);
+}
+/* Leaving: no fill and no pointer while its space closes. */
+.chat-queue-card[data-leaving] {
+  background: none;
+  pointer-events: none;
 }
 @media (forced-colors: active) {
   .chat-tray,
