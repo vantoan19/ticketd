@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
@@ -216,6 +218,37 @@ test("the empty state fades up once the last row is gone", async () => {
   await frames();
   await testbed.advance(SETTLED_MS);
   expect(state.style.opacity).toBe("1");
+});
+
+// The list's own spacing (its top and bottom padding) closes with the rows, so
+// the empty state settles where it ends instead of snapping up when the list,
+// holding only that spacing, is taken out.
+test("the list's own spacing closes with its last rows", async () => {
+  const { container, rerender } = render(
+    <List tickets={[ticket(1), ticket(2)]} empty="No tickets match" />,
+  );
+  const rows = container.querySelector(".ticket-rows")!;
+  expect(rows.hasAttribute("data-empty")).toBe(false);
+  rerender(<List tickets={[]} empty="No tickets match" />);
+  // The rows are still fading out, and the spacing is already closing.
+  expect(screen.queryByText("Ticket 1")).not.toBeNull();
+  expect(rows.hasAttribute("data-empty")).toBe(true);
+  rerender(<List tickets={[ticket(1)]} empty="No tickets match" />);
+  expect(rows.hasAttribute("data-empty")).toBe(false);
+});
+
+test("the stylesheet closes the list's padding on the smooth spring when it empties", () => {
+  const css = readFileSync(join(__dirname, "ticket-list.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const rule = (selector: string) =>
+    css.split("}").find((block) => block.trim().startsWith(selector + " {")) ??
+    "";
+  expect(rule(".ticket-rows")).toContain(
+    "transition: padding var(--spring-smooth-t) var(--spring-smooth)",
+  );
+  expect(rule(".ticket-rows[data-empty]")).toContain("padding-block: 0");
 });
 
 test("an empty list shows its empty state at once, without fading in", () => {

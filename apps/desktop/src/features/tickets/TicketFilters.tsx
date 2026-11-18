@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { FilterChip } from "@/components/ui/badge";
 import { Expand } from "@/components/ui/motion";
+import { useHeldExpand } from "@/components/ui/use-held-expand";
 import { PaneHeaderButton } from "@/components/ui/list-header";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
@@ -554,6 +555,10 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
     ...chips,
   ];
   const open = current.length > 0;
+  // The row mounts closed and opens a frame later: applying a filter redraws
+  // the list in this same task, and a row opening in that frame is late on its
+  // own clock and arrives already most of the way open (a 44px jump).
+  const { expanded } = useHeldExpand(open);
   // The chips last shown, kept while the row closes and until it is gone.
   const [held, setHeld] = useState(current);
   if (open && held !== current && !sameChips(held, current)) setHeld(current);
@@ -619,7 +624,7 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
       ?.focus({ preventScroll: true });
   }
   return (
-    <Expand open={open}>
+    <Expand open={expanded}>
       {all.length > 0 && (
         <div
           ref={row}
