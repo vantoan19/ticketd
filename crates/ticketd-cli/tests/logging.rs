@@ -40,6 +40,22 @@ fn ticketd_log_adds_detail_on_stderr_and_leaves_stdout_byte_identical() {
 }
 
 #[test]
+fn a_ticketd_log_that_does_not_parse_is_ignored_with_one_notice_that_does_not_echo_it() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(run(dir.path(), &["create", "First"], None).status.success());
+
+    let quiet = run(dir.path(), &["list"], None);
+    let ignored = run(dir.path(), &["list"], Some("ticketd=loudly"));
+
+    assert!(ignored.status.success());
+    assert_eq!(quiet.stdout, ignored.stdout);
+    let stderr = String::from_utf8_lossy(&ignored.stderr);
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.contains("TICKETD_LOG ignored"), "{stderr}");
+    assert!(!stderr.contains("loudly"), "{stderr}");
+}
+
+#[test]
 fn a_failing_command_keeps_its_error_line_and_adds_no_log_line_by_default() {
     let dir = tempfile::tempdir().unwrap();
     let output = run(dir.path(), &["show", "NOPE-1"], None);

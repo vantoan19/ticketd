@@ -195,6 +195,42 @@ fn the_level_reports_the_default_debug_and_the_environment_override() {
 }
 
 #[test]
+fn a_filter_that_does_not_parse_is_not_an_override_and_is_reported_once_without_its_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = DesktopLogs::open(
+        dir.path(),
+        Config {
+            filter_override: Some("ticketd=loudly".into()),
+            ..Config::default()
+        },
+    );
+
+    // The normal switch: no override, and Debug logging does something.
+    assert_eq!(logs.log_level().env_override, None);
+    logs.with_default(|| {
+        logs.set_debug(true);
+        tracing::debug!(target: "ticketd_core::sync", "now visible");
+    });
+    let level = logs.log_level();
+    assert_eq!((level.level.as_str(), level.debug), ("debug", true));
+
+    let lines = lines(&log_files(dir.path())[0]);
+    let notices: Vec<_> = lines
+        .iter()
+        .filter(|line| line["message"] == "TICKETD_LOG ignored")
+        .collect();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0]["level"], "WARN");
+    assert_eq!(notices[0]["length"], 14);
+    assert!(
+        !fs::read_to_string(&log_files(dir.path())[0])
+            .unwrap()
+            .contains("loudly")
+    );
+    assert!(lines.iter().any(|line| line["message"] == "now visible"));
+}
+
+#[test]
 fn the_logs_folder_is_the_one_the_files_are_written_to() {
     let dir = tempfile::tempdir().unwrap();
     let logs = open(dir.path());

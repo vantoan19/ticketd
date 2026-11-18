@@ -35,16 +35,19 @@ pub const FILTER_VARIABLE: &str = "TICKETD_LOG";
 /// says otherwise. Never writes a file, and never touches stdout.
 pub fn init_cli() {
     install_panic_hook();
-    let filter = filter(std::env::var(FILTER_VARIABLE).ok().as_deref(), "warn");
-    let subscriber = Registry::default().with(filter).with(
-        fmt::layer()
-            .compact()
-            .without_time()
-            .with_ansi(false)
-            .with_writer(std::io::stderr),
-    );
+    let requested = Requested::of(std::env::var(FILTER_VARIABLE).ok().as_deref());
+    let subscriber = Registry::default()
+        .with(filter(requested.filter(), "warn"))
+        .with(
+            fmt::layer()
+                .compact()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(std::io::stderr),
+        );
     let _ = tracing_log::LogTracer::init();
     let _ = tracing::subscriber::set_global_default(subscriber);
+    requested.report_if_invalid();
 }
 
 /// Installs the desktop's subscriber and returns the handle that controls it. If `log_dir`
@@ -54,9 +57,7 @@ pub fn init_desktop(log_dir: impl AsRef<Path>) -> DesktopLogs {
         log_dir,
         Config {
             stderr: cfg!(debug_assertions),
-            filter_override: std::env::var(FILTER_VARIABLE)
-                .ok()
-                .filter(|spec| !spec.trim().is_empty()),
+            filter_override: std::env::var(FILTER_VARIABLE).ok(),
             ..Config::default()
         },
     );
@@ -97,10 +98,47 @@ pub fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// `spec` as a filter, or `default` when it is missing, blank or not a valid filter.
+/// What `TICKETD_LOG` asked for.
+enum Requested {
+    /// Not set, or blank.
+    Nothing,
+    /// A filter that parses; it replaces the default.
+    Filter(String),
+    /// A value that is not a filter. It is ignored and reported, by its length only: the
+    /// text is whatever the person typed.
+    Invalid { length: usize },
+}
+
+impl Requested {
+    fn of(spec: Option<&str>) -> Self {
+        match spec.map(str::trim).filter(|spec| !spec.is_empty()) {
+            None => Self::Nothing,
+            Some(spec) if EnvFilter::try_new(spec).is_ok() => Self::Filter(spec.to_string()),
+            Some(spec) => Self::Invalid {
+                length: spec.chars().count(),
+            },
+        }
+    }
+
+    /// The filter to override the default with, if there is one.
+    fn filter(&self) -> Option<&str> {
+        match self {
+            Self::Filter(spec) => Some(spec),
+            _ => None,
+        }
+    }
+
+    /// Says once that the value was ignored.
+    fn report_if_invalid(&self) {
+        if let Self::Invalid { length } = self {
+            tracing::warn!(length, reason = "not a valid filter", "TICKETD_LOG ignored");
+        }
+    }
+}
+
+/// `spec` as a filter, or `default` when there is none.
 fn filter(spec: Option<&str>, default: &str) -> EnvFilter {
-    spec.filter(|spec| !spec.trim().is_empty())
-        .and_then(|spec| EnvFilter::try_new(spec).ok())
+    spec.and_then(|spec| EnvFilter::try_new(spec).ok())
         .unwrap_or_else(|| EnvFilter::new(default))
 }
 

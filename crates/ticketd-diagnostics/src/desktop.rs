@@ -16,7 +16,7 @@ use crate::crash::{SessionMarker, UncleanExit};
 use crate::errors::{self, ErrorGroup};
 use crate::export::{self, Export, Facts};
 use crate::sink::{Limits, Sink, SinkWriter};
-use crate::{Timestamp, filter};
+use crate::{Requested, Timestamp, filter};
 
 /// The level while Debug logging is off: our crates at `info`, everything else at `warn`.
 /// A target is matched by prefix, so `ticketd` covers `ticketd_core`, `ticketd_desktop_lib`
@@ -103,10 +103,13 @@ impl DesktopLogs {
             }
             None => (None, None),
         };
-        let pinned = config.filter_override.is_some();
-        let override_spec = config.filter_override.clone();
+        // A value that is not a filter is no override: the default applies and the switch
+        // works, and one notice says so.
+        let requested = Requested::of(config.filter_override.as_deref());
+        let override_spec = requested.filter().map(str::to_string);
+        let pinned = override_spec.is_some();
         let (filter_layer, filter) =
-            reload::Layer::new(filter(config.filter_override.as_deref(), DEFAULT_FILTER));
+            reload::Layer::new(filter(override_spec.as_deref(), DEFAULT_FILTER));
         let file = sink.map(|sink| {
             fmt::layer()
                 .json()
@@ -140,6 +143,7 @@ impl DesktopLogs {
             max_export_bytes: config.max_export_bytes,
             dir: dir.as_ref().to_path_buf(),
         };
+        logs.with_default(|| requested.report_if_invalid());
         if let Some(exit) = &logs.unclean_exit {
             let started_at = exit
                 .started_at
