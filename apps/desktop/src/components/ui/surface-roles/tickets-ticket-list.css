@@ -59,8 +59,10 @@
     transition: opacity var(--dur-3) var(--ease-out);
   }
 }
+/* No fill after the pop: a finished animation that still holds the checkbox's
+   opacity stops it fading out when the selection is cleared. */
 .ticket-rows input[type="checkbox"]:checked {
-  animation: ticket-check-in var(--spring-glide-t) var(--spring-glide) both;
+  animation: ticket-check-in var(--spring-glide-t) var(--spring-glide);
 }
 @keyframes ticket-check-in {
   from {
