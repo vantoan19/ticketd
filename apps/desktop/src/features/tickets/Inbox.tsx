@@ -567,6 +567,11 @@ function InboxContent({
         !(sync.entries.find((current) => current.id === e.id)?.read ?? e.read),
     )
     .map((e) => e.id);
+  // A conflict still waiting for review needs you as much as an approval does,
+  // even though it is listed under Updates.
+  const unreadConflicts = syncShown.some(
+    (e) => e.conflict && unreadSync.includes(e.id),
+  );
   const unreadApprovals = projection.approvals.filter(
     (chat) =>
       attention.chats.find((current) => current.id === chat.id)?.status
@@ -824,37 +829,40 @@ function InboxContent({
         {error && (
           <FailureAlert size="compact" failure={error} onRetry={reload} />
         )}
-        {!loading && !error && projection.needsCount === 0 && (
-          <EmptyState
-            icon={<CheckCheck />}
-            title={emptyCopy("inbox-caught-up").title}
-            description={emptyCopy("inbox-caught-up").sentence}
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const allPages = Math.max(
-                    1,
-                    Math.ceil(updates.length / PAGE_SIZE),
-                  );
-                  if (pages < allPages) {
-                    revealingRead.current = true;
-                    setPages(allPages);
-                  } else {
-                    body.current
-                      ?.querySelector<HTMLElement>(
-                        '[data-read="true"] .inbox-ticket',
-                      )
-                      ?.focus();
-                  }
-                }}
-              >
-                {emptyCopy("inbox-caught-up").action}
-              </Button>
-            }
-          />
-        )}
+        {!loading &&
+          !error &&
+          projection.needsCount === 0 &&
+          !unreadConflicts && (
+            <EmptyState
+              icon={<CheckCheck />}
+              title={emptyCopy("inbox-caught-up").title}
+              description={emptyCopy("inbox-caught-up").sentence}
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const allPages = Math.max(
+                      1,
+                      Math.ceil(updates.length / PAGE_SIZE),
+                    );
+                    if (pages < allPages) {
+                      revealingRead.current = true;
+                      setPages(allPages);
+                    } else {
+                      body.current
+                        ?.querySelector<HTMLElement>(
+                          '[data-read="true"] .inbox-ticket',
+                        )
+                        ?.focus();
+                    }
+                  }}
+                >
+                  {emptyCopy("inbox-caught-up").action}
+                </Button>
+              }
+            />
+          )}
         {groups.map(([group, items]) => (
           <section key={group} aria-labelledby={`inbox-group-${group}`}>
             <h2 id={`inbox-group-${group}`} data-sticky-group-heading>
