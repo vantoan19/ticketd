@@ -1914,6 +1914,10 @@ html[data-window-bar] {
   padding: 0 12px;
   /* Labels clip as the sidebar narrows to the rail. */
   overflow-x: clip;
+  /* The width is the clock for what the rail drops: see the container rule
+     below. The width is fixed, so nothing inside sizes it. */
+  container-name: sidebar;
+  container-type: inline-size;
   background: var(--background);
   color: var(--foreground);
   /* Collapsing and expanding glide on the smooth spring (section 12). Only the
@@ -2035,14 +2039,18 @@ html[data-window-bar] {
   line-height: var(--text-caption-line);
 }
 /* What the rail drops fades with a slight blur: out first, in once the width
-   has arrived. The elements stay in the row and the narrowing clips them. */
+   has arrived. The elements stay in the row and the narrowing clips them. The
+   fade back in has no delay of its own: it starts when the container rule
+   below stops holding the elements hidden. */
 .sidebar-label,
 .sidebar-wordmark,
+.sidebar-heading,
+.sidebar-count,
 .ui-button-jump > span,
 .ui-button-jump kbd {
   transition:
-    opacity var(--dur-enter) var(--ease-out) var(--dur-4),
-    filter var(--dur-enter) var(--ease-out) var(--dur-4);
+    opacity var(--dur-enter) var(--ease-out),
+    filter var(--dur-enter) var(--ease-out);
 }
 .sidebar[data-collapsed] :is(.sidebar-label, .sidebar-wordmark),
 .sidebar[data-collapsed] .ui-button-jump > span,
@@ -2056,6 +2064,26 @@ html[data-window-bar] {
 }
 .ui-button-jump kbd {
   margin-left: auto;
+}
+/* Expanding: the width first, then these fade back in. They stay hidden, at
+   once, until the sidebar is nearly open; the width itself is the clock, so a
+   busy main thread cannot let them run ahead of it (a timed delay did, and
+   labels showed beside the 56px rail). Elements that mount as the rail opens
+   (the Context heading, a count) start hidden the same way. */
+@container sidebar (max-width: 184px) {
+  .sidebar:not([data-collapsed])
+    :is(
+      .sidebar-label,
+      .sidebar-wordmark,
+      .sidebar-heading,
+      .sidebar-count,
+      .ui-button-jump > span,
+      .ui-button-jump kbd
+    ) {
+    opacity: 0;
+    filter: blur(var(--motion-blur-out));
+    transition: none;
+  }
 }
 /* Settings and Trash sit at explicit places, like the top row, so the rail's
    column and the row's pair are one transition on the smooth spring. */

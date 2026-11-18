@@ -2,7 +2,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useRef } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BandSlot } from "@/app/WorkspaceBand";
 import { useResultCascade } from "@/app/use-result-cascade";
@@ -237,4 +243,87 @@ it("the rail's footer buttons glide between the row and the column", () => {
   expect(styles).toMatch(
     /\.sidebar\[data-collapsed\] \.sidebar-footer-actions > button:last-child \{[^}]*top: var\(--header-control-height\)/,
   );
+});
+
+// Expanding the rail (DESIGN.md section 12): the width opens first, then the
+// labels fade back in. The labels must be the same elements that faded out, or
+// a fresh label mounts at full opacity beside the 56px rail.
+
+function Rail({ open }: { open: boolean }) {
+  return (
+    <SidebarProvider open={open}>
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton tooltip="Inbox">
+            <span className="sidebar-label">Inbox</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </SidebarProvider>
+  );
+}
+
+it("folding and unfolding the rail keeps each row and its label in place", () => {
+  const { rerender } = render(<Rail open />);
+  const button = screen.getByRole("button", { name: "Inbox" });
+  const label = screen.getByText("Inbox");
+  rerender(<Rail open={false} />);
+  expect(screen.getByRole("button", { name: "Inbox" })).toBe(button);
+  expect(screen.getByText("Inbox")).toBe(label);
+  rerender(<Rail open />);
+  expect(screen.getByRole("button", { name: "Inbox" })).toBe(button);
+  expect(screen.getByText("Inbox")).toBe(label);
+});
+
+it("the row's name is a label only on the folded rail, so Escape reaches the page", () => {
+  let escapes = 0;
+  render(
+    <div
+      onKeyDown={(event) => {
+        if (event.key === "Escape") escapes += 1;
+      }}
+    >
+      <Rail open />
+    </div>,
+  );
+  const button = screen.getByRole("button", { name: "Inbox" });
+  fireEvent.keyDown(document.body, { key: "Tab" });
+  act(() => button.focus());
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  fireEvent.keyDown(button, { key: "Escape" });
+  expect(escapes).toBe(1);
+});
+
+const css = styles.replace(/\/\*[\s\S]*?\*\//g, "");
+
+it("what the rail drops stays hidden until the width has opened", () => {
+  // The width is the one clock: a label returns when the sidebar is wide,
+  // however busy the main thread was while the width ran.
+  expect(css).toMatch(/\.sidebar\s*\{[^}]*container-type:\s*inline-size/);
+  const narrow = css.match(
+    /@container sidebar \(max-width: (\d+)px\)\s*\{([\s\S]*?)\n\}/,
+  );
+  expect(narrow).not.toBeNull();
+  const [, width, rules] = narrow ?? [];
+  expect(Number(width)).toBeGreaterThan(56);
+  expect(Number(width)).toBeLessThan(232);
+  for (const part of [
+    ".sidebar-label",
+    ".sidebar-wordmark",
+    ".sidebar-heading",
+    ".sidebar-count",
+    ".ui-button-jump > span",
+    ".ui-button-jump kbd",
+  ])
+    expect(rules).toContain(part);
+  expect(rules).toMatch(/\.sidebar:not\(\[data-collapsed\]\)/);
+  expect(rules).toMatch(/opacity:\s*0/);
+  // Hidden at once; the fade back starts as the rule stops matching.
+  expect(rules).toMatch(/transition:\s*none/);
+});
+
+it("the labels fade back in with no delay of their own", () => {
+  const rule = css.match(/\.sidebar-label,\s*\.sidebar-wordmark[^{]*\{([^}]*)\}/);
+  expect(rule?.[1]).toMatch(/transition:/);
+  expect(rule?.[1]).not.toMatch(/var\(--dur-4\)/);
 });

@@ -506,8 +506,8 @@ function SidebarMenuButton({
   asChild?: boolean;
   isActive?: boolean;
   /**
-   * The row's name on the folded rail. It is rendered only while the rail is
-   * folded on desktop: a mounted but hidden tooltip would catch Escape.
+   * The row's name on the folded rail. It opens only while the rail is folded
+   * on desktop; a closed tooltip mounts no layer, so it cannot catch Escape.
    */
   tooltip?: string;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
@@ -530,16 +530,23 @@ function SidebarMenuButton({
   // beside the button, not inside it: the button clips its text, and a clipped
   // highlight would only appear once it had arrived.
   const highlight = isActive && !asChild && <Glide id="sidebar-highlight" />;
-  if (!tooltip || state !== "collapsed" || isMobile)
+  if (!tooltip)
     return (
       <>
         {button}
         {highlight}
       </>
     );
+  // The Tooltip stays around the button whether or not the rail is folded, and
+  // is only held shut while it is not: wrapping and unwrapping would remount the
+  // row, and its label would come back at full opacity instead of fading in.
   return (
     <>
-      <Tooltip content={tooltip} side="right">
+      <Tooltip
+        content={tooltip}
+        side="right"
+        disabled={state !== "collapsed" || isMobile}
+      >
         {button}
       </Tooltip>
       {highlight}

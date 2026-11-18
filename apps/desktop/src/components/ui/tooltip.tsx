@@ -188,7 +188,7 @@ function Tooltip({
       data-slot="tooltip"
       open={open && !disabled && (!overflowOnly || cut)}
       onOpenChange={(next) => {
-        if (next && coveredByOverlay(trigger.current)) return;
+        if (next && (disabled || coveredByOverlay(trigger.current))) return;
         setOpen(next);
       }}
     >
