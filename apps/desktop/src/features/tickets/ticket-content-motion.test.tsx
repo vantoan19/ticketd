@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -231,4 +233,12 @@ test("a removed linked ticket fades out in its own time", async () => {
   expect(screen.queryByText("T-BBB")).not.toBeNull();
   expect(await presentAfter("T-BBB", EXIT_MS - 10)).toBe(true);
   expect(await presentAfter("T-BBB", 20)).toBe(false);
+});
+
+test("the gap a pill closes with its width is the gap the row sets between pills", () => {
+  // TagPills opens and closes 4px of margin with each pill; properties.css
+  // owns the 4px, and jsdom has no cascade to say so.
+  const css = readFileSync(join(__dirname, "properties.css"), "utf8");
+  const row = /\.rail-tags\s*\{([^}]*)\}/.exec(css);
+  expect(row?.[1]).toMatch(/gap:\s*4px/);
 });
