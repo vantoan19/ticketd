@@ -134,7 +134,7 @@ class FakeQuery {
   }
 }
 
-function harness() {
+function harness(writable: () => Promise<void> = async () => {}) {
   const events: BridgeEvent[] = [];
   const queries: FakeQuery[] = [];
   const query: QueryFn = ({ prompt, options }) => {
@@ -147,6 +147,7 @@ function harness() {
     emit: (event) => events.push(event),
     diagnostic: () => {},
     readClaudeVersion: async () => "2.1.322 (Claude Code)",
+    writable,
   });
   let nextId = 0;
   const send = async (command: Record<string, unknown>) => {
@@ -1267,5 +1268,31 @@ describe("reasoning, files, context and settings", () => {
         .map((event) => ("outcome" in event ? event.outcome : event.event)),
     ).toEqual(["applied", "applied", "applied", "command_rejected", "refused"]);
     expect(h.named("setting_result").at(-1)?.message).toBe("unknown model");
+  });
+});
+
+describe("output backpressure", () => {
+  it("reads no further SDK output until the host has taken what was written", async () => {
+    let drain = () => {};
+    let full = false;
+    const h = harness(() =>
+      full ? new Promise((resolve) => (drain = resolve)) : Promise.resolve(),
+    );
+    const fake = await h.open();
+    full = true;
+    const boundary = {
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 1 },
+    };
+    fake.push(boundary);
+    fake.push(boundary);
+    await settle();
+    expect(h.named("compacted")).toHaveLength(1);
+
+    full = false;
+    drain();
+    await settle();
+    expect(h.named("compacted")).toHaveLength(2);
   });
 });
