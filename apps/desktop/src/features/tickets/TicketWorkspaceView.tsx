@@ -28,6 +28,7 @@ import {
   usePaneMotion,
   type PaneMode,
 } from "@/features/tickets/use-pane-motion";
+import { usePaneWidths } from "@/features/tickets/use-pane-widths";
 import "@/features/tickets/ticket-pane-motion.css";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
@@ -212,17 +213,18 @@ export function TicketWorkspaceView({
     !expanded &&
     (selected !== null || (detailLeaving && leaving.from === "split"));
   // A pane that stays for its exit is out of the panel library's layout, so it
-  // is placed over the others at the width it had.
-  const detailPanelRef = usePanelRef();
+  // is placed over the others at the width it had. That width is the one it had
+  // beside the other pane: by the time this commit's effects run the layout has
+  // already changed, and the panel library reports the whole group.
+  const paneWidths = usePaneWidths(workspaceRef, mode);
   useLayoutEffect(() => {
     if (!leaving || leaving.from !== "split" || narrow || board) return;
-    const panel = leaving.pane === "detail" ? detailPanelRef : listPanelRef;
-    const width = panel.current?.getSize().inPixels;
-    if (width === undefined) return;
+    const width = paneWidths.current[leaving.pane];
+    if (width === null) return;
     const host = workspaceRef.current;
     host?.style.setProperty("--pane-leaving-width", `${width}px`);
     return () => void host?.style.removeProperty("--pane-leaving-width");
-  }, [leaving, narrow, board, detailPanelRef, listPanelRef]);
+  }, [leaving, narrow, board, paneWidths]);
   // The document owns J/K and Escape unless editing or an overlay owns them.
   const peekState = useRef({ peek, selected });
   useEffect(() => {
@@ -239,7 +241,9 @@ export function TicketWorkspaceView({
         event.ctrlKey ||
         event.altKey ||
         event.isComposing ||
-        event.repeat ||
+        // A held J or K swaps on every repeat, as it does from the list (the
+        // input guard makes each one instant). A held Escape closes once.
+        (event.repeat && event.key === "Escape") ||
         !(target instanceof HTMLElement) ||
         !target.closest("#detail") ||
         target.isContentEditable ||
@@ -398,7 +402,6 @@ export function TicketWorkspaceView({
           />
           <ResizablePanel
             id="detail"
-            panelRef={detailPanelRef}
             minSize={520}
             // The panel library makes its content box `overflow: auto` with an
             // auto height, so a percentage-height child never gets a bound and the

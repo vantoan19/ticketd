@@ -42,12 +42,13 @@
 }
 
 /* Open, and full width: the document glides in from the right and comes into
-   focus. Coming back, it glides in from the left beside the list. */
+   focus. Coming back, it glides in from the left beside the list. None of
+   these has a delay, so none has a fill: opacity 0 is held only until the
+   first frame paints (the layout's long task comes before it), never past it. */
 .ticket-workspace[data-pane-arrival]
   :is(#detail, [data-id="detail"])
   .ticket-detail {
-  animation: ticket-pane-in var(--spring-smooth-t) var(--spring-smooth)
-    backwards;
+  animation: ticket-pane-in var(--spring-smooth-t) var(--spring-smooth);
 }
 .ticket-workspace[data-pane-arrival="open"]
   :is(#detail, [data-id="detail"])
@@ -65,8 +66,7 @@
   --pane-from: calc(var(--pane-glide-wide) * -1);
 }
 .ticket-workspace[data-pane-arrival="return"] :is(#list, [data-id="list"]) > * {
-  animation: ticket-list-in var(--spring-smooth-t) var(--spring-smooth)
-    backwards;
+  animation: ticket-list-in var(--spring-smooth-t) var(--spring-smooth);
 }
 
 /* Close: the list has the width at once (the unselected rules) and the document
