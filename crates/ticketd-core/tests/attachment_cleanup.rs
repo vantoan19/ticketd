@@ -680,3 +680,42 @@ fn real_schema52_upgrade_preserves_unknown_dates_receipts_protections_and_comple
     restored.export_attachment(id, &output).unwrap();
     assert_eq!(std::fs::read(output).unwrap(), b"real schema52 bytes");
 }
+
+#[test]
+fn refused_attach_leaves_quarantined_bytes_in_quarantine() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let file = workspace
+        .import_attachment_bytes("upload", "trace.txt", b"stay put", |_, _| true)
+        .unwrap();
+    workspace.quarantine_attachment(&file.id).unwrap();
+    let root = dir.path().join("workspace.sqlite3.attachments");
+    let active = root.join(&file.locator);
+    let quarantined = root.join(file.locator.replacen("/bytes/", "/quarantine/", 1));
+    assert!(quarantined.exists() && !active.exists());
+    let trashed = workspace.create_ticket("In Trash").unwrap();
+    workspace
+        .set_trashed(&trashed.reference, true, None)
+        .unwrap();
+    let live = workspace.create_ticket("Nothing to replace").unwrap();
+    let replace = |reference: &str| ticketd_core::WriteRequest::ReplaceTicketAttachment {
+        reference: reference.into(),
+        previous_id: "not-attached".into(),
+        replacement_id: file.id.clone(),
+    };
+    assert!(
+        workspace
+            .set_ticket_attachment("T-9999", &file.id, true)
+            .is_err()
+    );
+    assert!(
+        workspace
+            .set_ticket_attachment(&trashed.reference, &file.id, true)
+            .is_err()
+    );
+    assert!(workspace.write(None, replace(&trashed.reference)).is_err());
+    assert!(workspace.write(None, replace(&live.reference)).is_err());
+    assert!(workspace.attachment(&file.id).unwrap().quarantined);
+    assert!(quarantined.exists() && !active.exists());
+}
