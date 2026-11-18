@@ -148,6 +148,46 @@ fn byte_range(header: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, ()
     )))
 }
 
+/// The whole of an audio or video attachment, for a WebView that cannot play media
+/// from a custom URI scheme. WebKitGTK hands `<audio>`/`<video>` sources to its
+/// GStreamer source element, which accepts only http(s) and blob URLs
+/// (<https://bugs.webkit.org/show_bug.cgi?id=146351>), so on Linux the page plays
+/// these bytes from a `blob:` URL. Images keep loading through the scheme.
+fn playable_bytes(workspace: &Workspace, identity: &str, id: &str) -> Result<Vec<u8>, String> {
+    let unavailable = || "This media could not be read".to_owned();
+    let mut media = workspace
+        .attachment_media(identity, id)
+        .map_err(|_| unavailable())?;
+    if !matches!(
+        media.media_type().split('/').next(),
+        Some("audio" | "video")
+    ) {
+        return Err("Only audio and video are read as whole files".into());
+    }
+    let length = media.len();
+    media.read(0, length).map_err(|_| unavailable())
+}
+
+#[tauri::command]
+pub async fn attachment_media_bytes(
+    webview: tauri::Webview,
+    workspace: String,
+    id: String,
+) -> Result<tauri::ipc::Response, super::BridgeFailure> {
+    // The same reach as the attachment-media scheme: only the main window.
+    if webview.label() != "main" {
+        return Err("This window cannot read attachment media".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let workspace_handle = super::open_workspace().map_err(super::BridgeFailure::from)?;
+        playable_bytes(&workspace_handle, &workspace, &id)
+            .map(tauri::ipc::Response::new)
+            .map_err(super::BridgeFailure::from)
+    })
+    .await
+    .map_err(super::BridgeFailure::from)?
+}
+
 pub(crate) fn handle(request: Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static ACTIVE: AtomicUsize = AtomicUsize::new(0);
@@ -178,7 +218,25 @@ pub(crate) fn handle(request: Request<Vec<u8>>, responder: tauri::UriSchemeRespo
 
 #[cfg(test)]
 mod tests {
-    use super::respond;
+    use super::{playable_bytes, respond};
+
+    #[test]
+    fn whole_audio_and_video_are_readable_but_not_images_or_foreign_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+        let identity = workspace.attachment_workspace_id().unwrap();
+        let wav = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0".to_vec();
+        let audio = workspace
+            .import_attachment_bytes("audio", "tone.wav", &wav, |_, _| true)
+            .unwrap();
+        assert_eq!(playable_bytes(&workspace, &identity, &audio.id), Ok(wav));
+        assert!(playable_bytes(&workspace, "other-workspace", &audio.id).is_err());
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0";
+        let image = workspace
+            .import_attachment_bytes("image", "dot.png", png, |_, _| true)
+            .unwrap();
+        assert!(playable_bytes(&workspace, &identity, &image.id).is_err());
+    }
 
     #[test]
     fn large_ranges_are_bounded_without_truncating_full_responses_or_serving_active_files() {

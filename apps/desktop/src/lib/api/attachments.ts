@@ -338,6 +338,21 @@ export const attachments = {
   mediaUrl(workspace: string, id: string) {
     return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;
   },
+  /**
+   * The whole of an audio or video file as a Blob, for WebKitGTK: its media
+   * elements play only http(s) and blob URLs, not the attachment-media scheme.
+   */
+  async mediaBlob(workspace: string, id: string, mime: string) {
+    const bytes: unknown = await invoke("attachment_media_bytes", {
+      workspace,
+      id,
+    });
+    // Raw IPC responses are an ArrayBuffer; Tauri's postMessage fallback sends numbers.
+    if (bytes instanceof ArrayBuffer) return new Blob([bytes], { type: mime });
+    return new Blob([Uint8Array.from(z.array(z.number()).parse(bytes))], {
+      type: mime,
+    });
+  },
   async driveInfo(id: string) {
     return driveReferenceSchema.parse(await invoke("drive_reference", { id }));
   },

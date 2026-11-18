@@ -62,6 +62,7 @@ import {
   storageWord,
   useAvailability,
 } from "@/features/sync-review/availability";
+import { isLinuxPlatform } from "@/lib/platform";
 import { syncApi } from "@/lib/sync-api";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { DriveReferenceDetails } from "./DriveReferenceDetails";
@@ -95,20 +96,65 @@ const usageKinds: Record<string, string> = {
   undo: "Kept for Undo",
 };
 
+/**
+ * Where a media element loads the file from. WebKitGTK hands audio and video
+ * to GStreamer, which cannot read the attachment-media scheme, so on Linux the
+ * whole file is read once into a blob URL; elsewhere the scheme serves ranges.
+ */
+function usePlayableUrl(
+  workspace: string,
+  id: string,
+  mime: string,
+  url: string,
+  onError: () => void,
+): string | null {
+  const buffered = isLinuxPlatform() && !mime.startsWith("image/");
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const failed = useRef(onError);
+  useLayoutEffect(() => {
+    failed.current = onError;
+  });
+  useEffect(() => {
+    if (!buffered) return;
+    let live = true;
+    let created = "";
+    attachments.mediaBlob(workspace, id, mime).then(
+      (blob) => {
+        if (!live) return;
+        created = URL.createObjectURL(blob);
+        setBlobUrl(created);
+      },
+      () => {
+        if (live) failed.current();
+      },
+    );
+    return () => {
+      live = false;
+      if (created) URL.revokeObjectURL(created);
+      setBlobUrl(null);
+    };
+  }, [buffered, workspace, id, mime]);
+  return buffered ? blobUrl : url;
+}
+
 function Media({
+  workspace,
   file,
   mime,
-  url,
+  url: schemeUrl,
   onError,
 }: {
+  workspace: string;
   file: Attachment;
   mime: string;
   url: string;
   onError: () => void;
 }) {
+  const url = usePlayableUrl(workspace, file.id, mime, schemeUrl, onError);
   const media = useRef<HTMLMediaElement>(null);
   const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
+    if (url === null) return;
     const element = media.current;
     const picture = image.current;
     // Strict Mode rehearses cleanup/setup; restore sources on each setup too.
@@ -127,13 +173,13 @@ function Media({
       <img
         ref={image}
         className="attachment-preview-image"
-        src={url}
+        src={schemeUrl}
         alt={file.display_name}
         onError={onError}
       />
     );
   const props = {
-    src: url,
+    ...(url === null ? {} : { src: url }),
     controls: true,
     preload: "metadata",
     onError,
@@ -702,6 +748,7 @@ function PreviewStage({
     body = (
       <Media
         key={`${preview.workspace}/${file.id}/${preview.attempt}`}
+        workspace={preview.workspace}
         file={file}
         mime={info.media_type}
         url={attachments.mediaUrl(preview.workspace, file.id)}
