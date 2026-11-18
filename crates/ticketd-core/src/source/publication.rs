@@ -1006,23 +1006,18 @@ impl Workspace {
         let provider = options.provider.as_str();
         let descriptor = engine.descriptor(provider)?;
         let target = self.publication_target(engine, provider)?;
-        let started = {
-            let transaction = self.connection.savepoint()?;
-            crate::write_scope::lock(&transaction)?;
-            let ticket = subject(&transaction, reference)?;
+        // `Err` from the scope's operation is an attempt that already published the
+        // ticket: it is replayed.
+        let started = match crate::write_scope::run(&self.connection, |transaction| {
+            let ticket = subject(transaction, reference)?;
             if let Some(attempt) =
-                latest_succeeded(&transaction, &ticket.id, options.now.as_deref())?
+                latest_succeeded(transaction, &ticket.id, options.now.as_deref())?
                 && matches!(
-                    tracking::authority(&transaction, &ticket.id)?,
+                    tracking::authority(transaction, &ticket.id)?,
                     tracking::Authority::External { .. }
                 )
             {
-                transaction.commit()?;
-                return Ok(PublishOutcome {
-                    ticket: self.show_ticket(reference)?,
-                    attempt,
-                    replayed: true,
-                });
+                return Ok(Err(attempt));
             }
             let refuse = |reason, message| {
                 Error::Publication(PublicationError::Ineligible {
@@ -1032,7 +1027,7 @@ impl Workspace {
                 })
             };
             if let Eligibility::Ineligible { reason, message } = eligibility(
-                &transaction,
+                transaction,
                 &ticket,
                 &descriptor.name,
                 options.now.as_deref(),
@@ -1062,7 +1057,7 @@ impl Workspace {
                 }
                 .into());
             }
-            let now = clock(&transaction, options.now.as_deref())?;
+            let now = clock(transaction, options.now.as_deref())?;
             let attempt_id = Uuid::new_v4().to_string();
             transaction.execute(
                 "INSERT INTO publication_attempts (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at) \
@@ -1078,8 +1073,7 @@ impl Workspace {
                     format!("+{LEASE_SECONDS} seconds"),
                 ],
             )?;
-            transaction.commit()?;
-            Started {
+            Ok(Ok(Started {
                 attempt_id,
                 reference: ticket.reference,
                 ticket_id: ticket.id,
@@ -1090,6 +1084,15 @@ impl Workspace {
                 },
                 config: target.config.clone(),
                 agent: options.agent.clone(),
+            }))
+        })? {
+            Ok(started) => started,
+            Err(attempt) => {
+                return Ok(PublishOutcome {
+                    ticket: self.show_ticket(reference)?,
+                    attempt,
+                    replayed: true,
+                });
             }
         };
 
@@ -1211,47 +1214,46 @@ impl Workspace {
         issue: &ExternalIssue,
         now: Option<&str>,
     ) -> Result<Linked, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let (still_open, started_at): (bool, String) = transaction.query_row(
-            "SELECT status = 'in_flight', started_at FROM publication_attempts WHERE id = ?1",
-            [&started.attempt_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if !still_open {
-            return Ok(Linked::SettledElsewhere);
-        }
-        let identity = &issue.reference.identity;
-        // Discovery may have imported the created issue as a ticket of its own
-        // first. That ticket is adopted (see `adoptable`); anything else owning
-        // the identity is a conflict.
-        let adopt = match identity_owner(&transaction, identity)? {
-            None => None,
-            Some(owner) if adoptable(&owner, &started_at) => Some(owner.ticket_id),
-            Some(owner) => {
-                return Ok(Linked::Conflict {
-                    origin: owner.origin,
-                });
+        crate::write_scope::run(&self.connection, |transaction| {
+            let (still_open, started_at): (bool, String) = transaction.query_row(
+                "SELECT status = 'in_flight', started_at FROM publication_attempts WHERE id = ?1",
+                [&started.attempt_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if !still_open {
+                return Ok(Linked::SettledElsewhere);
             }
-        };
-        let now = clock(&transaction, now)?;
-        let attempt = complete_attempt(
-            &transaction,
-            &Sent {
-                attempt_id: &started.attempt_id,
-                ticket_id: &started.ticket_id,
-                title: &started.request.title,
-                body: &started.request.body,
-                destination: &started.request.destination,
-                agent: started.agent.as_deref(),
-                adopt: adopt.as_deref(),
-                attached: None,
-            },
-            issue,
-            &now,
-        )?;
-        transaction.commit()?;
-        Ok(Linked::Done(Box::new(attempt)))
+            let identity = &issue.reference.identity;
+            // Discovery may have imported the created issue as a ticket of its own
+            // first. That ticket is adopted (see `adoptable`); anything else owning
+            // the identity is a conflict.
+            let adopt = match identity_owner(transaction, identity)? {
+                None => None,
+                Some(owner) if adoptable(&owner, &started_at) => Some(owner.ticket_id),
+                Some(owner) => {
+                    return Ok(Linked::Conflict {
+                        origin: owner.origin,
+                    });
+                }
+            };
+            let now = clock(transaction, now)?;
+            let attempt = complete_attempt(
+                transaction,
+                &Sent {
+                    attempt_id: &started.attempt_id,
+                    ticket_id: &started.ticket_id,
+                    title: &started.request.title,
+                    body: &started.request.body,
+                    destination: &started.request.destination,
+                    agent: started.agent.as_deref(),
+                    adopt: adopt.as_deref(),
+                    attached: None,
+                },
+                issue,
+                &now,
+            )?;
+            Ok(Linked::Done(Box::new(attempt)))
+        })
     }
 
     /// Moves an attempt that is still open to `failed` or `unresolved`, keeping
@@ -1267,15 +1269,14 @@ impl Workspace {
         issue: Option<&ExternalIssue>,
         now: Option<&str>,
     ) -> Result<(), Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let now = clock(&transaction, now)?;
-        let first_unknown: Option<(String, String)> = if status == AttemptState::Unresolved {
-            transaction.query_row("SELECT ticket_id, destination FROM publication_attempts WHERE id = ?1 AND status = 'in_flight'", [attempt_id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?
-        } else {
-            None
-        };
-        transaction.execute(
+        crate::write_scope::run(&self.connection, |transaction| {
+            let now = clock(transaction, now)?;
+            let first_unknown: Option<(String, String)> = if status == AttemptState::Unresolved {
+                transaction.query_row("SELECT ticket_id, destination FROM publication_attempts WHERE id = ?1 AND status = 'in_flight'", [attempt_id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?
+            } else {
+                None
+            };
+            transaction.execute(
             "UPDATE publication_attempts SET status = ?2, updated_at = ?3, failure_code = ?4, failure_message = ?5, \
              external_id = COALESCE(?6, external_id), locator = COALESCE(?7, locator), display = COALESCE(?8, display), url = COALESCE(?9, url) \
              WHERE id = ?1 AND (status IN ('in_flight', 'unresolved') \
@@ -1295,18 +1296,18 @@ impl Workspace {
                 RULED_OUT,
             ],
         )?;
-        if let Some((ticket, destination)) = first_unknown {
-            history::record(
-                &transaction,
-                &ticket,
-                "publication_unresolved",
-                attempt_id,
-                &destination,
-                None,
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
+            if let Some((ticket, destination)) = first_unknown {
+                history::record(
+                    transaction,
+                    &ticket,
+                    "publication_unresolved",
+                    attempt_id,
+                    &destination,
+                    None,
+                )?;
+            }
+            Ok(())
+        })
     }
 }
 
@@ -1764,88 +1765,88 @@ impl Workspace {
                 .into(),
             );
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        // Compare-and-set: the attempt must still be the same open attempt.
-        let still_open = open_attempt(&transaction, &ticket.id, now)?
-            .is_some_and(|open| open.id == attempt.id && open.state != AttemptState::InFlight);
-        if !still_open {
-            drop(transaction);
-            return self.settled_instead(
-                ticket,
-                &Resolution::Attach { issue: None },
-                Some(identity),
-                now,
-            );
-        }
-        // The ticket may have moved on while the issue was being verified (the
-        // person finished or trashed it): attaching would give an externally owned
-        // Done ticket an open issue. Re-check what publishing checked.
-        let current = subject(&transaction, &ticket.reference)?;
-        if current.trashed || !current.status.is_local_progress() {
-            return Err(mismatch(format!(
-                "{} is {}; make it a Todo, In progress or In review ticket again before attaching {}",
-                current.reference,
-                if current.trashed {
-                    "in the trash".to_owned()
-                } else {
-                    current.status.to_string()
-                },
-                issue.display
-            )));
-        }
-        let owner = identity_owner(&transaction, identity)?;
-        let adopt = match &owner {
-            Some(owner) if adoptable(owner, &attempt.started_at) => Some(owner.ticket_id.clone()),
-            _ => None,
-        };
-        let linked: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM external_identities WHERE ticket_id = ?1)",
-            [&ticket.id],
-            |row| row.get(0),
-        )?;
-        if (owner.is_some() && adopt.is_none()) || linked {
-            // Something else owns it. A person's choice that cannot be honored
-            // changes nothing: the attempt keeps what it knew, so the review still
-            // offers every action. Never attach one identity twice.
-            let message = match &owner {
-                Some(owner) => format!(
-                    "{} is already linked to another ticket (it was {} there), so it cannot be attached here",
-                    issue.display,
-                    if owner.origin == "published" {
-                        "published"
+        crate::write_scope::run(&self.connection, |transaction| {
+            // Compare-and-set: the attempt must still be the same open attempt.
+            let still_open = open_attempt(transaction, &ticket.id, now)?
+                .is_some_and(|open| open.id == attempt.id && open.state != AttemptState::InFlight);
+            if !still_open {
+                return self.settled_instead(
+                    ticket,
+                    &Resolution::Attach { issue: None },
+                    Some(identity),
+                    now,
+                );
+            }
+            // The ticket may have moved on while the issue was being verified (the
+            // person finished or trashed it): attaching would give an externally owned
+            // Done ticket an open issue. Re-check what publishing checked.
+            let current = subject(transaction, &ticket.reference)?;
+            if current.trashed || !current.status.is_local_progress() {
+                return Err(mismatch(format!(
+                    "{} is {}; make it a Todo, In progress or In review ticket again before attaching {}",
+                    current.reference,
+                    if current.trashed {
+                        "in the trash".to_owned()
                     } else {
-                        "imported"
-                    }
-                ),
-                None => format!(
-                    "{} is already linked to an issue of its own, so it cannot be attached here",
-                    ticket.reference
-                ),
+                        current.status.to_string()
+                    },
+                    issue.display
+                )));
+            }
+            let owner = identity_owner(transaction, identity)?;
+            let adopt = match &owner {
+                Some(owner) if adoptable(owner, &attempt.started_at) => {
+                    Some(owner.ticket_id.clone())
+                }
+                _ => None,
             };
-            return Err(mismatch(message));
-        }
-        let now = clock(&transaction, now)?;
-        let settled = complete_attempt(
-            &transaction,
-            &Sent {
-                attempt_id: &attempt.id,
-                ticket_id: &ticket.id,
-                title: &attempt.title,
-                body: &attempt.body,
-                destination: &attempt.destination,
-                agent,
-                adopt: adopt.as_deref(),
-                attached: Some(different),
-            },
-            issue,
-            &now,
-        )?;
-        transaction.commit()?;
-        Ok(PublishOutcome {
-            ticket: self.show_ticket(&ticket.reference)?,
-            attempt: settled,
-            replayed: false,
+            let linked: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM external_identities WHERE ticket_id = ?1)",
+                [&ticket.id],
+                |row| row.get(0),
+            )?;
+            if (owner.is_some() && adopt.is_none()) || linked {
+                // Something else owns it. A person's choice that cannot be honored
+                // changes nothing: the attempt keeps what it knew, so the review still
+                // offers every action. Never attach one identity twice.
+                let message = match &owner {
+                    Some(owner) => format!(
+                        "{} is already linked to another ticket (it was {} there), so it cannot be attached here",
+                        issue.display,
+                        if owner.origin == "published" {
+                            "published"
+                        } else {
+                            "imported"
+                        }
+                    ),
+                    None => format!(
+                        "{} is already linked to an issue of its own, so it cannot be attached here",
+                        ticket.reference
+                    ),
+                };
+                return Err(mismatch(message));
+            }
+            let now = clock(transaction, now)?;
+            let settled = complete_attempt(
+                transaction,
+                &Sent {
+                    attempt_id: &attempt.id,
+                    ticket_id: &ticket.id,
+                    title: &attempt.title,
+                    body: &attempt.body,
+                    destination: &attempt.destination,
+                    agent,
+                    adopt: adopt.as_deref(),
+                    attached: Some(different),
+                },
+                issue,
+                &now,
+            )?;
+            Ok(PublishOutcome {
+                ticket: self.show_ticket(&ticket.reference)?,
+                attempt: settled,
+                replayed: false,
+            })
         })
     }
 
@@ -1898,20 +1899,18 @@ impl Workspace {
                 attempt.destination
             ))));
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let now = clock(&transaction, now)?;
-        // The listing lags a creation by a few seconds, so a read this soon after
-        // the create call could last have landed may miss the issue it made.
-        if !search_settled(&attempt.started_at, &now) {
-            drop(transaction);
-            return Err(unverified(SourceError::Unavailable(format!(
-                "the issues in {} were read too soon to be conclusive, because a just-created issue may not be listed yet; look again after {}",
-                attempt.destination,
-                ready_text(&attempt.started_at)
-            ))));
-        }
-        let changed = transaction.execute(
+        crate::write_scope::run(&self.connection, |transaction| {
+            let now = clock(transaction, now)?;
+            // The listing lags a creation by a few seconds, so a read this soon after
+            // the create call could last have landed may miss the issue it made.
+            if !search_settled(&attempt.started_at, &now) {
+                return Err(unverified(SourceError::Unavailable(format!(
+                    "the issues in {} were read too soon to be conclusive, because a just-created issue may not be listed yet; look again after {}",
+                    attempt.destination,
+                    ready_text(&attempt.started_at)
+                ))));
+            }
+            let changed = transaction.execute(
             "UPDATE publication_attempts SET status = 'failed', updated_at = ?2, failure_code = ?3, failure_message = ?4 \
              WHERE id = ?1 AND status IN ('in_flight', 'unresolved') AND external_id IS NULL \
              AND (status = 'unresolved' OR lease_expires_at <= ?2)",
@@ -1925,30 +1924,29 @@ impl Workspace {
                 ),
             ],
         )?;
-        if changed == 0 {
-            drop(transaction);
-            return self.settled_instead(ticket, &Resolution::NotCreated, None, Some(&now));
-        }
-        history::record(
-            &transaction,
-            &ticket.id,
-            "publication",
-            "unresolved",
-            "not created",
-            agent,
-        )?;
-        let settled = transaction.query_row(
+            if changed == 0 {
+                return self.settled_instead(ticket, &Resolution::NotCreated, None, Some(&now));
+            }
+            history::record(
+                transaction,
+                &ticket.id,
+                "publication",
+                "unresolved",
+                "not created",
+                agent,
+            )?;
+            let settled = transaction.query_row(
             &format!(
                 "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?1"
             ),
             [&attempt.id],
             |row| attempt_from_row(row, &now),
         )?;
-        transaction.commit()?;
-        Ok(PublishOutcome {
-            ticket: self.show_ticket(&ticket.reference)?,
-            attempt: settled,
-            replayed: false,
+            Ok(PublishOutcome {
+                ticket: self.show_ticket(&ticket.reference)?,
+                attempt: settled,
+                replayed: false,
+            })
         })
     }
 }

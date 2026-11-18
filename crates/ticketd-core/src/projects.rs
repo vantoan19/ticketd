@@ -71,48 +71,46 @@ impl Workspace {
             path: path.to_owned(),
             paths: vec![path.to_owned()],
         };
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        ensure_path_free(&tx, path, &project.id)?;
-        tx.execute(
-            "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
-            params![project.id, project.name, project.path],
-        )?;
-        tx.execute(
-            "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
-            params![project.id, project.path],
-        )?;
-        tx.commit()?;
-        Ok(project)
+        crate::write_scope::run(&self.connection, |tx| {
+            ensure_path_free(tx, path, &project.id)?;
+            tx.execute(
+                "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
+                params![project.id, project.name, project.path],
+            )?;
+            tx.execute(
+                "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
+                params![project.id, project.path],
+            )?;
+            Ok(project)
+        })
     }
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
         let (name, path) = validate(name, path)?;
         let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
         let path = normalized.as_str();
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let old = find(&tx, id)?;
-        ensure_path_free(&tx, path, id)?;
-        if tx.execute(
-            "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
-            params![name, path, id],
-        )? == 0
-        {
-            return Err(Error::ProjectNotFound(id.to_owned()));
-        }
-        if old.path != path {
-            tx.execute(
-                "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
-                params![id, old.path],
-            )?;
-            tx.execute(
-                "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
-                params![id, path],
-            )?;
-        }
-        tx.commit()?;
-        self.show_project(id)
+        crate::write_scope::run(&self.connection, |tx| {
+            let old = find(tx, id)?;
+            ensure_path_free(tx, path, id)?;
+            if tx.execute(
+                "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
+                params![name, path, id],
+            )? == 0
+            {
+                return Err(Error::ProjectNotFound(id.to_owned()));
+            }
+            if old.path != path {
+                tx.execute(
+                    "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
+                    params![id, old.path],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
+                    params![id, path],
+                )?;
+            }
+            self.show_project(id)
+        })
     }
 
     pub fn show_project(&self, id: &str) -> Result<Project, Error> {

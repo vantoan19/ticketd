@@ -1133,186 +1133,184 @@ impl Workspace {
         now: &str,
         tracked: &[Tracked],
     ) -> Result<RefreshReport, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        // Configuration can change while the connector is on the network.
-        // Re-read it under the same write lock as the results: old discovery
-        // cannot import new tickets or describe the rules saved afterwards.
-        let mut replaced = HashSet::new();
-        for (provider, used) in &gathered.configurations {
-            let stored: Option<String> = transaction
-                .query_row(
-                    "SELECT configuration FROM source_configurations WHERE provider = ?1",
-                    [provider],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let current = stored
-                .map(|raw| serde_json::from_str::<super::ConfigValues>(&raw))
-                .transpose()?;
-            if current.as_ref() != Some(used) {
-                replaced.insert(provider.clone());
+        crate::write_scope::run(&self.connection, |transaction| {
+            // Configuration can change while the connector is on the network.
+            // Re-read it under the same write lock as the results: old discovery
+            // cannot import new tickets or describe the rules saved afterwards.
+            let mut replaced = HashSet::new();
+            for (provider, used) in &gathered.configurations {
+                let stored: Option<String> = transaction
+                    .query_row(
+                        "SELECT configuration FROM source_configurations WHERE provider = ?1",
+                        [provider],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let current = stored
+                    .map(|raw| serde_json::from_str::<super::ConfigValues>(&raw))
+                    .transpose()?;
+                if current.as_ref() != Some(used) {
+                    replaced.insert(provider.clone());
+                }
             }
-        }
-        let mut applied = Applied::default();
-        // Workspace events: what a source brings in is logged with actor `sync`, and a
-        // first import logs nothing. That is every issue new to this Workspace that
-        // comes from a part of its source (for GitHub, a repository) no run has read
-        // yet under the discovery rules it is read with now: the backlog of a new
-        // source, of a repository added to one, or shown by a loosened filter is not
-        // news. An issue that arrives in the same refresh as such a change cannot be
-        // told from that backlog and is silent too. A part counts as read once a
-        // successful run read it, so a first read
-        // that fails partway, or that skips a repository it cannot see, stays silent
-        // for it the next time too. Changes to tickets already here, and issues that
-        // arrive in a part already read, log as `sync`.
-        let logged = crate::events::head(&transaction)?;
-        let own_actor = crate::events::actor(&transaction)?;
-        let mut read_before: HashMap<&str, HashSet<String>> = HashMap::new();
-        for provider in gathered
-            .issues
-            .iter()
-            .map(|issue| &issue.reference.identity.provider)
-            .chain(gathered.runs.iter().map(|run| &run.provider))
-        {
-            if !read_before.contains_key(provider.as_str()) {
-                let read = freshness::read_partitions(
-                    &transaction,
-                    provider,
-                    gathered.imported_partitions.get(provider),
-                )?;
-                read_before.insert(provider, read);
-            }
-        }
-        for issue in &gathered.issues {
-            if replaced.contains(&issue.reference.identity.provider)
-                && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
+            let mut applied = Applied::default();
+            // Workspace events: what a source brings in is logged with actor `sync`, and a
+            // first import logs nothing. That is every issue new to this Workspace that
+            // comes from a part of its source (for GitHub, a repository) no run has read
+            // yet under the discovery rules it is read with now: the backlog of a new
+            // source, of a repository added to one, or shown by a loosened filter is not
+            // news. An issue that arrives in the same refresh as such a change cannot be
+            // told from that backlog and is silent too. A part counts as read once a
+            // successful run read it, so a first read
+            // that fails partway, or that skips a repository it cannot see, stays silent
+            // for it the next time too. Changes to tickets already here, and issues that
+            // arrive in a part already read, log as `sync`. The write scope folds the
+            // events of an imported ticket into its one `ticket.created`.
+            let own_actor = crate::events::actor(transaction)?;
+            let mut read_before: HashMap<&str, HashSet<String>> = HashMap::new();
+            for provider in gathered
+                .issues
+                .iter()
+                .map(|issue| &issue.reference.identity.provider)
+                .chain(gathered.runs.iter().map(|run| &run.provider))
             {
-                continue;
+                if !read_before.contains_key(provider.as_str()) {
+                    let read = freshness::read_partitions(
+                        transaction,
+                        provider,
+                        gathered.imported_partitions.get(provider),
+                    )?;
+                    read_before.insert(provider, read);
+                }
             }
-            let key = (
-                issue.reference.identity.provider.clone(),
-                issue.reference.identity.id.clone(),
-            );
-            // Only discovery brings in an issue that is not here yet.
-            let first_import = gathered.partitions.get(&key).is_some_and(|part| {
-                !read_before
-                    .get(key.0.as_str())
-                    .is_some_and(|read| read.contains(part))
-            }) && ticket_for_identity(&transaction, &issue.reference.identity)?
-                .is_none();
-            crate::events::set_actor(
-                &transaction,
-                Some(if first_import {
-                    crate::events::Acting::Silent
-                } else {
-                    crate::events::Acting::Sync
-                }),
-            )?;
-            apply_issue(
-                &transaction,
-                issue,
-                gathered.conversations.get(&key),
-                now,
-                &mut applied,
-            )?;
-        }
-        crate::events::set_actor(&transaction, own_actor)?;
-        crate::events::fold_into_creation(&transaction, logged)?;
-        for (provider, seen) in &gathered.discovery {
-            if replaced.contains(provider) {
-                continue;
+            for issue in &gathered.issues {
+                if replaced.contains(&issue.reference.identity.provider)
+                    && ticket_for_identity(transaction, &issue.reference.identity)?.is_none()
+                {
+                    continue;
+                }
+                let key = (
+                    issue.reference.identity.provider.clone(),
+                    issue.reference.identity.id.clone(),
+                );
+                // Only discovery brings in an issue that is not here yet.
+                let first_import =
+                    gathered.partitions.get(&key).is_some_and(|part| {
+                        !read_before
+                            .get(key.0.as_str())
+                            .is_some_and(|read| read.contains(part))
+                    }) && ticket_for_identity(transaction, &issue.reference.identity)?.is_none();
+                crate::events::set_actor(
+                    transaction,
+                    Some(if first_import {
+                        crate::events::Acting::Silent
+                    } else {
+                        crate::events::Acting::Sync
+                    }),
+                )?;
+                apply_issue(
+                    transaction,
+                    issue,
+                    gathered.conversations.get(&key),
+                    now,
+                    &mut applied,
+                )?;
             }
-            let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
-            let identities = statement
-                .query_map([provider], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            for (id, external_id) in identities {
-                transaction.execute("UPDATE source_sync SET discovery_matches = ?2 WHERE ticket_id = ?1 AND (last_attempt_at IS NULL OR last_attempt_at <= ?3)", params![id, seen.contains(&external_id), now])?;
+            crate::events::set_actor(transaction, own_actor)?;
+            for (provider, seen) in &gathered.discovery {
+                if replaced.contains(provider) {
+                    continue;
+                }
+                let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
+                let identities = statement
+                    .query_map([provider], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (id, external_id) in identities {
+                    transaction.execute("UPDATE source_sync SET discovery_matches = ?2 WHERE ticket_id = ?1 AND (last_attempt_at IS NULL OR last_attempt_at <= ?3)", params![id, seen.contains(&external_id), now])?;
+                }
             }
-        }
-        let by_reference: HashMap<&str, &Tracked> =
-            tracked.iter().map(|t| (t.reference.as_str(), t)).collect();
-        let mut failures = Vec::new();
-        for found in &gathered.failures {
-            if replaced.contains(&found.provider) {
-                continue;
-            }
-            let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
-            if let Some(ticket) = ticket {
-                match found.scope {
-                    FailureScope::Conversation => {
-                        transaction.execute(
+            let by_reference: HashMap<&str, &Tracked> =
+                tracked.iter().map(|t| (t.reference.as_str(), t)).collect();
+            let mut failures = Vec::new();
+            for found in &gathered.failures {
+                if replaced.contains(&found.provider) {
+                    continue;
+                }
+                let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
+                if let Some(ticket) = ticket {
+                    match found.scope {
+                        FailureScope::Conversation => {
+                            transaction.execute(
                             "UPDATE source_sync SET conversation_error_code = ?2, conversation_error_message = ?3 \
                              WHERE ticket_id = ?1 \
                              AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external')",
                             params![ticket.ticket_id, found.failure.code, found.failure.message],
                         )?;
-                    }
-                    FailureScope::Ticket | FailureScope::Source => {
-                        // Truthful freshness: the attempt and its error are recorded,
-                        // the last successful refresh and saved content are not touched.
-                        // An attempt that started before the ticket was last confirmed
-                        // is older news and records nothing.
-                        if FailureCode::parse(&found.failure.code)
-                            .is_some_and(FailureCode::is_unavailable)
-                        {
-                            let first: bool = transaction.query_row("SELECT failing_since IS NULL AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) FROM source_sync WHERE ticket_id = ?1", params![ticket.ticket_id, now], |row| row.get(0))?;
-                            if first {
-                                history::record(
-                                    &transaction,
-                                    &ticket.ticket_id,
-                                    "source_unavailable",
-                                    "",
-                                    &found.failure.code,
-                                    Some(&found.provider),
-                                )?;
-                            }
                         }
-                        transaction.execute(
+                        FailureScope::Ticket | FailureScope::Source => {
+                            // Truthful freshness: the attempt and its error are recorded,
+                            // the last successful refresh and saved content are not touched.
+                            // An attempt that started before the ticket was last confirmed
+                            // is older news and records nothing.
+                            if FailureCode::parse(&found.failure.code)
+                                .is_some_and(FailureCode::is_unavailable)
+                            {
+                                let first: bool = transaction.query_row("SELECT failing_since IS NULL AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) FROM source_sync WHERE ticket_id = ?1", params![ticket.ticket_id, now], |row| row.get(0))?;
+                                if first {
+                                    history::record(
+                                        transaction,
+                                        &ticket.ticket_id,
+                                        "source_unavailable",
+                                        "",
+                                        &found.failure.code,
+                                        Some(&found.provider),
+                                    )?;
+                                }
+                            }
+                            transaction.execute(
                             "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
                              failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1 \
                              AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) \
                              AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external')",
                             params![ticket.ticket_id, now, found.failure.code, found.failure.message],
                         )?;
+                        }
+                        FailureScope::Partition => {}
                     }
-                    FailureScope::Partition => {}
                 }
+                failures.push(RefreshFailure {
+                    provider: found.provider.clone(),
+                    reference: found.reference.clone(),
+                    code: found.failure.code.clone(),
+                    message: found.failure.message.clone(),
+                    retry_after_secs: gathered
+                        .runs
+                        .iter()
+                        .find(|run| {
+                            run.provider == found.provider
+                                && found.failure.code == FailureCode::RateLimited.as_str()
+                        })
+                        .and_then(|run| run.retry_after_secs),
+                    scope: found.scope,
+                });
             }
-            failures.push(RefreshFailure {
-                provider: found.provider.clone(),
-                reference: found.reference.clone(),
-                code: found.failure.code.clone(),
-                message: found.failure.message.clone(),
-                retry_after_secs: gathered
-                    .runs
-                    .iter()
-                    .find(|run| {
-                        run.provider == found.provider
-                            && found.failure.code == FailureCode::RateLimited.as_str()
-                    })
-                    .and_then(|run| run.retry_after_secs),
-                scope: found.scope,
-            });
-        }
-        for run in &gathered.runs {
-            if replaced.contains(&run.provider) {
-                continue;
+            for run in &gathered.runs {
+                if replaced.contains(&run.provider) {
+                    continue;
+                }
+                let none = HashSet::new();
+                let read = read_before.get(run.provider.as_str()).unwrap_or(&none);
+                freshness::record_run(transaction, run, read, now)?;
             }
-            let none = HashSet::new();
-            let read = read_before.get(run.provider.as_str()).unwrap_or(&none);
-            freshness::record_run(&transaction, run, read, now)?;
-        }
-        transaction.commit()?;
-        Ok(RefreshReport {
-            imported: applied.imported,
-            updated: applied.updated,
-            unchanged: applied.unchanged,
-            failures,
-            refreshed_at: now.to_owned(),
+            Ok(RefreshReport {
+                imported: applied.imported,
+                updated: applied.updated,
+                unchanged: applied.unchanged,
+                failures,
+                refreshed_at: now.to_owned(),
+            })
         })
     }
 }

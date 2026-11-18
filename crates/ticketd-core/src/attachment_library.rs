@@ -56,16 +56,14 @@ impl Workspace {
                 "supply a nonempty display name without NUL characters".into(),
             ));
         }
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        attachments::read_attachment(&tx, id)?;
-        tx.execute(
-            "UPDATE attachments SET display_name=?2 WHERE id=?1",
-            params![id, display_name],
-        )?;
-        let attachment = attachments::read_attachment(&tx, id)?;
-        tx.commit()?;
-        Ok(attachment)
+        crate::write_scope::run(&self.connection, |tx| {
+            attachments::read_attachment(tx, id)?;
+            tx.execute(
+                "UPDATE attachments SET display_name=?2 WHERE id=?1",
+                params![id, display_name],
+            )?;
+            attachments::read_attachment(tx, id)
+        })
     }
 
     /// A bounded, consistent library snapshot, including completed abandoned uploads.

@@ -96,15 +96,14 @@ impl Workspace {
     /// executor reports later is refused. Returns the Chats of the agents that were
     /// working, for the host to interrupt.
     pub fn stop_and_turn_off_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        transaction.execute(
-            "DELETE FROM automation_device_state WHERE automation_id = ?1",
-            [id],
-        )?;
-        let chats = end_active_runs(&transaction, id, Cause::TurnedOff)?;
-        transaction.commit()?;
-        Ok(chats)
+        crate::write_scope::run(&self.connection, |transaction| {
+            transaction.execute(
+                "DELETE FROM automation_device_state WHERE automation_id = ?1",
+                [id],
+            )?;
+            let chats = end_active_runs(transaction, id, Cause::TurnedOff)?;
+            Ok(chats)
+        })
     }
 
     /// Ends the Queued and Running runs of Automations that are deleted, as deleting
@@ -116,11 +115,10 @@ impl Workspace {
         if active_runs_of_deleted(&self.connection)?.is_empty() {
             return Ok(Vec::new());
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let ids = active_runs_of_deleted(&transaction)?;
-        let (_, chats) = end_each(&transaction, &ids, Cause::Deleted)?;
-        transaction.commit()?;
-        Ok(chats)
+        crate::write_scope::run(&self.connection, |transaction| {
+            let ids = active_runs_of_deleted(transaction)?;
+            let (_, chats) = end_each(transaction, &ids, Cause::Deleted)?;
+            Ok(chats)
+        })
     }
 }

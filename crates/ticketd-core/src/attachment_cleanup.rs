@@ -97,87 +97,82 @@ fn review(tx: &Connection, id: &str) -> Result<AttachmentCleanupReview, Error> {
 impl Workspace {
     /// Record-only cleanup: no provider or credential capability is involved.
     pub fn remove_remote_attachment(&mut self, id: &str) -> Result<RemoteAttachmentRemoval, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let current = review(&tx, id)?;
-        if current.attachment.kind != AttachmentKind::ExternalReference {
-            return Err(Error::Attachment("Remove from ticketd is for remote records. Use reversible quarantine for local snapshots.".into()));
-        }
-        if !current.remove_eligible {
-            return Err(Error::Attachment("Protected by saved references, recoverable drafts, Undo, Trash or unreviewed legacy drafts; review usage before removing from ticketd.".into()));
-        }
-        let metadata: String = tx.query_row(
-            "SELECT metadata FROM drive_references WHERE attachment_id=?1",
-            [id],
-            |row| row.get(0),
-        )?;
-        let metadata: crate::drive::DriveMetadata = serde_json::from_str(&metadata)?;
-        crate::drive::validate_metadata(&metadata.id, &metadata)?;
-        let result = RemoteAttachmentRemoval {
+        crate::write_scope::run(&self.connection, |tx| {
+            let current = review(tx, id)?;
+            if current.attachment.kind != AttachmentKind::ExternalReference {
+                return Err(Error::Attachment("Remove from ticketd is for remote records. Use reversible quarantine for local snapshots.".into()));
+            }
+            if !current.remove_eligible {
+                return Err(Error::Attachment("Protected by saved references, recoverable drafts, Undo, Trash or unreviewed legacy drafts; review usage before removing from ticketd.".into()));
+            }
+            let metadata: String = tx.query_row(
+                "SELECT metadata FROM drive_references WHERE attachment_id=?1",
+                [id],
+                |row| row.get(0),
+            )?;
+            let metadata: crate::drive::DriveMetadata = serde_json::from_str(&metadata)?;
+            crate::drive::validate_metadata(&metadata.id, &metadata)?;
+            let result = RemoteAttachmentRemoval {
             id: id.into(),
             display_name: current.attachment.display_name,
             open_url: metadata.web_url,
             message: "Removed from ticketd. The file remains in Drive, including copies uploaded by ticketd; no provider storage was reclaimed. Choose it again in the Google Drive picker to re-add it.".into(),
         };
-        tx.execute("DELETE FROM drive_references WHERE attachment_id=?1", [id])?;
-        tx.execute("DELETE FROM attachments WHERE id=?1", [id])?;
-        tx.execute("UPDATE drive_upload_operations SET operation=json_set(operation,'$.record_removed',json('true')) WHERE attachment_id=?1", [id])?;
-        tx.commit()?;
-        Ok(result)
+            tx.execute("DELETE FROM drive_references WHERE attachment_id=?1", [id])?;
+            tx.execute("DELETE FROM attachments WHERE id=?1", [id])?;
+            tx.execute("UPDATE drive_upload_operations SET operation=json_set(operation,'$.record_removed',json('true')) WHERE attachment_id=?1", [id])?;
+            Ok(result)
+        })
     }
 
     /// The identity itself makes retries idempotent. Never run inside a replay transaction:
     /// intent must commit before irreversible I/O, and completion only after deletion.
     pub fn purge_attachment(&mut self, id: &str) -> Result<Attachment, Error> {
         let _files = self.attachment_backup_lock()?;
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let file = attachments::read_attachment(&tx, id)?;
-        if file.kind != AttachmentKind::LocalSnapshot {
-            return Err(Error::Attachment(
+        let file = crate::write_scope::run(&self.connection, |tx| {
+            let file = attachments::read_attachment(tx, id)?;
+            if file.kind != AttachmentKind::LocalSnapshot {
+                return Err(Error::Attachment(
                 "Only quarantined local snapshots can be purged. Remote files are never deleted."
                     .into(),
             ));
-        }
-        if file.purge_state == AttachmentPurgeState::Purged {
-            return Ok(file);
-        }
-        if file.purge_state == AttachmentPurgeState::Retained {
-            let usage = crate::attachment_retention::read_usage(&tx, id)?;
-            if !usage.eligible {
-                return Err(Error::Attachment("Protected by saved references, recoverable drafts, Undo, Trash or unreviewed legacy drafts; review usage before purging.".into()));
             }
-            if !file.quarantined {
-                return Err(Error::Attachment(
-                    "Move this local snapshot to quarantine before permanent purge.".into(),
-                ));
-            }
-            let source = attachments::validate_attachment_bytes(&tx, &file)?;
-            let root = attachments::attachment_directory(&tx)?.canonicalize()?;
-            if source != root.join(quarantine_locator(&file.locator)) {
-                return Err(Error::Attachment(
+            if file.purge_state == AttachmentPurgeState::Retained {
+                let usage = crate::attachment_retention::read_usage(tx, id)?;
+                if !usage.eligible {
+                    return Err(Error::Attachment("Protected by saved references, recoverable drafts, Undo, Trash or unreviewed legacy drafts; review usage before purging.".into()));
+                }
+                if !file.quarantined {
+                    return Err(Error::Attachment(
+                        "Move this local snapshot to quarantine before permanent purge.".into(),
+                    ));
+                }
+                let source = attachments::validate_attachment_bytes(tx, &file)?;
+                let root = attachments::attachment_directory(tx)?.canonicalize()?;
+                if source != root.join(quarantine_locator(&file.locator)) {
+                    return Err(Error::Attachment(
                     "Quarantine move is incomplete. Restore this attachment, then quarantine it again before permanent purge."
                         .into(),
                 ));
+                }
+                tx.execute(
+                    "UPDATE attachments SET purge_state='pending' WHERE id=?1",
+                    [id],
+                )?;
             }
-            tx.execute(
-                "UPDATE attachments SET purge_state='pending' WHERE id=?1",
-                [id],
-            )?;
+            Ok(file)
+        })?;
+        if file.purge_state == AttachmentPurgeState::Purged {
+            return Ok(file);
         }
-        tx.commit()?;
 
         // No writer transaction during filesystem I/O. Committed pending state makes
         // concurrent canonical/draft restoration refuse these bytes without lock inversion.
         self.delete_purged_bytes(&file).map_err(|error| Error::Attachment(format!("Permanent purge is pending, not confirmed: {error}. Retry explicit purge for '{id}' after repairing managed storage; do not restore individual bytes.")))?;
-        (|| {
-            let tx = self.connection.savepoint()?;
-            crate::write_scope::lock(&tx)?;
+        crate::write_scope::run(&self.connection, |tx| {
             tx.execute("UPDATE attachments SET purge_state='purged' WHERE id=?1", [id])?;
-            let file = attachments::read_attachment(&tx, id)?;
-            tx.commit()?;
-            Ok(file)
-        })().map_err(|error: Error| Error::Attachment(format!("Permanent purge is pending: bytes were removed but completion was not recorded: {error}. Retry explicit purge for '{id}' to confirm completion.")))
+            attachments::read_attachment(tx, id)
+        }).map_err(|error: Error| Error::Attachment(format!("Permanent purge is pending: bytes were removed but completion was not recorded: {error}. Retry explicit purge for '{id}' to confirm completion.")))
     }
 
     fn delete_purged_bytes(&self, file: &Attachment) -> Result<(), Error> {
@@ -268,20 +263,19 @@ impl Workspace {
     }
 
     pub(crate) fn quarantine_attachment_locked(&mut self, id: &str) -> Result<Attachment, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let current = review(&tx, id)?;
-        if current.attachment.quarantined {
-            return Ok(current.attachment);
-        }
-        if !current.eligible {
-            return Err(Error::Attachment(current.reason));
-        }
-        move_bytes(&tx, &current.attachment, true)?;
-        tx.execute("UPDATE attachments SET quarantined=1 WHERE id=?1", [id])?;
-        let file = attachments::read_attachment(&tx, id)?;
-        tx.commit()?;
-        Ok(file)
+        crate::write_scope::run(&self.connection, |tx| {
+            let current = review(tx, id)?;
+            if current.attachment.quarantined {
+                return Ok(current.attachment);
+            }
+            if !current.eligible {
+                return Err(Error::Attachment(current.reason));
+            }
+            move_bytes(tx, &current.attachment, true)?;
+            tx.execute("UPDATE attachments SET quarantined=1 WHERE id=?1", [id])?;
+            let file = attachments::read_attachment(tx, id)?;
+            Ok(file)
+        })
     }
 
     pub fn restore_attachment(&mut self, id: &str) -> Result<Attachment, Error> {
@@ -290,17 +284,16 @@ impl Workspace {
     }
 
     pub(crate) fn restore_attachment_locked(&mut self, id: &str) -> Result<Attachment, Error> {
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let file = attachments::read_attachment(&tx, id)?;
-        if file.kind != AttachmentKind::LocalSnapshot {
-            return Err(Error::Attachment("External references have no local bytes to restore. Remote files remain unchanged.".into()));
-        }
-        restore_reference(&tx, id)?;
-        attachments::validate_attachment_bytes(&tx, &file)?;
-        let file = attachments::read_attachment(&tx, id)?;
-        tx.commit()?;
-        Ok(file)
+        crate::write_scope::run(&self.connection, |tx| {
+            let file = attachments::read_attachment(tx, id)?;
+            if file.kind != AttachmentKind::LocalSnapshot {
+                return Err(Error::Attachment("External references have no local bytes to restore. Remote files remain unchanged.".into()));
+            }
+            restore_reference(tx, id)?;
+            attachments::validate_attachment_bytes(tx, &file)?;
+            let file = attachments::read_attachment(tx, id)?;
+            Ok(file)
+        })
     }
 }
 

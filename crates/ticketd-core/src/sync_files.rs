@@ -1816,17 +1816,16 @@ impl Workspace {
     /// external ownership, dependency loops) do not apply: the record is taken as it is.
     pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
         record.validate()?;
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let mut apply = Apply {
-            c: &transaction,
-            record,
-            missing: Vec::new(),
-        };
-        apply.run()?;
-        let missing = apply.missing;
-        transaction.commit()?;
-        Ok(missing)
+        crate::write_scope::run(&self.connection, |transaction| {
+            let mut apply = Apply {
+                c: transaction,
+                record,
+                missing: Vec::new(),
+            };
+            apply.run()?;
+            let missing = apply.missing;
+            Ok(missing)
+        })
     }
 }
 

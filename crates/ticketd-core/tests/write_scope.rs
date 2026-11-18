@@ -4,8 +4,8 @@
 use serde_json::json;
 use ticketd_core::{
     ActivityPatch, BatchOperation, Error, EvidenceInput, EvidenceKind, RelationshipKind, Status,
-    TicketChange, TicketPatch, Workspace, WorkspaceEvent, WorkspaceEventType, WriteRequest,
-    WriteResult,
+    SyncRecord, TicketChange, TicketPatch, Workspace, WorkspaceEvent, WorkspaceEventType,
+    WriteRequest, WriteResult,
 };
 
 /// A Workspace with a ticket in Trash and the things the writes need around it.
@@ -500,6 +500,17 @@ fn every_write_that_creates_a_ticket_logs_one_created_event_with_the_final_value
                     panic!("expected a ticket")
                 };
                 ticket.reference
+            }),
+        ),
+        (
+            "an incoming sync record applied on its own",
+            Box::new(|w| {
+                let record = SyncRecord::parse(
+                    "---\nkind: ticket\nformat: 1\nid: \"0b5f6f0e-4a54-4d3e-9a51-6c1f4f0b2a10\"\nref: \"T-ZZ9\"\ntitle: \"Arrived\"\nstatus: \"In progress\"\ntrashed: false\nfollowing: false\n---\nSent from another desktop.\n",
+                )
+                .unwrap();
+                w.apply_sync_record(&record).unwrap();
+                "T-ZZ9".into()
             }),
         ),
     ];

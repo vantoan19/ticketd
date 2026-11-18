@@ -259,34 +259,33 @@ impl Workspace {
         let config = engine.validate(provider, raw)?;
         let preview = self.preview_source(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let previous: Option<String> = transaction
-            .query_row(
-                "SELECT configuration FROM source_configurations WHERE provider = ?1",
-                [provider],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let previous = previous
-            .map(|raw| serde_json::from_str::<ConfigValues>(&raw))
-            .transpose()?;
-        if previous.as_ref() != Some(&config) {
-            transaction.execute("UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN (SELECT i.ticket_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external')", [provider])?;
-        }
-        transaction.execute(
+        crate::write_scope::run(&self.connection, |transaction| {
+            let previous: Option<String> = transaction
+                .query_row(
+                    "SELECT configuration FROM source_configurations WHERE provider = ?1",
+                    [provider],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let previous = previous
+                .map(|raw| serde_json::from_str::<ConfigValues>(&raw))
+                .transpose()?;
+            if previous.as_ref() != Some(&config) {
+                transaction.execute("UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN (SELECT i.ticket_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external')", [provider])?;
+            }
+            transaction.execute(
             "INSERT INTO source_configurations (provider, configuration, account, contract_version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(provider) DO UPDATE SET configuration = excluded.configuration, account = excluded.account, contract_version = excluded.contract_version, saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
             params![provider, configuration, preview.account, CONTRACT_VERSION],
         )?;
-        let row = transaction.query_row(
+            let row = transaction.query_row(
             "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
             [provider],
             row_parts,
         )?;
-        transaction.commit()?;
-        Ok(SaveOutcome {
-            source: into_saved(row)?,
-            preview,
+            Ok(SaveOutcome {
+                source: into_saved(row)?,
+                preview,
+            })
         })
     }
 }
