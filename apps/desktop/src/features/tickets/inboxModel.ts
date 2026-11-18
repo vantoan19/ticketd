@@ -2,6 +2,7 @@ import type { Entry as HistoryEntry } from "@/lib/api/history";
 import { startOfLocalDay } from "@/lib/format";
 import { describeChange } from "./history-sentence";
 import { providerName } from "./ticket-source";
+import { progressBrief } from "./progress-brief";
 export type { Entry } from "@/lib/api/inbox";
 import type { Entry } from "@/lib/api/inbox";
 import type { Ticket } from "@/lib/api/client";
@@ -9,13 +10,18 @@ import type { Ticket } from "@/lib/api/client";
 /**
  * Why the Ticket an Inbox entry names cannot be changed, or null when it can:
  * `undefined` is a Ticket not read yet, `null` one the core says is gone.
+ * A reminder is the person's own and does not change the Ticket, so
+ * `allowTrashed` lets a Ticket in Trash keep one (spec 4.6; the core allows it).
  */
 export function ticketUnavailable(
   record: Ticket | null | undefined,
+  { allowTrashed = false }: { allowTrashed?: boolean } = {},
 ): string | null {
   if (record === undefined) return "The Ticket is still loading.";
   if (record === null) return "The Ticket no longer exists.";
-  return record.trashed ? "Restore the Ticket before changing it." : null;
+  return record.trashed && !allowTrashed
+    ? "Restore the Ticket before changing it."
+    : null;
 }
 
 export type DayGroup = "Today" | "Yesterday" | "Earlier";
@@ -41,7 +47,7 @@ export function summarize(entry: Entry): string {
       : entry.kind === "activity"
         ? entry.deleted
           ? "Update deleted"
-          : `New update: ${entry.to_value}`
+          : `New update: ${progressBrief(entry.to_value)}`
         : describeChange(entry.kind, entry.from_value, entry.to_value);
   return entry.editing_agent
     ? `${base} · ${providerName(entry.editing_agent)}`

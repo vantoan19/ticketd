@@ -145,11 +145,32 @@ test("loads older entries on request", async () => {
   store = Array.from({ length: 70 }, (_, i) => entry({ id: 200 - i }));
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+  // The heading counts every update, not just the rows shown, and the pager
+  // names how many the next page holds.
+  expect(screen.getByRole("heading", { name: /^Updates\s*70$/ })).toBeTruthy();
   fireEvent.click(
-    screen.getByRole("button", { name: "Show more Inbox entries" }),
+    screen.getByRole("button", { name: "Show 20 more Inbox entries" }),
   );
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(70));
-  expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+  expect(screen.getByRole("heading", { name: /^Updates\s*70$/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Show .* more/ })).toBeNull();
+});
+
+test("an Activity's Markdown brief reads as plain text in its row", async () => {
+  store = [
+    entry({
+      id: 3,
+      title: "Protocol",
+      kind: "activity",
+      from_value: "note-id",
+      to_value: "Needs review of the **conflict** section.",
+      editing_agent: "claude-code",
+    }),
+  ];
+  render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
+  expect((await screen.findByText(/Needs review/)).textContent).toBe(
+    "claude-code: Needs review of the conflict section.",
+  );
 });
 
 test("row actions are real buttons reachable by keyboard focus and mark one entry", async () => {
