@@ -143,8 +143,31 @@ test("the page's cascade delays its rows by whole stagger steps and only reaches
   // shell's still picture of the page that left (a clone) never replays it.
   for (const rule of css.matchAll(/([^{}]+)\{[^{}]*animation[^{}]*\}/g))
     expect(rule[1]?.trim().replace(/\s+/g, " ")).toMatch(
-      /^\.view-region \[data-own-entrance\] /,
+      /^\.view-region(?:\[data-departing\])? \[data-own-entrance\] /,
     );
+});
+
+test("the page's cascade is held while the old page's picture is on show, by a rule that out-ranks the entrance", () => {
+  const css = readFileSync(
+    join(__dirname, "layout", "settings-layout.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(
+    ([, selector = "", body = ""]) => ({
+      selector: selector.trim().replace(/\s+/g, " "),
+      body,
+    }),
+  );
+  const entrance = rules.find((rule) => /animation:/.test(rule.body));
+  const hold = rules.find((rule) => rule.body.includes("paused"));
+  expect(hold?.selector).toBe(
+    ".view-region[data-departing] [data-own-entrance] .settings-shell:not([hidden]) > .settings-page-column > *",
+  );
+  // The hold is the entrance's selector plus the region's marker, so it wins on
+  // specificity (enter.css's own hold is weaker than the entrance rule here).
+  expect(hold?.selector.replace("[data-departing]", "")).toBe(
+    entrance?.selector,
+  );
 });
 
 test.each([

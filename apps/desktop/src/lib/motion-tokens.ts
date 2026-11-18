@@ -8,9 +8,6 @@ import type { Easing } from "motion/react";
 // A token that is missing (a test without the stylesheet) reads as zero: no
 // motion, never a guessed duration.
 
-/** The longest cascade: items after the eighth start together with it. */
-const STAGGER_STEPS = 7;
-
 function token(name: string): string {
   return getComputedStyle(document.documentElement)
     .getPropertyValue(name)
@@ -103,9 +100,14 @@ export function blur(direction: "in" | "out"): number {
   return number(`--motion-blur-${direction}`);
 }
 
-/** Seconds item `index` of a cascade waits behind the first. */
+/**
+ * Seconds item `index` of a cascade waits behind the first. A cascade stops
+ * after `--stagger-steps` steps (eight items): later items start with the last.
+ * The CSS entrances read the same token.
+ */
 export function staggerDelay(index: number): number {
-  return Math.min(Math.max(index, 0), STAGGER_STEPS) * seconds("--stagger");
+  const last = number("--stagger-steps");
+  return Math.min(Math.max(index, 0), last) * seconds("--stagger");
 }
 
 /** Seconds a read is given before any placeholder shows, so a fast one never flashes. */

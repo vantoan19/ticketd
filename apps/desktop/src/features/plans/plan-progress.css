@@ -22,7 +22,8 @@
   transform-origin: 0 50%;
   animation: plan-bar-fill var(--spring-travel-t) var(--spring-travel) backwards;
   animation-delay: calc(
-    var(--stagger) * min(var(--enter-step, 0), 7) + var(--dur-enter)
+    var(--stagger) * min(var(--enter-step, 0), var(--stagger-steps)) +
+      var(--dur-enter)
   );
 }
 @keyframes plan-bar-fill {

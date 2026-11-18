@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { MotionProvider, Presence } from "@/components/ui/motion";
+import { ViewRegion } from "@/components/layout/ViewRegion";
 import { Step, Steps } from "@/components/ui/steps";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
-import { frames, freezeMotionClock } from "@/test/motion-clock";
 import {
   applyTokens,
   instantTokens,
@@ -14,76 +13,143 @@ import {
 import { FirstRunGuide } from "./FirstRunGuide";
 
 // First run (DESIGN.md section 12): the guide arrives in a cascade of its own,
-// fades out when the first ticket exists, and a step that completes draws its
-// check. Motion time is the test's own (test/motion-clock), so nothing depends
-// on how fast the machine runs.
+// the shell fades it out when the list holds the first ticket, and a step that
+// completes draws its check. jsdom has no Web Animations, so `animate` is a spy.
 
 vi.mock("@/lib/api/agent-skills", () => ({
   agentSkillsClient: { list: vi.fn() },
 }));
 
-const EXIT_MS = 150;
+type Played = {
+  element: Element;
+  options: KeyframeAnimationOptions;
+  onfinish: null | (() => void);
+  oncancel: null | (() => void);
+  finished: Promise<unknown>;
+};
+const played: Played[] = [];
+const animate = vi.fn(function (
+  this: Element,
+  _keyframes: unknown,
+  options: KeyframeAnimationOptions,
+) {
+  const animation = {
+    element: this,
+    options,
+    onfinish: null,
+    oncancel: null,
+    finished: new Promise<unknown>(() => {}),
+  } as Played;
+  played.push(animation);
+  return animation as unknown as Animation;
+});
 
 let restoreTokens: () => void;
-let clock: ReturnType<typeof freezeMotionClock>;
 beforeEach(() => {
   vi.mocked(agentSkillsClient.list).mockResolvedValue([]);
+  played.length = 0;
+  animate.mockClear();
+  Element.prototype.animate = animate as unknown as Element["animate"];
   restoreTokens = applyTokens(rootTokens);
-  clock = freezeMotionClock();
+  // jsdom reports no client rects; whatever is mounted and not hidden is on show.
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
+    function (this: HTMLElement) {
+      return (this.closest("[hidden]") ? [] : [{}]) as unknown as DOMRectList;
+    },
+  );
 });
 afterEach(() => {
   cleanup();
-  clock.restore();
+  vi.restoreAllMocks();
   restoreTokens();
+  // @ts-expect-error jsdom has no animate; remove the spy
+  delete Element.prototype.animate;
 });
 
-function Guide({ first }: { first: boolean }) {
+/** The first ticket exists: the guide gives way to the list, as App does. */
+function Page({ first }: { first: boolean }) {
   return (
-    <MotionProvider>
-      <Presence>
-        {first && (
-          <FirstRunGuide
-            key="guide"
-            disabledReason={null}
-            onCreate={() => {}}
-          />
-        )}
-      </Presence>
-    </MotionProvider>
+    <main className="content-panel">
+      <ViewRegion page={first ? "first-run" : "list"}>
+        {first && <FirstRunGuide disabledReason={null} onCreate={() => {}} />}
+        <section className="ticket-list" hidden={first}>
+          <header data-arrive="header" />
+          <ul>
+            <li data-arrive="row">T-1</li>
+          </ul>
+        </section>
+      </ViewRegion>
+    </main>
   );
 }
 
-const host = () => document.querySelector<HTMLElement>(".first-run-host");
+// The live guide, not the shell's picture of it.
+const host = () =>
+  document.querySelector<HTMLElement>(
+    '[data-slot="view-region"] .first-run-host',
+  );
 
-test("the guide arranges its own entrance: icon, title, lede, each step, hint, one stagger step apart", () => {
-  render(<Guide first />);
+test("the guide arranges its own entrance: header, icon, title, lede, the steps card with each step, hint, one stagger step apart", () => {
+  render(<Page first />);
   expect(host()?.hasAttribute("data-own-entrance")).toBe(true);
   const parts = Array.from(
     host()!.querySelectorAll<HTMLElement>("[data-enter]"),
   );
+  // The card arrives with its first step, so it is never an empty box.
   expect(
     parts.map((part) => part.style.getPropertyValue("--enter-step")),
-  ).toEqual(["0", "1", "2", "3", "4", "5", "6"]);
-  expect(parts[1]?.querySelector("h2")).not.toBeNull();
-  // The three steps are three parts, not one block.
-  expect(parts.slice(3, 6).map((part) => part.dataset.slot)).toEqual([
+  ).toEqual(["0", "1", "2", "3", "4", "4", "5", "6", "7"]);
+  expect(parts[0]?.querySelector('[data-slot="pane-header"]')).not.toBeNull();
+  expect(parts[2]?.querySelector("h2")).not.toBeNull();
+  expect(parts[4]?.dataset.slot).toBe("steps");
+  expect(parts.slice(5, 8).map((part) => part.dataset.slot)).toEqual([
     "step",
     "step",
     "step",
   ]);
-  expect(parts[6]?.textContent).toContain("to search or jump anywhere");
+  expect(parts[8]?.textContent).toContain("to search or jump anywhere");
 });
 
-test("once the first ticket exists the guide lets go of its space and fades out in the exit time", async () => {
-  const { rerender } = render(<Guide first />);
-  await frames();
-  rerender(<Guide first={false} />);
-  expect(host()?.dataset.leaving).toBe("true");
-  await frames();
-  await clock.advance(EXIT_MS - 10);
-  expect(host()).not.toBeNull();
-  await clock.advance(20);
+test("the guide leaves once: the shell's inert picture fades, the live guide is gone at once", () => {
+  const { container, rerender } = render(<Page first />);
+  rerender(<Page first={false} />);
   expect(host()).toBeNull();
+  const picture = container.querySelector(".view-departing");
+  expect(picture?.querySelector(".first-run-host")).not.toBeNull();
+  expect(picture?.hasAttribute("inert")).toBe(true);
+  expect(picture?.getAttribute("aria-hidden")).toBe("true");
+  // One fade out of the picture; nothing else fades the guide.
+  expect(played.filter((one) => one.options.fill === "forwards")).toHaveLength(
+    1,
+  );
+  expect(played[0]?.element).toBe(picture);
+});
+
+test("the list then arrives as a page arrival: header, then its rows, after the picture's fade", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    top: 0,
+    bottom: 100,
+    left: 0,
+    right: 100,
+    width: 100,
+    height: 100,
+  } as DOMRect);
+  const { container, rerender } = render(<Page first />);
+  rerender(<Page first={false} />);
+  const arrivals = played.filter((one) => one.options.fill === "backwards");
+  const delayOf = (kind: string) =>
+    arrivals.find((one) => one.element.getAttribute("data-arrive") === kind)
+      ?.options.delay;
+  expect(delayOf("header")).toBe(150);
+  expect(delayOf("row")).toBe(174);
+  expect(
+    container.querySelector(".ticket-list")?.hasAttribute("data-arriving"),
+  ).toBe(true);
+});
+
+test("the shell plays nothing for a guide that is simply on show", () => {
+  render(<Page first />);
+  expect(animate).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -92,10 +158,12 @@ test.each([
 ])("with %s the guide goes at once", async (_name, tokens) => {
   restoreTokens();
   restoreTokens = applyTokens({ ...rootTokens, ...tokens });
-  const { rerender } = render(<Guide first />);
-  rerender(<Guide first={false} />);
-  await frames();
+  const { container, rerender } = render(<Page first />);
+  rerender(<Page first={false} />);
+  await act(async () => {});
   expect(host()).toBeNull();
+  expect(container.querySelector(".view-departing")).toBeNull();
+  expect(animate).not.toHaveBeenCalled();
 });
 
 const drawn = () => document.querySelector('[data-slot="drawn-path"]');
@@ -162,7 +230,7 @@ test("the guide shows the skill step done, not drawn, when the skill was install
       error: null,
     },
   ]);
-  render(<Guide first />);
+  render(<Page first />);
   expect(await screen.findByText(/Completed:/)).toBeTruthy();
   expect(drawn()).toBeNull();
   expect(

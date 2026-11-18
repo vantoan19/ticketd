@@ -98,11 +98,28 @@ export function leave(element: Element, done: () => void): void {
 
 const latest = new WeakMap<Element, symbol>();
 
+/** A page, or a part of one, that arranges its own entrance and is not on its way out. */
+const OWN_ENTRANCE = "[data-own-entrance]:not([data-leaving])";
+
+/**
+ * Whether `page` choreographs its own entrance (arrival contract rule 2). The
+ * marker may sit on the page or anywhere inside it (Documents marks
+ * `.documents-page`, Projects and Automations mark inside a wrapper). One that
+ * is leaving does not count: it is not the page that arrives.
+ */
+export function ownsEntrance(page: HTMLElement): boolean {
+  return (
+    page.matches(OWN_ENTRANCE) || page.querySelector(OWN_ENTRANCE) !== null
+  );
+}
+
 /**
  * The header and the visible rows marked `data-arrive` inside `root`: headers
  * first at step `first`, then the rows one stagger step apart in document
  * order. Rows below the fold are left alone and rows past the last step arrive
- * with it. Placeholders carry no marker, so they never join.
+ * with it. Placeholders carry no marker, so they never join. What a page that
+ * owns its entrance holds is its own to play, and what is already animating (a
+ * list that began its own cascade first) is not started again.
  */
 function cascade(root: HTMLElement, first: number, delay: number): Animation[] {
   const frame = root.getBoundingClientRect();
@@ -111,7 +128,9 @@ function cascade(root: HTMLElement, first: number, delay: number): Animation[] {
     return (
       element.getClientRects().length > 0 &&
       box.bottom > frame.top &&
-      box.top < frame.bottom
+      box.top < frame.bottom &&
+      element.closest(OWN_ENTRANCE) === null &&
+      (element.getAnimations?.().length ?? 0) === 0
     );
   };
   const marked = (kind: "header" | "row") =>
@@ -150,13 +169,24 @@ export function arrivePage(page: HTMLElement, delay = 0): void {
 
 /**
  * The window opening (DESIGN.md section 12): the sidebar fades in, the pane
- * follows a step later, then the header and visible rows inside it.
+ * follows a step later, then the header and visible rows inside it. A pane
+ * showing a page that owns its entrance (the First-run guide) is left to it: the
+ * pane does not fade and the page's own cascade is not stacked on.
  */
 export function arriveWorkspace(
   sidebar: Element | null,
   pane: HTMLElement | null,
 ): void {
   if (sidebar) arrive(sidebar, { fade: true });
-  if (pane)
+  if (pane && !shownPages(pane).some(ownsEntrance))
     holdArriving(pane, [...arrive(pane, { index: 1 }), ...cascade(pane, 2, 0)]);
+}
+
+/** The pages of the pane that are on show (a kept page behind `hidden` is not). */
+function shownPages(pane: HTMLElement): HTMLElement[] {
+  const region = pane.querySelector('[data-slot="view-region"]');
+  return [...(region?.children ?? [pane])].filter(
+    (page): page is HTMLElement =>
+      page instanceof HTMLElement && page.getClientRects().length > 0,
+  );
 }

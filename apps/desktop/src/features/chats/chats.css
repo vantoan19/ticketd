@@ -2,8 +2,8 @@
 
 /* Chat screens: the ticket list + detail split with one quiet conversation
    column. Layout only; every color, radius, shadow and size is a token. */
-.chats-workspace :is(#chat-list, [data-id="chat-list"]),
-.chats-workspace :is(#chat-detail, [data-id="chat-detail"]) {
+.chats-workspace :is(#chat-list, [data-view-id="chat-list"]),
+.chats-workspace :is(#chat-detail, [data-view-id="chat-detail"]) {
   min-width: 0;
 }
 /* One pane at a time below 840px and in Expanded. Both panes stay mounted
@@ -17,8 +17,10 @@
 .chats-workspace[data-single] [data-slot="resizable-handle"] {
   display: none;
 }
-.chats-workspace[data-single="list"] :is(#chat-detail, [data-id="chat-detail"]),
-.chats-workspace[data-single="detail"] :is(#chat-list, [data-id="chat-list"]) {
+.chats-workspace[data-single="list"]
+  :is(#chat-detail, [data-view-id="chat-detail"]),
+.chats-workspace[data-single="detail"]
+  :is(#chat-list, [data-view-id="chat-list"]) {
   position: absolute;
   inset: 0;
   visibility: hidden;
