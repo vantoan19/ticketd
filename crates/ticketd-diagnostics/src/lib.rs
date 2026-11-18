@@ -8,6 +8,8 @@
 //! Nothing here depends on Tauri, so everything can be tested with a temporary folder.
 
 mod desktop;
+mod errors;
+mod export;
 mod sink;
 
 use std::path::Path;
@@ -19,6 +21,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt};
 
 pub use desktop::{Config, DesktopLogs};
+pub use errors::ErrorGroup;
+pub use export::{Export, Facts, HarnessVersion, KnownValues, WorkspaceHealth, export_file_name};
 
 /// The environment variable that sets the filter, for the CLI and the desktop alike.
 pub const FILTER_VARIABLE: &str = "TICKETD_LOG";
