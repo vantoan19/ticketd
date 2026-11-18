@@ -119,7 +119,10 @@ fn attention_the_old_way(workspace: &Workspace) -> InboxAttention {
 
 #[test]
 fn inbox_attention_decides_what_needs_the_person_as_the_inbox_did() {
-    let Seeded { mut workspace, .. } = seeded();
+    let Seeded {
+        mut workspace,
+        _dir,
+    } = seeded();
     let listed = workspace.list_tickets().unwrap();
     let reference = |n| numbered(&listed, n).reference;
     for n in [1, 3, 5, 6, 7] {
@@ -201,7 +204,10 @@ fn inbox_attention_decides_what_needs_the_person_as_the_inbox_did() {
 
 #[test]
 fn chat_summaries_are_the_listed_chats_with_the_chats_in_their_folder() {
-    let Seeded { mut workspace, .. } = seeded();
+    let Seeded {
+        mut workspace,
+        _dir,
+    } = seeded();
     let listed = workspace.list_tickets().unwrap();
     let mut chat = |title: &str, folder: &str, ticket: Option<usize>| {
         workspace
@@ -285,7 +291,7 @@ fn chat_summaries_are_the_listed_chats_with_the_chats_in_their_folder() {
 
 #[test]
 fn active_tickets_are_the_tickets_changed_last() {
-    let Seeded { workspace, .. } = seeded();
+    let Seeded { workspace, _dir } = seeded();
     let mut expected = workspace.list_tickets().unwrap();
     expected.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     for limit in [1, 4, 50] {
@@ -320,7 +326,10 @@ fn active_tickets_are_the_tickets_changed_last() {
 
 #[test]
 fn chat_suggestions_continue_review_and_triage_from_the_tickets_under_way() {
-    let Seeded { mut workspace, .. } = seeded();
+    let Seeded {
+        mut workspace,
+        _dir,
+    } = seeded();
     let listed = workspace.list_tickets().unwrap();
     let reference = |n| numbered(&listed, n).reference;
     workspace.set_following(&reference(3), true).unwrap();
@@ -475,7 +484,7 @@ fn pages() -> Vec<TicketFilter> {
 
 #[test]
 fn a_ticket_row_says_what_the_full_ticket_says_without_its_body() {
-    let Seeded { workspace, .. } = seeded();
+    let Seeded { workspace, _dir } = seeded();
     for filter in pages() {
         let expected: Vec<TicketRow> = workspace
             .find_tickets_with_updates(&filter)
@@ -538,7 +547,7 @@ fn a_ticket_row_says_what_the_full_ticket_says_without_its_body() {
 
 #[test]
 fn a_listed_ticket_is_the_ticket_shown_on_its_own() {
-    let Seeded { workspace, .. } = seeded();
+    let Seeded { workspace, _dir } = seeded();
     let listed = workspace.list_tickets().unwrap();
     assert_eq!(listed.len(), 11);
     let numbered = |n: usize| {
