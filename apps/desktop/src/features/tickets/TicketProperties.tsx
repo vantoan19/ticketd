@@ -51,7 +51,6 @@ import "./properties.css";
 import { Badge } from "@/components/ui/badge";
 import { m } from "motion/react";
 import { CrossfadeText, Presence } from "@/components/ui/motion";
-import { glide } from "@/components/ui/row-motion";
 import {
   blur,
   enterTransition,
@@ -59,44 +58,66 @@ import {
   spring,
 } from "@/lib/motion-tokens";
 
+/** The gap between pills, in px: `.rail-tags` in properties.css sets it. */
+const PILL_GAP = 4;
+
 /**
- * The tags as pills. A new pill fades up from a soft blur at 94% scale while
- * its neighbours glide aside; a removed pill fades out and they close the gap
- * (popLayout takes it out of the flow at once, so both happen together). The
- * pills present when the row appears do not animate.
+ * The tags as pills. A new pill opens its own width and fades up from a soft
+ * blur at 94% scale; a removed pill fades out as its width closes. Pills after
+ * it make or give up the room as the width moves, in the row's own flow, so a
+ * pill never overlaps its neighbour, and the row never reflows at once (a pill
+ * that glided to a new line, as layout motion would move it, was clipped by its
+ * row and vanished mid-way). A pill's gap opens and closes with it. The pills
+ * present when the row appears do not animate.
  */
 function TagPills({ tags }: { tags: string[] }) {
   return (
     <span className="rail-tags">
-      <Presence initial={false} mode="popLayout">
-        {tags.map((tag) => (
-          <m.span
-            key={tag}
-            {...glide(tags.join())}
-            initial={{
-              opacity: 0,
-              scale: 0.94,
-              filter: `blur(${blur("in")}px)`,
-            }}
-            animate={{
-              opacity: 1,
-              scale: 1,
-              filter: "blur(0px)",
-              transitionEnd: { filter: "none" },
-              transition: {
-                default: enterTransition(),
-                scale: spring("smooth"),
-              },
-            }}
-            exit={{
-              opacity: 0,
-              filter: `blur(${blur("out")}px)`,
-              transition: exitTransition(),
-            }}
-          >
-            <Badge>{tag}</Badge>
-          </m.span>
-        ))}
+      <Presence initial={false}>
+        {tags.map((tag) => {
+          const smooth = spring("smooth");
+          return (
+            <m.span
+              key={tag}
+              initial={{
+                opacity: 0,
+                scale: 0.94,
+                filter: `blur(${blur("in")}px)`,
+                width: 0,
+                marginRight: -PILL_GAP,
+                overflow: "clip",
+              }}
+              animate={{
+                opacity: 1,
+                scale: 1,
+                filter: "blur(0px)",
+                width: "auto",
+                marginRight: 0,
+                transitionEnd: { filter: "none", overflow: "visible" },
+                transition: {
+                  default: enterTransition(),
+                  scale: smooth,
+                  width: smooth,
+                  marginRight: smooth,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                filter: `blur(${blur("out")}px)`,
+                width: 0,
+                marginRight: -PILL_GAP,
+                overflow: "clip",
+                transition: {
+                  default: exitTransition(),
+                  width: smooth,
+                  marginRight: smooth,
+                },
+              }}
+            >
+              <Badge>{tag}</Badge>
+            </m.span>
+          );
+        })}
       </Presence>
       {tags.length === 0 && "No tags"}
     </span>

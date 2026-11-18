@@ -122,15 +122,43 @@ test("an added tag settles into place", async () => {
   expect(added.style.opacity).toBe("1");
 });
 
-test("a removed tag fades out in its own time and leaves", async () => {
+test("a removed tag fades out in its own time, closes its width, and leaves", async () => {
   const { rerender } = render(
     <Properties value={ticket({ tags: ["api", "perf"] })} />,
   );
   rerender(<Properties value={ticket({ tags: ["api"] })} />);
-  expect(screen.queryByText("perf")).not.toBeNull();
+  const leaving = screen.getByText("perf").parentElement!;
   expect(await presentAfter("perf", EXIT_MS - 10)).toBe(true);
-  expect(await presentAfter("perf", 20)).toBe(false);
+  // Still in the row's flow while it closes, not lifted out of it: the pills
+  // after it follow its width, and the row never reflows at once.
+  expect(leaving.style.position).not.toBe("absolute");
+  expect(leaving.style.width).toBe("0px");
+  // Its gap is closing with it (the margin heads to -4px, the gap's width).
+  expect(parseFloat(leaving.style.marginRight)).toBeLessThan(0);
+  expect(await presentAfter("perf", SETTLED_MS)).toBe(false);
   expect(screen.queryByText("api")).not.toBeNull();
+});
+
+test("an added tag opens its own width and its gap, so it never overlaps its neighbour", async () => {
+  const { rerender } = render(<Properties value={ticket({ tags: ["api"] })} />);
+  rerender(<Properties value={ticket({ tags: ["api", "perf"] })} />);
+  const added = screen.getByText("perf").parentElement!;
+  // The 4px between pills opens with it, as its width does.
+  expect(added.style.width).toBe("0px");
+  expect(added.style.marginRight).toBe("-4px");
+  // Clipped while it opens, so no word shows outside its width.
+  expect(added.style.overflow).toBe("clip");
+  await frames();
+  await testbed.advance(SETTLED_MS);
+  expect(added.style.width).not.toBe("0px");
+  expect(added.style.marginRight).toBe("0px");
+});
+
+test("a pill present when the row appears is already open, with nothing to animate", () => {
+  render(<Properties value={ticket({ tags: ["api"] })} />);
+  const { width, opacity, marginRight } =
+    screen.getByText("api").parentElement!.style;
+  expect([width, opacity, marginRight]).toEqual(["auto", "1", "0px"]);
 });
 
 test("a removed tag leaves at once under reduced motion", async () => {
