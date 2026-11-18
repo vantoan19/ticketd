@@ -2149,6 +2149,10 @@ html[data-window-bar] {
    the previous row; the button itself only changes its text color. */
 .sidebar-nav li {
   position: relative;
+}
+/* One stacking context for the whole body, so the travelling highlight sits
+   under every row it crosses, not only under the row it lands in. */
+.sidebar-body {
   isolation: isolate;
 }
 .sidebar-nav li > [data-slot="glide"] {
