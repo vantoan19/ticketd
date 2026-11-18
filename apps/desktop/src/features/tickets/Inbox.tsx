@@ -59,6 +59,7 @@ import { compactAgo, formatDateTime, formatTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { inboxClient } from "@/lib/api/inbox";
 import { StatusIcon } from "./StatusIcon";
+import { progressBrief } from "./progress-brief";
 import {
   entryNoun,
   attentionGroup,
@@ -478,7 +479,14 @@ function InboxContent({
     (entry) => !needsYou(entry, projection, new Date(now)),
   );
   const entries = [...urgent, ...updates.slice(0, pages * PAGE_SIZE)];
-  const more = pages * PAGE_SIZE < updates.length;
+  const hidden = updates.slice(pages * PAGE_SIZE);
+  // Everything is loaded; only the rows are paged. Headings count them all.
+  const hiddenCounts = new Map<string, number>();
+  for (const entry of hidden) {
+    const group = attentionGroup(entry, new Date(now));
+    hiddenCounts.set(group, (hiddenCounts.get(group) ?? 0) + 1);
+  }
+  const more = hidden.length > 0;
   const [navigationError, setNavigationError] =
     useState<FailureDescription | null>(null);
   const error = navigationError ?? attention.error;
@@ -870,6 +878,7 @@ function InboxContent({
               {group}
               <Count>
                 {items.length +
+                  (hiddenCounts.get(group) ?? 0) +
                   (group === "Needs you" ? projection.approvals.length : 0)}
               </Count>
             </h2>
@@ -980,7 +989,7 @@ function InboxContent({
                           <span className="inbox-agent-name">
                             {e.editing_agent}
                           </span>
-                          : {e.to_value}
+                          : {progressBrief(e.to_value)}
                         </>
                       ) : (
                         summarize(e)
@@ -1025,6 +1034,7 @@ function InboxContent({
         ))}
         {more && (
           <Pager
+            more={Math.min(PAGE_SIZE, hidden.length)}
             noun="Inbox entries"
             loading={loading}
             onMore={() => {

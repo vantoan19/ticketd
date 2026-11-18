@@ -914,6 +914,13 @@ function AppContent() {
                                       ticketUnavailable(
                                         reference ? inboxRecord : undefined,
                                       );
+                                    // A reminder is the person's own, so Trash does not block it.
+                                    const reminderActionReason =
+                                      ticketReason ??
+                                      ticketUnavailable(
+                                        reference ? inboxRecord : undefined,
+                                        { allowTrashed: true },
+                                      );
                                     const isReview =
                                       entry?.kind === "status" &&
                                       entry.to_value === "In review";
@@ -931,7 +938,7 @@ function AppContent() {
                                             ? "The source does not allow moving this Ticket to Done."
                                             : null))
                                       : entry?.kind === "reminder"
-                                        ? ticketActionReason
+                                        ? reminderActionReason
                                         : blocked;
                                     const primaryLabel = chat
                                       ? "Review in Chat"
@@ -963,7 +970,7 @@ function AppContent() {
                                           entry?.kind === "reminder"
                                             ? "Snooze reminder"
                                             : "Remind me on this Ticket",
-                                        disabledReason: ticketActionReason,
+                                        disabledReason: reminderActionReason,
                                         run: () => requestInboxAction("remind"),
                                       },
                                       {
