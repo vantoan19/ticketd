@@ -14,6 +14,36 @@ use crate::{Error, Ticket, Workspace, WriteRequest, WriteResult, relationships};
 
 pub const DEFAULT_ATTACHMENT_LIMIT: u64 = 100 * 1024 * 1024;
 
+/// The largest file a backup can hold ([ADR 0008]): a backup keeps each retained file in
+/// one SQLite blob, and SQLite limits a row to 1,000,000,000 bytes. A little is left for
+/// the row's path and checksum. The upload limit never exceeds it, so every file that can
+/// be attached can also be backed up.
+///
+/// [ADR 0008]: ../../../docs/adr/0008-attachment-backup-container.md
+pub const MAX_BACKUP_FILE_BYTES: u64 = 999_000_000;
+
+/// The longest display name, in characters, matching the other name fields.
+pub const DISPLAY_NAME_LIMIT: usize = 256;
+
+/// A display name as stored: trimmed, on one line, and bounded.
+pub(crate) fn normalize_display_name(name: &str) -> Result<String, Error> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::Attachment("display name must not be empty".into()));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(Error::Attachment(
+            "display name must be one line without control characters".into(),
+        ));
+    }
+    if name.chars().count() > DISPLAY_NAME_LIMIT {
+        return Err(Error::Attachment(format!(
+            "display name can be at most {DISPLAY_NAME_LIMIT} characters"
+        )));
+    }
+    Ok(name.to_owned())
+}
+
 pub(crate) fn migrate_upload_settings(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS attachment_upload_settings (id INTEGER PRIMARY KEY CHECK(id = 1), limit_bytes INTEGER NOT NULL CHECK(limit_bytes > 0));
@@ -87,20 +117,23 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 impl Workspace {
+    /// The per-file upload limit in force. A larger value saved by an earlier version is
+    /// held to [`MAX_BACKUP_FILE_BYTES`], so no file is accepted that a backup cannot hold.
     pub fn attachment_upload_limit(&self) -> Result<u64, Error> {
-        Ok(self.connection.query_row(
+        let stored: u64 = self.connection.query_row(
             "SELECT limit_bytes FROM attachment_upload_settings WHERE id=1",
             [],
             |row| row.get(0),
-        )?)
+        )?;
+        Ok(stored.min(MAX_BACKUP_FILE_BYTES))
     }
 
     /// Applies to future copies, not completed outcomes replayed by request ID.
     pub fn set_attachment_upload_limit(&self, bytes: u64) -> Result<(), Error> {
-        if bytes == 0 || bytes >= i64::MAX as u64 {
-            return Err(Error::Attachment(
-                "upload limit must be between 1 and 9223372036854775806 bytes".into(),
-            ));
+        if bytes == 0 || bytes > MAX_BACKUP_FILE_BYTES {
+            return Err(Error::Attachment(format!(
+                "upload limit must be between 1 and {MAX_BACKUP_FILE_BYTES} bytes, the largest file a backup can hold"
+            )));
         }
         self.connection.execute(
             "UPDATE attachment_upload_settings SET limit_bytes=?1 WHERE id=1",
@@ -151,6 +184,12 @@ impl Workspace {
             filename,
             display_name,
             || {
+                // Check the kind before opening: opening a pipe would wait for a writer.
+                let before =
+                    fs::metadata(source).map_err(|e| crate::path_error("file", source, e))?;
+                if !before.is_file() {
+                    return Err(Error::Attachment("choose a regular file".into()));
+                }
                 let input = File::open(source).map_err(|e| crate::path_error("file", source, e))?;
                 let metadata = input.metadata()?;
                 if !metadata.is_file() {
@@ -236,10 +275,17 @@ impl Workspace {
             return Err(upload_limit_error(limit));
         }
         let original_filename = filename.to_owned();
-        let display_name = display_name.unwrap_or(&original_filename);
-        if display_name.trim().is_empty() {
-            return Err(Error::Attachment("display name must not be empty".into()));
-        }
+        let display_name = match display_name {
+            Some(name) => normalize_display_name(name)?,
+            // A file name is accepted as it is on disk, so the name derived from it is tidied.
+            None => normalize_display_name(
+                &original_filename
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .take(DISPLAY_NAME_LIMIT)
+                    .collect::<String>(),
+            )?,
+        };
         let id = Uuid::new_v4().to_string();
         let staged = tempfile::Builder::new()
             .prefix(".upload-")
@@ -252,7 +298,7 @@ impl Workspace {
         let attachment = Attachment {
             locator: format!("{id}/bytes/{original_filename}"),
             id: id.clone(),
-            display_name: display_name.into(),
+            display_name,
             original_filename,
             size_bytes: Some(size_bytes),
             kind: AttachmentKind::LocalSnapshot,
