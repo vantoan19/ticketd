@@ -1194,6 +1194,14 @@ fn translate_issue(
             .collect(),
         created_at: text("created_at").unwrap_or_default().to_owned(),
         updated_at: text("updated_at").unwrap_or_default().to_owned(),
+        // GitHub reports an issue opened by a deleted account with no user.
+        author: Some(
+            item.get("user")
+                .and_then(|user| user.get("login"))
+                .and_then(Value::as_str)
+                .unwrap_or("ghost")
+                .to_owned(),
+        ),
         // The issue payload does not name the canonical issue; `fetch` looks it up.
         duplicate_of: None,
         duplicate_of_url: None,

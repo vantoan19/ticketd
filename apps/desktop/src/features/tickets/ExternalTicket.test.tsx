@@ -409,6 +409,33 @@ test("an externally owned description is a read-only source card without editing
   expect(screen.getByText("GitHub owns this description.")).toBeTruthy();
 });
 
+test("an open state line names who opened the issue and when", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const openedAt = new Date(Date.now() - 2 * 1440 * 60_000).toISOString();
+  render(
+    <DetailsFixture
+      value={ticket({
+        source: source({ author: "alice", created_at: openedAt }),
+      })}
+    />,
+  );
+  const line = screen.getByText("Open on GitHub").closest(".ticket-state-line");
+  expect(line?.textContent).toContain("#98");
+  expect(within(line as HTMLElement).getByText("alice")).toBeTruthy();
+  expect(
+    within(line as HTMLElement)
+      .getByText("opened 2 d ago")
+      .getAttribute("datetime"),
+  ).toBe(openedAt);
+});
+
+test("a ticket imported before the author was stored shows neither until a refresh", () => {
+  bridge.invoke.mockResolvedValue([]);
+  render(<DetailsFixture value={ticket()} />);
+  const line = screen.getByText("Open on GitHub").closest(".ticket-state-line");
+  expect(line?.textContent).not.toContain("opened");
+});
+
 test("a closed state line uses the core's closure time and names its canonical issue", () => {
   bridge.invoke.mockResolvedValue([]);
   const closedAt = new Date(Date.now() - 210 * 60_000).toISOString();

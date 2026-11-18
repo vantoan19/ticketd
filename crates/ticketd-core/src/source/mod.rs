@@ -98,6 +98,11 @@ pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(),
     freshness::migrate(connection)
 }
 
+/// Format version 85: who opened each tracked issue at the source, and when.
+pub(crate) fn migrate_issue_opening(connection: &rusqlite::Connection) -> Result<(), Error> {
+    tracking::migrate_issue_opening(connection)
+}
+
 /// Format version 82: the parts of each source that have been read.
 pub(crate) fn migrate_read_partitions(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate_read_partitions(connection)

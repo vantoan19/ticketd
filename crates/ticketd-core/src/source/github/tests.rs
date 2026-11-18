@@ -110,6 +110,7 @@ fn issue(id: u64, number: u64, repo: &str) -> Value {
         "html_url": format!("https://github.example/{repo}/issues/{number}"),
         "repository_url": format!("{API}/repos/{repo}"),
         "assignees": [{"login": "octo"}], "labels": [{"name": "bug"}, "plain"],
+        "user": {"login": "alice"},
         "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z"
     })
 }
@@ -145,7 +146,10 @@ fn discovery_pages_through_every_repository_and_skips_pull_requests() {
             )],
         ),
     );
-    fixture.respond(&second, ok(json!([issue(3, 3, "o/one")])));
+    // A deleted account's issue has no user.
+    let mut orphaned = issue(3, 3, "o/one");
+    orphaned["user"] = Value::Null;
+    fixture.respond(&second, ok(json!([orphaned])));
     fixture.respond(&third, ok(json!([issue(4, 1, "o/two")])));
 
     let issues = discover_all(
@@ -159,6 +163,9 @@ fn discovery_pages_through_every_repository_and_skips_pull_requests() {
     assert_eq!(issues[0].reference.identity.id, "1");
     assert_eq!(issues[0].assignees, ["octo"]);
     assert_eq!(issues[0].labels, ["bug", "plain"]);
+    assert_eq!(issues[0].author.as_deref(), Some("alice"));
+    assert_eq!(issues[0].created_at, "2026-01-01T00:00:00Z");
+    assert_eq!(issues[1].author.as_deref(), Some("ghost"));
     assert_eq!(fixture.urls(), [first, second, third]);
 }
 

@@ -215,6 +215,17 @@ export function TicketPage({
                     </time>
                   </Tooltip>
                 )}
+                {source.author && <span>{source.author}</span>}
+                {source.created_at && (
+                  <Tooltip
+                    content={formatDateTime(source.created_at)}
+                    side="bottom"
+                  >
+                    <time dateTime={source.created_at} tabIndex={0}>
+                      opened {relativeDateTime(source.created_at, now)}
+                    </time>
+                  </Tooltip>
+                )}
               </>
             )}
           </>

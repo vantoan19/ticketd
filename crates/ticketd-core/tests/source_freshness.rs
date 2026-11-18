@@ -170,6 +170,7 @@ fn issue(id: u64, updated_at: &str) -> ExternalIssue {
         labels: vec![],
         created_at: "2026-01-01T00:00:00Z".into(),
         updated_at: updated_at.into(),
+        author: None,
         duplicate_of: None,
         duplicate_of_url: None,
         duplicate_withdrawn: false,
