@@ -18,6 +18,16 @@ The current application does not implement product analytics, session replay,
 or automatic crash-report uploads to ticketd maintainers. This is not a promise
 that every action is offline: the integrations below make network requests.
 
+The desktop keeps a local log of what the app did, to find out why something went
+wrong afterwards. It is a set of JSON files in your OS's log folder (on macOS,
+`~/Library/Logs/com.vantoan19.ticketd/`), one per day. ticketd keeps the last 7 days
+and at most 50 MB, and deletes older files when it starts. A line holds the time, a
+level, the part of ticketd that wrote it, a short message, and IDs, counts, durations
+and error kinds. By design, it never holds the text of your tickets, Documents, Plans
+or Chats. Error messages from your operating system can still contain a file path.
+The files never leave your machine by themselves; sharing them is your choice. The
+CLI writes warnings and errors to your terminal and keeps no log file.
+
 Workspace files and exports are not encrypted by ticketd. Protect them with OS
 permissions, disk encryption, and appropriate backup storage. Anyone who can read
 these files may be able to read their content.

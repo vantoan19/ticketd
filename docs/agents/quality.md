@@ -15,6 +15,23 @@
 - Keep SQL and Tauri out of domain calculations. Use parameterized SQL and short transactions; test persistence through the core interface.
 - When scaffolding Rust, pin the toolchain in `rust-toolchain.toml`, commit `Cargo.lock`, and inherit workspace lint settings in every member. Scope any lint exception narrowly and explain it.
 
+## Logging
+
+Log with `tracing`, and only `tracing`; never `eprintln!` or `println!` for diagnostics. Library crates emit events and spans and never install a subscriber. The two binaries do, through `ticketd-diagnostics` (`init_cli`, `init_desktop`). The CLI's own `error: …` line and prompts are output for the person or agent that ran it, not logs. The reasons are in [ADR 0017](../adr/0017-local-only-structured-logs.md).
+
+Where the logs are: the desktop writes JSON lines to `ticketd.YYYY-MM-DD.log` (UTC) in the app's log folder (on macOS `~/Library/Logs/com.vantoan19.ticketd/`); read them with `jq`. The CLI writes readable lines to stderr at `warn`. `TICKETD_LOG` takes any `tracing` filter (`TICKETD_LOG=debug`, `TICKETD_LOG=warn,ticketd_core=debug`) for both and overrides the desktop's Debug logging switch.
+
+The event standard:
+
+- The message is a short lowercase phrase with no values in it: `"sync pass failed"`. Put values in fields. Start a message with a capital only for a proper term from the glossary.
+- Field names are snake_case. The fixed ID fields are `ticket_ref`, `chat_id`, `automation_run_id`, `source_id` and `request_id`; use them as they are rather than inventing `ticket` or `runId`.
+- An error logs `error_kind` (a stable variant name, such as `ticketd_core::Error::kind().code()`) and `error` (its `Display` text, as `%error`). Never log an error's `Debug` output. Paths go through `ticketd_diagnostics::display_path`, which rewrites the home folder to `~`.
+- Allowed: IDs, counts, durations, error kinds, state names. Never: Ticket, Document, Plan or Chat text, titles, tokens, authorization URLs or query strings, email addresses. When an error's text can carry a Harness's or a person's words, log its kind and IDs and leave the text out.
+- Levels: `error` is for work the user lost or work that stopped. `warn` is degraded but recovered, such as a pass that failed and will be tried again. `info` is lifecycle and background passes. `debug` is detail. A failure that repeats on a timer logs when it changes or comes back, not on every attempt.
+- The target is the module path, which `tracing` sets by default. The default desktop filter is `warn,ticketd=info`, so a target must start with `ticketd` to be logged at `info`; dependencies log at `warn`.
+- Wrap work that has an ID in a span that carries it, so every line inside is correlated and the span's close records its duration. A line in the file has `timestamp` (RFC 3339, UTC), `level`, `target`, `message`, the event's fields and `spans` (the chain, outermost first). A closed span logs `message: "close"` with `time.busy` and `time.idle`.
+- A library crate that logs depends on `tracing` alone. Test what reaches the log folder or stderr through `ticketd-diagnostics` or the CLI process, not by mocking `tracing`.
+
 ## TypeScript, React, and desktop
 
 - Enable TypeScript `strict`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`. Validate data crossing process boundaries; type assertions do not validate input.
