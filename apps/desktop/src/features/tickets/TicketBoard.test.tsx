@@ -42,6 +42,7 @@ Element.prototype.scrollIntoView = () => {};
 function ticket(id: number, status = "Todo"): Ticket {
   return {
     id: String(id),
+    local_number: id,
     reference: `T-KQ${id}`,
     title: `Ticket ${id}`,
     body: "",
@@ -1868,34 +1869,39 @@ test("a card that arrives from a column scrolled out of sight enters instead of 
   end();
 });
 
-test("a card moved at once takes its sorted slot, so the core's confirmation moves nothing", async () => {
+test("a mixed-device card takes its core slot at once and stays there on confirmation", async () => {
   let resolve!: () => void;
   writeOverride = async ({ status }) => {
     await new Promise<void>((done) => {
       resolve = done;
     });
     saved = saved.map((item) =>
-      item.reference === "T-KQ1" ? { ...item, status } : item,
+      item.reference === "T-ZZ900" ? { ...item, status } : item,
     );
-    return [saved.find((item) => item.reference === "T-KQ1")!];
+    return [saved.find((item) => item.reference === "T-ZZ900")!];
   };
   // The mock core lists a column in the order saved, so keep it highest first.
-  saved = [ticket(3, "In review"), ticket(2, "In review"), ticket(1)];
+  saved = [
+    { ...ticket(40, "In review"), reference: "T-AA1" },
+    ticket(37, "In review"),
+    { ...ticket(36), reference: "T-ZZ900" },
+    ticket(34, "In review"),
+  ];
   render(<App />);
   await settle();
   await showBoard();
-  await chooseStatus("T-KQ1", "In review");
+  await chooseStatus("T-ZZ900", "In review");
   const order = () =>
     [
       ...document
         .querySelector('[aria-label="In review column"]')!
         .querySelectorAll("[data-board-reference]"),
     ].map((card) => card.getAttribute("data-board-reference"));
-  // The core lists a column highest number first: 3, 2, then 1.
-  expect(order()).toEqual(["T-KQ3", "T-KQ2", "T-KQ1"]);
+  // The local numbers are 40, 37, 36, 34; the reference counters do not compare.
+  expect(order()).toEqual(["T-AA1", "T-KQ37", "T-ZZ900", "T-KQ34"]);
   resolve();
   await settle();
-  expect(order()).toEqual(["T-KQ3", "T-KQ2", "T-KQ1"]);
+  expect(order()).toEqual(["T-AA1", "T-KQ37", "T-ZZ900", "T-KQ34"]);
 });
 
 test("dragging a card says nothing of refusal in its own column, and Add waits", async () => {

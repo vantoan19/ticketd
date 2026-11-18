@@ -21,7 +21,7 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 const ticket = (n: number, status = "Todo"): Ticket =>
-  ({ id: String(n), reference: `T-${n}`, status }) as Ticket;
+  ({ id: String(n), local_number: n, reference: `T-${n}`, status }) as Ticket;
 const filter = { tags: [] } as unknown as FindFilter;
 
 beforeEach(() => {
@@ -122,65 +122,39 @@ it("putting a card back uses the place it was given", async () => {
   expect(done(result)).toEqual(["T-5", "T-10", "T-2"]);
 });
 
-// A reference is a device code plus that device's own counter, so counters of
-// different devices say nothing about the core's order: only one device's are
-// compared, and a card with no kin in the column leads.
-it("compares counters within one device code only", async () => {
-  const at = (reference: string, status = "Done") =>
-    ({ id: reference, reference, status }) as Ticket;
+// Device counters do not determine local order: the older imported ticket can
+// have a much larger counter than a newer ticket from another device.
+it("a mixed-device move takes the core slot before confirmation and stays there", async () => {
+  const newer = { ...ticket(40, "Done"), reference: "T-AA1" };
+  const middle = { ...ticket(37, "Done"), reference: "T-BD37" };
+  const older = { ...ticket(34, "Done"), reference: "T-BD34" };
+  const moved = { ...ticket(36), reference: "T-ZZ900" };
+  read.tickets = [newer, middle, older, moved];
+  const { result } = renderHook(() => useTicketBoard(filter, true, 0));
+  await settled(result);
+  await act(async () => {
+    result.current.placeTicket({ ...moved, status: "Done" });
+  });
+  expect(done(result)).toEqual(["T-AA1", "T-BD37", "T-ZZ900", "T-BD34"]);
+
+  read.tickets = [newer, middle, { ...moved, status: "Done" }, older];
+  await act(async () => {
+    await result.current.refresh();
+  });
+  expect(done(result)).toEqual(["T-AA1", "T-BD37", "T-ZZ900", "T-BD34"]);
+});
+
+it("older payloads without local order remain movable without guessing from references", async () => {
+  const legacy = { ...ticket(5), local_number: undefined };
   read.tickets = [
-    at("T-AB90"),
-    at("T-CD5"),
-    at("T-AB3"),
-    at("T-CD2"),
-    at("T-AB50", "Todo"),
-    at("T-CD40", "Todo"),
-    at("T-EF7", "Todo"),
-    at("T-AB1", "Todo"),
+    { ...ticket(10, "Done"), local_number: null },
+    ticket(2, "Done"),
+    legacy,
   ];
   const { result } = renderHook(() => useTicketBoard(filter, true, 0));
   await settled(result);
-  const place = async (reference: string) => {
-    await act(async () => {
-      result.current.placeTicket(at(reference));
-    });
-    return done(result);
-  };
-  // Not by the digits alone: those would put 50 above CD5 and 40 above AB50.
-  expect(await place("T-AB50")).toEqual([
-    "T-AB90",
-    "T-CD5",
-    "T-AB50",
-    "T-AB3",
-    "T-CD2",
-  ]);
-  expect(await place("T-CD40")).toEqual([
-    "T-AB90",
-    "T-CD40",
-    "T-CD5",
-    "T-AB50",
-    "T-AB3",
-    "T-CD2",
-  ]);
-  // No ticket of its device is there: the lead.
-  expect(await place("T-EF7")).toEqual([
-    "T-EF7",
-    "T-AB90",
-    "T-CD40",
-    "T-CD5",
-    "T-AB50",
-    "T-AB3",
-    "T-CD2",
-  ]);
-  // Older than every ticket of its device: after the last of them.
-  expect(await place("T-AB1")).toEqual([
-    "T-EF7",
-    "T-AB90",
-    "T-CD40",
-    "T-CD5",
-    "T-AB50",
-    "T-AB3",
-    "T-AB1",
-    "T-CD2",
-  ]);
+  await act(async () => {
+    result.current.placeTicket({ ...legacy, status: "Done" });
+  });
+  expect(done(result)).toEqual(["T-5", "T-10", "T-2"]);
 });

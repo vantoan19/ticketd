@@ -36,32 +36,17 @@ function remember(shown: Shown, columns: Column[], arrive: boolean) {
   return arrived;
 }
 
-/**
- * A reference is a device code and that device's own counter ("T-CJ42" is
- * counter 42 of device "T-CJ"). The core orders by the local row number, which
- * the reference does not carry, so only counters of one device compare.
- */
-function partsOf(reference: string) {
-  const match = /^(.*?)(\d+)$/.exec(reference);
-  return { device: match?.[1] ?? reference, counter: Number(match?.[2] ?? 0) };
-}
-
-/**
- * Where a ticket sits in a column the core lists newest first, among the
- * tickets loaded so far. Newer tickets of the same device come first, so it
- * goes before the first older one of its device, or after the last one of its
- * device. With none of its device in the column the order is unknown: it leads.
- */
+/** The core's immutable local number orders a column, independent of device references. */
 function slotOf(column: readonly Ticket[], ticket: Ticket) {
-  const own = partsOf(ticket.reference);
-  const kin = column.map((item) => partsOf(item.reference));
-  const older = kin.findIndex(
-    (item) => item.device === own.device && item.counter < own.counter,
+  const number = ticket.local_number;
+  // Older saved outcomes carry no order. Do not infer it from their references.
+  if (number == null || column.some((item) => item.local_number == null))
+    return 0;
+  const older = column.findIndex(
+    (item) => item.local_number != null && item.local_number < number,
   );
-  if (older >= 0) return older;
-  return kin.map((item) => item.device).lastIndexOf(own.device) + 1;
+  return older < 0 ? column.length : older;
 }
-
 /** Independent bounded reads; core owns matching and ordering, desktop owns pages. */
 export function useTicketBoard(
   filter: FindFilter,
