@@ -184,6 +184,97 @@ test("an approval request fades up in the tray and leaves once answered", async 
   );
 });
 
+// By key: a click right after the one that opened the Chat is a rapid click,
+// and the input guard would make the exit instant.
+const answer = () =>
+  fireEvent.keyDown(screen.getByRole("button", { name: /Allow once/ }), {
+    key: "1",
+  });
+
+const approvalTwo: TranscriptItem = {
+  ...approval,
+  id: "req-2",
+  title: "Codex wants to edit",
+  subject: "package.json",
+};
+
+test("a request replaced by the next waits for it to leave: two never stack", async () => {
+  const restoreTokens = applyTokens(rootTokens);
+  const clock = freezeMotionClock();
+  try {
+    await open(
+      { id: "c1", title: "Limiter", activity: "waiting" },
+      [approval, approvalTwo],
+      MotionProvider,
+    );
+    const shown = () =>
+      [...document.querySelectorAll("[data-request]")].map(
+        (request) => request.textContent ?? "",
+      );
+    expect(shown()).toHaveLength(1);
+    expect(shown()[0]).toContain("npm install");
+    answer();
+    await clock.advance(10);
+    // The answered one is leaving; the next has not begun.
+    expect(shown()).toHaveLength(1);
+    expect(shown()[0]).toContain("npm install");
+    await clock.advance(400);
+    expect(shown()).toHaveLength(1);
+    expect(shown()[0]).toContain("package.json");
+  } finally {
+    clock.restore();
+    restoreTokens();
+  }
+});
+
+test("a request that leaves cannot be reached while it fades", async () => {
+  const restoreTokens = applyTokens(rootTokens);
+  const clock = freezeMotionClock();
+  try {
+    await open(
+      { id: "c1", title: "Limiter", activity: "waiting" },
+      [approval],
+      MotionProvider,
+    );
+    const request = screen.getByRole("group", { name: /Codex wants to run/ });
+    expect(request.hasAttribute("inert")).toBe(false);
+    answer();
+    await clock.advance(10);
+    expect(request.isConnected).toBe(true);
+    expect(request.hasAttribute("inert")).toBe(true);
+    await clock.advance(400);
+    expect(request.isConnected).toBe(false);
+  } finally {
+    clock.restore();
+    restoreTokens();
+  }
+});
+
+test("an answered question's receipt rises into the transcript", async () => {
+  const question: TranscriptItem = {
+    id: "q-1",
+    at,
+    kind: "request",
+    request: "question",
+    title: "Codex is asking you",
+    subject: "What should the limiter do?",
+    options: [{ id: "open", label: "Fail open" }],
+    free_text: false,
+    state: "pending",
+  };
+  await open({ id: "c1", title: "Limiter", activity: "waiting" }, [question]);
+  // Asked and unanswered: nothing in the transcript yet.
+  expect(document.querySelector(".chat-receipt")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Fail open/ }));
+  const receipt = await waitFor(() => {
+    const found = document.querySelector(".chat-receipt");
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  expect(receipt.textContent).toBe("Answered · Fail open");
+  expect(receipt.closest('[data-slot="appear"]')).toBeTruthy();
+});
+
 test("queued messages open and close their own space; the queue leaves with its last card", async () => {
   await open({ id: "c1", title: "Limiter", activity: "working" }, []);
   expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
@@ -220,7 +311,7 @@ function withLayoutSize() {
   return () => spy.mockRestore();
 }
 
-test("a removed queue card stays in the flow, out of reach, while it fades; the cards below do not jump", async () => {
+test("a removed queue card fades out, out of reach, as its space closes; the cards below glide up", async () => {
   const restoreTokens = applyTokens(rootTokens);
   const clock = freezeMotionClock();
   const restoreLayout = withLayoutSize();
@@ -246,15 +337,21 @@ test("a removed queue card stays in the flow, out of reach, while it fades; the 
       screen.getAllByRole("button", { name: "Remove from queue" })[0]!,
     );
     await clock.advance(10);
-    // Still drawn and still in flow (not lifted out for its neighbours to
-    // close over), but nothing in it can be reached.
+    // Still drawn, but nothing in it can be reached.
     const leaving = cards().find((card) => card.textContent === "first thing");
     expect(leaving).toBeTruthy();
-    expect(document.querySelector("[data-motion-pop-id]")).toBeNull();
     expect(
       leaving?.querySelector('[data-slot="appear"]')?.hasAttribute("inert"),
     ).toBe(true);
-    await clock.advance(200);
+    // Its own space closes with the fade, so the cards below move up as it
+    // goes instead of jumping when it has gone.
+    expect(leaving?.style.overflow).toBe("clip");
+    const closing = () => Number.parseFloat(leaving?.style.height ?? "");
+    expect(closing()).toBeLessThan(40);
+    const early = closing();
+    await clock.advance(60);
+    expect(closing()).toBeLessThan(early);
+    await clock.advance(500);
     expect(cards().map((card) => card.textContent)).toEqual(["second thing"]);
   } finally {
     restoreLayout();
