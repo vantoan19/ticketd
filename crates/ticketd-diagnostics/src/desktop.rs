@@ -4,11 +4,13 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
+use chrono::SecondsFormat;
 use tracing::Dispatch;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt, reload};
 
+use crate::crash::{SessionMarker, UncleanExit};
 use crate::sink::{Limits, Sink, SinkWriter};
 use crate::{Timestamp, filter};
 
@@ -55,6 +57,9 @@ pub struct DesktopLogs {
     dispatch: Dispatch,
     filter: reload::Handle<EnvFilter, Registry>,
     pinned: bool,
+    unclean_exit: Option<UncleanExit>,
+    /// Removes the session marker when the handle is dropped.
+    _session: Option<SessionMarker>,
 }
 
 impl DesktopLogs {
@@ -69,6 +74,13 @@ impl DesktopLogs {
             max_file_bytes: config.max_file_bytes,
         };
         let sink = Sink::open(dir.as_ref(), &limits);
+        let (session, unclean_exit) = match &sink {
+            Some(_) => {
+                let (marker, left_behind) = SessionMarker::start(dir.as_ref());
+                (Some(marker), left_behind)
+            }
+            None => (None, None),
+        };
         let pinned = config.filter_override.is_some();
         let (filter_layer, filter) =
             reload::Layer::new(filter(config.filter_override.as_deref(), DEFAULT_FILTER));
@@ -94,11 +106,31 @@ impl DesktopLogs {
             .with(filter_layer)
             .with(file)
             .with(readable);
-        Self {
+        let logs = Self {
             dispatch: Dispatch::new(subscriber),
             filter,
             pinned,
+            unclean_exit,
+            _session: session,
+        };
+        if let Some(exit) = &logs.unclean_exit {
+            let started_at = exit
+                .started_at
+                .map(|time| time.to_rfc3339_opts(SecondsFormat::Millis, true));
+            logs.with_default(|| {
+                tracing::warn!(
+                    previous_started_at = started_at.as_deref(),
+                    "previous session ended unexpectedly"
+                );
+            });
         }
+        logs
+    }
+
+    /// Whether the session before this one ended without a clean shutdown, and when it
+    /// started. The Diagnostics page shows it among the recent errors.
+    pub fn previous_session_ended_unexpectedly(&self) -> Option<&UncleanExit> {
+        self.unclean_exit.as_ref()
     }
 
     /// Makes this the process's subscriber, and routes `log` records from dependencies

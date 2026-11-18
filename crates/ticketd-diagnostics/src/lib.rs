@@ -7,6 +7,7 @@
 //!
 //! Nothing here depends on Tauri, so everything can be tested with a temporary folder.
 
+mod crash;
 mod desktop;
 mod sink;
 
@@ -18,6 +19,7 @@ use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt};
 
+pub use crash::{UncleanExit, install_panic_hook};
 pub use desktop::{Config, DesktopLogs};
 
 /// The environment variable that sets the filter, for the CLI and the desktop alike.
@@ -26,6 +28,7 @@ pub const FILTER_VARIABLE: &str = "TICKETD_LOG";
 /// Installs the CLI's subscriber: readable lines on stderr, `warn` unless `TICKETD_LOG`
 /// says otherwise. Never writes a file, and never touches stdout.
 pub fn init_cli() {
+    install_panic_hook();
     let filter = filter(std::env::var(FILTER_VARIABLE).ok().as_deref(), "warn");
     let subscriber = Registry::default().with(filter).with(
         fmt::layer()
@@ -52,6 +55,7 @@ pub fn init_desktop(log_dir: impl AsRef<Path>) -> DesktopLogs {
         },
     );
     logs.install();
+    install_panic_hook();
     logs
 }
 
