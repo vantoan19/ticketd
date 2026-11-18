@@ -9,6 +9,8 @@ pub struct Backlink {
     pub source_reference: String,
     pub source_title: String,
     pub activity_id: Option<String>,
+    /// When the mentioning update was reported; `None` for a ticket description.
+    pub reported_at: Option<String>,
     pub passage: String,
     /// Where the mention sits in the Markdown body, counted in Unicode scalar values
     /// (chars), as `passage` is, with a leading U+FEFF not counted:
@@ -114,7 +116,7 @@ pub(crate) fn query(
     offset: u32,
 ) -> Result<Vec<Backlink>, Error> {
     let pattern = format!("%{reference}%");
-    let mut statement = tx.prepare("SELECT t.reference,t.title,NULL,t.body,0,t.number FROM tickets t WHERE t.trashed=0 AND (t.body LIKE ?1 OR instr(t.body,'&')>0 OR instr(t.body,char(92))>0) UNION ALL SELECT t.reference,t.title,n.id,n.brief,n.number,t.number FROM activities n JOIN tickets t ON t.id=n.ticket_id WHERE t.trashed=0 AND (n.brief LIKE ?1 OR instr(n.brief,'&')>0 OR instr(n.brief,char(92))>0) ORDER BY 6,5")?;
+    let mut statement = tx.prepare("SELECT t.reference,t.title,NULL,t.body,0,t.number,NULL FROM tickets t WHERE t.trashed=0 AND (t.body LIKE ?1 OR instr(t.body,'&')>0 OR instr(t.body,char(92))>0) UNION ALL SELECT t.reference,t.title,n.id,n.brief,n.number,t.number,n.reported_at FROM activities n JOIN tickets t ON t.id=n.ticket_id WHERE t.trashed=0 AND (n.brief LIKE ?1 OR instr(n.brief,'&')>0 OR instr(n.brief,char(92))>0) ORDER BY 6,5")?;
     let mut rows = statement.query([pattern])?;
     let mut links = Vec::new();
     let mut seen = 0u32;
@@ -124,6 +126,7 @@ pub(crate) fn query(
         let title: String = row.get(1)?;
         let activity_id: Option<String> = row.get(2)?;
         let content: String = row.get(3)?;
+        let reported_at: Option<String> = row.get(6)?;
         if reference == source_reference {
             continue;
         }
@@ -146,6 +149,7 @@ pub(crate) fn query(
                     source_reference: source_reference.clone(),
                     source_title: title.chars().take(256).collect(),
                     activity_id: activity_id.clone(),
+                    reported_at: reported_at.clone(),
                     mention_start: char_offset(&content, mention.start),
                     mention_end: char_offset(&content, mention.end),
                     passage: {

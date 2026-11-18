@@ -76,6 +76,7 @@ and pages through 50 results at a time.
 
 `ticketd backlinks T-KQ1` lists incoming references as JSON. Each entry has
 `source_reference`, `source_title`, `activity_id` (null for a description),
+`reported_at` (when the mentioning update was reported; null for a description),
 `passage` (the source line, trimmed to 512 characters around the reference), and
 `mention_start` and `mention_end`, which locate the mention in the source ticket
 description or authored Activity. They count Unicode scalar values (characters, as `passage`

@@ -1797,7 +1797,12 @@ fn backlinks_follow_markdown_content_and_note_changes() {
     assert_eq!(links.len(), 2);
     assert_eq!(links[0].source_reference, source.reference);
     assert_eq!(links[0].passage, "See T-KQ1 here.");
+    assert_eq!(links[0].reported_at, None);
     assert_eq!(links[1].activity_id.as_deref(), Some(note.id.as_str()));
+    assert_eq!(
+        links[1].reported_at.as_deref(),
+        Some(note.reported_at.as_str())
+    );
     workspace
         .delete_activity(&source.reference, &note.id)
         .unwrap();

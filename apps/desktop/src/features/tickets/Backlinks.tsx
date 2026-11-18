@@ -33,7 +33,6 @@ export function Backlinks({
   const [offset, setOffset] = useState(0);
   const {
     links: found,
-    dates: noteDates,
     failure: error,
     retry,
   } = useOpenTicket("backlinks", offset);
@@ -106,7 +105,7 @@ export function Backlinks({
                 <strong>{link.source_title}</strong>
                 <span className="backlink-where">
                   {link.activity_id
-                    ? `Update${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
+                    ? `Update${link.reported_at ? ` · ${formatDateTime(link.reported_at)}` : ""}`
                     : "Description"}
                 </span>
               </span>

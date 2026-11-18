@@ -119,6 +119,7 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                   source_reference: "T-KQ2",
                   source_title: "Source",
                   activity_id: null,
+                  reported_at: null,
                   passage: "Blocked on T-KQ1 today.",
                   ...span,
                 },
