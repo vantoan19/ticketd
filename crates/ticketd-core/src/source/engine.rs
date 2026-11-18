@@ -356,6 +356,11 @@ impl Engine {
         Ok(connector.destinations(&config))
     }
 
+    /// Whether `destination` is well formed for `provider`; no network call.
+    pub fn check_destination(&self, provider: &str, destination: &str) -> Result<(), SourceError> {
+        self.connector(provider)?.check_destination(destination)
+    }
+
     /// Whether `provider` declares the optional publication capability.
     pub fn can_publish(&self, provider: &str) -> bool {
         self.descriptor(provider)

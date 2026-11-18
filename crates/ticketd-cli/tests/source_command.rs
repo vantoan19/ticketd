@@ -203,7 +203,57 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
     assert!(!stderr.contains("wrong-token"));
     let stderr = cli.fail(&["source", "test", "github"], None);
     assert!(stderr.contains("gh auth login"), "{stderr}");
-    assert!(stderr.contains("TICKETD_GITHUB_TOKEN"), "{stderr}");
+    // The cause and the script hint are separate sentences, and a terminal is
+    // never sent to a desktop Settings button.
+    assert!(
+        stderr.contains("to sign in. From a script, set TICKETD_GITHUB_TOKEN"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Settings"), "{stderr}");
+}
+
+#[test]
+fn a_settings_file_that_cannot_be_used_is_named_with_what_was_wrong() {
+    let cli = Cli::new();
+    let missing = cli.dir.path().join("missing.json");
+    let stderr = cli.fail(
+        &[
+            "source",
+            "preview",
+            "github",
+            "--config-file",
+            missing.to_str().unwrap(),
+        ],
+        Some(TOKEN),
+    );
+    assert!(
+        stderr.contains("could not read the --config-file"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("missing.json"), "{stderr}");
+    let bad = cli.dir.path().join("bad.json");
+    std::fs::write(&bad, "{bad").unwrap();
+    let stderr = cli.fail(
+        &[
+            "source",
+            "preview",
+            "github",
+            "--config-file",
+            bad.to_str().unwrap(),
+        ],
+        Some(TOKEN),
+    );
+    assert!(stderr.contains("bad.json is not valid JSON"), "{stderr}");
+}
+
+#[test]
+fn taking_over_a_local_ticket_says_it_is_already_local() {
+    let cli = Cli::new();
+    let created = cli.run(&["create", "Mine"]);
+    let reference = created["reference"].as_str().unwrap();
+    let stderr = cli.fail(&["source", "take-ownership", reference], Some(TOKEN));
+    assert!(stderr.contains("already a local ticket"), "{stderr}");
+    assert!(!stderr.contains("refresh"), "{stderr}");
 }
 
 #[test]

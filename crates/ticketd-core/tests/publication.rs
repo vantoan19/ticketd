@@ -25,7 +25,7 @@ use ticketd_core::{
         ActionKind, AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema,
         ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
         DiscoveryRequest, Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
+        ExternalState, FieldIssue, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
         PublicationCandidates, PublicationError, PublicationSearch, PublishOptions, PublishRequest,
         RefreshOptions, Resolution, ResolveOptions, SchemaField, SourceError, ValueFormat,
     },
@@ -183,12 +183,10 @@ impl Connector for Fake {
         self.answer(|remote| {
             let (repository, number) = text.rsplit_once('#').unwrap_or((destination, text));
             if repository != destination {
-                return Err(SourceError::InvalidConfiguration(vec![
-                    ticketd_core::source::FieldIssue {
-                        field: "issue".into(),
-                        message: format!("is not in {destination}"),
-                    },
-                ]));
+                return Err(SourceError::InvalidConfiguration(vec![FieldIssue {
+                    field: "issue".into(),
+                    message: format!("is not in {destination}"),
+                }]));
             }
             let id: u64 = number
                 .parse()
@@ -220,6 +218,17 @@ impl Connector for Fake {
                 complete: remote.search_complete,
             })
         })
+    }
+
+    // Like GitHub, a destination must look like `owner/name`.
+    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
+        match destination.split_once('/') {
+            Some((owner, name)) if !owner.is_empty() && !name.is_empty() => Ok(()),
+            _ => Err(SourceError::InvalidConfiguration(vec![FieldIssue {
+                field: "destination".into(),
+                message: "must be a repository in the form owner/name".into(),
+            }])),
+        }
     }
 
     fn destinations(&self, config: &ConfigValues) -> Vec<String> {
@@ -695,6 +704,39 @@ fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
     assert_eq!(preview.destinations, vec!["o/r".to_owned()]);
     assert_eq!(preview.provider_name, "Fake");
     assert_eq!(preview.eligibility, Eligibility::Eligible);
+    assert_eq!(f.created(), 0);
+}
+
+#[test]
+fn preview_refuses_a_malformed_destination_the_way_publishing_does() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body.");
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", Some("nonsense"))
+        .unwrap();
+    let Eligibility::Ineligible { reason, message } = preview.eligibility else {
+        panic!("a malformed destination must not be eligible");
+    };
+    assert_eq!(reason, IneligibleReason::InvalidDestination);
+    assert!(
+        message.contains("nonsense") && message.contains("owner/name"),
+        "{message}"
+    );
+    // The publish refuses it too, before recording an attempt.
+    let mut publish = options();
+    publish.destination = Some("nonsense".into());
+    assert!(
+        f.workspace
+            .publish_ticket(&f.engine, &ticket.reference, &publish)
+            .is_err()
+    );
+    assert!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(f.created(), 0);
 }
 
