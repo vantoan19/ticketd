@@ -92,11 +92,13 @@ function useResizing(expanded: boolean): boolean {
   }
   React.useEffect(() => {
     if (!resizing) return;
-    const done = setTimeout(
-      () => setResizing(false),
-      spring("smooth").duration * 1000,
-    );
-    return () => clearTimeout(done);
+    const finish = () => setResizing(false);
+    const done = setTimeout(finish, spring("smooth").duration * 1000);
+    window.addEventListener("resize", finish);
+    return () => {
+      clearTimeout(done);
+      window.removeEventListener("resize", finish);
+    };
   }, [resizing, seen]);
   return resizing;
 }
