@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { m } from "motion/react";
 import { Presence } from "@/components/ui/motion";
 import { arrival } from "@/components/ui/row-motion";
@@ -10,7 +10,9 @@ import { exitTransition } from "@/lib/motion-tokens";
 /**
  * One entry's place in its group. A new entry opens its space and fades up
  * from a soft blur, so the entries below glide down with it. Entries already
- * on screen do not animate. (Nothing hides read entries, so none exits.)
+ * on screen do not animate. (Nothing hides read entries, so none exits.) The
+ * motion is only for an entry that mounts arriving, so it is built, and the
+ * tokens read, once for that entry and for no other.
  */
 export function EntrySlot({
   arriving,
@@ -19,12 +21,13 @@ export function EntrySlot({
   arriving: boolean;
   children: ReactNode;
 }) {
-  const { initial, animate } = arrival(0, { space: true });
+  const [motion] = useState(() =>
+    arriving ? arrival(0, { space: true }) : null,
+  );
   return (
     <m.li
       data-arrive="row"
-      initial={arriving ? initial : false}
-      animate={animate}
+      {...(motion ? motion : { initial: false as const })}
     >
       {children}
     </m.li>

@@ -12,8 +12,35 @@ import {
 // div, and a list's item must be the li, so the same recipe is written once
 // here as props for an `m.li`: fade up from a soft blur and settle, a stagger
 // step behind `index`; leave faster; glide when a neighbour arrives or leaves.
-// Timing comes from the motion tokens, read when a helper is called, so reduced
-// motion and a held key reach every row; call it in render, never cache it.
+// Timing comes from the motion tokens, read as the row renders, so reduced
+// motion and a held key reach every row. A list of rows reads them once per
+// render with `rowTokens()` and hands the result to each helper; one row alone
+// may leave it out and the helper reads them itself.
+
+/**
+ * The motion tokens a row needs, read once. Read them in render, never cache
+ * them: reduced motion and a held key change the tokens between renders.
+ */
+export function rowTokens() {
+  const step = staggerDelay(1);
+  // Past the last step an item starts with it: the longest wait of a cascade.
+  const longest = staggerDelay(Number.POSITIVE_INFINITY);
+  return {
+    springs: {
+      glide: spring("glide"),
+      smooth: spring("smooth"),
+      travel: spring("travel"),
+    },
+    enter: enterTransition(),
+    exit: exitTransition(),
+    rise: rise("row"),
+    blurIn: blur("in"),
+    blurOut: blur("out"),
+    /** Seconds item `index` of a cascade waits behind the first. */
+    stagger: (index: number) => Math.min(Math.max(index, 0) * step, longest),
+  };
+}
+export type RowTokens = ReturnType<typeof rowTokens>;
 
 /**
  * What a row's entrance or exit does besides fade. `space` opens (or closes) the
@@ -27,16 +54,17 @@ type Shape = { space?: boolean; gap?: number | undefined; after?: number };
 export function arrival(
   index = 0,
   { space = false, gap, after = 0 }: Shape = {},
+  tokens: RowTokens = rowTokens(),
 ) {
-  const smooth = spring("smooth");
+  const smooth = tokens.springs.smooth;
   // The wait sits inside each property's own transition: Motion reads a sibling
   // `delay` for none of them once `default` is present.
-  const delay = after + staggerDelay(index);
+  const delay = after + tokens.stagger(index);
   return {
     initial: {
       opacity: 0,
-      y: rise("row"),
-      filter: `blur(${blur("in")}px)`,
+      y: tokens.rise,
+      filter: `blur(${tokens.blurIn}px)`,
       ...(space && { height: 0, overflow: "clip" }),
       ...(gap !== undefined && { marginTop: space ? 0 : gap }),
     },
@@ -51,7 +79,7 @@ export function arrival(
       // clipping, so what glides into it (the open row's highlight) is seen.
       transitionEnd: { filter: "none", ...(space && { overflow: "visible" }) },
       transition: {
-        default: { ...enterTransition(), delay },
+        default: { ...tokens.enter, delay },
         y: { ...smooth, delay },
         height: { ...smooth, delay },
         marginTop: { ...smooth, delay },
@@ -60,17 +88,26 @@ export function arrival(
   };
 }
 
-/** Fades out to a slight blur, faster than it arrived. */
-export function departure({ space = false, gap }: Shape = {}) {
-  const smooth = spring("smooth");
+/**
+ * Fades out to a slight blur, faster than it arrived. With `space` the row's
+ * height closes with the fade, so the rows below glide up into it instead of
+ * jumping when it is removed. The stylesheet must not give the row a height
+ * floor (a `min-height`): the library measures what the height can reach, and a
+ * floor makes that the row's own height.
+ */
+export function departure(
+  { space = false, gap }: Shape = {},
+  tokens: RowTokens = rowTokens(),
+) {
+  const smooth = tokens.springs.smooth;
   return {
     exit: {
       opacity: 0,
-      filter: `blur(${blur("out")}px)`,
+      filter: `blur(${tokens.blurOut}px)`,
       ...(space && { height: 0, overflow: "clip" }),
       ...(gap !== undefined && { marginTop: 0 }),
       transition: {
-        default: exitTransition(),
+        default: tokens.exit,
         height: smooth,
         marginTop: smooth,
       },
@@ -84,19 +121,22 @@ export function departure({ space = false, gap }: Shape = {}) {
  * measured then and not on every render of its parent. A row held back and
  * released into a new group `travel`s farther.
  */
-export function glide(dependency?: unknown, name: SpringName = "smooth") {
+export function glide(
+  dependency?: unknown,
+  name: SpringName = "smooth",
+  tokens: RowTokens = rowTokens(),
+) {
   return {
     layout: "position" as const,
     layoutDependency: dependency,
-    transition: { layout: spring(name) },
+    transition: { layout: tokens.springs[name] },
   };
 }
 
 /**
  * Whether a page arrival is running (Shell marks the page root `data-arriving`).
  * Rows then arrive with the page, so a list's own cascade stays out of its way.
- * A held row's `li` carries the same attribute for its own fill; it is not a page.
  */
 export function pageArriving(): boolean {
-  return document.querySelector("[data-arriving]:not(li)") !== null;
+  return document.querySelector("[data-arriving]") !== null;
 }
