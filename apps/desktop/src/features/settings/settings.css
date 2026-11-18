@@ -24,6 +24,10 @@
 }
 .settings-nav-row {
   position: relative;
+}
+/* One stacking context for every row: the travelling highlight sits under all
+   the rows it crosses (Glide). */
+.settings-nav {
   isolation: isolate;
 }
 .settings-back {

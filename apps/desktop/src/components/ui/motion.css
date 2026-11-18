@@ -73,13 +73,15 @@
   }
 }
 
-/* Shimmer: a band of --disabled-foreground travels through the text. */
+/* Shimmer: a band lighter than the words travels through them. It is the
+   text's own colour mixed toward white, so it reads lighter in both themes
+   whatever the text colour (a fixed grey was darker than the text in dark). */
 .ui-shimmer {
   background: linear-gradient(
     90deg,
     currentcolor 0%,
     currentcolor 40%,
-    var(--disabled-foreground) 50%,
+    color-mix(in srgb, currentcolor, white 60%) 50%,
     currentcolor 60%,
     currentcolor 100%
   );

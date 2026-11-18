@@ -17,10 +17,17 @@ const DefaultSide = React.createContext<Side | undefined>(undefined);
  * The app-level tooltip provider: 400ms before the first label, then 300ms in
  * which the next one opens without waiting. Mount it once at the root. A
  * Tooltip rendered outside it (a test, a detached portal) brings its own.
+ *
+ * A label is not a place to travel to (it has pointer-events off, see
+ * styles.css), so the content is not hoverable: Radix's grace area, which
+ * waits for the pointer to reach a hoverable chip, would otherwise keep the
+ * label open and hold the next control's label shut when that control lies
+ * under the chip (the sidebar's side-right chips do).
  */
 function TooltipProvider({
   delayDuration = DELAY_MS,
   skipDelayDuration = SKIP_DELAY_MS,
+  disableHoverableContent = true,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
@@ -29,6 +36,7 @@ function TooltipProvider({
         data-slot="tooltip-provider"
         delayDuration={delayDuration}
         skipDelayDuration={skipDelayDuration}
+        disableHoverableContent={disableHoverableContent}
         {...props}
       />
     </ProviderMounted>
@@ -180,7 +188,7 @@ function Tooltip({
       data-slot="tooltip"
       open={open && !disabled && (!overflowOnly || cut)}
       onOpenChange={(next) => {
-        if (next && coveredByOverlay(trigger.current)) return;
+        if (next && (disabled || coveredByOverlay(trigger.current))) return;
         setOpen(next);
       }}
     >

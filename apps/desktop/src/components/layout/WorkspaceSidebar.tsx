@@ -1,3 +1,4 @@
+import { ArrivingGroup } from "./ArrivingGroup";
 import { FoldingGroup } from "./FoldingGroup";
 import { useInboxAttention } from "@/features/tickets/use-inbox-attention";
 import {
@@ -535,7 +536,7 @@ export function WorkspaceSidebar({
           {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}
         </span>
         <div className="sidebar-scroll">
-          {(projects.length > 0 || hasTickets) && (
+          <ArrivingGroup present={projects.length > 0 || hasTickets}>
             <SidebarGroup className="sidebar-group">
               <FoldingGroup
                 collapsed={collapsed}
@@ -580,8 +581,8 @@ export function WorkspaceSidebar({
                 </nav>
               </FoldingGroup>
             </SidebarGroup>
-          )}
-          {(plans.length > 0 || hasTickets) && (
+          </ArrivingGroup>
+          <ArrivingGroup present={plans.length > 0 || hasTickets}>
             <SidebarGroup className="sidebar-group">
               <FoldingGroup
                 collapsed={collapsed}
@@ -633,7 +634,7 @@ export function WorkspaceSidebar({
                 </nav>
               </FoldingGroup>
             </SidebarGroup>
-          )}
+          </ArrivingGroup>
           <SidebarGroup className="sidebar-group">
             {!collapsed && <div className="sidebar-heading">Context</div>}
             <nav aria-label="Context" className="sidebar-nav">

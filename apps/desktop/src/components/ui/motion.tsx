@@ -103,6 +103,12 @@ export function Appear({
  * Render it inside whichever item is active, with one `id` per group; it glides
  * from the previous item. The item needs `position: relative`; give the
  * highlight its fill with `className`.
+ *
+ * Isolate the container of the items (`isolation: isolate`), never each item.
+ * The highlight is `z-index: -1`: in an isolated item it would paint above
+ * every earlier item it passes while travelling down, and blank their labels.
+ * In one isolated container it sits under all of them. Rows then must not paint
+ * their own background over it.
  */
 export function Glide({ id, className }: { id: string; className?: string }) {
   return (

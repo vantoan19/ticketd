@@ -333,7 +333,7 @@
   width: 16px;
   height: 20px;
   margin: 8px 10px;
-  z-index: 1;
+  z-index: 0;
 }
 .ui-item-navigator:has(.ticket-select:hover) .ticket-row-status {
   visibility: hidden;
@@ -397,9 +397,18 @@
    highlight that glides to it and the fill that fades behind it. It clips only
    while its space opens or closes (row-motion sets overflow then), so the
    highlight can glide in from the row it left. */
+.ticket-rows {
+  /* One stacking context for every row: the travelling highlight sits under
+     all the rows it crosses (Glide). */
+  isolation: isolate;
+}
 .ticket-rows li {
   position: relative;
-  isolation: isolate;
+}
+/* The Glide's fill is the open row's background; the row's own hover fill
+   would paint over it, now that the Glide sits under all the rows. */
+.ticket-rows li:has(> [data-slot="glide"]) {
+  background: transparent;
 }
 .ticket-rows:empty {
   display: none;

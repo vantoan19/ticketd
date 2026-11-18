@@ -1,6 +1,8 @@
 import { workspaceMessages } from "./workspace-messages";
 import { useRef, useState, type ReactNode } from "react";
-import { Expand } from "@/components/ui/motion";
+import { m, useIsPresent } from "motion/react";
+import { Expand, Presence } from "@/components/ui/motion";
+import { blur, exitTransition } from "@/lib/motion-tokens";
 import { useHeldExpand } from "@/components/ui/use-held-expand";
 import { Button } from "@/components/ui/button";
 import { FailureDetails } from "@/components/ui/failure-alert";
@@ -15,6 +17,9 @@ import { useWorkspaceState } from "@/lib/workspace-state";
  * everything below moving with it. It mounts closed and opens a frame later so
  * the first opening is seen, and stays mounted until the closing has finished.
  * A band that is already there when the window opens simply is.
+ *
+ * When the condition clears, the message fades out over `--dur-exit` while the
+ * strip stays: the reservation, not the message, decides when the space goes.
  */
 export function BandSlot({
   open,
@@ -28,7 +33,22 @@ export function BandSlot({
   return (
     <div className="workspace-band-slot" data-open={expanded}>
       <Expand open={expanded}>
-        <div className="workspace-band-reserve">{children}</div>
+        <div className="workspace-band-reserve">
+          <Presence initial={false}>
+            {children && (
+              <m.div
+                key="band"
+                exit={{
+                  opacity: 0,
+                  filter: `blur(${blur("out")}px)`,
+                  transition: exitTransition(),
+                }}
+              >
+                {children}
+              </m.div>
+            )}
+          </Presence>
+        </div>
       </Expand>
     </div>
   );
@@ -47,7 +67,14 @@ export function WorkspaceBand({
 }) {
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
-  const state = useWorkspaceState();
+  const current = useWorkspaceState();
+  // While the band fades out (BandSlot's Presence) the condition has already
+  // cleared; keep saying what it said until the band is gone. Anywhere else a
+  // cleared condition leaves no band.
+  const present = useIsPresent();
+  const [last, setLast] = useState(current);
+  if (current && current !== last) setLast(current);
+  const state = current ?? (present ? null : last);
   if (!state) return null;
   return (
     <div role="status" data-slot="workspace-band" className="workspace-band">

@@ -331,6 +331,7 @@ export function TicketWorkspaceView({
             board && "board-layout",
             !displayedSelection && "unselected",
           )}
+          data-narrow={narrow || undefined}
           data-peek={peek || undefined}
           data-pane-arrival={arrival ?? undefined}
           data-pane-leaving={leaving?.pane}
