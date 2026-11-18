@@ -53,6 +53,12 @@ it("offsets, blur and stagger come from the tokens", () => {
   expect(staggerDelay(40)).toBeCloseTo(0.168);
 });
 
+it("the length of a cascade is the --stagger-steps token, which the CSS entrances read too", () => {
+  restore();
+  restore = applyTokens({ ...rootTokens, "--stagger-steps": "3" });
+  expect(staggerDelay(40)).toBeCloseTo(0.072);
+});
+
 it("reduced motion makes all of it instant", () => {
   restore();
   restore = applyTokens({ ...rootTokens, ...reducedTokens });

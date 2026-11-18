@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
-import { useIsPresent } from "motion/react";
+import { m, useIsPresent } from "motion/react";
 import { Appear } from "@/components/ui/motion";
+import { spring } from "@/lib/motion-tokens";
 import { useArrived } from "@/features/chats/use-arrivals";
 
 /**
@@ -36,5 +37,35 @@ export function Rise(props: ComponentProps<typeof Appear>) {
   const present = useIsPresent();
   return (
     <Appear rise="overlay" {...props} {...(!present && { inert: true })} />
+  );
+}
+
+/**
+ * A box that closes its own height when it leaves (inside `Presence`), so what
+ * sits below glides up as the words in it fade (a `Rise` inside) instead of
+ * jumping when they have gone. It adds no fade of its own. Timing is read as it
+ * renders, so reduced motion and a held key reach it.
+ */
+export function Space({
+  as = "div",
+  className,
+  children,
+}: {
+  as?: "div" | "li";
+  className?: string;
+  children: ReactNode;
+}) {
+  const Box = as === "li" ? m.li : m.div;
+  return (
+    <Box
+      {...(className && { className })}
+      exit={{
+        height: 0,
+        overflow: "clip",
+        transition: { height: spring("smooth") },
+      }}
+    >
+      {children}
+    </Box>
   );
 }

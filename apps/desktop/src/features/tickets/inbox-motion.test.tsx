@@ -4,7 +4,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { Inbox } from "./Inbox";
 import { useNewEntries } from "./inbox-arrivals";
-import { UnreadDot } from "./inbox-motion";
+import { EntrySlot, UnreadDot } from "./inbox-motion";
 import type { Entry } from "./inboxModel";
 import { frames } from "@/test/motion-clock";
 import { EXIT_MS, holdKey, motionTestbed } from "@/test/motion-testbed";
@@ -204,4 +204,42 @@ test("keys that arrive while loading, or with Show more, are not new", () => {
   rerender(<Arrivals keys={["a"]} />);
   rerender(<Arrivals keys={["a", "b", "c"]} pages={2} />);
   expect(told.every((arrived) => arrived === "")).toBe(true);
+});
+
+// The tokens: an entry reads them only for its own arrival, and only once.
+
+const rootReads = (run: () => void) => {
+  const read = vi.spyOn(window, "getComputedStyle");
+  run();
+  const reads = read.mock.calls.filter(
+    ([element]) => element === document.documentElement,
+  ).length;
+  read.mockRestore();
+  return reads;
+};
+const Slots = ({ arriving, count }: { arriving: boolean; count: number }) => (
+  <MotionProvider>
+    <ul>
+      {Array.from({ length: count }, (_, index) => (
+        <EntrySlot key={index} arriving={arriving}>
+          Entry {index}
+        </EntrySlot>
+      ))}
+    </ul>
+  </MotionProvider>
+);
+
+test("entries already on screen read no motion tokens, however many there are", () => {
+  expect(rootReads(() => render(<Slots arriving={false} count={80} />))).toBe(
+    0,
+  );
+});
+
+test("an arriving entry reads them for its own arrival, and not again as the list renders", () => {
+  const view = render(<Slots arriving count={1} />);
+  const once = rootReads(() => view.rerender(<Slots arriving count={1} />));
+  expect(once).toBe(0);
+  const first = rootReads(() => render(<Slots arriving count={1} />));
+  expect(first).toBeGreaterThan(0);
+  expect(rootReads(() => render(<Slots arriving count={9} />))).toBe(first * 9);
 });

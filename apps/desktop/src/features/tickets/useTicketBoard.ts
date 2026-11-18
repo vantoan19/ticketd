@@ -36,6 +36,21 @@ function remember(shown: Shown, columns: Column[], arrive: boolean) {
   return arrived;
 }
 
+/** The number in a reference ("T-CJ42" is 42). */
+function numberOf(reference: string) {
+  return Number(/(\d+)$/.exec(reference)?.[1] ?? 0);
+}
+
+/**
+ * Where a ticket sits in a column the core lists newest first (highest number
+ * first), among the tickets loaded so far.
+ */
+function slotOf(column: readonly Ticket[], ticket: Ticket) {
+  const own = numberOf(ticket.reference);
+  const index = column.findIndex((item) => numberOf(item.reference) < own);
+  return index < 0 ? column.length : index;
+}
+
 /** Independent bounded reads; core owns matching and ordering, desktop owns pages. */
 export function useTicketBoard(
   filter: FindFilter,
@@ -245,14 +260,14 @@ export function useTicketBoard(
     setState(saved.current);
   }
   /**
-   * Shows a status change at once (P10): the card leaves its column and leads
-   * the target column, before the core confirms it. A later read or
-   * `confirmTicket` puts it where the core says; `at` puts it back at its old
-   * place after a failure. Returns where it was.
+   * Shows a status change at once (P10): the card leaves its column and takes
+   * its slot in the target column's order, where the core will put it, so the
+   * card never moves when the core confirms. `at` puts it at a given place
+   * instead, back where it was after a failure. Returns where it was.
    */
   function placeTicket(
     ticket: Ticket,
-    at = 0,
+    at?: number,
   ): { status: string; index: number } {
     let from = { status: "", index: -1 };
     if (saved.current.key !== key) return from;
@@ -264,7 +279,8 @@ export function useTicketBoard(
           ...column,
           tickets: (() => {
             const rest = column.tickets.filter((item) => item.id !== ticket.id);
-            return [...rest.slice(0, at), ticket, ...rest.slice(at)];
+            const slot = at ?? slotOf(rest, ticket);
+            return [...rest.slice(0, slot), ticket, ...rest.slice(slot)];
           })(),
           total:
             index >= 0 || column.total === null

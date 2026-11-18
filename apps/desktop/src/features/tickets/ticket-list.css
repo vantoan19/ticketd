@@ -13,6 +13,10 @@
   align-items: flex-start;
   column-gap: 0;
   min-width: 0;
+  /* No height floor (the Item's 36px, and 44px for touch): a row closes its
+     space as it leaves (row-motion `space`), and a floor would hold it open.
+     The selection cell sets the height of a row, and a header has its own. */
+  min-height: 0;
   margin: 0 8px;
   padding: 0 10px 0 4px;
 }
@@ -375,7 +379,6 @@
 }
 
 @media (pointer: coarse) {
-  .ticket-rows > li:not(.ticket-group-header),
   .ticket-select {
     min-height: 44px;
   }

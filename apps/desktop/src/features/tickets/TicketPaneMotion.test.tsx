@@ -7,7 +7,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TicketWorkspaceView } from "./TicketWorkspaceView";
 import { useBulkEdit } from "./useBulkEdit";
@@ -30,6 +33,32 @@ const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 
 let restoreTokens: () => void;
+type Observer = { targets: Set<Element>; callback: ResizeObserverCallback };
+const observers: Observer[] = [];
+/** Tickets the list holds; empty unless a test needs neighbours to move to. */
+let listed: string[] = [];
+/** The browser reports a pane's width: only observers watching it hear. */
+function resized(id: string, width: number) {
+  const pane = document.getElementById(id);
+  if (!pane) throw new Error(`no pane ${id}`);
+  const entry = {
+    target: pane,
+    contentRect: { width },
+    borderBoxSize: [{ inlineSize: width, blockSize: 600 }],
+  };
+  act(() => {
+    for (const one of observers)
+      if (one.targets.has(pane))
+        one.callback([entry as unknown as ResizeObserverEntry], one as never);
+  });
+}
+const host = () => {
+  const element = document.querySelector<HTMLElement>(".plan-workspace");
+  if (!element) throw new Error("no host");
+  return element;
+};
+const leavingWidth = () =>
+  host().style.getPropertyValue("--pane-leaving-width");
 const scrollIntoView = Element.prototype.scrollIntoView;
 beforeEach(() => {
   restoreTokens = applyTokens(rootTokens);
@@ -44,12 +73,24 @@ beforeEach(() => {
         removeEventListener: vi.fn(),
       }) as unknown as MediaQueryList,
   );
+  observers.length = 0;
+  listed = [];
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
+      targets = new Set<Element>();
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
     },
   );
   const ticket = (reference: string): Ticket => ({
@@ -70,6 +111,14 @@ beforeEach(() => {
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
       if (command === "show_ticket") return ticket(args?.reference ?? "");
+      if (command === "find_tickets_with_updates") {
+        const list = listed.map(ticket);
+        return (args as { projection?: string }).projection
+          ? { items: [], omitted: false }
+          : list.map((item) => ({ ticket: item, latest_update: null }));
+      }
+      if (command === "count_tickets")
+        return { ...(bridgeDefault(command) as object), total: listed.length };
       return bridgeDefault(command, args as { reference?: string });
     },
   );
@@ -175,7 +224,10 @@ test("J and K keep the old document one exit, then show the next with a swap arr
   const pages = () => [...document.querySelectorAll(".detail-content")];
   const leaving = pages().filter((page) => page.hasAttribute("data-leaving"));
   expect(leaving).toHaveLength(1);
-  expect(leaving[0]?.hasAttribute("hidden")).toBe(true);
+  // Not `hidden`: the base layer's `[hidden] { display: none !important }`
+  // beats any rule here, so a hidden page could never be seen fading out.
+  expect(leaving[0]?.hasAttribute("hidden")).toBe(false);
+  expect(leaving[0]?.hasAttribute("inert")).toBe(true);
   expect(leaving[0]?.textContent).toContain("Title of T-KQ1");
   const next = await waitFor(() => {
     const page = pages().find((item) => item.hasAttribute("data-swap"));
@@ -246,4 +298,106 @@ test.each([
   open(null);
   expect(group().getAttribute("data-pane-leaving")).toBeNull();
   expect(group().classList.contains("unselected")).toBe(true);
+});
+
+test("closing places the leaving document at the width the pane had, measured before the layout changed", async () => {
+  await setUp();
+  open("T-KQ1");
+  await screen.findByText("Title of T-KQ1");
+  // Split: the panes are 360 and 680 wide inside a 1040 group.
+  resized("list", 360);
+  resized("detail", 680);
+  open(null);
+  expect(group().getAttribute("data-pane-leaving")).toBe("detail");
+  expect(leavingWidth()).toBe("680px");
+  // The closed layout then gives the list the whole group; that is not the
+  // document's width, and nothing may move the held value.
+  resized("list", 1040);
+  resized("detail", 1040);
+  expect(leavingWidth()).toBe("680px");
+  await waitFor(() => expect(leavingWidth()).toBe(""));
+});
+
+test("full width places the leaving list at the width it had", async () => {
+  await setUp();
+  open("T-KQ1");
+  await screen.findByText("Title of T-KQ1");
+  resized("list", 360);
+  resized("detail", 680);
+  fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+  expect(group().getAttribute("data-pane-leaving")).toBe("list");
+  expect(leavingWidth()).toBe("360px");
+  resized("detail", 1040);
+  expect(leavingWidth()).toBe("360px");
+});
+
+test("a pane that was never measured leaves at the group's width, not at none", async () => {
+  await setUp();
+  open("T-KQ1");
+  await screen.findByText("Title of T-KQ1");
+  open(null);
+  expect(group().getAttribute("data-pane-leaving")).toBe("detail");
+  expect(leavingWidth()).toBe("");
+});
+
+test.each([
+  ["j", "T-KQ1", "T-KQ2", "T-KQ3"],
+  ["k", "T-KQ3", "T-KQ2", "T-KQ1"],
+])(
+  "a held %s with focus in the document moves on every repeat",
+  async (key, from, first, second) => {
+    listed = ["T-KQ1", "T-KQ2", "T-KQ3"];
+    await setUp();
+    open(from);
+    const shown = (reference: string) =>
+      within(document.getElementById("detail") as HTMLElement).findByText(
+        `Title of ${reference}`,
+      );
+    await shown(from);
+    const pane = () =>
+      screen.getByRole("button", { name: "Close ticket details" });
+    // The first press, then the repeats the keyboard sends while it is held.
+    fireEvent.keyDown(pane(), { key });
+    await shown(first);
+    fireEvent.keyDown(pane(), { key, repeat: true });
+    await shown(second);
+  },
+);
+
+test("a held Escape closes once and leaves the repeats alone", async () => {
+  await setUp();
+  open("T-KQ1");
+  await screen.findByText("Title of T-KQ1");
+  const pane = screen.getByRole("button", { name: "Close ticket details" });
+  fireEvent.keyDown(pane, { key: "Escape", repeat: true });
+  expect(group().classList.contains("unselected")).toBe(false);
+  fireEvent.keyDown(pane, { key: "Escape" });
+  expect(group().classList.contains("unselected")).toBe(true);
+});
+
+// jsdom has no cascade, so the rules that decide a pane's motion are read as
+// text. The leaving document must stay out of the base layer's
+// `[hidden] { display: none !important }`, and the pane arrivals carry no
+// fill (they have no delay to hold the first keyframe through).
+const css = (file: string) =>
+  readFileSync(join(__dirname, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("the leaving document's rule does not depend on the hidden attribute", () => {
+  const rules = css(
+    "../../components/ui/surface-roles/tickets-ticket-detail.css",
+  );
+  expect(rules).toMatch(
+    /\.detail-content\[data-leaving\]\s*\{[^}]*display:\s*grid/,
+  );
+  expect(rules).not.toMatch(/data-leaving\]\[hidden\]/);
+});
+
+test("the pane arrivals hold nothing beyond their own delay", () => {
+  const rules = css("ticket-pane-motion.css");
+  const arrivals = [
+    ...rules.matchAll(/animation:\s*(ticket-(?:pane|list)-in[^;]*);/g),
+  ];
+  expect(arrivals.length).toBeGreaterThan(0);
+  for (const [, animation] of arrivals)
+    expect(animation).not.toMatch(/\b(backwards|both)\b/);
 });

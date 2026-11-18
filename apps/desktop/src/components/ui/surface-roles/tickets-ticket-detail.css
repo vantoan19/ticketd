@@ -9,14 +9,14 @@
 /* J and K between tickets (DESIGN.md section 5): the open document fades out
    where it was, then the next fades up from a soft blur, after it has gone.
    Opening and the full width are the pane's own motion (ticket-pane-motion.css). */
-.detail-content[data-swap]:not([hidden]) .detail-document {
+.detail-content[data-swap]:not([hidden], [data-leaving]) .detail-document {
   animation: ticket-document-in var(--dur-enter) var(--ease-out) var(--dur-exit)
     backwards;
 }
 /* A ticket that loads after its skeleton fades up the moment it arrives: the
    skeleton glided in with the pane, and nothing is leaving that it should wait
    for. It follows the swap rule, so it also takes away that rule's delay. */
-.detail-content[data-fresh]:not([hidden]) .detail-document {
+.detail-content[data-fresh]:not([hidden], [data-leaving]) .detail-document {
   animation: ticket-document-in var(--dur-enter) var(--ease-out) backwards;
 }
 @keyframes ticket-document-in {
@@ -27,11 +27,14 @@
   }
 }
 /* The old document is out of flow so the new one sits where it will rest; the
-   scroller is positioned only while one is leaving. */
+   scroller is positioned only while one is leaving. It is not `hidden`: the
+   base layer's `[hidden] { display: none !important }` beats every rule here
+   (an important declaration in an earlier layer wins), so a hidden page could
+   never be seen fading out. It is `inert` instead. */
 .detail-scroll:has(.detail-content[data-leaving]) {
   position: relative;
 }
-.detail-content[data-leaving][hidden] {
+.detail-content[data-leaving] {
   display: grid;
   position: absolute;
   inset: 0 0 auto;

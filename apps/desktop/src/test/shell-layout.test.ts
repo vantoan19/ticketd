@@ -69,11 +69,11 @@ it("the stacked panes follow the settled narrow state, not a container query", (
   // Each stacked rule is keyed on data-narrow, at no added specificity (:where),
   // so it competes with the other layouts' rules exactly as before.
   for (const selector of [
-    '.ticket-workspace:where([data-narrow]) :is(#list, [data-id="list"]) {',
-    '.ticket-workspace:where([data-narrow]):not([data-pane-leaving="detail"]) :is(#detail, [data-id="detail"]),',
+    '.ticket-workspace:where([data-narrow]) :is(#list, [data-view-id="list"]) {',
+    '.ticket-workspace:where([data-narrow]):not([data-pane-leaving="detail"]) :is(#detail, [data-view-id="detail"]),',
     ".ticket-workspace:where([data-narrow]) .split-handle {",
-    '.ticket-workspace:where([data-narrow]).narrow-detail :is(#list, [data-id="list"]) {',
-    '.ticket-workspace:where([data-narrow]).narrow-detail :is(#detail, [data-id="detail"]) {',
+    '.ticket-workspace:where([data-narrow]).narrow-detail :is(#list, [data-view-id="list"]) {',
+    '.ticket-workspace:where([data-narrow]).narrow-detail :is(#detail, [data-view-id="detail"]) {',
     ".ticket-workspace:where([data-narrow]).narrow-detail .return-to-list {",
     ".ticket-workspace:where([data-narrow]) .expand-ticket {",
   ])

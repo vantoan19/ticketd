@@ -196,8 +196,8 @@
    enter-rise keyframes of components/ui/enter.css). This runs when a page
    mounts and when a kept-mounted source page is shown again (display none to
    shown replays it). The page before it fades out first (SettingsView), or the
-   shell does while it is the Settings page itself that opens (enter.css holds
-   the animation until then). It is limited to the live page: the shell's still
+   shell does while it is the Settings page itself that opens (the hold below,
+   while the region is `data-departing`). It is limited to the live page: the shell's still
    picture of the page that left is a clone and must not play it again. */
 .view-region
   [data-own-entrance]
@@ -214,4 +214,12 @@
   > .settings-page-column
   > :not(header) {
   animation-delay: var(--stagger);
+}
+/* The hold of enter.css, repeated because the rules above out-rank it. */
+.view-region[data-departing]
+  [data-own-entrance]
+  .settings-shell:not([hidden])
+  > .settings-page-column
+  > * {
+  animation-play-state: paused;
 }

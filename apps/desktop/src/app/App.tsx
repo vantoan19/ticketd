@@ -4,7 +4,6 @@ import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
 import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
 import { requestTicketUpdate } from "@/features/tickets/activity-composer-request";
 import { FirstRunGuide } from "@/features/tickets/FirstRunGuide";
-import { Presence } from "@/components/ui/motion";
 import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
 import {
   TicketCommandContext,
@@ -425,23 +424,19 @@ function AppContent() {
       live = false;
     };
   }, [revision]);
-  const firstRun =
+  // Nothing but tickets could be missing: no other content, no failed read, no
+  // filter that would hide one.
+  const nothingElse =
     workspace.listKnown &&
     workspace.plansKnown &&
     !workspace.queryError &&
     !workspace.plansFailure &&
-    workspaceInfo?.tickets === 0 &&
-    workspaceInfo.documents === 0 &&
+    workspaceInfo?.documents === 0 &&
     workspaceInfo.projects === 0 &&
     workspaceInfo.active_plans === 0 &&
     projects.length === 0 &&
     plans.length === 0 &&
-    !loading &&
     !error &&
-    workspace.tickets.length === 0 &&
-    workspace.opened.length === 0 &&
-    (counts?.total ?? 0) === 0 &&
-    (workspace.counts?.total ?? 0) === 0 &&
     navigation.kind === "all" &&
     navigation.project === "all" &&
     !navigation.plan &&
@@ -450,8 +445,37 @@ function AppContent() {
     !workspace.tags.length &&
     !workspace.availability &&
     workspace.source === "all";
-  // The guide is a page of its own: when the first ticket exists it fades out
-  // and the list arrives in its place, which `ViewRegion` plays as a switch.
+  const noTickets =
+    workspaceInfo?.tickets === 0 &&
+    !loading &&
+    workspace.tickets.length === 0 &&
+    workspace.opened.length === 0 &&
+    (counts?.total ?? 0) === 0 &&
+    (workspace.counts?.total ?? 0) === 0;
+  // The first ticket reaches the info and the counts, and opens, before the
+  // list has read it. So once it was created from the guide, the guide stays
+  // until the list holds a ticket, and the list never shows "No tickets yet" in
+  // between. A failed read gives up the wait.
+  const [firstCreated, setFirstCreated] = useState(false);
+  if (firstCreated && workspace.tickets.length > 0) setFirstCreated(false);
+  const firstRun =
+    nothingElse &&
+    (noTickets ||
+      (firstCreated &&
+        workspace.tickets.length === 0 &&
+        !workspace.refreshFailed));
+  const createTicket = async (...args: Parameters<typeof create>) => {
+    if (firstRun) setFirstCreated(true);
+    try {
+      return await create(...args);
+    } catch (reason) {
+      setFirstCreated(false);
+      throw reason;
+    }
+  };
+  // The guide is a page of its own: when the list holds the first ticket the
+  // guide goes and the list arrives in its place, which `ViewRegion` plays as a
+  // switch.
   const guideShown = firstRun && view === "tickets" && graphOrigin === null;
   const goTo = (target: GoTo) => {
     if ((target === "chats" || target === "automations") && !chat.enabled)
@@ -564,7 +588,9 @@ function AppContent() {
     bulk.reset();
     await workspaceReplaced();
     // After the reads are dropped, so the launch does not animate the old
-    // Workspace's rows; the new ones arrive as their list loads.
+    // Workspace's rows; the new ones arrive as their list loads. The list's own
+    // read is not one of those, so rows it already began to animate are skipped
+    // by the launch (arrive.ts).
     setLaunches((count) => count + 1);
   };
   const openNotifiedTicket = (reference: string) => {
@@ -1067,7 +1093,7 @@ function AppContent() {
                                   })}
                                   projects={projects}
                                   plans={plans}
-                                  create={create}
+                                  create={createTicket}
                                 />
                                 <ViewRegion
                                   page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : ""}`}
@@ -1279,19 +1305,16 @@ function AppContent() {
                                       setPaletteOpen(true);
                                     }}
                                   >
-                                    <Presence>
-                                      {guideShown && (
-                                        <FirstRunGuide
-                                          key="first-run"
-                                          disabledReason={createDisabledReason}
-                                          onCreate={(trigger) => {
-                                            createTriggerRef.current = trigger;
-                                            setCreateStatus(undefined);
-                                            setCreating(true);
-                                          }}
-                                        />
-                                      )}
-                                    </Presence>
+                                    {guideShown && (
+                                      <FirstRunGuide
+                                        disabledReason={createDisabledReason}
+                                        onCreate={(trigger) => {
+                                          createTriggerRef.current = trigger;
+                                          setCreateStatus(undefined);
+                                          setCreating(true);
+                                        }}
+                                      />
+                                    )}
                                     <TicketListSync value={patchTicket}>
                                       <InboxTriageProvider
                                         active={view === "inbox"}

@@ -1778,3 +1778,152 @@ test("opening a folded column glides the columns to its right", async () => {
   restore();
   clock.restore();
 });
+
+// The Board as the app opens it: the saved layout is Board, so the board is
+// mounted in the pane's first Presence render, which skips the entrance of
+// everything below it unless the board lifts that (board-motion). These tests
+// look at where a motion starts; `board-motion.test` runs one to its end.
+async function launchBoard(options: { scrolled?: string[] } = {}) {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ ticketLayout: "board" }),
+  );
+  const restore = applyTokens(rootTokens);
+  // Columns are 300px apart and their bodies 300px tall; cards stand 90px
+  // apart, or far below the body when their column has scrolled them away.
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: Element) {
+      const column = this.closest<HTMLElement>("[data-board-status]");
+      const left = column
+        ? [...document.querySelectorAll("[data-board-status]")].indexOf(
+            column,
+          ) * 300
+        : 0;
+      if (this.classList.contains("board-column-body"))
+        return new DOMRect(left, 40, 280, 300);
+      if (!column || !this.hasAttribute("data-ticket-reference"))
+        return new DOMRect();
+      const place = [
+        ...column.querySelectorAll("[data-ticket-reference]"),
+      ].indexOf(this);
+      const away = options.scrolled?.includes(column.dataset.boardStatus!);
+      return new DOMRect(left + 10, away ? 900 : 50 + place * 90, 240, 80);
+    },
+  );
+  render(<App />);
+  await settle(200);
+  return restore;
+}
+/** Runs the fake clock in small steps until something is there to see. */
+async function until(found: () => unknown) {
+  for (let step = 0; step < 60 && !found(); step++) await settle(50);
+  expect(found()).toBeTruthy();
+}
+const container = (reference: string) =>
+  document.querySelector<HTMLElement>(
+    `.ticket-board [data-ticket-reference="${reference}"]`,
+  )!;
+
+test("a card another hand moves flies from its old slot, even when the board opened with the app", async () => {
+  const end = await launchBoard();
+  saved = [ticket(1, "In progress"), ticket(2, "In review")];
+  change++;
+  await until(() => document.querySelector("[data-board-flight]"));
+  const flight = document.querySelector<HTMLElement>("[data-board-flight]")!;
+  expect(flight.dataset.boardFlight).toBe("T-KQ1");
+  // In Todo it stood at x 10; in In progress it stands at x 310: it is on its
+  // way from the left, not already there.
+  expect(flight.style.transform).toMatch(/translateX\(-\d/);
+  end();
+});
+
+test("a card that arrives while the board is open enters, even when the board opened with the app", async () => {
+  const end = await launchBoard();
+  saved = [ticket(1), ticket(2, "In review"), ticket(3)];
+  change++;
+  await until(() => container("T-KQ3"));
+  expect(Number(container("T-KQ3").style.opacity)).toBeLessThan(1);
+  expect(container("T-KQ3").style.height).not.toMatch(/^(auto)?$/);
+  end();
+});
+
+test("a card that arrives from a column scrolled out of sight enters instead of flying", async () => {
+  const end = await launchBoard({ scrolled: ["Todo"] });
+  saved = [ticket(1, "In progress"), ticket(2, "In review")];
+  change++;
+  await until(() =>
+    document.querySelector(
+      '[aria-label="In progress column"] [data-ticket-reference="T-KQ1"]',
+    ),
+  );
+  expect(document.querySelector("[data-board-flight]")).toBeNull();
+  expect(Number(container("T-KQ1").style.opacity)).toBeLessThan(1);
+  // Not again: the next change of columns leaves the card as it is, not
+  // mounted anew (which would start its entrance over).
+  const card = container("T-KQ1");
+  change++;
+  saved = [ticket(1, "In progress"), ticket(2, "In review"), ticket(4)];
+  await until(() => container("T-KQ4"));
+  expect(container("T-KQ1")).toBe(card);
+  end();
+});
+
+test("a card moved at once takes its sorted slot, so the core's confirmation moves nothing", async () => {
+  let resolve!: () => void;
+  writeOverride = async ({ status }) => {
+    await new Promise<void>((done) => {
+      resolve = done;
+    });
+    saved = saved.map((item) =>
+      item.reference === "T-KQ1" ? { ...item, status } : item,
+    );
+    return [saved.find((item) => item.reference === "T-KQ1")!];
+  };
+  // The mock core lists a column in the order saved, so keep it highest first.
+  saved = [ticket(3, "In review"), ticket(2, "In review"), ticket(1)];
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-KQ1", "In review");
+  const order = () =>
+    [
+      ...document
+        .querySelector('[aria-label="In review column"]')!
+        .querySelectorAll("[data-board-reference]"),
+    ].map((card) => card.getAttribute("data-board-reference"));
+  // The core lists a column highest number first: 3, 2, then 1.
+  expect(order()).toEqual(["T-KQ3", "T-KQ2", "T-KQ1"]);
+  resolve();
+  await settle();
+  expect(order()).toEqual(["T-KQ3", "T-KQ2", "T-KQ1"]);
+});
+
+test("dragging a card says nothing of refusal in its own column, and Add waits", async () => {
+  saved[0] = { ...ticket(1), source: external() };
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(100); // over its own column
+  const todo = screen.getByRole("region", { name: "Todo column" });
+  expect(within(todo).queryByText("Can't move here")).toBeNull();
+  expect(todo.getAttribute("data-drop-allowed")).toBeNull();
+  movePointer(1000);
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByText(
+      "Can't move here",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("region", { name: "Ticket status board" })
+      .hasAttribute("data-dragging"),
+  ).toBe(true);
+  releasePointer(1000);
+  expect(
+    screen
+      .getByRole("region", { name: "Ticket status board" })
+      .hasAttribute("data-dragging"),
+  ).toBe(false);
+});

@@ -1,5 +1,5 @@
 import { Component, useEffect, type ReactNode, type RefObject } from "react";
-import { m } from "motion/react";
+import { m, PresenceContext } from "motion/react";
 import type { Ticket } from "@/lib/api/client";
 import { spring } from "@/lib/motion-tokens";
 
@@ -12,6 +12,19 @@ import { spring } from "@/lib/motion-tokens";
 
 type Columns = readonly { status: string; tickets: readonly Ticket[] }[];
 type Corner = { left: number; top: number };
+
+/**
+ * Lets the motion components below take their `initial` as written. A
+ * `Presence initial={false}` tells everything that mounts beneath it, for as
+ * long as it lives, to skip its `initial`, and the board is a child of the
+ * pane's Presence. A board shown at launch (the saved layout) would otherwise
+ * show every flight and entrance already finished.
+ */
+export function TakesItsInitial({ children }: { children: ReactNode }) {
+  return (
+    <PresenceContext.Provider value={null}>{children}</PresenceContext.Provider>
+  );
+}
 
 /** One card's flight above the board. */
 export type Flight = {
@@ -48,7 +61,11 @@ function shows(element: Element): boolean {
   );
 }
 
-type Snapshot = Map<string, { from: Corner; kind: Flight["kind"] }>;
+/** Where a card was, for a flight; "enter" when it came from out of sight. */
+type Snapshot = Map<
+  string,
+  { from: Corner; kind: Flight["kind"] } | { kind: "enter" }
+>;
 
 /**
  * Watches the columns for cards that change column and, in the same commit,
@@ -57,7 +74,10 @@ type Snapshot = Map<string, { from: Corner; kind: Flight["kind"] }>;
  * changes it; a card's old place is gone by the time any effect runs.
  *
  * A flight needs a place to start and a place to land that both show; with
- * neither motion (reduced, or a held key) there is no flight at all.
+ * neither motion (reduced, or a held key) there is no flight at all. A card
+ * that lands in view from a place out of sight (scrolled away, or a folded
+ * column) has nothing to fly from: it is reported to `onEntering` instead,
+ * which the board answers with the card's entrance.
  */
 export class MoveWatch extends Component<{
   columns: Columns;
@@ -65,6 +85,11 @@ export class MoveWatch extends Component<{
   holding: boolean;
   board: RefObject<HTMLElement | null>;
   onFlights: (flights: readonly Flight[]) => void;
+  /**
+   * The cards that arrive from out of sight, called for every change of
+   * columns (an empty list ends the last one's news).
+   */
+  onEntering: (references: readonly string[]) => void;
 }> {
   private serial = 0;
 
@@ -106,7 +131,10 @@ export class MoveWatch extends Component<{
       const old =
         document.querySelector(`[data-board-flight="${reference}"]`) ??
         board.querySelector(`[data-ticket-reference="${reference}"]`);
-      if (!old || !shows(old)) continue;
+      if (!old || !shows(old)) {
+        snapshot.set(reference, { kind: "enter" });
+        continue;
+      }
       const box = old.getBoundingClientRect();
       snapshot.set(reference, {
         from: { left: box.left, top: box.top },
@@ -117,29 +145,35 @@ export class MoveWatch extends Component<{
   }
 
   componentDidUpdate(
-    _previous: unknown,
+    previous: { columns: Columns },
     _state: unknown,
     snapshot: Snapshot | null,
   ) {
     const board = this.props.board.current;
-    if (!board || !snapshot) return;
     const flights: Flight[] = [];
-    for (const [reference, { from, kind }] of snapshot) {
-      const card = board.querySelector(
+    const entering: string[] = [];
+    for (const [reference, origin] of snapshot ?? []) {
+      const card = board?.querySelector(
         `[data-ticket-reference="${reference}"]`,
       );
       // A card that landed in a folded column, or out of sight, just appears.
       if (!card || !shows(card)) continue;
+      if (origin.kind === "enter") {
+        entering.push(reference);
+        continue;
+      }
       const box = card.getBoundingClientRect();
       flights.push({
         reference,
-        kind,
-        from,
+        kind: origin.kind,
+        from: origin.from,
         to: { left: box.left, top: box.top, width: box.width },
         serial: ++this.serial,
       });
     }
     if (flights.length) this.props.onFlights(flights);
+    if (entering.length || previous.columns !== this.props.columns)
+      this.props.onEntering(entering);
   }
 
   render() {
@@ -172,21 +206,23 @@ export function FlightCard({
     return () => window.clearTimeout(timer);
   }, [flight, flightSpring.duration, onLand]);
   return (
-    <m.div
-      className="board-flight"
-      data-board-flight={flight.reference}
-      data-kind={kind}
-      aria-hidden="true"
-      inert
-      style={{ left: to.left, top: to.top, width: to.width }}
-      initial={{
-        x: from.left - to.left,
-        y: from.top - to.top,
-        scale: kind === "drop" ? 1.02 : 1,
-      }}
-      animate={{ x: 0, y: 0, scale: 1, transition: flightSpring }}
-    >
-      {children}
-    </m.div>
+    <TakesItsInitial>
+      <m.div
+        className="board-flight"
+        data-board-flight={flight.reference}
+        data-kind={kind}
+        aria-hidden="true"
+        inert
+        style={{ left: to.left, top: to.top, width: to.width }}
+        initial={{
+          x: from.left - to.left,
+          y: from.top - to.top,
+          scale: kind === "drop" ? 1.02 : 1,
+        }}
+        animate={{ x: 0, y: 0, scale: 1, transition: flightSpring }}
+      >
+        {children}
+      </m.div>
+    </TakesItsInitial>
   );
 }

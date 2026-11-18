@@ -92,8 +92,6 @@
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-  /* A removed pill leaves the flow here while it fades (Presence popLayout). */
-  position: relative;
 }
 /* Only a row with pills takes the pill padding, not the "No tags" words. */
 .rail-row:has(.rail-tags > *) {

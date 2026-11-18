@@ -20,6 +20,18 @@
   min-height: 100%;
   min-width: 904px;
 }
+/* A lane's panel arrives with its heading, not before it: the well fades in on
+   the same step as the heading (graph-kit sets --enter-step from the lane's
+   index), so no empty panel waits on screen for its contents. */
+@keyframes plan-flow-lane-in {
+  from {
+    background-color: transparent;
+  }
+}
+.plan-flow-lanes > .ui-graph-flow-lane {
+  animation: plan-flow-lane-in var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), 7));
+}
 .plan-flow-edges {
   position: absolute;
   inset: 0;

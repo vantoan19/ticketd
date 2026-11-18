@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode, Ref } from "react";
+import type { ComponentProps, CSSProperties, ReactNode, Ref } from "react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -411,12 +411,16 @@ export function GraphFlowLane({
 }: {
   title: string;
   caption: string;
-  /** Place in the cascade of lanes: the heading fades up in its turn. */
+  /** Place in the cascade of lanes: the heading fades up in its turn, and the lane's panel fades in with it (plan-flow.css reads `--enter-step`). */
   index?: number;
   children: ReactNode;
 }) {
   return (
-    <section className="ui-graph-flow-lane" aria-label={title}>
+    <section
+      className="ui-graph-flow-lane"
+      aria-label={title}
+      style={{ "--enter-step": index } as CSSProperties}
+    >
       <Appear index={index}>
         <header>
           <h2>{title}</h2>

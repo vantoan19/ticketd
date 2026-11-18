@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render } from "@testing-library/react";
 import { expect, it } from "vitest";
-import { MotionProvider } from "@/components/ui/motion";
+import { MotionProvider, Presence } from "@/components/ui/motion";
 import { frames } from "@/test/motion-clock";
 import { motionTestbed, SETTLED_MS } from "@/test/motion-testbed";
 import { TicketRowsSkeleton } from "./TicketRowsSkeleton";
@@ -63,4 +63,24 @@ it("rows are in place at once under reduced motion", async () => {
 it("placeholders are not page rows: none is marked for a page arrival", () => {
   renderRows();
   expect(rows().some((row) => row.hasAttribute("data-arrive"))).toBe(false);
+});
+
+it("fade up after the delay even where the pane's own Presence skips initial animations", async () => {
+  // The pane mounts its list in a Presence with `initial={false}`, which would
+  // otherwise show the first render's rows at once, past the wait.
+  render(
+    <MotionProvider>
+      <Presence initial={false}>
+        <div key="list">
+          <TicketRowsSkeleton count={3} />
+        </div>
+      </Presence>
+    </MotionProvider>,
+  );
+  expect(rows().map((row) => row.style.opacity)).toEqual(["0", "0", "0"]);
+  await frames();
+  await testbed.advance(LOADING_DELAY_MS - 10);
+  expect(rows().map((row) => row.style.opacity)).toEqual(["0", "0", "0"]);
+  await testbed.advance(SETTLED_MS);
+  expect(rows().map((row) => row.style.opacity)).toEqual(["1", "1", "1"]);
 });

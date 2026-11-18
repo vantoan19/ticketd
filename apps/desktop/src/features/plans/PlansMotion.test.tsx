@@ -113,7 +113,7 @@ test("each card's progress bar waits for its own card, not a flat delay", () => 
   // so the bar has to sit inside the element that holds the card's step.
   const css = readFileSync(join(__dirname, "plan-progress.css"), "utf8");
   expect(css).toMatch(
-    /animation-delay:\s*calc\(\s*var\(--stagger\)\s*\*\s*min\(var\(--enter-step, 0\), 7\)\s*\+\s*var\(--dur-enter\)/,
+    /animation-delay:\s*calc\(\s*var\(--stagger\)\s*\*\s*min\(var\(--enter-step, 0\), var\(--stagger-steps\)\)\s*\+\s*var\(--dur-enter\)/,
   );
   const { container } = list();
   for (const bar of container.querySelectorAll(".plan-split-bar"))
@@ -214,5 +214,26 @@ test("a line is measured again when a card lands, so it ends where the card is",
     expect(
       container.querySelector("path[data-edge]")!.getAttribute("d"),
     ).not.toBe(before),
+  );
+});
+
+test("a lane's panel arrives with its heading, on the heading's step, not before it", async () => {
+  const { container } = flow();
+  await screen.findByRole("button", { name: /T-A1/ });
+  const lanes = [
+    ...container.querySelectorAll<HTMLElement>(".ui-graph-flow-lane"),
+  ];
+  // The heading's `Appear` takes the same index, three steps a lane.
+  expect(
+    lanes.map((lane) => lane.style.getPropertyValue("--enter-step")),
+  ).toEqual(["0", "3", "6"]);
+  // jsdom cannot paint a panel, so the rule is read as written: the well fades
+  // in from transparent over the entrance, held until its step.
+  const css = readFileSync(join(__dirname, "plan-flow.css"), "utf8");
+  expect(css).toMatch(
+    /@keyframes plan-flow-lane-in\s*\{\s*from\s*\{\s*background-color:\s*transparent/,
+  );
+  expect(css).toMatch(
+    /\.plan-flow-lanes > \.ui-graph-flow-lane\s*\{\s*animation:\s*plan-flow-lane-in var\(--dur-enter\) var\(--ease-out\) backwards;\s*animation-delay:\s*calc\(var\(--stagger\) \* min\(var\(--enter-step, 0\), 7\)\)/,
   );
 });
