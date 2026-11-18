@@ -11,8 +11,8 @@ spans and never install a subscriber. Only the two binaries do, through the
   to `ticketd.YYYY-MM-DD.log` (UTC days) in the app's log folder (on macOS
   `~/Library/Logs/<bundle identifier>/`). It returns a desktop logs handle that the
   desktop keeps in managed state and drops on `RunEvent::Exit`. The handle
-  changes the level at runtime (Debug logging), lists recent errors and writes the
-  diagnostics export; later work adds the crash-session marker to it. Dev builds also print
+  changes the level at runtime (Debug logging), lists recent errors, keeps the
+  crash-session marker and writes the diagnostics export. Dev builds also print
   readable lines to stderr. If the folder cannot be used, logging falls back to
   stderr and the app keeps running.
 - **CLI.** `init_cli()` installs readable lines on stderr, at `warn` by default.
@@ -22,14 +22,22 @@ spans and never install a subscriber. Only the two binaries do, through the
   everything else (HTTP clients, which could log URLs carrying Drive file IDs or
   OAuth codes) at `warn`. `ticketd` matches targets by prefix, so it covers every
   `ticketd_*` crate. `TICKETD_LOG` overrides the default for the desktop too, and
-  then wins over the Debug logging switch.
+  then wins over the Debug logging switch. A `TICKETD_LOG` that is not a valid filter is
+  ignored, not treated as an override: the default applies, the switch works, and one
+  `warn` ("TICKETD_LOG ignored", with the value's length and never the value) says so.
 - **File sink.** One file per day. Each line is written synchronously to the file
   under a mutex, with no buffer and no background worker, so nothing is lost on
   `std::process::exit` (which is how Tauri ends the process) or a panic. At startup
   our own code deletes ticketd's log files older than 7 days by modified time, then
   the oldest until the folder is under 50 MB. A day's file stops taking routine
-  lines at 20 MB: it writes one notice, then only `warn` and `error`. A failed
-  write is dropped.
+  lines at 20 MB: it writes one notice (once per day file, so not again after a
+  restart), then only `warn` and `error`. A failed write is dropped.
+- **Desktop command spans.** Each Tauri command handler runs in a `debug` span named
+  for the command, with the `request_id` when the interface sent one. Tauri runs an
+  `async` command's future outside the handler, where we cannot reach it, so for those
+  the span covers only the start: its close time is not the command's duration and
+  later lines from the future do not carry it. Work whose duration matters opens its
+  own span. We did not wrap or fork Tauri's command macros for this.
 - **Event standard.** A short message without values, fixed snake_case field names,
   typed IDs, `error_kind` and `error`, and never user content. It is written in the
   Logging section of `docs/agents/quality.md`.
@@ -37,12 +45,28 @@ spans and never install a subscriber. Only the two binaries do, through the
   Diagnostics export (a redacted `.zip`, built from an allowlist of fields) is the
   safe way to attach them to a GitHub issue.
 - **Recent errors and the export read the files.** `recent_errors()` groups the
-  warnings and errors in the log folder by target and error kind, so it covers earlier
-  runs and any line written by other code (such as an unclean end of the previous
-  session) without registering it. The export keeps only allowlisted fields of each
-  line (never the `error` text, which can quote a path, a Harness or a person), and the
-  list is `ID_FIELDS` and `SAFE_FIELDS` in `ticketd-diagnostics`. A field that should
-  reach a bug report is added there on purpose, and to the export fixture test.
+  warnings and errors of the last 7 days of files (by the date in the file name) by
+  target and error kind, so it covers earlier runs and any line written by other code
+  without registering it. The one exception is the previous session's unclean end,
+  which the handle adds from its own state, so it is listed under any log filter and
+  counted once when its line is also in the file. The export's `errors.json` is the
+  same list; its `logs/` holds the last 3 days. The export keeps only allowlisted
+  fields of each line (never the `error` text, which can quote a path, a Harness or a
+  person), and the list is `ID_FIELDS` and `SAFE_FIELDS` in `ticketd-diagnostics`. A
+  field that should reach a bug report is added there on purpose, and to the export
+  fixture test.
+- **Allowlist beyond the five IDs and `error_kind`.** Each is a field our own code
+  emits, with a value that cannot hold content: `location` and `thread` (a panic's
+  source position and thread name), `panic_message` (only a `&'static str` payload; a
+  formatted message is never logged), `previous_started_at` (a timestamp), `route`,
+  `repeat_count` and `frames` (an uncaught WebView error's view, count and frames
+  reduced to `basename:line:column`, so no URL, query string or function name),
+  `harness` (the Harness key; its stderr `line` is not allowed), `command` (a Tauri
+  command's name), `bytes` (the export's size), `action` (which background Chat action
+  failed), `version` (the app version at start), and the span timings `time.busy` and
+  `time.idle`. The summary's commit comes from `build.rs`, which stamps the short hash
+  of `HEAD` (or `TICKETD_COMMIT`) at build time; a build outside a checkout says
+  `unknown`.
 
 ## Rejected
 

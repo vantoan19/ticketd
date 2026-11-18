@@ -1621,17 +1621,34 @@ fn start_reminder_timer(
     }
 }
 
+/// The span a command handler runs in: the command's name, and the `request_id` when the
+/// interface sent one with it (a write's request ID, which the core also records).
+fn command_span(command: &str, payload: &tauri::ipc::InvokeBody) -> tracing::Span {
+    let request_id = match payload {
+        tauri::ipc::InvokeBody::Json(arguments) => arguments
+            .get("requestId")
+            .and_then(serde_json::Value::as_str),
+        tauri::ipc::InvokeBody::Raw(_) => None,
+    };
+    tracing::debug_span!("command", command, request_id)
+}
+
 /// Runs each command handler inside a span named for the command, so the lines it logs say
-/// which command they belong to and the close records how long it took.
+/// which command they belong to.
 ///
 /// The span is at `debug`: the interface's change poll is a command and runs every second,
-/// so an `info` span would log a line for each one. Debug logging shows them. An `async`
-/// command only starts inside the span; the span ends when the handler returns its future.
+/// so an `info` span would log a line for each one. Debug logging shows them.
+///
+/// Only the synchronous part of a command is inside the span. Tauri runs an `async`
+/// command's future on its own runtime, where the handler cannot reach it, so for those the
+/// span ends when the future is created: its close time is not the command's duration, and
+/// lines the future logs later do not carry it. A command whose duration matters opens its
+/// own span around its work.
 fn traced<R: tauri::Runtime>(
     handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
-        let span = tracing::debug_span!("command", command = invoke.message.command());
+        let span = command_span(invoke.message.command(), invoke.message.payload());
         span.in_scope(|| handler(invoke))
     }
 }
@@ -2137,6 +2154,46 @@ mod tests {
         assert!(!holds_exit(Some(0), false));
         assert!(!holds_exit(None, false));
         assert!(!holds_exit(Some(tauri::RESTART_EXIT_CODE), true));
+    }
+
+    #[test]
+    fn a_command_span_carries_the_command_and_the_request_id_when_it_has_one() {
+        let dir = tempfile::tempdir().expect("log folder");
+        let logs = ticketd_diagnostics::DesktopLogs::open(dir.path(), Default::default());
+        logs.set_debug(true);
+        let with =
+            tauri::ipc::InvokeBody::Json(serde_json::json!({"id": "T-1", "requestId": "req-7"}));
+        let without = tauri::ipc::InvokeBody::Json(serde_json::json!({"id": "T-1"}));
+        let raw = tauri::ipc::InvokeBody::Raw(vec![1, 2, 3]);
+        logs.with_default(|| {
+            for (command, payload) in [("one", &with), ("two", &without), ("three", &raw)] {
+                super::command_span(command, payload).in_scope(|| tracing::warn!("inside"));
+            }
+        });
+
+        let mut seen = Vec::new();
+        for entry in std::fs::read_dir(dir.path()).expect("folder") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|extension| extension == "log") {
+                for line in std::fs::read_to_string(path).expect("file").lines() {
+                    let line: serde_json::Value = serde_json::from_str(line).expect("json line");
+                    if line["message"] == "inside" {
+                        seen.push((
+                            line["spans"][0]["command"].as_str().map(str::to_owned),
+                            line["spans"][0]["request_id"].as_str().map(str::to_owned),
+                        ));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                (Some("one".to_owned()), Some("req-7".to_owned())),
+                (Some("two".to_owned()), None),
+                (Some("three".to_owned()), None),
+            ]
+        );
     }
 
     #[test]
