@@ -26,13 +26,17 @@
   animation:
     enter-fade var(--dur-enter) var(--ease-out) backwards,
     enter-rise var(--spring-smooth-t) var(--spring-smooth) backwards;
-  animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), 7));
+  animation-delay: calc(
+    var(--stagger) * min(var(--enter-step, 0), var(--stagger-steps))
+  );
 }
 
-/* While the old page is still fading (ViewRegion keeps its picture as a sibling
-   of the region), hold every animation of the new page where it starts. They run
-   when the picture is gone: the new page begins once the old one has left, and a
-   page that mounts with no switch begins at once. */
-.content-panel:has(> .view-departing) > .view-region [data-own-entrance] * {
+/* While the old page is still fading, hold every animation of the new page where
+   it starts. ViewRegion marks its region `data-departing` for as long as its
+   picture of the old page is on show, so this does not depend on how the panel
+   is built. They run when the picture is gone: the new page begins once the old
+   one has left, and a page that mounts with no switch begins at once. A page
+   whose own rule out-ranks this one repeats it (Settings). */
+.view-region[data-departing] [data-own-entrance] * {
   animation-play-state: paused;
 }

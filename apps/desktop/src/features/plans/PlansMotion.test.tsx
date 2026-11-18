@@ -113,7 +113,7 @@ test("each card's progress bar waits for its own card, not a flat delay", () => 
   // so the bar has to sit inside the element that holds the card's step.
   const css = readFileSync(join(__dirname, "plan-progress.css"), "utf8");
   expect(css).toMatch(
-    /animation-delay:\s*calc\(\s*var\(--stagger\)\s*\*\s*min\(var\(--enter-step, 0\), 7\)\s*\+\s*var\(--dur-enter\)/,
+    /animation-delay:\s*calc\(\s*var\(--stagger\)\s*\*\s*min\(var\(--enter-step, 0\), var\(--stagger-steps\)\)\s*\+\s*var\(--dur-enter\)/,
   );
   const { container } = list();
   for (const bar of container.querySelectorAll(".plan-split-bar"))

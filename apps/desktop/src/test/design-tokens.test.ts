@@ -153,7 +153,7 @@ function motionFindings(source: string): string[] {
     // A delay may also be whole cascade steps: --stagger times the step the
     // element holds (--enter-step, set by components/ui/enter.ts).
     const allowed = /-delay$/.test(property)
-      ? /^--(?:dur-|stagger$|enter-step$)/
+      ? /^--(?:dur-|stagger(?:-steps)?$|enter-step$)/
       : /-duration$/.test(property)
         ? /^--dur-/
         : /^--(?:dur-|ease-|spring-|animate-spin$|motion-swift$)/;
@@ -185,7 +185,7 @@ it("rejects raw times and unrelated tokens in motion declarations", () => {
 it("allows whole stagger steps in a delay, and nowhere else", () => {
   expect(
     motionFindings(
-      "a { animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), 7)); }",
+      "a { animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), var(--stagger-steps))); }",
     ),
   ).toEqual([]);
   expect(motionFindings("a { animation-delay: var(--stagger); }")).toEqual([]);

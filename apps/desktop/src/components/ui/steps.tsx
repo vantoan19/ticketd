@@ -19,8 +19,8 @@ const StepPlace = createContext<{ number: number; enter?: number }>({
 /**
  * A numbered list of things to do in order, joined by a thin line. Compose
  * `Step`s as children; they are numbered from 1. On a page with its own
- * entrance (enter.ts), `enterFrom` makes each step arrive in turn, the first
- * at that step of the page's cascade.
+ * entrance (enter.ts), `enterFrom` makes the card arrive with its first step at
+ * that step of the page's cascade and each later step follow in turn.
  */
 export function Steps({
   className,
@@ -35,6 +35,7 @@ export function Steps({
 }) {
   return (
     <ol
+      {...(enterFrom !== undefined && enter(enterFrom))}
       data-slot="steps"
       data-variant={variant}
       className={cn("m-0 flex list-none flex-col p-0", className)}

@@ -1,6 +1,6 @@
 import { Component, createRef, type ReactNode } from "react";
 import { exitDuration } from "@/lib/motion-tokens";
-import { arrivePage, leave } from "./arrive";
+import { arrivePage, leave, ownsEntrance } from "./arrive";
 
 type Props = {
   /** Names the page on show; a new value is a switch of pages. */
@@ -28,7 +28,10 @@ type Departing = {
  * (`arrivePage`). A page that choreographs its own entrance marks its root
  * `data-own-entrance` and is left to do so. The copy is only a picture: inert,
  * hidden from assistive technology, out of `getElementById` (its ids become
- * `data-id`), and it never takes the pointer.
+ * `data-view-id`), it never takes the pointer, and it plays nothing (every
+ * animation and transition in it is switched off, so it never replays an
+ * entrance). While a copy is on show the region carries `data-departing`, which
+ * is what holds the new page's own entrance.
  *
  * It is a layout-free wrapper (`display: contents`), so pages lay out exactly
  * as they would without it. With reduced motion, or while a key repeats or
@@ -57,7 +60,12 @@ export class ViewRegion extends Component<Props> {
       const to = [image, ...image.querySelectorAll<HTMLElement>("*")];
       from.forEach((element, index) => {
         const copy = to[index];
-        if (copy && (element.scrollTop || element.scrollLeft)) {
+        if (!copy) return;
+        // The clone starts every CSS entrance and transition afresh once it is
+        // inserted, and some are not scoped to `.view-region`: it is a picture.
+        copy.style.setProperty("animation", "none");
+        copy.style.setProperty("transition", "none");
+        if (element.scrollTop || element.scrollLeft) {
           copy.dataset.scrollTop = String(element.scrollTop);
           copy.dataset.scrollLeft = String(element.scrollLeft);
         }
@@ -82,11 +90,13 @@ export class ViewRegion extends Component<Props> {
     if (previous.page === this.props.page || !region) return;
     const panel = region.parentElement;
     if (panel && departing)
-      for (const { image, ...box } of departing) show(panel, image, box);
+      for (const { image, ...box } of departing)
+        show(panel, image, box, region);
     for (const page of region.children)
       if (
         page instanceof HTMLElement &&
         page.getClientRects().length > 0 &&
+        !page.hasAttribute("data-leaving") &&
         !ownsEntrance(page)
       )
         arrivePage(page, exitDuration());
@@ -106,6 +116,7 @@ function show(
   panel: HTMLElement,
   image: HTMLElement,
   box: Pick<Departing, "left" | "top" | "width" | "height">,
+  region: HTMLElement,
 ) {
   const frame = document.createElement("div");
   frame.className = "view-departing";
@@ -122,29 +133,24 @@ function show(
     if (scrollTop) element.scrollTop = Number(scrollTop);
     if (scrollLeft) element.scrollLeft = Number(scrollLeft);
   }
-  leave(frame, () => frame.remove());
-}
-
-/**
- * A page that choreographs its own entrance marks its root, or an element
- * inside it (Documents marks `.documents-page`, Projects and Automations mark
- * inside a wrapper), so the marker is looked for anywhere in the page
- * (arrival contract rule 2).
- */
-function ownsEntrance(page: HTMLElement): boolean {
-  const marker = "[data-own-entrance]";
-  return page.matches(marker) || page.querySelector(marker) !== null;
+  region.setAttribute("data-departing", "");
+  leave(frame, () => {
+    frame.remove();
+    if (!panel.querySelector(".view-departing"))
+      region.removeAttribute("data-departing");
+  });
 }
 
 /**
  * The picture lays out like the page it copies, so its ids stay available to
- * CSS as `data-id` (the rules that key on `#list` also match `[data-id="list"]`),
+ * CSS as `data-view-id` (the rules that key on `#list` also match
+ * `[data-view-id="list"]`; `data-id` is taken by rows),
  * but they leave `getElementById`. SVG ids stay: `url(#…)` resolves inside the
  * picture and nothing looks an SVG element up by id.
  */
 function hideId(element: Element) {
   const id = element.getAttribute("id");
   if (id === null || element instanceof SVGElement) return;
-  element.setAttribute("data-id", id);
+  element.setAttribute("data-view-id", id);
   element.removeAttribute("id");
 }

@@ -1,8 +1,6 @@
 import { useContext, useEffect, useState } from "react";
 import { ListTodo } from "lucide-react";
-import { m, useIsPresent } from "motion/react";
 import { enter } from "@/components/ui/enter";
-import { exitTransition } from "@/lib/motion-tokens";
 import { Button } from "@/components/ui/button";
 import { IconTile } from "@/components/ui/icon-tile";
 import { PaneHeader } from "@/components/ui/list-header";
@@ -19,9 +17,10 @@ import "./first-run.css";
 
 /**
  * A guide to existing actions, with completion read from their real state.
- * It arrives in a short cascade (icon, title, lede, each step, hint) of its
- * own (enter.ts) and, rendered inside `Presence`, fades out once the first
- * ticket exists.
+ * It arrives in a short cascade (header, icon, title, lede, the steps card with
+ * each step, hint) of its own (enter.ts). Once the list holds the first ticket
+ * the guide is simply no longer rendered: it is a page of the shell, whose
+ * picture of it fades out (ViewRegion) and which the list then replaces.
  */
 export function FirstRunGuide({
   onCreate,
@@ -57,31 +56,26 @@ export function FirstRunGuide({
     };
   }, []);
   const copy = emptyCopy("workspace-first-run");
-  const present = useIsPresent();
   return (
-    <m.div
-      className="first-run-host"
-      data-own-entrance=""
-      // Leaving, it lets go of its space so the list does not share the panel.
-      data-leaving={!present || undefined}
-      exit={{ opacity: 0, transition: exitTransition() }}
-    >
-      <PaneHeader title="All tickets" />
+    <div className="first-run-host" data-own-entrance="">
+      <div {...enter(0)}>
+        <PaneHeader title="All tickets" />
+      </div>
       <ManagementPage layout="guide" aria-labelledby="first-run-title">
-        <div className="flex" {...enter(0)}>
+        <div className="flex" {...enter(1)}>
           <IconTile>
             <ListTodo />
           </IconTile>
         </div>
-        <div {...enter(1)}>
+        <div {...enter(2)}>
           <h2 id="first-run-title" className="ui-guide-title">
             {copy.title}
           </h2>
         </div>
-        <div {...enter(2)}>
+        <div {...enter(3)}>
           <p className="ui-guide-lede">{copy.sentence}</p>
         </div>
-        <Steps variant="settings" className="mt-4.5" enterFrom={3}>
+        <Steps variant="settings" className="mt-4.5" enterFrom={4}>
           <Step
             state="current"
             title="Create your first ticket"
@@ -164,13 +158,13 @@ export function FirstRunGuide({
             }
           />
         </Steps>
-        <div className="mt-3.5" {...enter(6)}>
+        <div className="mt-3.5" {...enter(7)}>
           <p className="ui-guide-hint">
             Press <Kbd>{shortcutLabel("command-palette")}</Kbd> to search or
             jump anywhere.
           </p>
         </div>
       </ManagementPage>
-    </m.div>
+    </div>
   );
 }

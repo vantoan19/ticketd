@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { enter } from "./enter";
@@ -31,17 +31,36 @@ it("plays only on the live page, so the picture of the page that left never repl
   ]);
 });
 
-it("holds the new page's animations until the old page's picture is gone", () => {
+it("holds the new page's animations while the region says its old page's picture is on show", () => {
   const hold = rules.find((rule) => rule.body.includes("paused"));
+  // Keyed on the region's own marker (ViewRegion), not on how the panel is built.
   expect(hold?.selector).toBe(
-    ".content-panel:has(> .view-departing) > .view-region [data-own-entrance] *",
+    ".view-region[data-departing] [data-own-entrance] *",
   );
   expect(hold?.body).toContain("animation-play-state: paused");
 });
 
-it("steps the cascade by whole stagger steps, eight at most", () => {
+it("steps the cascade by whole stagger steps, eight at most, from the one token", () => {
   const delay = rules.find((rule) => rule.body.includes("animation-delay"));
-  expect(delay?.body).toContain(
-    "calc(var(--stagger) * min(var(--enter-step, 0), 7))",
+  expect(delay?.body).toMatch(
+    /calc\(\s*var\(--stagger\) \* min\(var\(--enter-step, 0\), var\(--stagger-steps\)\)\s*\)/,
   );
+});
+
+it("no stylesheet repeats the cap as a number: it is --stagger-steps", () => {
+  const src = join(__dirname, "..", "..");
+  const files = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? files(join(directory, entry.name))
+        : entry.name.endsWith(".css")
+          ? [join(directory, entry.name)]
+          : [],
+    );
+  const repeated = files(src).filter((file) =>
+    /min\(\s*var\(--enter-step[^)]*\)\s*,\s*\d/.test(
+      readFileSync(file, "utf8"),
+    ),
+  );
+  expect(repeated).toEqual([]);
 });

@@ -310,7 +310,7 @@ it("a page whose marker sits deeper inside it is left alone too", () => {
   expect(played).toHaveLength(1);
 });
 
-it("the picture keeps its ids as data-id: out of getElementById, still in reach of CSS", () => {
+it("the picture keeps its ids as data-view-id: out of getElementById, still in reach of CSS", () => {
   giveBoxes();
   const { container, rerender } = render(
     <Panel page="tickets">
@@ -325,8 +325,10 @@ it("the picture keeps its ids as data-id: out of getElementById, still in reach 
   rerender(<Panel page="plans" />);
   const picture = container.querySelector(".view-departing");
   expect(picture?.querySelector("#list")).toBeNull();
-  expect(picture?.querySelector('[data-id="list"]')).not.toBeNull();
-  expect(picture?.querySelector('[data-id="page"]')).not.toBeNull();
+  expect(picture?.querySelector('[data-view-id="list"]')).not.toBeNull();
+  expect(picture?.querySelector('[data-view-id="page"]')).not.toBeNull();
+  // `data-id` already means something else (a row's record), so it is not reused.
+  expect(picture?.querySelector("[data-id]")).toBeNull();
   expect(document.getElementById("list")).toBeNull();
   // SVG references like url(#arrow) must still resolve inside the picture.
   expect(picture?.querySelector("#arrow")).not.toBeNull();
@@ -343,12 +345,12 @@ function stylesheets(directory: string): string[] {
   );
 }
 
-it("every rule that keys layout on a panel id also matches the picture's data-id", () => {
+it("every rule that keys layout on a panel id also matches the picture's data-view-id", () => {
   for (const file of stylesheets(source)) {
     const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     for (const id of ["list", "detail", "chat-list", "chat-detail"]) {
       const bare = new RegExp(`#${id}(?![\\w-])`, "g");
-      const paired = `:is(#${id}, [data-id="${id}"])`;
+      const paired = `:is(#${id}, [data-view-id="${id}"])`;
       expect(
         css.split(paired).join("").match(bare),
         `${file} #${id}`,
@@ -422,4 +424,157 @@ it("launches nothing under reduced motion", () => {
   launch(root);
   expect(animate).not.toHaveBeenCalled();
   expect(root.querySelector("[data-arriving]")).toBeNull();
+});
+
+it("every element of the picture is switched off: no animation or transition, set inline and not !important", () => {
+  giveBoxes();
+  const { container, rerender } = render(
+    <Panel page="tickets">
+      <section>
+        <div className="plan-bar" data-testid="bar">
+          <span />
+        </div>
+      </section>
+    </Panel>,
+  );
+  rerender(<Panel page="plans" />);
+  const picture = container.querySelector<HTMLElement>(".view-departing > *");
+  for (const element of [
+    picture!,
+    ...picture!.querySelectorAll<HTMLElement>("*"),
+  ]) {
+    expect(element.style.getPropertyValue("animation")).toBe("none");
+    expect(element.style.getPropertyValue("transition")).toBe("none");
+    expect(element.style.getPropertyPriority("animation")).toBe("");
+  }
+  // Only the picture: the page that stays is untouched.
+  expect(
+    container
+      .querySelector('[data-slot="view-region"] section')
+      ?.getAttribute("style"),
+  ).toBeNull();
+});
+
+it("the region is data-departing for as long as a picture is on show", () => {
+  giveBoxes();
+  const { container, rerender } = render(<Panel page="tickets" />);
+  const region = container.querySelector('[data-slot="view-region"]');
+  expect(region?.hasAttribute("data-departing")).toBe(false);
+  rerender(<Panel page="plans" />);
+  expect(region?.hasAttribute("data-departing")).toBe(true);
+  // A second switch before the first picture is gone keeps the marker until both are.
+  rerender(<Panel page="settings" />);
+  expect(container.querySelectorAll(".view-departing")).toHaveLength(2);
+  const fades = played.filter((one) => one.options.fill === "forwards");
+  act(() => fades[0]?.onfinish?.());
+  expect(region?.hasAttribute("data-departing")).toBe(true);
+  act(() => fades[1]?.onfinish?.());
+  expect(container.querySelector(".view-departing")).toBeNull();
+  expect(region?.hasAttribute("data-departing")).toBe(false);
+});
+
+it("under reduced motion the region never carries data-departing", () => {
+  giveBoxes();
+  useTokens(reducedTokens);
+  const { container, rerender } = render(<Panel page="tickets" />);
+  rerender(<Panel page="plans" />);
+  expect(container.querySelector("[data-departing]")).toBeNull();
+});
+
+it("a marker that is on its way out does not stop the page that replaces it from arriving", () => {
+  layOut();
+  const { container, rerender } = render(<Panel page="first-run" />);
+  rerender(
+    <Panel page="list">
+      <section className="leaving" data-own-entrance="" data-leaving="true" />
+      <section className="list">
+        <header data-arrive="header" />
+        <ul>
+          <li data-arrive="row" data-y="1" />
+        </ul>
+      </section>
+    </Panel>,
+  );
+  // The leaving page is left alone; the list arrives after the picture.
+  expect(arrivals().map(delayOf)).toEqual([150, 174]);
+  expect(container.querySelector(".list")?.hasAttribute("data-arriving")).toBe(
+    true,
+  );
+  expect(
+    container.querySelector(".leaving")?.hasAttribute("data-arriving"),
+  ).toBe(false);
+});
+
+it("a leaving marker inside a page does not count as the page owning its entrance", () => {
+  layOut();
+  const { rerender } = render(<Panel page="a" />);
+  rerender(
+    <Panel page="b">
+      <div className="management-host">
+        <header data-arrive="header" />
+        <section data-own-entrance="" data-leaving="true" />
+      </div>
+    </Panel>,
+  );
+  expect(arrivals().map(delayOf)).toEqual([150]);
+});
+
+it("the launch leaves a page that owns its entrance to it: no pane fade, no cascade on top", () => {
+  layOut();
+  const root = document.createElement("div");
+  root.innerHTML = `<nav class="sidebar"></nav>
+    <main class="content-panel"><div data-slot="view-region">
+    <div class="first-run-host" data-own-entrance="">
+      <header data-arrive="header"></header>
+    </div>
+    <section class="ticket-list" hidden>
+      <header data-arrive="header"></header>
+    </section></div></main>`;
+  launch(root);
+  // Only the sidebar fades in.
+  expect(arrivals()).toHaveLength(1);
+  expect(arrivals()[0]?.element.className).toBe("sidebar");
+  expect(root.querySelector("[data-arriving]")).toBeNull();
+});
+
+it("a page that owns its entrance but is kept hidden does not stop the launch", () => {
+  layOut();
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
+    function (this: HTMLElement) {
+      return (this.closest("[hidden]") ? [] : [{}]) as unknown as DOMRectList;
+    },
+  );
+  const root = document.createElement("div");
+  root.innerHTML = `<nav class="sidebar"></nav>
+    <main class="content-panel"><div data-slot="view-region">
+    <section class="documents" hidden data-own-entrance=""></section>
+    <section class="ticket-list">
+      <header data-arrive="header"></header>
+      <ul><li data-arrive="row"></li></ul>
+    </section></div></main>`;
+  launch(root);
+  // sidebar, pane, header, row
+  expect(arrivals()).toHaveLength(4);
+});
+
+it("the launch does not start rows that are already animating again (the list's own cascade began first)", () => {
+  layOut();
+  Element.prototype.getAnimations = function (this: Element) {
+    return (this.hasAttribute("data-busy") ? [{}] : []) as Animation[];
+  };
+  try {
+    const root = workspace(3);
+    root.querySelectorAll("li")[0]?.setAttribute("data-busy", "");
+    root.querySelectorAll("li")[1]?.setAttribute("data-busy", "");
+    launch(root);
+    const rows = arrivals().filter(
+      (one) => one.element.getAttribute("data-arrive") === "row",
+    );
+    // Only the third row joins the launch cascade: header at step 2, rows follow.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.element).toBe(root.querySelectorAll("li")[2]);
+  } finally {
+    // @ts-expect-error jsdom has no getAnimations; remove the stand-in
+    delete Element.prototype.getAnimations;
+  }
 });
