@@ -124,7 +124,7 @@ export const SHORTCUTS = [
     sequences: [[["G"], [key]]],
     scope: "Everywhere" as const,
     label,
-    note: "Not while typing or using an overlay.",
+    note: "Not while typing or with a dialog or menu open.",
     ...(id === "go-chats" && { needs: "chat" as const }),
   })),
   {
@@ -166,7 +166,7 @@ export const SHORTCUTS = [
       ["attachments-add", [["Mod", "Shift", "U"]], "Add files"],
       ["attachments-open", [["O"]], "Open file"],
       ["attachments-more", [["."]], "More file actions"],
-      ["attachments-back", [["Escape"]], "Back to Attachments"],
+      ["attachments-back", [["Esc"]], "Back to Attachments"],
     ] as const
   ).map(([id, keys, label]) => ({
     id,
@@ -197,7 +197,7 @@ export const SHORTCUTS = [
     keys: [["→"]],
     scope: "Lists",
     label: "Focus the Document’s exact updated time",
-    note: "Escape or Left arrow returns to the row.",
+    note: "Esc or Left arrow returns to the row.",
   },
   {
     id: "board-move",
