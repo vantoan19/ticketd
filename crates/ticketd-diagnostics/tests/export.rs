@@ -76,6 +76,8 @@ fn read_zip(path: &Path) -> Vec<(String, String)> {
         .collect()
 }
 
+// Clippy exempts #[test] functions from the panic lint, not their helpers.
+#[allow(clippy::panic)]
 fn file<'a>(files: &'a [(String, String)], name: &str) -> &'a str {
     files
         .iter()
