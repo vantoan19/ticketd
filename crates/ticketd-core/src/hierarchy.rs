@@ -15,30 +15,6 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    let mut statement = connection.prepare_cached("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.parent_id WHERE ticket_parents.child_id = ?1")?;
-    ticket.parent = statement
-        .query_row([&ticket.id], |row| {
-            Ok(RelatedTicket {
-                reference: row.get::<_, String>(0)?,
-                title: row.get(1)?,
-                trashed: row.get(2)?,
-            })
-        })
-        .optional()?;
-    let mut statement = connection.prepare_cached("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.child_id WHERE ticket_parents.parent_id = ?1 ORDER BY tickets.number")?;
-    ticket.children = statement
-        .query_map([&ticket.id], |row| {
-            Ok(RelatedTicket {
-                reference: row.get::<_, String>(0)?,
-                title: row.get(1)?,
-                trashed: row.get(2)?,
-            })
-        })?
-        .collect::<Result<_, _>>()?;
-    Ok(())
-}
-
 impl Workspace {
     pub fn detach_child(
         &mut self,

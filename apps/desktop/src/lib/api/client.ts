@@ -420,7 +420,32 @@ const flowTicketMetadataSchema = lazySchema(() =>
     source: ticketSourceSchema.pick({ unavailable: true }).nullish(),
   }),
 );
+/** A ticket as a list or board row shows it; the detail pane reads the whole Ticket. */
+const ticketRowSchema = lazySchema(() =>
+  ticketMetadataSchema.extend({
+    updated_at: ticketSchema.shape.updated_at,
+    tags: ticketSchema.shape.tags,
+    latest_update: latestUpdateSchema.nullable(),
+    /** Set only while an external source owns the ticket. */
+    source: z
+      .object({
+        provider: z.string(),
+        provider_name: z.string(),
+        place: z.string(),
+        number: z.string(),
+        display: z.string(),
+      })
+      .nullable(),
+    parent: ticketSchema.shape.parent,
+    duplicate_of: z.string().nullable(),
+    prerequisites: z.object({
+      total: z.number().int().nonnegative(),
+      unresolved: z.number().int().nonnegative(),
+    }),
+  }),
+);
 export type TicketMetadata = z.infer<typeof ticketMetadataSchema>;
+export type TicketRow = z.infer<typeof ticketRowSchema>;
 export type FlowTicketMetadata = z.infer<typeof flowTicketMetadataSchema>;
 export type FindFilter = {
   query: string;
@@ -811,6 +836,12 @@ export const client = {
       ...ticket,
       progress_summary: latest_update,
     }));
+  },
+  /** A page of list or board rows: what `findTickets` finds, without bodies. */
+  async findTicketRows(filter: FindFilter) {
+    return z
+      .array(ticketRowSchema)
+      .parse(await invoke("find_ticket_rows", { filter }));
   },
   async findTicketMetadata(filter: FindFilter, ids?: string[]) {
     return z

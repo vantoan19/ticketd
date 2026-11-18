@@ -219,8 +219,12 @@ impl Workspace {
     pub fn expire_versions(&mut self, now: Option<&str>) -> Result<usize, Error> {
         let now = crate::source::clock(&self.connection, now)?;
         Ok(self.connection.execute(
-            "DELETE FROM record_versions WHERE julianday(replaced_at) < julianday(?1) - ?2",
-            params![now, RETENTION_DAYS],
+            "DELETE FROM record_versions WHERE replaced_at < ?1",
+            [crate::events::cutoff(
+                &self.connection,
+                &now,
+                RETENTION_DAYS,
+            )?],
         )?)
     }
 }

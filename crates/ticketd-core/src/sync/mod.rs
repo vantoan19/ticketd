@@ -34,6 +34,13 @@ pub(crate) fn migrate_capture(connection: &rusqlite::Connection) -> Result<(), c
     capture::migrate(connection)
 }
 
+/// Format version 84: see `capture::migrate_unchanged_tickets`.
+pub(crate) fn migrate_unchanged_tickets(
+    connection: &rusqlite::Connection,
+) -> Result<(), crate::Error> {
+    capture::migrate_unchanged_tickets(connection)
+}
+
 /// The sync destination and Attachment transfer state (format version 59).
 pub(crate) fn migrate_setup(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate(connection)
