@@ -51,6 +51,10 @@ from Settings → Agent skills, or run:
 ticketd skills install --harness claude-code,codex
 ```
 
+Claude Code reads the installed skill from `~/.claude/skills/ticketd`, or from
+`$CLAUDE_CONFIG_DIR/skills` when that variable is set. Codex reads
+`~/.agents/skills/ticketd`.
+
 The guide teaches CLI operations while leaving work organization to you. See
 [agent skill installation](docs/install.md#agent-cli-skill) and
 [CLI workflows](docs/cli.md) for project context, atomic batches, search, and progress reports.
@@ -85,10 +89,13 @@ The product specification includes future direction and is not a list of shipped
 ## Repository layout
 
 ```text
-apps/desktop/src/            React UI and typed desktop bridge clients
-apps/desktop/src-tauri/      Tauri adapter, configuration, and capabilities
-crates/ticketd-core/         Shared domain behavior and persistence
-crates/ticketd-cli/          Standalone CLI named ticketd
-scripts/                    Shared development checks
-docs/                       Product and engineering guidance
+apps/desktop/src/                  React UI and typed desktop bridge clients
+apps/desktop/src-tauri/            Tauri adapter, configuration, and capabilities
+apps/chat-bridge-claude/           Claude Chat bridge, built into the desktop sidecar
+crates/ticketd-core/               Shared domain behavior and persistence
+crates/ticketd-cli/                Standalone CLI named ticketd
+crates/ticketd-chat-host/          Chat supervisor and harness adapter contract
+crates/ticketd-automation-runner/  Runs Automations from Workspace events
+scripts/                           Shared development checks
+docs/                              Product and engineering guidance
 ```
