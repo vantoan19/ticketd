@@ -150,10 +150,12 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
   });
 
   const panel = await start(steps, "On a schedule");
-  expect(stored.trigger).toEqual({
-    kind: "schedule",
-    schedule: { kind: "weekly", time: "09:00", weekdays: ["mon"] },
-  });
+  await waitFor(() =>
+    expect(stored.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "weekly", time: "09:00", weekdays: ["mon"] },
+    }),
+  );
   // Conditions are about a ticket, and nothing here starts from one: they are
   // kept for when a ticket trigger is chosen back, and neither asked nor shown.
   expect(stored.conditions).toEqual([{ kind: "tag", tag: "bug", has: true }]);
@@ -175,10 +177,12 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
   fireEvent.change(within(panel).getByLabelText("Time"), {
     target: { value: "17:30" },
   });
-  expect(stored.trigger).toEqual({
-    kind: "schedule",
-    schedule: { kind: "weekly", time: "17:30", weekdays: ["wed", "fri"] },
-  });
+  await waitFor(() =>
+    expect(stored.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "weekly", time: "17:30", weekdays: ["wed", "fri"] },
+    }),
+  );
   expect(
     within(panel)
       .getByRole("button", { name: "Wednesday" })
@@ -188,17 +192,21 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
   fireEvent.click(
     within(panel).getByRole("radio", { name: "Every few hours" }),
   );
-  expect(stored.trigger).toEqual({
-    kind: "schedule",
-    schedule: { kind: "every_hours", hours: 6 },
-  });
+  await waitFor(() =>
+    expect(stored.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "every_hours", hours: 6 },
+    }),
+  );
   const hours = within(panel).getByRole("spinbutton", { name: "Hours" });
   fireEvent.change(hours, { target: { value: "2" } });
   fireEvent.blur(hours);
-  expect(stored.trigger).toEqual({
-    kind: "schedule",
-    schedule: { kind: "every_hours", hours: 2 },
-  });
+  await waitFor(() =>
+    expect(stored.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "every_hours", hours: 2 },
+    }),
+  );
   expect(triggerCard(steps).getAttribute("aria-label")).toBe(
     "On a schedule: Every 2 hours",
   );
@@ -210,17 +218,21 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
       "Every 1 to 168 hours. For longer, use At set times.",
     );
     fireEvent.blur(hours);
-    expect(stored.trigger).toEqual({
-      kind: "schedule",
-      schedule: { kind: "every_hours", hours: 2 },
-    });
+    await waitFor(() =>
+      expect(stored.trigger).toEqual({
+        kind: "schedule",
+        schedule: { kind: "every_hours", hours: 2 },
+      }),
+    );
   }
   fireEvent.change(hours, { target: { value: "168" } });
   fireEvent.keyDown(hours, { key: "Enter" });
-  expect(stored.trigger).toEqual({
-    kind: "schedule",
-    schedule: { kind: "every_hours", hours: 168 },
-  });
+  await waitFor(() =>
+    expect(stored.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "every_hours", hours: 168 },
+    }),
+  );
   // A schedule is switched on like any Automation.
   expect(
     screen.getByRole("switch", { name: "On for this desktop" }),
@@ -242,7 +254,7 @@ test("hours left right after hours committed with Enter are stored too", async (
   hours.focus();
   fireEvent.change(hours, { target: { value: "100" } });
   fireEvent.keyDown(hours, { key: "Enter" });
-  expect(hoursStored()).toBe(100);
+  await waitFor(() => expect(hoursStored()).toBe(100));
   fireEvent.change(hours, { target: { value: "7" } });
   // Leaving by focus moving on, as Tab does: the editor hears it leave too.
   within(panel).getByRole("radio", { name: "Every few hours" }).focus();

@@ -1814,3 +1814,38 @@ async fn the_running_runs_of_an_automation_deleted_through_sync_end_at_the_next_
         Some(TurnEnding::StoppedByTicketd(StopReason::RunEnded))
     );
 }
+
+/// The desktop's idle cost: a pass reads the Workspace once, and says whether
+/// anything needs the runner, so the loop can wait longer when nothing does.
+#[tokio::test(start_paused = true)]
+#[allow(clippy::unwrap_used)]
+async fn a_pass_uses_the_workspace_once_and_says_whether_anything_needs_the_runner() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let f = Fixture::new();
+    let uses = Arc::new(AtomicUsize::new(0));
+    let counted: WorkspaceOpener = {
+        let (inner, uses) = (opener(&f.path), Arc::clone(&uses));
+        Arc::new(move || {
+            uses.fetch_add(1, Ordering::SeqCst);
+            inner()
+        })
+    };
+    let host = f.host.clone();
+    let runner = Runner::new(
+        counted,
+        Arc::new(move || Ok(host.clone())),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
+
+    uses.store(0, Ordering::SeqCst);
+    assert!(runner.tick().unwrap(), "an Automation is on");
+    assert_eq!(uses.load(Ordering::SeqCst), 1);
+
+    f.core()
+        .set_automation_enabled(&f.automation.id, false)
+        .unwrap();
+    uses.store(0, Ordering::SeqCst);
+    assert!(!runner.tick().unwrap(), "nothing is on, queued or running");
+    assert_eq!(uses.load(Ordering::SeqCst), 1);
+}

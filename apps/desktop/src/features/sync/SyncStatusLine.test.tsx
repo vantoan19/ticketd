@@ -11,7 +11,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 import { invoke } from "@tauri-apps/api/core";
-import { syncApi, type SyncStatus } from "@/lib/sync-api";
+import { onSyncStatus, syncApi, type SyncStatus } from "@/lib/sync-api";
 import { SyncStatusProvider } from "./SyncStatusProvider";
 import { useSyncNavigation } from "./sync-status";
 import { hostFailure, notConnected, syncStatus } from "./sync-fixtures";
@@ -20,7 +20,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/sync-api", async (original) => ({
   ...(await original<typeof import("@/lib/sync-api")>()),
   syncApi: { status: vi.fn(), syncNow: vi.fn(), recover: vi.fn() },
+  onSyncStatus: vi.fn(),
 }));
+/** Sends a status as the desktop does when it changes. */
+let push: (status: SyncStatus) => void = () => {};
 const api = vi.mocked(syncApi);
 /** The api as shipped, over the mocked bridge. */
 const real = (
@@ -46,6 +49,10 @@ function Shell() {
 }
 async function footer(status: SyncStatus) {
   api.status.mockResolvedValue(status);
+  vi.mocked(onSyncStatus).mockImplementation(async (handler) => {
+    push = handler;
+    return () => {};
+  });
   render(
     <SyncStatusProvider>
       <Shell />
@@ -83,6 +90,25 @@ test("uploaded: the line says Drive synced and when, and the popover offers Sync
   api.status.mockResolvedValue(now);
   fireEvent.click(within(dialog).getByRole("button", { name: "Sync now" }));
   expect(await within(dialog).findByText("Last synced just now")).toBeTruthy();
+});
+
+test("a status the desktop sends replaces the line, with no read of its own", async () => {
+  await footer(syncStatus());
+  expect((await line()).textContent).toBe("Drive synced1 min ago");
+  api.status.mockClear();
+  push(
+    syncStatus({
+      state: "upload_pending",
+      pending_uploads: [change("A")],
+      pending_total: 1,
+    }),
+  );
+  await waitFor(async () =>
+    expect((await line()).textContent).toBe(
+      "Uploading 1 change…Saved on this computer",
+    ),
+  );
+  expect(api.status).not.toHaveBeenCalled();
 });
 
 test("upload pending: the line counts the changes and says they are saved here", async () => {

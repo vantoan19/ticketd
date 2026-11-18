@@ -105,6 +105,17 @@ vi.mock("@tauri-apps/api/core", () => ({
     return bridge.invoke(command, args);
   },
 }));
+// The desktop sends the sync status when it changes; a test sends it here.
+const syncPush = vi.hoisted(() => ({
+  send: (status: unknown): void => void status,
+}));
+vi.mock("@/lib/sync-api", async (original) => ({
+  ...(await original<typeof import("@/lib/sync-api")>()),
+  onSyncStatus: async (handler: (status: never) => void) => {
+    syncPush.send = (status) => handler(status as never);
+    return () => {};
+  },
+}));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
 
 vi.mock("@uiw/react-codemirror", () => ({
@@ -5396,6 +5407,7 @@ test("Document sync metadata survives floating Saved feedback and waits for Driv
   ).toBe("Saved on this computer");
   expect(within(stateRow).queryByText("Synced to Drive")).toBeNull();
   uploaded = true;
+  act(() => syncPush.send(syncStatus()));
   expect(await within(stateRow).findByText("Synced to Drive")).toBeTruthy();
   await vi.waitFor(() => expect(within(bar).queryByText("Saved")).toBeNull(), {
     timeout: 4000,

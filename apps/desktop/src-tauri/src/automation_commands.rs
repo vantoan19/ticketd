@@ -9,7 +9,13 @@ use ticketd_core::{
 };
 
 use crate::automation_runner::AutomationRunner;
-use crate::open_workspace;
+
+/// The workspace, once the start-up pass has ended the runs the previous process
+/// left Running, so no page shows them as still going.
+fn open_workspace() -> Result<ticketd_core::WorkspaceGuard, ticketd_core::Error> {
+    crate::automation_runner::started();
+    crate::open_workspace()
+}
 
 /// An agent as the Agents list shows it: with the Automations that use it, which
 /// is why it cannot be deleted while there are any.
@@ -20,7 +26,7 @@ pub struct ListedAgent {
     used_by: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_agent_list() -> Result<Vec<ListedAgent>, String> {
     open_workspace()
         .and_then(|workspace| {
@@ -39,14 +45,14 @@ pub fn automation_agent_list() -> Result<Vec<ListedAgent>, String> {
 }
 
 /// A new agent starts from the core's defaults and is edited in place.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_agent_create() -> Result<AutomationAgent, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.create_new_automation_agent())
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_agent_update(
     id: String,
     settings: AutomationAgentSettings,
@@ -56,14 +62,14 @@ pub fn automation_agent_update(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_agent_delete(id: String) -> Result<(), String> {
     open_workspace()
         .and_then(|mut workspace| workspace.delete_automation_agent(&id))
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_list() -> Result<Vec<Automation>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automations())
@@ -71,7 +77,7 @@ pub fn automation_list() -> Result<Vec<Automation>, String> {
 }
 
 /// A new Automation starts empty and off, and is edited in place.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_create() -> Result<Automation, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.create_automation(AutomationDefinition::default()))
@@ -79,7 +85,7 @@ pub fn automation_create() -> Result<Automation, String> {
 }
 
 /// One of the examples the empty page offers, as an Automation that is off.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_create_example(example: AutomationExample) -> Result<Automation, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.create_example_automation(example))
@@ -87,7 +93,7 @@ pub fn automation_create_example(example: AutomationExample) -> Result<Automatio
 }
 
 /// A copy of an Automation, off.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_duplicate(id: String) -> Result<Automation, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.duplicate_automation(&id))
@@ -99,7 +105,7 @@ pub fn automation_duplicate(id: String) -> Result<Automation, String> {
 /// `typing` is an edit still being made, such as a field being typed in: it is
 /// stored unless that would switch the Automation off, and the answer is the
 /// Automation as it is stored either way.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_update(
     id: String,
     definition: AutomationDefinition,
@@ -131,7 +137,7 @@ pub async fn automation_delete(
 }
 
 /// On or off for this device only.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.set_automation_enabled(&id, enabled))
@@ -141,7 +147,7 @@ pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, S
 /// A step's text with its fields filled in from the ticket changed most recently,
 /// and `tag` for the tag from the event. `None` while the Workspace has no ticket.
 /// With `has_ticket` false it reads as a run without a ticket fills it in.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_text_preview(
     text: String,
     tag: Option<String>,
@@ -190,7 +196,7 @@ fn listed(runs: Vec<AutomationRun>) -> Vec<ListedRun> {
 }
 
 /// An Automation's runs on this device, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_runs(&automation_id))
@@ -199,7 +205,7 @@ pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, Stri
 }
 
 /// The runs of every Automation on this device, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_list_all() -> Result<Vec<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.all_automation_runs())
@@ -208,7 +214,7 @@ pub fn automation_run_list_all() -> Result<Vec<ListedRun>, String> {
 }
 
 /// The runs that acted on a ticket, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_list_for_ticket(reference: String) -> Result<Vec<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.ticket_automation_runs(&reference))
@@ -217,7 +223,7 @@ pub fn automation_run_list_for_ticket(reference: String) -> Result<Vec<ListedRun
 }
 
 /// The run the person took over through this Chat, if they did.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_taken_over_in(chat_id: String) -> Result<Option<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_run_taken_over_in(&chat_id))
@@ -226,7 +232,7 @@ pub fn automation_run_taken_over_in(chat_id: String) -> Result<Option<ListedRun>
 }
 
 /// One run with the definition it executes and each step it reached.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_get(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_run(&id))
@@ -249,7 +255,7 @@ pub async fn automation_run_stop(
 
 /// Queues a new run for the event that started a finished one, which then no
 /// longer needs the person.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.run_automation_again(&id))
@@ -258,7 +264,7 @@ pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
 
 /// "Run now": queues a run of an Automation that is run by hand. The runner starts
 /// it at its next pass.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_now(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.run_automation_now(&id))
@@ -266,7 +272,7 @@ pub fn automation_run_now(id: String) -> Result<AutomationRun, String> {
 }
 
 /// The person wants nothing more from a run that needs attention.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_run_dismiss(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.dismiss_automation_run(&id))
@@ -296,7 +302,7 @@ pub struct RunsAtOnce {
     most: usize,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_runs_at_once() -> Result<RunsAtOnce, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_runs_at_once())
@@ -308,7 +314,7 @@ pub fn automation_runs_at_once() -> Result<RunsAtOnce, String> {
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_automation_runs_at_once(runs: usize) -> Result<(), String> {
     open_workspace()
         .and_then(|workspace| workspace.set_automation_runs_at_once(runs))

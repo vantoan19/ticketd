@@ -160,6 +160,12 @@ impl Workspace {
             Ok(())
         })
     }
+    /// How long until the next undelivered reminder comes due: zero when one already
+    /// has, `None` when none is set. The desktop sleeps this long before delivering.
+    pub fn next_reminder_due_in(&self) -> Result<Option<std::time::Duration>, Error> {
+        let seconds: Option<f64> = self.connection.prepare_cached("SELECT MIN((julianday(due_at) - julianday('now')) * 86400.0) FROM ticket_reminders WHERE person = ?1 AND delivered = 0")?.query_row([LOCAL_PERSON], |row| row.get(0))?;
+        Ok(seconds.map(|seconds| std::time::Duration::from_secs_f64(seconds.max(0.0))))
+    }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
         self.inbox_page(limit, offset, false)
     }
