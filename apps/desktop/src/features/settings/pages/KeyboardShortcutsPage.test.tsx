@@ -159,3 +159,11 @@ test("Chat-only keys are hidden while Chat is off and shown when it is on", () =
   expect(screen.getByText("Open the approval in Chat")).toBeTruthy();
   expect(screen.getByText("Add the selected text to a Chat")).toBeTruthy();
 });
+
+test("the Escape key has one name, Esc, in every key and note", () => {
+  for (const item of SHORTCUTS as readonly Shortcut[]) {
+    expect(item.keys.flat(), item.id).not.toContain("Escape");
+    expect(item.note ?? "", item.id).not.toMatch(/\bEscape\b/);
+  }
+  expect(shortcutLabel("attachments-back")).toMatch(/Esc/);
+});
