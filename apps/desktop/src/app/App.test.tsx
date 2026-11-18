@@ -2581,6 +2581,35 @@ test("Select all reaches every matching ticket, beyond the listed page (list B-0
   expect(screen.getByText("51 selected")).toBeTruthy();
 });
 
+test("after Select all matching, the status menu counts the whole selection", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
+    ...bulkTicket(1, index === 50 ? { status: "Done" } : {}),
+    id: String(index + 1),
+    reference: `T-KQ${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      all.slice(args.filter.offset, args.filter.offset + 50),
+    count_tickets: () => counted({ todo: 50, done: 1 }),
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  openMenu("More selected ticket actions");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Select all 50" }));
+  openMenu("More selected ticket actions");
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Select all 51 matching" }),
+  );
+  await act(async () => {});
+  openMenu("Status of selected tickets");
+  // T-KQ51 is beyond the listed page, and still counted.
+  expect(screen.getByRole("menuitem", { name: /^Todo/ }).textContent).toContain(
+    "50 of 51",
+  );
+  expect(screen.getByRole("menuitem", { name: /^Done/ }).textContent).toContain(
+    "1 of 51",
+  );
+});
+
 test("Shift-click selects the range from the last ticket toggled", async () => {
   await renderBulk({
     find_tickets: () => [bulkTicket(1), bulkTicket(2), bulkTicket(3)],

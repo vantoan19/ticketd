@@ -93,7 +93,7 @@ function TicketListBody({
     pages,
     resetPaging,
     showMore,
-    matchingReferences,
+    matchingTickets,
     plan,
     status,
     tags,
@@ -618,7 +618,7 @@ function TicketListBody({
             bulk={bulk}
             visible={visibleTickets}
             total={total}
-            matchingReferences={matchingReferences}
+            matchingTickets={matchingTickets}
             projects={projects}
             plans={plans}
           />

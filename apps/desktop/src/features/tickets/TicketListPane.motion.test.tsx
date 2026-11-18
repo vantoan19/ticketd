@@ -96,7 +96,7 @@ function workspaceOf({ loading, layout, tickets, tags = "" }: State) {
     pages: 1,
     resetPaging: vi.fn(),
     showMore: vi.fn(),
-    matchingReferences: vi.fn(async () => []),
+    matchingTickets: vi.fn(async () => []),
     plan: "",
     status: "",
     tags,

@@ -77,7 +77,7 @@ export function BulkControls({
   bulk,
   visible,
   total,
-  matchingReferences,
+  matchingTickets,
   projects,
   plans,
 }: {
@@ -86,8 +86,8 @@ export function BulkControls({
   visible: Ticket[];
   /** Every ticket the search and filters match, listed or not. */
   total: number;
-  /** Reads every matching reference, for "Select all 59 matching". */
-  matchingReferences: () => Promise<string[]>;
+  /** Reads every matching ticket, for "Select all 59 matching". */
+  matchingTickets: () => Promise<Ticket[]>;
   projects: TicketWorkspace["projects"];
   plans: TicketWorkspace["plans"];
 }) {
@@ -98,9 +98,15 @@ export function BulkControls({
   // The bar stays drawn while it sinks away after the last ticket is cleared.
   const [leaving, setLeaving] = useState(false);
   const [hadSelection, setHadSelection] = useState(count > 0);
+  // The tickets "Select all n matching" read beyond the listed page, so the
+  // Status and Plan counts cover the whole selection. Dropped with it.
+  const [matched, setMatched] = useState<ReadonlyMap<string, Ticket>>(
+    () => new Map(),
+  );
   if (count > 0 !== hadSelection) {
     setHadSelection(count > 0);
     setLeaving(count === 0);
+    if (count === 0) setMatched(new Map());
   }
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
@@ -139,9 +145,12 @@ export function BulkControls({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [count, pending, bulk]);
-  const selectedTickets = visible.filter((ticket) =>
-    selection.includes(ticket.reference),
-  );
+  // A listed ticket is the freshest copy; the rest come from the matching read.
+  const listed = new Map(visible.map((ticket) => [ticket.reference, ticket]));
+  const selectedTickets = selection.flatMap((reference) => {
+    const ticket = listed.get(reference) ?? matched.get(reference);
+    return ticket ? [ticket] : [];
+  });
   const inStatus = (status: string) =>
     selectedTickets.filter((ticket) => ticket.status === status).length;
   const activePlans = plans.filter((item) => !item.archived);
@@ -156,7 +165,9 @@ export function BulkControls({
   async function selectMatching() {
     setSelecting(true);
     try {
-      bulk.selectAll(await matchingReferences());
+      const found = await matchingTickets();
+      setMatched(new Map(found.map((ticket) => [ticket.reference, ticket])));
+      bulk.selectAll(found.map((ticket) => ticket.reference));
     } catch (reason) {
       statusLine.show({
         tone: "error",

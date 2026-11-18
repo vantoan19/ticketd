@@ -36,7 +36,7 @@ function Bar({ selection }: { selection: string[] }) {
         bulk={bulk}
         visible={[]}
         total={0}
-        matchingReferences={() => Promise.resolve([])}
+        matchingTickets={() => Promise.resolve([])}
         projects={[]}
         plans={[]}
       />

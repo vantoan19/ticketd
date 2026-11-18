@@ -90,7 +90,7 @@ function workspaceOf({ loading, layout, count }: State) {
     pages: 1,
     resetPaging: vi.fn(),
     showMore: vi.fn(),
-    matchingReferences: vi.fn(async () => []),
+    matchingTickets: vi.fn(async () => []),
     plan: "",
     status: "",
     tags: "",
