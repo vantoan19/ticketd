@@ -4492,6 +4492,10 @@ kbd,
   width: min(560px, calc(100vw - 32px));
   background: var(--popover);
 }
+:where(.ui-dialog[data-surface="create"]) {
+  /* Excluding size properties cancels the glide; theme colors still win. */
+  transition-property: none;
+}
 .ui-dialog[data-surface="create"][data-resizing] {
   /* Expand and collapse glide, and only then: a window resize must not (the
      dialog sets data-resizing for the length of the spring). The top anchor
