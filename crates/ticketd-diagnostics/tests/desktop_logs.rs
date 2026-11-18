@@ -15,6 +15,8 @@ fn open(dir: &Path) -> DesktopLogs {
 }
 
 /// The folder's `ticketd.*.log` files, oldest name first.
+// Clippy only exempts #[test] functions from the unwrap lint, not their helpers.
+#[allow(clippy::unwrap_used)]
 fn log_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<_> = fs::read_dir(dir)
         .unwrap()
@@ -29,6 +31,7 @@ fn log_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+#[allow(clippy::unwrap_used)]
 fn lines(path: &Path) -> Vec<serde_json::Value> {
     fs::read_to_string(path)
         .unwrap()
@@ -38,6 +41,7 @@ fn lines(path: &Path) -> Vec<serde_json::Value> {
 }
 
 /// A stand-in for an old log file: `size` bytes, last modified `age` ago.
+#[allow(clippy::unwrap_used)]
 fn old_file(dir: &Path, name: &str, size: usize, age: Duration) -> PathBuf {
     let path = dir.join(name);
     fs::write(&path, vec![b'x'; size]).unwrap();
@@ -73,7 +77,10 @@ fn an_event_becomes_one_json_line_in_todays_file() {
     // RFC 3339 in UTC, and the file is named for the same UTC day.
     let timestamp = line["timestamp"].as_str().unwrap();
     assert!(timestamp.ends_with('Z'), "{timestamp}");
-    assert!(chrono::DateTime::parse_from_rfc3339(timestamp).is_ok(), "{timestamp}");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(timestamp).is_ok(),
+        "{timestamp}"
+    );
     assert_eq!(name, format!("ticketd.{}.log", &timestamp[..10]));
 }
 
@@ -169,7 +176,10 @@ fn opening_removes_files_older_than_seven_days_by_modified_time() {
 
     assert!(!dir.path().join("ticketd.2020-01-01.log").exists());
     assert!(kept.exists());
-    assert!(unrelated.exists(), "only ticketd's own log files are pruned");
+    assert!(
+        unrelated.exists(),
+        "only ticketd's own log files are pruned"
+    );
 }
 
 #[test]

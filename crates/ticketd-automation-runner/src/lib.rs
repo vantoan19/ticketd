@@ -205,7 +205,11 @@ impl Runner {
                 }
                 // A slot is free: the next queued run need not wait for the timer.
                 if let Err(error) = runner.start_queued() {
-                    eprintln!("ticketd: queued Automation runs could not be started: {error}");
+                    tracing::warn!(
+                        error_kind = error.kind().code(),
+                        %error,
+                        "queued Automation runs could not be started"
+                    );
                 }
             });
         }
@@ -219,12 +223,17 @@ impl Runner {
         let ended = (self.inner.open_workspace)()
             .and_then(|mut workspace| workspace.fail_automation_run(run_id, reason));
         match ended {
-            Ok(true) => eprintln!("ticketd: Automation run {run_id} ended: {reason}"),
+            // The reason is words for the person and can carry a Harness's text, so only
+            // the run is logged.
+            Ok(true) => tracing::warn!(automation_run_id = run_id, "Automation run ended"),
             Ok(false) => {}
             // The next pass finds it Running with nothing behind it and ends it.
-            Err(error) => {
-                eprintln!("ticketd: Automation run {run_id} could not be ended ({reason}): {error}")
-            }
+            Err(error) => tracing::warn!(
+                automation_run_id = run_id,
+                error_kind = error.kind().code(),
+                %error,
+                "Automation run could not be ended"
+            ),
         }
     }
 
@@ -363,9 +372,10 @@ impl Runner {
             return;
         };
         for unconfirmed in host.end_run_agents(chats).await {
-            eprintln!(
-                "ticketd: the agent in Chat {} may still be running: {}",
-                unconfirmed.chat_id, unconfirmed.reason
+            // Why it could not be confirmed can carry the Harness's own output.
+            tracing::warn!(
+                chat_id = unconfirmed.chat_id,
+                "the agent in a Chat may still be running"
             );
         }
     }

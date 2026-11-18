@@ -4689,6 +4689,7 @@ dependencies = [
  "ticketd-chat-host",
  "ticketd-core",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4762,7 +4763,9 @@ dependencies = [
  "ticketd-automation-runner",
  "ticketd-chat-host",
  "ticketd-core",
+ "ticketd-diagnostics",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

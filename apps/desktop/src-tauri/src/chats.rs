@@ -85,9 +85,11 @@ type Outcome<T> = Result<T, ChatFailure>;
 /// does not stop the caller, and it is written to the log rather than lost.
 pub fn log_failure<T>(what: &str, result: Outcome<T>) {
     if let Err(failure) = result {
-        eprintln!(
-            "Chat: could not {what}: {} ({})",
-            failure.message, failure.code
+        tracing::warn!(
+            action = what,
+            error_kind = failure.code,
+            error = %failure.message,
+            "a Chat action could not be done"
         );
     }
 }

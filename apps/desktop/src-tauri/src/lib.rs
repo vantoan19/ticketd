@@ -1558,7 +1558,11 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
                     Err(error) => {
                         let message = error.to_string();
                         if reported.as_deref() != Some(message.as_str()) {
-                            eprintln!("periodic source refresh could not run: {message}");
+                            tracing::warn!(
+                                error_kind = error.kind().code(),
+                                %error,
+                                "periodic source refresh could not run"
+                            );
                             reported = Some(message);
                         }
                     }
@@ -1567,7 +1571,7 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
             }
         });
     if let Err(error) = spawned {
-        eprintln!("could not start periodic source refresh: {error}");
+        tracing::error!(%error, "could not start periodic source refresh");
     }
 }
 
@@ -1597,7 +1601,11 @@ fn start_reminder_timer(
                     Err(error) => {
                         let message = error.to_string();
                         if reported.as_deref() != Some(message.as_str()) {
-                            eprintln!("due reminders could not be delivered: {message}");
+                            tracing::warn!(
+                                error_kind = error.kind().code(),
+                                %error,
+                                "due reminders could not be delivered"
+                            );
                             reported = Some(message);
                         }
                         wake::IDLE
@@ -1607,7 +1615,7 @@ fn start_reminder_timer(
             }
         });
     if let Err(error) = spawned {
-        eprintln!("could not start the reminder timer: {error}");
+        tracing::error!(%error, "could not start the reminder timer");
     }
 }
 
@@ -1630,7 +1638,7 @@ fn request_quit(app: &tauri::AppHandle) {
     match app.get_webview_window("main") {
         Some(window) => {
             if let Err(error) = window.close() {
-                eprintln!("could not ask the window to close: {error}");
+                tracing::warn!(%error, "could not ask the window to close");
             }
         }
         None => app.exit(0),
@@ -1659,6 +1667,10 @@ fn guard_menu_quit(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The desktop's logs handle, held in managed state for the whole run and dropped on exit.
+/// Commands that read or change the logs take it from here.
+struct Logs(std::sync::Mutex<Option<ticketd_diagnostics::DesktopLogs>>);
+
 /// What the startup watchdog has heard from the boot module.
 #[derive(Default)]
 struct StartupProgress {
@@ -1686,7 +1698,7 @@ pub fn run() -> Result<(), tauri::Error> {
         std::sync::Arc::new(ticketd_core::source::SystemClock),
         ticketd_core::source::RefreshPolicy::default(),
     ));
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // Must be the first plugin. One process owns Chat execution: starting ticketd
         // again shows the running app's window instead of starting a second host.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -1748,7 +1760,7 @@ pub fn run() -> Result<(), tauri::Error> {
                         && let Err(error) =
                             window.eval(include_str!("../../public/startup-fallback.js"))
                     {
-                        eprintln!("Could not display startup guidance: {error}");
+                        tracing::warn!(%error, "could not display startup guidance");
                     }
                     // Once shown, visibility belongs to the person. In
                     // particular, Cmd+H during these five seconds must stay hidden.
@@ -1759,11 +1771,11 @@ pub fn run() -> Result<(), tauri::Error> {
                         Ok(true) => return,
                         Ok(false) => {}
                         Err(error) => {
-                            eprintln!("Could not check startup window visibility: {error}");
+                            tracing::warn!(%error, "could not check startup window visibility");
                         }
                     }
                     if let Err(error) = window.show() {
-                        eprintln!("Could not reveal ticketd after startup: {error}");
+                        tracing::warn!(%error, "could not reveal ticketd after startup");
                     }
                 }
             });
@@ -2054,18 +2066,38 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::attachment_availability,
             sync_commands::download_attachment
         ])
-        .build(tauri::generate_context!())?
-        .run(|app, event| {
-            use tauri::Manager;
-            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
-                && holds_exit(*code, app.get_webview_window("main").is_some())
-            {
-                api.prevent_exit();
-                request_quit(app);
-                return;
-            }
-            chat_commands::on_run_event(app, &event);
-        });
+        .build(tauri::generate_context!())?;
+    // The log folder is named for the app's identifier, which only a built app knows. The
+    // setup hook and the event loop have not started yet, so nothing before this is lost
+    // but the app's own construction. A path the platform cannot give is an empty one,
+    // which makes logging fall back to stderr like any other unusable folder.
+    {
+        use tauri::Manager;
+        let log_dir = app.path().app_log_dir().unwrap_or_default();
+        app.manage(Logs(std::sync::Mutex::new(Some(
+            ticketd_diagnostics::init_desktop(log_dir),
+        ))));
+        tracing::info!(version = %app.package_info().version, "ticketd started");
+    }
+    app.run(|app, event| {
+        use tauri::Manager;
+        if let tauri::RunEvent::Exit = event {
+            // Tauri ends the process with `std::process::exit`, so the handle is dropped
+            // here, where it still runs.
+            let logs = app
+                .try_state::<Logs>()
+                .and_then(|logs| logs.0.lock().ok()?.take());
+            drop(logs);
+        }
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
+            && holds_exit(*code, app.get_webview_window("main").is_some())
+        {
+            api.prevent_exit();
+            request_quit(app);
+            return;
+        }
+        chat_commands::on_run_event(app, &event);
+    });
     Ok(())
 }
 

@@ -70,7 +70,7 @@ pub struct Scheduler {
     running: Mutex<()>,
 }
 
-/// What a tick failed with, for stderr. The core keeps a failed run in the
+/// What a tick failed with, for the log. The core keeps a failed run in the
 /// status, where the interface shows it; a tick that could not even open the
 /// Workspace or save that outcome is known only here.
 fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<String> {
@@ -83,6 +83,14 @@ fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<String> {
                 .unwrap_or_else(|| "unknown failure".into()),
         ),
         Ok(_) => None,
+    }
+}
+
+/// The stable kind of what [`failure`] reports, for the log.
+fn failure_kind(tick: &Result<Option<SyncStatus>, Error>) -> &'static str {
+    match tick {
+        Err(error) => error.kind().code(),
+        _ => "sync_recovery",
     }
 }
 
@@ -186,15 +194,18 @@ impl Scheduler {
         if now < *at {
             return;
         }
-        let failed = (self.upkeep)(workspace)
-            .err()
-            .map(|error| error.to_string());
+        let error = (self.upkeep)(workspace).err();
+        let failed = error.as_ref().map(ToString::to_string);
         *at = now + failed.as_ref().map_or(UPKEEP_INTERVAL, |_| UPKEEP_RETRY);
-        // Said once on stderr, and again only if it changes or comes back.
-        if let Some(message) = &failed
-            && reported.as_ref() != Some(message)
+        // Logged once, and again only if it changes or comes back.
+        if let Some(error) = &error
+            && *reported != failed
         {
-            eprintln!("Workspace upkeep could not run: {message}");
+            tracing::warn!(
+                error_kind = error.kind().code(),
+                %error,
+                "Workspace upkeep could not run"
+            );
         }
         *reported = failed;
     }
@@ -283,7 +294,7 @@ impl Scheduler {
             .name("workspace-sync".into())
             .spawn(move || {
                 at_launch();
-                // Said once on stderr, and again only if it changes or comes back.
+                // Logged once, and again only if it changes or comes back.
                 let mut reported: Option<String> = None;
                 let mut seen = 0;
                 loop {
@@ -295,7 +306,11 @@ impl Scheduler {
                             if let Some(message) = &message
                                 && reported.as_ref() != Some(message)
                             {
-                                eprintln!("Workspace sync could not run: {message}");
+                                tracing::warn!(
+                                    error_kind = failure_kind(&tick),
+                                    error = %message,
+                                    "Workspace sync could not run"
+                                );
                             }
                             reported = message;
                             // A run changed the status the interface is shown.
@@ -308,7 +323,7 @@ impl Scheduler {
                 }
             });
         if let Err(error) = spawned {
-            eprintln!("could not start Workspace sync: {error}");
+            tracing::error!(%error, "could not start Workspace sync");
         }
     }
 }
@@ -719,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failure_with_no_state_of_its_own_is_kept_in_the_status_and_said_on_stderr() {
+    fn a_failure_with_no_state_of_its_own_is_kept_in_the_status_and_logged() {
         let desk = desk();
         desk.remote
             .fail(RemoteOp::List, 1, RemoteError::Other("nonsense".into()));

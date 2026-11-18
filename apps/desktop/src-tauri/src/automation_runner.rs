@@ -89,7 +89,11 @@ impl AutomationRunner {
     /// logged and tried again by whatever needs the runner next.
     pub fn start_up(&self) {
         if let Err(error) = self.get() {
-            eprintln!("ticketd: the Automation runner could not start: {error}");
+            tracing::error!(
+                error_kind = error.kind().code(),
+                %error,
+                "the Automation runner could not start"
+            );
         }
     }
 
@@ -122,7 +126,11 @@ impl AutomationRunner {
         match self.get().and_then(|runner| runner.tick()) {
             Ok(busy) => busy,
             Err(error) => {
-                eprintln!("ticketd: an Automation pass failed: {error}");
+                tracing::warn!(
+                    error_kind = error.kind().code(),
+                    %error,
+                    "an Automation pass failed"
+                );
                 true
             }
         }
