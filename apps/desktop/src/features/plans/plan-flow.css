@@ -30,7 +30,9 @@
 }
 .plan-flow-lanes > .ui-graph-flow-lane {
   animation: plan-flow-lane-in var(--dur-enter) var(--ease-out) backwards;
-  animation-delay: calc(var(--stagger) * min(var(--enter-step, 0), 7));
+  animation-delay: calc(
+    var(--stagger) * min(var(--enter-step, 0), var(--stagger-steps))
+  );
 }
 .plan-flow-edges {
   position: absolute;
