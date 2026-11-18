@@ -251,6 +251,16 @@ test("rows end with the core update time, never a progress excerpt or a lone no-
   expect(screen.queryByText("Update unavailable")).toBeNull();
 });
 
+test("a Trash row shows only the compact age; the full age stays for screen readers", () => {
+  const when = new Date(Date.now() - 9 * 60_000).toISOString();
+  const { container } = renderList([
+    ticket({ trashed: true, updated_at: when }),
+  ]);
+  const time = container.querySelector(".ticket-row-time time");
+  expect(time?.querySelector('[aria-hidden="true"]')?.textContent).toBe("9m");
+  expect(screen.getByText("Trashed 9 min ago")).toBeTruthy();
+});
+
 test("a Plan and a project carry different icons", () => {
   const { container } = renderList([
     ticket({ id: "1", reference: "T-KQ1", plan_id: "e1" }),

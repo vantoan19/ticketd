@@ -699,14 +699,18 @@ function RowDetails({
       )}
       <span className="ticket-row-time">
         {ticket.updated_at ? (
-          <Tooltip content={formatDateTime(ticket.updated_at)}>
+          <Tooltip
+            content={`${ticket.trashed ? "Trashed " : ""}${formatDateTime(ticket.updated_at)}`}
+          >
             <time dateTime={ticket.updated_at}>
               <span className="sr-only">
                 {ticket.trashed ? "Trashed" : "Updated"}{" "}
                 {ago(ticket.updated_at, now)}
               </span>
+              {/* The view is titled Trash, and "Trashed 9m" overflows the
+                  44px time column (#454); the word stays for screen readers
+                  and in the tooltip. */}
               <span aria-hidden="true">
-                {ticket.trashed ? "Trashed " : ""}
                 {compactAgo(ticket.updated_at, now)}
               </span>
             </time>
