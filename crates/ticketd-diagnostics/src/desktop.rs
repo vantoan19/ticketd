@@ -1,7 +1,8 @@
 //! The desktop's subscriber and the handle that controls it.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::SecondsFormat;
@@ -11,6 +12,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt, reload};
 
 use crate::crash::{SessionMarker, UncleanExit};
+use crate::errors::{self, ErrorGroup};
+use crate::export::{self, Export, Facts};
 use crate::sink::{Limits, Sink, SinkWriter};
 use crate::{Timestamp, filter};
 
@@ -35,6 +38,8 @@ pub struct Config {
     /// A filter that replaces the default and cannot be changed by [`DesktopLogs::set_debug`]:
     /// the value of `TICKETD_LOG`.
     pub filter_override: Option<String>,
+    /// The diagnostics export is cut to stay under this size.
+    pub max_export_bytes: u64,
 }
 
 impl Default for Config {
@@ -45,6 +50,7 @@ impl Default for Config {
             max_file_bytes: 20 * 1024 * 1024,
             stderr: false,
             filter_override: None,
+            max_export_bytes: 5 * 1024 * 1024,
         }
     }
 }
@@ -60,6 +66,10 @@ pub struct DesktopLogs {
     unclean_exit: Option<UncleanExit>,
     /// Removes the session marker when the handle is dropped.
     _session: Option<SessionMarker>,
+    debug: AtomicBool,
+    filter_override: Option<String>,
+    max_export_bytes: u64,
+    dir: PathBuf,
 }
 
 impl DesktopLogs {
@@ -82,6 +92,7 @@ impl DesktopLogs {
             None => (None, None),
         };
         let pinned = config.filter_override.is_some();
+        let override_spec = config.filter_override.clone();
         let (filter_layer, filter) =
             reload::Layer::new(filter(config.filter_override.as_deref(), DEFAULT_FILTER));
         let file = sink.map(|sink| {
@@ -112,6 +123,10 @@ impl DesktopLogs {
             pinned,
             unclean_exit,
             _session: session,
+            debug: AtomicBool::new(false),
+            filter_override: override_spec,
+            max_export_bytes: config.max_export_bytes,
+            dir: dir.as_ref().to_path_buf(),
         };
         if let Some(exit) = &logs.unclean_exit {
             let started_at = exit
@@ -146,12 +161,50 @@ impl DesktopLogs {
         tracing::dispatcher::with_default(&self.dispatch, f)
     }
 
+    /// The warnings and errors in the log folder, grouped by target and error kind, most
+    /// recently seen first. This includes earlier runs that are still on disk.
+    pub fn recent_errors(&self) -> Vec<ErrorGroup> {
+        errors::recent_errors(&self.dir)
+    }
+
+    /// The level as the summary states it: `info`, `debug` while Debug logging is on, or the
+    /// `TICKETD_LOG` filter that overrides both.
+    fn level(&self) -> String {
+        match &self.filter_override {
+            Some(spec) => format!("{spec} (from TICKETD_LOG)"),
+            None if self.debug.load(Ordering::Relaxed) => "debug".to_string(),
+            None => "info".to_string(),
+        }
+    }
+
+    /// A short, redacted description of the app and its environment: `summary.txt` of the
+    /// export, for pasting into an issue.
+    pub fn summary(&self, facts: &Facts) -> String {
+        export::summary_text(facts, &self.level())
+    }
+
+    /// Writes the diagnostics bundle to `destination`, a folder (the bundle gets the name
+    /// [`export_file_name`](crate::export_file_name) there) or the path of the file itself.
+    /// The bundle stays under the size limit and holds nothing but allowlisted fields; see
+    /// ADR 0017.
+    pub fn export(&self, destination: impl AsRef<Path>, facts: &Facts) -> io::Result<Export> {
+        export::write(
+            &self.dir,
+            destination.as_ref(),
+            facts,
+            &self.level(),
+            &self.recent_errors(),
+            self.max_export_bytes,
+        )
+    }
+
     /// Turns Debug logging on or off, taking effect for the next event. Does nothing while
     /// `TICKETD_LOG` overrides the level.
     pub fn set_debug(&self, enabled: bool) {
         if self.pinned {
             return;
         }
+        self.debug.store(enabled, Ordering::Relaxed);
         let spec = if enabled {
             DEBUG_FILTER
         } else {

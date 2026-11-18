@@ -17,6 +17,7 @@ serde_json = "1"
 tracing.workspace = true
 tracing-log.workspace = true
 tracing-subscriber.workspace = true
+zip = { version = "9.7.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"

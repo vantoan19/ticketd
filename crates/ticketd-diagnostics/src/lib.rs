@@ -9,6 +9,8 @@
 
 mod crash;
 mod desktop;
+mod errors;
+mod export;
 mod sink;
 mod webview;
 
@@ -22,6 +24,8 @@ use tracing_subscriber::{EnvFilter, Registry, fmt};
 
 pub use crash::{UncleanExit, install_panic_hook};
 pub use desktop::{Config, DesktopLogs};
+pub use errors::ErrorGroup;
+pub use export::{Export, Facts, HarnessVersion, KnownValues, WorkspaceHealth, export_file_name};
 pub use webview::{WebviewError, record_webview_error};
 
 /// The environment variable that sets the filter, for the CLI and the desktop alike.

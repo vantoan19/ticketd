@@ -11,8 +11,8 @@ spans and never install a subscriber. Only the two binaries do, through the
   to `ticketd.YYYY-MM-DD.log` (UTC days) in the app's log folder (on macOS
   `~/Library/Logs/<bundle identifier>/`). It returns a desktop logs handle that the
   desktop keeps in managed state and drops on `RunEvent::Exit`. The handle
-  changes the level at runtime (Debug logging); later work adds recent errors, the
-  diagnostics export and the crash-session marker to it. Dev builds also print
+  changes the level at runtime (Debug logging), lists recent errors and writes the
+  diagnostics export; later work adds the crash-session marker to it. Dev builds also print
   readable lines to stderr. If the folder cannot be used, logging falls back to
   stderr and the app keeps running.
 - **CLI.** `init_cli()` installs readable lines on stderr, at `warn` by default.
@@ -36,6 +36,13 @@ spans and never install a subscriber. Only the two binaries do, through the
 - **Local only.** Logs never leave the machine. Sharing them is a user action: the
   Diagnostics export (a redacted `.zip`, built from an allowlist of fields) is the
   safe way to attach them to a GitHub issue.
+- **Recent errors and the export read the files.** `recent_errors()` groups the
+  warnings and errors in the log folder by target and error kind, so it covers earlier
+  runs and any line written by other code (such as an unclean end of the previous
+  session) without registering it. The export keeps only allowlisted fields of each
+  line (never the `error` text, which can quote a path, a Harness or a person), and the
+  list is `ID_FIELDS` and `SAFE_FIELDS` in `ticketd-diagnostics`. A field that should
+  reach a bug report is added there on purpose, and to the export fixture test.
 
 ## Rejected
 
