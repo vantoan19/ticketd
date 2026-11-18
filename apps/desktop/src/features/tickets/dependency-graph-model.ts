@@ -4,11 +4,13 @@ import type { DependencyGraph } from "@/lib/api/client";
 export const NODE_WIDTH = 224;
 export const NODE_HEIGHT = 64;
 
-/** Widest rank drawn on one row; wider ranks wrap onto more rows. */
-export const MAX_PER_ROW = 8;
-/** Above this many linked tickets rows are narrower, so the graph stays readable. */
-export const DENSE_NODES = 8;
-export const DENSE_PER_ROW = 4;
+/** Widest rank of linked tickets drawn on one row; only wider ranks wrap onto
+ * more rows. A wrapped row puts tickets between a blocker and its dependents,
+ * so its edges run behind unrelated cards: wrapping is a last resort for hubs,
+ * not a way to keep an ordinary fan-out narrow (the canvas pans and zooms). */
+export const MAX_PER_ROW = 12;
+/** Columns of the grid that holds tickets with no link. */
+const LOOSE_COLUMNS = 8;
 const COLUMN_GAP = 32;
 const ROW_GAP = 64;
 
@@ -44,16 +46,15 @@ export function layoutGraph(graph: DependencyGraph) {
       const { x, y } = layout.node(node.reference) as { x: number; y: number };
       ranks.set(y, [...(ranks.get(y) ?? []), { reference: node.reference, x }]);
     }
-    const perRow = linked.length > DENSE_NODES ? DENSE_PER_ROW : MAX_PER_ROW;
-    const wide = [...ranks.values()].some((rank) => rank.length > perRow);
+    const wide = [...ranks.values()].some((rank) => rank.length > MAX_PER_ROW);
     const all = [...ranks.values()].flat();
     const middle =
       (Math.min(...all.map((m) => m.x)) + Math.max(...all.map((m) => m.x))) / 2;
     let y = 0;
     for (const rank of [...ranks.entries()].sort(([a], [b]) => a - b)) {
       const members = rank[1].sort((a, b) => a.x - b.x);
-      for (let start = 0; start < members.length; start += perRow) {
-        const row = members.slice(start, start + perRow);
+      for (let start = 0; start < members.length; start += MAX_PER_ROW) {
+        const row = members.slice(start, start + MAX_PER_ROW);
         // Without a wide rank dagre's own alignment is kept. With one, every
         // rank is repacked around a shared center so narrow ranks stay under it.
         const left =
@@ -67,14 +68,14 @@ export function layoutGraph(graph: DependencyGraph) {
             y,
           }),
         );
-        const more = start + perRow < members.length;
+        const more = start + MAX_PER_ROW < members.length;
         y += NODE_HEIGHT + (more ? 32 : ROW_GAP);
       }
     }
     bottom = y - ROW_GAP;
   }
   const columns = Math.min(
-    MAX_PER_ROW,
+    LOOSE_COLUMNS,
     Math.max(1, Math.ceil(Math.sqrt(loose.length * 2))),
   );
   // Line the loose grid up with the left edge of the linked tickets above it.

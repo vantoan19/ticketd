@@ -90,10 +90,21 @@ export function planFlow<T extends FlowTicket>(members: T[]) {
         dependent: ticket.reference,
       })),
   );
+  // Canceled and Duplicate prerequisites stay unresolved (spec 4.5), but Flow
+  // hides closed tickets, so name the status where the blocker is not on screen.
+  function blockerName(blocker: T["prerequisites"][number]) {
+    const notes = [
+      ...(!members.some((member) => member.reference === blocker.reference)
+        ? ["outside this Plan"]
+        : []),
+      ...(closed.has(blocker.status) ? [blocker.status] : []),
+    ];
+    return blocker.reference + (notes.length ? ` (${notes.join(", ")})` : "");
+  }
   function reason(ticket: T) {
     const blockers = ticket.prerequisites.filter((item) => item.unresolved);
     if (blockers.length)
-      return `Waits on ${blockers.map((item) => item.reference + (!members.some((member) => member.reference === item.reference) ? " (outside this Plan)" : "")).join(", ")}${cycles.has(ticket.reference) ? " (they block each other)" : ""}`;
+      return `Waits on ${blockers.map(blockerName).join(", ")}${cycles.has(ticket.reference) ? " (they block each other)" : ""}`;
     const dependents = edges
       .filter((edge) => edge.blocker === ticket.reference)
       .map((edge) => edge.dependent);
@@ -101,5 +112,15 @@ export function planFlow<T extends FlowTicket>(members: T[]) {
       ? `Blocks ${dependents.join(", ")}`
       : "No open blockers";
   }
-  return { lanes, edges, reason };
+  // Flow only draws lines that run to a later lane; the rest sit in one lane
+  // (every ticket two or more steps from Now shares "Later") or form a cycle.
+  const laneOf = new Map(
+    lanes.flatMap((lane, index) =>
+      lane.map((ticket) => [ticket.reference, index] as const),
+    ),
+  );
+  const undrawn = edges.filter(
+    (edge) => laneOf.get(edge.blocker)! >= laneOf.get(edge.dependent)!,
+  ).length;
+  return { lanes, edges, undrawn, reason };
 }

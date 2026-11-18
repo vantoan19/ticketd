@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import type { DependencyGraph } from "@/lib/api/client";
 import {
   NODE_HEIGHT,
+  MAX_PER_ROW,
   NODE_WIDTH,
   boundsOf,
   fitViewport,
@@ -51,7 +52,7 @@ const dense: DependencyGraph = {
   ...graph,
   nodes: Array.from({ length: 55 }, (_, index) => node(`T-KQ${index + 1}`)),
   edges: [
-    ...Array.from({ length: 12 }, (_, index) => ({
+    ...Array.from({ length: 30 }, (_, index) => ({
       blocker: "T-KQ1",
       dependent: `T-KQ${index + 2}`,
     })),
@@ -60,10 +61,10 @@ const dense: DependencyGraph = {
   ],
 };
 
-test("a hub with many dependents wraps into rows within a width budget", () => {
+test("a hub with very many dependents wraps into rows within a width budget", () => {
   const positions = layoutGraph(dense);
   const bounds = boundsOf(positions, positions.keys());
-  expect(bounds!.width).toBeLessThanOrEqual(8 * (NODE_WIDTH + 32));
+  expect(bounds!.width).toBeLessThanOrEqual(MAX_PER_ROW * (NODE_WIDTH + 32));
   expect(positions.get("T-KQ1")!.y).toBeLessThan(positions.get("T-KQ2")!.y);
   const spots = new Set([...positions.values()].map((at) => `${at.x},${at.y}`));
   expect(spots.size).toBe(dense.nodes.length);
@@ -89,12 +90,12 @@ test("Fit shows every ticket and the opening view keeps the hub in sight", () =>
   expect(hub.y * open.zoom + open.y).toBeGreaterThanOrEqual(0);
 });
 
-test("a dense graph wraps to five per rank and opens readable on the selected ticket", () => {
+test("a dense graph wraps wide ranks and opens readable on the selected ticket", () => {
   const big: DependencyGraph = {
     ...dense,
     nodes: Array.from({ length: 50 }, (_, index) => node(`T-KQ${index + 1}`)),
     edges: [
-      ...Array.from({ length: 24 }, (_, index) => ({
+      ...Array.from({ length: 30 }, (_, index) => ({
         blocker: "T-KQ1",
         dependent: `T-KQ${index + 2}`,
       })),
@@ -108,7 +109,7 @@ test("a dense graph wraps to five per rank and opens readable on the selected ti
     perRow.set(at.y, (perRow.get(at.y) ?? 0) + 1);
   const linkedRows = [...perRow.entries()].filter(([y]) => y <= 600);
   expect(Math.max(...linkedRows.map(([, count]) => count))).toBeLessThanOrEqual(
-    5,
+    MAX_PER_ROW,
   );
   const size = { width: 1000, height: 650 };
   for (const focus of ["T-KQ41", null]) {
@@ -122,4 +123,47 @@ test("a dense graph wraps to five per rank and opens readable on the selected ti
     expect(top).toBeGreaterThanOrEqual(0);
     expect(top + NODE_HEIGHT * open.zoom).toBeLessThanOrEqual(size.height);
   }
+});
+
+/** Edges drawn as straight lines between card centres that pass over a card that is neither end. */
+function crossings(graph: DependencyGraph) {
+  const positions = layoutGraph(graph);
+  let count = 0;
+  for (const edge of graph.edges) {
+    const from = positions.get(edge.blocker)!;
+    const to = positions.get(edge.dependent)!;
+    for (const [reference, at] of positions) {
+      if (reference === edge.blocker || reference === edge.dependent) continue;
+      for (let step = 1; step < 50; step += 1) {
+        const x = from.x + ((to.x - from.x) * step) / 50 + NODE_WIDTH / 2;
+        const y =
+          from.y + NODE_HEIGHT + ((to.y - from.y - NODE_HEIGHT) * step) / 50;
+        if (
+          x > at.x &&
+          x < at.x + NODE_WIDTH &&
+          y > at.y &&
+          y < at.y + NODE_HEIGHT
+        ) {
+          count += 1;
+          break;
+        }
+      }
+    }
+  }
+  return count;
+}
+
+test("an ordinary fan-out stays on one rank, so no edge runs behind another ticket", () => {
+  const leaves = Array.from({ length: 10 }, (_, index) => `T-KQ${index + 2}`);
+  const fan: DependencyGraph = {
+    ...graph,
+    nodes: ["T-KQ1", ...leaves, "T-KQ12"].map(node),
+    edges: [
+      ...leaves.map((leaf) => ({ blocker: "T-KQ1", dependent: leaf })),
+      ...leaves.map((leaf) => ({ blocker: leaf, dependent: "T-KQ12" })),
+    ],
+  };
+  const positions = layoutGraph(fan);
+  expect(new Set(leaves.map((leaf) => positions.get(leaf)!.y)).size).toBe(1);
+  expect(crossings(fan)).toBe(0);
 });
