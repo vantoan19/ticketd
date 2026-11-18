@@ -483,6 +483,17 @@ pub async fn chat_linked_to(bridge: State<'_, ChatBridge>, link: LinkRef) -> Out
     bridge.chats.linked_to(&link)
 }
 
+/// The whole output of one step, which views carry only the last lines of until its
+/// row opens.
+#[tauri::command]
+pub async fn chat_step_output(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    tool_id: String,
+) -> Outcome<Option<String>> {
+    bridge.chats.step_output(&chat_id, &tool_id)
+}
+
 #[tauri::command]
 pub async fn chat_remove_queued(
     bridge: State<'_, ChatBridge>,

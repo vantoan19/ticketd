@@ -351,9 +351,25 @@ function StepDetail({
   const words = stepWords(step);
   // Opened, a command shows exactly what ran.
   const command = step.kind === "run" ? step.command : undefined;
-  const { folder } = useContext(ChatFilesContext);
+  const { folder, output: readOutput } = useContext(ChatFilesContext);
   const [failure, setFailure] = useState("");
   const files = opensFiles(step);
+  // A step carries only its output's end; opened, it reads the whole of it.
+  const toolId = step.full_output?.tool_id;
+  const [whole, setWhole] = useState<{ toolId: string; text: string }>();
+  useEffect(() => {
+    if (!toolId || !readOutput) return;
+    let current = true;
+    readOutput(toolId).then(
+      (text) => current && text !== null && setWhole({ toolId, text }),
+      // The end it has stays shown.
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [toolId, readOutput]);
+  const output = whole && whole.toolId === toolId ? whole.text : step.output;
   // A command says where it ran: its own folder, or the Chat's.
   const detail =
     command && !step.folder && folder
@@ -362,7 +378,13 @@ function StepDetail({
   return (
     <div className="chat-steplist" id={command ? undefined : id}>
       {command ? (
-        <OutputBox id={id} command={command} output={step.output} />
+        // Remounted when the whole output arrives, so it opens at its last line again.
+        <OutputBox
+          key={output === step.output ? "end" : "whole"}
+          id={id}
+          command={command}
+          output={output}
+        />
       ) : targets.length > 2 ? (
         <ul>
           {targets.map((target, index) => (
@@ -387,9 +409,7 @@ function StepDetail({
           ))}
         </ul>
       ) : (
-        step.output && (
-          <pre className="chat-out">{plainOutput(step.output)}</pre>
-        )
+        output && <pre className="chat-out">{plainOutput(output)}</pre>
       )}
       {failure && (
         <p className="chat-fine" role="alert">
@@ -1288,6 +1308,7 @@ export function Transcript({
       ...(!missing && {
         open: (path: string) => client.openFile(chatId, path),
       }),
+      output: (toolId: string) => client.stepOutput(chatId, toolId),
     }),
     [client, chatId, folder, missing],
   );

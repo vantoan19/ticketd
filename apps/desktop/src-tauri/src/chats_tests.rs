@@ -2394,7 +2394,7 @@ async fn a_long_codex_turn_reads_the_workspace_at_most_once_per_update_and_sends
 #[tokio::test(start_paused = true)]
 async fn an_overview_wake_reads_again_only_the_chat_that_changed() {
     let f = Fixture::new().await;
-    let id = f.chat().await;
+    f.chat().await;
     let mut core = f.core();
     for _ in 0..99 {
         core.create_chat(
@@ -2421,4 +2421,47 @@ async fn an_overview_wake_reads_again_only_the_chat_that_changed() {
     );
     assert_eq!(rows.len(), 100);
     assert_eq!(f.chats.rows_built.load(Ordering::SeqCst) - built, 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_step_s_whole_output_is_read_when_its_row_opens() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let output: String = (1..=100).map(|n| format!("test {n} ok\n")).collect();
+    let EventKind::ToolUpdated {
+        turn,
+        item,
+        title,
+        detail,
+        ..
+    } = command_tool("cmd-1", "cargo test", ToolStatus::Succeeded)
+    else {
+        unreachable!()
+    };
+    f.emit(EventKind::ToolUpdated {
+        turn,
+        item,
+        title,
+        status: ToolStatus::Succeeded,
+        output: Some(output.clone()),
+        detail,
+    })
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let step = opened
+        .snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Steps { steps, .. } => steps.first().cloned(),
+            _ => None,
+        })
+        .unwrap();
+    assert!(step.output.unwrap().starts_with("test 81 ok\n"));
+    let full = step.full_output.unwrap();
+    assert_eq!(full.bytes, output.len());
+    assert_eq!(
+        f.chats.step_output(&id, &full.tool_id).unwrap(),
+        Some(output)
+    );
 }

@@ -341,6 +341,7 @@ export function mergeSteps(steps: Step[]): Step[] {
     // A merged row opens to its targets, so no one step's output comes with it.
     const merged: Step = { ...last };
     delete merged.output;
+    delete merged.full_output;
     delete merged.result;
     delete merged.truncated;
     rows[rows.length - 1] = {

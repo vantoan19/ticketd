@@ -2273,6 +2273,11 @@ impl Chats {
             .collect())
     }
 
+    /// The whole output of one of the Chat's steps; views carry only its last lines.
+    pub fn step_output(&self, chat_id: &str, tool_id: &str) -> Outcome<Option<String>> {
+        Ok(self.workspace()?.chat_tool_output(chat_id, tool_id)?)
+    }
+
     /// A file in the Chat's folder, for the system to open: one a step named
     /// (relative to the folder) or one a turn reported changing (absolute). A path
     /// that resolves outside the folder, through `..` or a link, is refused; a file

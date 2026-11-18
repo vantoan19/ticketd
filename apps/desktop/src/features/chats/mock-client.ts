@@ -460,6 +460,8 @@ export function createMockChatClient(
     now?: string;
     /** How many log entries are kept per Chat for a reconnecting subscriber. */
     logLimit?: number;
+    /** Whole step outputs by tool id, for steps that carry only their end. */
+    outputs?: Record<string, string>;
   } = {},
 ): MockChatClient {
   const now = seed.now ?? "2026-11-10T10:00:00Z";
@@ -999,6 +1001,10 @@ export function createMockChatClient(
         },
       });
       return change;
+    },
+    async stepOutput(id, toolId) {
+      get(id);
+      return seed.outputs?.[toolId] ?? null;
     },
     async openFolder(id) {
       client.openedFiles.push(get(id).chat.folder.path);

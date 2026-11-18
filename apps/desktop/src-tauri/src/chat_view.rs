@@ -174,7 +174,10 @@ pub struct Step {
     /// or `unknown` (contact was lost): a step not `done` is not told as done.
     pub state: &'static str,
     pub result: Option<String>,
+    /// The output's last lines: what a view shows until the row opens.
     pub output: Option<String>,
+    /// Set when `output` holds only the last lines: where to read all of it.
+    pub full_output: Option<FullOutput>,
     /// When the host recorded the call, for a running step's clock. Absent from calls
     /// recorded before ticketd kept it.
     pub started_at: Option<String>,
@@ -190,6 +193,33 @@ pub struct Step {
     /// The harness waits for the person to approve this step: the request card says it,
     /// so the step has no row of its own until it is decided.
     pub awaiting: bool,
+}
+
+/// Where a step's whole output is read when its row opens (`chat_step_output`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FullOutput {
+    pub tool_id: String,
+    pub bytes: usize,
+}
+
+/// The lines of output a step carries until its row opens; tool output is kept up to
+/// 1 MiB, and every snapshot and update would carry it.
+const OUTPUT_TAIL_LINES: usize = 20;
+/// The most a step carries even when its last lines are long.
+const OUTPUT_TAIL_BYTES: usize = 4096;
+
+/// The last `OUTPUT_TAIL_LINES` lines of `output`, at most `OUTPUT_TAIL_BYTES` long.
+fn output_tail(output: &str) -> &str {
+    let body = output.strip_suffix('\n').unwrap_or(output);
+    let lines = body
+        .rmatch_indices('\n')
+        .nth(OUTPUT_TAIL_LINES - 1)
+        .map_or(0, |(at, _)| at + 1);
+    let mut start = lines.max(output.len().saturating_sub(OUTPUT_TAIL_BYTES));
+    while !output.is_char_boundary(start) {
+        start += 1;
+    }
+    &output[start..]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -980,7 +1010,15 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         no_matches: false,
         state: "done",
         result: cut,
-        output: tool.output.clone(),
+        output: tool.output.as_deref().map(output_tail).map(str::to_owned),
+        full_output: tool
+            .output
+            .as_ref()
+            .filter(|output| output_tail(output).len() < output.len())
+            .map(|output| FullOutput {
+                tool_id: tool.id.clone(),
+                bytes: output.len(),
+            }),
         started_at: tool.started_at.clone(),
         added_lines: None,
         removed_lines: None,
@@ -994,6 +1032,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
             targets: Vec::new(),
             result: None,
             output: Some(tool.input.clone()),
+            full_output: None,
             ..base
         }];
     }
@@ -2623,6 +2662,32 @@ mod tests {
                 "Transcript.tsx has no wording for {marker}"
             );
         }
+    }
+
+    #[test]
+    fn a_step_carries_its_output_s_last_lines_and_says_how_much_there_is() {
+        let lines: Vec<String> = (1..=30).map(|n| format!("line {n}")).collect();
+        let output = format!("{}\n", lines.join("\n"));
+        let long = one(&tool("Bash", "ls", ChatToolState::Completed, Some(&output)));
+        let tail = format!("{}\n", lines[10..].join("\n"));
+        assert_eq!(long.output.as_deref(), Some(tail.as_str()));
+        assert_eq!(
+            long.full_output,
+            Some(super::FullOutput {
+                tool_id: "t".to_owned(),
+                bytes: output.len(),
+            })
+        );
+        // One long line is cut too, on a character boundary.
+        let wide = "é".repeat(5000);
+        let cut = one(&tool("Bash", "ls", ChatToolState::Completed, Some(&wide)));
+        assert!(cut.output.as_deref().is_some_and(|tail| tail.len() <= 4096));
+        // Output that fits is all there, with nothing more to read.
+        let short = one(&tool("Bash", "ls", ChatToolState::Completed, Some("ok\n")));
+        assert_eq!(
+            (short.output.as_deref(), short.full_output),
+            (Some("ok\n"), None)
+        );
     }
 
     #[test]
