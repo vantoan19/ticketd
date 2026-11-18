@@ -1,9 +1,10 @@
-import type { ComponentProps, ReactNode, Ref } from "react";
+import type { ComponentProps, CSSProperties, ReactNode, Ref } from "react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
+import { Appear } from "@/components/ui/motion";
 import { Reference } from "@/components/ui/reference";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -405,18 +406,27 @@ export function GraphPanelActions({
 export function GraphFlowLane({
   title,
   caption,
+  index = 0,
   children,
 }: {
   title: string;
   caption: string;
+  /** Place in the cascade of lanes: the heading fades up in its turn, and the lane's panel fades in with it (plan-flow.css reads `--enter-step`). */
+  index?: number;
   children: ReactNode;
 }) {
   return (
-    <section className="ui-graph-flow-lane" aria-label={title}>
-      <header>
-        <h2>{title}</h2>
-        <span>{caption}</span>
-      </header>
+    <section
+      className="ui-graph-flow-lane"
+      aria-label={title}
+      style={{ "--enter-step": index } as CSSProperties}
+    >
+      <Appear index={index}>
+        <header>
+          <h2>{title}</h2>
+          <span>{caption}</span>
+        </header>
+      </Appear>
       {children}
     </section>
   );

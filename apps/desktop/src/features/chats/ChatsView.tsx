@@ -1,7 +1,18 @@
 import { Item } from "@/components/ui/item";
 import { EmptyState } from "@/components/ui/empty-state";
 import { emptyCopy } from "@/lib/empty-copy";
-import { Fragment, useContext, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { m } from "motion/react";
+import { Arrival } from "@/components/ui/motion";
+import { glide } from "@/components/ui/row-motion";
+import { spring } from "@/lib/motion-tokens";
 import {
   ArrowLeft,
   BellOff,
@@ -45,6 +56,7 @@ import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { chatTime, emphasised } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
 import { useChatFeature, useChatList } from "@/features/chats/use-chats";
+import { usePlaced } from "@/features/chats/use-placed";
 
 /** The title names the scope once and is its menu's trigger (CH-04). */
 const SCOPES: { id: Retention; title: string }[] = [
@@ -125,17 +137,23 @@ function moveInList(event: React.KeyboardEvent<HTMLElement>) {
 
 function ChatRow({
   chat,
+  needs,
   active,
   tabStop,
   now,
+  order,
   onOpen,
   onResult,
 }: {
   chat: ChatSummary;
+  /** In the "Needs you" group. */
+  needs: boolean;
   active: boolean;
   /** The row the list's one Tab stop lands on. */
   tabStop: boolean;
   now: number;
+  /** The list's order (the ids joined): rows are measured for a glide only when it changes. */
+  order: string;
   onOpen: () => void;
   onResult: (failure: ChatFailureNotice | null) => void;
 }) {
@@ -143,12 +161,32 @@ function ChatRow({
   const [menu, setMenu] = useState(false);
   const strong = emphasised(chat.status);
   const more = useRef<HTMLSpanElement>(null);
+  // A row that moves up into "Needs you" glides there, then its fill arrives.
+  const [arrival, setArrival] = useState<number>();
+  const wasNeeds = useRef(needs);
+  useEffect(() => {
+    const was = wasNeeds.current;
+    wasNeeds.current = needs;
+    if (!needs || was) return;
+    const timer = setTimeout(
+      () => setArrival((count) => (count ?? 0) + 1),
+      spring("travel").duration * 1000,
+    );
+    return () => clearTimeout(timer);
+  }, [needs]);
   // The actions are reached with Right Arrow, not Tab.
   useLayoutEffect(() => {
     more.current?.querySelector("button")?.setAttribute("tabindex", "-1");
   });
   return (
-    <li className="chat-row-item" onKeyDown={moveInList}>
+    <m.li
+      // Read in render, never cached, so a held key and reduced motion reach it.
+      {...glide(`${order}:${needs}`, needs ? "travel" : "smooth")}
+      data-arrive="row"
+      className="chat-row-item"
+      onKeyDown={moveInList}
+    >
+      <Arrival {...(arrival !== undefined && { at: arrival })} />
       <Item asChild variant="navigator">
         <button
           ref={row}
@@ -211,7 +249,7 @@ function ChatRow({
           onResult={onResult}
         />
       </span>
-    </li>
+    </m.li>
   );
 }
 
@@ -302,6 +340,9 @@ export function ChatsView({
     setNewFocus((count) => count + 1);
   }
   const list = useChatList(scope);
+  const [pointerOver, setPointerOver] = useState(false);
+  const placed = usePlaced(list?.chats, pointerOver);
+  const order = placed.map(({ chat }) => chat.id).join();
   const now = useNow();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
@@ -373,10 +414,11 @@ export function ChatsView({
         )}
         count={
           list?.known && (
-            <Count>
-              {list.chats.length}
+            <>
+              {/* One child, so the number crossfades; the noun is for readers. */}
+              <Count>{list.chats.length}</Count>
               <span className="sr-only"> chats</span>
-            </Count>
+            </>
           )
         }
         actions={
@@ -434,30 +476,29 @@ export function ChatsView({
       {list && !list.error && list.chats.length === 0 && (
         <ChatListEmpty scope={scope} />
       )}
-      <ul className="chat-rows" aria-label="Chats">
-        {list?.chats
-          .slice()
-          .sort(
-            (a, b) =>
-              Number(b.status.rank === "approval") -
-              Number(a.status.rank === "approval"),
-          )
-          .map((chat, index, chats) => (
+      <ul
+        className="chat-rows"
+        aria-label="Chats"
+        onPointerEnter={() => setPointerOver(true)}
+        onPointerLeave={() => setPointerOver(false)}
+      >
+        {list &&
+          placed.map(({ chat, needs }, index) => (
             <Fragment key={chat.id}>
               {scope === "active" &&
-                (index === 0 ||
-                  (chats[index - 1]?.status.rank === "approval") !==
-                    (chat.status.rank === "approval")) && (
+                (index === 0 || placed[index - 1]?.needs !== needs) && (
                   <li
                     className="chat-list-group text-xs text-muted-foreground"
                     role="presentation"
                   >
-                    {chat.status.rank === "approval" ? "Needs you" : "Recent"}
+                    {needs ? "Needs you" : "Recent"}
                   </li>
                 )}
               <ChatRow
                 chat={chat}
+                needs={needs}
                 now={now}
+                order={order}
                 active={open?.kind === "chat" && open.id === chat.id}
                 tabStop={
                   list.chats.some(

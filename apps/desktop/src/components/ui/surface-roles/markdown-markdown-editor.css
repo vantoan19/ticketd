@@ -73,9 +73,6 @@
 .rich-document[data-empty] > :first-child::before {
   color: var(--disabled-foreground);
 }
-.rich-document li > input {
-  accent-color: var(--primary);
-}
 .rich-document .code-language {
   border: 0;
   border-radius: var(--radius-segment);

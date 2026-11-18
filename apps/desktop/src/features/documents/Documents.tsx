@@ -27,6 +27,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { enter } from "@/components/ui/enter";
 import {
   ArrowLeft,
   Clock,
@@ -750,8 +751,11 @@ export function Documents({
         ? allLoaded
         : browseLoaded;
   return (
+    // The page stays mounted while another is shown; its entrance (enter.ts)
+    // plays again each time it comes back from `hidden`.
     <div
       className="documents-page"
+      data-own-entrance=""
       data-reading={selected !== null || opening !== null || undefined}
       ref={page}
     >
@@ -793,53 +797,55 @@ export function Documents({
           }
         }}
       >
-        <PaneHeader
-          title="Documents"
-          count={countKnown ? <Count>{shownCount}</Count> : undefined}
-          titleEditor={
-            searchOpen ? (
-              <NavigatorSearch
-                aria-label="Search Documents"
-                placeholder="Search Documents…"
-                value={query}
-                onValueChange={(value) => {
-                  setQuery(value);
-                  setOffset(0);
-                }}
-              />
-            ) : undefined
-          }
-          actions={
-            <>
-              {!searchOpen && (
-                <IconButton
-                  ref={searchTrigger}
-                  label="Search Documents"
-                  shortcut={shortcutLabel("documents-search")}
-                  aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
-                  onClick={() => {
-                    setSearchOpen(true);
-                    if (showTrash) setView("recent");
+        <div className="documents-list-head" {...enter(0)}>
+          <PaneHeader
+            title="Documents"
+            count={countKnown ? <Count>{shownCount}</Count> : undefined}
+            titleEditor={
+              searchOpen ? (
+                <NavigatorSearch
+                  aria-label="Search Documents"
+                  placeholder="Search Documents…"
+                  value={query}
+                  onValueChange={(value) => {
+                    setQuery(value);
+                    setOffset(0);
                   }}
-                >
-                  <Search />
-                </IconButton>
-              )}
-              {onCapture && (
-                <IconButton
-                  label="New Document"
-                  shortcut={shortcutLabel("capture")}
-                  aria-keyshortcuts={ariaKeyShortcuts("capture")}
-                  onClick={onCapture}
-                >
-                  <Plus />
-                </IconButton>
-              )}
-            </>
-          }
-        />
+                />
+              ) : undefined
+            }
+            actions={
+              <>
+                {!searchOpen && (
+                  <IconButton
+                    ref={searchTrigger}
+                    label="Search Documents"
+                    shortcut={shortcutLabel("documents-search")}
+                    aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
+                    onClick={() => {
+                      setSearchOpen(true);
+                      if (showTrash) setView("recent");
+                    }}
+                  >
+                    <Search />
+                  </IconButton>
+                )}
+                {onCapture && (
+                  <IconButton
+                    label="New Document"
+                    shortcut={shortcutLabel("capture")}
+                    aria-keyshortcuts={ariaKeyShortcuts("capture")}
+                    onClick={onCapture}
+                  >
+                    <Plus />
+                  </IconButton>
+                )}
+              </>
+            }
+          />
+        </div>
         {/* One toolbar in every view: it never collapses or moves (DL-01, DL-02). */}
-        <div className="documents-toolbar">
+        <div className="documents-toolbar" {...enter(1)}>
           <SegmentedControl
             aria-label="Documents view"
             value={searching && !showTrash ? ("" as typeof view) : view}
@@ -891,161 +897,167 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        {listError?.kind === "load" && !countKnown ? (
-          <FailureState failure={listError.failure} onRetry={listError.retry} />
-        ) : showTrash ? (
-          <section ref={trashList} aria-label="Trash">
-            {!trashLoaded ? (
-              <EmptyState
-                size="inline"
-                role="status"
-                description="Loading Trash…"
-              />
-            ) : (
-              trash.length === 0 && (
+        <div {...enter(2)}>
+          {listError?.kind === "load" && !countKnown ? (
+            <FailureState
+              failure={listError.failure}
+              onRetry={listError.retry}
+            />
+          ) : showTrash ? (
+            <section ref={trashList} aria-label="Trash">
+              {!trashLoaded ? (
                 <EmptyState
-                  icon={<Trash2 />}
-                  title={emptyCopy("documents-trash").title}
-                  description={emptyCopy("documents-trash").sentence}
-                  action={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setView("all")}
-                    >
-                      Browse Documents
-                    </Button>
+                  size="inline"
+                  role="status"
+                  description="Loading Trash…"
+                />
+              ) : (
+                trash.length === 0 && (
+                  <EmptyState
+                    icon={<Trash2 />}
+                    title={emptyCopy("documents-trash").title}
+                    description={emptyCopy("documents-trash").sentence}
+                    action={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setView("all")}
+                      >
+                        Browse Documents
+                      </Button>
+                    }
+                  />
+                )
+              )}
+              {list(trash, "", true)}
+              {trash.length >= trashOffset + 50 && (
+                <Pager
+                  noun="Documents in Trash"
+                  onMore={() => setTrashOffset(trashOffset + 50)}
+                />
+              )}
+            </section>
+          ) : searching ? (
+            <section aria-label="Search results">
+              {searchKey !==
+              JSON.stringify([query, filter, offset, includeSupport]) ? (
+                <p role="status" className="documents-count">
+                  Searching Documents…
+                </p>
+              ) : results.length === 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  title={`No Documents match ${query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}`}
+                  description={
+                    !includeSupport && hiddenMatches
+                      ? "Update details are hidden; turn on Show update details to search them."
+                      : "Try another word, or clear the search."
                   }
                 />
-              )
-            )}
-            {list(trash, "", true)}
-            {trash.length >= trashOffset + 50 && (
-              <Pager
-                noun="Documents in Trash"
-                onMore={() => setTrashOffset(trashOffset + 50)}
-              />
-            )}
-          </section>
-        ) : searching ? (
-          <section aria-label="Search results">
-            {searchKey !==
-            JSON.stringify([query, filter, offset, includeSupport]) ? (
-              <p role="status" className="documents-count">
-                Searching Documents…
-              </p>
-            ) : results.length === 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                title={`No Documents match ${query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}`}
-                description={
-                  !includeSupport && hiddenMatches
-                    ? "Update details are hidden; turn on Show update details to search them."
-                    : "Try another word, or clear the search."
-                }
-              />
-            ) : (
-              <>
-                <p role="status" className="sr-only">
-                  {results.length === 1
-                    ? "1 result"
-                    : `${results.length} results`}
-                </p>
-                {list(results, query)}
-              </>
-            )}
-            {results.length >= offset + 50 && (
-              <Pager noun="results" onMore={() => setOffset(offset + 50)} />
-            )}
-          </section>
-        ) : (
-          <>
-            {view === "recent" && groupPins.length > 0 && (
-              <section aria-label="Pinned">
-                <h2 className="documents-group">
-                  <Pin aria-hidden="true" />
-                  Pinned
-                  <Count>{groupPins.length}</Count>
-                </h2>
-                {list(groupPins)}
-                {pins.length >= pinOffset + 50 && (
-                  <Pager
-                    noun="pinned Documents"
-                    onMore={() => setPinOffset(pinOffset + 50)}
-                  />
-                )}
-              </section>
-            )}
-            {view === "all" ? (
-              <section aria-label="All Documents">
-                {!allLoaded ? (
-                  <EmptyState
-                    size="inline"
-                    role="status"
-                    description="Loading Documents…"
-                  />
-                ) : (
-                  all.length === 0 && (
-                    <EmptyState
-                      icon={<FileText />}
-                      title={emptyCopy("documents-all").title}
-                      description={emptyCopy("documents-all").sentence}
-                    />
-                  )
-                )}
-                {list(all)}
-                {all.length >= allOffset + 50 && (
-                  <Pager
-                    noun="Documents"
-                    onMore={() => setAllOffset(allOffset + 50)}
-                  />
-                )}
-              </section>
-            ) : (
-              <section aria-label="Recently opened">
-                {groupPins.length > 0 && (
+              ) : (
+                <>
+                  <p role="status" className="sr-only">
+                    {results.length === 1
+                      ? "1 result"
+                      : `${results.length} results`}
+                  </p>
+                  {list(results, query)}
+                </>
+              )}
+              {results.length >= offset + 50 && (
+                <Pager noun="results" onMore={() => setOffset(offset + 50)} />
+              )}
+            </section>
+          ) : (
+            <>
+              {view === "recent" && groupPins.length > 0 && (
+                <section aria-label="Pinned">
                   <h2 className="documents-group">
-                    <Clock aria-hidden="true" />
-                    Recent
-                    <Count>
-                      {
-                        recent.filter(
-                          (doc) => !groupPins.some((pin) => pin.id === doc.id),
-                        ).length
-                      }
-                    </Count>
+                    <Pin aria-hidden="true" />
+                    Pinned
+                    <Count>{groupPins.length}</Count>
                   </h2>
-                )}
-                {!browseLoaded ? (
-                  <EmptyState
-                    size="inline"
-                    role="status"
-                    description="Loading Documents…"
-                  />
-                ) : (
-                  recent.length === 0 && (
-                    <EmptyState
-                      icon={<FileText />}
-                      title={emptyCopy("documents-recent").title}
-                      description={emptyCopy("documents-recent").sentence}
+                  {list(groupPins)}
+                  {pins.length >= pinOffset + 50 && (
+                    <Pager
+                      noun="pinned Documents"
+                      onMore={() => setPinOffset(pinOffset + 50)}
                     />
-                  )
-                )}
-                {list(
-                  recent.filter(
-                    (doc) => !groupPins.some((p) => p.id === doc.id),
-                  ),
-                )}
-                {recent.length >= recentOffset + 50 && (
-                  <Pager
-                    noun="recent Documents"
-                    onMore={() => setRecentOffset(recentOffset + 50)}
-                  />
-                )}
-              </section>
-            )}
-          </>
-        )}
+                  )}
+                </section>
+              )}
+              {view === "all" ? (
+                <section aria-label="All Documents">
+                  {!allLoaded ? (
+                    <EmptyState
+                      size="inline"
+                      role="status"
+                      description="Loading Documents…"
+                    />
+                  ) : (
+                    all.length === 0 && (
+                      <EmptyState
+                        icon={<FileText />}
+                        title={emptyCopy("documents-all").title}
+                        description={emptyCopy("documents-all").sentence}
+                      />
+                    )
+                  )}
+                  {list(all)}
+                  {all.length >= allOffset + 50 && (
+                    <Pager
+                      noun="Documents"
+                      onMore={() => setAllOffset(allOffset + 50)}
+                    />
+                  )}
+                </section>
+              ) : (
+                <section aria-label="Recently opened">
+                  {groupPins.length > 0 && (
+                    <h2 className="documents-group">
+                      <Clock aria-hidden="true" />
+                      Recent
+                      <Count>
+                        {
+                          recent.filter(
+                            (doc) =>
+                              !groupPins.some((pin) => pin.id === doc.id),
+                          ).length
+                        }
+                      </Count>
+                    </h2>
+                  )}
+                  {!browseLoaded ? (
+                    <EmptyState
+                      size="inline"
+                      role="status"
+                      description="Loading Documents…"
+                    />
+                  ) : (
+                    recent.length === 0 && (
+                      <EmptyState
+                        icon={<FileText />}
+                        title={emptyCopy("documents-recent").title}
+                        description={emptyCopy("documents-recent").sentence}
+                      />
+                    )
+                  )}
+                  {list(
+                    recent.filter(
+                      (doc) => !groupPins.some((p) => p.id === doc.id),
+                    ),
+                  )}
+                  {recent.length >= recentOffset + 50 && (
+                    <Pager
+                      noun="recent Documents"
+                      onMore={() => setRecentOffset(recentOffset + 50)}
+                    />
+                  )}
+                </section>
+              )}
+            </>
+          )}
+        </div>
         <label
           className="documents-include"
           data-hidden={showTrash || undefined}

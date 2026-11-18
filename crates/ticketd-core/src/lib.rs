@@ -372,6 +372,9 @@ pub enum Error {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
     pub id: String,
+    /// Device-local insertion order, highest first in newest lists; absent in older payloads.
+    #[serde(default)]
+    pub local_number: Option<i64>,
     pub trashed: bool,
     pub reference: String,
     pub title: String,
@@ -811,7 +814,7 @@ impl Workspace {
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
         let mut statement = self.connection.prepare(&format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {} FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {}, t.number AS local_number FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
             readiness::indicator_sql("t")
         ))?;
         let mut tickets = statement
@@ -838,7 +841,7 @@ impl Workspace {
 pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
     let ticket = connection
         .query_row(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed, number AS local_number FROM tickets WHERE reference = ?1",
             [reference],
             ticket_from_row,
         )
@@ -855,7 +858,7 @@ pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ti
 }
 
 /// A ticket from a list query that selected `readiness::indicator_sql` as its ninth
-/// column, after the eight of [`ticket_from_row`]: its availability needs no query of its own.
+/// column, followed by `local_number`: its availability needs no query of its own.
 pub(crate) fn listed_ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
     let mut ticket = ticket_from_row(row)?;
     ticket.availability = row.get(8)?;
@@ -865,6 +868,7 @@ pub(crate) fn listed_ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Resul
 fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
     Ok(Ticket {
         id: row.get(0)?,
+        local_number: Some(row.get("local_number")?),
         trashed: row.get(7)?,
         reference: row.get::<_, String>(1)?,
         title: row.get(2)?,

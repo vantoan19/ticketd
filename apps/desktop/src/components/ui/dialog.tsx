@@ -6,11 +6,12 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useFocusReturn } from "@/components/ui/use-focus-return";
+import { spring } from "@/lib/motion-tokens";
 
-type Invocation = { element: HTMLElement | null; rect: DOMRect | null };
-const DialogInvocation = React.createContext<Invocation | null>(null);
+// The opener, which focus returns to when the dialog closes.
+const DialogInvocation = React.createContext<HTMLElement | null>(null);
 
-function captureInvocation(): Invocation {
+function captureInvocation(): HTMLElement | null {
   let element =
     document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -22,13 +23,7 @@ function captureInvocation(): Invocation {
         (trigger) => trigger.getAttribute("aria-controls") === menu.id,
       ) ?? element;
   }
-  return {
-    element,
-    rect:
-      element && element !== document.body
-        ? element.getBoundingClientRect()
-        : null,
-  };
+  return element;
 }
 
 function Dialog({
@@ -82,6 +77,32 @@ function DialogOverlay({
   );
 }
 
+/**
+ * True while the dialog's size changes because `expanded` did, and for the
+ * spring that follows. The size transition (styles.css) is declared only for
+ * that moment, so resizing the window never animates the dialog.
+ */
+function useResizing(expanded: boolean): boolean {
+  const [seen, setSeen] = React.useState(expanded);
+  const [resizing, setResizing] = React.useState(false);
+  // Set while rendering, so the first frame of the change already carries it.
+  if (seen !== expanded) {
+    setSeen(expanded);
+    setResizing(true);
+  }
+  React.useEffect(() => {
+    if (!resizing) return;
+    const finish = () => setResizing(false);
+    const done = setTimeout(finish, spring("smooth").duration * 1000);
+    window.addEventListener("resize", finish);
+    return () => {
+      clearTimeout(done);
+      window.removeEventListener("resize", finish);
+    };
+  }, [resizing, seen]);
+  return resizing;
+}
+
 function DialogContent({
   className,
   children,
@@ -119,31 +140,26 @@ function DialogContent({
   /** The current logical opener when responsive chrome replaced the original node. */
   resolveReturnFocus?: () => HTMLElement | null;
 }) {
-  const invocation = React.useContext(DialogInvocation);
+  const opener = React.useContext(DialogInvocation);
+  const resizing = useResizing(expanded);
   const focus = useFocusReturn(
     returnFocus,
     {
       ...(onOpenAutoFocus && { onOpenAutoFocus }),
       ...(onCloseAutoFocus && { onCloseAutoFocus }),
     },
-    invocation?.element,
+    opener,
     resolveReturnFocus,
   );
   return (
     <DialogPortal data-slot="dialog-portal">
       {overlay && <DialogOverlay />}
       <DialogPrimitive.Content
-        ref={(panel) => {
-          const rect = invocation?.rect;
-          if (panel && rect && size !== "palette") {
-            const left = panel.offsetLeft - panel.offsetWidth / 2;
-            panel.style.transformOrigin = `${rect.left + rect.width / 2 - left}px ${rect.top + rect.height / 2 - panel.offsetTop}px`;
-          }
-        }}
         data-slot="dialog-content"
         data-size={size ?? "default"}
         data-surface={surface}
         data-expanded={expanded || undefined}
+        data-resizing={resizing || undefined}
         className={cn(
           // Position and width come from data-size in styles.css.
           "ui-dialog fixed z-50 grid outline-none",

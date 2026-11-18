@@ -11,6 +11,7 @@ type Column = {
   loading: boolean;
   error: string;
 };
+const noFresh: ReadonlySet<string> = new Set();
 const emptyColumns = (): Column[] =>
   ticketStatuses.map((status) => ({
     status,
@@ -20,6 +21,32 @@ const emptyColumns = (): Column[] =>
     error: "",
   }));
 
+type Shown = { key: string; ids: Set<string>; settled: boolean };
+/**
+ * Notes every ticket the board shows. Once the board has settled, a ticket it
+ * had not shown before has arrived (a live update, not a move or a page).
+ */
+function remember(shown: Shown, columns: Column[], arrive: boolean) {
+  const arrived = new Set<string>();
+  for (const column of columns)
+    for (const { id } of column.tickets) {
+      if (arrive && shown.settled && !shown.ids.has(id)) arrived.add(id);
+      shown.ids.add(id);
+    }
+  return arrived;
+}
+
+/** The core's immutable local number orders a column, independent of device references. */
+function slotOf(column: readonly Ticket[], ticket: Ticket) {
+  const number = ticket.local_number;
+  // Older saved outcomes carry no order. Do not infer it from their references.
+  if (number == null || column.some((item) => item.local_number == null))
+    return 0;
+  const older = column.findIndex(
+    (item) => item.local_number != null && item.local_number < number,
+  );
+  return older < 0 ? column.length : older;
+}
 /** Independent bounded reads; core owns matching and ordering, desktop owns pages. */
 export function useTicketBoard(
   filter: FindFilter,
@@ -32,9 +59,14 @@ export function useTicketBoard(
     () => JSON.parse(key) as FindFilter,
     [key],
   );
-  const [state, setState] = useState({ key, columns: emptyColumns() });
+  const [state, setState] = useState({
+    key,
+    columns: emptyColumns(),
+    fresh: noFresh,
+  });
   const displayed = state.key === key ? state.columns : emptyColumns();
   const saved = useRef(state);
+  const shown = useRef<Shown>({ key, ids: new Set(), settled: false });
   const generation = useRef(0);
   const loadingMore = useRef(new Set<TicketStatus>());
 
@@ -87,14 +119,19 @@ export function useTicketBoard(
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     loadingMore.current.clear();
+    if (shown.current.key !== key)
+      shown.current = { key, ids: new Set(), settled: false };
     const previous =
       saved.current.key === key ? saved.current.columns : emptyColumns();
-    const commit = (columns: Column[]) => {
-      const next = { key, columns };
+    const commit = (columns: Column[], fresh = saved.current.fresh) => {
+      const next = { key, columns, fresh };
       saved.current = next;
       setState(next);
     };
-    commit(previous.map((column) => ({ ...column, loading: true, error: "" })));
+    commit(
+      previous.map((column) => ({ ...column, loading: true, error: "" })),
+      noFresh,
+    );
     await Promise.all(
       previous.map(async (column) => {
         try {
@@ -103,12 +140,17 @@ export function useTicketBoard(
             Math.max(BATCH_SIZE, column.tickets.length),
           );
           if (request !== generation.current) return;
+          const columns = saved.current.columns.map((current) =>
+            current.status === column.status
+              ? { ...current, ...result, loading: false, error: "" }
+              : current,
+          );
           commit(
-            saved.current.columns.map((current) =>
-              current.status === column.status
-                ? { ...current, ...result, loading: false, error: "" }
-                : current,
-            ),
+            columns,
+            new Set([
+              ...saved.current.fresh,
+              ...remember(shown.current, columns, true),
+            ]),
           );
         } catch (reason) {
           if (request !== generation.current) return;
@@ -126,6 +168,7 @@ export function useTicketBoard(
         }
       }),
     );
+    if (request === generation.current) shown.current.settled = true;
   }, [key, read]);
 
   useEffect(() => {
@@ -151,12 +194,12 @@ export function useTicketBoard(
     const request = generation.current;
     loadingMore.current.add(status);
     const commit = (patch: Partial<Column>) => {
-      const next = {
-        key,
-        columns: saved.current.columns.map((item) =>
-          item.status === status ? { ...item, ...patch } : item,
-        ),
-      };
+      const columns = saved.current.columns.map((item) =>
+        item.status === status ? { ...item, ...patch } : item,
+      );
+      // A page the person asked for lands where the button was; it is not news.
+      remember(shown.current, columns, false);
+      const next = { key, columns, fresh: noFresh };
       saved.current = next;
       setState(next);
     };
@@ -209,18 +252,18 @@ export function useTicketBoard(
             : Math.max(0, column.total - 1),
       };
     });
-    saved.current = { key, columns };
+    saved.current = { key, columns, fresh: noFresh };
     setState(saved.current);
   }
   /**
-   * Shows a status change at once (P10): the card leaves its column and leads
-   * the target column, before the core confirms it. A later read or
-   * `confirmTicket` puts it where the core says; `at` puts it back at its old
-   * place after a failure. Returns where it was.
+   * Shows a status change at once (P10): the card leaves its column and takes
+   * its slot in the target column's order, where the core will put it, so the
+   * card never moves when the core confirms. `at` puts it at a given place
+   * instead, back where it was after a failure. Returns where it was.
    */
   function placeTicket(
     ticket: Ticket,
-    at = 0,
+    at?: number,
   ): { status: string; index: number } {
     let from = { status: "", index: -1 };
     if (saved.current.key !== key) return from;
@@ -232,7 +275,8 @@ export function useTicketBoard(
           ...column,
           tickets: (() => {
             const rest = column.tickets.filter((item) => item.id !== ticket.id);
-            return [...rest.slice(0, at), ticket, ...rest.slice(at)];
+            const slot = at ?? slotOf(rest, ticket);
+            return [...rest.slice(0, slot), ticket, ...rest.slice(slot)];
           })(),
           total:
             index >= 0 || column.total === null
@@ -247,12 +291,14 @@ export function useTicketBoard(
         total: column.total === null ? null : Math.max(0, column.total - 1),
       };
     });
-    saved.current = { key, columns };
+    saved.current = { key, columns, fresh: noFresh };
     setState(saved.current);
     return from;
   }
   return {
     columns: displayed,
+    /** Ids of tickets the last refresh added to a board already showing. */
+    fresh: state.key === key ? state.fresh : noFresh,
     refresh,
     loadMore,
     matches,

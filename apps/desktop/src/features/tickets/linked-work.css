@@ -7,6 +7,8 @@
   flex-direction: column;
   margin: 0;
   padding: 0;
+  /* A removed row leaves the flow here while it fades (Presence popLayout). */
+  position: relative;
 }
 .reference-row {
   position: relative;

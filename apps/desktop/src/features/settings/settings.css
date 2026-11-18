@@ -22,6 +22,14 @@
   flex: none;
   padding: 0 8px;
 }
+.settings-nav-row {
+  position: relative;
+}
+/* One stacking context for every row: the travelling highlight sits under all
+   the rows it crosses (Glide). */
+.settings-nav {
+  isolation: isolate;
+}
 .settings-back {
   gap: 8px;
 }
@@ -138,4 +146,14 @@
 }
 .source-preview-heading > .settings-hint {
   margin-left: auto;
+}
+
+/* Leaving a page: its content fades out in the exit time before the next
+   page arrives (SettingsView). */
+.settings-page[data-leaving] > * {
+  opacity: 0;
+  filter: blur(var(--motion-blur-out));
+  transition:
+    opacity var(--dur-exit) var(--ease-in),
+    filter var(--dur-exit) var(--ease-in);
 }

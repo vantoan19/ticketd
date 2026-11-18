@@ -5,6 +5,14 @@ import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
+import { scrollHost } from "@/components/ui/scroll-host";
+import { HighlightGroup } from "@/components/ui/highlight-group";
+import { RowHighlight } from "@/components/ui/row-highlight";
+
+// Select scrolls in its content and its viewport; both are `layoutScroll` hosts
+// so the highlight Glide measures its old row against the scroll.
+const ScrollingContent = scrollHost(SelectPrimitive.Content);
+const ScrollingViewport = scrollHost(SelectPrimitive.Viewport);
 
 function Select({
   ...props
@@ -92,9 +100,11 @@ function SelectContent({
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();
+  const group = React.useId();
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content
+      <ScrollingContent
+        layoutScroll
         ref={contentRef}
         data-slot="select-content"
         className={cn(
@@ -115,17 +125,18 @@ function SelectContent({
         }}
       >
         <SelectScrollUpButton />
-        <SelectPrimitive.Viewport
+        <ScrollingViewport
+          layoutScroll
           className={cn(
             "p-1",
             position === "popper" &&
               "h-(--radix-select-trigger-height) w-full min-w-(--radix-select-trigger-width) scroll-my-1",
           )}
         >
-          {children}
-        </SelectPrimitive.Viewport>
+          <HighlightGroup value={group}>{children}</HighlightGroup>
+        </ScrollingViewport>
         <SelectScrollDownButton />
-      </SelectPrimitive.Content>
+      </ScrollingContent>
     </SelectPrimitive.Portal>
   );
 }
@@ -152,11 +163,12 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className,
       )}
       {...props}
     >
+      <RowHighlight />
       <span
         data-slot="select-item-indicator"
         className="absolute right-2 flex size-3.5 items-center justify-center"

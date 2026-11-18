@@ -604,7 +604,12 @@ test("the empty page offers New Automation and three examples, and choosing one 
     ).getByRole("group", { name: "Start from an example" }),
   ).toBe(examples);
   const list = screen.getByRole("region", { name: "Automation list" });
-  expect(within(list).getByText("0").textContent).toBe("0 automations");
+  // The number is the whole of its Count (so it crossfades); the word for
+  // screen readers follows it.
+  expect(within(list).getByText("0").textContent).toBe("0");
+  expect(
+    list.querySelector('[data-slot="pane-header"]')?.textContent,
+  ).toContain("0 automations");
   expect(within(list).getByText("No Automations yet")).toBeTruthy();
   expect(screen.getByRole("separator", { name: "Resize list" })).toBeTruthy();
 

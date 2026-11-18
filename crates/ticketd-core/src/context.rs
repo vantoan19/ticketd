@@ -216,7 +216,7 @@ impl Workspace {
     ) -> Result<TicketContext, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let id = relationships::id(&tx, reference)?;
-        let ticket = tx.query_row("SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
+        let ticket = tx.query_row("SELECT id, reference, title, status, body, project_id, plan_id, trashed, number AS local_number FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
         let availability = crate::readiness::indicator(&tx, &id)?;
         let tags = {
             let mut stmt = tx.prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name LIMIT ?2 OFFSET ?3")?;

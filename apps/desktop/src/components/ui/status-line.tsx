@@ -8,12 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { m, useIsPresent } from "motion/react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { Appear, Presence } from "@/components/ui/motion";
 import { StatusDot } from "@/components/ui/status-dot";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
+import { enterTransition, exitTransition } from "@/lib/motion-tokens";
 import {
   STATUS_LINE_TIMINGS,
   StatusLineContext,
@@ -60,17 +63,19 @@ export function StatusLineRegion({
     <StatusLineContext value={region}>
       {children}
       <span ref={anchor} hidden data-slot="status-line-anchor" />
-      {shown && (
-        <FloatingLine
-          key={shown.id}
-          shown={shown}
-          anchor={anchor}
-          host={host}
-          inset={inset}
-          show={show}
-          dismiss={dismissLine}
-        />
-      )}
+      <Presence>
+        {shown && (
+          <LineSlot
+            key="slot"
+            shown={shown}
+            anchor={anchor}
+            host={host}
+            inset={inset}
+            show={show}
+            dismiss={dismissLine}
+          />
+        )}
+      </Presence>
     </StatusLineContext>
   );
 }
@@ -84,22 +89,86 @@ function hostOf(anchor: HTMLElement | null): HTMLElement | null {
   return host;
 }
 
+type LineProps = {
+  shown: Shown;
+  anchor: React.RefObject<HTMLSpanElement | null>;
+  host: React.RefObject<HTMLElement | null> | undefined;
+  show: (message: StatusLineMessage) => void;
+  dismiss: (id: number) => void;
+};
+
+/**
+ * Where the line sits, and how it comes and goes. The slot stays while the
+ * line is open: it rises from a soft blur and leaves in 150ms. A following
+ * outcome swaps the words inside it (they crossfade) rather than stacking a
+ * second line. While it leaves it cannot be pressed.
+ */
+function LineSlot({ inset, ...props }: LineProps & { inset: number }) {
+  const { shown, anchor, host: hostRef } = props;
+  const present = useIsPresent();
+  const [box, setBox] = useState<{
+    left: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const host = hostRef?.current ?? hostOf(anchor.current);
+    if (!host) return;
+    const measure = () => {
+      const rect = host.getBoundingClientRect();
+      setBox({
+        left: rect.left + rect.width / 2,
+        bottom: window.innerHeight - rect.bottom,
+        width: rect.width,
+      });
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(host);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [anchor, hostRef]);
+  return createPortal(
+    <div
+      className="ui-status-line-slot"
+      inert={!present}
+      style={
+        box
+          ? {
+              left: box.left,
+              bottom: box.bottom + 8 + inset,
+              maxWidth: `min(480px, ${Math.max(0, box.width - 16)}px)`,
+            }
+          : { visibility: "hidden" }
+      }
+    >
+      <Appear rise="overlay">
+        <div className="ui-status-line">
+          <Presence initial={false}>
+            <FloatingLine key={shown.id} {...props} />
+          </Presence>
+        </div>
+      </Appear>
+    </div>,
+    document.body,
+  );
+}
+
 function FloatingLine({
   shown,
   anchor,
   host: hostRef,
-  inset,
   show,
   dismiss,
-}: {
-  shown: Shown;
-  anchor: React.RefObject<HTMLSpanElement | null>;
-  host: React.RefObject<HTMLElement | null> | undefined;
-  inset: number;
-  show: (message: StatusLineMessage) => void;
-  dismiss: (id: number) => void;
-}) {
+}: LineProps) {
   const { id } = shown;
+  const present = useIsPresent();
   const dismissSelf = useCallback(() => dismiss(id), [dismiss, id]);
   const error = shown.tone === "error";
   const action: StatusLineAction | undefined = shown.undo
@@ -114,11 +183,6 @@ function FloatingLine({
   const [focused, setFocused] = useState(false);
   const [running, setRunning] = useState(false);
   const paused = hovered || focused || running;
-  const [box, setBox] = useState<{
-    left: number;
-    bottom: number;
-    width: number;
-  } | null>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   const lineRef = useRef<HTMLDivElement>(null);
   // Where focus goes when the person closes the line from inside it.
@@ -163,30 +227,6 @@ function FloatingLine({
     };
   }, [paused, dismissSelf]);
 
-  useLayoutEffect(() => {
-    const host = hostRef?.current ?? hostOf(anchor.current);
-    if (!host) return;
-    const measure = () => {
-      const rect = host.getBoundingClientRect();
-      setBox({
-        left: rect.left + rect.width / 2,
-        bottom: window.innerHeight - rect.bottom,
-        width: rect.width,
-      });
-    };
-    measure();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(measure);
-    observer?.observe(host);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [anchor, hostRef]);
-
   // A failure that needs an answer takes focus: its action, else Dismiss.
   useEffect(() => {
     if (!shown.focusAction) return;
@@ -196,6 +236,9 @@ function FloatingLine({
     )?.focus();
   }, [shown.focusAction]);
 
+  // The line waits for the action on purpose: a failed Undo replaces it with
+  // "Couldn't undo…" (and Retry), so closing it at the click would flash it away
+  // and back. It fades in --dur-exit once the action has succeeded.
   async function act() {
     if (!action) return;
     setRunning(true);
@@ -219,22 +262,17 @@ function FloatingLine({
     }
   }
 
-  const line = (
-    <div
+  return (
+    <m.div
       ref={lineRef}
       data-slot="status-line"
       data-tone={error ? "error" : undefined}
       role={error ? "alert" : "status"}
-      className="ui-status-line"
-      style={
-        box
-          ? {
-              left: box.left,
-              bottom: box.bottom + 8 + inset,
-              maxWidth: `min(480px, ${Math.max(0, box.width - 16)}px)`,
-            }
-          : { visibility: "hidden" }
-      }
+      className="ui-status-line-body"
+      inert={!present}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: enterTransition() }}
+      exit={{ opacity: 0, transition: exitTransition() }}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocus={() => setFocused(true)}
@@ -279,7 +317,6 @@ function FloatingLine({
       <IconButton label="Dismiss" onClick={close}>
         <X />
       </IconButton>
-    </div>
+    </m.div>
   );
-  return createPortal(line, document.body);
 }

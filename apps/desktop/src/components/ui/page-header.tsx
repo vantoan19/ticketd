@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { cn } from "cn";
 import { ShellLeading, ShellNoticeSlot } from "@/components/ui/list-header";
 import "./patterns.css";
@@ -12,19 +12,26 @@ import "./patterns.css";
 export function ManagementPage({
   className,
   layout = "default",
+  ownEntrance = false,
   children,
   "aria-labelledby": labelledBy,
   "aria-label": label,
+  ref,
 }: {
+  ref?: Ref<HTMLElement>;
   className?: string;
   layout?: "default" | "centered" | "guide";
+  /** The page arranges its own entrance (enter.ts); the shell only fades the old page out. */
+  ownEntrance?: boolean;
   children: ReactNode;
   "aria-labelledby"?: string;
   "aria-label"?: string;
 }) {
   return (
     <section
+      ref={ref}
       data-slot="management-page"
+      data-own-entrance={ownEntrance || undefined}
       aria-labelledby={labelledBy}
       aria-label={label}
       className={cn(
@@ -62,7 +69,7 @@ export function PageHeader({
   toolbar?: ReactNode;
 }) {
   return (
-    <header data-slot="page-header">
+    <header data-slot="page-header" data-arrive="header">
       <div className="ui-page-header">
         <div className="ui-page-header-text">
           <div className="ui-page-header-title">

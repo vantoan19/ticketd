@@ -1,0 +1,125 @@
+/* The list and document panes opening, closing, taking the full width and
+   coming back (DESIGN.md section 5). The layout itself changes at once; these
+   rules play on top of it. use-pane-motion sets data-pane-arrival (the
+   document, or the list coming back) and data-pane-leaving (a pane kept on
+   screen for one exit) and ends both when their token says. Reduced motion and
+   a held key zero the tokens, so neither attribute is ever set. The offsets are
+   the canvas's: they have no token of their own. */
+.ticket-workspace {
+  --pane-glide: 16px;
+  --pane-glide-wide: 24px;
+  --pane-slide: 12px;
+  --pane-drift: 8px;
+}
+
+@keyframes ticket-pane-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--pane-from));
+    filter: blur(var(--motion-blur-in));
+  }
+}
+@keyframes ticket-pane-out {
+  to {
+    opacity: 0;
+    transform: translateX(var(--pane-drift));
+    filter: blur(var(--motion-blur-out));
+  }
+}
+/* Coming back, the document was on screen a moment ago and the layout's long
+   task holds its first frame, so it does not start from nothing: with the list
+   also at opacity 0 that frame would be blank. */
+@keyframes ticket-pane-return {
+  from {
+    opacity: 0.5;
+    transform: translateX(var(--pane-from));
+    filter: blur(var(--motion-blur-in));
+  }
+}
+@keyframes ticket-list-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--pane-slide) * -1));
+    filter: blur(var(--motion-blur-in));
+  }
+}
+@keyframes ticket-list-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(var(--pane-slide) * -1));
+    filter: blur(var(--motion-blur-out));
+  }
+}
+
+/* Open, and full width: the document glides in from the right and comes into
+   focus. Coming back, it glides in from the left beside the list. None of
+   these has a delay, so none has a fill: opacity 0 is held only until the
+   first frame paints (the layout's long task comes before it), never past it. */
+.ticket-workspace[data-pane-arrival]
+  :is(#detail, [data-view-id="detail"])
+  .ticket-detail {
+  animation: ticket-pane-in var(--spring-smooth-t) var(--spring-smooth);
+}
+.ticket-workspace[data-pane-arrival="open"]
+  :is(#detail, [data-view-id="detail"])
+  .ticket-detail {
+  --pane-from: var(--pane-glide);
+}
+.ticket-workspace[data-pane-arrival="expand"]
+  :is(#detail, [data-view-id="detail"])
+  .ticket-detail {
+  --pane-from: var(--pane-glide-wide);
+}
+.ticket-workspace[data-pane-arrival="return"]
+  :is(#detail, [data-view-id="detail"])
+  .ticket-detail {
+  --pane-from: calc(var(--pane-glide-wide) * -1);
+  animation-name: ticket-pane-return;
+}
+.ticket-workspace[data-pane-arrival="return"]
+  :is(#list, [data-view-id="list"])
+  > * {
+  animation: ticket-list-in var(--spring-smooth-t) var(--spring-smooth);
+}
+
+/* Close: the list has the width at once (the unselected rules) and the document
+   fades out over it, drifting right, where it was. The panel library gives the
+   panel an inline width of auto, so the leaving pane is placed with its edges. */
+.ticket-workspace[data-pane-leaving] {
+  position: relative;
+}
+.ticket-workspace[data-pane-leaving="detail"]
+  :is(#detail, [data-view-id="detail"]) {
+  pointer-events: none;
+}
+.ticket-workspace[data-pane-leaving="detail"]:not([data-peek])
+  :is(#detail, [data-view-id="detail"]) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: calc(100% - var(--pane-leaving-width, 100%));
+}
+.ticket-workspace[data-pane-leaving="detail"]
+  :is(#detail, [data-view-id="detail"])
+  .ticket-detail {
+  animation: ticket-pane-out var(--dur-exit) var(--ease-in) forwards;
+}
+
+/* Full width: the list slides left as it fades, over the document that has
+   taken its place. */
+.ticket-workspace.expanded[data-pane-leaving="list"]
+  :is(#list, [data-view-id="list"]) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: calc(100% - var(--pane-leaving-width, 100%));
+  z-index: 1;
+  pointer-events: none;
+}
+.ticket-workspace[data-pane-leaving="list"]
+  :is(#list, [data-view-id="list"])
+  > * {
+  animation: ticket-list-out var(--dur-exit) var(--ease-in) forwards;
+}

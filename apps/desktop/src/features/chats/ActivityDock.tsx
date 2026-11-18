@@ -21,7 +21,10 @@ import {
   ShieldQuestion,
   X,
 } from "lucide-react";
+import { Presence } from "@/components/ui/motion";
+import { Rise, Space } from "@/features/chats/arrivals";
 import { Button } from "@/components/ui/button";
+import { Count } from "@/components/ui/count";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Kbd } from "@/components/ui/kbd";
 import { Time } from "@/components/ui/time";
@@ -117,9 +120,8 @@ function Request({
   ) : null;
   const Icon = question ? MessageCircleQuestion : ShieldQuestion;
   return (
-    <section
+    <Rise
       role="group"
-      className="chat-request"
       data-request={request.request}
       aria-labelledby={titleId}
       {...(request.reason &&
@@ -304,7 +306,7 @@ function Request({
         )}
         {question && error && <FailureAlert size="compact" failure={error} />}
       </div>
-    </section>
+    </Rise>
   );
 }
 
@@ -324,51 +326,54 @@ function QueueCard({
   const textId = useId();
   const [sending, setSending] = useState(false);
   return (
-    <li className="chat-queue-card">
-      <span className="chat-queue-main">
-        <span id={textId} className="chat-queue-text">
-          {queued.text}
+    // Its own space closes with its fade, so the cards below glide up.
+    <Space as="li" className="chat-queue-card">
+      <Rise className="flex w-full items-center min-h-8">
+        <span className="chat-queue-main">
+          <span id={textId} className="chat-queue-text">
+            {queued.text}
+          </span>
+          {queued.refused_steer && (
+            <span className="chat-queue-note">
+              Couldn't steer; queued · {queued.refused_steer}
+            </span>
+          )}
         </span>
-        {queued.refused_steer && (
-          <span className="chat-queue-note">
-            Couldn't steer; queued · {queued.refused_steer}
+        {sending ? (
+          <span className="chat-queue-sending">Sending…</span>
+        ) : (
+          <span className="chat-queue-actions">
+            {canSendNow && (
+              <IconButton
+                label="Send now"
+                aria-describedby={textId}
+                onClick={() => {
+                  setSending(true);
+                  // On success the card leaves the queue; on failure it stays.
+                  onSendNow().catch(() => setSending(false));
+                }}
+              >
+                <CornerUpRight aria-hidden />
+              </IconButton>
+            )}
+            <IconButton
+              label="Edit in the message box"
+              aria-describedby={textId}
+              onClick={onEdit}
+            >
+              <Pencil aria-hidden />
+            </IconButton>
+            <IconButton
+              label="Remove from queue"
+              aria-describedby={textId}
+              onClick={onRemove}
+            >
+              <X aria-hidden />
+            </IconButton>
           </span>
         )}
-      </span>
-      {sending ? (
-        <span className="chat-queue-sending">Sending…</span>
-      ) : (
-        <span className="chat-queue-actions">
-          {canSendNow && (
-            <IconButton
-              label="Send now"
-              aria-describedby={textId}
-              onClick={() => {
-                setSending(true);
-                // On success the card leaves the queue; on failure it stays.
-                onSendNow().catch(() => setSending(false));
-              }}
-            >
-              <CornerUpRight aria-hidden />
-            </IconButton>
-          )}
-          <IconButton
-            label="Edit in the message box"
-            aria-describedby={textId}
-            onClick={onEdit}
-          >
-            <Pencil aria-hidden />
-          </IconButton>
-          <IconButton
-            label="Remove from queue"
-            aria-describedby={textId}
-            onClick={onRemove}
-          >
-            <X aria-hidden />
-          </IconButton>
-        </span>
-      )}
-    </li>
+      </Rise>
+    </Space>
   );
 }
 
@@ -409,58 +414,78 @@ export function ActivityDock({
 }) {
   const request = requests[0];
   const { queue, queue_paused: paused } = chat;
-  if (!request && !plan && queue.length === 0) return null;
   // During a turn that cannot be steered, a queued message can only wait.
   const live = chat.activity === "working" || chat.activity === "waiting";
   const canSendNow = !live || chat.steering.available;
+  // Always drawn (empty it takes no room): a request or the queue that leaves
+  // fades out here while the tray closes its space (DockSlot).
   return (
     <div ref={dockRef} className="chat-activity">
-      {request && (
-        <Request
-          key={request.id}
-          request={request}
-          position={1}
-          count={requests.length}
-          onAnswer={(optionId) => onAnswer(request.id, optionId)}
-          onLeave={onLeave}
-          {...(onAnswered && { onAnswered })}
-          name={recordNamer(chat.links)}
-          focusTitle={focusRequest}
-        />
-      )}
+      {/* One request at a time: the next waits for the answered one to leave. */}
+      <Presence initial={false} mode="wait">
+        {request && (
+          <Request
+            key={request.id}
+            request={request}
+            position={1}
+            count={requests.length}
+            onAnswer={(optionId) => onAnswer(request.id, optionId)}
+            onLeave={onLeave}
+            {...(onAnswered && { onAnswered })}
+            name={recordNamer(chat.links)}
+            focusTitle={focusRequest}
+          />
+        )}
+      </Presence>
       {plan && <section className="chat-activity-slot">{plan}</section>}
-      {queue.length > 0 && (
-        <section className="chat-queue">
-          <div className="chat-queue-head">
-            <span>
-              Queued {queue.length} · {paused ? "Paused" : "After this turn"}
-            </span>
-            {paused && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto"
-                onClick={onResume}
-              >
-                Resume
-              </Button>
-            )}
-          </div>
-          <ol aria-label="Queued messages">
-            {queue.map((queued) => (
-              <QueueCard
-                key={queued.id}
-                queued={queued}
-                canSendNow={canSendNow}
-                onSendNow={() => onSendNow(queued.id)}
-                onEdit={() => onEdit(queued)}
-                onRemove={() => onRemove(queued.id)}
-              />
-            ))}
-          </ol>
-        </section>
-      )}
+      <Presence initial={false}>
+        {queue.length > 0 && (
+          <QueueSection key="queue">
+            <div className="chat-queue-head">
+              <span>
+                Queued <Count>{queue.length}</Count> ·{" "}
+                {paused ? "Paused" : "After this turn"}
+              </span>
+              {paused && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={onResume}
+                >
+                  Resume
+                </Button>
+              )}
+            </div>
+            <ol aria-label="Queued messages">
+              <Presence initial={false}>
+                {queue.map((queued) => (
+                  <QueueCard
+                    key={queued.id}
+                    queued={queued}
+                    canSendNow={canSendNow}
+                    onSendNow={() => onSendNow(queued.id)}
+                    onEdit={() => onEdit(queued)}
+                    onRemove={() => onRemove(queued.id)}
+                  />
+                ))}
+              </Presence>
+            </ol>
+          </QueueSection>
+        )}
+      </Presence>
     </div>
+  );
+}
+
+/** The queue's section: it fades up with its first card and out with its last. */
+function QueueSection({ children }: { children: ReactNode }) {
+  return (
+    <Space>
+      <Rise>
+        <section className="chat-queue">{children}</section>
+      </Rise>
+    </Space>
   );
 }
 

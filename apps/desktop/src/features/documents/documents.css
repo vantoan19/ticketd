@@ -31,7 +31,9 @@
   min-height: 0;
   overflow-y: auto;
 }
-.documents-list-view > [data-slot="pane-header"] {
+/* The header sits in a wrapper that takes its step of the page's entrance. */
+.documents-list-view > .documents-list-head {
+  background: var(--surface);
   position: sticky;
   top: 0;
   z-index: 2;
