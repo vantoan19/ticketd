@@ -102,3 +102,14 @@ test("both checklist boxes keep an edge and a visible tick under forced colours"
   expect(block).toMatch(/border:\s*1px solid CanvasText/);
   expect(block).toMatch(/::after\s*\{\s*background:\s*CanvasText/);
 });
+
+// A done item's strike is a background, which forced colours remove.
+test("checked items keep a strike-through under forced colours", () => {
+  const forced = styles.slice(
+    styles.indexOf("@media (forced-colors: active)", styles.indexOf(box)),
+  );
+  const block = forced.slice(0, forced.indexOf("\n}\n"));
+  expect(block).toContain(".markdown-task-text");
+  expect(block).toContain("div[data-slate-node]");
+  expect(block).toMatch(/text-decoration:\s*line-through/);
+});

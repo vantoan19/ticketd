@@ -141,6 +141,42 @@ test("a removed tag fades out in its own time, closes its width, and leaves", as
   expect(screen.queryByText("api")).not.toBeNull();
 });
 
+test("a removed tag leaves the row its width until the pill is gone, so the row never changes line part-way", async () => {
+  // jsdom lays nothing out: the row is 235px wide before the pill leaves.
+  const width = vi
+    .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+    .mockReturnValue(235);
+  const { rerender } = render(
+    <Properties value={ticket({ tags: ["api", "perf"] })} layout="strip" />,
+  );
+  const row = () => document.querySelector<HTMLElement>(".rail-tags")!;
+  expect(row().style.minWidth).toBe("");
+  rerender(<Properties value={ticket({ tags: ["api"] })} layout="strip" />);
+  width.mockReturnValue(180);
+  expect(row().style.minWidth).toBe("235px");
+  expect(await presentAfter("perf", EXIT_MS - 10)).toBe(true);
+  expect(row().style.minWidth).toBe("235px");
+  expect(await presentAfter("perf", SETTLED_MS)).toBe(false);
+  expect(row().style.minWidth).toBe("");
+  width.mockRestore();
+});
+
+test("a removed tag holds no width under reduced motion", async () => {
+  testbed.reduceMotion();
+  const width = vi
+    .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+    .mockReturnValue(235);
+  const { rerender } = render(
+    <Properties value={ticket({ tags: ["api", "perf"] })} layout="strip" />,
+  );
+  rerender(<Properties value={ticket({ tags: ["api"] })} layout="strip" />);
+  await frames();
+  expect(
+    document.querySelector<HTMLElement>(".rail-tags")!.style.minWidth,
+  ).toBe("");
+  width.mockRestore();
+});
+
 test("an added tag opens its own width and its gap, so it never overlaps its neighbour", async () => {
   const { rerender } = render(<Properties value={ticket({ tags: ["api"] })} />);
   rerender(<Properties value={ticket({ tags: ["api", "perf"] })} />);

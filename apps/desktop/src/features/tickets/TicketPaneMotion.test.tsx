@@ -318,6 +318,26 @@ test("closing places the leaving document at the width the pane had, measured be
   await waitFor(() => expect(leavingWidth()).toBe(""));
 });
 
+test("closing from full width keeps the document at the full-width size while it fades", async () => {
+  await setUp();
+  open("T-KQ1");
+  await screen.findByText("Title of T-KQ1");
+  fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+  await waitFor(() =>
+    expect(group().getAttribute("data-pane-leaving")).toBeNull(),
+  );
+  const detail = () => document.querySelector(".ticket-detail");
+  expect(detail()?.hasAttribute("data-expanded")).toBe(true);
+  open(null);
+  expect(group().getAttribute("data-pane-leaving")).toBe("detail");
+  // The expanded rules (760px wide) still apply: the split's width would
+  // re-lay the text out as the exit starts.
+  expect(detail()?.hasAttribute("data-expanded")).toBe(true);
+  await waitFor(() =>
+    expect(group().getAttribute("data-pane-leaving")).toBeNull(),
+  );
+});
+
 test("full width places the leaving list at the width it had", async () => {
   await setUp();
   open("T-KQ1");
@@ -400,4 +420,17 @@ test("the pane arrivals hold nothing beyond their own delay", () => {
   expect(arrivals.length).toBeGreaterThan(0);
   for (const [, animation] of arrivals)
     expect(animation).not.toMatch(/\b(backwards|both)\b/);
+});
+
+test("coming back to the split never starts the document, or a blank screen, from nothing", () => {
+  const rules = css("ticket-pane-motion.css");
+  const keyframes = rules.match(
+    /@keyframes ticket-pane-return\s*\{[\s\S]*?\n\}/,
+  )?.[0];
+  expect(keyframes).toBeTruthy();
+  const opacity = Number(keyframes?.match(/opacity:\s*([\d.]+)/)?.[1]);
+  expect(opacity).toBeGreaterThan(0);
+  expect(rules).toMatch(
+    /data-pane-arrival="return"\]\s*:is\([^)]*\)\s*\.ticket-detail\s*\{[^}]*animation-name:\s*ticket-pane-return/,
+  );
 });
