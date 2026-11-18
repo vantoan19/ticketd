@@ -203,6 +203,9 @@ struct TextBuffer {
 
 pub(crate) struct Supervisor {
     chat_id: String,
+    /// The Chat's span, for work spawned on its behalf (opening the Harness), so the Harness's
+    /// stderr lines are correlated with the Chat and do not hold a Turn's span open.
+    span: tracing::Span,
     open_workspace: WorkspaceOpener,
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
@@ -293,7 +296,8 @@ impl Supervisor {
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
-        let supervisor = Self {
+        let mut supervisor = Self {
+            span: tracing::Span::none(),
             chat_id: chat.id.clone(),
             open_workspace,
             adapter,
@@ -348,6 +352,7 @@ impl Supervisor {
                 .as_ref()
                 .map(|unattended| unattended.run_id.as_str()),
         );
+        supervisor.span = span.clone();
         tokio::spawn(supervisor.run().instrument(span));
         sender
     }
@@ -970,25 +975,29 @@ impl Supervisor {
             reply,
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
-        tokio::spawn(async move {
-            // Reading the context runs the CLI and can take seconds: off the async threads.
-            let context = match source {
-                Some(source) => tokio::task::spawn_blocking(move || source(&chat_id))
+        let chat_span = self.span.clone();
+        tokio::spawn(
+            async move {
+                // Reading the context runs the CLI and can take seconds: off the async threads.
+                let context = match source {
+                    Some(source) => tokio::task::spawn_blocking(move || source(&chat_id))
+                        .await
+                        .unwrap_or_else(|error| Err(error.to_string())),
+                    None => Ok(None),
+                };
+                request.ticketd_cli = tokio::task::spawn_blocking(crate::cli::executable)
                     .await
-                    .unwrap_or_else(|error| Err(error.to_string())),
-                None => Ok(None),
-            };
-            request.ticketd_cli = tokio::task::spawn_blocking(crate::cli::executable)
-                .await
-                .ok()
-                .flatten();
-            let result = adapter.open(request).await;
-            let _ = done.send(Done::Opened {
-                generation,
-                result,
-                context,
-            });
-        });
+                    .ok()
+                    .flatten();
+                let result = adapter.open(request).await;
+                let _ = done.send(Done::Opened {
+                    generation,
+                    result,
+                    context,
+                });
+            }
+            .instrument(chat_span),
+        );
     }
 
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
