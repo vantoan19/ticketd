@@ -1,13 +1,14 @@
 import { invoke } from "@/lib/api/bridge-failure";
 
 /**
- * What the native log learns about an uncaught error. The name, message and
- * stack frames are the error's own; the route is the view the person was on.
- * `count` is how many times this error happened since it was last sent.
+ * What the native log learns about an uncaught error. The name is the error's
+ * own; each frame is only `file:line:column` (no URL, query string or function
+ * name); the route is the view the person was on. The message is never sent:
+ * it can quote a Ticket, a Document or a Harness. `count` is how many times
+ * this error happened since it was last sent.
  */
 export interface ErrorReport {
   name: string;
-  message: string;
   frames: string[];
   route: string;
   count: number;
@@ -29,28 +30,35 @@ export interface ErrorReporter {
 const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 10;
 const MAX_KINDS = 100;
-const MAX_MESSAGE = 500;
 const MAX_FRAMES = 10;
-const MAX_FRAME = 200;
+const MAX_LINE = 500;
+
+/**
+ * One stack line, as Chrome writes it (`at fn (url:1:2)`) or Safari and Firefox
+ * do (`fn@url:1:2`). It captures the file's base name and the position, which
+ * is all a report keeps. A line that is not a frame (the error's header, with
+ * its message) does not match.
+ */
+const FRAME =
+  /^(?:at\s+(?:.*?\()?|[^\s@]*@)?(?:[^\s()?#]*[/\\])?([\w.$-]+?)(?:[?#][^\s()]*)?:(\d+):(\d+)\)?$/;
 
 /** A report's identity: the same failure at the same place is a repeat. */
 function identity(report: Omit<ErrorReport, "count">) {
-  return `${report.name}\n${report.message}\n${report.frames[0] ?? ""}`;
+  return `${report.name}\n${report.frames[0] ?? ""}`;
 }
 
 function describe(error: unknown, route: string): Omit<ErrorReport, "count"> {
   const isError = error instanceof Error;
   const name = isError && error.name ? error.name : "NonError";
-  // eslint-disable-next-line no-restricted-syntax -- the raw text goes to the log, not to a person
-  const message = isError ? error.message : String(error);
-  const header = `${name}: ${message}`;
   const frames = (isError ? (error.stack ?? "") : "")
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && line !== header && line !== message)
-    .slice(0, MAX_FRAMES)
-    .map((line) => line.slice(0, MAX_FRAME));
-  return { name, message: message.slice(0, MAX_MESSAGE), frames, route };
+    .flatMap((line) => {
+      const [, file, row, column] =
+        FRAME.exec(line.trim().slice(0, MAX_LINE)) ?? [];
+      return file ? [`${file}:${row}:${column}`] : [];
+    })
+    .slice(0, MAX_FRAMES);
+  return { name, frames, route };
 }
 
 /**

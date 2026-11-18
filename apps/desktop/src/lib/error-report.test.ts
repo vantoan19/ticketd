@@ -22,10 +22,11 @@ function install(route = "tickets") {
   return reporter;
 }
 
-function failure(message: string, name = "TypeError") {
+/** `site` is the file the error was thrown from; the same site is the same failure. */
+function failure(message: string, name = "TypeError", site = "index.js") {
   const error = new Error(message);
   error.name = name;
-  error.stack = `${name}: ${message}\n    at render (tauri://localhost/assets/index.js:10:5)\n    at commit (tauri://localhost/assets/index.js:20:7)`;
+  error.stack = `${name}: ${message}\n    at render (tauri://localhost/assets/${site}:10:5)\n    at commit (tauri://localhost/assets/${site}:20:7)`;
   return error;
 }
 
@@ -35,7 +36,7 @@ function rejection(reason: unknown) {
   );
 }
 
-test("a window error is sent with its name, message, frames, route and a count of one", () => {
+test("a window error is sent with its name, frames, route and a count of one, and never its message", () => {
   install("chats");
   window.dispatchEvent(
     new ErrorEvent("error", { error: failure("x is undefined") }),
@@ -43,14 +44,32 @@ test("a window error is sent with its name, message, frames, route and a count o
   expect(sent).toEqual([
     {
       name: "TypeError",
-      message: "x is undefined",
-      frames: [
-        "at render (tauri://localhost/assets/index.js:10:5)",
-        "at commit (tauri://localhost/assets/index.js:20:7)",
-      ],
+      frames: ["index.js:10:5", "index.js:20:7"],
       route: "chats",
       count: 1,
     },
+  ]);
+  expect(JSON.stringify(sent)).not.toContain("x is undefined");
+});
+
+test("frames lose their URLs, query strings and function names, whichever engine wrote them", () => {
+  const reporter = install();
+  const error = failure("boom");
+  error.stack = [
+    "TypeError: boom at secret.js:1:1",
+    "    at render (https://app.test/assets/index-AB12.js?token=abc&next=/a/b:3:4)",
+    "    at async Promise.all (index 0)",
+    "    at tauri://localhost/assets/chunk.js:5:6",
+    "render@tauri://localhost/assets/safari.js:7:8",
+    "@tauri://localhost/assets/anonymous.js:9:10",
+    "[native code]",
+  ].join("\n");
+  reporter.report(error);
+  expect(sent[0]?.frames).toEqual([
+    "index-AB12.js:3:4",
+    "chunk.js:5:6",
+    "safari.js:7:8",
+    "anonymous.js:9:10",
   ]);
 });
 
@@ -58,17 +77,15 @@ test("an unhandled rejection is reported, including a reason that is not an Erro
   install();
   rejection(failure("lost", "RangeError"));
   rejection("plain text");
-  expect(sent.map(({ name, message }) => [name, message])).toEqual([
-    ["RangeError", "lost"],
-    ["NonError", "plain text"],
-  ]);
+  expect(sent.map(({ name }) => name)).toEqual(["RangeError", "NonError"]);
+  expect(JSON.stringify(sent)).not.toContain("plain text");
 });
 
 test("the React root's uncaught-error callback reports through the same path", () => {
   const reporter = install();
   reporter.report(failure("render failed"));
   expect(sent).toHaveLength(1);
-  expect(sent[0]?.message).toBe("render failed");
+  expect(JSON.stringify(sent)).not.toContain("render failed");
 });
 
 test("a repeat of the same error is dropped, then counted when it is next sent", () => {
@@ -85,11 +102,12 @@ test("a repeat of the same error is dropped, then counted when it is next sent",
 
 test("at most ten reports are sent a minute, whatever they are", () => {
   const reporter = install();
-  for (let i = 0; i < 25; i += 1) reporter.report(failure(`distinct ${i}`));
+  for (let i = 0; i < 25; i += 1)
+    reporter.report(failure("boom", "TypeError", `site${i}.js`));
   expect(sent).toHaveLength(10);
 
   clock += 61_000;
-  reporter.report(failure("distinct 24"));
+  reporter.report(failure("boom", "TypeError", "site24.js"));
   expect(sent).toHaveLength(11);
   // It was dropped once by the limit, so the count says so.
   expect(sent[10]?.count).toBe(2);
@@ -117,11 +135,10 @@ test("a sender that throws or rejects never raises another error", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
-test("long messages and deep stacks are bounded", () => {
+test("deep stacks are bounded", () => {
   const reporter = install();
   const error = failure("m".repeat(5000));
-  error.stack = `TypeError: x\n${Array.from({ length: 50 }, (_, i) => `    at f${i} (file.js:1:1)`).join("\n")}`;
+  error.stack = `TypeError: x\n${Array.from({ length: 50 }, (_, i) => `    at f${i} (file${i}.js:1:1)`).join("\n")}`;
   reporter.report(error);
-  expect(sent[0]?.message.length).toBeLessThanOrEqual(500);
   expect(sent[0]?.frames).toHaveLength(10);
 });

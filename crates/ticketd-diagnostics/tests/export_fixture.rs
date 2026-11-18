@@ -41,7 +41,7 @@ fn nothing_planted_in_a_field_the_export_does_not_allow_survives() {
         tracing::error!(target: "ticketd_diagnostics::crash", location = "crates/core/src/lib.rs:10:5", thread = "main", panic_message = "static literal", "panic");
         tracing::error!(target: "ticketd_diagnostics::crash", location = "crates/core/src/lib.rs:10:5", thread = "main", "panic");
         tracing::warn!(target: "ticketd_diagnostics::desktop", previous_started_at = "2026-11-18T07:45:00.000Z", extra = SECRET, "previous session ended unexpectedly");
-        tracing::error!(target: "webview", error_kind = "TypeError", error = SECRET, route = "/tickets", repeat_count = 3, frames = "at render (app.js:1:1)", name = SECRET, stack = SECRET, "uncaught WebView error");
+        tracing::error!(target: "ticketd::webview", error_kind = "TypeError", error = SECRET, route = "/tickets", repeat_count = 3, frames = "app.js:1:1", name = SECRET, stack = SECRET, "uncaught WebView error");
         tracing::debug!(target: "ticketd_chat_host::harness_stderr", harness = "codex", line = SECRET, "harness stderr");
         tracing::info!(target: "ticketd_desktop_lib::diagnostics_commands", bytes = 1024, path = SECRET, "diagnostics exported");
 
@@ -89,7 +89,7 @@ fn nothing_planted_in_a_field_the_export_does_not_allow_survives() {
         "\"previous_started_at\":\"2026-11-18T07:45:00.000Z\"",
         "\"route\":\"/tickets\"",
         "\"repeat_count\":3",
-        "\"frames\":\"at render (app.js:1:1)\"",
+        "\"frames\":\"app.js:1:1\"",
         "\"error_kind\":\"TypeError\"",
         "\"harness\":\"codex\"",
         "\"command\":\"list_tickets\"",
