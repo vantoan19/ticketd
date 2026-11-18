@@ -57,7 +57,7 @@ ticketd skills get writes
 
 `get` prints Markdown; `list` returns JSON with the CLI version and guide names.
 Topic guides cover tickets, context (Documents, Activities, and Plans), writes,
-sources, and workspace operations. Command-specific `--help` remains the argument
+sources, workspace operations, and working from a ticketd Chat (`chat`). Command-specific `--help` remains the argument
 reference. All `skills` commands work without opening, creating, or migrating the
 ticket workspace.
 

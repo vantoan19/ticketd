@@ -487,7 +487,7 @@ macOS, an autostart entry on Linux). The page reaches it through two ticketd
 commands; the plugin's own commands are granted to no window. There is no
 service: with ticketd quit, nothing runs.
 
-The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#20-native-agent-chats).
+The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#21-native-agent-chats).
 Provider support clarification and live compatibility checks remain requirements
 before release; this architecture does not claim they have passed. Exact SQL
 schema, Rust signatures, bridge framing, buffer limits and version ranges are
