@@ -105,7 +105,7 @@ mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
-    DEFAULT_ATTACHMENT_LIMIT,
+    DEFAULT_ATTACHMENT_LIMIT, DISPLAY_NAME_LIMIT, MAX_BACKUP_FILE_BYTES,
 };
 mod automation_advance;
 mod automation_agents;
@@ -373,7 +373,9 @@ pub enum Error {
     SyncFile(String),
     #[error("sync: {0}")]
     Sync(String),
-    #[error("workspace schema version {0} is newer than this application supports")]
+    #[error(
+        "workspace schema version {0} is newer than this application supports; update ticketd to open it"
+    )]
     NewerSchema(i64),
 }
 
@@ -459,6 +461,11 @@ fn upload_limit_message(limit: u64) -> String {
     } else {
         format!("{limit} bytes")
     };
+    if limit >= attachments::MAX_BACKUP_FILE_BYTES {
+        return format!(
+            "file is larger than the {bound} ticketd can keep, the most a backup can hold; choose a smaller file"
+        );
+    }
     format!(
         "file exceeds the workspace upload limit of {bound}; change it in Settings > Attachments or `ticketd attachment limit --bytes <bytes>`"
     )
@@ -934,8 +941,9 @@ fn default_path() -> Result<std::path::PathBuf, Error> {
     Ok(path)
 }
 
-/// Name the file or folder a person supplied when it is missing or of the wrong
-/// kind. Other I/O failures keep the generic workspace wording.
+/// Name the file or folder a person supplied when it is missing, unreadable, not
+/// writable or of the wrong kind. A full disk keeps the generic workspace wording,
+/// so it is still reported as a full disk.
 pub(crate) fn path_error(role: &str, path: &std::path::Path, error: std::io::Error) -> Error {
     let shown = if path.as_os_str().is_empty() {
         std::path::Path::new(".")
@@ -949,6 +957,28 @@ pub(crate) fn path_error(role: &str, path: &std::path::Path, error: std::io::Err
         std::io::ErrorKind::NotADirectory => {
             Error::Path(format!("{role} is not a folder: {}", shown.display()))
         }
-        _ => Error::Directory(error),
+        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
+            Error::Directory(error)
+        }
+        _ => Error::Path(format!(
+            "cannot access {role} {}: {}",
+            shown.display(),
+            io_reason(&error)
+        )),
+    }
+}
+
+/// The cause of an I/O error in plain words, without the operating system's code or
+/// the path some libraries append.
+fn io_reason(error: &std::io::Error) -> String {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "permission denied".into(),
+        std::io::ErrorKind::ReadOnlyFilesystem => "the folder is read-only".into(),
+        std::io::ErrorKind::IsADirectory => "it is a folder".into(),
+        _ => {
+            let text = error.to_string();
+            let text = text.split(" (os error").next().unwrap_or(&text);
+            text.split(" at path").next().unwrap_or(text).to_lowercase()
+        }
     }
 }

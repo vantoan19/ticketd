@@ -6,11 +6,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, FORMAT_VERSION, Workspace, backup, backup_archive, default_path, session};
+use crate::{
+    Error, FORMAT_VERSION, Workspace, backup, backup_archive, backup_review, default_path, session,
+};
 
 #[derive(Serialize, Deserialize)]
 struct RestoreJournal {
@@ -108,12 +110,39 @@ impl Workspace {
         backup: &Path,
         keep_sync_folder: bool,
     ) -> Result<PathBuf, Error> {
-        if !backup.is_file() {
-            return Err(Error::Backup(format!(
-                "backup file not found: {}",
-                backup.display()
-            )));
+        backup_review::require_backup_file(backup)?;
+        let folder = workspace
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        if !folder.is_dir() {
+            let missing = folder
+                .metadata()
+                .err()
+                .unwrap_or_else(|| std::io::ErrorKind::NotADirectory.into());
+            return Err(crate::path_error("target folder", folder, missing));
         }
+        let lock = backup::resolve(workspace)
+            .ok()
+            .map(|r| backup::lock_path(&r));
+        let lock_existed = lock.as_ref().is_some_and(|lock| lock.exists());
+        let result = Self::restore_checked(workspace, backup, keep_sync_folder);
+        // A restore that fails before it replaces anything leaves no new lock file behind.
+        // Another process holding the lock is not ours to remove.
+        if let (Err(error), Some(lock)) = (&result, lock)
+            && !lock_existed
+            && !matches!(error, Error::RestoreLock { .. })
+        {
+            let _ = fs::remove_file(lock);
+        }
+        result
+    }
+
+    fn restore_checked(
+        workspace: &Path,
+        backup: &Path,
+        keep_sync_folder: bool,
+    ) -> Result<PathBuf, Error> {
         // Warm sessions elsewhere are asked to let go first (ADR 0016).
         let _lock = session::lock_exclusive(workspace, session::RELEASE_WAIT)?;
         let reported_workspace = if workspace
@@ -143,9 +172,7 @@ impl Workspace {
         if workspace.exists() && workspace.canonicalize()? == backup.canonicalize()? {
             return Err(Error::Backup("backup is the current workspace".into()));
         }
-        let source = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        session::configure(&source)?;
-        source.execute_batch("BEGIN")?;
+        let source = backup_review::open_backup(backup)?;
         backup::validate(&source)?;
         let parent = workspace
             .parent()

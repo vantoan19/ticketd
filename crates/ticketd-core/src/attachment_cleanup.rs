@@ -271,6 +271,9 @@ impl Workspace {
         let tx = self.connection.savepoint()?;
         crate::write_scope::lock(&tx)?;
         let current = review(&tx, id)?;
+        if current.attachment.purge_state == AttachmentPurgeState::Purged {
+            return Err(Error::Attachment(purge_unavailable(&current.attachment)));
+        }
         if current.attachment.quarantined {
             return Ok(current.attachment);
         }

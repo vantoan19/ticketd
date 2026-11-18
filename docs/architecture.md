@@ -585,6 +585,10 @@ older database-only backups remain readable. See
 [ADR 0008](adr/0008-attachment-backup-container.md) for the format and recovery
 trade-off. Desktop review and `ticketd inspect-backup <path>` expose completeness,
 local file totals, and the limits of remote references through the same core.
+`inspect-backup` prints its JSON report for every readable file and exits with an
+error, worded as a restore would word it, when `check.status` is anything but
+`valid`. Each file must fit one SQLite blob, so the upload limit is capped at
+999,000,000 bytes and an older, larger setting is held to it.
 
 ## Local media previews
 

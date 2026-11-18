@@ -95,7 +95,7 @@ enum AttachmentCommand {
     },
     /// Read or change the workspace's per-file upload limit (default 100 MiB); existing snapshots stay unchanged
     Limit {
-        /// Positive byte bound, enforced while copying actual bytes
+        /// Positive byte bound, enforced while copying actual bytes; at most 999000000, the largest file a backup can hold
         #[arg(long)]
         bytes: Option<u64>,
     },
@@ -382,7 +382,7 @@ enum Command {
     },
     /// Save a consistent workspace backup to a new file
     Backup { path: String },
-    /// Review backup integrity and retained local bytes as JSON without restoring
+    /// Review backup integrity and retained local bytes as JSON without restoring; exits with an error when the backup cannot be restored
     InspectBackup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
     RestoreWorkspace {
@@ -1356,7 +1356,16 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
         }
-        Command::InspectBackup { path } => serde_json::to_string(&workspace.inspect_backup(path)?)?,
+        Command::InspectBackup { path } => {
+            let inspection = workspace.inspect_backup(path)?;
+            let text = serde_json::to_string(&inspection)?;
+            // The report is printed either way; a backup that cannot be restored also fails.
+            if let Some(refusal) = inspection.check.refusal() {
+                writeln!(output, "{text}")?;
+                return Err(refusal.into());
+            }
+            text
+        }
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
         Command::ExportMarkdown {
             ticket,
