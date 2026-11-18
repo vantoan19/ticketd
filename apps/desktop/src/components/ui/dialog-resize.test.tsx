@@ -78,6 +78,43 @@ it("a window resize interrupts the size glide without stopping the next delibera
   expect(dialog().hasAttribute("data-resizing")).toBe(true);
 });
 
+it("excludes size transitions after a resize while retaining the theme fade", () => {
+  // jsdom checks the cascade, not native cancellation of an existing transition.
+  const sheet = document.createElement("style");
+  sheet.textContent = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(
+      ([, selector]) =>
+        selector?.includes('.ui-dialog[data-surface="create"]') ||
+        selector?.includes(":root[data-theme-fading] *"),
+    )
+    // jsdom drops mixed element/pseudo-element lists; only the element applies here.
+    .map(([, selector, body]) => {
+      const elements = (selector ?? "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split(",")
+        .filter((part) => !part.includes("::"));
+      return `${elements.join(",")} {${body ?? ""}}`;
+    })
+    .join("\n");
+  document.head.append(sheet);
+  try {
+    const { rerender } = render(<Create expanded={false} />);
+    rerender(<Create expanded />);
+    fireEvent.resize(window);
+    expect(dialog().hasAttribute("data-resizing")).toBe(false);
+    expect(getComputedStyle(dialog()).transitionProperty).toBe("none");
+
+    document.documentElement.setAttribute("data-theme-fading", "");
+    const properties = getComputedStyle(dialog()).transitionProperty;
+    expect(properties).toContain("background-color");
+    expect(properties).toContain("box-shadow");
+    expect(properties).not.toMatch(/width|height|all/);
+  } finally {
+    document.documentElement.removeAttribute("data-theme-fading");
+    sheet.remove();
+  }
+});
+
 it("its size transition is declared only for that moment", () => {
   const rules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((rule) => ({
     selector: (rule[1] ?? "").replace(/\s+/g, " ").trim(),
