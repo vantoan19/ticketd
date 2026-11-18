@@ -47,6 +47,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -566,6 +567,7 @@ async fn a_new_session_opens_with_new_chats_picks() {
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
@@ -593,6 +595,7 @@ async fn a_chat_taken_over_from_a_run_resumes_with_new_chats_defaults() {
         unattended: None,
         ticketd_cli: None,
         taken_over: true,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -614,12 +617,92 @@ async fn a_chat_taken_over_before_its_session_exists_opens_with_new_chats_defaul
         unattended: None,
         ticketd_cli: None,
         taken_over: true,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
     let (opened, ()) = tokio::join!(opening, peer.play());
 
     assert!(opened.is_ok(), "the session opens");
+}
+
+/// #408: Claude Code resumes a session's history but not its model or permission
+/// mode. A person's Chat resumed after a restart opens with what it last reported in
+/// effect, not with Claude Code's own `defaultMode`.
+#[tokio::test(start_paused = true)]
+async fn a_resumed_chat_opens_with_the_settings_it_last_ran_with() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_recorded"));
+    let recorded = json!({
+        "claude_code_version": "2.1.322",
+        "cwd": "/work/chat-1",
+        "model": "claude-opus-test",
+        "permission_mode": "default",
+    });
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: Some(recorded.to_string()),
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// #408: what the Chat runs with is recorded each time it changes, so the record a
+/// resumed session opens with is the latest, including a change the person made.
+#[test]
+fn the_settings_in_effect_are_recorded_each_time_they_change() {
+    use super::session::Session;
+    fn recorded(events: Vec<EventKind>) -> Vec<String> {
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                EventKind::Notice {
+                    kind: crate::NoticeKind::EffectiveSettings,
+                    detail,
+                    ..
+                } => detail.map(|detail| detail.payload().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+    let mut session = Session::default();
+    let info = |mode: &str| {
+        json!({"v": 1, "event": "session_info", "generation": 7, "session_id": "sess-1",
+               "model": "claude-opus-test", "permission_mode": mode})
+    };
+    let mut said = |event: Value| recorded(session.event("session_info", &event).expect("known").0);
+
+    assert_eq!(said(info("auto")).len(), 1, "the first report is recorded");
+    assert!(said(info("auto")).is_empty(), "an unchanged report is not");
+    let changed = said(info("acceptEdits"));
+    assert!(
+        changed[0].contains(r#""permission_mode":"acceptEdits""#),
+        "{changed:?}"
+    );
+
+    let applied = recorded(
+        session
+            .setting_applied(crate::SettingKey::Permission, "default")
+            .into_iter()
+            .collect(),
+    );
+    assert!(
+        applied[0].contains(r#""permission_mode":"default""#),
+        "{applied:?}"
+    );
+    assert!(
+        applied[0].contains(r#""model":"claude-opus-test""#),
+        "{applied:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -974,6 +1057,7 @@ async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_
         unattended: Some(reader_that_tests()),
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -1538,6 +1622,7 @@ async fn claude_code_s_version_is_asked_once_until_the_executable_changes() {
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let session = |fixture: String| {

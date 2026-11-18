@@ -146,6 +146,10 @@ pub struct OpenRequest {
     /// The person's picks for a new session; empty for the harness's own settings.
     /// An unattended run leaves it empty: its model comes from `unattended`.
     pub settings: StartSettings,
+    /// What the harness last reported in effect for this Chat, as recorded
+    /// (`ticketd_core::Chat::effective_settings`). A harness whose resumed session
+    /// does not keep its settings opens it with these where nothing was picked.
+    pub recorded_settings: Option<String>,
     /// The ticketd CLI executable. Its folder goes first on the harness process's
     /// `PATH`, so the agent runs it by its name, `ticketd`, and never needs its path.
     pub ticketd_cli: Option<PathBuf>,

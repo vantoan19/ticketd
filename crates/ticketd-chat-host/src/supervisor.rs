@@ -932,12 +932,14 @@ impl Supervisor {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
-            // A resumed session keeps what it ran with.
+            // New Chat's picks are for a new session; what a Chat ran with before
+            // is in `recorded_settings`.
             settings: match session {
                 SessionStart::New => self.start_settings.clone(),
                 SessionStart::Resume(_) => StartSettings::default(),
             },
             session,
+            recorded_settings: chat.effective_settings.clone(),
             unattended: self.unattended.clone(),
             ticketd_cli: None,
             taken_over,

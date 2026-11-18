@@ -22,6 +22,7 @@ async fn open(fake: &FakeAdapter, generation: RuntimeGeneration) -> OpenedRuntim
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     })
     .await

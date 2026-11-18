@@ -56,6 +56,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -690,6 +691,7 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings {
             model: Some("gpt-b".to_owned()),
             effort: Some("high".to_owned()),
@@ -915,6 +917,7 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
         unattended: Some(unattended(false, false)),
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -943,6 +946,7 @@ async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
         unattended: Some(unattended(false, false)),
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     tokio::join!(open_over(io, &request, options()), peer.play()).0
@@ -998,6 +1002,7 @@ async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Pee
         unattended: Some(agent),
         ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -1326,6 +1331,7 @@ async fn a_taken_over_thread_is_resumed_with_its_configuration_read_first() {
         unattended: None,
         ticketd_cli: None,
         taken_over: true,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -1355,6 +1361,7 @@ async fn a_taken_over_chat_still_answers_the_ticketd_tool() {
         unattended: None,
         ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
         taken_over: true,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -1432,6 +1439,7 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     };
     let listing = Options {
