@@ -41,6 +41,7 @@ function identity(report: Omit<ErrorReport, "count">) {
 function describe(error: unknown, route: string): Omit<ErrorReport, "count"> {
   const isError = error instanceof Error;
   const name = isError && error.name ? error.name : "NonError";
+  // eslint-disable-next-line no-restricted-syntax -- the raw text goes to the log, not to a person
   const message = isError ? error.message : String(error);
   const header = `${name}: ${message}`;
   const frames = (isError ? (error.stack ?? "") : "")
@@ -74,10 +75,7 @@ export function installErrorReporter(options: Options = {}): ErrorReporter {
       const time = now();
       const kind = kinds.get(key) ?? { sentAt: -Infinity, held: 0 };
       sentAt = sentAt.filter((at) => time - at < WINDOW_MS);
-      if (
-        time - kind.sentAt < WINDOW_MS ||
-        sentAt.length >= MAX_PER_WINDOW
-      ) {
+      if (time - kind.sentAt < WINDOW_MS || sentAt.length >= MAX_PER_WINDOW) {
         kind.held += 1;
         kinds.delete(key);
         kinds.set(key, kind);
@@ -90,8 +88,7 @@ export function installErrorReporter(options: Options = {}): ErrorReporter {
         void Promise.resolve(send({ ...described, count })).catch(() => {});
       }
       const oldest = kinds.keys().next().value;
-      if (kinds.size > MAX_KINDS && oldest !== undefined)
-        kinds.delete(oldest);
+      if (kinds.size > MAX_KINDS && oldest !== undefined) kinds.delete(oldest);
     } catch {
       // Reporting is best effort.
     }
