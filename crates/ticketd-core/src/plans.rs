@@ -67,12 +67,21 @@ pub(crate) fn ensure_active(connection: &Connection, id: &str) -> Result<Plan, E
     }
     Ok(plan)
 }
+/// The longest Plan name accepted, matching the bound context output gives names.
+const MAX_NAME: usize = 256;
+fn valid_name(name: &str) -> Result<&str, Error> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::EmptyPlanName);
+    }
+    if name.chars().count() > MAX_NAME {
+        return Err(Error::PlanNameTooLong(MAX_NAME));
+    }
+    Ok(name)
+}
 impl Workspace {
     pub fn create_plan(&mut self, name: &str) -> Result<Plan, Error> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(Error::EmptyPlanName);
-        }
+        let name = valid_name(name)?;
         let id = Uuid::new_v4().to_string();
         self.connection.execute(
             "INSERT INTO plans (id, name) VALUES (?1, ?2)",
@@ -86,13 +95,14 @@ impl Workspace {
         name: Option<&str>,
         archived: Option<bool>,
     ) -> Result<Plan, Error> {
-        let name = name.map(str::trim);
-        if name == Some("") {
-            return Err(Error::EmptyPlanName);
-        }
+        let name = name.map(valid_name).transpose()?;
         // The archived check and the write share one locked transaction.
         crate::write_scope::run(&self.connection, |scope| {
             let current = get(scope, id)?;
+            // Archiving an archived Plan, like reactivating an active one, changes nothing.
+            if current.archived && archived == Some(true) && name.is_none() {
+                return Ok(current);
+            }
             if current.archived && archived != Some(false) {
                 return Err(Error::PlanArchived);
             }
@@ -244,8 +254,8 @@ impl Workspace {
                 stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": r.get::<_, String>(0)?, "dependent": r.get::<_, String>(1)?})))?.collect::<Result<Vec<_>, _>>()?
             };
             let documents = {
-                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
-                stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document read {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
+                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 AND d.trashed = 0 THEN substr(d.body, 1, 4096) ELSE NULL END, ?2 AND d.trashed = 0 AND length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
+                stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": r.get::<_, bool>(4)?, "fetch": format!("ticketd document read {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
             };
             Ok(serde_json::json!({
                 "plan": {"id": plan.id, "name": plan.name.chars().take(256).collect::<String>(), "purpose": plan.purpose.chars().take(4096).collect::<String>(), "archived": plan.archived, "spec_document_id": plan.spec_document_id, "name_truncated": plan.name.chars().count() > 256, "purpose_truncated": plan.purpose.chars().count() > 4096},

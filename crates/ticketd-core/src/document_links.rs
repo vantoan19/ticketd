@@ -25,6 +25,8 @@ pub struct DocumentBacklink {
     pub source_reference: String,
     pub source_title: String,
     pub passage: String,
+    /// The mentioning ticket is in Trash.
+    pub source_trashed: bool,
 }
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
@@ -299,17 +301,27 @@ fn index_text(
     Ok(())
 }
 
+/// The Markdown options headings and excerpts are derived with. YAML front matter is its own
+/// block, so what it declares is metadata, not the Document's first line.
+pub(crate) const HEADING_OPTIONS: pulldown_cmark::Options =
+    pulldown_cmark::Options::ENABLE_STRIKETHROUGH
+        .union(pulldown_cmark::Options::ENABLE_TASKLISTS)
+        .union(pulldown_cmark::Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+
 /// The first plain-text line of Markdown: markers, emphasis and link syntax removed, whitespace
-/// collapsed, at most 120 characters. This is the one rule for a Document's derived heading.
+/// collapsed, at most 120 characters. A leading byte order mark and YAML front matter are not
+/// part of the text. This is the one rule for a Document's derived heading.
 pub fn derive_heading(markdown: &str) -> Option<String> {
     const MAX: usize = 120;
+    let markdown = markdown.strip_prefix('\u{feff}').unwrap_or(markdown);
     let mut line = String::new();
     let mut found = None;
-    for event in Parser::new_ext(
-        markdown,
-        pulldown_cmark::Options::ENABLE_STRIKETHROUGH | pulldown_cmark::Options::ENABLE_TASKLISTS,
-    ) {
+    let mut in_metadata = false;
+    for event in Parser::new_ext(markdown, HEADING_OPTIONS) {
         match event {
+            Event::Start(Tag::MetadataBlock(_)) => in_metadata = true,
+            Event::End(TagEnd::MetadataBlock(_)) => in_metadata = false,
+            _ if in_metadata => {}
             Event::Text(text)
             | Event::Code(text)
             | Event::InlineMath(text)
@@ -543,13 +555,14 @@ impl Workspace {
     ) -> Result<Vec<DocumentBacklink>, Error> {
         self.read(|_| {
         self.show_document(id)?;
-        let mut statement = self.connection.prepare(&format!("SELECT t.reference, t.title, m.passage FROM {DOCUMENT_MENTIONS} m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3"))?;
+        let mut statement = self.connection.prepare(&format!("SELECT t.reference, t.title, m.passage, t.trashed FROM {DOCUMENT_MENTIONS} m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 AND m.explicit = 0 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3"))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(DocumentBacklink {
                     source_reference: r.get::<_, String>(0)?,
                     source_title: r.get(1)?,
                     passage: r.get(2)?,
+                    source_trashed: r.get(3)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

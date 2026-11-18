@@ -138,7 +138,9 @@ impl Error {
             | Self::LegacyEffortWorkspace
             | Self::Serialization(_)
             | Self::InvalidBatch(_)
+            | Self::InvalidGraphRequest(_)
             | Self::EmptyPlanName
+            | Self::PlanNameTooLong(_)
             | Self::AmbiguousProject
             | Self::CheckoutTaken(_)
             | Self::InvalidCheckoutPath

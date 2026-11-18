@@ -25,9 +25,12 @@ fn an_explicit_reference_leaves_the_description_alone_and_shows_in_every_context
     let incoming = workspace.context_backlinks(&document.id, 100, 0).unwrap();
     assert_eq!(incoming.len(), 1);
     assert_eq!(incoming[0].source_label, ticket.reference);
-    assert_eq!(
-        workspace.document_backlinks(&document.id, 100, 0).unwrap()[0].source_reference,
-        ticket.reference
+    // An attachment is a reference, not a mention: only the incoming list shows it.
+    assert!(
+        workspace
+            .document_backlinks(&document.id, 100, 0)
+            .unwrap()
+            .is_empty()
     );
     let graph = workspace.context_graph(&ticket.reference, true).unwrap();
     assert!(

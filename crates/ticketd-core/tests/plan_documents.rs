@@ -304,3 +304,55 @@ fn metadata_projection_omits_bodies_and_bounds_prerequisites_without_changing_le
             .is_err()
     );
 }
+
+#[test]
+fn plan_context_marks_a_trashed_document_and_leaves_out_its_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
+    let doc = workspace
+        .create_document(Some("Old"), "secret text")
+        .unwrap();
+    workspace
+        .set_plan_document(&plan.id, &doc.id, true)
+        .unwrap();
+    workspace.set_document_trashed(&doc.id, true).unwrap();
+    let context = workspace.plan_context(&plan.id, true).unwrap();
+    assert_eq!(context["documents"][0]["trashed"], true);
+    assert!(context["documents"][0]["body"].is_null());
+    assert_eq!(context["documents"][0]["body_truncated"], false);
+}
+
+#[test]
+fn plan_names_are_bounded_and_archive_is_as_idempotent_as_reactivate() {
+    use ticketd_core::Error;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert!(matches!(
+        workspace.create_plan(&"n".repeat(257)),
+        Err(Error::PlanNameTooLong(256))
+    ));
+    let plan = workspace
+        .create_plan(&format!("  {}  ", "n".repeat(256)))
+        .unwrap();
+    assert_eq!(plan.name.chars().count(), 256);
+    assert!(matches!(
+        workspace.change_plan(&plan.id, Some(&"n".repeat(257)), None),
+        Err(Error::PlanNameTooLong(256))
+    ));
+    workspace.change_plan(&plan.id, None, Some(true)).unwrap();
+    let again = workspace.change_plan(&plan.id, None, Some(true)).unwrap();
+    assert!(again.archived);
+    // Renaming an archived Plan is still a change it refuses.
+    assert!(matches!(
+        workspace.change_plan(&plan.id, Some("New"), Some(true)),
+        Err(Error::PlanArchived)
+    ));
+    workspace.change_plan(&plan.id, None, Some(false)).unwrap();
+    assert!(
+        !workspace
+            .change_plan(&plan.id, None, Some(false))
+            .unwrap()
+            .archived
+    );
+}

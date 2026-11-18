@@ -238,8 +238,12 @@ pub enum Error {
     },
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
+    #[error("invalid graph request: {0}")]
+    InvalidGraphRequest(String),
     #[error("plan name must not be empty")]
     EmptyPlanName,
+    #[error("plan name must be at most {0} characters")]
+    PlanNameTooLong(usize),
     #[error("plan '{0}' was not found")]
     PlanNotFound(String),
     #[error(
