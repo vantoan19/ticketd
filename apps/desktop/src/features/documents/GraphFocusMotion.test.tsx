@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -23,6 +24,8 @@ import { ContextGraphCanvas } from "./ContextGraphCanvas";
 type Flow = {
   nodes: { id: string; className?: string }[];
   edges: { id: string; className?: string }[];
+  viewport?: unknown;
+  onMoveStart?: ((event: unknown) => void) | undefined;
 };
 const flow: Flow = { nodes: [], edges: [] };
 const instance = {
@@ -38,6 +41,8 @@ vi.mock("@xyflow/react", () => ({
   ReactFlow: (props: Flow & { onInit: (value: unknown) => void }) => {
     flow.nodes = props.nodes;
     flow.edges = props.edges;
+    flow.viewport = props.viewport;
+    flow.onMoveStart = props.onMoveStart;
     props.onInit(instance);
     return <div>Canvas</div>;
   },
@@ -170,3 +175,60 @@ test.each([
   await waitFor(() => expect(instance.setCenter).toHaveBeenCalled());
   expect(instance.setCenter.mock.calls[0]![2].duration).toBe(0);
 });
+
+// React Flow hands a controlled viewport back after every frame of a glide, one
+// render behind, and snaps the view to it: the glide ends after a step. So the
+// canvas leaves the viewport out while it glides (useViewportGlide).
+test("while the view glides the canvas leaves its viewport to React Flow, and takes it back on arrival", async () => {
+  let arrive: () => void = () => {};
+  instance.setCenter.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      arrive = resolve;
+    }),
+  );
+  render(canvas({ focusId: "a", centerOn: "a" }));
+  await waitFor(() => expect(instance.setCenter).toHaveBeenCalled());
+  await waitFor(() => expect(flow.viewport).toBeUndefined());
+  await act(async () => arrive());
+  await waitFor(() => expect(flow.viewport).toEqual({ x: 0, y: 0, zoom: 1 }));
+});
+
+test("a person's own pan or zoom hands the viewport back before the glide ends", async () => {
+  instance.setCenter.mockReturnValueOnce(new Promise<void>(() => {}));
+  render(canvas({ focusId: "a", centerOn: "a" }));
+  await waitFor(() => expect(flow.viewport).toBeUndefined());
+  act(() => flow.onMoveStart?.(new Event("wheel")));
+  await waitFor(() => expect(flow.viewport).toEqual({ x: 0, y: 0, zoom: 1 }));
+});
+
+test("a Fit that is interrupted still hands the viewport back", async () => {
+  vi.useFakeTimers();
+  try {
+    instance.fitView.mockReturnValueOnce(new Promise<void>(() => {}));
+    render(canvas({ focusId: "a" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(flow.viewport).toBeUndefined();
+    // A glide cut off by another never reports its end; the glide's time plus
+    // a short grace gives the viewport back.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(flow.viewport).toEqual({ x: 0, y: 0, zoom: 1 });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each([
+  ["reduced motion", reducedTokens],
+  ["a held key", instantTokens],
+])(
+  "under %s the viewport stays controlled: a jump has nothing to cut short",
+  async (_name, tokens) => {
+    restoreTokens();
+    restoreTokens = applyTokens({ ...rootTokens, ...tokens });
+    render(canvas({ focusId: "a", centerOn: "a" }));
+    await waitFor(() => expect(instance.setCenter).toHaveBeenCalled());
+    expect(flow.viewport).toEqual({ x: 0, y: 0, zoom: 1 });
+  },
+);
