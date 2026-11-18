@@ -60,6 +60,8 @@ let runUnreadable: string | null = null;
 let agentUnsavable: string | null = null;
 /** While set, a save of an agent waits for it before it is answered. */
 let agentSaveHeld: Promise<void> | null = null;
+/** While set, only a save of an agent with this model is refused. */
+let agentUnsavableModel: string | null = null;
 beforeEach(() => {
   stored = [];
   automations = [];
@@ -67,6 +69,7 @@ beforeEach(() => {
   runUnreadable = null;
   agentUnsavable = null;
   agentSaveHeld = null;
+  agentUnsavableModel = null;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { id, settings, example } = (args ?? {}) as {
       id?: string;
@@ -121,7 +124,11 @@ beforeEach(() => {
       }
       case "automation_agent_update": {
         // Refused or not as things stood when it was sent.
-        const refused = agentUnsavable;
+        const refused =
+          agentUnsavableModel === null ||
+          settings?.model === agentUnsavableModel
+            ? agentUnsavable
+            : null;
         if (agentSaveHeld) await agentSaveHeld;
         if (refused) throw new Error(refused);
         const agent = { ...settings, id } as AutomationAgent;
@@ -952,15 +959,17 @@ test("a failed save after quick saves of its own that worked is not taken for a 
   await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   let answer = () => {};
   agentSaveHeld = new Promise((resolve) => (answer = resolve));
-  // Typed fast: the first saves are still on their way when the last is sent.
+  // Typed fast: the last is typed while the first is still on its way, and
+  // the desktop takes them in turn.
+  agentUnsavable = "the workspace is busy";
+  agentUnsavableModel = "FAILME";
   fireEvent.change(model, { target: { value: "F" } });
   fireEvent.change(model, { target: { value: "FA" } });
-  agentUnsavable = "the workspace is busy";
   fireEvent.change(model, { target: { value: "FAILME" } });
   await act(async () => answer());
+  await screen.findByText(/Your last change to the agent was not saved/);
   agentSaveHeld = null;
   agentUnsavable = null;
-  await screen.findByText(/Your last change to the agent was not saved/);
   expect(screen.queryByText("Changed somewhere else")).toBeNull();
 
   // The page reads again and finds what this form's own saves stored.

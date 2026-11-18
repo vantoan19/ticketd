@@ -18,7 +18,8 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "error",
       "react-refresh/only-export-components": [
         "error",
-        { allowConstantExport: true },
+        // lazyView wraps a component, as memo does.
+        { allowConstantExport: true, extraHOCs: ["lazyView"] },
       ],
     },
   },

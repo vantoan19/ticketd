@@ -17,6 +17,7 @@
 //! atomic, identity-unique and ignores observations older than what it holds.
 
 use std::{
+    borrow::BorrowMut,
     sync::{Arc, Condvar, Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -213,24 +214,28 @@ impl RefreshCoordinator {
     /// One scheduled tick against a workspace opened on demand, so nothing is
     /// held between ticks. The first tick of a process also honors a rate-limit
     /// hold persisted by earlier runs.
-    pub fn tick(
+    pub fn tick<W: BorrowMut<Workspace>>(
         &self,
         engine: &Engine,
-        open: &dyn Fn() -> Result<Workspace, Error>,
+        open: &dyn Fn() -> Result<W, Error>,
     ) -> Result<Run<RefreshReport>, Error> {
         self.load_hold(open)?;
-        self.run_if_due(|| open()?.refresh_sources(engine, &RefreshOptions::default()))
+        self.run_if_due(|| {
+            open()?
+                .borrow_mut()
+                .refresh_sources(engine, &RefreshOptions::default())
+        })
     }
 
     /// An explicit refresh of everything, or of one ticket by reference.
-    pub fn refresh_now(
+    pub fn refresh_now<W: BorrowMut<Workspace>>(
         &self,
         engine: &Engine,
-        open: &dyn Fn() -> Result<Workspace, Error>,
+        open: &dyn Fn() -> Result<W, Error>,
         ticket: Option<&str>,
     ) -> Result<RefreshReport, Error> {
         self.run_explicit(ticket.is_none(), || {
-            open()?.refresh_sources(
+            open()?.borrow_mut().refresh_sources(
                 engine,
                 &RefreshOptions {
                     ticket: ticket.map(str::to_owned),
@@ -240,11 +245,14 @@ impl RefreshCoordinator {
         })
     }
 
-    fn load_hold(&self, open: &dyn Fn() -> Result<Workspace, Error>) -> Result<(), Error> {
+    fn load_hold<W: BorrowMut<Workspace>>(
+        &self,
+        open: &dyn Fn() -> Result<W, Error>,
+    ) -> Result<(), Error> {
         if self.lock().hold_loaded {
             return Ok(());
         }
-        let hold = open()?.source_hold_until()?;
+        let hold = open()?.borrow_mut().source_hold_until()?;
         let mut state = self.lock();
         if !state.hold_loaded {
             state.hold_loaded = true;

@@ -322,6 +322,8 @@ const LAYER =
   '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
 /** An Esc this soon after one that closed a layer never stops the turn. */
 const ESC_AFTER_LAYER_MS = 1000;
+/** How long scrolling pauses before what was read through is kept. */
+const READ_THROUGH_MS = 250;
 
 function Conversation({
   snapshot,
@@ -569,11 +571,28 @@ function Conversation({
     if (after) return after;
     return chat.unseen ? unseenFrom(items) : undefined;
   });
+  // The host keeps the furthest item read; while the person scrolls, one write
+  // per pause is enough, and leaving the Chat sends what is still waiting.
+  const readThrough = useRef<{ item?: string | undefined; timer?: number }>({});
+  useEffect(() => {
+    const pending = readThrough.current;
+    return () => {
+      window.clearTimeout(pending.timer);
+      if (pending.item)
+        void client.readThrough(id, pending.item).catch(() => {});
+      pending.item = undefined;
+    };
+  }, [client, id]);
   const { root, content, marker, following, reading, follow, onScroll } =
-    useTranscriptScroll(
-      id,
-      (itemId) => void client.readThrough(id, itemId).catch(() => {}),
-    );
+    useTranscriptScroll(id, (itemId) => {
+      const pending = readThrough.current;
+      pending.item = itemId;
+      window.clearTimeout(pending.timer);
+      pending.timer = window.setTimeout(() => {
+        pending.item = undefined;
+        void client.readThrough(id, itemId).catch(() => {});
+      }, READ_THROUGH_MS);
+    });
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
     follow();

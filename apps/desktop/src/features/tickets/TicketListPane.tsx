@@ -650,7 +650,8 @@ function ListOverlays({ children }: { children: ReactNode }) {
         : new ResizeObserver(measure);
     observer?.observe(element);
     return () => observer?.disconnect();
-  });
+    // Measured once on mount; the observer follows every later size change.
+  }, []);
   return (
     <div className="ticket-list-overlays" ref={ref}>
       {children}

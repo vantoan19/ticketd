@@ -21,6 +21,12 @@
   margin: 0 8px;
   padding: 0 10px 0 4px;
 }
+/* Rows out of view skip layout and paint; the margin keeps focus rings unclipped. */
+.ticket-rows > li:not(.ticket-group-header) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 36px;
+  overflow-clip-margin: 8px;
+}
 .ticket-list .ticket-row {
   display: grid;
   grid-template-columns: 26px 62px minmax(0, 1fr) 168px 140px 152px 44px;

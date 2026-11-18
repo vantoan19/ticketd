@@ -325,6 +325,16 @@ export function reported<T>(
   );
 }
 
+// Edits are sent one at a time, in the order they were made: the desktop runs
+// commands side by side, so a keystroke saved while the one before it is still
+// on its way could otherwise be overwritten by it.
+let edits: Promise<unknown> = Promise.resolve();
+function inOrder<T>(edit: () => Promise<T>): Promise<T> {
+  const sent = edits.then(edit);
+  edits = sent.catch(() => {});
+  return sent;
+}
+
 export const automationsClient = {
   async automations(): Promise<Automation[]> {
     return z.array(automationSchema).parse(await invoke("automation_list"));
@@ -358,7 +368,9 @@ export const automationsClient = {
     typing: boolean,
   ): Promise<Automation> {
     return automationSchema.parse(
-      await invoke("automation_update", { id, definition, typing }),
+      await inOrder(() =>
+        invoke("automation_update", { id, definition, typing }),
+      ),
     );
   },
   async deleteAutomation(id: string): Promise<void> {
@@ -370,7 +382,7 @@ export const automationsClient = {
     enabled: boolean,
   ): Promise<Automation> {
     return automationSchema.parse(
-      await invoke("automation_set_enabled", { id, enabled }),
+      await inOrder(() => invoke("automation_set_enabled", { id, enabled })),
     );
   },
   /**
@@ -379,7 +391,7 @@ export const automationsClient = {
    */
   async stopAndTurnOff(id: string): Promise<Automation> {
     return automationSchema.parse(
-      await invoke("automation_stop_and_turn_off", { id }),
+      await inOrder(() => invoke("automation_stop_and_turn_off", { id })),
     );
   },
   /**
@@ -392,7 +404,7 @@ export const automationsClient = {
       .parse(await invoke("automation_runs_at_once"));
   },
   async setRunsAtOnce(runs: number): Promise<void> {
-    await invoke("set_automation_runs_at_once", { runs });
+    await inOrder(() => invoke("set_automation_runs_at_once", { runs }));
   },
   /** Whether the system starts ticketd when the person signs in. */
   async startsAtLogin(): Promise<boolean> {
@@ -482,7 +494,7 @@ export const automationsClient = {
     settings: AutomationAgentSettings,
   ): Promise<AutomationAgent> {
     return automationAgentSchema.parse(
-      await invoke("automation_agent_update", { id, settings }),
+      await inOrder(() => invoke("automation_agent_update", { id, settings })),
     );
   },
   async deleteAgent(id: string): Promise<void> {

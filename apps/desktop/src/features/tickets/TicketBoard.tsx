@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useRef,
@@ -106,7 +107,13 @@ export function TicketBoard({
     workspace.plan !== workspace.navigation.plan ||
     workspace.availability,
   );
-  const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
+  const {
+    board: boardRef,
+    preview,
+    drag,
+    start,
+    open,
+  } = useBoardDrag(workspace);
   const statusLine = useStatusLine();
   const { notice, noticeUndo, dismissNotice } = statusAction;
   useEffect(() => {
@@ -264,12 +271,26 @@ export function TicketBoard({
         )
         ?.focus();
   }, [lengthKey, workspace.board.columns, boardRef]);
+  // Cards are memoized, so what they call is the same object on every render.
+  const latest = useRef({ statusAction, start, open, onOpen });
+  useEffect(() => {
+    latest.current = { statusAction, start, open, onOpen };
+  });
+  const [cardActions] = useState<CardActions>(() => ({
+    pointerDown: (event, ticket) => latest.current.start(event, ticket),
+    click: (event, reference) => {
+      if (Date.now() < guardUntil.current) return;
+      if (latest.current.open(event.currentTarget, event.detail))
+        latest.current.onOpen(reference);
+    },
+    choose: (ticket, status) =>
+      void latest.current.statusAction.choose(ticket, status),
+    retry: (reference) => latest.current.statusAction.retry(reference),
+  }));
   // Choosing Board: the columns fade up left to right.
   const columnEnter = columnArrivals(workspace.board.columns.length);
-  // The smooth spring, read once for the render and handed to every card: a
-  // drag re-renders the board on each pointer move, and a card reading its own
-  // tokens would cost a style read per card. It is not kept between renders, so
-  // a held key still reaches the next motion.
+  // Read the spring once for all cards and columns. Held keys and reduced
+  // motion change the tokens for the next motion.
   const smooth = spring("smooth");
   // Columns that open or fold move the ones after them (see layoutDependency).
   const unfoldedKey = [...unfolded].join(",");
@@ -436,18 +457,14 @@ export function TicketBoard({
               }
               flying={flights.some((f) => f.reference === ticket.reference)}
               arrival={arrivals.get(ticket.reference)}
-              workspace={workspace}
-              scope={scope}
+              {...scope}
               smooth={smooth}
               selected={workspace.selected === ticket.reference}
               dragging={drag?.ticket.reference === ticket.reference}
               needsReview={needsReview.has(ticket.id)}
-              onPointerDown={(event) => start(event, ticket)}
-              onClick={(event) => {
-                if (Date.now() < guardUntil.current) return;
-                if (open(event.currentTarget, event.detail))
-                  onOpen(ticket.reference);
-              }}
+              pending={statusAction.pending.has(ticket.reference)}
+              failure={statusAction.failures[ticket.reference]}
+              actions={cardActions}
             />
           ));
           for (const [reference, move] of slots.sort(
@@ -591,28 +608,32 @@ export function TicketBoard({
       {drag && (
         <>
           <Card
+            ref={preview}
             variant="lift"
             data-board-drag-preview=""
             data-board-drag-reference={drag.ticket.reference}
             aria-hidden="true"
             inert
-            style={{
-              left: drag.x - drag.offsetX,
-              top: drag.y - drag.offsetY,
-              width: drag.width,
-            }}
+            style={
+              {
+                // Later moves set these directly (useBoardDrag), without a render.
+                "--drag-x": `${drag.x - drag.offsetX}px`,
+                "--drag-y": `${drag.y - drag.offsetY}px`,
+                width: drag.width,
+              } as CSSProperties
+            }
           >
             <BoardCard
               copy
               ticket={drag.ticket}
-              workspace={workspace}
-              scope={scope}
+              {...scope}
               smooth={smooth}
               selected={false}
               dragging={false}
               needsReview={needsReview.has(drag.ticket.id)}
-              onPointerDown={() => {}}
-              onClick={() => {}}
+              pending={false}
+              failure={undefined}
+              actions={previewActions}
             />
           </Card>
           <p className="sr-only" role="status">
@@ -640,14 +661,14 @@ export function TicketBoard({
                 <BoardCard
                   copy
                   ticket={ticket}
-                  workspace={workspace}
-                  scope={scope}
+                  {...scope}
                   smooth={smooth}
                   selected={false}
                   dragging={false}
                   needsReview={needsReview.has(ticket.id)}
-                  onPointerDown={() => {}}
-                  onClick={() => {}}
+                  pending={statusAction.pending.has(ticket.reference)}
+                  failure={statusAction.failures[ticket.reference]}
+                  actions={previewActions}
                 />
               </Card>
             </FlightCard>
@@ -679,32 +700,55 @@ function ContextIcon({ kind }: { kind: RowContextKind }) {
  * status trigger appears on hover or focus; pending and failure live on the
  * card itself.
  */
-function BoardCard({
+type CardActions = {
+  pointerDown: (
+    event: React.PointerEvent<HTMLButtonElement>,
+    ticket: Ticket,
+  ) => void;
+  click: (
+    event: React.MouseEvent<HTMLButtonElement>,
+    reference: string,
+  ) => void;
+  choose: (ticket: Ticket, status: string) => void;
+  retry: (reference: string) => void;
+};
+/** The drag preview is a picture of the card: it does nothing. */
+const previewActions: CardActions = {
+  pointerDown: () => {},
+  click: () => {},
+  choose: () => {},
+  retry: () => {},
+};
+
+const BoardCard = memo(function BoardCard({
   ticket,
-  workspace,
-  scope,
+  showPlan,
+  showProject,
+  plans,
+  projects,
   smooth,
   selected,
   dragging,
   needsReview,
-  onPointerDown,
-  onClick,
+  pending,
+  failure,
+  actions,
   copy = false,
   place,
   fresh = false,
   flying = false,
   arrival,
-}: {
+}: Parameters<typeof rowContextItem>[1] & {
   ticket: Ticket;
-  workspace: TicketWorkspace;
-  scope: Parameters<typeof rowContextItem>[1];
   /** The smooth spring the board read for this render. */
   smooth: ReturnType<typeof spring>;
   selected: boolean;
   dragging: boolean;
   needsReview: boolean;
-  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Its status change is saving. */
+  pending: boolean;
+  failure: TicketWorkspace["statusAction"]["failures"][string] | undefined;
+  actions: CardActions;
   /** A picture of the card in the air (the drag, a flight): it stays still. */
   copy?: boolean;
   /** Where the card sits (column and place in it); glides when it changes. */
@@ -716,7 +760,6 @@ function BoardCard({
   /** Counts each time the card lands, to play the arrival fill. */
   arrival?: number | undefined;
 }) {
-  const { statusAction } = workspace;
   // How a card that arrived enters, fixed when it mounts. No motion means no
   // entrance: a card is never left collapsed for a frame.
   const [entrance] = useState(() =>
@@ -745,9 +788,12 @@ function BoardCard({
           : "";
   const source = externalSource(ticket);
   const state = readiness(ticket);
-  const context = rowContextItem(ticket, scope);
-  const pending = statusAction.pending.has(ticket.reference);
-  const failure = statusAction.failures[ticket.reference];
+  const context = rowContextItem(ticket, {
+    showPlan,
+    showProject,
+    plans,
+    projects,
+  });
   return (
     <TakesItsInitial>
       <m.div
@@ -771,10 +817,10 @@ function BoardCard({
           size="card"
           data-board-reference={ticket.reference}
           aria-pressed={selected}
-          onPointerDown={onPointerDown}
+          onPointerDown={(event) => actions.pointerDown(event, ticket)}
           onDragStart={(event) => event.preventDefault()}
           aria-keyshortcuts={ariaKeyShortcuts("board-move")}
-          onClick={onClick}
+          onClick={(event) => actions.click(event, ticket.reference)}
         >
           <Arrival {...arrivedAt(arrival, entrance && entered)} />
           {failure && (
@@ -874,9 +920,7 @@ function BoardCard({
               <DropdownMenuLabel>Status</DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={ticket.status}
-                onValueChange={(status) =>
-                  void statusAction.choose(ticket, status)
-                }
+                onValueChange={(status) => actions.choose(ticket, status)}
               >
                 {ticketStatuses.map((choice) => (
                   <DropdownMenuRadioItem
@@ -907,14 +951,14 @@ function BoardCard({
               retryLabel={`Retry status change for ${ticket.reference}`}
               detailsVariant="popover"
               detailsIconOnly
-              onRetry={() => statusAction.retry(ticket.reference)}
+              onRetry={() => actions.retry(ticket.reference)}
             />
           </div>
         )}
       </m.div>
     </TakesItsInitial>
   );
-}
+});
 
 /** The arrival fill plays after a flight lands, or after an entrance. */
 function arrivedAt(landed: number | undefined, entered: boolean | null) {

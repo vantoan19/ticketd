@@ -9,6 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { Profiler } from "react";
 import { App } from "@/app/App";
 import type { FindFilter, Ticket, TicketSource } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
@@ -447,6 +448,36 @@ test("pointer dragging into an empty column saves through the card status action
   expect(
     screen.queryByRole("button", { name: "Close ticket details" }),
   ).toBeNull();
+});
+
+test("pointer moves within one column move only the preview; React commits only when the target changes", async () => {
+  let commits = 0;
+  render(
+    <Profiler id="app" onRender={() => (commits += 1)}>
+      <App />
+    </Profiler>,
+  );
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(400);
+  expect(
+    screen.getByText("Drop to change status to In progress."),
+  ).toBeTruthy();
+  const before = commits;
+  for (let x = 401; x < 431; x++) movePointer(x, 120);
+  expect(commits).toBe(before);
+  const preview = document.querySelector<HTMLElement>(
+    "[data-board-drag-preview]",
+  )!;
+  // The preview follows the pointer, less where the card was grabbed (x 100 → 0).
+  expect(preview.style.getPropertyValue("--drag-x")).toBe("330px");
+  expect(preview.style.getPropertyValue("--drag-y")).toBe("20px");
+  movePointer(700);
+  expect(commits).toBeGreaterThan(before);
+  expect(screen.getByText("Drop to change status to In review.")).toBeTruthy();
+  releasePointer(-50);
 });
 
 test("same-column and outside drops, Escape and pointer cancellation preserve saved state and focus", async () => {

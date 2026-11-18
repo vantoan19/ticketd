@@ -9,7 +9,7 @@ use std::{
 };
 
 use ticketd_core::{
-    Error, Workspace,
+    Error, Workspace, WorkspaceGuard,
     sync::{MIN_POLL_INTERVAL_SECS, SyncItem, SyncRecovery, SyncStatus, remote::RemoteStorage},
 };
 
@@ -36,7 +36,7 @@ pub struct Binding {
     pub remote: Arc<dyn RemoteStorage>,
 }
 
-type Open = dyn Fn() -> Result<Workspace, Error> + Send + Sync;
+type Open = dyn Fn() -> Result<WorkspaceGuard, Error> + Send + Sync;
 /// `None` while the Workspace is not connected to a folder.
 type Bound = dyn Fn(&Workspace) -> Result<Option<Binding>, Error> + Send + Sync;
 /// What the Workspace needs now and then whether or not it syncs, such as
@@ -103,7 +103,7 @@ impl Scheduler {
     }
 
     pub fn binding(&self) -> Result<Option<Binding>, Error> {
-        (self.binding)(&(self.open)()?)
+        (self.binding)(&*(self.open)()?)
     }
 
     /// Keeps sync away from the Workspace while the caller replaces its file:
@@ -163,6 +163,21 @@ impl Scheduler {
             .map(Some)
     }
 
+    /// How long the loop may sleep before a tick has something to do: the next
+    /// poll, upload or upkeep, and never more than [`crate::wake::IDLE`]. A local
+    /// change or a request wakes it sooner.
+    pub fn until_due(&self, now: Duration) -> Duration {
+        let mut next = lock(&self.upkeep_at).0.min(now + crate::wake::IDLE);
+        let watch = lock(&self.watch);
+        if watch.connected {
+            let runs = watch
+                .upload_at
+                .map_or(watch.poll_at, |at| at.min(watch.poll_at));
+            next = next.min(runs.max(watch.not_before));
+        }
+        next.saturating_sub(now)
+    }
+
     /// Runs the upkeep when it is due. A failure is tried again after
     /// [`UPKEEP_RETRY`] and never holds up sync.
     fn keep_up(&self, workspace: &mut Workspace, now: Duration) {
@@ -208,7 +223,7 @@ impl Scheduler {
     /// the network.
     fn run(
         &self,
-        workspace: Result<Workspace, Error>,
+        workspace: Result<WorkspaceGuard, Error>,
         binding: &Binding,
         now: Duration,
         run: Run,
@@ -260,8 +275,9 @@ impl Scheduler {
         Ok((status.pending_uploads, status.pending_total))
     }
 
-    /// Starts sync for as long as the app runs: `at_launch` once, then asks
-    /// every second whether a run is due.
+    /// Starts sync for as long as the app runs: `at_launch` once, then a tick
+    /// whenever one may be due, or something it follows changed (see
+    /// [`crate::wake`]).
     pub fn start(self: Arc<Self>, started: Instant, at_launch: impl FnOnce() + Send + 'static) {
         let spawned = std::thread::Builder::new()
             .name("workspace-sync".into())
@@ -269,6 +285,7 @@ impl Scheduler {
                 at_launch();
                 // Said once on stderr, and again only if it changes or comes back.
                 let mut reported: Option<String> = None;
+                let mut seen = 0;
                 loop {
                     match self.tick(started.elapsed()) {
                         // Nothing was due: what was last said still stands.
@@ -281,9 +298,13 @@ impl Scheduler {
                                 eprintln!("Workspace sync could not run: {message}");
                             }
                             reported = message;
+                            // A run changed the status the interface is shown.
+                            if tick.is_ok() {
+                                crate::wake::CHANGED.notify();
+                            }
                         }
                     }
-                    std::thread::sleep(Duration::from_secs(1));
+                    crate::wake::CHANGED.wait(&mut seen, self.until_due(started.elapsed()));
                 }
             });
         if let Err(error) = spawned {
@@ -419,7 +440,7 @@ mod tests {
         let scheduler = Arc::new(Scheduler::new(
             Box::new(move || {
                 counted.fetch_add(1, Ordering::SeqCst);
-                Workspace::open(&open_path)
+                ticketd_core::WorkspaceSession::for_file(&open_path)?.workspace()
             }),
             Box::new(move |_| Ok(lock(&source).clone())),
             Box::new(move |_| {
@@ -507,6 +528,24 @@ mod tests {
         assert_eq!(desk.scheduler.tick(7 * SECOND).unwrap(), None);
     }
 
+    /// The loop sleeps until something is due, and no longer than the idle
+    /// fallback: a Workspace that does not sync is looked at twice a minute.
+    #[test]
+    fn waits_until_the_next_run_is_due_and_at_most_thirty_seconds() {
+        let desk = desk();
+        desk.bind(None);
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+        assert_eq!(desk.scheduler.until_due(Duration::ZERO), 30 * SECOND);
+
+        desk.bind(Some(desk.binding(MINUTE)));
+        assert!(desk.scheduler.tick(SECOND).unwrap().is_some());
+        assert_eq!(desk.scheduler.until_due(45 * SECOND), 16 * SECOND);
+
+        desk.workspace().create_ticket("Second").unwrap();
+        assert_eq!(desk.scheduler.tick(2 * SECOND).unwrap(), None);
+        assert_eq!(desk.scheduler.until_due(2 * SECOND), 3 * SECOND);
+    }
+
     #[test]
     fn a_refused_run_is_recorded_and_waits_for_the_next_poll() {
         let desk = desk();
@@ -562,10 +601,11 @@ mod tests {
     fn a_failed_upkeep_runs_again_after_a_minute() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workspace.sqlite3");
+        drop(Workspace::open(&path).unwrap());
         let attempts = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&attempts);
         let scheduler = Scheduler::new(
-            Box::new(move || Workspace::open(&path)),
+            Box::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
             Box::new(|_| Ok(None)),
             Box::new(move |_| match counted.fetch_add(1, Ordering::SeqCst) {
                 0 => Err(Error::NotFound("a busy Workspace".into())),

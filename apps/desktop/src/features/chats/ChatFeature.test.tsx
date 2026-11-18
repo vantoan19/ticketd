@@ -294,3 +294,14 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
     await screen.findByRole("heading", { name: "What should we work on?" }),
   ).toBeTruthy();
 });
+
+test("with Chat on, a clicked notification opens its Chat on the first visit to Chats", async () => {
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [{ chat: chatState({ id: "c1", title: "Limiter" }), items: [] }],
+  });
+  app(client);
+  await screen.findByRole("button", { name: "Chats" });
+  act(() => client.requestOpen({ chat_id: "c1", retention: "active" }));
+  expect(await screen.findByRole("heading", { name: "Limiter" })).toBeTruthy();
+});

@@ -36,7 +36,7 @@ pub(crate) fn prerequisites(
     } else {
         "tickets.number"
     };
-    let mut statement = connection.prepare(&format!("SELECT reference, title, status, trashed, tickets.number FROM dependencies JOIN tickets ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY {order} LIMIT ?2"))?;
+    let mut statement = connection.prepare_cached(&format!("SELECT reference, title, status, trashed, tickets.number FROM dependencies JOIN tickets ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY {order} LIMIT ?2"))?;
     let mut prerequisites = statement
         .query_map(
             params![ticket_id, limit.map(i64::from).unwrap_or(-1)],
@@ -67,14 +67,6 @@ pub(crate) fn prerequisites(
         .into_iter()
         .map(|(blocker, _)| blocker)
         .collect())
-}
-
-/// The prerequisites of a ticket. Its availability is not set here: a read of one ticket
-/// asks `readiness::indicator`, and a list selects `readiness::indicator_sql` with the
-/// tickets, so a list makes no readiness query per ticket.
-pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    ticket.prerequisites = prerequisites(connection, &ticket.id, None)?;
-    Ok(())
 }
 
 /// Whether `to` can be reached from `from` by following dependencies from a

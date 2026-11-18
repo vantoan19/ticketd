@@ -40,11 +40,8 @@ function bezier(name: string): Easing {
  * A `linear(...)` curve as a function. The springs are sampled evenly with
  * plain numbers and no stop positions, which is all this reads.
  */
-function sampled(name: string): Easing {
-  const stops = /^linear\(([^)]*)\)$/
-    .exec(token(name))?.[1]
-    ?.split(",")
-    .map(Number);
+function sampled(curve: string): Easing {
+  const stops = /^linear\(([^)]*)\)$/.exec(curve)?.[1]?.split(",").map(Number);
   if (!stops || stops.length < 2 || stops.some(Number.isNaN)) return "linear";
   const last = stops.length - 1;
   return (t) => {
@@ -57,12 +54,20 @@ function sampled(name: string): Easing {
 
 export type SpringName = "glide" | "smooth" | "travel";
 
+type Spring = { duration: number; ease: Easing };
+const springs = new Map<SpringName, { curve: string; transition: Spring }>();
+
 /** A no-bounce spring: settle time and curve, for `transition`. */
-export function spring(name: SpringName): { duration: number; ease: Easing } {
-  return {
-    duration: seconds(`--spring-${name}-t`),
-    ease: sampled(`--spring-${name}`),
-  };
+export function spring(name: SpringName): Spring {
+  const duration = seconds(`--spring-${name}-t`);
+  const curve = token(`--spring-${name}`);
+  const cached = springs.get(name);
+  // An unchanged spring does not invalidate the board's memoized cards.
+  if (cached?.curve === curve && cached.transition.duration === duration)
+    return cached.transition;
+  const transition = { duration, ease: sampled(curve) };
+  springs.set(name, { curve, transition });
+  return transition;
 }
 
 /** Opacity and blur of an entrance. */

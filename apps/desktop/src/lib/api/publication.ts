@@ -1,39 +1,46 @@
+import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 
 /** An external issue ticketd created or may have created. */
-const publishedIssueSchema = z.object({
-  identity: z.object({ provider: z.string(), id: z.string() }),
-  locator: z.string(),
-  display: z.string(),
-  url: z.string(),
-});
+const publishedIssueSchema = lazySchema(() =>
+  z.object({
+    identity: z.object({ provider: z.string(), id: z.string() }),
+    locator: z.string(),
+    display: z.string(),
+    url: z.string(),
+  }),
+);
 
 /** An issue in the destination that may be the one a publication created. */
-const publicationCandidateSchema = publishedIssueSchema.extend({
-  title: z.string(),
-  created_at: z.string(),
-  reason: z.enum(["content_match", "created_by_account"]),
-});
+const publicationCandidateSchema = lazySchema(() =>
+  publishedIssueSchema.extend({
+    title: z.string(),
+    created_at: z.string(),
+    reason: z.enum(["content_match", "created_by_account"]),
+  }),
+);
 export type PublicationCandidate = z.infer<typeof publicationCandidateSchema>;
 
 /**
  * One try at creating an external issue for a local ticket. `in_flight` and
  * `unresolved` mean the issue may exist and block publishing again.
  */
-export const publicationAttemptSchema = z.object({
-  id: z.string(),
-  reference: z.string(),
-  provider: z.string(),
-  destination: z.string(),
-  title: z.string(),
-  body: z.string(),
-  state: z.enum(["in_flight", "unresolved", "failed", "succeeded"]),
-  started_at: z.string(),
-  updated_at: z.string(),
-  failure: z.object({ code: z.string(), message: z.string() }).nullable(),
-  /** The created issue, when ticketd saw it but could not attach it. */
-  issue: publishedIssueSchema.nullable(),
-});
+export const publicationAttemptSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    reference: z.string(),
+    provider: z.string(),
+    destination: z.string(),
+    title: z.string(),
+    body: z.string(),
+    state: z.enum(["in_flight", "unresolved", "failed", "succeeded"]),
+    started_at: z.string(),
+    updated_at: z.string(),
+    failure: z.object({ code: z.string(), message: z.string() }).nullable(),
+    /** The created issue, when ticketd saw it but could not attach it. */
+    issue: publishedIssueSchema.nullable(),
+  }),
+);
 export type PublicationAttempt = z.infer<typeof publicationAttemptSchema>;
 
 /**
@@ -41,30 +48,32 @@ export type PublicationAttempt = z.infer<typeof publicationAttemptSchema>;
  * actions that are safe. `candidates_complete` is null when no search ran or it
  * failed (see `lookup_failure`); a failed search is never "nothing found".
  */
-export const publicationReviewSchema = z.object({
-  attempt: publicationAttemptSchema,
-  provider_name: z.string(),
-  known: z.array(z.string()),
-  unknown: z.string(),
-  note: z.string(),
-  actions: z.array(
-    z.object({
-      kind: z.enum(["attach", "not_created"]),
-      available: z.boolean(),
-      label: z.string(),
-      detail: z.string(),
-    }),
-  ),
-  candidates: z.array(publicationCandidateSchema),
-  /** Other issues the account created in the window: shown, never blocking. */
-  other_recent: z.array(publicationCandidateSchema),
-  candidates_complete: z.boolean().nullable(),
-  /** When a search first counts for a "not created" verdict (RFC 3339). */
-  search_ready_at: z.string().nullable(),
-  lookup_failure: z
-    .object({ code: z.string(), message: z.string() })
-    .nullable(),
-});
+export const publicationReviewSchema = lazySchema(() =>
+  z.object({
+    attempt: publicationAttemptSchema,
+    provider_name: z.string(),
+    known: z.array(z.string()),
+    unknown: z.string(),
+    note: z.string(),
+    actions: z.array(
+      z.object({
+        kind: z.enum(["attach", "not_created"]),
+        available: z.boolean(),
+        label: z.string(),
+        detail: z.string(),
+      }),
+    ),
+    candidates: z.array(publicationCandidateSchema),
+    /** Other issues the account created in the window: shown, never blocking. */
+    other_recent: z.array(publicationCandidateSchema),
+    candidates_complete: z.boolean().nullable(),
+    /** When a search first counts for a "not created" verdict (RFC 3339). */
+    search_ready_at: z.string().nullable(),
+    lookup_failure: z
+      .object({ code: z.string(), message: z.string() })
+      .nullable(),
+  }),
+);
 export type PublicationReview = z.infer<typeof publicationReviewSchema>;
 
 export type PublicationResolution =

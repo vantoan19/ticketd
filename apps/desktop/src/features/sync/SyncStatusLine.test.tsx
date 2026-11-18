@@ -1,6 +1,7 @@
 import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,16 +12,19 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 import { invoke } from "@tauri-apps/api/core";
-import { syncApi, type SyncStatus } from "@/lib/sync-api";
+import { onSyncStatus, syncApi, type SyncStatus } from "@/lib/sync-api";
 import { SyncStatusProvider } from "./SyncStatusProvider";
-import { useSyncNavigation } from "./sync-status";
+import { useSyncNavigation, useSyncStatus } from "./sync-status";
 import { hostFailure, notConnected, syncStatus } from "./sync-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/sync-api", async (original) => ({
   ...(await original<typeof import("@/lib/sync-api")>()),
   syncApi: { status: vi.fn(), syncNow: vi.fn(), recover: vi.fn() },
+  onSyncStatus: vi.fn(),
 }));
+/** Sends a status as the desktop does when it changes. */
+let push: (status: SyncStatus) => void = () => {};
 const api = vi.mocked(syncApi);
 /** The api as shipped, over the mocked bridge. */
 const real = (
@@ -46,6 +50,10 @@ function Shell() {
 }
 async function footer(status: SyncStatus) {
   api.status.mockResolvedValue(status);
+  vi.mocked(onSyncStatus).mockImplementation(async (handler) => {
+    push = handler;
+    return () => {};
+  });
   render(
     <SyncStatusProvider>
       <Shell />
@@ -83,6 +91,25 @@ test("uploaded: the line says Drive synced and when, and the popover offers Sync
   api.status.mockResolvedValue(now);
   fireEvent.click(within(dialog).getByRole("button", { name: "Sync now" }));
   expect(await within(dialog).findByText("Last synced just now")).toBeTruthy();
+});
+
+test("a status the desktop sends replaces the line, with no read of its own", async () => {
+  await footer(syncStatus());
+  expect((await line()).textContent).toBe("Drive synced1 min ago");
+  api.status.mockClear();
+  push(
+    syncStatus({
+      state: "upload_pending",
+      pending_uploads: [change("A")],
+      pending_total: 1,
+    }),
+  );
+  await waitFor(async () =>
+    expect((await line()).textContent).toBe(
+      "Uploading 1 change…Saved on this computer",
+    ),
+  );
+  expect(api.status).not.toHaveBeenCalled();
 });
 
 test("upload pending: the line counts the changes and says they are saved here", async () => {
@@ -288,4 +315,42 @@ test("offline with something else to look at: the line says Offline and counts w
     "3 changes waiting to upload",
   );
   expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+test("the same status sent again re-renders nothing", async () => {
+  const status = syncStatus();
+  api.status.mockImplementation(async () => structuredClone(status));
+  vi.mocked(onSyncStatus).mockImplementation(async (handler) => {
+    push = handler;
+    return () => {};
+  });
+  const shellRendered = vi.fn();
+  const readerRendered = vi.fn();
+  function CountedShell() {
+    shellRendered();
+    useSyncNavigation({ openSettings, openReview });
+    return null;
+  }
+  function Reader() {
+    readerRendered();
+    return <span>{useSyncStatus().status?.state}</span>;
+  }
+  render(
+    <SyncStatusProvider>
+      <CountedShell />
+      <Reader />
+    </SyncStatusProvider>,
+  );
+  await screen.findByText("uploaded");
+  const before = [
+    shellRendered.mock.calls.length,
+    readerRendered.mock.calls.length,
+  ];
+  // The desktop sends a status equal to the one shown.
+  act(() => push(structuredClone(status)));
+  await Promise.resolve();
+  expect([
+    shellRendered.mock.calls.length,
+    readerRendered.mock.calls.length,
+  ]).toEqual(before);
 });

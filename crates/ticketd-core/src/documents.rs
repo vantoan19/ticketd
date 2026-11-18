@@ -488,13 +488,15 @@ impl Workspace {
     }
 
     pub fn document_tags(&self, id: &str) -> Result<Vec<String>, Error> {
-        self.show_document(id)?;
-        let mut statement = self.connection.prepare(
-            "SELECT tag_name FROM document_tags WHERE document_id = ?1 ORDER BY tag_name",
-        )?;
-        Ok(statement
-            .query_map([id], |row| row.get(0))?
-            .collect::<Result<_, _>>()?)
+        self.read(|_| {
+            self.show_document(id)?;
+            let mut statement = self.connection.prepare(
+                "SELECT tag_name FROM document_tags WHERE document_id = ?1 ORDER BY tag_name",
+            )?;
+            Ok(statement
+                .query_map([id], |row| row.get(0))?
+                .collect::<Result<_, _>>()?)
+        })
     }
 
     pub fn change_document(&mut self, id: &str, patch: DocumentPatch) -> Result<Document, Error> {

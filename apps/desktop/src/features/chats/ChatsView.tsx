@@ -301,8 +301,10 @@ export function ChatsView({
   const [newFocus, setNewFocus] = useState(0);
   const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   // A clicked notification opens its Chat under its own list, title focused.
+  // The screen mounts on its first visit, so a request present at mount is the
+  // one that brought the person here.
   const { openRequest, chatRequest } = useChatFeature();
-  const [seenOpen, setSeenOpen] = useState(openRequest?.n ?? 0);
+  const [seenOpen, setSeenOpen] = useState(0);
   if (openRequest && seenOpen !== openRequest.n) {
     setSeenOpen(openRequest.n);
     setScope(openRequest.request.retention);
@@ -313,7 +315,7 @@ export function ChatsView({
     });
   }
   // A Chat asked for from a ticket: opened with a crumb back, or New Chat about it.
-  const [seenChat, setSeenChat] = useState(chatRequest?.n ?? 0);
+  const [seenChat, setSeenChat] = useState(0);
   if (chatRequest && seenChat !== chatRequest.n) {
     setSeenChat(chatRequest.n);
     const request = chatRequest.request;

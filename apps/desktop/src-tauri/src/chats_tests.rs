@@ -33,9 +33,11 @@ impl Fixture {
     async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
+        // The desktop creates its workspace before its session opens it.
+        drop(Workspace::open(&path).unwrap());
         let fake = FakeAdapter::codex();
         let chats = Chats::new(
-            Arc::new(move || Workspace::open(&path)),
+            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
             vec![Arc::new(fake.clone())],
             vec![(
                 "claude-code",
@@ -78,7 +80,12 @@ impl Fixture {
         let opened = self.chats.open(
             chat_id,
             Arc::new(move |change| {
-                sink.lock().unwrap().push(change);
+                // An update's items come as one array; tests read them one by one.
+                let mut seen = sink.lock().unwrap();
+                match change {
+                    Value::Array(batch) => seen.extend(batch),
+                    change => seen.push(change),
+                }
                 true
             }),
         );
@@ -2309,4 +2316,152 @@ fn a_file_opens_only_inside_the_chat_folder() {
         std::os::unix::fs::symlink(dir.path().join("secret.txt"), folder.join("link.txt")).unwrap();
         assert_eq!(code("link.txt"), "failed");
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_long_codex_turn_reads_the_workspace_at_most_once_per_update_and_sends_only_what_changed()
+{
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let messages = Arc::new(AtomicU64::new(0));
+    let (sink, counted) = (seen.clone(), messages.clone());
+    f.chats
+        .open(
+            &id,
+            Arc::new(move |change| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let mut seen = sink.lock().unwrap();
+                match change {
+                    Value::Array(batch) => seen.extend(batch),
+                    change => seen.push(change),
+                }
+                true
+            }),
+        )
+        .await
+        .unwrap();
+    settle().await;
+    let before_uses = f.chats.workspace_uses.load(Ordering::SeqCst);
+    let before_messages = messages.load(Ordering::SeqCst);
+    let mut updates = 0;
+    for step in 0..50 {
+        let item = format!("cmd-{step}");
+        f.emit(command_tool(&item, "cargo test", ToolStatus::Running))
+            .await;
+        f.emit(command_tool(&item, "cargo test", ToolStatus::Succeeded))
+            .await;
+        // Codex reports its token use after every model call.
+        f.emit(EventKind::ContextUsage(ticketd_chat_host::ContextUsage {
+            used: 1000 + step,
+            window: 200_000,
+            categories: Vec::new(),
+            compacts_at: None,
+        }))
+        .await;
+        updates += 3;
+    }
+    let uses = f.chats.workspace_uses.load(Ordering::SeqCst) - before_uses;
+    let sent = messages.load(Ordering::SeqCst) - before_messages;
+    println!(
+        "50-step Codex turn: {updates} host events, {uses} feed workspace uses, {sent} messages"
+    );
+    assert!(
+        uses <= updates,
+        "{uses} workspace uses for {updates} updates"
+    );
+    // Each step is sent running, then done; the context alone resends no item.
+    let changes = seen.lock().unwrap().clone();
+    let steps = changes
+        .iter()
+        .filter(|change| change["item"]["kind"] == "steps")
+        .count();
+    assert_eq!(steps, 100);
+    let mut ids: Vec<_> = changes
+        .iter()
+        .filter(|change| change["kind"] == "item")
+        .map(|change| (change["item"]["id"].clone(), change["item"].clone()))
+        .collect();
+    let all = ids.len();
+    ids.dedup();
+    assert_eq!(
+        ids.len(),
+        all,
+        "an item is never sent twice unchanged in a row"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_overview_wake_reads_again_only_the_chat_that_changed() {
+    let f = Fixture::new().await;
+    f.chat().await;
+    let mut core = f.core();
+    for _ in 0..99 {
+        core.create_chat(
+            None,
+            NewChat {
+                title: Some("Quiet".to_owned()),
+                harness: "codex".to_owned(),
+                execution_folder: f.dir.path().to_string_lossy().into_owned(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    }
+    f.chats.overview_digest().unwrap();
+    f.emit(command_tool("cmd-1", "cargo test", ToolStatus::Running))
+        .await;
+    let built = f.chats.rows_built.load(Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let (_, rows, _) = f.chats.overview_digest().unwrap();
+    println!(
+        "overview wake, 100 Chats, one changed: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(rows.len(), 100);
+    assert_eq!(f.chats.rows_built.load(Ordering::SeqCst) - built, 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_step_s_whole_output_is_read_when_its_row_opens() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let output: String = (1..=100).map(|n| format!("test {n} ok\n")).collect();
+    let EventKind::ToolUpdated {
+        turn,
+        item,
+        title,
+        detail,
+        ..
+    } = command_tool("cmd-1", "cargo test", ToolStatus::Succeeded)
+    else {
+        unreachable!()
+    };
+    f.emit(EventKind::ToolUpdated {
+        turn,
+        item,
+        title,
+        status: ToolStatus::Succeeded,
+        output: Some(output.clone()),
+        detail,
+    })
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let step = opened
+        .snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Steps { steps, .. } => steps.first().cloned(),
+            _ => None,
+        })
+        .unwrap();
+    assert!(step.output.unwrap().starts_with("test 81 ok\n"));
+    let full = step.full_output.unwrap();
+    assert_eq!(full.bytes, output.len());
+    assert_eq!(
+        f.chats.step_output(&id, &full.tool_id).unwrap(),
+        Some(output)
+    );
 }

@@ -21,7 +21,19 @@ type Gesture = {
   offsetY: number;
   dragging: boolean;
 };
-type Drag = Gesture & { target: string | null };
+/** What the board renders for a drag; the pointer position lives in the gesture. */
+type Drag = Pick<Gesture, "ticket" | "width" | "offsetX" | "offsetY"> & {
+  target: string | null;
+  /** Where the preview starts; later moves set its position directly. */
+  x: number;
+  y: number;
+};
+
+/** Moves the preview without rendering: the board renders only when the target changes. */
+function place(preview: HTMLElement | null, active: Gesture) {
+  preview?.style.setProperty("--drag-x", `${active.x - active.offsetX}px`);
+  preview?.style.setProperty("--drag-y", `${active.y - active.offsetY}px`);
+}
 
 /** Pointer geometry stays in the desktop; every drop uses the shared status action. */
 export function useBoardDrag(workspace: TicketWorkspace) {
@@ -33,6 +45,8 @@ export function useBoardDrag(workspace: TicketWorkspace) {
   const gesture = useRef<Gesture | null>(null);
   const suppressedClick = useRef<HTMLButtonElement | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  const preview = useRef<HTMLDivElement>(null);
+  const shown = useRef<Drag | null>(null);
 
   useEffect(() => {
     let frame = 0;
@@ -80,11 +94,26 @@ export function useBoardDrag(workspace: TicketWorkspace) {
       return status;
     }
     function show(active: Gesture) {
-      setDrag({
-        ...active,
-        ticket: currentTicket(active) ?? active.ticket,
-        target: destination(active),
-      });
+      const ticket = currentTicket(active) ?? active.ticket;
+      const target = destination(active);
+      const last = shown.current;
+      if (last && last.ticket === ticket && last.target === target)
+        return place(preview.current, active);
+      shown.current = {
+        ticket,
+        target,
+        width: active.width,
+        offsetX: active.offsetX,
+        offsetY: active.offsetY,
+        x: active.x,
+        y: active.y,
+      };
+      setDrag(shown.current);
+      place(preview.current, active);
+    }
+    function hide() {
+      shown.current = null;
+      setDrag(null);
     }
     function edgeSpeed(position: number, start: number, end: number) {
       const edge = Math.min(40, (end - start) / 3);
@@ -148,7 +177,7 @@ export function useBoardDrag(workspace: TicketWorkspace) {
       if (!active || event.pointerId !== active.pointer) return;
       gesture.current = null;
       stopScrolling();
-      setDrag(null);
+      hide();
       if (!active.dragging) return;
       active.x = event.clientX;
       active.y = event.clientY;
@@ -162,7 +191,7 @@ export function useBoardDrag(workspace: TicketWorkspace) {
       const active = gesture.current;
       gesture.current = null;
       stopScrolling();
-      setDrag(null);
+      hide();
       if (active?.dragging) active.element.focus({ preventScroll: true });
     }
     function escape(event: KeyboardEvent) {
@@ -191,6 +220,7 @@ export function useBoardDrag(workspace: TicketWorkspace) {
 
   return {
     board,
+    preview,
     drag,
     start(event: ReactPointerEvent<HTMLButtonElement>, ticket: Ticket) {
       suppressedClick.current = null;

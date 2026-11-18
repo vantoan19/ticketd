@@ -7,6 +7,7 @@ import {
 // @vitest-environment jsdom
 import { chooseFilter } from "@/test/filters";
 import { setPreference } from "@/lib/preferences";
+import * as webviewScale from "@/lib/webview-scale";
 import {
   act,
   cleanup,
@@ -19,6 +20,11 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
+// The views App loads on first visit, loaded up front so a visit renders at once.
+import "@/features/documents/ContextGraph";
+import "@/features/documents/WorkspaceGraph";
+import "@/features/attachments/AttachmentLibrary";
+import "@/features/automations/AutomationsView";
 import { launch } from "@/components/layout/launch";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
@@ -99,6 +105,17 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "workspace_change_token") return bridge.token.next();
     return bridge.invoke(command, args);
+  },
+}));
+// The desktop sends the sync status when it changes; a test sends it here.
+const syncPush = vi.hoisted(() => ({
+  send: (status: unknown): void => void status,
+}));
+vi.mock("@/lib/sync-api", async (original) => ({
+  ...(await original<typeof import("@/lib/sync-api")>()),
+  onSyncStatus: async (handler: (status: never) => void) => {
+    syncPush.send = (status) => handler(status as never);
+    return () => {};
   },
 }));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
@@ -5432,8 +5449,10 @@ test("highlighted description edits preserve canonical code and links, and copy 
     bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
   ).toBe(false);
   fireEvent.click(checkbox);
-  await vi.waitFor(() =>
-    expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+  // The editor reports once idle, then autosave waits its own delay.
+  await vi.waitFor(
+    () => expect(stored.body).toBe(body.replace("[ ]", "[x]").trimEnd()),
+    { timeout: 5000 },
   );
   const richCopy = screen.getByRole("button", { name: "Copy code" });
   richCopy.focus();
@@ -5573,6 +5592,7 @@ test("Document sync metadata survives floating Saved feedback and waits for Driv
   ).toBe("Saved on this computer");
   expect(within(stateRow).queryByText("Synced to Drive")).toBeNull();
   uploaded = true;
+  act(() => syncPush.send(syncStatus()));
   expect(await within(stateRow).findByText("Synced to Drive")).toBeTruthy();
   await vi.waitFor(() => expect(within(bar).queryByText("Saved")).toBeNull(), {
     timeout: 4000,
@@ -6057,7 +6077,11 @@ test("Workspace graph opens Graph, groups Plan members and keeps identical items
   expect(screen.getByLabelText("Search")).toBeTruthy();
 });
 
-test("Workspace graph pages a large Plan without losing membership when connections expand", async () => {
+test("Workspace graph pages a large Plan without losing membership when connections expand", async ({
+  onTestFinished,
+}) => {
+  const token = vi.spyOn(bridge.token, "next").mockReturnValue(0);
+  onTestFinished(() => token.mockRestore());
   const user = userEvent.setup();
   const plan = { id: "P-window", name: "Windowed Plan", archived: false };
   const members = Array.from({ length: 130 }, (_, index) =>
@@ -6128,7 +6152,7 @@ test("Workspace graph pages a large Plan without losing membership when connecti
   await user.click(
     await screen.findByRole("button", { name: "Workspace graph" }),
   );
-  const graph = screen.getByRole("region", { name: "Workspace graph" });
+  const graph = await screen.findByRole("region", { name: "Workspace graph" });
   await within(graph).findByText("119 tickets, 0 Documents");
   expect(
     within(graph).getByText(/Some Plan tickets or Documents are not loaded/),
@@ -7030,7 +7054,12 @@ test("leaving a focused filter submenu cancels the earlier pointer hover opening
   }
 });
 
-test("filter drafts keep every tag and Status when keyboard selection closes a pointer-opened menu", async () => {
+test("filter drafts keep every tag and Status when keyboard selection closes a pointer-opened menu", async ({
+  onTestFinished,
+}) => {
+  // Only opening the list and applying the filters should trigger reads here.
+  const token = vi.spyOn(bridge.token, "next").mockReturnValue(0);
+  onTestFinished(() => token.mockRestore());
   const user = userEvent.setup();
   const tickets = [
     bulkTicket(1, {
@@ -12761,7 +12790,14 @@ test("Settings Escape and palette Reset return to visible section navigation wit
   }
 });
 
-test("zoom keys wait for retained native scale and keep the latest Reset while initialization is pending", async () => {
+test("zoom keys wait for retained native scale and keep the latest Reset while initialization is pending", async ({
+  onTestFinished,
+}) => {
+  // The background size check also reads the scale and can race initialization.
+  const watcher = vi
+    .spyOn(webviewScale, "keepWebviewInStep")
+    .mockReturnValue(undefined);
+  onTestFinished(() => watcher.mockRestore());
   let finishScale: ((scale: number) => void) | undefined;
   let actualZoom = 2;
   const dpr = vi

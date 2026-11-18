@@ -98,6 +98,26 @@ describe("the desktop Chat client", () => {
     expect(seen).toHaveLength(2);
   });
 
+  it("passes on an update's changes, sent together, one by one in order", async () => {
+    const stub = stubBridge(opened());
+    const client = createHostChatClient(stub.bridge);
+    const snapshot = await client.openChat("c1");
+    stub.push([{ seq: 1, kind: "item", item: response("Hel") }]);
+    const seen: ChatChange[] = [];
+    client.subscribe("c1", snapshot.cursor, (change) => seen.push(change));
+
+    stub.push([
+      { seq: 2, kind: "text", item_id: "m1", text: "lo" },
+      { seq: 3, kind: "chat", chat },
+    ]);
+
+    expect(seen.map((change) => [change.seq, change.kind])).toEqual([
+      [1, "item"],
+      [2, "text"],
+      [3, "chat"],
+    ]);
+  });
+
   it("turns a change it cannot read into a resync instead of passing it on", async () => {
     const stub = stubBridge(opened());
     const client = createHostChatClient(stub.bridge);

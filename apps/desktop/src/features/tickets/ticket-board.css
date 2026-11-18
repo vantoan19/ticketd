@@ -100,6 +100,11 @@
    refused column says so in its header. */
 .board-card-container {
   position: relative;
+  /* Cards out of view skip layout and paint; a column holds hundreds. The
+     margin keeps the card's focus ring and lift unclipped. */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 88px;
+  overflow-clip-margin: 8px;
   /* An entering card is overflow: hidden, which lets a flex item shrink to 0
      in a column whose cards overflow; its height must open by animation. */
   flex-shrink: 0;
@@ -191,13 +196,15 @@
 }
 [data-board-drag-preview] {
   position: fixed;
+  top: 0;
+  left: 0;
   z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 0;
-  /* Held: a 2% scale and the lift shadow, no tilt. */
-  transform: scale(1.02);
+  /* Pointer moves update CSS directly; the held card scales without tilting. */
+  transform: translate(var(--drag-x), var(--drag-y)) scale(1.02);
   pointer-events: none;
 }
 /* A card in the air between columns (board-motion). Its real card waits

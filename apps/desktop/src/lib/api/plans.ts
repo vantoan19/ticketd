@@ -1,39 +1,44 @@
 import { invoke } from "@/lib/api/bridge-failure";
+import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 import { graphSchema } from "./client";
-const planSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  archived: z.boolean(),
-  purpose: z.string().default(""),
-});
-const viewSchema = z.object({
-  plan: planSchema.extend({
-    spec_document_id: z.string().nullable().default(null),
+const planSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    archived: z.boolean(),
+    purpose: z.string().default(""),
   }),
-  documents: z
-    .array(
-      z.object({ id: z.string(), heading: z.string(), trashed: z.boolean() }),
-    )
-    .default([]),
-  counts: z.object({
-    todo: z.number(),
-    in_progress: z.number(),
-    in_review: z.number(),
-    done: z.number(),
-    canceled: z.number(),
-    duplicate: z.number().default(0),
-  }),
-  members: z.array(
-    z.object({
-      reference: z.string(),
-      title: z.string(),
-      status: z.string(),
-      project_id: z.string().nullable(),
-      availability: z.string().nullable().default(null),
+);
+const viewSchema = lazySchema(() =>
+  z.object({
+    plan: planSchema.extend({
+      spec_document_id: z.string().nullable().default(null),
     }),
-  ),
-});
+    documents: z
+      .array(
+        z.object({ id: z.string(), heading: z.string(), trashed: z.boolean() }),
+      )
+      .default([]),
+    counts: z.object({
+      todo: z.number(),
+      in_progress: z.number(),
+      in_review: z.number(),
+      done: z.number(),
+      canceled: z.number(),
+      duplicate: z.number().default(0),
+    }),
+    members: z.array(
+      z.object({
+        reference: z.string(),
+        title: z.string(),
+        status: z.string(),
+        project_id: z.string().nullable(),
+        availability: z.string().nullable().default(null),
+      }),
+    ),
+  }),
+);
 
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;

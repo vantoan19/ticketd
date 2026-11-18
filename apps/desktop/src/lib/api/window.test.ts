@@ -31,6 +31,40 @@ test("startup tells the native watchdog to stop only after the window is shown",
   expect(commands).toEqual(["plugin:window|show", "plugin:event|emit_to"]);
 });
 
+test("the window is shown only after theme.js has painted the native frame", async () => {
+  const commands: string[] = [];
+  let finishPaint: (() => void) | undefined;
+  window.ticketdThemePainted = new Promise<void>((resolve) => {
+    finishPaint = resolve;
+  });
+  mockWindows("main");
+  mockIPC((command) => {
+    commands.push(command);
+  });
+  const launch = windowClient.show();
+  await Promise.resolve();
+  expect(commands).toEqual([]);
+  finishPaint?.();
+  await launch;
+  expect(commands).toEqual(["plugin:window|show", "plugin:event|emit_to"]);
+  delete window.ticketdThemePainted;
+});
+
+test("booting tells the native watchdog the application modules loaded", async () => {
+  const events: unknown[] = [];
+  mockWindows("main");
+  mockIPC((command, args) => {
+    if (command === "plugin:event|emit_to") events.push(args);
+  });
+  await windowClient.booted();
+  expect(events).toEqual([
+    expect.objectContaining({
+      target: { kind: "App" },
+      event: "ticketd://startup-booted",
+    }),
+  ]);
+});
+
 test("a failed initial reveal leaves the native watchdog armed", async () => {
   const commands: string[] = [];
   mockWindows("main");

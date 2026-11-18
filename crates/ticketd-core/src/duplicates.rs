@@ -228,31 +228,17 @@ fn final_canonical(conn: &Connection, canonical_id: &str) -> Result<String, Erro
     }
 }
 
-pub(crate) fn populate(conn: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    ticket.duplicate_redirect = None;
-    let direct: Option<String> = conn
-        .query_row(
-            "SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1",
-            [&ticket.id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if let Some(direct) = direct
-        && let Ok(resolved) = final_canonical(conn, &direct)
-        && resolved != direct
-    {
-        ticket.duplicate_redirect = Some(conn.query_row(
+/// For a duplicate of `direct`: the reference of the ticket that is now the original,
+/// when `direct` has itself become a Duplicate since (see `Ticket::duplicate_redirect`).
+pub(crate) fn redirect(conn: &Connection, direct: &str) -> Result<Option<String>, Error> {
+    match final_canonical(conn, direct) {
+        Ok(resolved) if resolved != direct => Ok(Some(conn.query_row(
             "SELECT reference FROM tickets WHERE id = ?1",
             [&resolved],
             |r| r.get(0),
-        )?);
+        )?)),
+        _ => Ok(None),
     }
-    ticket.duplicate_of = conn.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&ticket.id], |r| r.get(0)).optional()?;
-    let mut stmt = conn.prepare("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1 ORDER BY t.number")?;
-    ticket.duplicates = stmt
-        .query_map([&ticket.id], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
-    Ok(())
 }
 
 impl Workspace {
@@ -747,20 +733,21 @@ impl Workspace {
         mode: ReviewMode,
     ) -> Result<DuplicateDependencyPreview, Error> {
         // One read transaction, so the edges, statuses and issues describe one moment.
-        let tx = self.connection.unchecked_transaction()?;
-        let snapshot = Snapshot::load(&tx, source, canonical, mode)?;
-        let replacement_issues = snapshot
-            .edges
-            .iter()
-            .map(|edge| self.replacement_issue(edge))
-            .collect::<Result<_, _>>()?;
-        Ok(DuplicateDependencyPreview {
-            waiting: snapshot.baseline()?,
-            source: snapshot.source,
-            mode,
-            canonical: snapshot.destination,
-            edges: snapshot.edges,
-            replacement_issues,
+        crate::read_scope::run(&self.connection, |tx| {
+            let snapshot = Snapshot::load(tx, source, canonical, mode)?;
+            let replacement_issues = snapshot
+                .edges
+                .iter()
+                .map(|edge| self.replacement_issue(edge))
+                .collect::<Result<_, _>>()?;
+            Ok(DuplicateDependencyPreview {
+                waiting: snapshot.baseline()?,
+                source: snapshot.source,
+                mode,
+                canonical: snapshot.destination,
+                edges: snapshot.edges,
+                replacement_issues,
+            })
         })
     }
 
@@ -776,11 +763,12 @@ impl Workspace {
         mode: ReviewMode,
         decisions: &[DependencyDecision],
     ) -> Result<Vec<WaitingOutcome>, Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        let snapshot = Snapshot::load(&tx, source, canonical, mode)?;
-        snapshot.check(decisions)?;
-        self.ensure_replaceable(decisions)?;
-        snapshot.outcomes(decisions)
+        crate::read_scope::run(&self.connection, |tx| {
+            let snapshot = Snapshot::load(tx, source, canonical, mode)?;
+            snapshot.check(decisions)?;
+            self.ensure_replaceable(decisions)?;
+            snapshot.outcomes(decisions)
+        })
     }
 
     /// A replacement that became impossible since the review was shown, through an unrelated

@@ -1,8 +1,9 @@
-//! Hosts the Automation runner in the desktop: one pass at start and one every few
-//! seconds. Everything a pass does lives in `ticketd-automation-runner`; this only
+//! Hosts the Automation runner in the desktop: one pass at start, one every few
+//! seconds while anything needs the runner, and otherwise one when the Workspace
+//! changes or at the idle fallback. Everything a pass does lives in `ticketd-automation-runner`; this only
 //! decides when one may happen.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use tauri::AppHandle;
@@ -45,6 +46,15 @@ pub fn open_on_click(app: &AppHandle) {
             crate::chat_commands::show_window(&window);
         }
     });
+}
+
+/// Set once the start-up pass has ended, however it ended.
+static STARTED: OnceLock<()> = OnceLock::new();
+
+/// Waits for the start-up pass, which runs off the main thread: until it has
+/// ended, the runs the previous process left Running still read as Running.
+pub fn started() {
+    STARTED.wait();
 }
 
 /// How long after a ticket changes its Automation may start. Passes are cheap: with
@@ -105,37 +115,54 @@ impl AutomationRunner {
         self.chats.automation_host().is_ok()
     }
 
-    /// One pass. A pass that fails (the Workspace is busy or unreadable) is tried
-    /// again at the next tick, which also ends any run the failure left Running.
-    /// Blocking.
-    fn pass(&self) {
-        match self.get() {
-            Ok(runner) => {
-                if let Err(error) = runner.tick() {
-                    eprintln!("ticketd: an Automation pass failed: {error}");
-                }
+    /// One pass; returns whether anything needs the runner. A pass that fails (the
+    /// Workspace is busy or unreadable) is tried again at the next tick, which also
+    /// ends any run the failure left Running. Blocking.
+    fn pass(&self) -> bool {
+        match self.get().and_then(|runner| runner.tick()) {
+            Ok(busy) => busy,
+            Err(error) => {
+                eprintln!("ticketd: an Automation pass failed: {error}");
+                true
             }
-            Err(error) => eprintln!("ticketd: the Automation runner could not start: {error}"),
         }
     }
 }
 
-/// Starts the loop. While Chat is off, or a backup is being restored, there is no
-/// host and nothing is matched; each Automation's cursor holds, so changes made
-/// meanwhile start their runs at the first pass afterwards.
+/// Starts the loop, after the start-up pass. While Chat is off, or a backup is being
+/// restored, there is no host and nothing is matched; each Automation's cursor holds,
+/// so changes made meanwhile start their runs at the first pass afterwards.
 pub fn start(runner: AutomationRunner, app: AppHandle) {
     open_on_click(&app);
-    tauri::async_runtime::spawn(async move {
-        loop {
-            if runner.host_available() {
-                let runner = runner.clone();
-                // The pass reads SQLite and may run the CLI: off the async threads.
-                // It starts its runs on this runtime, which a blocking thread is in.
-                let _ = tauri::async_runtime::spawn_blocking(move || runner.pass()).await;
-            }
-            tokio::time::sleep(TICK).await;
-        }
-    });
+    tauri::async_runtime::spawn(run(runner));
+}
+
+/// The loop: the start-up pass, then a pass every few seconds while anything needs
+/// the runner, otherwise when the Workspace changes or at the idle fallback.
+pub(crate) async fn run(runner: AutomationRunner) {
+    // SQLite work, off the async threads and the main thread; the passes and the
+    // Automation commands wait for it.
+    let first = runner.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || first.start_up()).await;
+    let _ = STARTED.set(());
+    let mut seen = 0;
+    loop {
+        let busy = runner.host_available() && {
+            let runner = runner.clone();
+            // The pass reads SQLite and may run the CLI: off the async threads.
+            // It starts its runs on this runtime, which a blocking thread is in.
+            tauri::async_runtime::spawn_blocking(move || runner.pass())
+                .await
+                .unwrap_or(true)
+        };
+        let wait = if busy { TICK } else { crate::wake::IDLE };
+        seen = tauri::async_runtime::spawn_blocking(move || {
+            crate::wake::CHANGED.wait(&mut seen, wait);
+            seen
+        })
+        .await
+        .unwrap_or(seen);
+    }
 }
 
 #[cfg(test)]

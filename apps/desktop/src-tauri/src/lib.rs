@@ -12,8 +12,11 @@ mod chats;
 mod cli_status;
 mod drive_commands;
 mod folder_probe;
+#[cfg(test)]
+mod runtime_trace;
 mod sync_commands;
 mod sync_scheduler;
+mod wake;
 mod workspace_session;
 
 use ticketd_core::{
@@ -133,13 +136,21 @@ impl From<ticketd_core::Error> for BridgeFailure {
     }
 }
 
-/// Opens the workspace as the person using the desktop: their own changes do not notify them.
-fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
-    static SESSION: workspace_session::Session = workspace_session::Session::new();
+static SESSION: workspace_session::Session = workspace_session::Session::new();
+
+/// The workspace for one command, as the person using the desktop: their own changes
+/// do not notify them.
+fn open_workspace() -> Result<ticketd_core::WorkspaceGuard, ticketd_core::Error> {
     SESSION.open(Workspace::open_default)
 }
 
-#[tauri::command]
+/// The desktop's warm session, for work that replaces the workspace file.
+fn workspace_session() -> Result<std::sync::Arc<ticketd_core::WorkspaceSession>, ticketd_core::Error>
+{
+    SESSION.session(Workspace::open_default)
+}
+
+#[tauri::command(async)]
 fn recent_documents(
     offset: u32,
     include_support: bool,
@@ -148,13 +159,13 @@ fn recent_documents(
         .and_then(|w| w.recent_documents_including_support(50, offset, include_support))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn pinned_documents(offset: u32) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.pinned_documents(50, offset))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn search_documents(
     query: String,
     tag: Option<String>,
@@ -173,7 +184,7 @@ fn search_documents(
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn keep_document(id: String, request_id: String) -> Result<Document, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), WriteRequest::KeepDocument { id }))
@@ -183,25 +194,25 @@ fn keep_document(id: String, request_id: String) -> Result<Document, BridgeFailu
         _ => Err("Unexpected document result".into()),
     }
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_document_pin(id: String, pinned: bool) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_document_pin(&id, pinned))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn document_tags(id: String) -> Result<Vec<String>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.document_tags(&id))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_document_tag(&id, &tag, present))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn all_documents(
     offset: u32,
     include_support: bool,
@@ -210,13 +221,13 @@ fn all_documents(
         .and_then(|w| w.all_documents_page(50, offset, include_support))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.trashed_documents_page(50, offset))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_document_trashed(
     id: String,
     trashed: bool,
@@ -235,25 +246,25 @@ fn set_document_trashed(
         _ => Err("Unexpected document result".into()),
     }
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn show_document(id: String) -> Result<Document, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.show_document(&id))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn document_version(id: String) -> Result<(String, bool), BridgeFailure> {
     open_workspace()
         .and_then(|w| w.document_version(&id))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn open_document(id: String) -> Result<Document, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.open_document(&id))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn save_document(
     id: Option<String>,
     title: Option<String>,
@@ -288,13 +299,13 @@ fn save_document(
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn context_link_markdown(reference: String) -> Result<String, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.context_link_markdown(&reference))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn document_context_links(
     id: String,
     offset: Option<u32>,
@@ -333,7 +344,7 @@ fn document_context_links(
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn ticket_from_document(
     id: String,
     title: String,
@@ -358,13 +369,13 @@ fn ticket_from_document(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reminder(reference: String) -> Result<Option<String>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.reminder(&reference))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_reminder(
     reference: String,
     due_at: Option<String>,
@@ -380,7 +391,7 @@ fn set_reminder(
         .map(|_| ())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn inbox(
     offset: u32,
     limit: Option<u32>,
@@ -390,13 +401,18 @@ fn inbox(
         .and_then(|w| w.inbox_page(limit.unwrap_or(100), offset, unread_only.unwrap_or(false)))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+/// The interface's change poll (ADR 0013) is also how the background loops learn
+/// that the Workspace changed: a token that moved since the last read wakes them.
+#[tauri::command(async)]
 fn workspace_change_token() -> Result<i64, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.change_token())
-        .map_err(BridgeFailure::from)
+    static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MIN);
+    let token = open_workspace().and_then(|w| w.change_token())?;
+    if LAST.swap(token, std::sync::atomic::Ordering::SeqCst) != token {
+        wake::CHANGED.notify();
+    }
+    Ok(token)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn sidebar_counts() -> Result<SidebarCounts, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
@@ -407,13 +423,13 @@ fn sidebar_counts() -> Result<SidebarCounts, BridgeFailure> {
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn is_following(reference: String) -> Result<bool, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.is_following(&reference))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_following(
     reference: String,
     following: bool,
@@ -432,7 +448,7 @@ fn set_following(
         .map(|_| ())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), WriteRequest::SetInboxRead { ids, read }))
@@ -449,7 +465,7 @@ fn export_workspace(path: String) -> Result<(), BridgeFailure> {
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_projects() -> Result<Vec<Project>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.list_projects())
@@ -466,33 +482,33 @@ fn project_icon(id: String) -> Result<Option<folder_probe::Favicon>, BridgeFailu
         .chain(&project.paths)
         .find_map(|path| folder_probe::favicon(std::path::Path::new(path))))
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn create_project(name: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.create_project(&name, &path))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_project(id: String, name: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.edit_project(&id, &name, &path))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn context_graph(reference: String, include_details: bool) -> Result<ContextGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.context_graph(&reference, include_details))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn workspace_graph(request: WorkspaceGraphRequest) -> Result<WorkspaceGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.workspace_graph(&request))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn context_graph_expanded(
     reference: String,
     include_details: bool,
@@ -506,21 +522,21 @@ fn context_graph_expanded(
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn dependency_graph(reference: String) -> Result<DependencyGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.dependency_graph(&reference))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn plan_dependency_graph(id: String) -> Result<DependencyGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.plan_dependency_graph(&id))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn ticket_backlinks(
     reference: String,
     limit: u32,
@@ -532,7 +548,7 @@ fn ticket_backlinks(
 }
 
 /// The source's comments and events retrieved for a ticket (read-only).
-#[tauri::command]
+#[tauri::command(async)]
 fn source_conversation(
     reference: String,
 ) -> Result<Vec<ticketd_core::source::ConversationEntry>, BridgeFailure> {
@@ -541,7 +557,7 @@ fn source_conversation(
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn show_ticket(reference: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.show_ticket(&reference))
@@ -554,7 +570,7 @@ enum TicketPage {
     Full(Vec<ticketd_core::TicketWithUpdate>),
     Metadata(ticketd_core::TicketMetadataPage),
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn find_tickets_with_updates(
     filter: TicketFilter,
     projection: Option<String>,
@@ -575,14 +591,28 @@ fn find_tickets_with_updates(
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+/// Every Inbox entry with whether it still needs the person, in one read.
+#[tauri::command(async)]
+fn inbox_attention() -> Result<ticketd_core::InboxAttention, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.inbox_attention())
+        .map_err(BridgeFailure::from)
+}
+/// A page of list or board rows: what `find_tickets_with_updates` finds, without bodies.
+#[tauri::command(async)]
+fn find_ticket_rows(filter: TicketFilter) -> Result<Vec<ticketd_core::TicketRow>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.find_ticket_rows(&filter))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
 fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.count_tickets(&filter))
         .map_err(BridgeFailure::from)
 }
 /// How many tickets each source filter (All, a provider, Local) would show.
-#[tauri::command]
+#[tauri::command(async)]
 fn count_by_source(
     filter: TicketFilter,
 ) -> Result<ticketd_core::source::SourceCounts, BridgeFailure> {
@@ -590,7 +620,7 @@ fn count_by_source(
         .and_then(|w| w.count_by_source(&filter))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn search_tickets(
     query: String,
     project: Option<String>,
@@ -602,33 +632,33 @@ fn search_tickets(
         .and_then(|w| w.search_tickets(&query, project.as_deref(), unlinked, limit, offset))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn list_trash() -> Result<Vec<Ticket>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.list_trash())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_trashed(reference: String, trashed: bool) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_trashed(&reference, trashed, None))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn register_checkout(id: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.register_checkout(&id, &path))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_checkout(id: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.remove_checkout(&id, &path))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)] // Preserve named IPC fields while adding an optional retry ID.
 fn create_ticket(
     title: String,
@@ -664,7 +694,7 @@ fn create_ticket(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn bulk_change(
     references: Vec<String>,
     change: TicketChange,
@@ -688,7 +718,7 @@ fn bulk_change(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn bulk_status(
     references: Vec<String>,
     status: Status,
@@ -718,7 +748,7 @@ fn bulk_status(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn change_ticket(
     reference: String,
     patch: TicketPatch,
@@ -738,20 +768,20 @@ fn change_ticket(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.ticket_history(&reference))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.evidence(&reference, 50, offset))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn add_evidence(
     reference: String,
     input: EvidenceInput,
@@ -770,7 +800,7 @@ fn add_evidence(
         _ => Err("Unexpected evidence result".into()),
     }
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_evidence(
     reference: String,
     id: String,
@@ -794,7 +824,7 @@ fn edit_evidence(
         _ => Err("Unexpected evidence result".into()),
     }
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_evidence(reference: String, id: String, request_id: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| {
@@ -806,14 +836,14 @@ fn delete_evidence(reference: String, id: String, request_id: String) -> Result<
         .map(|_| ())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn latest_update(reference: String) -> Result<Option<LatestUpdate>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.latest_update(&reference))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn activity_feed(
     reference: String,
     limit: u32,
@@ -823,7 +853,7 @@ fn activity_feed(
         .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn get_activity(reference: String, id: String) -> Result<Option<Activity>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| match workspace.activity(&reference, &id) {
@@ -833,7 +863,7 @@ fn get_activity(reference: String, id: String) -> Result<Option<Activity>, Bridg
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn add_activity(reference: String, brief: String) -> Result<Activity, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| {
@@ -843,7 +873,7 @@ fn add_activity(reference: String, brief: String) -> Result<Activity, BridgeFail
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn add_activity_with_details(
     reference: String,
     brief: String,
@@ -874,7 +904,7 @@ fn add_activity_with_details(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_activity(
     reference: String,
     id: String,
@@ -884,35 +914,35 @@ fn edit_activity(
         .and_then(|mut workspace| workspace.edit_activity(&reference, &id, patch))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_activity(reference: String, id: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.delete_activity(&reference, &id))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_tags(query: String) -> Result<Vec<String>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.search_tags(&query, 50))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_tag(reference: String, tag: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.add_tag(&reference, &tag))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_tag(reference: String, tag: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.remove_tag(&reference, &tag))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn preview_duplicate_dependencies(
     source: String,
     canonical: String,
@@ -930,7 +960,7 @@ fn preview_duplicate_dependencies(
 }
 
 /// What a whole set of choices does to each waiting ticket, for the review to show.
-#[tauri::command]
+#[tauri::command(async)]
 fn evaluate_dependency_review(
     source: String,
     canonical: String,
@@ -949,7 +979,7 @@ fn evaluate_dependency_review(
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn mark_duplicate_reviewed(
     source: String,
     canonical: String,
@@ -977,7 +1007,7 @@ fn mark_duplicate_reviewed(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_dependencies_reviewed(
     source: String,
     canonical: String,
@@ -1005,7 +1035,7 @@ fn edit_dependencies_reviewed(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, BridgeFailure> {
     let result = open_workspace()
         .and_then(|mut workspace| {
@@ -1024,7 +1054,7 @@ fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, Bridge
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn take_ownership(reference: String, request_id: String) -> Result<Ticket, BridgeFailure> {
     let result = open_workspace()
         .and_then(|mut workspace| {
@@ -1043,7 +1073,7 @@ fn take_ownership(reference: String, request_id: String) -> Result<Ticket, Bridg
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn contextual_relationships(
     reference: String,
     offset: u32,
@@ -1062,7 +1092,7 @@ fn contextual_relationships(
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn change_contextual_relationship(
     source: String,
     target: String,
@@ -1094,34 +1124,34 @@ fn change_contextual_relationship(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_dependency(blocker: String, dependent: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.add_dependency(&blocker, &dependent, None))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.remove_dependency(&blocker, &dependent, None))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn detach_child(parent: String, child: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.detach_child(&parent, &child, None))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.set_parent(&reference, parent.as_deref(), None))
         .map_err(BridgeFailure::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_plans(limit: Option<u32>, offset: Option<u32>) -> Result<Vec<Plan>, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
@@ -1129,7 +1159,7 @@ fn list_plans(limit: Option<u32>, offset: Option<u32>) -> Result<Vec<Plan>, Brid
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_plan_document(
     plan_id: String,
     document_id: String,
@@ -1154,7 +1184,7 @@ fn set_plan_document(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_ticket_document(
     reference: String,
     document_id: String,
@@ -1179,7 +1209,7 @@ fn set_ticket_document(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_plan_spec(
     plan_id: String,
     document_id: Option<String>,
@@ -1202,7 +1232,7 @@ fn set_plan_spec(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn show_plan(
     id: String,
     limit: Option<u32>,
@@ -1220,13 +1250,13 @@ fn show_plan(
         })
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn create_plan(name: String) -> Result<Plan, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.create_plan(&name))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn change_plan(
     id: String,
     name: Option<String>,
@@ -1236,13 +1266,13 @@ fn change_plan(
         .and_then(|mut w| w.change_plan(&id, name.as_deref(), archived))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_plan_purpose(id: String, purpose: String) -> Result<Plan, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_plan_purpose(&id, &purpose))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_plan(&reference, plan.as_deref(), None))
@@ -1256,7 +1286,7 @@ fn backup_workspace(path: String) -> Result<bool, BridgeFailure> {
         .and_then(|w| w.backup(&path))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn last_backup() -> Result<Option<BackupRecord>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.last_backup())
@@ -1264,13 +1294,13 @@ fn last_backup() -> Result<Option<BackupRecord>, BridgeFailure> {
 }
 /// Where the workspace file is, read without opening it: the startup recovery
 /// screen names the file even when it cannot be opened.
-#[tauri::command]
+#[tauri::command(async)]
 fn workspace_location() -> Result<String, BridgeFailure> {
     ticketd_core::default_workspace_path()
         .map(|path| path.display().to_string())
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn workspace_info() -> Result<WorkspaceInfo, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.workspace_info())
@@ -1282,7 +1312,7 @@ fn inspect_backup(path: String) -> Result<BackupInspection, BridgeFailure> {
         .and_then(|w| w.inspect_backup(path))
         .map_err(BridgeFailure::from)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn safety_backups() -> Result<Vec<SafetyBackup>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.safety_backups())
@@ -1491,7 +1521,7 @@ struct SourceHealth {
 
 /// What the interface needs to say how fresh each source is: persisted status plus
 /// whether a refresh is running. It does no network I/O.
-#[tauri::command]
+#[tauri::command(async)]
 fn source_health(refresher: tauri::State<'_, Refresher>) -> Result<SourceHealth, SourceFailure> {
     let sources = open_workspace()?.source_statuses()?;
     Ok(SourceHealth {
@@ -1514,7 +1544,16 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
                 // and the coordinator spaces the next attempt. What it cannot record
                 // (the workspace would not open, the hold could not be read) is said
                 // once on stderr, and again only if it changes or comes back.
-                match coordinator.tick(&engine, &open_workspace) {
+                let tick = coordinator.tick(&engine, &open_workspace);
+                // Until the next refresh is due (it opens nothing before), at most
+                // the idle fallback; a refresh that failed tries again after ten seconds.
+                let wait = match &tick {
+                    Ok(ticketd_core::source::Run::Skipped(
+                        ticketd_core::source::Skip::NotDue { in_secs },
+                    )) => std::time::Duration::from_secs(*in_secs).min(wake::IDLE),
+                    _ => std::time::Duration::from_secs(10),
+                };
+                match tick {
                     Ok(_) => reported = None,
                     Err(error) => {
                         let message = error.to_string();
@@ -1524,11 +1563,51 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
                         }
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_secs(10));
+                std::thread::sleep(wait);
             }
         });
     if let Err(error) = spawned {
         eprintln!("could not start periodic source refresh: {error}");
+    }
+}
+
+/// Delivers reminders to the Inbox as they come due while the desktop runs. Reads never
+/// deliver them, so the change poll stays off the write lock; this is the one writer, and
+/// it takes the lock only when a reminder is due. It sleeps until the next reminder is
+/// due, or a change (a reminder set or moved) wakes it. A delivery moves the change
+/// token, so the views, and the reminder notification, follow at their next poll.
+fn start_reminder_timer(
+    open: impl Fn() -> Result<ticketd_core::WorkspaceGuard, ticketd_core::Error> + Send + 'static,
+) {
+    let spawned = std::thread::Builder::new()
+        .name("reminders".into())
+        .spawn(move || {
+            let mut reported: Option<String> = None;
+            let mut seen = 0;
+            loop {
+                let next = open().and_then(|mut w| {
+                    w.deliver_due_reminders()?;
+                    w.next_reminder_due_in()
+                });
+                let wait = match next {
+                    Ok(next) => {
+                        reported = None;
+                        next.map_or(wake::IDLE, |due| due.min(wake::IDLE))
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        if reported.as_deref() != Some(message.as_str()) {
+                            eprintln!("due reminders could not be delivered: {message}");
+                            reported = Some(message);
+                        }
+                        wake::IDLE
+                    }
+                };
+                wake::CHANGED.wait(&mut seen, wait);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("could not start the reminder timer: {error}");
     }
 }
 
@@ -1580,6 +1659,22 @@ fn guard_menu_quit(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// What the startup watchdog has heard from the boot module.
+#[derive(Default)]
+struct StartupProgress {
+    /// The window is shown; from then on its visibility belongs to the person.
+    revealed: std::sync::atomic::AtomicBool,
+    /// The application modules loaded.
+    booted: std::sync::atomic::AtomicBool,
+}
+
+impl StartupProgress {
+    fn finished(&self) -> bool {
+        self.revealed.load(std::sync::atomic::Ordering::SeqCst)
+            && self.booted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     let started = std::time::Instant::now();
     let sync = std::sync::Arc::new(sync_scheduler::Scheduler::new(
@@ -1614,36 +1709,58 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
-            // The theme-first frontend reveal is the fast path. A broken module
-            // or stalled painting IPC must never leave the process invisible.
-            let (revealed, initial_reveal) = tokio::sync::oneshot::channel();
-            let startup_event =
+            // The boot module shows the window first (revealed), then loads the
+            // application modules (booted). A broken module or stalled painting
+            // IPC must never leave the process invisible or blank.
+            let startup = std::sync::Arc::new(StartupProgress::default());
+            let (progressed, mut progress) = tokio::sync::mpsc::unbounded_channel();
+            let reveal_event = {
+                let (startup, progressed) = (startup.clone(), progressed.clone());
                 tauri::Listener::once(app, "ticketd://startup-revealed", move |_| {
-                    let _ = revealed.send(());
-                });
+                    startup
+                        .revealed
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = progressed.send(());
+                })
+            };
+            let boot_event = {
+                let startup = startup.clone();
+                tauri::Listener::once(app, "ticketd://startup-booted", move |_| {
+                    startup
+                        .booted
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = progressed.send(());
+                })
+            };
             let startup_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Once startup succeeds, visibility belongs to the person. In
-                // particular, Cmd+H during these five seconds must stay hidden.
-                if tokio::time::timeout(std::time::Duration::from_secs(5), initial_reveal)
-                    .await
-                    .is_ok()
-                {
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while !startup.finished() && progress.recv().await.is_some() {}
+                })
+                .await;
+                if startup.finished() {
                     return;
                 }
-                tauri::Listener::unlisten(&startup_app, startup_event);
+                tauri::Listener::unlisten(&startup_app, reveal_event);
+                tauri::Listener::unlisten(&startup_app, boot_event);
                 if let Some(window) = tauri::Manager::get_webview_window(&startup_app, "main") {
+                    if !startup.booted.load(std::sync::atomic::Ordering::SeqCst)
+                        && let Err(error) =
+                            window.eval(include_str!("../../public/startup-fallback.js"))
+                    {
+                        eprintln!("Could not display startup guidance: {error}");
+                    }
+                    // Once shown, visibility belongs to the person. In
+                    // particular, Cmd+H during these five seconds must stay hidden.
+                    if startup.revealed.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
                     match window.is_visible() {
                         Ok(true) => return,
                         Ok(false) => {}
                         Err(error) => {
                             eprintln!("Could not check startup window visibility: {error}");
                         }
-                    }
-                    if let Err(error) =
-                        window.eval(include_str!("../../public/startup-fallback.js"))
-                    {
-                        eprintln!("Could not display startup guidance: {error}");
                     }
                     if let Err(error) = window.show() {
                         eprintln!("Could not reveal ticketd after startup: {error}");
@@ -1657,14 +1774,13 @@ pub fn run() -> Result<(), tauri::Error> {
                 std::sync::Arc::new(open_workspace),
                 automation_runner::notifier(app.handle().clone()),
             );
-            // Before any command is served, so a Stop never meets runs the previous
-            // process left Running.
-            runner.start_up();
             automation_runner::start(runner.clone(), app.handle().clone());
             tauri::Manager::manage(app, runner);
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             start_periodic_refresh(coordinator);
+            start_reminder_timer(open_workspace);
+            sync_commands::publish_status(app.handle().clone());
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
                 guard_menu_quit(app.handle())?;
@@ -1823,6 +1939,8 @@ pub fn run() -> Result<(), tauri::Error> {
             show_ticket,
             search_tickets,
             find_tickets_with_updates,
+            find_ticket_rows,
+            inbox_attention,
             count_tickets,
             context_graph,
             workspace_graph,
@@ -1890,6 +2008,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_send,
             chat_commands::chat_linked_to,
             chat_commands::chat_files,
+            chat_commands::chat_step_output,
             chat_commands::chat_remove_queued,
             chat_commands::chat_resume_queue,
             chat_commands::chat_send_queued_now,

@@ -53,9 +53,16 @@ mod projects;
 mod relationships;
 pub use relationships::RelationshipKind;
 mod search;
-pub use search::{Availability, TicketFilter, TicketOrder};
+pub use search::{
+    ActiveTicket, Availability, PrerequisiteCounts, SourcePill, TicketFilter, TicketOrder,
+    TicketRow,
+};
 mod sync_files;
 pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
+mod hydrate;
+mod read_scope;
+mod session;
+pub use session::{WorkspaceGuard, WorkspaceSession};
 mod tags;
 mod ticket_documents;
 mod write_scope;
@@ -75,7 +82,7 @@ mod history;
 mod readiness;
 pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
-pub use inbox::InboxEntry;
+pub use inbox::{AttentionEntry, InboxAttention, InboxEntry, ReminderState, ReviewState};
 mod activities;
 mod attachment_cleanup;
 mod attachment_library;
@@ -126,8 +133,9 @@ pub use automation_agents::{
 pub use automation_examples::AutomationExample;
 pub use automation_run_machine::{RunEnd, StepOutcome};
 pub use automation_runs::{
-    AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
-    AutomationStepStatus, RunAnswer,
+    AutomationRun, AutomationRunScope, AutomationRunStatus, AutomationRunStep,
+    AutomationRunSummary, AutomationRunTicket, AutomationStepStatus, RunAnswer,
+    RunningAutomationRuns,
 };
 pub use automation_steps::AutomationNotification;
 pub use automations::{
@@ -142,8 +150,8 @@ pub use chats::{
     ChatInputStanding, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
     ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter, ChatMessage, ChatNotice,
     ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin, ChatSnapshot,
-    ChatSubmissionAttempt, ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
-    NewChat,
+    ChatSubmissionAttempt, ChatSubmissionIntent, ChatSummary, ChatTool, ChatToolState, ChatTurn,
+    ChatTurnState, FolderChat, NewChat,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
@@ -554,6 +562,9 @@ impl Workspace {
         // Starts when exclusive use is first refused, and anew after each
         // wait for a migration: that one was not an open Workspace.
         let mut open_elsewhere: Option<Instant> = None;
+        // While this open waits for exclusive use, warm sessions elsewhere are asked to
+        // let go (ADR 0016).
+        let mut release: Option<session::ReleaseRequest> = None;
         loop {
             let lock = backup::lock_file(path)?;
             if let Err(error) = FileExt::try_lock_shared(&lock) {
@@ -565,6 +576,13 @@ impl Workspace {
                 wait_for_migration_lock(migrating)?;
                 continue;
             }
+            // Another process waits for warm sessions to let go; opening now would
+            // hold it off.
+            if release.is_none() && session::release_requested(path) {
+                drop(lock);
+                wait_for_migration_lock(migrating)?;
+                continue;
+            }
             if restore::pending(path) {
                 drop(lock);
                 let recovery_lock = backup::lock_file(path)?;
@@ -572,12 +590,16 @@ impl Workspace {
                     if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                         return Err(error.into());
                     }
+                    if release.is_none() {
+                        release = Some(session::ReleaseRequest::new(path)?);
+                    }
                     wait_for_migration_lock(
                         *open_elsewhere
                             .get_or_insert_with(|| Instant::now() + open_workspaces_wait),
                     )?;
                     continue;
                 }
+                release = None;
                 restore::recover(path)?;
                 continue;
             }
@@ -587,8 +609,7 @@ impl Workspace {
             {
                 return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings > Restore from backup".into()));
             }
-            document_links::register_heading_function(&connection)?;
-            connection.busy_timeout(Duration::from_secs(10))?;
+            session::configure(&connection)?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
             let legacy: bool = connection.query_row(
@@ -615,14 +636,17 @@ impl Workspace {
                 if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                     return Err(error.into());
                 }
+                if release.is_none() {
+                    release = Some(session::ReleaseRequest::new(path)?);
+                }
                 wait_for_migration_lock(
                     *open_elsewhere.get_or_insert_with(|| Instant::now() + open_workspaces_wait),
                 )?;
                 continue;
             }
+            release = None;
             let mut connection = Connection::open_with_flags(path, flags)?;
-            document_links::register_heading_function(&connection)?;
-            connection.busy_timeout(Duration::from_secs(10))?;
+            session::configure(&connection)?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
             let legacy: bool = connection.query_row(
@@ -691,8 +715,10 @@ impl Workspace {
     }
 
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        history::read(&self.connection, &ticket.id)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            history::read(&self.connection, &ticket.id)
+        })
     }
 
     pub fn add_activity_with_details(
@@ -766,8 +792,10 @@ impl Workspace {
     }
     /// Read the latest authored Activity without loading its history.
     pub fn latest_update(&self, reference: &str) -> Result<Option<LatestUpdate>, Error> {
-        let id = relationships::id(&self.connection, reference)?;
-        activities::latest(&self.connection, &id)
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::latest(&self.connection, &id)
+        })
     }
 
     pub fn activity_feed(
@@ -776,13 +804,17 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ActivityFeedEntry>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        activities::feed(&self.connection, &ticket.id, limit, offset)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            activities::feed(&self.connection, &ticket.id, limit, offset)
+        })
     }
 
     pub fn activity(&self, reference: &str, id: &str) -> Result<Activity, Error> {
-        let ticket = self.show_ticket(reference)?;
-        activities::get(&self.connection, &ticket.id, id)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            activities::get(&self.connection, &ticket.id, id)
+        })
     }
 
     pub fn activities(
@@ -791,21 +823,14 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Activity>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        activities::read(&self.connection, &ticket.id, limit, offset)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            activities::read(&self.connection, &ticket.id, limit, offset)
+        })
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
         self.list_by_trash(false)
-    }
-
-    /// The `limit` tickets out of the trash whose content or organization changed
-    /// last, most recent first.
-    pub fn recently_updated_tickets(&self, limit: usize) -> Result<Vec<Ticket>, Error> {
-        let mut tickets = self.list_tickets()?;
-        tickets.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        tickets.truncate(limit);
-        Ok(tickets)
     }
 
     pub fn list_trash(&self) -> Result<Vec<Ticket>, Error> {
@@ -813,48 +838,30 @@ impl Workspace {
     }
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
-        let mut statement = self.connection.prepare(&format!(
-            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {}, t.number AS local_number FROM tickets t WHERE t.trashed = ?1 ORDER BY t.number DESC",
-            readiness::indicator_sql("t")
-        ))?;
-        let mut tickets = statement
-            .query_map([trashed], listed_ticket_from_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        for ticket in &mut tickets {
-            ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
-            relationships::populate(&self.connection, ticket)?;
-            hierarchy::populate(&self.connection, ticket)?;
-            duplicates::populate(&self.connection, ticket)?;
-            source::populate(&self.connection, ticket)?;
-            activities::populate_update(&self.connection, ticket)?;
-        }
-        Ok(tickets)
+        read_scope::run(&self.connection, |connection| {
+            let mut statement = connection.prepare_cached(&format!(
+                "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed, {}, t.number AS local_number FROM tickets t WHERE +t.trashed = ?1 ORDER BY t.number DESC",
+                readiness::indicator_sql("t")
+            ))?;
+            let mut tickets = statement
+                .query_map([trashed], listed_ticket_from_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            hydrate::hydrate(connection, &mut tickets)?;
+            Ok(tickets)
+        })
     }
 
     pub fn show_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        read_ticket(&self.connection, reference)
+        read_scope::run(&self.connection, |connection| {
+            read_ticket(connection, reference)
+        })
     }
 }
 
 /// A ticket with everything shown about it. A write calls this at the end of its scope, so
 /// the result is what the write left behind.
 pub(crate) fn read_ticket(connection: &Connection, reference: &str) -> Result<Ticket, Error> {
-    let ticket = connection
-        .query_row(
-            "SELECT id, reference, title, status, body, project_id, plan_id, trashed, number AS local_number FROM tickets WHERE reference = ?1",
-            [reference],
-            ticket_from_row,
-        )
-        .optional()?;
-    let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-    ticket.tags = tags::for_ticket(connection, &ticket.id)?;
-    relationships::populate(connection, &mut ticket)?;
-    ticket.availability = readiness::indicator(connection, &ticket.id)?;
-    hierarchy::populate(connection, &mut ticket)?;
-    duplicates::populate(connection, &mut ticket)?;
-    source::populate(connection, &mut ticket)?;
-    activities::populate_update(connection, &mut ticket)?;
-    Ok(ticket)
+    hydrate::one(connection, reference)
 }
 
 /// A ticket from a list query that selected `readiness::indicator_sql` as its ninth

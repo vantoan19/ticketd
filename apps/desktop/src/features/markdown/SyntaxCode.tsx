@@ -1,6 +1,10 @@
-import { useMemo } from "react";
-import DOMPurify from "dompurify";
-import { syntaxHighlighter as hljs } from "./syntax-highlighting";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { RootContent } from "hast";
+
+type Lowlight = (typeof import("./syntax-highlighting"))["codeLowlight"];
+
+/** Set once the highlighter has loaded, with the first code block read. */
+let loaded: Lowlight | undefined;
 
 export function SyntaxCode({
   source,
@@ -9,16 +13,37 @@ export function SyntaxCode({
   source: string;
   language: string;
 }) {
-  const html = useMemo(() => {
-    if (source.length > 50000 || !hljs.getLanguage(language)) return null;
-    return DOMPurify.sanitize(
-      hljs.highlight(source, { language, ignoreIllegals: true }).value,
-      { ALLOWED_TAGS: ["span"], ALLOWED_ATTR: ["class"] },
-    );
-  }, [source, language]);
-  return html === null ? (
-    <code>{source}</code>
-  ) : (
-    <code dangerouslySetInnerHTML={{ __html: html }} />
+  const [lowlight, setLowlight] = useState(loaded);
+  useEffect(() => {
+    if (lowlight) return;
+    let live = true;
+    void import("./syntax-highlighting").then(({ codeLowlight }) => {
+      loaded = codeLowlight;
+      if (live) setLowlight(() => codeLowlight);
+    });
+    return () => {
+      live = false;
+    };
+  }, [lowlight]);
+  const tokens = useMemo(() => {
+    const tree = lowlight?.highlight(language, source);
+    return tree?.children.length ? toReact(tree.children) : null;
+  }, [lowlight, source, language]);
+  return <code>{tokens ?? source}</code>;
+}
+
+/** The highlighter's tree is text in classed spans, rendered as React owns it. */
+function toReact(nodes: RootContent[]): ReactNode[] {
+  return nodes.map((node, index) =>
+    node.type === "text" ? (
+      node.value
+    ) : node.type === "element" ? (
+      <span
+        key={index}
+        className={[node.properties.className ?? []].flat().join(" ")}
+      >
+        {toReact(node.children)}
+      </span>
+    ) : null,
   );
 }
