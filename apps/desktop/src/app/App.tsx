@@ -14,7 +14,6 @@ import { keepWebviewInStep } from "@/lib/webview-scale";
 import { usePageZoom } from "./use-page-zoom";
 import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
 import { PageZoomStatus } from "./PageZoomStatus";
-import { CommandPalette } from "./CommandPalette";
 import { useCommandKeys, type GoTo } from "./use-command-keys";
 import {
   ContextGraphNavigation,
@@ -22,22 +21,13 @@ import {
   PlanNavigation,
   ProjectNavigation,
 } from "@/features/documents/navigation";
-import { ContextGraph } from "@/features/documents/ContextGraph";
-import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
-import {
-  Documents,
-  type DocumentCommands,
-} from "@/features/documents/Documents";
-import {
-  AttachmentLibrary,
-  type AttachmentCommands,
-} from "@/features/attachments/AttachmentLibrary";
+import type { DocumentCommands } from "@/features/documents/Documents";
+import type { AttachmentCommands } from "@/features/attachments/AttachmentLibrary";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { client, type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { InboxAttentionProvider } from "@/features/tickets/inbox-attention";
-import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { useBulkEdit } from "@/features/tickets/useBulkEdit";
@@ -46,8 +36,6 @@ import {
   WorkspaceSidebar,
   type View,
 } from "@/components/layout/WorkspaceSidebar";
-import { SettingsView } from "@/features/settings/SettingsView";
-import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
 import { usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
@@ -61,8 +49,6 @@ import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
-import { PlanList } from "@/features/plans/PlanList";
-import { Projects } from "@/features/projects/Projects";
 import {
   useCallback,
   useEffect,
@@ -103,11 +89,97 @@ import {
   useWorkspaceState,
 } from "@/lib/workspace-state";
 import { ChatProvider } from "@/features/chats/ChatProvider";
-import { AutomationsView } from "@/features/automations/AutomationsView";
 import { RunNavigation } from "@/features/automations/navigation";
 import { useAutomationNotifications } from "@/features/automations/useAutomationNotifications";
-import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
+import { lazyView } from "./lazy-view";
+
+// Each view behind the view switch loads on its first visit; the likely next
+// ones load while idle after the first paint (PREFETCHED).
+const CommandPalette = lazyView(() =>
+  import("./CommandPalette").then((module) => module.CommandPalette),
+);
+const ContextGraph = lazyView(() =>
+  import("@/features/documents/ContextGraph").then(
+    (module) => module.ContextGraph,
+  ),
+);
+const WorkspaceGraph = lazyView(() =>
+  import("@/features/documents/WorkspaceGraph").then(
+    (module) => module.WorkspaceGraph,
+  ),
+);
+const Documents = lazyView(() =>
+  import("@/features/documents/Documents").then((module) => module.Documents),
+);
+const AttachmentLibrary = lazyView(() =>
+  import("@/features/attachments/AttachmentLibrary").then(
+    (module) => module.AttachmentLibrary,
+  ),
+);
+const Inbox = lazyView(() =>
+  import("@/features/tickets/Inbox").then((module) => module.Inbox),
+);
+const SettingsView = lazyView(() =>
+  import("@/features/settings/SettingsView").then(
+    (module) => module.SettingsView,
+  ),
+);
+const SettingsNav = lazyView(() =>
+  import("@/features/settings/SettingsNav").then(
+    (module) => module.SettingsNav,
+  ),
+);
+const PlanList = lazyView(() =>
+  import("@/features/plans/PlanList").then((module) => module.PlanList),
+);
+const Projects = lazyView(() =>
+  import("@/features/projects/Projects").then((module) => module.Projects),
+);
+const AutomationsView = lazyView(() =>
+  import("@/features/automations/AutomationsView").then(
+    (module) => module.AutomationsView,
+  ),
+);
+const ChatsView = lazyView(() =>
+  import("@/features/chats/ChatsView").then((module) => module.ChatsView),
+);
+const PREFETCHED = [
+  CommandPalette,
+  Inbox,
+  Documents,
+  PlanList,
+  Projects,
+  SettingsView,
+  SettingsNav,
+];
+
+/** Loads the likely next views and the editor once the first paint is done. */
+function usePrefetch() {
+  useEffect(() => {
+    const prefetch = () => {
+      for (const view of PREFETCHED) void view.preload().catch(() => {});
+      // CodeMirror follows the editor: source mode is its less common path.
+      void import("@/features/markdown/MarkdownEditor")
+        .then((editor) => editor.LazySourceEditor.preload())
+        .catch(() => {});
+    };
+    if ("requestIdleCallback" in window) {
+      const idle = requestIdleCallback(prefetch);
+      return () => cancelIdleCallback(idle);
+    }
+    // WebKit has no idle callback.
+    const timer = setTimeout(prefetch, 500);
+    return () => clearTimeout(timer);
+  }, []);
+}
+
+/** True from the first render where `value` is: a hidden view keeps its state. */
+function useVisited(value: boolean) {
+  const [visited, setVisited] = useState(value);
+  if (value && !visited) setVisited(true);
+  return visited || value;
+}
 
 /** Each top-level view by name, for "Back to …" (Settings returns to it). */
 const VIEW_NAMES = {
@@ -177,6 +249,7 @@ function AppContent() {
     useState<SettingsPageId>("appearance");
   useThemeSync();
   useInputModality();
+  usePrefetch();
   // Settings replaces the sidebar; Back to tickets returns to the view it left.
   const [viewBeforeSettings, setViewBeforeSettings] =
     useState<typeof view>("tickets");
@@ -710,6 +783,11 @@ function AppContent() {
   // Read only while the palette is open: a closed one has no use for it.
   const paletteTicket =
     useTicket(paletteOpen ? paletteReference : null).value ?? undefined;
+  // Hidden views mount on their first visit, then stay to keep their state.
+  const paletteMounted = useVisited(paletteOpen);
+  const projectsMounted = useVisited(view === "projects");
+  const documentsMounted = useVisited(view === "documents" || capture);
+  const chatsMounted = useVisited(view === "chats");
   return (
     // Runs open in the Automations page, which is there only while Chat is on.
     // Without it a run's Inbox entry opens its ticket instead.
@@ -803,184 +881,192 @@ function AppContent() {
                           refresh={refresh}
                           onCreated={(id) => scope("all", "all", id)}
                         />
-                        <CommandPalette
-                          pageZoom={pageZoom}
-                          inboxCommands={
-                            view === "inbox" && inboxSelection
-                              ? (() => {
-                                  const entry =
-                                    inboxSelection.kind === "entry"
-                                      ? inboxSelection.entry
-                                      : null;
-                                  const chat =
-                                    inboxSelection.kind === "approval"
-                                      ? inboxSelection.chat
-                                      : null;
-                                  const reference =
-                                    entry?.reference ??
-                                    chat?.tickets[0]?.reference ??
-                                    chat?.first_ticket;
-                                  const ticketReason =
-                                    editingBlockedReason(workspaceProblem) ??
-                                    (!reference
-                                      ? "This Chat has no linked Ticket."
-                                      : null);
-                                  const blocked =
-                                    editingBlockedReason(workspaceProblem);
-                                  const activeTicket = reference
-                                    ? inboxTicket
-                                    : undefined;
-                                  const ticketActionReason =
-                                    ticketReason ??
-                                    ticketUnavailable(
-                                      reference ? inboxRecord : undefined,
-                                    );
-                                  const isReview =
-                                    entry?.kind === "status" &&
-                                    entry.to_value === "In review";
-                                  const primaryReason = isReview
-                                    ? (ticketActionReason ??
-                                      (activeTicket?.status !== "In review"
-                                        ? "This review is already resolved."
-                                        : activeTicket.source?.ownership ===
-                                              "external" &&
-                                            (activeTicket.source
-                                              .status_locked ||
-                                              !activeTicket.source.status_choices.includes(
-                                                "Done",
-                                              ))
-                                          ? "The source does not allow moving this Ticket to Done."
-                                          : null))
-                                    : entry?.kind === "reminder"
-                                      ? ticketActionReason
-                                      : blocked;
-                                  const primaryLabel = chat
-                                    ? "Review in Chat"
-                                    : entry?.kind === "reminder"
-                                      ? "Clear reminder"
-                                      : entry?.kind === "status" &&
-                                          entry.to_value === "In review"
-                                        ? "Move to Done"
-                                        : "Mark read";
-                                  return [
-                                    {
-                                      id: "inbox-primary" as const,
-                                      label: primaryLabel,
-                                      disabledReason: chat
-                                        ? null
-                                        : primaryReason,
-                                      run: () => requestInboxAction("primary"),
-                                    },
-                                    {
-                                      id: "inbox-reply" as const,
-                                      label: "Reply on this Ticket",
-                                      disabledReason: ticketActionReason,
-                                      run: () => requestInboxAction("reply"),
-                                    },
-                                    {
-                                      id: "inbox-remind" as const,
-                                      label:
-                                        entry?.kind === "reminder"
-                                          ? "Snooze reminder"
-                                          : "Remind me on this Ticket",
-                                      disabledReason: ticketActionReason,
-                                      run: () => requestInboxAction("remind"),
-                                    },
-                                    {
-                                      id: "inbox-read" as const,
-                                      label: "Toggle Inbox read state",
-                                      disabledReason: blocked,
-                                      run: () => requestInboxAction("read"),
-                                    },
-                                    {
-                                      id: "inbox-next" as const,
-                                      label: "Next Inbox entry",
-                                      disabledReason: null,
-                                      run: () => requestInboxAction("next"),
-                                    },
-                                    {
-                                      id: "inbox-previous" as const,
-                                      label: "Previous Inbox entry",
-                                      disabledReason: null,
-                                      run: () => requestInboxAction("previous"),
-                                    },
-                                  ];
-                                })()
-                              : null
-                          }
-                          writeUpdate={
-                            view === "tickets" &&
-                            workspace.selected === paletteReference &&
-                            editingBlockedReason(workspaceProblem) === null
-                              ? openTicketUpdate
-                              : null
-                          }
-                          memoryTickets={workspace.tickets}
-                          readyCount={counts?.ready ?? null}
-                          automationCount={counts?.runs_needing_you ?? null}
-                          {...{
-                            attachmentCommands:
-                              view === "attachments" && graphOrigin === null
-                                ? attachmentCommands
-                                : null,
-                            documentCommands:
-                              view === "documents" && graphOrigin === null
-                                ? documentCommands
-                                : null,
-                          }}
-                          currentPlan={navigation.plan || null}
-                          workspaceGraphActive={graphOrigin === "__workspace__"}
-                          createDisabledReason={createDisabledReason}
-                          create={(kind) => {
-                            if (editingBlockedReason(workspaceProblem)) return;
-                            if (kind === "ticket") {
-                              createTriggerRef.current =
-                                paletteReturn.current instanceof
-                                HTMLButtonElement
-                                  ? paletteReturn.current
-                                  : null;
-                              setCreateStatus(undefined);
-                              setCreating(true);
-                            } else if (kind === "plan") {
-                              setCreatingPlan(true);
-                            } else if (kind === "capture")
-                              openCapture(paletteReturn.current);
-                            else {
-                              setNewChatRequest((count) => count + 1);
-                              openView("chats");
+                        {paletteMounted && (
+                          <CommandPalette
+                            pageZoom={pageZoom}
+                            inboxCommands={
+                              view === "inbox" && inboxSelection
+                                ? (() => {
+                                    const entry =
+                                      inboxSelection.kind === "entry"
+                                        ? inboxSelection.entry
+                                        : null;
+                                    const chat =
+                                      inboxSelection.kind === "approval"
+                                        ? inboxSelection.chat
+                                        : null;
+                                    const reference =
+                                      entry?.reference ??
+                                      chat?.tickets[0]?.reference ??
+                                      chat?.first_ticket;
+                                    const ticketReason =
+                                      editingBlockedReason(workspaceProblem) ??
+                                      (!reference
+                                        ? "This Chat has no linked Ticket."
+                                        : null);
+                                    const blocked =
+                                      editingBlockedReason(workspaceProblem);
+                                    const activeTicket = reference
+                                      ? inboxTicket
+                                      : undefined;
+                                    const ticketActionReason =
+                                      ticketReason ??
+                                      ticketUnavailable(
+                                        reference ? inboxRecord : undefined,
+                                      );
+                                    const isReview =
+                                      entry?.kind === "status" &&
+                                      entry.to_value === "In review";
+                                    const primaryReason = isReview
+                                      ? (ticketActionReason ??
+                                        (activeTicket?.status !== "In review"
+                                          ? "This review is already resolved."
+                                          : activeTicket.source?.ownership ===
+                                                "external" &&
+                                              (activeTicket.source
+                                                .status_locked ||
+                                                !activeTicket.source.status_choices.includes(
+                                                  "Done",
+                                                ))
+                                            ? "The source does not allow moving this Ticket to Done."
+                                            : null))
+                                      : entry?.kind === "reminder"
+                                        ? ticketActionReason
+                                        : blocked;
+                                    const primaryLabel = chat
+                                      ? "Review in Chat"
+                                      : entry?.kind === "reminder"
+                                        ? "Clear reminder"
+                                        : entry?.kind === "status" &&
+                                            entry.to_value === "In review"
+                                          ? "Move to Done"
+                                          : "Mark read";
+                                    return [
+                                      {
+                                        id: "inbox-primary" as const,
+                                        label: primaryLabel,
+                                        disabledReason: chat
+                                          ? null
+                                          : primaryReason,
+                                        run: () =>
+                                          requestInboxAction("primary"),
+                                      },
+                                      {
+                                        id: "inbox-reply" as const,
+                                        label: "Reply on this Ticket",
+                                        disabledReason: ticketActionReason,
+                                        run: () => requestInboxAction("reply"),
+                                      },
+                                      {
+                                        id: "inbox-remind" as const,
+                                        label:
+                                          entry?.kind === "reminder"
+                                            ? "Snooze reminder"
+                                            : "Remind me on this Ticket",
+                                        disabledReason: ticketActionReason,
+                                        run: () => requestInboxAction("remind"),
+                                      },
+                                      {
+                                        id: "inbox-read" as const,
+                                        label: "Toggle Inbox read state",
+                                        disabledReason: blocked,
+                                        run: () => requestInboxAction("read"),
+                                      },
+                                      {
+                                        id: "inbox-next" as const,
+                                        label: "Next Inbox entry",
+                                        disabledReason: null,
+                                        run: () => requestInboxAction("next"),
+                                      },
+                                      {
+                                        id: "inbox-previous" as const,
+                                        label: "Previous Inbox entry",
+                                        disabledReason: null,
+                                        run: () =>
+                                          requestInboxAction("previous"),
+                                      },
+                                    ];
+                                  })()
+                                : null
                             }
-                          }}
-                          initialTicket={
-                            paletteTicket ??
-                            workspace.tickets.find(
-                              (ticket) => ticket.reference === paletteReference,
-                            ) ??
-                            null
-                          }
-                          reference={paletteReference}
-                          initialScope={paletteScope}
-                          projects={projects}
-                          plans={plans}
-                          refresh={reportChange}
-                          open={paletteOpen}
-                          returnFocus={paletteReturn}
-                          resolveReturnFocus={resolvePaletteFocus}
-                          onOpenChange={setPaletteOpen}
-                          go={goTo}
-                          chatsEnabled={chat.enabled}
-                          workspaceNotice={
-                            deferredWorkspaceLabel
-                              ? {
-                                  label: "Review workspace notice",
-                                  run: showWorkspaceNotice,
-                                }
-                              : null
-                          }
-                          ticket={(reference) => {
-                            setSelected(reference);
-                            setView("tickets");
-                          }}
-                        />
+                            writeUpdate={
+                              view === "tickets" &&
+                              workspace.selected === paletteReference &&
+                              editingBlockedReason(workspaceProblem) === null
+                                ? openTicketUpdate
+                                : null
+                            }
+                            memoryTickets={workspace.tickets}
+                            readyCount={counts?.ready ?? null}
+                            automationCount={counts?.runs_needing_you ?? null}
+                            {...{
+                              attachmentCommands:
+                                view === "attachments" && graphOrigin === null
+                                  ? attachmentCommands
+                                  : null,
+                              documentCommands:
+                                view === "documents" && graphOrigin === null
+                                  ? documentCommands
+                                  : null,
+                            }}
+                            currentPlan={navigation.plan || null}
+                            workspaceGraphActive={
+                              graphOrigin === "__workspace__"
+                            }
+                            createDisabledReason={createDisabledReason}
+                            create={(kind) => {
+                              if (editingBlockedReason(workspaceProblem))
+                                return;
+                              if (kind === "ticket") {
+                                createTriggerRef.current =
+                                  paletteReturn.current instanceof
+                                  HTMLButtonElement
+                                    ? paletteReturn.current
+                                    : null;
+                                setCreateStatus(undefined);
+                                setCreating(true);
+                              } else if (kind === "plan") {
+                                setCreatingPlan(true);
+                              } else if (kind === "capture")
+                                openCapture(paletteReturn.current);
+                              else {
+                                setNewChatRequest((count) => count + 1);
+                                openView("chats");
+                              }
+                            }}
+                            initialTicket={
+                              paletteTicket ??
+                              workspace.tickets.find(
+                                (ticket) =>
+                                  ticket.reference === paletteReference,
+                              ) ??
+                              null
+                            }
+                            reference={paletteReference}
+                            initialScope={paletteScope}
+                            projects={projects}
+                            plans={plans}
+                            refresh={reportChange}
+                            open={paletteOpen}
+                            returnFocus={paletteReturn}
+                            resolveReturnFocus={resolvePaletteFocus}
+                            onOpenChange={setPaletteOpen}
+                            go={goTo}
+                            chatsEnabled={chat.enabled}
+                            workspaceNotice={
+                              deferredWorkspaceLabel
+                                ? {
+                                    label: "Review workspace notice",
+                                    run: showWorkspaceNotice,
+                                  }
+                                : null
+                            }
+                            ticket={(reference) => {
+                              setSelected(reference);
+                              setView("tickets");
+                            }}
+                          />
+                        )}
                       </StatusLineRegion>
                       <div
                         ref={workspaceRoot}
@@ -1138,7 +1224,7 @@ function AppContent() {
                                         onCommandsChange={setAttachmentCommands}
                                       />
                                     )}
-                                  {
+                                  {projectsMounted && (
                                     <div
                                       className="management-host"
                                       hidden={
@@ -1160,7 +1246,7 @@ function AppContent() {
                                         }}
                                       />
                                     </div>
-                                  }
+                                  )}
                                   {(view === "plans" ||
                                     view === "archived-plans") &&
                                     graphOrigin === null && (
@@ -1186,51 +1272,53 @@ function AppContent() {
                                         refresh={refresh}
                                       />
                                     )}
-                                  <div
-                                    className="context-view-wrapper"
-                                    hidden={
-                                      view !== "documents" ||
-                                      graphOrigin !== null
-                                    }
-                                  >
-                                    <Documents
-                                      onCommandsChange={setDocumentCommands}
-                                      key={`documents:${recoveryGeneration}`}
-                                      active={view === "documents"}
-                                      listRequest={documentListRequest}
-                                      target={documentTarget}
-                                      backLabel={
-                                        (documentReturn &&
-                                          documentReturnLabel) ||
-                                        "Back to Documents"
+                                  {documentsMounted && (
+                                    <div
+                                      className="context-view-wrapper"
+                                      hidden={
+                                        view !== "documents" ||
+                                        graphOrigin !== null
                                       }
-                                      capture={capture}
-                                      onCapture={() => openCapture()}
-                                      currentTicket={
-                                        view === "tickets"
-                                          ? workspace.selected
-                                          : null
-                                      }
-                                      onOpenPlan={(id) => {
-                                        // Leaving through a link ends the return trip.
-                                        setDocumentReturn(null);
-                                        scope("all", "all", id);
-                                        setView("tickets");
-                                      }}
-                                      onOpenTicket={(reference) => {
-                                        setDocumentReturn(null);
-                                        setSelected(reference);
-                                        setView("tickets");
-                                      }}
-                                      onDocumentClose={() => {
-                                        if (documentReturn) {
-                                          setView(documentReturn);
-                                          setDocumentReturn(null);
+                                    >
+                                      <Documents
+                                        onCommandsChange={setDocumentCommands}
+                                        key={`documents:${recoveryGeneration}`}
+                                        active={view === "documents"}
+                                        listRequest={documentListRequest}
+                                        target={documentTarget}
+                                        backLabel={
+                                          (documentReturn &&
+                                            documentReturnLabel) ||
+                                          "Back to Documents"
                                         }
-                                      }}
-                                      onCaptureClose={closeCapture}
-                                    />
-                                  </div>
+                                        capture={capture}
+                                        onCapture={() => openCapture()}
+                                        currentTicket={
+                                          view === "tickets"
+                                            ? workspace.selected
+                                            : null
+                                        }
+                                        onOpenPlan={(id) => {
+                                          // Leaving through a link ends the return trip.
+                                          setDocumentReturn(null);
+                                          scope("all", "all", id);
+                                          setView("tickets");
+                                        }}
+                                        onOpenTicket={(reference) => {
+                                          setDocumentReturn(null);
+                                          setSelected(reference);
+                                          setView("tickets");
+                                        }}
+                                        onDocumentClose={() => {
+                                          if (documentReturn) {
+                                            setView(documentReturn);
+                                            setDocumentReturn(null);
+                                          }
+                                        }}
+                                        onCaptureClose={closeCapture}
+                                      />
+                                    </div>
+                                  )}
                                   {workspaceGraphMounted && (
                                     <div
                                       className="context-view-wrapper"
@@ -1295,7 +1383,7 @@ function AppContent() {
                                       />
                                     </div>
                                   )}
-                                  {chat.enabled && (
+                                  {chat.enabled && chatsMounted && (
                                     <div
                                       className="context-view-wrapper"
                                       hidden={

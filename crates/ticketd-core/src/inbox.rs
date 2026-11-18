@@ -21,6 +21,68 @@ pub struct InboxEntry {
     pub deleted: bool,
 }
 
+/// The Inbox as its list and the sidebar count show it, read at once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InboxAttention {
+    /// Every entry, newest first.
+    pub entries: Vec<AttentionEntry>,
+    /// Each ticket that an agent moved to In review in an entry: where it stands now, so
+    /// an Undo of the review can be checked and restored.
+    pub reviews: Vec<ReviewState>,
+    /// The reminder each ticket with a reminder entry has now.
+    pub reminders: Vec<ReminderState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AttentionEntry {
+    #[serde(flatten)]
+    pub entry: InboxEntry,
+    /// The entry still asks the person to act: an agent's move to In review that is
+    /// still the ticket's latest status change, or a reminder that is due and not
+    /// rescheduled. A review the person restored with Undo needs them again too; the
+    /// desktop keeps those restorations and adds them.
+    pub needs_you: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReviewState {
+    pub reference: String,
+    pub status: crate::Status,
+    pub latest_status_change: Option<crate::HistoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReminderState {
+    pub reference: String,
+    pub due_at: String,
+}
+
+/// The columns of an `InboxEntry`, for `inbox_entries i JOIN tickets t`.
+const ENTRY_COLUMNS: &str = "i.id, t.reference, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value))";
+
+fn entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboxEntry> {
+    Ok(InboxEntry {
+        id: row.get(0)?,
+        reference: row.get::<_, String>(1)?,
+        title: row.get(2)?,
+        kind: row.get(3)?,
+        from_value: row.get(4)?,
+        to_value: row.get(5)?,
+        timestamp: row.get(6)?,
+        read: row.get(7)?,
+        editing_agent: row.get(8)?,
+        deleted: row.get(9)?,
+    })
+}
+
+/// An entry where an agent, not the person, moved the ticket to In review.
+const AGENT_REVIEW: &str = "i.kind = 'status' AND i.to_value = 'In review' AND i.editing_agent IS NOT NULL AND i.editing_agent <> 'local-person'";
+
+/// The `ticket_history` row of the latest status change of the ticket `id`.
+fn latest_status_change(id: &str) -> String {
+    format!("(SELECT MAX(number) FROM ticket_history WHERE ticket_id = {id} AND kind = 'status')")
+}
+
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
     tx.execute_batch("CREATE TABLE ticket_follows (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(person, ticket_id)); CREATE TABLE inbox_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), read INTEGER NOT NULL DEFAULT 0); CREATE INDEX inbox_person_id ON inbox_entries(person, id DESC);")?;
     Ok(())
@@ -64,15 +126,17 @@ impl Workspace {
     }
     /// Return the scheduled instant in UTC, independent of following.
     pub fn reminder(&self, reference: &str) -> Result<Option<String>, Error> {
-        let ticket = self.show_ticket(reference)?;
-        Ok(self
-            .connection
-            .query_row(
-                "SELECT due_at FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
-                params![LOCAL_PERSON, ticket.id],
-                |row| row.get(0),
-            )
-            .optional()?)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            Ok(self
+                .connection
+                .query_row(
+                    "SELECT due_at FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+                    params![LOCAL_PERSON, ticket.id],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })
     }
 
     /// Set or dismiss a reminder. Every set schedules a new occurrence.
@@ -114,12 +178,14 @@ impl Workspace {
     }
 
     pub fn is_following(&self, reference: &str) -> Result<bool, Error> {
-        let ticket = self.show_ticket(reference)?;
-        Ok(self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2)",
-            params![LOCAL_PERSON, ticket.id],
-            |row| row.get(0),
-        )?)
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            Ok(self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2)",
+                params![LOCAL_PERSON, ticket.id],
+                |row| row.get(0),
+            )?)
+        })
     }
     pub fn set_following(&mut self, reference: &str, following: bool) -> Result<(), Error> {
         // Following is the person's own, so a ticket in Trash may be followed.
@@ -136,20 +202,31 @@ impl Workspace {
             Ok(())
         })
     }
-    /// Due reminders become inbox entries when someone looks, so every read of
-    /// the inbox or its counts delivers them first. Insertion and marking
-    /// delivered commit together, including across processes.
-    pub(crate) fn deliver_due_reminders(&self) -> Result<(), Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        crate::write_scope::lock(&tx)?;
-        let now: String =
-            tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
-                row.get(0)
-            })?;
-        tx.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
-        tx.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
-        tx.commit()?;
-        Ok(())
+    /// Turn reminders that have come due into inbox entries. Reads never do this: the
+    /// reminder poll (the desktop) and the inbox command (the CLI) call it. Insertion and
+    /// marking delivered commit together, so each reminder is delivered once, including
+    /// across processes. It takes the write lock only when a reminder is due.
+    pub fn deliver_due_reminders(&mut self) -> Result<(), Error> {
+        // Checked with the same comparison the delivery makes, so the two cannot disagree.
+        let due: bool = self.connection.prepare_cached("SELECT EXISTS(SELECT 1 FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday('now'))")?.query_row([LOCAL_PERSON], |row| row.get(0))?;
+        if !due {
+            return Ok(());
+        }
+        crate::write_scope::run(&self.connection, |scope| {
+            let now: String =
+                scope.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+                    row.get(0)
+                })?;
+            scope.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+            scope.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+            Ok(())
+        })
+    }
+    /// How long until the next undelivered reminder comes due: zero when one already
+    /// has, `None` when none is set. The desktop sleeps this long before delivering.
+    pub fn next_reminder_due_in(&self) -> Result<Option<std::time::Duration>, Error> {
+        let seconds: Option<f64> = self.connection.prepare_cached("SELECT MIN((julianday(due_at) - julianday('now')) * 86400.0) FROM ticket_reminders WHERE person = ?1 AND delivered = 0")?.query_row([LOCAL_PERSON], |row| row.get(0))?;
+        Ok(seconds.map(|seconds| std::time::Duration::from_secs_f64(seconds.max(0.0))))
     }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
         self.inbox_page(limit, offset, false)
@@ -162,28 +239,93 @@ impl Workspace {
         offset: u32,
         unread_only: bool,
     ) -> Result<Vec<InboxEntry>, Error> {
-        self.deliver_due_reminders()?;
-        let mut stmt = self.connection.prepare("SELECT i.id, t.reference, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value)) FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
+        let mut stmt = self.connection.prepare_cached(&format!("SELECT {ENTRY_COLUMNS} FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3"))?;
         let entries = stmt
             .query_map(
                 params![LOCAL_PERSON, limit.min(100), offset, unread_only],
-                |row| {
-                    Ok(InboxEntry {
-                        id: row.get(0)?,
-                        reference: row.get::<_, String>(1)?,
-                        title: row.get(2)?,
-                        kind: row.get(3)?,
-                        from_value: row.get(4)?,
-                        to_value: row.get(5)?,
-                        timestamp: row.get(6)?,
-                        read: row.get(7)?,
-                        editing_agent: row.get(8)?,
-                        deleted: row.get(9)?,
-                    })
-                },
+                entry_from_row,
             )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
+    }
+
+    /// Every Inbox entry, newest first, with whether it still needs the person, and what
+    /// an Undo of a review checks. Three queries, however long the Inbox is.
+    pub fn inbox_attention(&self) -> Result<InboxAttention, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            let latest = latest_status_change("t.id");
+            let mut statement = connection.prepare_cached(&format!(
+                "SELECT {ENTRY_COLUMNS}, CASE
+                   WHEN {AGENT_REVIEW} THEN t.status = 'In review' AND EXISTS (
+                     SELECT 1 FROM ticket_history h WHERE h.number = {latest} AND h.to_value = 'In review'
+                       AND h.editing_agent = i.editing_agent AND julianday(i.timestamp) >= julianday(h.timestamp))
+                   WHEN i.kind = 'reminder' THEN EXISTS (
+                     SELECT 1 FROM ticket_reminders r WHERE r.person = i.person AND r.ticket_id = i.ticket_id
+                       AND r.due_at = i.to_value AND julianday(r.due_at) <= julianday('now'))
+                   ELSE 0 END
+                 FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 ORDER BY i.id DESC"
+            ))?;
+            let entries = statement
+                .query_map([LOCAL_PERSON], |row| {
+                    Ok(AttentionEntry {
+                        entry: entry_from_row(row)?,
+                        needs_you: row.get(10)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut statement = connection.prepare_cached(&format!(
+                "SELECT t.reference, t.status, h.kind, h.from_value, h.to_value, h.timestamp, h.editing_agent
+                   FROM tickets t LEFT JOIN ticket_history h ON h.number = {latest}
+                  WHERE t.id IN (SELECT i.ticket_id FROM inbox_entries i WHERE i.person = ?1 AND {AGENT_REVIEW})
+                  ORDER BY t.number DESC"
+            ))?;
+            let reviews = statement
+                .query_map([LOCAL_PERSON], |row| {
+                    let latest_status_change = match row.get::<_, Option<String>>(2)? {
+                        Some(kind) => Some(crate::HistoryEntry {
+                            kind,
+                            from_value: row.get(3)?,
+                            to_value: row.get(4)?,
+                            timestamp: row.get(5)?,
+                            editing_agent: row.get(6)?,
+                        }),
+                        None => None,
+                    };
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        latest_status_change,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|(reference, status, latest_status_change)| {
+                    Ok(ReviewState {
+                        reference,
+                        status: status.parse()?,
+                        latest_status_change,
+                    })
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
+            let mut statement = connection.prepare_cached(
+                "SELECT t.reference, r.due_at FROM ticket_reminders r JOIN tickets t ON t.id = r.ticket_id
+                  WHERE r.person = ?1 AND r.ticket_id IN (SELECT ticket_id FROM inbox_entries WHERE person = ?1 AND kind = 'reminder')
+                  ORDER BY t.number DESC",
+            )?;
+            let reminders = statement
+                .query_map([LOCAL_PERSON], |row| {
+                    Ok(ReminderState {
+                        reference: row.get(0)?,
+                        due_at: row.get(1)?,
+                    })
+                })?
+                .collect::<Result<_, _>>()?;
+            Ok(InboxAttention {
+                entries,
+                reviews,
+                reminders,
+            })
+        })
     }
     /// The person who wrote an update is not told about it: drop the inbox
     /// entries that update produced for them.

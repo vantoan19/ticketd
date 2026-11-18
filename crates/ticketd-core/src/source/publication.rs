@@ -676,14 +676,11 @@ fn open_attempt(
 ) -> Result<Option<PublicationAttempt>, Error> {
     let now = clock(connection, now)?;
     Ok(connection
-        .query_row(
-            &format!(
-                "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id \
-                 WHERE a.ticket_id = ?1 AND a.status IN ('in_flight', 'unresolved')"
-            ),
-            [ticket_id],
-            |row| attempt_from_row(row, &now),
-        )
+        .prepare_cached(&format!(
+            "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id \
+             WHERE a.ticket_id = ?1 AND a.status IN ('in_flight', 'unresolved')"
+        ))?
+        .query_row([ticket_id], |row| attempt_from_row(row, &now))
         .optional()?)
 }
 

@@ -10,6 +10,8 @@ export type ChatFiles = {
   folder: string;
   /** Fails with a `gone` ChatError when the file is no longer there. */
   open?: (path: string) => Promise<void>;
+  /** A step's whole output by its tool call, for a row that carries only its end. */
+  output?: (toolId: string) => Promise<string | null>;
 };
 export const ChatFilesContext = createContext<ChatFiles>({ folder: "" });
 

@@ -131,18 +131,20 @@ impl Workspace {
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>, Error> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT id, name, path FROM projects ORDER BY name, id")?;
-        let rows = statement
-            .query_map([], row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|mut project| {
-                project.paths = paths(&self.connection, &project.id)?;
-                Ok(project)
-            })
-            .collect()
+        self.read(|_| {
+            let mut statement = self
+                .connection
+                .prepare("SELECT id, name, path FROM projects ORDER BY name, id")?;
+            let rows = statement
+                .query_map([], row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.into_iter()
+                .map(|mut project| {
+                    project.paths = paths(&self.connection, &project.id)?;
+                    Ok(project)
+                })
+                .collect()
+        })
     }
 }
 

@@ -285,7 +285,12 @@ const stepSchema = z.object({
     .optional(),
   /** A note about the output, already readable. */
   result: z.string().nullish(),
+  /** The output's last lines, all a view carries until the row opens. */
   output: z.string().nullish(),
+  /** Set when `output` is only the last lines: where to read all of it. */
+  full_output: z
+    .object({ tool_id: z.string(), bytes: z.number().int().nonnegative() })
+    .nullish(),
   /** Set when ticketd kept less output than the harness produced. */
   truncated: z
     .object({ kept_bytes: z.number(), total_bytes: z.number() })
@@ -850,6 +855,8 @@ export interface ChatClient {
    * `gone` when the file is no longer there; a path outside the folder fails.
    */
   openFile(id: string, path: string): Promise<void>;
+  /** A step's whole output, which views carry only the last lines of; null when there is none. */
+  stepOutput(id: string, toolId: string): Promise<string | null>;
   /** Ordinary core Document creation from a response or a plan; resolves to the Document's id. */
   saveAsDocument(
     id: string,

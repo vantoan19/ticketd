@@ -18,7 +18,7 @@ use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
     ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger,
-    Workspace,
+    Workspace, WorkspaceSession,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},
@@ -46,7 +46,7 @@ type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) + Send>>>>;
 
 fn opener(path: &Path) -> WorkspaceOpener {
     let path = path.to_owned();
-    Arc::new(move || Workspace::open(&path))
+    Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
 }
 
 fn tools() -> AutomationAgentTools {
@@ -125,7 +125,7 @@ impl Fixture {
         let host_opener: WorkspaceOpener = {
             let (path, looks) = (path.clone(), as_the_host_looks.clone());
             Arc::new(move || {
-                let mut workspace = Workspace::open(&path)?;
+                let mut workspace = WorkspaceSession::for_file(&path)?.workspace()?;
                 if let Some(happens) = looks.lock().unwrap().as_ref() {
                     happens(&mut workspace);
                 }
@@ -1012,7 +1012,7 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
                 "the disk is gone".into(),
             ));
         }
-        Workspace::open(&path)
+        WorkspaceSession::for_file(&path)?.workspace()
     });
     let host = f.host.clone();
     let runner = Runner::new(
@@ -1074,7 +1074,7 @@ async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_p
                 "the disk is gone".into(),
             ));
         }
-        Workspace::open(&path)
+        WorkspaceSession::for_file(&path)?.workspace()
     });
     let host = ChatHost::new(
         flaky,
@@ -1165,7 +1165,7 @@ async fn a_storage_failure_while_the_agent_works_ends_the_run_without_its_failur
                 "the disk is gone".into(),
             ));
         }
-        Workspace::open(&path)
+        WorkspaceSession::for_file(&path)?.workspace()
     });
     let host = ChatHost::new(
         flaky,
@@ -1813,4 +1813,39 @@ async fn the_running_runs_of_an_automation_deleted_through_sync_end_at_the_next_
         f.first_turn_ending(),
         Some(TurnEnding::StoppedByTicketd(StopReason::RunEnded))
     );
+}
+
+/// The desktop's idle cost: a pass reads the Workspace once, and says whether
+/// anything needs the runner, so the loop can wait longer when nothing does.
+#[tokio::test(start_paused = true)]
+#[allow(clippy::unwrap_used)]
+async fn a_pass_uses_the_workspace_once_and_says_whether_anything_needs_the_runner() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let f = Fixture::new();
+    let uses = Arc::new(AtomicUsize::new(0));
+    let counted: WorkspaceOpener = {
+        let (inner, uses) = (opener(&f.path), Arc::clone(&uses));
+        Arc::new(move || {
+            uses.fetch_add(1, Ordering::SeqCst);
+            inner()
+        })
+    };
+    let host = f.host.clone();
+    let runner = Runner::new(
+        counted,
+        Arc::new(move || Ok(host.clone())),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
+
+    uses.store(0, Ordering::SeqCst);
+    assert!(runner.tick().unwrap(), "an Automation is on");
+    assert_eq!(uses.load(Ordering::SeqCst), 1);
+
+    f.core()
+        .set_automation_enabled(&f.automation.id, false)
+        .unwrap();
+    uses.store(0, Ordering::SeqCst);
+    assert!(!runner.tick().unwrap(), "nothing is on, queued or running");
+    assert_eq!(uses.load(Ordering::SeqCst), 1);
 }

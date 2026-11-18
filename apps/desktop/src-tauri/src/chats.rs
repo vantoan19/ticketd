@@ -18,9 +18,9 @@ use ticketd_chat_host::{
     TurnEnding, UnconfirmedCleanup, WorkspaceOpener, harness_key,
 };
 use ticketd_core::{
-    AutomationRunStatus, BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding,
-    ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
-    ChatSubmissionIntent, ChatTurnState, NewChat, Workspace,
+    BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
+    ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
+    ChatTurnState, NewChat, Workspace, WorkspaceGuard,
 };
 use tokio::sync::oneshot;
 
@@ -755,6 +755,26 @@ struct View {
     tracker: Tracker,
     state: ChatState,
     sequence: u64,
+    /// The item last sent under each id, so an unchanged one is not sent again.
+    sent: HashMap<String, Value>,
+    /// What the workspace said around the Chat, until the Chat's own records or
+    /// state move; `None` reads it again.
+    around: Option<Surroundings>,
+}
+
+/// The overview's rows as last built, kept between wakes.
+#[derive(Default)]
+struct BuiltRows {
+    /// The change sequence they were built at.
+    sequence: i64,
+    rows: HashMap<String, BuiltRow>,
+}
+
+/// One Chat's row, with the live state and check it was built with.
+struct BuiltRow {
+    live: ChatLive,
+    checked: Option<String>,
+    summary: Summary,
 }
 
 pub struct Chats {
@@ -788,6 +808,13 @@ pub struct Chats {
     options: Mutex<HashMap<&'static str, (Option<String>, HarnessOptionsView)>>,
     /// The version each harness reported at its last check.
     versions: Mutex<HashMap<&'static str, Option<String>>>,
+    built_rows: Mutex<BuiltRows>,
+    /// How often this service borrowed the workspace, for tests that bound it.
+    #[cfg(test)]
+    workspace_uses: AtomicU64,
+    /// How many list rows were built from history.
+    #[cfg(test)]
+    rows_built: AtomicU64,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -818,6 +845,11 @@ impl Chats {
             notify: AtomicBool::new(true),
             options: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
+            built_rows: Mutex::default(),
+            #[cfg(test)]
+            workspace_uses: AtomicU64::new(0),
+            #[cfg(test)]
+            rows_built: AtomicU64::new(0),
         })
     }
 
@@ -836,7 +868,9 @@ impl Chats {
         )
     }
 
-    fn workspace(&self) -> Outcome<Workspace> {
+    fn workspace(&self) -> Outcome<WorkspaceGuard> {
+        #[cfg(test)]
+        self.workspace_uses.fetch_add(1, Ordering::SeqCst);
         Ok((self.open_workspace)()?)
     }
 
@@ -888,12 +922,12 @@ impl Chats {
     }
 
     /// Moves whenever any Chat record was written or live state changed; cheap to read.
-    pub fn digest(&self) -> Option<String> {
+    pub fn digest(&self) -> Option<(i64, Vec<(String, ChatLive)>)> {
         let host = self.started_host()?;
         let sequence = self.workspace().ok()?.chat_change_sequence().ok()?;
         let mut live: Vec<_> = host.live().into_iter().collect();
         live.sort_by(|a, b| a.0.cmp(&b.0));
-        Some(format!("{sequence} {live:?}"))
+        Some((sequence, live))
     }
 
     fn started_host(&self) -> Option<ChatHost> {
@@ -947,23 +981,17 @@ impl Chats {
             .map(|host| host.live())
             .unwrap_or_default();
         live.retain(|_, live| live.activity != Activity::Idle);
-        let runs = self
+        let going = self
             .workspace()
             .ok()
-            .and_then(|workspace| workspace.all_automation_runs().ok())
+            .and_then(|workspace| workspace.running_automation_runs().ok())
             .unwrap_or_default();
-        let going: Vec<_> = runs
-            .iter()
-            .filter(|run| run.status == AutomationRunStatus::Running)
-            .collect();
-        for step in going.iter().flat_map(|run| &run.steps) {
-            if let Some(chat_id) = &step.chat_id {
-                live.remove(chat_id);
-            }
+        for chat_id in &going.chat_ids {
+            live.remove(chat_id);
         }
         Stopping {
             chats: live.len(),
-            runs: going.len(),
+            runs: going.runs,
         }
     }
 
@@ -1157,38 +1185,92 @@ impl Chats {
         let folder_users = folder_users(&workspace)?;
         let mut summaries = Vec::new();
         for chat in workspace.list_chats(filter)? {
-            let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
             let live = live
                 .as_ref()
                 .and_then(|live| live.get(&chat.id).cloned())
                 .unwrap_or_else(ChatLive::idle);
-            summaries.push(chat_view::summary(
-                &chat,
-                &live,
-                &Tracker::from_items(&items),
-                &surroundings(
-                    &workspace,
-                    &chat,
-                    &folder_users,
-                    self.checked(&chat.id),
-                    &live,
-                    &self.missing_folders,
-                )?,
-            ));
+            summaries.push(self.summary(&workspace, &chat, &folder_users, &live)?);
         }
         Ok(summaries)
     }
 
-    /// The counts, the rows outside the trash, and a text that differs exactly when a
-    /// list row or the counts would read differently. Streamed text being checkpointed
-    /// changes neither, so lists are not fetched again for it.
-    pub fn overview_digest(&self) -> Outcome<(Overview, String, Vec<Summary>)> {
-        let mut rows = self.summaries(ChatListFilter::Active)?;
-        rows.extend(self.summaries(ChatListFilter::Archived)?);
-        let overview = overview_of(&rows);
-        let trashed = self.summaries(ChatListFilter::Trashed)?;
-        let digest = format!("{rows:?}{trashed:?}");
-        Ok((overview, digest, rows))
+    /// One Chat's list row, read from its latest history.
+    fn summary(
+        &self,
+        workspace: &Workspace,
+        chat: &Chat,
+        folder_users: &[Chat],
+        live: &ChatLive,
+    ) -> Outcome<Summary> {
+        #[cfg(test)]
+        self.rows_built.fetch_add(1, Ordering::SeqCst);
+        let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
+        Ok(chat_view::summary(
+            chat,
+            live,
+            &Tracker::from_items(&items),
+            &surroundings(
+                workspace,
+                chat,
+                folder_users,
+                self.checked(&chat.id),
+                live,
+                &self.missing_folders,
+            )?,
+        ))
+    }
+
+    /// The counts, the rows outside the trash, and the trashed rows. Only the Chats
+    /// written since the last call, or whose live state moved, are read again; the
+    /// others keep the row built before. A list row may lag a change outside its Chat,
+    /// such as a linked ticket's status, until its Chat next changes.
+    pub fn overview_digest(&self) -> Outcome<(Overview, Vec<Summary>, Vec<Summary>)> {
+        let workspace = self.workspace()?;
+        let live = self
+            .started_host()
+            .map(|host| host.live())
+            .unwrap_or_default();
+        let mut built = lock(&self.built_rows);
+        // Read first: a write after it is caught by the next call.
+        let sequence = workspace.chat_change_sequence()?;
+        let changed: HashSet<String> = workspace
+            .chats_changed_since(built.sequence)?
+            .into_iter()
+            .map(|(chat_id, _)| chat_id)
+            .collect();
+        let users = folder_users(&workspace)?;
+        let trashed = workspace.list_chats(ChatListFilter::Trashed)?;
+        let mut kept = HashMap::new();
+        let mut row = |chat: &Chat| -> Outcome<Summary> {
+            let live = live.get(&chat.id).cloned().unwrap_or_else(ChatLive::idle);
+            let checked = self.checked(&chat.id);
+            let summary = match built.rows.remove(&chat.id) {
+                Some(row)
+                    if !changed.contains(&chat.id)
+                        && row.live == live
+                        && row.checked == checked =>
+                {
+                    row.summary
+                }
+                _ => self.summary(&workspace, chat, &users, &live)?,
+            };
+            kept.insert(
+                chat.id.clone(),
+                BuiltRow {
+                    live,
+                    checked,
+                    summary: summary.clone(),
+                },
+            );
+            Ok(summary)
+        };
+        let rows = users.iter().map(&mut row).collect::<Outcome<Vec<_>>>()?;
+        let trashed = trashed.iter().map(&mut row).collect::<Outcome<Vec<_>>>()?;
+        *built = BuiltRows {
+            sequence,
+            rows: kept,
+        };
+        Ok((overview_of(&rows), rows, trashed))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {
@@ -1391,27 +1473,36 @@ impl Chats {
         lock(&self.checked).get(chat_id).cloned()
     }
 
-    fn state(&self, view: &View) -> Outcome<ChatState> {
-        let workspace = self.workspace()?;
-        let users = folder_users(&workspace)?;
-        let checked = self.checked(&view.chat.id);
-        let mut around = surroundings(
-            &workspace,
-            &view.chat,
-            &users,
-            checked,
-            &view.live,
-            &self.missing_folders,
-        )?;
-        // Read again with every state, so a branch switched outside shows by the
-        // turn's end.
-        around.branch = folder_probe::branch(Path::new(&view.chat.execution_folder));
-        Ok(chat_view::chat_state(
-            &view.chat,
-            &view.live,
-            &view.tracker,
-            &around,
-        ))
+    /// The workspace for one update: borrowed on first need, then shared by the rest.
+    fn lend<'a>(&self, lent: &'a mut Option<WorkspaceGuard>) -> Outcome<&'a Workspace> {
+        Ok(match lent {
+            Some(workspace) => workspace,
+            None => lent.insert(self.workspace()?),
+        })
+    }
+
+    fn state(&self, view: &mut View, lent: &mut Option<WorkspaceGuard>) -> Outcome<ChatState> {
+        let around = match view.around.take() {
+            Some(around) => around,
+            None => {
+                let workspace = self.lend(lent)?;
+                let mut around = surroundings(
+                    workspace,
+                    &view.chat,
+                    &folder_users(workspace)?,
+                    self.checked(&view.chat.id),
+                    &view.live,
+                    &self.missing_folders,
+                )?;
+                // Read again with the surroundings, so a branch switched outside shows
+                // by the turn's end.
+                around.branch = folder_probe::branch(Path::new(&view.chat.execution_folder));
+                around
+            }
+        };
+        let state = chat_view::chat_state(&view.chat, &view.live, &view.tracker, &around);
+        view.around = Some(around);
+        Ok(state)
     }
 
     /// Attaches a view: a snapshot now, then every change after it through `sink`,
@@ -1435,12 +1526,19 @@ impl Chats {
         around.branch = folder_probe::branch(Path::new(&chat.execution_folder));
         let state = chat_view::chat_state(&chat, &attached.live, &tracker, &around);
         let fresh = self.fresh(chat_id);
-        let items = attached
+        let items: Vec<Item> = attached
             .snapshot
             .items
             .iter()
             .flat_map(|item| chat_view::items(item, &chat, &attached.live, fresh, &tracker))
             .map(|item| with_gone(&workspace, item))
+            .collect();
+        let sent = items
+            .iter()
+            .filter_map(|item| {
+                let item = serde_json::to_value(item).ok()?;
+                Some((item["id"].as_str()?.to_owned(), item))
+            })
             .collect();
         let view = View {
             chat,
@@ -1448,6 +1546,8 @@ impl Chats {
             tracker,
             state: state.clone(),
             sequence: 0,
+            sent,
+            around: Some(around),
         };
         let id = self.next_feed.fetch_add(1, Ordering::SeqCst);
         let (resync, resynced) = oneshot::channel();
@@ -1492,10 +1592,10 @@ impl Chats {
         mut resynced: oneshot::Receiver<()>,
         sink: Sink,
     ) {
-        let send = |view: &mut View, mut change: Value| {
+        let number = |view: &mut View, mut change: Value| {
             view.sequence += 1;
             change["seq"] = json!(view.sequence);
-            sink(change)
+            change
         };
         loop {
             let update = tokio::select! {
@@ -1510,7 +1610,10 @@ impl Chats {
                     let mut records = Vec::new();
                     for change in changes {
                         match change.record {
-                            ChatRecord::Chat(chat) => view.chat = chat,
+                            ChatRecord::Chat(chat) => {
+                                view.chat = chat;
+                                view.around = None;
+                            }
                             ChatRecord::Item(item) => {
                                 // A turn starting or ending changes no Chat record, so the
                                 // Chat's active turn is followed from the turn itself.
@@ -1523,6 +1626,11 @@ impl Chats {
                                     } else if ends_active {
                                         view.chat.active_turn = None;
                                     }
+                                }
+                                // A tool call leaves the surroundings as they were; input,
+                                // turns and the rest can move the queue or the branch.
+                                if !matches!(item, ChatItem::Tool(_)) {
+                                    view.around = None;
                                 }
                                 view.tracker.note(&item);
                                 records.push(item);
@@ -1542,6 +1650,8 @@ impl Chats {
                     turn_id,
                     delta,
                 }) => {
+                    // The view's text grows past what was last sent for it.
+                    view.sent.remove(&message_id);
                     let change = if view.tracker.streaming(&message_id, &turn_id) {
                         let item = Item::Response {
                             id: message_id,
@@ -1554,43 +1664,57 @@ impl Chats {
                     } else {
                         json!({ "kind": "text", "item_id": message_id, "text": delta })
                     };
-                    if !send(&mut view, change) {
+                    let change = number(&mut view, change);
+                    if !sink(change) {
                         return;
                     }
                     continue;
                 }
                 Some(ChatUpdate::Live(live)) => {
-                    let held_before = std::mem::replace(&mut view.live, *live).sending;
-                    // Whether a stored request can still be answered is live state.
-                    let mut records = view.tracker.dependents();
-                    // Input the host began or stopped holding to send reads differently.
-                    let sending = &view.live.sending;
-                    let moved: Vec<&String> = held_before
-                        .iter()
-                        .filter(|id| !sending.contains(id))
-                        .chain(sending.iter().filter(|id| !held_before.contains(id)))
-                        .collect();
-                    if !moved.is_empty() {
-                        let Ok(stored) = self
-                            .workspace()
-                            .and_then(|workspace| Ok(messages(&workspace, &view.chat.id)?))
-                        else {
-                            break;
-                        };
-                        let moved: Vec<ChatMessage> = stored
-                            .into_iter()
-                            .filter(|message| moved.contains(&&message.id))
+                    let before = std::mem::replace(&mut view.live, *live);
+                    // Codex reports its context after every model call, stamped with the
+                    // time; nothing the records show depends on it.
+                    let context_only = before != view.live
+                        && ChatLive {
+                            context: before.context.clone(),
+                            ..view.live.clone()
+                        } == before;
+                    if context_only {
+                        Vec::new()
+                    } else {
+                        // Live state the same as before is a request to read again.
+                        view.around = None;
+                        // Whether a stored request can still be answered is live state.
+                        let mut records = view.tracker.dependents();
+                        // Input the host began or stopped holding to send reads differently.
+                        let (held_before, sending) = (&before.sending, &view.live.sending);
+                        let moved: Vec<&String> = held_before
+                            .iter()
+                            .filter(|id| !sending.contains(id))
+                            .chain(sending.iter().filter(|id| !held_before.contains(id)))
                             .collect();
-                        // Back in the queue, it has no row; a change cannot remove one.
-                        if moved.iter().any(|message| {
-                            !sending.contains(&message.id)
-                                && message.standing() == ChatInputStanding::Queued
-                        }) {
-                            break;
+                        if !moved.is_empty() {
+                            let Ok(stored) = self
+                                .workspace()
+                                .and_then(|workspace| Ok(messages(&workspace, &view.chat.id)?))
+                            else {
+                                break;
+                            };
+                            let moved: Vec<ChatMessage> = stored
+                                .into_iter()
+                                .filter(|message| moved.contains(&&message.id))
+                                .collect();
+                            // Back in the queue, it has no row; a change cannot remove one.
+                            if moved.iter().any(|message| {
+                                !sending.contains(&message.id)
+                                    && message.standing() == ChatInputStanding::Queued
+                            }) {
+                                break;
+                            }
+                            records.extend(moved.into_iter().map(ChatItem::Message));
                         }
-                        records.extend(moved.into_iter().map(ChatItem::Message));
+                        records
                     }
-                    records
                 }
                 Some(ChatUpdate::Resync) | None => break,
             };
@@ -1598,32 +1722,51 @@ impl Chats {
             if ended && self.focused.load(Ordering::SeqCst) {
                 log_failure("mark the Chat seen", self.mark_seen(&view.chat.id).await);
             }
+            // At most one workspace use per update, and only when something needs it.
+            let mut lent = None;
+            let mut batch = Vec::new();
             let fresh = self.fresh(&view.chat.id);
             for record in records {
                 let tracker = &view.tracker;
                 for item in chat_view::items(&record, &view.chat, &view.live, fresh, tracker) {
-                    let item = match (&item, self.workspace()) {
-                        (Item::Records { .. }, Ok(workspace)) => with_gone(&workspace, item),
+                    let item = match &item {
+                        Item::Records { .. } => match self.lend(&mut lent) {
+                            Ok(workspace) => with_gone(workspace, item),
+                            Err(_) => item,
+                        },
                         _ => item,
                     };
-                    if !send(&mut view, json!({ "kind": "item", "item": item })) {
-                        return;
+                    let Ok(item) = serde_json::to_value(&item) else {
+                        continue;
+                    };
+                    let Some(id) = item["id"].as_str().map(str::to_owned) else {
+                        continue;
+                    };
+                    // An item the view already has as it is now is not sent again.
+                    if view.sent.get(&id) == Some(&item) {
+                        continue;
                     }
+                    view.sent.insert(id, item.clone());
+                    batch.push(number(&mut view, json!({ "kind": "item", "item": item })));
                 }
             }
             // If the workspace cannot be read the view keeps what it shows; the next
             // change tries again.
-            if let Ok(state) = self.state(&view)
+            if let Ok(state) = self.state(&mut view, &mut lent)
                 && state != view.state
             {
                 view.state = state;
                 let change = json!({ "kind": "chat", "chat": view.state });
-                if !send(&mut view, change) {
-                    return;
-                }
+                batch.push(number(&mut view, change));
+            }
+            drop(lent);
+            // An update's changes arrive together, so the view draws once for them.
+            if !batch.is_empty() && !sink(Value::Array(batch)) {
+                return;
             }
         }
-        send(&mut view, json!({ "kind": "resync" }));
+        let change = number(&mut view, json!({ "kind": "resync" }));
+        sink(change);
     }
 
     pub async fn send(&self, chat_id: &str, text: &str, mode: SendMode) -> Outcome<()> {
@@ -1901,7 +2044,7 @@ impl Chats {
         let workspace = self.workspace()?;
         if query.is_empty() {
             let mut found = Vec::new();
-            for ticket in workspace.recently_updated_tickets(4)? {
+            for ticket in workspace.active_tickets(4)? {
                 found.push(LinkedRecord::Ticket {
                     status: status_name(ticket.status)?,
                     id: ticket.id,
@@ -2128,6 +2271,11 @@ impl Chats {
             .into_iter()
             .map(chat_view::Suggestion::from)
             .collect())
+    }
+
+    /// The whole output of one of the Chat's steps; views carry only its last lines.
+    pub fn step_output(&self, chat_id: &str, tool_id: &str) -> Outcome<Option<String>> {
+        Ok(self.workspace()?.chat_tool_output(chat_id, tool_id)?)
     }
 
     /// A file in the Chat's folder, for the system to open: one a step named

@@ -36,4 +36,6 @@ serde_json = "1"
 # The host's sync tests run against the core's in-memory storage.
 ticketd-core = { workspace = true, features = ["fake-remote"] }
 tempfile = "3"
+# The runtime trace holds the write lock as another process would.
+rusqlite = { version = "0.37", features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "rt", "test-util"] }

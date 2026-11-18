@@ -235,7 +235,10 @@ trigger Automations. The value itself is not stored.
 
 `crates/ticketd-automation-runner` owns the loop and depends only on the core and
 the Chat host, so it is tested without the desktop. The desktop calls one pass at
-start and every five seconds while Chat is on. A pass asks the core to queue a run
+start, off the main thread (its Automation commands wait for it), then every five
+seconds while Chat is on and an Automation is on or a run is Queued or Running;
+otherwise when the Workspace changes, and at least every 30 seconds. A pass is one
+use of the Workspace. A pass asks the core to queue a run
 for each Workspace event after a switched-on Automation's cursor that matches its
 trigger and conditions, and to start queued runs, oldest event first, until as
 many are running as the device's "Runs at once" setting allows (2 unless changed,
@@ -446,13 +449,17 @@ The desktop owns one `ChatHost` for the life of the process
 screens reach it through `chat_*` commands with validated arguments. Opening a
 Chat returns a snapshot and a per-view channel of changes numbered one apart,
 already translated into the view model (`chat_view.rs`); a view that falls behind
-or cannot be served receives one `resync` entry and reads a new snapshot. The view
+or cannot be served receives one `resync` entry and reads a new snapshot. Each
+update's changes arrive as one array, and an item already sent unchanged is not
+sent again. Steps carry the last lines of their output; an opened row reads the
+whole of it with `chat_step_output`. The view
 model only shapes what the host and core decided: attention and notification
 rules, step classification and what blocks Send live in `ticketd-chat-host`
 (`attention`, `step_kind`, `conditions`), and record queries such as New Chat's
 suggestions and a folder's Project live in the core. List
 rows and counts follow the `chat-overview` event, which comes from the host and
-not from the workspace poll. The Experimental switch is a per-computer
+not from the workspace poll. Each wake rebuilds only the rows of Chats written
+since the last one or whose live state moved. The Experimental switch is a per-computer
 preference kept by the interface; the backend starts with Chat off and is told
 the choice at startup.
 
@@ -635,8 +642,12 @@ entries, including drafts, Undo and Trash; the display subset never decides clea
 Draft recovery payloads and derived attachment claims commit together through
 `Workspace::retain_draft`. The core parses canonical Markdown using the saved
 reference parser. Drafts are private workspace recovery data, not published
-Documents or Activities. Desktop startup loads recovery before mounting editors;
-each host retains its existing autosave or explicit-submit behavior. Capture
+Documents or Activities. Desktop startup loads recovery while the views mount;
+editor hosts wait for it behind a recovery gate, and each host retains its
+existing autosave or explicit-submit behavior. The Markdown editor owns its save
+cadence: rich text is written out as Markdown once typing pauses and at once on
+blur, Escape, a shortcut, unmount and window close; source text passes through
+as typed. Recovery writes for one owner coalesce while queued. Capture
 requests keep their original retry identity across restart. Backups include
 recovery prose and protections; ordinary domain JSON export excludes this private
 authoring state.
@@ -645,8 +656,10 @@ Owners use compare-and-swap revisions, including release tombstones; exact
 retries of the last update are idempotent. Desktop writes serialize and failures
 remain visible and block subsequent submission until protection is durable.
 Current draft replacement and independent editor Undo use separate claims; Undo
-accumulates references until history is reset/unmounted. Normal unmount releases
-only transient history, never a recoverable draft. An interrupted history release
+accumulates references until history is reset/unmounted, and is written only when
+its attachment links grow. Normal unmount releases only transient history, never
+a recoverable draft; a released history record is removed, since its owner
+belongs to one editor mount. An interrupted history release
 leaves conservative protection for explicit review, without a time expiry.
 
 `Workspace::attachment_usage` returns a consistent snapshot of direct, embedded,
@@ -718,6 +731,8 @@ Inside the core, every ticket write runs in one write scope (`write_scope.rs`), 
 
 Inside that scope every way of changing a ticket is one ticket change (`ticket_change.rs`): `change_ticket`, the combined `TicketChange`, batches, tag, parent, dependency and Plan changes, ticket creation and the `WriteRequest` that names each. They share the rules (editability, the external owner of a ticket's content, an archived Plan, entering and leaving Duplicate, history and the inbox) and one read back; a combined change or batch makes all its steps in one scope. One rule still depends on the way in, named by the change's mode: a change on its own that leaves Duplicate clears the duplicate link, while a change in a batch, and so the combined single-ticket change, is refused.
 
+Reads never write. A read of several statements runs in the read scope (`read_scope.rs`), beside the write scope: one deferred transaction, so it sees one snapshot, takes SQLite's shared lock once instead of once per statement, and never waits behind a writer that has not begun to commit. Inside a transaction already under way it runs as part of it, and `Workspace::read` lets an adapter combine several reads in one snapshot. Due reminders reach the Inbox through their own write, `deliver_due_reminders`, which the desktop's reminder timer (set to the next due reminder) and the CLI's `inbox` command call; it takes the write lock only when a reminder is due.
+
 Record versions are outside the MVP. An editor may send the title, body or Document `updated_at` it last loaded, and the core rejects its save if that value has since changed ([ADR 0015](adr/0015-optional-expected-values-guard-editor-saves.md)); a caller that omits them, such as the CLI, keeps last-successful-write wins. Updates affect only supplied fields, with last-successful-write wins on the same field. Dependencies and tags use explicit additions/removals rather than replacing whole lists. The desktop retains unsaved drafts when saved content changes, indicates that change, and lets the person reload or save over it.
 
 Request IDs prevent repeated execution after a lost response; they do not prevent overwrites by different requests. Successful request outcomes are retained indefinitely in the MVP and included in backups. Replays return original results, not current ticket state.
@@ -727,6 +742,8 @@ Request IDs prevent repeated execution after a lost response; they do not preven
 One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Plans, Activities, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
 
 The core owns migrations, export, backup/restore, and data access. Domain validation and persistence must remain atomic across processes, including cycle checks and hierarchy rules. Validate lock handling, concurrent writes, migration coordination, and active-database backup behavior before finalizing the process model.
+
+The desktop, with the Chat host and Automation runner inside it, keeps the Workspace open through the core's one `WorkspaceSession` per file and process, instead of opening it per command; the CLI opens it once per invocation. Inside the session the file is in WAL mode with every commit synced, so readers and writers do not wait for each other. A restore or migration in another process asks warm sessions to let go through a release marker beside the Workspace, and a file swap first checkpoints the file back to a single file and removes any leftover WAL. Backups are always single files. See [one warm Workspace session per process](adr/0016-one-warm-workspace-session-per-process-wal-inside-it.md).
 
 ## External changes
 
@@ -855,6 +872,7 @@ A future server may call the same core workflow interface. Personal sync between
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
 - [Optional expected values guard editor saves](adr/0015-optional-expected-values-guard-editor-saves.md)
 - [Shared core and local workspace](adr/0004-shared-core-local-workspace.md)
+- [One warm Workspace session per process, WAL inside it](adr/0016-one-warm-workspace-session-per-process-wal-inside-it.md)
 - [Workspace sync through Google Drive](adr/0011-markdown-file-sync-through-google-drive.md)
 - [Sync file format](sync-file-format.md)
 

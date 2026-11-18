@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_core::{ChatItem, ChatMessage, ChatObservation, ChatSnapshot, Error, Workspace};
+use ticketd_core::{ChatItem, ChatMessage, ChatObservation, ChatSnapshot, Error, WorkspaceGuard};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
@@ -39,9 +39,9 @@ pub const DELIVERY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(120);
 /// History items in the snapshot a view receives on attach.
 pub const SNAPSHOT_ITEMS: usize = 200;
 
-/// Opens the workspace for one short operation, as every other desktop command does.
-/// The host holds no connection between operations, so backup and restore are not blocked.
-pub type WorkspaceOpener = Arc<dyn Fn() -> Result<Workspace, Error> + Send + Sync>;
+/// Lends the workspace for one short operation, as every other desktop command has it:
+/// from the desktop's warm session (ADR 0016), which lets go of the file for a restore.
+pub type WorkspaceOpener = Arc<dyn Fn() -> Result<WorkspaceGuard, Error> + Send + Sync>;
 
 /// The ticketd context for a Chat (see `context::for_chat`), read when a harness
 /// session starts. `Ok(None)` sends nothing; an error is told to the person and the
@@ -928,7 +928,7 @@ impl ChatHost {
         self.chats().remove(chat_id)
     }
 
-    pub(crate) fn workspace(&self) -> Result<Workspace, HostError> {
+    pub(crate) fn workspace(&self) -> Result<WorkspaceGuard, HostError> {
         Ok((self.inner.open_workspace)()?)
     }
 

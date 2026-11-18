@@ -2,14 +2,15 @@ import { useEffect, useRef } from "react";
 import { inboxClient } from "@/lib/api/inbox";
 import { notificationClient } from "@/lib/api/notifications";
 import { usePreferences } from "@/lib/preferences";
-
-const POLL_MS = 5000;
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
 /**
  * Shows one system notification per reminder that comes due while ticketd is
  * open and the preference is on. Reminders already in the inbox when this
  * starts stay inbox-only. `open` receives the ticket to show when the person
- * clicks the notification.
+ * clicks the notification. The desktop delivers a reminder to the inbox when it
+ * comes due, which moves the change token, so the inbox is read on each
+ * workspace change rather than on a timer of its own.
  */
 export function useReminderNotifications(open: (reference: string) => void) {
   const { notifyReminders } = usePreferences();
@@ -17,15 +18,21 @@ export function useReminderNotifications(open: (reference: string) => void) {
   useEffect(() => {
     openRef.current = open;
   });
+  const changed = useRef(() => {});
+  useOnWorkspaceChange(() => changed.current());
   useEffect(() => {
     if (!notifyReminders) return;
     let active = true;
     let busy = false;
+    // A change that came during a read is read once that read ends.
+    let again = false;
     let seen: number | null = null;
-    let timer: number | undefined;
     let stopListening: (() => void) | undefined;
     async function check() {
-      if (busy) return;
+      if (busy) {
+        again = true;
+        return;
+      }
       busy = true;
       try {
         const entries = await inboxClient.list({
@@ -55,12 +62,16 @@ export function useReminderNotifications(open: (reference: string) => void) {
         // Notifications are best effort; the inbox still shows every reminder.
       } finally {
         busy = false;
+        if (again && active) {
+          again = false;
+          void check();
+        }
       }
     }
     function start() {
       if (!active) return;
       void check();
-      timer = window.setInterval(() => void check(), POLL_MS);
+      changed.current = () => void check();
     }
     // The listener goes first: clicks are reported only for notifications shown
     // while one exists. Without it the notifications still appear.
@@ -76,7 +87,7 @@ export function useReminderNotifications(open: (reference: string) => void) {
       .finally(start);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      changed.current = () => {};
       stopListening?.();
     };
   }, [notifyReminders]);

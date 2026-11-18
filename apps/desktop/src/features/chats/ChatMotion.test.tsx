@@ -304,6 +304,10 @@ test("a removed queue card fades out, out of reach, as its space closes; the car
   const restoreTokens = applyTokens(rootTokens);
   const clock = freezeMotionClock();
   const restoreLayout = withLayoutSize();
+  let clickTime = 0;
+  const inputClock = vi
+    .spyOn(performance, "now")
+    .mockImplementation(() => clickTime);
   try {
     await open(
       { id: "c1", title: "Limiter", activity: "working" },
@@ -322,6 +326,8 @@ test("a removed queue card fades out, out of reach, as its space closes; the car
       ...document.querySelectorAll<HTMLElement>(".chat-queue-card"),
     ];
     expect(cards()).toHaveLength(2);
+    // The click that opened the Chat must not count as part of a rapid click.
+    clickTime += 400;
     fireEvent.click(
       screen.getAllByRole("button", { name: "Remove from queue" })[0]!,
     );
@@ -343,6 +349,7 @@ test("a removed queue card fades out, out of reach, as its space closes; the car
     await clock.advance(500);
     expect(cards().map((card) => card.textContent)).toEqual(["second thing"]);
   } finally {
+    inputClock.mockRestore();
     restoreLayout();
     clock.restore();
     restoreTokens();

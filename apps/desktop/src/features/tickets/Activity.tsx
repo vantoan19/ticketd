@@ -86,7 +86,10 @@ import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import { editedUpdateFills, useOpenTicket } from "./open-ticket";
-import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import {
+  DraftRecoveryGate,
+  useDraftRecovery,
+} from "@/lib/draft-recovery-context";
 import "./activity.css";
 
 /**
@@ -179,19 +182,7 @@ function quoteOf(brief: string): string {
   return `${(space > 20 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
-export function Activity({
-  reference,
-  ticketId = reference,
-  projects,
-  active,
-  trashed,
-  select,
-  target,
-  plans = [],
-  sourceName,
-  latestNoteId,
-  foldEmpty = false,
-}: {
+type ActivityProps = {
   foldEmpty?: boolean;
   sourceName?: string | undefined;
   latestNoteId?: string | undefined;
@@ -203,7 +194,30 @@ export function Activity({
   select?: (reference: string) => void;
   target?: { id: string; key: number } | null;
   plans?: Plan[];
-}) {
+};
+
+/** Opens once stored recovery has loaded, so unsent updates come back with it. */
+export function Activity(props: ActivityProps) {
+  return (
+    <DraftRecoveryGate>
+      <RecoveredActivity {...props} />
+    </DraftRecoveryGate>
+  );
+}
+
+function RecoveredActivity({
+  reference,
+  ticketId = reference,
+  projects,
+  active,
+  trashed,
+  select,
+  target,
+  plans = [],
+  sourceName,
+  latestNoteId,
+  foldEmpty = false,
+}: ActivityProps) {
   const recovery = useDraftRecovery();
   const targetId = target?.id;
   const targetKey = target?.key;

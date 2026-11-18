@@ -391,7 +391,8 @@ impl Supervisor {
     // ponytail: SQLite runs on the supervisor task; move to spawn_blocking if a slow
     // disk shows up as stalled Chats.
     fn core<T>(&self, call: impl FnOnce(&mut Workspace) -> Result<T, Error>) -> Result<T, Error> {
-        call(&mut (self.open_workspace)()?)
+        let mut workspace = (self.open_workspace)()?;
+        call(&mut workspace)
     }
 
     /// A core write. A failure that is not a refusal of this one request means history
@@ -2235,7 +2236,9 @@ impl Supervisor {
 
     /// Publishes committed changes since the last call, then live state if it changed.
     fn publish(&mut self) {
-        self.board.report(&self.chat_id, Some(self.live()));
+        // Reading the changes moves nothing live state is built from: built once.
+        let live = self.live();
+        self.board.report(&self.chat_id, Some(live.clone()));
         self.subscribers.retain(Publisher::open);
         if self.subscribers.is_empty() {
             return;
@@ -2271,7 +2274,6 @@ impl Supervisor {
                 }
             }
         }
-        let live = self.live();
         if self.last_live.as_ref() != Some(&live) {
             for subscriber in &self.subscribers {
                 subscriber.push(ChatUpdate::Live(Box::new(live.clone())));

@@ -1348,6 +1348,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::Inbox { limit, offset } => {
+            // The CLI has no reminder poll: reminders due by now arrive before the read.
+            workspace.deliver_due_reminders()?;
             serde_json::to_string(&workspace.inbox(limit, offset)?)?
         }
         Command::Backup { path } => {

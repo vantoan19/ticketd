@@ -1008,3 +1008,21 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 
 ## 83
 + column chat_turns.ending
+
+## 84
++ table activity_search_fts
++ table ticket_search_fts
++ column activity_search_fts.activity_search_fts
++ column activity_search_fts.brief
++ column activity_search_fts.rank
++ column ticket_search_fts.body
++ column ticket_search_fts.rank
++ column ticket_search_fts.reference
++ column ticket_search_fts.ticket_search_fts
++ column ticket_search_fts.title
++ trigger activity_search_fts_delete
++ trigger activity_search_fts_insert
++ trigger activity_search_fts_update
++ trigger ticket_search_fts_delete
++ trigger ticket_search_fts_insert
++ trigger ticket_search_fts_update

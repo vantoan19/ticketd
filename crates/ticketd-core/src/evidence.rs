@@ -148,10 +148,12 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Evidence>, Error> {
+        self.read(|_| {
         let ticket = relationships::id(&self.connection, reference)?;
         let mut stmt = self.connection.prepare("SELECT id,kind,name,value,created_at,updated_at,editing_agent FROM evidence WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
         Ok(stmt
             .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
             .collect::<Result<Vec<_>, _>>()?)
+        })
     }
 }

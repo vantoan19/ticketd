@@ -18,12 +18,13 @@ use ticketd_core::{
     },
     sync::{
         AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, SetupOptions, SyncChoice,
-        SyncConflict, SyncItem, SyncNotice, SyncRecovery, SyncResolution, SyncSettings, SyncStatus,
+        SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncRecovery, SyncResolution,
+        SyncSettings, SyncStatus,
         remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
     },
 };
 
-use super::{BridgeFailure, open_workspace};
+use super::{BridgeFailure, open_workspace, workspace_session};
 use crate::sync_scheduler::{Binding, EXIT_LIMIT, Scheduler};
 
 /// The one scheduler of this process and the instant its time counts from.
@@ -64,7 +65,7 @@ fn binding_of(
     workspace: &Workspace,
     remote: impl FnOnce(&str) -> Arc<dyn RemoteStorage>,
 ) -> Result<Option<Binding>, Error> {
-    // One small read: the scheduler asks every second.
+    // One small read: the scheduler asks each time it wakes.
     let Some(bound) = workspace.sync_binding()? else {
         return Ok(None);
     };
@@ -716,37 +717,37 @@ pub struct ExitReport {
     pending_total: u64,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_conflicts() -> Outcome<Vec<ConflictSummary>> {
-    Ok(conflicts(&open_workspace()?)?)
+    Ok(conflicts(&*open_workspace()?)?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_conflict(
     host: tauri::State<'_, SyncHost>,
     kind: SyncKind,
     id: String,
 ) -> Outcome<Conflict> {
     let bound = host.scheduler.binding()?;
-    Ok(conflict(&open_workspace()?, kind, &id, bound.as_ref())?)
+    Ok(conflict(&*open_workspace()?, kind, &id, bound.as_ref())?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_sync_conflict(
     kind: SyncKind,
     id: String,
     resolutions: Vec<Resolution>,
     request_id: String,
 ) -> Outcome<()> {
-    resolve(&mut open_workspace()?, kind, id, resolutions, &request_id)
+    resolve(&mut *open_workspace()?, kind, id, resolutions, &request_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_notices() -> Outcome<Vec<SyncNotice>> {
     Ok(open_workspace()?.sync_notices()?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_sync_read(ids: Vec<String>, read: bool) -> Outcome<()> {
     if ids.len() > 1000 || ids.iter().any(|id| id.is_empty() || id.len() > 128) {
         return rejected("invalid Inbox entries");
@@ -763,7 +764,7 @@ pub fn record_versions(
     source: Source,
 ) -> Outcome<Vec<VersionEntry>> {
     let bound = host.scheduler.binding()?;
-    versions(&open_workspace()?, bound.as_ref(), kind, &id, source)
+    versions(&*open_workspace()?, bound.as_ref(), kind, &id, source)
 }
 
 #[tauri::command(async)]
@@ -776,7 +777,7 @@ pub fn record_version(
 ) -> Outcome<VersionDetail> {
     let bound = host.scheduler.binding()?;
     version_detail(
-        &open_workspace()?,
+        &*open_workspace()?,
         bound.as_ref(),
         kind,
         &id,
@@ -796,7 +797,7 @@ pub fn restore_record_version(
 ) -> Outcome<()> {
     let bound = host.scheduler.binding()?;
     restore(
-        &mut open_workspace()?,
+        &mut *open_workspace()?,
         bound.as_ref(),
         kind,
         &id,
@@ -869,16 +870,63 @@ fn check_attachment_ids(ids: &[String]) -> Outcome<()> {
     Ok(())
 }
 
-#[tauri::command]
+/// The event that carries the sync status to the interface.
+const STATUS_EVENT: &str = "sync-status";
+/// How often the status is read while this Workspace syncs: upload progress,
+/// going offline and an expired sign-in move no change token.
+const STATUS_READ: Duration = Duration::from_secs(2);
+
+/// Tells the interface the sync status each time it changes, so no view polls it.
+/// It is read when something may have changed it (a local change, a sync command,
+/// a run), every two seconds while connected, and otherwise at the idle fallback.
+pub fn publish_status(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    let spawned = std::thread::Builder::new()
+        .name("sync-status".into())
+        .spawn(move || {
+            let mut seen = 0;
+            let mut shown: Option<SyncStatus> = None;
+            loop {
+                // A failed read keeps what is shown; the next one tries again.
+                if let Ok(status) = open_workspace().and_then(|workspace| workspace.sync_status())
+                    && shown.as_ref() != Some(&status)
+                {
+                    if let Err(error) = app.emit(STATUS_EVENT, &status) {
+                        eprintln!("could not send the sync status: {error}");
+                    }
+                    shown = Some(status);
+                }
+                let connected = shown
+                    .as_ref()
+                    .is_some_and(|status| status.connection != SyncConnection::NotConnected);
+                let wait = if connected {
+                    STATUS_READ
+                } else {
+                    crate::wake::IDLE
+                };
+                crate::wake::CHANGED.wait(&mut seen, wait);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("could not start sending the sync status: {error}");
+    }
+}
+#[tauri::command(async)]
 pub fn sync_status() -> Outcome<SyncStatus> {
     Ok(open_workspace()?.sync_status()?)
+}
+
+/// Wakes the scheduler, whose next look follows what the command changed.
+fn woken<T>(outcome: Outcome<T>) -> Outcome<T> {
+    crate::wake::CHANGED.notify();
+    outcome
 }
 
 // Everything below that reaches Google runs off the UI thread.
 #[tauri::command(async)]
 pub fn sync_connect(app: tauri::AppHandle) -> Outcome<SyncStatus> {
     let (connection, account) = sign_in(&app)?;
-    Ok(open_workspace()?.sync_connect(&connection, &account)?)
+    woken(Ok(open_workspace()?.sync_connect(&connection, &account)?))
 }
 
 #[tauri::command(async)]
@@ -888,12 +936,15 @@ pub fn sync_setup_options() -> Outcome<SetupOptions> {
     Ok(workspace.sync_setup_options(remote.as_ref())?)
 }
 
-/// The first upload itself starts with the scheduler's next look, within a second.
+/// The first upload itself starts with the scheduler's next look, which this wakes.
 #[tauri::command(async)]
 pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
     let remote = signed_in_drive(&workspace)?;
-    Ok(workspace.sync_upload_workspace(remote.as_ref(), "ticketd Workspace")?)
+    woken(Ok(workspace.sync_upload_workspace(
+        remote.as_ref(),
+        "ticketd Workspace",
+    )?))
 }
 
 /// Back to the folder this Workspace synced with before it was disconnected.
@@ -902,7 +953,7 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
 pub fn sync_reconnect() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
     let remote = signed_in_drive(&workspace)?;
-    Ok(workspace.sync_reconnect(remote.as_ref())?)
+    woken(Ok(workspace.sync_reconnect(remote.as_ref())?))
 }
 
 /// The status after a download, and where the replaced Workspace was kept.
@@ -914,22 +965,27 @@ pub struct Downloaded {
 }
 
 /// Replaces the Workspace file, like restoring a backup: sync is held off
-/// meanwhile, and the handle used here is the one the core consumes.
+/// meanwhile, the desktop's session lets go of the file, and the handle used
+/// here is the one the core consumes.
 #[tauri::command(async)]
 pub fn sync_download_workspace(
     host: tauri::State<'_, SyncHost>,
     folder_id: String,
 ) -> Outcome<Downloaded> {
     check_folder_id(&folder_id)?;
-    let _no_run = host.scheduler.hold();
-    let workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
-    let (replaced, safety_backup) =
-        workspace.sync_download_workspace(remote.as_ref(), &folder_id)?;
-    Ok(Downloaded {
-        status: replaced.sync_status()?,
+    let remote = signed_in_drive(&*open_workspace()?)?;
+    let no_run = host.scheduler.hold();
+    let (status, safety_backup) = workspace_session()?.exclusive(|path| {
+        let (replaced, safety_backup) =
+            Workspace::open_existing(path)?.sync_download_workspace(remote.as_ref(), &folder_id)?;
+        Ok((replaced.sync_status()?, safety_backup))
+    })?;
+    // Let go first, so the run this wakes is not turned away by the hold.
+    drop(no_run);
+    woken(Ok(Downloaded {
+        status,
         safety_backup: safety_backup.display().to_string(),
-    })
+    }))
 }
 
 #[tauri::command(async)]
@@ -955,9 +1011,9 @@ pub fn sync_recover(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_disconnect() -> Outcome<SyncStatus> {
-    Ok(open_workspace()?.sync_disconnect()?)
+    woken(Ok(open_workspace()?.sync_disconnect()?))
 }
 
 #[tauri::command(async)]
@@ -978,7 +1034,7 @@ pub fn sync_open_folder(app: tauri::AppHandle) -> Outcome<()> {
         .map_err(|_| failed("Could not open the folder in Google Drive"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_settings() -> Outcome<SyncSettings> {
     Ok(open_workspace()?.sync_settings()?)
 }
@@ -1002,12 +1058,12 @@ fn change_settings(workspace: &mut Workspace, settings: &SettingsChange) -> Outc
     )?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_sync_settings(settings: SettingsChange) -> Outcome<SyncSettings> {
-    change_settings(&mut open_workspace()?, &settings)
+    woken(change_settings(&mut *open_workspace()?, &settings))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_availability(ids: Vec<String>) -> Outcome<Vec<AttachmentAvailability>> {
     check_attachment_ids(&ids)?;
     Ok(open_workspace()?.attachment_availability(&ids)?)

@@ -175,6 +175,11 @@ export function createHostChatClient(
     listener?.({ seq: feed.last + 1, kind: "resync" });
   }
   function receive(id: string, feed: Feed, message: unknown) {
+    // An update's changes come as one array, so the view draws once for them.
+    if (Array.isArray(message)) {
+      for (const each of message) receive(id, feed, each);
+      return;
+    }
     if (feed.closed) return;
     const change = chatChangeSchema.safeParse(message);
     // An entry the view cannot read is a gap; never guess at what it said.
@@ -343,6 +348,11 @@ export function createHostChatClient(
         await call("chat_change_setting", { chatId: id, setting, value }),
       ),
     openFile: (id, path) => run("chat_open_file", { chatId: id, path }),
+    stepOutput: async (id, toolId) =>
+      z
+        .string()
+        .nullable()
+        .parse(await call("chat_step_output", { chatId: id, toolId })),
     openFolder: (id) => run("chat_open_folder", { chatId: id }),
     saveAsDocument: async (id, responseId, title) =>
       z.string().parse(

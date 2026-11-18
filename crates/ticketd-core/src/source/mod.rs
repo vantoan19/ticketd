@@ -150,9 +150,9 @@ pub(crate) fn provider_display_name(provider: &str) -> String {
 pub(crate) fn clock(connection: &rusqlite::Connection, now: Option<&str>) -> Result<String, Error> {
     Ok(match now {
         Some(now) => now.to_owned(),
-        None => connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
-            row.get(0)
-        })?,
+        None => connection
+            .prepare_cached("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')")?
+            .query_row([], |row| row.get(0))?,
     })
 }
 
@@ -188,12 +188,19 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
 
 pub(crate) use tracking::{availability_projection, guard_change, guard_duplicate, held_sql};
 
-/// Fills the ticket's external side and any blocking publication attempt.
-pub(crate) fn populate(
+/// Fills the external side of a ticket that has one.
+pub(crate) fn populate_tracking(
     connection: &rusqlite::Connection,
     ticket: &mut crate::Ticket,
 ) -> Result<(), Error> {
-    tracking::populate(connection, ticket)?;
+    tracking::populate(connection, ticket)
+}
+
+/// Fills the publication attempt that blocks publishing a ticket, if any.
+pub(crate) fn populate_publication(
+    connection: &rusqlite::Connection,
+    ticket: &mut crate::Ticket,
+) -> Result<(), Error> {
     publication::populate(connection, ticket)
 }
 

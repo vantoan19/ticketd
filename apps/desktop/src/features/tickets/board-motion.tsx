@@ -97,7 +97,7 @@ export class MoveWatch extends Component<{
     columns: Columns;
     holding: boolean;
   }): Snapshot | null {
-    // A pointer move re-renders the board with the same columns: nothing to see.
+    // A change of drag target can render without moving any cards.
     const letGoNow = previous.holding && !this.props.holding;
     if (previous.columns === this.props.columns && !letGoNow) return null;
     const board = this.props.board.current;
@@ -120,8 +120,8 @@ export class MoveWatch extends Component<{
       if (reference === dropped && letGo) {
         snapshot.set(reference, {
           from: {
-            left: Number.parseFloat(letGo.style.left),
-            top: Number.parseFloat(letGo.style.top),
+            left: Number.parseFloat(letGo.style.getPropertyValue("--drag-x")),
+            top: Number.parseFloat(letGo.style.getPropertyValue("--drag-y")),
           },
           kind: "drop",
         });

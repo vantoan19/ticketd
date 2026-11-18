@@ -1681,3 +1681,45 @@ fn a_format_82_workspace_gains_the_turn_ending_column_and_keeps_its_turns() {
     assert_eq!(turn.state, ChatTurnState::Completed);
     assert_eq!(turn.ending, None);
 }
+
+#[test]
+fn the_chats_written_since_a_sequence_are_named_with_their_latest_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, quiet) = workspace_with_chat(&dir);
+    let busy = workspace.create_chat(None, new_chat()).unwrap();
+    start_turn(&mut workspace, &busy, "Go", "turn-1");
+    let since = workspace.chat_change_sequence().unwrap();
+    assert_eq!(workspace.chats_changed_since(since).unwrap(), Vec::new());
+
+    workspace
+        .record_chat_observations(
+            &busy.id,
+            vec![ChatObservation::Tool {
+                tool_id: "tool-1".into(),
+                turn_id: "turn-1".into(),
+                name: "Bash".into(),
+                input: "cargo test".into(),
+                state: ChatToolState::Completed,
+                output: Some("line 1\nline 2\n".into()),
+            }],
+        )
+        .unwrap();
+    let head = workspace.chat_change_sequence().unwrap();
+    assert_eq!(
+        workspace.chats_changed_since(since).unwrap(),
+        vec![(busy.id.clone(), head)]
+    );
+    assert_ne!(quiet.id, busy.id);
+    // One step's output is read on its own, in full.
+    assert_eq!(
+        workspace
+            .chat_tool_output(&busy.id, "tool-1")
+            .unwrap()
+            .as_deref(),
+        Some("line 1\nline 2\n")
+    );
+    assert_eq!(
+        workspace.chat_tool_output(&quiet.id, "tool-1").unwrap(),
+        None
+    );
+}

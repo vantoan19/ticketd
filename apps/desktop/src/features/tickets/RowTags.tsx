@@ -2,6 +2,21 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { fittingTags } from "./ticket-row";
 import { Badge } from "@/components/ui/badge";
 
+// One observer serves every row's tag line: a list or board has hundreds.
+let lines: ResizeObserver | null = null;
+const refits = new Map<Element, () => void>();
+function observeLine(line: Element, fit: () => void) {
+  lines ??= new ResizeObserver((entries) => {
+    for (const entry of entries) refits.get(entry.target)?.();
+  });
+  refits.set(line, fit);
+  lines.observe(line);
+  return () => {
+    refits.delete(line);
+    lines?.unobserve(line);
+  };
+}
+
 /**
  * Line two's tag pills: as many whole pills as the line has room for (half of
  * it), the others as one "+N" pill. Layout is measured, so a wide pane shows
@@ -50,9 +65,7 @@ export function RowTags({
     };
     fit();
     if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(fit);
-    observer.observe(line);
-    return () => observer.disconnect();
+    return observeLine(line, fit);
   }, [key, tags.length, shown, ledger]);
   if (tags.length === 0) return null;
   const visible = Math.min(shown, tags.length);

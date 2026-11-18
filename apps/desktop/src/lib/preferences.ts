@@ -208,7 +208,7 @@ export function useSystemDark(): boolean | null {
 export function useThemeSync() {
   const dark = useDarkTheme();
   const { theme } = usePreferences();
-  // main.tsx applies the stored theme before the first paint.
+  // public/theme.js applies the stored theme before the first paint.
   useEffect(() => changeTheme(dark ? "dark" : "light"), [dark]);
   useEffect(() => syncWindowTheme(theme), [theme]);
   useEffect(() => syncWindowColor(dark ? "dark" : "light"), [dark]);
@@ -227,25 +227,4 @@ function syncWindowColor(resolved: "light" | "dark") {
   void windowClient.setBackgroundColor(
     resolved === "dark" ? "#0A0A0A" : "#FAFAFA",
   );
-}
-
-/**
- * Applies the stored theme before the first render, to the page and to the
- * native window, so a screen shown before the app mounts (opening, or the
- * startup recovery screen, which renders without the app and its
- * `useThemeSync`) never sits under a light title bar in dark.
- */
-export async function applyStoredTheme() {
-  const { theme } = loadPreferences();
-  const resolved = resolveTheme(theme, systemPrefersDark());
-  applyTheme(resolved);
-  // Both IPC requests must finish before the initially hidden native window
-  // becomes visible; firing them before React alone still paints a light frame.
-  await Promise.allSettled([
-    windowClient.setTheme(theme === "system" ? null : theme),
-    windowClient.setBackgroundColor(
-      resolved === "dark" ? "#0A0A0A" : "#FAFAFA",
-    ),
-  ]);
-  await windowClient.show();
 }

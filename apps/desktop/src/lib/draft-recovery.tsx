@@ -17,7 +17,6 @@ import {
   reportWorkspaceFailure,
 } from "./workspace-state";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -27,16 +26,20 @@ import {
   DraftRecoveryErrorContext as ErrorContext,
   DraftRecoveryGenerationContext as GenerationContext,
   DraftRecoveryNoticesContext as NoticesContext,
+  DraftRecoveryReadyContext as ReadyContext,
   type DraftRecovery,
 } from "./draft-recovery-context";
 
 type RecoveryStore = DraftRecovery & {
   has: (owner: string) => boolean;
+  /** Settles once the stored rows are in `read` and `has`. */
+  loaded: Promise<void>;
   retire: () => void;
 };
 
 function recoveryStore(
-  initial: DraftRetention[],
+  /** The stored recovery rows. Writes wait for them; reads need them loaded. */
+  loading: Promise<DraftRetention[]>,
   /** A failure to protect drafts, or null once writes succeed again. */
   onError: (reason: unknown) => void,
   onReload: (
@@ -45,11 +48,19 @@ function recoveryStore(
     previous: RecoveryStore,
   ) => void,
 ): RecoveryStore {
-  const records = new Map(initial.map((record) => [record.owner, record]));
-  const visible = new Map(
-    initial.map((record) => [record.owner, record.payload]),
-  );
-  const queue: (() => Promise<void>)[] = [];
+  const records = new Map<string, DraftRetention>();
+  const visible = new Map<string, unknown>();
+  const loaded = loading.then((initial) => {
+    for (const record of initial) {
+      records.set(record.owner, record);
+      // A write queued while loading is newer than the stored row.
+      if (!visible.has(record.owner)) visible.set(record.owner, record.payload);
+    }
+  });
+  // Observed by the provider; writes see it through `loaded` below.
+  loaded.catch(() => {});
+  // One entry per owner: a newer put replaces a write that has not started.
+  const queue: { owner: string; write: () => Promise<void> }[] = [];
   let running: Promise<void> | null = null;
   let error: unknown = null;
   let transitioning = false;
@@ -59,8 +70,9 @@ function recoveryStore(
     if (transitioning || retired) return Promise.resolve();
     if (error) return Promise.reject(error);
     running = (async () => {
+      await loaded;
       while (queue.length) {
-        await queue[0]?.();
+        await queue[0]?.write();
         queue.shift();
       }
     })()
@@ -97,6 +109,7 @@ function recoveryStore(
   const store: RecoveryStore = {
     active: true,
     has: (owner) => visible.has(owner),
+    loaded,
     read(owner, schema) {
       const payload = visible.get(owner);
       return payload == null ? null : schema.parse(payload);
@@ -109,7 +122,7 @@ function recoveryStore(
           new Error("Draft recovery store is no longer writable"),
         );
       visible.set(owner, payload);
-      queue.push(async () => {
+      const write = async () => {
         const previous = records.get(owner);
         // Do not create empty recovery records on every untouched editor mount.
         if (!previous && payload == null && !markdown.length) return;
@@ -130,7 +143,13 @@ function recoveryStore(
           markdown,
         });
         records.set(owner, saved);
-      });
+      };
+      // While a write runs, queue[0] is that write and must finish as it is.
+      const waiting = queue.findIndex(
+        (entry, index) => entry.owner === owner && (index > 0 || !running),
+      );
+      if (waiting === -1) queue.push({ owner, write });
+      else queue[waiting] = { owner, write };
       const pending = settle();
       // Callers that deliberately await flush see the error; background edits show the banner.
       void pending.catch(() => {});
@@ -178,12 +197,32 @@ function recoveryStore(
   return store;
 }
 
-/** Load core recovery before mounting editors; all payloads are workspace-local and backed up. */
+/**
+ * Only the first commit sees this, before the provider's effect makes the store.
+ * A write then fails visibly to its caller; editors repeat theirs when the store
+ * arrives, since they depend on it.
+ */
+const notYetStarted: DraftRecovery = {
+  active: true,
+  retry: () => {},
+  read: () => null,
+  put: () =>
+    Promise.reject(new Error("Draft recovery has not started loading yet")),
+  flush: async () => {},
+  reloadAfterRestore: async () => {},
+};
+
+/**
+ * Loads core recovery while the views mount. Editor hosts render behind a
+ * DraftRecoveryGate, so they read recovered drafts only once loaded; all payloads
+ * are workspace-local and backed up.
+ */
 export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
   const [recovery, setRecovery] = useState<{
     store: RecoveryStore | null;
     generation: number;
-  }>({ store: null, generation: 0 });
+    ready: boolean;
+  }>({ store: null, generation: 0, ready: false });
   // Why drafts are not protected, or null. The workspace band says so; editors
   // read it only to stop claiming their content is protected.
   const [failure, setFailureState] = useState<unknown>(null);
@@ -209,9 +248,9 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
     let active = true;
     const startupFailure = getWorkspaceFailure();
     void (async () => {
-      const makeStore = (initial: DraftRetention[]): RecoveryStore =>
+      const makeStore = (loading: Promise<DraftRetention[]>): RecoveryStore =>
         recoveryStore(
-          initial,
+          loading,
           (reason) => {
             if (active) setFailure(reason);
           },
@@ -221,12 +260,22 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
             setFailure(null);
             setCutoverPending(pending);
             setRecovery((current) => ({
-              store: makeStore(restored),
+              store: makeStore(Promise.resolve(restored)),
               generation: current.generation + 1,
+              ready: true,
             }));
           },
         );
-      const next = makeStore(await draftRetention.list());
+      // Both startup reads at once. Views mount meanwhile; editor hosts wait
+      // at their DraftRecoveryGate, and early writes wait for the rows.
+      const reads = Promise.all([
+        draftRetention.list(),
+        draftRetention.cutoverPending(),
+      ]);
+      const next = makeStore(reads.then(([rows]) => rows));
+      setRecovery((current) => ({ ...current, store: next, ready: false }));
+      const [, pending] = await reads;
+      await next.loaded;
       const importLegacy = async (
         owner: string,
         payload: unknown,
@@ -338,7 +387,13 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
         }
         localStorage.removeItem(key);
       }
-      const pending = await draftRetention.cutoverPending();
+      if (active) {
+        setCutoverPending(pending);
+        setRecovery((current) =>
+          current.store === next ? { ...current, ready: true } : current,
+        );
+        setFailureState(null);
+      }
       if (startupFailure) {
         // Opening recovery is a read. Verify write access separately before
         // retiring its stale band; a read-only workspace can still open.
@@ -349,21 +404,16 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
           () => {},
         );
       }
-      if (active) {
-        setCutoverPending(pending);
-        setRecovery((current) => ({ ...current, store: next }));
-        setFailureState(null);
-      }
     })().catch((reason: unknown) => {
-      // Before the store exists the recovery screen says it; there is no band yet.
+      // Before recovery is ready the recovery screen says it; there is no band yet.
       if (active) setFailureState(reason ?? new Error("Unknown failure"));
     });
     return () => {
       active = false;
     };
   }, [attempt, setFailure]);
-  if (!recovery.store)
-    return failure !== null ? (
+  if (!recovery.ready && failure !== null)
+    return (
       <RecoveryScreen
         reason={failure}
         onRetry={() => {
@@ -371,10 +421,6 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
           setAttempt((value) => value + 1);
         }}
       />
-    ) : (
-      <div className="grid min-h-screen place-items-center p-6">
-        <EmptyState size="hint" role="status" title="Opening workspace…" />
-      </div>
     );
   // The legacy-draft review is workspace-level and lasting, so it takes the
   // workspace band's anatomy at the top of the content panel (see
@@ -418,10 +464,12 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
         <ErrorContext.Provider
           value={failure === null ? "" : toFailure(failure).message}
         >
-          <Context.Provider value={recovery.store}>
-            <NoticesContext.Provider value={notices}>
-              {children}
-            </NoticesContext.Provider>
+          <Context.Provider value={recovery.store ?? notYetStarted}>
+            <ReadyContext.Provider value={recovery.ready}>
+              <NoticesContext.Provider value={notices}>
+                {children}
+              </NoticesContext.Provider>
+            </ReadyContext.Provider>
           </Context.Provider>
         </ErrorContext.Provider>
       </GenerationContext.Provider>

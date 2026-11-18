@@ -44,8 +44,9 @@ export function useStickyRows(
       : copy;
   };
   const wake = useRef<() => void>(() => {});
+  // Pointing at a row re-renders nothing: the row under the pointer is read
+  // only when the list changes beneath it or a held row is released.
   const hovered = useRef<string | null>(null);
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const interacting = useRef(new Set<string>());
   useEffect(() => {
     interacting.current = new Set(
@@ -80,11 +81,13 @@ export function useStickyRows(
         ? held
         : undefined,
     );
+    // The row under the pointer is read only when the list changed; pointing alone must not render.
+    // eslint-disable-next-line react-hooks/refs
     source.forEach((before, index) => {
       if (
         before.reference !== selected &&
         before.reference !== focused &&
-        before.id !== hoveredRow &&
+        before.id !== hovered.current &&
         !bulkSelection.includes(before.reference)
       )
         return;
@@ -237,11 +240,9 @@ export function useStickyRows(
       ),
     onPointerEnter: (id: string) => {
       hovered.current = id;
-      setHoveredRow(id);
     },
     onPointerLeave: () => {
       hovered.current = null;
-      setHoveredRow(null);
       wake.current();
     },
   };

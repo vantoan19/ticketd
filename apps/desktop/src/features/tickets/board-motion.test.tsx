@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useRef, type ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
@@ -89,7 +89,12 @@ function Board({
         <div
           data-board-drag-preview=""
           data-board-drag-reference={preview.reference}
-          style={{ left: preview.left, top: preview.top }}
+          style={
+            {
+              "--drag-x": `${preview.left}px`,
+              "--drag-y": `${preview.top}px`,
+            } as CSSProperties
+          }
         />
       )}
       <MoveWatch

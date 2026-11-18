@@ -1,17 +1,31 @@
 import "./styles.css";
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "@/app/App";
-import { MotionProvider } from "@/components/ui/motion";
-import { ChatClientContext } from "@/features/chats/client";
-import { createHostChatClient } from "@/features/chats/host-client";
-import { applyStoredTheme } from "@/lib/preferences";
-import { DraftRecoveryProvider } from "@/lib/draft-recovery";
+import { windowClient } from "@/lib/api/window";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing application root");
 
-void applyStoredTheme();
+// The boot module: public/theme.js has painted the stored theme, so the window
+// shows now, while the application's modules load.
+void windowClient.show();
+const [
+  { App },
+  { MotionProvider },
+  { ChatClientContext },
+  { createHostChatClient },
+  { DraftRecoveryProvider },
+] = await Promise.all([
+  import("@/app/App"),
+  import("@/components/ui/motion"),
+  import("@/features/chats/client"),
+  import("@/features/chats/host-client"),
+  import("@/lib/draft-recovery"),
+]).catch((error: unknown) => {
+  showStartupFailure();
+  throw error;
+});
+void windowClient.booted();
 const applicationRoot = createRoot(root);
 
 /** Every way the app starts renders inside the one motion provider. */
@@ -56,4 +70,11 @@ if (import.meta.env.DEV && window.location.hash === "#plate-prototype") {
       <App />
     </DraftRecoveryProvider>,
   );
+}
+
+/** The page the native watchdog would show; React has not replaced it yet. */
+function showStartupFailure() {
+  const script = document.createElement("script");
+  script.src = "/startup-fallback.js";
+  document.head.append(script);
 }

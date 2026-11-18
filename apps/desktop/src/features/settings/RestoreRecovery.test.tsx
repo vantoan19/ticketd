@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import {
   type DraftRecovery,
+  DraftRecoveryGate,
   useDraftRecovery,
   useDraftRecoveryGeneration,
   useDraftRecoveryNotices,
@@ -339,7 +340,9 @@ test("the replaced store rejects stale undo cleanup and flush without touching t
   });
   render(
     <DraftRecoveryProvider>
-      <HoldRecoveryStore capture={capture} />
+      <DraftRecoveryGate>
+        <HoldRecoveryStore capture={capture} />
+      </DraftRecoveryGate>
       <RestoreDialog
         path="backup.sqlite3"
         onClose={() => {}}
@@ -432,7 +435,9 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
     });
     render(
       <DraftRecoveryProvider>
-        <HoldRecoveryStore capture={capture} />
+        <DraftRecoveryGate>
+          <HoldRecoveryStore capture={capture} />
+        </DraftRecoveryGate>
         <RestoreDialog
           path="backup.sqlite3"
           onClose={() => {}}

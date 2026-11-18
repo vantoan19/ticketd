@@ -83,6 +83,14 @@ impl Workspace {
         )?)
     }
 
+    /// Whether the runner has anything to do on this device: an Automation is on, or
+    /// a run is Queued or Running (one a restored backup left Running, say).
+    pub fn automations_need_the_runner(&self) -> Result<bool, Error> {
+        Ok(self.connection.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM automation_device_state) OR EXISTS(SELECT 1 FROM automation_runs WHERE status IN ('queued', 'running'))",
+        )?.query_row([], |row| row.get(0))?)
+    }
+
     /// Switches an Automation off for this device and ends its Queued and Running
     /// runs as Needs attention, failing the step each was on: the outcome an
     /// executor reports later is refused. Returns the Chats of the agents that were

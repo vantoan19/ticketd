@@ -88,6 +88,34 @@ fn migrating_an_existing_workspace_continues_the_ladder() {
     );
 }
 
+/// The Ticket upload mark skips an update that leaves the row as it was by comparing the
+/// columns `tickets` had at format version 84. A later column must be compared too.
+#[test]
+fn the_ticket_upload_mark_compares_every_ticket_column() {
+    let connection = scratch(FORMAT_VERSION).unwrap();
+    let trigger: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'sync_capture_tickets_update'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut statement = connection
+        .prepare("SELECT name FROM pragma_table_info('tickets')")
+        .unwrap();
+    let columns: Vec<String> = statement
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    for column in columns {
+        assert!(
+            trigger.contains(&format!("OLD.\"{column}\" IS NOT NEW.\"{column}\"")),
+            "tickets.{column} is not compared; make sync_capture_tickets_update again in the step that added it"
+        );
+    }
+}
+
 const LEDGER: &str = "format-ledger.txt";
 
 /// What each format version added and removed, by name: tables, `table.column`s,

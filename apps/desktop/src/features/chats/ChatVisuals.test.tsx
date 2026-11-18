@@ -178,6 +178,31 @@ test("a command's detail strips terminal colour and says its exit and folder", a
   expect(screen.getByText("Exit 1 · in web-app")).toBeTruthy();
 });
 
+test("an opened command shows its whole output; until then the view has only its end", async () => {
+  await show(
+    [
+      {
+        chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+        items: steps({
+          kind: "run",
+          target: "npm test",
+          command: "npm test",
+          output: "last line",
+          full_output: { tool_id: "s1", bytes: 19 },
+        }),
+      },
+    ],
+    { outputs: { s1: "first line\nlast line" } },
+  );
+  fireEvent.click(button("Ran npm test"));
+  const output = () =>
+    screen.getByRole("region", { name: "Output of npm test" }).textContent;
+  expect(output()).toBe("$ npm test\n\nlast line");
+  await waitFor(() =>
+    expect(output()).toBe("$ npm test\n\nfirst line\nlast line"),
+  );
+});
+
 test("your message offers Copy, and its images are tiles: three, then +N", async () => {
   const image = (id: string) => ({
     id,

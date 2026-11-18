@@ -2,16 +2,38 @@ import { invoke } from "@/lib/api/bridge-failure";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+declare global {
+  interface Window {
+    /** Set by public/theme.js: settles once the native frame has the stored theme. */
+    ticketdThemePainted?: Promise<unknown>;
+  }
+}
+
 /** Set once the app decided to close, so the close guard lets the next request through. */
 let quitting = false;
 
 export const windowClient = {
-  /** The desktop starts hidden so its stored theme is painted before showing. */
+  /**
+   * The desktop starts hidden so its stored theme is painted before showing;
+   * theme.js paints it, so the window can show before the app's modules load.
+   */
   async show() {
+    if (window.ticketdThemePainted) await window.ticketdThemePainted;
     if (!("__TAURI_INTERNALS__" in window)) return;
     const win = getCurrentWindow();
     await win.show();
     await win.emitTo({ kind: "App" }, "ticketd://startup-revealed");
+  },
+  /**
+   * Tells the native startup watchdog the application modules loaded. Shown
+   * and booted are separate: the window shows first, then the app loads.
+   */
+  async booted() {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    await getCurrentWindow().emitTo(
+      { kind: "App" },
+      "ticketd://startup-booted",
+    );
   },
   /**
    * Holds the window open when the person closes it and calls `handler`, which
@@ -26,6 +48,8 @@ export const windowClient = {
       .onCloseRequested((event) => {
         if (quitting) return;
         event.preventDefault();
+        // Editors report typing they hold, so drafts are queued before quitting.
+        window.dispatchEvent(new Event("ticketd:window-closing"));
         // With Chats working the shell hides the window and nothing is quitting.
         void invoke<boolean>("close_keeps_running")
           .catch(() => false)

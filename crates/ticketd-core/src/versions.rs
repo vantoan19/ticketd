@@ -154,6 +154,7 @@ impl Workspace {
         kind: RecordKind,
         reference: &str,
     ) -> Result<Vec<VersionSummary>, Error> {
+        self.read(|_| {
         let record_id = match kind {
             RecordKind::Ticket => relationships::id(&self.connection, reference)?,
             RecordKind::Document => self.show_document(reference)?.id,
@@ -172,6 +173,7 @@ impl Workspace {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(versions)
+        })
     }
 
     /// One earlier version with its content.
@@ -217,8 +219,12 @@ impl Workspace {
     pub fn expire_versions(&mut self, now: Option<&str>) -> Result<usize, Error> {
         let now = crate::source::clock(&self.connection, now)?;
         Ok(self.connection.execute(
-            "DELETE FROM record_versions WHERE julianday(replaced_at) < julianday(?1) - ?2",
-            params![now, RETENTION_DAYS],
+            "DELETE FROM record_versions WHERE replaced_at < ?1",
+            [crate::events::cutoff(
+                &self.connection,
+                &now,
+                RETENTION_DAYS,
+            )?],
         )?)
     }
 }

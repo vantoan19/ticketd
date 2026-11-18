@@ -220,14 +220,19 @@ pub(crate) fn set_actor(connection: &Connection, acting: Option<Acting>) -> Resu
     Ok(())
 }
 
+/// The instant `days` days before `now`, written as the timestamps it is compared with
+/// are, so a retention delete compares text instead of converting every row.
+pub(crate) fn cutoff(connection: &Connection, now: &str, days: i64) -> Result<String, Error> {
+    Ok(connection
+        .prepare_cached("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', julianday(?1) - ?2)")?
+        .query_row(params![now, days], |row| row.get(0))?)
+}
+
 /// The id of the newest event ever logged, 0 before the first. Expiry does not lower it.
 pub(crate) fn head(connection: &Connection) -> Result<i64, Error> {
     Ok(connection
-        .query_row(
-            "SELECT seq FROM sqlite_sequence WHERE name = 'workspace_events'",
-            [],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT seq FROM sqlite_sequence WHERE name = 'workspace_events'")?
+        .query_row([], |row| row.get(0))
         .optional()?
         .unwrap_or(0))
 }
@@ -239,18 +244,18 @@ pub(crate) fn head(connection: &Connection) -> Result<i64, Error> {
 /// such a write, inside its transaction, with the head read at its start.
 pub(crate) fn fold_into_creation(connection: &Connection, since: i64) -> Result<(), Error> {
     let created = created_values("tickets");
-    connection.execute(
-        "DELETE FROM workspace_events WHERE id > ?1 AND type IN ('ticket.updated', 'ticket.status_changed')
-         AND ticket_id IN (SELECT ticket_id FROM workspace_events WHERE id > ?1 AND type = 'ticket.created')",
-        [since],
-    )?;
-    connection.execute(
-        &format!(
+    connection
+        .prepare_cached(
+            "DELETE FROM workspace_events WHERE id > ?1 AND type IN ('ticket.updated', 'ticket.status_changed')
+             AND ticket_id IN (SELECT ticket_id FROM workspace_events WHERE id > ?1 AND type = 'ticket.created')",
+        )?
+        .execute([since])?;
+    connection
+        .prepare_cached(&format!(
             "UPDATE workspace_events SET current = (SELECT {created} FROM tickets WHERE tickets.id = ticket_id)
              WHERE id > ?1 AND type = 'ticket.created'"
-        ),
-        [since],
-    )?;
+        ))?
+        .execute([since])?;
     Ok(())
 }
 
@@ -329,8 +334,8 @@ impl Workspace {
         self.expire_versions(now)?;
         let now = crate::source::clock(&self.connection, now)?;
         self.connection.execute(
-            "DELETE FROM workspace_events WHERE julianday(at) < julianday(?1) - ?2",
-            params![now, RETENTION_DAYS],
+            "DELETE FROM workspace_events WHERE at < ?1",
+            [cutoff(&self.connection, &now, RETENTION_DAYS)?],
         )?;
         crate::automation_runs::expire(&self.connection, &now)?;
         Ok(())
