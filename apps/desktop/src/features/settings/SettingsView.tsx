@@ -20,6 +20,9 @@ import {
   SearchPage,
 } from "@/features/settings/pages/SearchPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
+import { useFadeThrough } from "@/features/settings/fade-through";
+// The keyframes of the page's own entrance (settings-layout.css plays them).
+import "@/components/ui/enter";
 import "@/features/settings/settings.css";
 
 /** True for the platform's find chord: ⌘F on macOS, Ctrl+F elsewhere. */
@@ -41,7 +44,7 @@ export function SettingsView({
   onRestore,
   onOpenInbox,
   onSelect,
-  selected = "appearance",
+  selected: chosen = "appearance",
 }: {
   selected?: SettingsPageId;
   /** Opens another page, for links between pages and for ⌘F. */
@@ -60,6 +63,8 @@ export function SettingsView({
     await onRestore();
   };
   const { entries: sources } = useSources();
+  // Choosing another page fades the open one out, then the next arrives.
+  const { shown: selected, leaving } = useFadeThrough(chosen);
   // Every page shares one scroll container, so a page would otherwise open at
   // the scroll offset the previous one was left at. Before paint: no jump.
   const scroller = useRef<HTMLDivElement>(null);
@@ -79,7 +84,14 @@ export function SettingsView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onSelect]);
   return (
-    <div ref={scroller} className="settings-page">
+    <div
+      ref={scroller}
+      className="settings-page"
+      data-own-entrance=""
+      data-leaving={leaving || undefined}
+      // Fading out, the page is out of reach: nothing in it takes focus or a click.
+      inert={leaving || undefined}
+    >
       {selected === "appearance" && <AppearancePage />}
       {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}
       {selected === "location" && <LocationPage />}

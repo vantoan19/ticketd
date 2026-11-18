@@ -97,7 +97,8 @@
     opacity: 1;
   }
 }
-.ticket-detail:has(.inbox-triage-document) .detail-content:not([hidden]) {
+.ticket-detail:has(.inbox-triage-document)
+  .detail-content:not([hidden], [data-leaving]) {
   animation: inbox-detail-enter var(--dur-2) var(--ease-out);
 }
 .inbox-triage-evidence {

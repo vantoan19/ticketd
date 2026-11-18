@@ -1,0 +1,101 @@
+/* Motion primitives (DESIGN.md section 12). Every time, easing and distance is
+   a token, so reduced motion and a held key (data-motion="instant") reach all
+   of it through styles.css; nothing here sets its own duration. */
+
+/* Glide: the shared highlight fills the item it sits in. */
+.ui-glide {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* CrossfadeText: old and new words share one cell while they trade. */
+.ui-crossfade {
+  display: inline-grid;
+}
+.ui-crossfade > * {
+  grid-area: 1 / 1;
+}
+
+/* Expand: rows 0fr to 1fr, with the content fading faster on the way out. */
+.ui-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--spring-smooth-t) var(--spring-smooth);
+}
+.ui-expand[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.ui-expand-body {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-exit) var(--ease-in);
+}
+.ui-expand[data-open="true"] > .ui-expand-body {
+  opacity: 1;
+  transition: opacity var(--dur-enter) var(--ease-out);
+}
+
+/* Arrival: the --hover fill fading over --dur-arrival, behind the content. */
+.ui-arrival {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--hover);
+  pointer-events: none;
+  animation: ui-arrival var(--dur-arrival) var(--ease-out) both;
+}
+@keyframes ui-arrival {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* DrawnPath: the stroke draws from its start (the path has pathLength 1). */
+.ui-drawn {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: ui-draw var(--dur-enter) var(--ease-out) both;
+}
+@keyframes ui-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Shimmer: a band lighter than the words travels through them. It is the
+   text's own colour mixed toward white, so it reads lighter in both themes
+   whatever the text colour (a fixed grey was darker than the text in dark). */
+.ui-shimmer {
+  background: linear-gradient(
+    90deg,
+    currentcolor 0%,
+    currentcolor 40%,
+    color-mix(in srgb, currentcolor, white 60%) 50%,
+    currentcolor 60%,
+    currentcolor 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ui-shimmer var(--dur-shimmer) linear infinite;
+}
+@keyframes ui-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}

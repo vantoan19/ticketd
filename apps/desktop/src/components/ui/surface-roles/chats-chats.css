@@ -103,20 +103,22 @@
   color: var(--foreground);
   font-family: inherit;
 }
+/* The button fades itself (Appear); the strip stays until its exit is done. */
 .chat-jump {
-  transition:
-    height var(--dur-lift) var(--ease-out),
-    opacity var(--dur-lift) var(--ease-out);
+  transition: height var(--dur-exit) var(--ease-out);
 }
 .chat-jump:not([data-shown]) {
-  opacity: 0;
   transition:
-    height var(--dur-lift) var(--ease-out),
-    opacity var(--dur-lift) var(--ease-out),
-    visibility var(--dur-instant) linear var(--dur-lift);
+    height var(--dur-exit) var(--ease-out),
+    visibility var(--dur-instant) linear var(--dur-exit);
 }
 .chat-dock-slot {
-  transition: height var(--dur-2) var(--ease-out);
+  transition: height var(--spring-smooth-t) var(--spring-smooth);
+}
+/* A Space inside is animating its own height: the slot is that height, not a
+   spring after it. */
+.chat-dock-slot[data-following] {
+  transition: none;
 }
 .chat-you {
   border-radius: var(--radius-panel) var(--radius-panel) var(--radius-segment)
@@ -192,11 +194,6 @@ button.chat-steps:hover {
 .chat-step-verb {
   transition: min-width var(--dur-settle) var(--ease-out);
 }
-@media (prefers-reduced-motion: reduce) {
-  .chat-step-verb {
-    transition: none;
-  }
-}
 .chat-warnings {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
@@ -221,6 +218,20 @@ button.chat-steps:hover {
 }
 .chat-steps .ui-reference {
   color: var(--foreground);
+}
+/* Fades up from a soft blur: each new chunk of streamed text, and a status dot. */
+@keyframes chat-soft-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--motion-blur-in));
+  }
+}
+.chat-chunk {
+  animation: chat-soft-in var(--dur-enter) var(--ease-out);
+}
+/* A Chat that starts needing you: its dot arrives, then the words crossfade. */
+.chat-status[data-arrived] > [data-slot="status-dot"] {
+  animation: chat-soft-in var(--dur-enter) var(--ease-out);
 }
 .chat-fold[data-fresh] {
   animation: chat-fade-in var(--dur-lift) var(--ease-out);
@@ -450,7 +461,7 @@ button.chat-file-name:focus-visible {
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.chat-activity > section + section {
+.chat-activity > * + * {
   box-shadow: inset 0 1px 0 0 var(--group-hairline);
 }
 .chat-request-head > svg {
@@ -524,6 +535,11 @@ button.chat-file-name:focus-visible {
 .chat-queue-card:hover,
 .chat-queue-card:focus-within {
   background: var(--accent);
+}
+/* Leaving: no fill and no pointer while its space closes. */
+.chat-queue-card[data-leaving] {
+  background: none;
+  pointer-events: none;
 }
 @media (forced-colors: active) {
   .chat-tray,
@@ -744,11 +760,6 @@ button.chat-file-name:focus-visible {
 @keyframes chat-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .chat-spin {
-    animation: none;
   }
 }
 .chat-pane[data-expanded] .chat-you,

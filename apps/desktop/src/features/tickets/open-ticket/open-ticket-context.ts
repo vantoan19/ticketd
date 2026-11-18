@@ -17,6 +17,12 @@ export type OpenTicketState = {
   /** A saved copy is shown while the first read of the record is unanswered. */
   opening: boolean;
   /**
+   * The record arrived after the page showed its skeleton, and the page is
+   * still showing: its document fades up (DESIGN.md section 5). It ends when
+   * the page is hidden, so showing the page again does not play it again.
+   */
+  fresh: boolean;
+  /**
    * Whether the record is as current as the last change. It is read when asked
    * for, so a page that never asks does not re-render when it moves.
    */
@@ -111,9 +117,9 @@ export function useOpenTicket<Name extends PartName>(
   const current = useCurrent(open.currency);
   const served = usePart(open.record, part, args);
   if (part !== undefined) return served;
-  const { reference, record, opening, failure, retry, changed } = open;
+  const { reference, record, opening, fresh, failure, retry, changed } = open;
   return withCurrent(
-    { reference, record, opening, failure, retry, changed },
+    { reference, record, opening, fresh, failure, retry, changed },
     current,
   );
 }

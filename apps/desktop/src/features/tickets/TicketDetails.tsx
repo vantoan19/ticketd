@@ -15,6 +15,7 @@ import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
+import { usePageSwap } from "./use-page-swap";
 type NoteTarget = { id: string; key: number };
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
@@ -45,8 +46,11 @@ export function TicketDetails({
   onAdjacent,
   returnLabel,
   outsideResults = false,
+  leaving = false,
 }: {
   outsideResults?: boolean;
+  /** The pane is fading out after the ticket closed: it takes no input. */
+  leaving?: boolean;
   hidden?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
@@ -105,6 +109,9 @@ export function TicketDetails({
     onReady: onMentionReady,
     onEnd: onClearMention,
   });
+  // A ticket closed a moment ago is still held on screen: it is not one to
+  // move from, so reopening inside the close is not a swap.
+  const swap = usePageSwap(leaving ? null : selected);
   const pages =
     selected && !opened.includes(selected) ? [...opened, selected] : opened;
   return (
@@ -112,6 +119,7 @@ export function TicketDetails({
       ref={setBoundary}
       className="ticket-detail"
       hidden={hidden}
+      inert={leaving}
       data-expanded={expanded || undefined}
       data-empty={selected === null || undefined}
       aria-labelledby="detail-heading"
@@ -139,7 +147,7 @@ export function TicketDetails({
                 onScroll={(event) => {
                   const scroller = event.currentTarget;
                   const title = scroller.querySelector<HTMLElement>(
-                    ".detail-content:not([hidden]) .editor-title, .detail-content:not([hidden]) .detail-title",
+                    ".detail-content:not([hidden], [data-leaving]) .editor-title, .detail-content:not([hidden], [data-leaving]) .detail-title",
                   );
                   const titleBottom = title
                     ? title.getBoundingClientRect().bottom -
@@ -182,6 +190,8 @@ export function TicketDetails({
                   >
                     <TicketPage
                       active={reference === selected}
+                      swap={swap.swapped && reference === selected}
+                      leaving={reference === swap.leaving}
                       outsideResults={outsideResults && reference === selected}
                       projects={projects}
                       plans={plans}

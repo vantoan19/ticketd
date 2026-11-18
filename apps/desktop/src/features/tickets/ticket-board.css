@@ -64,11 +64,24 @@
   padding: 0 4px 0 8px;
 }
 .board-column-header h2 {
+  flex: none;
   margin: 0;
+  white-space: nowrap;
+}
+/* Beside the title and count, the refusal gives way before the title wraps. */
+.board-column-refused {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .board-column-actions {
   display: flex;
   margin-left: auto;
+}
+/* While a card is dragged a header holds only its title, count and refusal:
+   Add and Fold would crowd them, and nothing is clicked mid-drag. */
+.ticket-board[data-dragging] .board-column-actions {
+  display: none;
 }
 /* Add and Fold are revealed on the header's hover or focus (P12). */
 .board-column-body {
@@ -87,6 +100,9 @@
    refused column says so in its header. */
 .board-card-container {
   position: relative;
+  /* An entering card is overflow: hidden, which lets a flex item shrink to 0
+     in a column whose cards overflow; its height must open by animation. */
+  flex-shrink: 0;
 }
 /* The card being dragged leaves a dashed slot; so does a card that moved
    at once, until the core confirms it. */
@@ -180,9 +196,24 @@
   flex-direction: column;
   gap: 4px;
   padding: 0;
-
-  transform: scale(1.02) rotate(-1.2deg);
+  /* Held: a 2% scale and the lift shadow, no tilt. */
+  transform: scale(1.02);
   pointer-events: none;
+}
+/* A card in the air between columns (board-motion). Its real card waits
+   unseen where it lands, still focusable. */
+.board-flight {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+}
+.board-card-container[data-flying] {
+  opacity: 0;
+}
+/* The arrival fill sits behind the card's content. */
+.board-card-container [data-board-reference] {
+  position: relative;
+  isolation: isolate;
 }
 .board-read-error {
   display: flex;
@@ -196,11 +227,12 @@
    in a 520px peek over the right of the board, which never resizes (S5).
    !important: the panel library sets flex inline on the panels (see
    styles.css). */
-.ticket-workspace.unselected #list,
-.ticket-workspace[data-peek] #list {
+.ticket-workspace.unselected :is(#list, [data-view-id="list"]),
+.ticket-workspace[data-peek] :is(#list, [data-view-id="list"]) {
   flex: 1 1 0 !important;
 }
-.ticket-workspace.unselected #detail,
+.ticket-workspace.unselected:not([data-pane-leaving="detail"])
+  :is(#detail, [data-view-id="detail"]),
 .ticket-workspace.unselected .split-handle,
 .ticket-workspace[data-peek] .split-handle {
   display: none !important;
@@ -208,7 +240,7 @@
 .ticket-workspace[data-peek] {
   position: relative;
 }
-.ticket-workspace[data-peek] #detail {
+.ticket-workspace[data-peek] :is(#detail, [data-view-id="detail"]) {
   /* The panel library supplies flex inline; an overlay owns its own width. */
   display: flex;
   position: absolute;

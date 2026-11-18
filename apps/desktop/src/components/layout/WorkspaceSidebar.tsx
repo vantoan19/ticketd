@@ -1,3 +1,5 @@
+import { ArrivingGroup } from "./ArrivingGroup";
+import { FoldingGroup } from "./FoldingGroup";
 import { useInboxAttention } from "@/features/tickets/use-inbox-attention";
 import {
   Inbox,
@@ -43,6 +45,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CrossfadeText } from "@/components/ui/motion";
 import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -71,7 +74,9 @@ function SidebarCount({ value }: { value: number }) {
   return (
     <>
       {" "}
-      <span className="sidebar-count">{value}</span>
+      <span className="sidebar-count">
+        <CrossfadeText>{String(value)}</CrossfadeText>
+      </span>
     </>
   );
 }
@@ -398,9 +403,7 @@ export function WorkspaceSidebar({
           >
             <Search aria-hidden="true" />
             <span>Search or jump to…</span>
-            {!collapsed && (
-              <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
-            )}
+            <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
           </Button>
         </Tooltip>
       </SidebarHeader>
@@ -417,14 +420,16 @@ export function WorkspaceSidebar({
                 aria-label={inboxLabel}
                 onClick={() => setView("inbox")}
               >
-                <Inbox size={16} /> Inbox
+                <Inbox size={16} /> <span className="sidebar-label">Inbox</span>
                 {(needsCount > 0 || unread) && (
                   <span className="sidebar-count" aria-hidden="true">
                     <StatusDot
                       tone={needsCount ? "attention" : "unread"}
                       size={6}
                     />
-                    {needsCount > 0 && needsCount}
+                    {needsCount > 0 && (
+                      <CrossfadeText>{String(needsCount)}</CrossfadeText>
+                    )}
                   </span>
                 )}
               </SidebarMenuButton>
@@ -440,7 +445,8 @@ export function WorkspaceSidebar({
                 tooltip="All tickets"
                 onClick={() => scope("all")}
               >
-                <ListTodo size={16} /> All tickets
+                <ListTodo size={16} />{" "}
+                <span className="sidebar-label">All tickets</span>
                 {counts?.total !== undefined && (
                   <SidebarCount value={counts.total} />
                 )}
@@ -452,7 +458,8 @@ export function WorkspaceSidebar({
                 tooltip="Ready"
                 onClick={() => scope("ready")}
               >
-                <CirclePlay size={16} /> Ready
+                <CirclePlay size={16} />{" "}
+                <span className="sidebar-label">Ready</span>
                 {counts && <SidebarCount value={counts.ready} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -462,7 +469,8 @@ export function WorkspaceSidebar({
                 tooltip="In progress"
                 onClick={() => scope("progress")}
               >
-                <StatusIcon status="In progress" decorative /> In progress
+                <StatusIcon status="In progress" decorative />{" "}
+                <span className="sidebar-label">In progress</span>
                 {counts && <SidebarCount value={counts.in_progress} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -474,7 +482,8 @@ export function WorkspaceSidebar({
                   aria-label={chatsName}
                   onClick={() => setView("chats")}
                 >
-                  <MessagesSquare size={16} /> Chats
+                  <MessagesSquare size={16} />{" "}
+                  <span className="sidebar-label">Chats</span>
                   {(waiting > 0 || working > 0 || unreadChats > 0) && (
                     <span className="sidebar-count" aria-hidden="true">
                       {waiting === 0 && working > 0 ? (
@@ -488,7 +497,9 @@ export function WorkspaceSidebar({
                           size={6}
                         />
                       )}
-                      {waiting > 0 ? waiting : working > 0 ? working : null}
+                      {(waiting > 0 || working > 0) && (
+                        <span>{waiting > 0 ? waiting : working}</span>
+                      )}
                     </span>
                   )}
                 </SidebarMenuButton>
@@ -502,11 +513,12 @@ export function WorkspaceSidebar({
                   aria-label={automationsLabel}
                   onClick={() => setView("automations")}
                 >
-                  <Workflow size={16} /> Automations
+                  <Workflow size={16} />{" "}
+                  <span className="sidebar-label">Automations</span>
                   {runsWaiting > 0 && (
                     <span className="sidebar-count" aria-hidden="true">
                       <StatusDot tone="attention" />
-                      {runsWaiting}
+                      <span>{runsWaiting}</span>
                     </span>
                   )}
                 </SidebarMenuButton>
@@ -526,107 +538,105 @@ export function WorkspaceSidebar({
           {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}
         </span>
         <div className="sidebar-scroll">
-          {(projects.length > 0 || hasTickets) && (
+          <ArrivingGroup present={projects.length > 0 || hasTickets}>
             <SidebarGroup className="sidebar-group">
-              {collapsed ? (
-                <nav aria-label="Projects" className="sidebar-nav">
-                  <SidebarMenu>
-                    <GroupMenu
-                      label="Projects"
-                      icon={Folder}
-                      entries={projectEntries}
-                      manage={{
-                        label: "All projects",
-                        current: view === "projects",
-                        onSelect: () => setView("projects"),
-                      }}
-                    />
-                  </SidebarMenu>
-                </nav>
-              ) : (
-                <>
-                  <GroupHeading
-                    label="Projects"
-                    current={view === "projects"}
-                    onOpen={() => setView("projects")}
-                  />
-                  <nav aria-label="Project scopes" className="sidebar-nav">
+              <FoldingGroup
+                collapsed={collapsed}
+                rail={
+                  <nav aria-label="Projects" className="sidebar-nav">
                     <SidebarMenu>
-                      {projectEntries.map((entry) => (
-                        <SidebarMenuItem key={entry.key}>
-                          <SidebarMenuButton
-                            isActive={entry.active}
-                            onClick={entry.onSelect}
-                          >
-                            {entry.icon}{" "}
-                            <Tooltip content={entry.label} overflowOnly>
-                              <span>{entry.label}</span>
-                            </Tooltip>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
+                      <GroupMenu
+                        label="Projects"
+                        icon={Folder}
+                        entries={projectEntries}
+                        manage={{
+                          label: "All projects",
+                          current: view === "projects",
+                          onSelect: () => setView("projects"),
+                        }}
+                      />
                     </SidebarMenu>
                   </nav>
-                </>
-              )}
-            </SidebarGroup>
-          )}
-          {(plans.length > 0 || hasTickets) && (
-            <SidebarGroup className="sidebar-group">
-              {collapsed ? (
-                <nav aria-label="Plans" className="sidebar-nav">
+                }
+              >
+                <GroupHeading
+                  label="Projects"
+                  current={view === "projects"}
+                  onOpen={() => setView("projects")}
+                />
+                <nav aria-label="Project scopes" className="sidebar-nav">
                   <SidebarMenu>
-                    <GroupMenu
-                      label="Plans"
-                      icon={Layers}
-                      entries={planEntries}
-                      manage={{
-                        label: "All Plans",
-                        current: view === "plans",
-                        onSelect: () => setView("plans"),
-                      }}
-                    />
+                    {projectEntries.map((entry) => (
+                      <SidebarMenuItem key={entry.key}>
+                        <SidebarMenuButton
+                          isActive={entry.active}
+                          onClick={entry.onSelect}
+                        >
+                          {entry.icon}{" "}
+                          <Tooltip content={entry.label} overflowOnly>
+                            <span className="sidebar-label">{entry.label}</span>
+                          </Tooltip>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
                   </SidebarMenu>
                 </nav>
-              ) : (
-                <>
-                  <GroupHeading
-                    label="Plans"
-                    current={view === "plans"}
-                    onOpen={() => setView("plans")}
-                  />
-                  <nav aria-label="Plan scopes" className="sidebar-nav">
+              </FoldingGroup>
+            </SidebarGroup>
+          </ArrivingGroup>
+          <ArrivingGroup present={plans.length > 0 || hasTickets}>
+            <SidebarGroup className="sidebar-group">
+              <FoldingGroup
+                collapsed={collapsed}
+                rail={
+                  <nav aria-label="Plans" className="sidebar-nav">
                     <SidebarMenu>
-                      {planEntries.map((entry) => (
-                        <SidebarMenuItem key={entry.key}>
-                          <SidebarMenuButton
-                            isActive={entry.active}
-                            aria-label={entry.label}
-                            aria-description={
-                              entry.count
-                                ? `${entry.count} completed`
-                                : undefined
-                            }
-                            onClick={entry.onSelect}
-                          >
-                            {entry.icon}{" "}
-                            <Tooltip content={entry.label} overflowOnly>
-                              <span>{entry.label}</span>
-                            </Tooltip>
-                            {entry.count && (
-                              <span className="sidebar-count">
-                                {entry.count}
-                              </span>
-                            )}
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
+                      <GroupMenu
+                        label="Plans"
+                        icon={Layers}
+                        entries={planEntries}
+                        manage={{
+                          label: "All Plans",
+                          current: view === "plans",
+                          onSelect: () => setView("plans"),
+                        }}
+                      />
                     </SidebarMenu>
                   </nav>
-                </>
-              )}
+                }
+              >
+                <GroupHeading
+                  label="Plans"
+                  current={view === "plans"}
+                  onOpen={() => setView("plans")}
+                />
+                <nav aria-label="Plan scopes" className="sidebar-nav">
+                  <SidebarMenu>
+                    {planEntries.map((entry) => (
+                      <SidebarMenuItem key={entry.key}>
+                        <SidebarMenuButton
+                          isActive={entry.active}
+                          aria-label={entry.label}
+                          aria-description={
+                            entry.count ? `${entry.count} completed` : undefined
+                          }
+                          onClick={entry.onSelect}
+                        >
+                          {entry.icon}{" "}
+                          <Tooltip content={entry.label} overflowOnly>
+                            <span className="sidebar-label">{entry.label}</span>
+                          </Tooltip>
+                          {entry.count && (
+                            <span className="sidebar-count">{entry.count}</span>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </nav>
+              </FoldingGroup>
             </SidebarGroup>
-          )}
+          </ArrivingGroup>
           <SidebarGroup className="sidebar-group">
             {!collapsed && <div className="sidebar-heading">Context</div>}
             <nav aria-label="Context" className="sidebar-nav">
@@ -637,7 +647,8 @@ export function WorkspaceSidebar({
                     tooltip="Documents"
                     onClick={() => setView("documents")}
                   >
-                    <FileText size={16} /> Documents
+                    <FileText size={16} />{" "}
+                    <span className="sidebar-label">Documents</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -646,7 +657,8 @@ export function WorkspaceSidebar({
                     tooltip="Attachments"
                     onClick={() => setView("attachments")}
                   >
-                    <Paperclip size={16} /> Attachments
+                    <Paperclip size={16} />{" "}
+                    <span className="sidebar-label">Attachments</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -655,7 +667,8 @@ export function WorkspaceSidebar({
                     tooltip="Workspace graph"
                     onClick={() => openGraph?.("__workspace__")}
                   >
-                    <Network size={16} /> Workspace graph
+                    <Network size={16} />{" "}
+                    <span className="sidebar-label">Workspace graph</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>

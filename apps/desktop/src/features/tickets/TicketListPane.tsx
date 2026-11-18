@@ -6,6 +6,9 @@ import {
   type RefObject,
   type ReactNode,
 } from "react";
+import { m } from "motion/react";
+import { Presence } from "@/components/ui/motion";
+import { blur, exitTransition } from "@/lib/motion-tokens";
 import { Layers, SearchX, Ticket as TicketIcon, Trash2, X } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
@@ -29,6 +32,7 @@ import { allowRemoval } from "@/lib/removal-guard";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import { useListCascade } from "@/features/tickets/use-list-cascade";
 import {
   useFiltersMenu,
   type FiltersMenuState,
@@ -127,6 +131,10 @@ function TicketListBody({
         )
       : null;
   const headerTotal = boardTotal ?? total;
+  // Back from the Board, or in place of the placeholders, the rows fade up top
+  // first, once.
+  const waiting = loading && tickets.length === 0;
+  const { cascade, done: cascaded } = useListCascade(workspace.layout, waiting);
   // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const planAction = usePlanAction(planState);
@@ -354,17 +362,20 @@ function TicketListBody({
             // First run (S20): the title alone over an empty workspace.
             (workspace.listKnown || boardTotal !== null) &&
             !bare && (
-              <Count>
-                {filtered && scopeTotal != null
-                  ? ofTotal(headerTotal, scopeTotal)
-                  : headerTotal}
+              // The noun sits outside Count so the number alone crossfades.
+              <>
+                <Count>
+                  {filtered && scopeTotal != null
+                    ? ofTotal(headerTotal, scopeTotal)
+                    : headerTotal}
+                </Count>
                 {!(filtered && scopeTotal != null) && (
                   <span className="sr-only">
                     {" "}
                     {noun(headerTotal, "ticket")}
                   </span>
                 )}
-              </Count>
+              </>
             )
           }
           actions={
@@ -419,163 +430,181 @@ function TicketListBody({
               )}
             </div>
           )}
-          {workspace.layout === "board" ? (
-            <TicketBoard
-              workspace={workspace}
-              empty={
-                !loading && !queryError && tickets.length === 0
-                  ? emptyView
-                  : null
-              }
-              onOpen={onOpen}
-              {...(!addDisabled &&
-                !trash && {
-                  onAdd: (status: string, trigger: HTMLButtonElement) =>
-                    onCreate(trigger, status),
-                })}
-            />
-          ) : (
-            <div className="ticket-scroll">
-              {queryError ? (
-                <FailureState
-                  failure={
-                    listFailure ?? {
-                      code: "failed",
-                      title: "Couldn't load tickets",
-                      sentence:
-                        "ticketd couldn't read the list. Nothing changed.",
-                      action: "retry",
-                      details: "",
+          {/* Choosing Board: the rows fade out, then the columns fade up. The
+              header and the Display menu stay put. */}
+          <Presence mode="wait" initial={false}>
+            {workspace.layout === "board" ? (
+              <TicketBoard
+                key="board"
+                workspace={workspace}
+                empty={
+                  !loading && !queryError && tickets.length === 0
+                    ? emptyView
+                    : null
+                }
+                onOpen={onOpen}
+                {...(!addDisabled &&
+                  !trash && {
+                    onAdd: (status: string, trigger: HTMLButtonElement) =>
+                      onCreate(trigger, status),
+                  })}
+              />
+            ) : (
+              <m.div
+                key="list"
+                className="ticket-scroll"
+                // The rows glide from where they were on screen, not from
+                // where they sat before the list scrolled.
+                layoutScroll
+                exit={{
+                  opacity: 0,
+                  filter: `blur(${blur("out")}px)`,
+                  transition: exitTransition(),
+                }}
+              >
+                {queryError ? (
+                  <FailureState
+                    failure={
+                      listFailure ?? {
+                        code: "failed",
+                        title: "Couldn't load tickets",
+                        sentence:
+                          "ticketd couldn't read the list. Nothing changed.",
+                        action: "retry",
+                        details: "",
+                      }
                     }
-                  }
-                  onRetry={() => void refresh({ reportFailure: true })}
-                />
-              ) : loading && tickets.length === 0 ? (
-                <TicketRowsSkeleton detailed={ticketRows === "detailed"} />
-              ) : (
-                <>
-                  {showBulk && bulk.selection.length > 0 && (
-                    // The bar is last in the page but is the next thing to reach.
-                    <a
-                      className="skip-link"
-                      href="#bulk-controls"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        document.getElementById("bulk-controls")?.focus();
+                    onRetry={() => void refresh({ reportFailure: true })}
+                  />
+                ) : waiting ? (
+                  <TicketRowsSkeleton detailed={ticketRows === "detailed"} />
+                ) : (
+                  <>
+                    {showBulk && bulk.selection.length > 0 && (
+                      // The bar is last in the page but is the next thing to reach.
+                      <a
+                        className="skip-link"
+                        href="#bulk-controls"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          document.getElementById("bulk-controls")?.focus();
+                        }}
+                      >
+                        Skip to selection actions
+                      </a>
+                    )}
+                    <TicketList
+                      scopeKey={JSON.stringify([
+                        filter,
+                        plan,
+                        status,
+                        tags,
+                        availability,
+                        family,
+                        source,
+                        query,
+                        trash,
+                      ])}
+                      cascade={cascade}
+                      onCascaded={cascaded}
+                      tickets={visibleTickets}
+                      empty={emptyView}
+                      scope={{
+                        showPlan: !navigation.plan,
+                        showProject: navigation.project === "all",
+                        plans,
+                        projects,
                       }}
-                    >
-                      Skip to selection actions
-                    </a>
-                  )}
-                  <TicketList
-                    scopeKey={JSON.stringify([
-                      filter,
-                      plan,
-                      status,
-                      tags,
-                      availability,
-                      family,
-                      source,
-                      query,
-                      trash,
-                    ])}
-                    tickets={visibleTickets}
-                    empty={emptyView}
-                    scope={{
-                      showPlan: !navigation.plan,
-                      showProject: navigation.project === "all",
-                      plans,
-                      projects,
-                    }}
-                    selected={selected}
-                    readyView={navigation.kind === "ready"}
-                    simple={ticketRows === "simple"}
-                    // A status filter keeps its group header (board C); only the
-                    // dedicated Ready and In progress views drop it.
-                    singleStatus={
-                      navigation.kind === "ready" ||
-                      navigation.kind === "progress"
-                    }
-                    {...(grouped &&
-                      counts && {
-                        grouping: {
-                          counts,
-                          ...(!addDisabled && {
-                            onAdd: (
-                              status: string,
-                              trigger: HTMLButtonElement,
-                            ) => {
-                              if (status === "Duplicate")
-                                setMarkingDuplicate(true);
-                              else onCreate(trigger, status);
-                            },
-                          }),
-                        },
-                      })}
-                    selectable={!trash}
-                    selectionDisabled={bulk.pending}
-                    bulkSelection={bulk.selection}
-                    onToggle={bulk.toggle}
-                    onSelectMany={bulk.selectAll}
-                    onOpen={(reference) => {
-                      if (Date.now() < guardUntil.current) return;
-                      onOpen(reference);
-                    }}
-                    {...(scopedPlan &&
-                      planWritable && {
-                        rowAction: (ticket: Ticket) => (
-                          <IconButton
-                            disabled={planState.pending}
-                            label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
-                            tooltipSide="top"
-                            onClick={() => {
-                              // A second click lands on the row that moved up:
-                              // ignore clicks for 400ms after a removal (P7).
-                              if (!allowRemoval(lastRemoval)) return;
-                              const { reference } = ticket;
-                              const { id, name } = scopedPlan;
-                              void planAction(
-                                () => plansClient.setMember(reference, null),
-                                `remove ${reference} from ${name}`,
-                                {
-                                  message: `Removed ${reference} from ${name}`,
-                                  undo: () =>
-                                    planState.apply(() =>
-                                      plansClient.setMember(reference, id),
-                                    ),
-                                },
-                              );
-                            }}
-                          >
-                            <X />
-                          </IconButton>
-                        ),
-                      })}
-                  />
-                </>
-              )}
-              {!trash &&
-                !queryError &&
-                tickets.length > 0 &&
-                tickets.length < total && (
-                  <Pager
-                    more={Math.min(PAGE_SIZE, total - tickets.length)}
-                    noun="tickets"
-                    loading={loading && pages * PAGE_SIZE > tickets.length}
-                    onMore={() => {
-                      arriving.current = {
-                        from: visibleTickets.length,
-                        focused:
-                          document.activeElement?.closest(
-                            '[data-slot="pager"]',
-                          ) != null,
-                      };
-                      showMore();
-                    }}
-                  />
+                      selected={selected}
+                      readyView={navigation.kind === "ready"}
+                      simple={ticketRows === "simple"}
+                      // A status filter keeps its group header (board C); only the
+                      // dedicated Ready and In progress views drop it.
+                      singleStatus={
+                        navigation.kind === "ready" ||
+                        navigation.kind === "progress"
+                      }
+                      {...(grouped &&
+                        counts && {
+                          grouping: {
+                            counts,
+                            ...(!addDisabled && {
+                              onAdd: (
+                                status: string,
+                                trigger: HTMLButtonElement,
+                              ) => {
+                                if (status === "Duplicate")
+                                  setMarkingDuplicate(true);
+                                else onCreate(trigger, status);
+                              },
+                            }),
+                          },
+                        })}
+                      selectable={!trash}
+                      selectionDisabled={bulk.pending}
+                      bulkSelection={bulk.selection}
+                      onToggle={bulk.toggle}
+                      onSelectMany={bulk.selectAll}
+                      onOpen={(reference) => {
+                        if (Date.now() < guardUntil.current) return;
+                        onOpen(reference);
+                      }}
+                      {...(scopedPlan &&
+                        planWritable && {
+                          rowAction: (ticket: Ticket) => (
+                            <IconButton
+                              disabled={planState.pending}
+                              label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                              tooltipSide="top"
+                              onClick={() => {
+                                // A second click lands on the row that moved up:
+                                // ignore clicks for 400ms after a removal (P7).
+                                if (!allowRemoval(lastRemoval)) return;
+                                const { reference } = ticket;
+                                const { id, name } = scopedPlan;
+                                void planAction(
+                                  () => plansClient.setMember(reference, null),
+                                  `remove ${reference} from ${name}`,
+                                  {
+                                    message: `Removed ${reference} from ${name}`,
+                                    undo: () =>
+                                      planState.apply(() =>
+                                        plansClient.setMember(reference, id),
+                                      ),
+                                  },
+                                );
+                              }}
+                            >
+                              <X />
+                            </IconButton>
+                          ),
+                        })}
+                    />
+                  </>
                 )}
-            </div>
-          )}
+                {!trash &&
+                  !queryError &&
+                  tickets.length > 0 &&
+                  tickets.length < total && (
+                    <Pager
+                      more={Math.min(PAGE_SIZE, total - tickets.length)}
+                      noun="tickets"
+                      loading={loading && pages * PAGE_SIZE > tickets.length}
+                      onMore={() => {
+                        arriving.current = {
+                          from: visibleTickets.length,
+                          focused:
+                            document.activeElement?.closest(
+                              '[data-slot="pager"]',
+                            ) != null,
+                        };
+                        showMore();
+                      }}
+                    />
+                  )}
+              </m.div>
+            )}
+          </Presence>
         </>
       }
       <MarkDuplicateDialog
@@ -583,7 +612,8 @@ function TicketListBody({
         onOpenChange={setMarkingDuplicate}
       />
       <ListOverlays>
-        {showBulk && workspace.layout === "list" && (
+        {/* Always mounted in the list so the bar can sink away when cleared. */}
+        {!trash && workspace.layout === "list" && (
           <BulkControls
             bulk={bulk}
             visible={visibleTickets}

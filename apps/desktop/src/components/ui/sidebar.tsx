@@ -15,6 +15,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Glide } from "@/components/ui/motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipSide } from "@/components/ui/tooltip";
 
@@ -472,7 +473,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "ui-navigation-button peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+  "ui-navigation-button peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -505,8 +506,8 @@ function SidebarMenuButton({
   asChild?: boolean;
   isActive?: boolean;
   /**
-   * The row's name on the folded rail. It is rendered only while the rail is
-   * folded on desktop: a mounted but hidden tooltip would catch Escape.
+   * The row's name on the folded rail. It opens only while the rail is folded
+   * on desktop; a closed tooltip mounts no layer, so it cannot catch Escape.
    */
   tooltip?: string;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
@@ -525,11 +526,31 @@ function SidebarMenuButton({
     />
   );
 
-  if (!tooltip || state !== "collapsed" || isMobile) return button;
+  // The current row's fill is one highlight that travels between rows. It sits
+  // beside the button, not inside it: the button clips its text, and a clipped
+  // highlight would only appear once it had arrived.
+  const highlight = isActive && !asChild && <Glide id="sidebar-highlight" />;
+  if (!tooltip)
+    return (
+      <>
+        {button}
+        {highlight}
+      </>
+    );
+  // The Tooltip stays around the button whether or not the rail is folded, and
+  // is only held shut while it is not: wrapping and unwrapping would remount the
+  // row, and its label would come back at full opacity instead of fading in.
   return (
-    <Tooltip content={tooltip} side="right">
-      {button}
-    </Tooltip>
+    <>
+      <Tooltip
+        content={tooltip}
+        side="right"
+        disabled={state !== "collapsed" || isMobile}
+      >
+        {button}
+      </Tooltip>
+      {highlight}
+    </>
   );
 }
 

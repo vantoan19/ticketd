@@ -8,13 +8,17 @@ import {
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
+import { Expand } from "@/components/ui/motion";
 import { renderedLines } from "@/components/ui/rendered-lines";
+import "./disclosure.css";
 import "./patterns.css";
 
 /**
  * A labelled section that opens in place: a 16px chevron that turns down,
  * the label at 14/20 and an optional count. One level only; it replaces every
- * raw `<details>`. Closed content stays mounted but hidden. Controlled with `open` and
+ * raw `<details>`. Closed content stays mounted but inert. It opens on the
+ * smooth spring while its rows fade up one after another (the first seven), and
+ * closes with the height while the content fades. Controlled with `open` and
  * `onOpenChange`, or left to itself with `defaultOpen`.
  */
 export function Disclosure({
@@ -53,10 +57,13 @@ export function Disclosure({
         <span>{label}</span>
         {count !== undefined && <Count>{count}</Count>}
       </button>
-      {/* Kept mounted while closed, as <details> is, so state inside survives. */}
-      <div id={body} className="ui-disclosure-body" hidden={!open}>
-        {children}
-      </div>
+      {/* Kept mounted while closed, as <details> is, so state inside survives;
+          Expand keeps it inert and out of the accessibility tree. */}
+      <Expand open={open}>
+        <div id={body} className="ui-disclosure-body">
+          {children}
+        </div>
+      </Expand>
     </div>
   );
 }

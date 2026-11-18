@@ -29,6 +29,16 @@
 .ui-graph-canvas .react-flow__node {
   pointer-events: auto;
 }
+/* Focusing a card or island dims what is not part of it to 35%. --dur-3 is the
+   nearest token to the 200ms in the motion design. */
+.ui-graph-canvas .react-flow__node,
+.ui-graph-canvas .react-flow__edge {
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+.ui-graph-canvas .react-flow__node.is-dim,
+.ui-graph-canvas .react-flow__edge.is-dim {
+  opacity: 0.35;
+}
 
 /* Empty and limited states sit centred in the canvas, above the dots. */
 .ui-graph-notice {
@@ -428,7 +438,7 @@
   border-radius: var(--radius-panel);
   background: var(--well);
 }
-.ui-graph-flow-lane > header {
+.ui-graph-flow-lane header {
   display: flex;
   flex-direction: column;
   align-items: flex-start;

@@ -6,6 +6,11 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* The loading rule: nothing for the loading delay, then a fade in. */
+.board-column-note[data-loading] {
+  animation: skeleton-appear var(--dur-enter) var(--ease-out)
+    var(--dur-loading-delay) both;
+}
 .board-column-fold {
   border-radius: var(--radius);
   color: var(--muted-foreground);
@@ -52,6 +57,13 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+/* The hairline and the ring fade in and out as the pointer crosses columns. */
+.board-column-body,
+.board-column[data-folded] {
+  transition:
+    box-shadow var(--dur-settle) var(--ease-out),
+    background-color var(--dur-settle) var(--ease-out);
 }
 .board-column[data-drop-allowed="true"] .board-column-body {
   box-shadow: inset 0 0 0 1px var(--border);
@@ -115,29 +127,76 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.ticket-workspace[data-peek] #detail {
+.ticket-workspace[data-peek] :is(#detail, [data-view-id="detail"]) {
   border-radius: var(--radius-panel) 0 0 var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-modal);
 }
 
+/* Picking a card up: the lift shadow and a 2% scale, no tilt. */
 @keyframes board-lift {
   from {
-    transform: scale(1) rotate(0);
-  }
-  to {
-    transform: scale(1.02) rotate(-1.2deg);
-  }
-}
-.board-card-container[aria-busy="true"] [data-board-reference] {
-  animation: board-settle var(--dur-settle) var(--ease-out);
-}
-@keyframes board-settle {
-  from {
-    transform: scale(1.02);
-  }
-  to {
     transform: scale(1);
+    box-shadow: var(--shadow-card);
+  }
+  to {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-card-lift);
+  }
+}
+/* A card in the air: a dropped one sets down, one another hand moved lifts on
+   the way and sets down. The flight itself is a spring (board-motion). */
+.board-flight[data-kind="drop"] > [data-slot="card"] {
+  animation: board-set-down var(--spring-smooth-t) var(--ease-out) both;
+}
+.board-flight[data-kind="live"] > [data-slot="card"] {
+  animation: board-lift-soft var(--spring-travel-t) var(--ease-in-out) both;
+}
+@keyframes board-set-down {
+  from {
+    box-shadow: var(--shadow-card-lift);
+  }
+  to {
+    box-shadow: var(--shadow-card);
+  }
+}
+@keyframes board-lift-soft {
+  0%,
+  100% {
+    box-shadow: var(--shadow-card);
+  }
+  25%,
+  70% {
+    box-shadow: var(--shadow-card-lift);
+  }
+}
+/* A folded column opens from its 40px header: the column is revealed from the
+   left on the smooth spring, then its header and cards fade up. Folding fades
+   the 40px header in. */
+.board-column[data-reveal="open"] {
+  animation: board-open var(--spring-smooth-t) var(--spring-smooth);
+}
+@keyframes board-open {
+  from {
+    clip-path: inset(0 calc(100% - 40px) 0 0);
+  }
+}
+.board-column[data-reveal="open"] > * {
+  animation: board-fade-up var(--dur-enter) var(--ease-out) var(--dur-1) both;
+}
+@keyframes board-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise));
+    filter: blur(var(--motion-blur-in));
+  }
+}
+.board-column[data-reveal="fold"] > * {
+  animation: board-fade-in var(--dur-settle) var(--ease-out) both;
+}
+@keyframes board-fade-in {
+  from {
+    opacity: 0;
   }
 }
 .board-fold-refused {
@@ -148,7 +207,8 @@
 }
 
 [data-board-slot][data-collapsing] {
-  animation: board-slot-collapse var(--dur-settle) var(--ease-out) forwards;
+  animation: board-slot-collapse var(--spring-smooth-t) var(--spring-smooth)
+    forwards;
 }
 @keyframes board-slot-collapse {
   from {

@@ -6,7 +6,14 @@ import {
   ticketCommandActions,
 } from "@/lib/ticket-command-actions";
 import { LatestUpdate } from "./LatestUpdate";
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ChoiceList, type Choice } from "@/components/ui/choice-list";
 import { Folder, Layers, type LucideIcon } from "lucide-react";
 import { SourceRail } from "./SourceRail";
@@ -49,6 +56,98 @@ import type { Plan } from "@/lib/api/plans";
 import { useSourcesConfigured } from "./use-publication-preview";
 import "./properties.css";
 import { Badge } from "@/components/ui/badge";
+import { m } from "motion/react";
+import { CrossfadeText, Presence } from "@/components/ui/motion";
+import {
+  blur,
+  enterTransition,
+  exitTransition,
+  spring,
+} from "@/lib/motion-tokens";
+
+/** The gap between pills, in px: `.rail-tags` in properties.css sets it. */
+const PILL_GAP = 4;
+
+/**
+ * The tags as pills. A new pill opens its own width and fades up from a soft
+ * blur at 94% scale; a removed pill fades out as its width closes. Pills after
+ * it make or give up the room as the width moves, in the row's own flow, so a
+ * pill never overlaps its neighbour, and the row never reflows at once (a pill
+ * that glided to a new line, as layout motion would move it, was clipped by its
+ * row and vanished mid-way). A pill's gap opens and closes with it. The pills
+ * present when the row appears do not animate.
+ *
+ * In the strip the whole row is one wrapping item, so a narrowing row would
+ * hop to the line above (and leave its "+" behind) part-way through the exit.
+ * The row keeps the width it had until the last leaving pill is gone.
+ */
+function TagPills({ tags }: { tags: string[] }) {
+  const root = useRef<HTMLSpanElement>(null);
+  const before = useRef(tags);
+  const [kept, setKept] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const removed = before.current.some((tag) => !tags.includes(tag));
+    before.current = tags;
+    // The leaving pill is still laid out here, so this is the width it had.
+    if (removed && exitTransition().duration > 0 && root.current)
+      setKept((width) => width ?? root.current?.offsetWidth ?? null);
+  }, [tags]);
+  return (
+    <span
+      ref={root}
+      className="rail-tags"
+      style={kept === null ? undefined : { minWidth: kept }}
+    >
+      <Presence initial={false} onExitComplete={() => setKept(null)}>
+        {tags.map((tag) => {
+          const smooth = spring("smooth");
+          return (
+            <m.span
+              key={tag}
+              initial={{
+                opacity: 0,
+                scale: 0.94,
+                filter: `blur(${blur("in")}px)`,
+                width: 0,
+                marginRight: -PILL_GAP,
+                overflow: "clip",
+              }}
+              animate={{
+                opacity: 1,
+                scale: 1,
+                filter: "blur(0px)",
+                width: "auto",
+                marginRight: 0,
+                transitionEnd: { filter: "none", overflow: "visible" },
+                transition: {
+                  default: enterTransition(),
+                  scale: smooth,
+                  width: smooth,
+                  marginRight: smooth,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                filter: `blur(${blur("out")}px)`,
+                width: 0,
+                marginRight: -PILL_GAP,
+                overflow: "clip",
+                transition: {
+                  default: exitTransition(),
+                  width: smooth,
+                  marginRight: smooth,
+                },
+              }}
+            >
+              <Badge>{tag}</Badge>
+            </m.span>
+          );
+        })}
+      </Presence>
+      {tags.length === 0 && "No tags"}
+    </span>
+  );
+}
 
 /** The Status choice that opens the duplicate review instead of setting a status. */
 const DUPLICATE_ACTION = "mark-duplicate";
@@ -432,7 +531,9 @@ export function TicketProperties({
             aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
           >
             <StatusIcon status={ticket.status} decorative />
-            <SelectValue>{ticket.status}</SelectValue>
+            <SelectValue>
+              <CrossfadeText>{ticket.status}</CrossfadeText>
+            </SelectValue>
             {saving("Status") && (
               <span className="rail-row-trailing">{saving("Status")}</span>
             )}
@@ -518,6 +619,7 @@ export function TicketProperties({
       label="Project"
       things="projects"
       value={projectName}
+      display={<CrossfadeText>{projectName}</CrossfadeText>}
       empty={!project && !ticket.project_id}
       selected={ticket.project_id ?? ""}
       disabled={disabled}
@@ -541,6 +643,7 @@ export function TicketProperties({
       label="Plan"
       things="Plans"
       value={planName}
+      display={<CrossfadeText>{planName}</CrossfadeText>}
       empty={!plan && !ticket.plan_id}
       selected={ticket.plan_id ?? ""}
       disabled={disabled}
@@ -554,19 +657,13 @@ export function TicketProperties({
       }
     />,
   );
-  const pills = ticket.tags.length > 0 && (
-    <span className="rail-tags">
-      {ticket.tags.map((tag) => (
-        <Badge key={tag}>{tag}</Badge>
-      ))}
-    </span>
-  );
+  const pills = <TagPills tags={ticket.tags} />;
   const tagsRow = property(
     "Tags",
     <PropertyPicker
       readOnly={readOnly}
       // The pills are the value: no icon, so they start on the label's edge.
-      display={pills || "No tags"}
+      display={pills}
       label="Tags"
       things="tags"
       value={ticket.tags.length ? ticket.tags.join(", ") : "No tags"}
@@ -656,7 +753,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
                     title={`Change status (${shortcutLabel("ticket-status")})`}
                   >
-                    {ticket.status}
+                    <CrossfadeText>{ticket.status}</CrossfadeText>
                   </RailRow>
                 }
               />
@@ -676,7 +773,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-project")}
                     title={`Change project (${shortcutLabel("ticket-project")})`}
                   >
-                    {projectName}
+                    <CrossfadeText>{projectName}</CrossfadeText>
                   </RailRow>
                 }
               />
@@ -696,7 +793,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-plan")}
                     title={`Move to Plan (${shortcutLabel("ticket-plan")})`}
                   >
-                    {planName}
+                    <CrossfadeText>{planName}</CrossfadeText>
                   </RailRow>
                 }
               />
@@ -715,7 +812,7 @@ export function TicketProperties({
                     aria-keyshortcuts={ariaKeyShortcuts("ticket-tags")}
                     title={`Edit tags (${shortcutLabel("ticket-tags")})`}
                   >
-                    {pills || "No tags"}
+                    {pills}
                   </RailRow>
                 }
               />

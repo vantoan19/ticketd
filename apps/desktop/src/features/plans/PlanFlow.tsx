@@ -14,6 +14,7 @@ import {
   GraphNodeCard,
   GraphFlowLane,
 } from "@/components/ui/graph-kit";
+import { Appear, DrawnPath } from "@/components/ui/motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
@@ -31,6 +32,11 @@ import "./plan-flow.css";
 
 const names = ["Now", "Next", "Later"];
 const captions = ["No open blockers", "Waits on Now", "Waits on Next"];
+
+/** Cascade steps between lanes (about 70ms), and from a heading to its first ticket. */
+const LANE_STEPS = 3;
+const FIRST_TICKET_STEPS = 2;
+
 export function PlanFlow({
   id,
   revision,
@@ -48,6 +54,7 @@ export function PlanFlow({
   const openGraph = useContext(ContextGraphNavigation);
   const frame = useRef<HTMLDivElement>(null);
   const cards = useRef(new Map<string, HTMLButtonElement>());
+  const remeasure = useRef(() => {});
   const [lines, setLines] = useState<
     { key: string; d: string; hot: boolean }[]
   >([]);
@@ -112,6 +119,9 @@ export function PlanFlow({
       );
     }
     measure();
+    // A card still rising into place is painted a few pixels low; measure again
+    // as each one lands, before the lines (which wait for the cards) draw.
+    remeasure.current = measure;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
@@ -151,7 +161,7 @@ export function PlanFlow({
               </marker>
             </defs>
             {lines.map((line) => (
-              <path
+              <DrawnPath
                 key={line.key}
                 data-edge={line.key}
                 data-hot={line.hot || undefined}
@@ -163,6 +173,7 @@ export function PlanFlow({
           {flow.lanes.map((lane, index) => (
             <GraphFlowLane
               key={names[index]}
+              index={index * LANE_STEPS}
               title={names[index]!}
               caption={`${captions[index]} · ${members ? lane.length : "…"}`}
             >
@@ -171,71 +182,77 @@ export function PlanFlow({
                   <Skeleton className="h-full w-full" />
                 </div>
               )}
-              {lane.map((ticket) => (
-                <Tooltip
+              {lane.map((ticket, row) => (
+                <Appear
                   key={ticket.reference}
-                  content={`${ticket.reference}: ${ticket.title}. ${flow.reason(ticket)}. Enter to open.`}
-                  shortcut={shortcutLabel("flow-open")}
+                  index={index * LANE_STEPS + FIRST_TICKET_STEPS + row}
+                  onAnimationComplete={() => remeasure.current()}
                 >
-                  <GraphNodeCard
-                    variant="flow"
-                    aria-pressed={selected === ticket.reference}
-                    ref={(node) => {
-                      if (node) cards.current.set(ticket.reference, node);
-                      else cards.current.delete(ticket.reference);
-                    }}
-                    reference={ticket.reference}
-                    title={ticket.title}
-                    icon={<StatusIcon status={ticket.status} decorative />}
-                    {...(ticket.status !== "Todo" && { meta: ticket.status })}
-                    trailing={
-                      <AvailabilityMark availability={ticket.availability} />
-                    }
-                    aria-description={flow.reason(ticket)}
-                    reason={flow.reason(ticket)}
-                    selected={selected === ticket.reference}
-                    onClick={() => setSelected(ticket.reference)}
-                    onKeyDown={(event) => {
-                      if (event.metaKey || event.ctrlKey || event.altKey)
-                        return;
-                      if (
-                        matchesShortcut(event, "flow-full-graph") &&
-                        openGraph
-                      ) {
-                        event.preventDefault();
-                        openGraph(id, { workspacePlan: id });
-                      } else if (matchesShortcut(event, "flow-open")) {
-                        event.preventDefault();
-                        onOpen(ticket.reference);
-                      } else if (matchesShortcut(event, "flow-move")) {
-                        event.preventDefault();
-                        const direction = [
-                          "k",
-                          "ArrowUp",
-                          "ArrowLeft",
-                        ].includes(event.key)
-                          ? -1
-                          : 1;
-                        const next =
-                          ordered[
-                            Math.max(
-                              0,
-                              Math.min(
-                                ordered.length - 1,
-                                ordered.findIndex(
-                                  (item) => item.reference === ticket.reference,
-                                ) + direction,
-                              ),
-                            )
-                          ];
-                        if (next) {
-                          setSelected(next.reference);
-                          cards.current.get(next.reference)?.focus();
-                        }
+                  <Tooltip
+                    content={`${ticket.reference}: ${ticket.title}. ${flow.reason(ticket)}. Enter to open.`}
+                    shortcut={shortcutLabel("flow-open")}
+                  >
+                    <GraphNodeCard
+                      variant="flow"
+                      aria-pressed={selected === ticket.reference}
+                      ref={(node) => {
+                        if (node) cards.current.set(ticket.reference, node);
+                        else cards.current.delete(ticket.reference);
+                      }}
+                      reference={ticket.reference}
+                      title={ticket.title}
+                      icon={<StatusIcon status={ticket.status} decorative />}
+                      {...(ticket.status !== "Todo" && { meta: ticket.status })}
+                      trailing={
+                        <AvailabilityMark availability={ticket.availability} />
                       }
-                    }}
-                  />
-                </Tooltip>
+                      aria-description={flow.reason(ticket)}
+                      reason={flow.reason(ticket)}
+                      selected={selected === ticket.reference}
+                      onClick={() => setSelected(ticket.reference)}
+                      onKeyDown={(event) => {
+                        if (event.metaKey || event.ctrlKey || event.altKey)
+                          return;
+                        if (
+                          matchesShortcut(event, "flow-full-graph") &&
+                          openGraph
+                        ) {
+                          event.preventDefault();
+                          openGraph(id, { workspacePlan: id });
+                        } else if (matchesShortcut(event, "flow-open")) {
+                          event.preventDefault();
+                          onOpen(ticket.reference);
+                        } else if (matchesShortcut(event, "flow-move")) {
+                          event.preventDefault();
+                          const direction = [
+                            "k",
+                            "ArrowUp",
+                            "ArrowLeft",
+                          ].includes(event.key)
+                            ? -1
+                            : 1;
+                          const next =
+                            ordered[
+                              Math.max(
+                                0,
+                                Math.min(
+                                  ordered.length - 1,
+                                  ordered.findIndex(
+                                    (item) =>
+                                      item.reference === ticket.reference,
+                                  ) + direction,
+                                ),
+                              )
+                            ];
+                          if (next) {
+                            setSelected(next.reference);
+                            cards.current.get(next.reference)?.focus();
+                          }
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                </Appear>
               ))}
             </GraphFlowLane>
           ))}
