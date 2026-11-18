@@ -4696,9 +4696,11 @@ dependencies = [
 name = "ticketd-automation-runner"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "tempfile",
  "ticketd-chat-host",
  "ticketd-core",
+ "ticketd-diagnostics",
  "tokio",
  "tracing",
 ]

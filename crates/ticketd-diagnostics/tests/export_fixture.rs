@@ -27,7 +27,7 @@ fn nothing_planted_in_a_field_the_export_does_not_allow_survives() {
         // Events as the desktop, the chat host and the Automation runner emit them today.
         tracing::warn!(target: "ticketd_desktop_lib", error_kind = "offline", error = SECRET, "periodic source refresh could not run");
         tracing::warn!(target: "ticketd_desktop_lib::chats", action = "send", error_kind = "chat_failed", error = SECRET, "a Chat action could not be done");
-        tracing::warn!(target: "ticketd_automation_runner", automation_run_id = "run-1", "Automation run ended");
+        tracing::error!(target: "ticketd_automation_runner", automation_run_id = "run-1", "Automation run abandoned");
         tracing::warn!(target: "ticketd_automation_runner", automation_run_id = "run-1", error_kind = "io", error = SECRET, "Automation run could not be ended");
         tracing::warn!(target: "ticketd_automation_runner", chat_id = "chat-1", "the agent in a Chat may still be running");
         tracing::info!(target: "ticketd_desktop_lib", version = "0.1.0", "ticketd started");
@@ -73,7 +73,7 @@ fn nothing_planted_in_a_field_the_export_does_not_allow_survives() {
     // The lines themselves were kept: what is left out is the fields, not the events.
     for kept in [
         "periodic source refresh could not run",
-        "Automation run ended",
+        "Automation run abandoned",
         "sync pass failed",
         "uncaught WebView error",
         "\"chat_id\":\"chat-1\"",

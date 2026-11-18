@@ -233,9 +233,10 @@ impl Runner {
         let ended = (self.inner.open_workspace)()
             .and_then(|mut workspace| workspace.fail_automation_run(run_id, reason));
         match ended {
-            // The reason is words for the person and can carry a Harness's text, so only
-            // the run is logged.
-            Ok(true) => tracing::warn!(automation_run_id = run_id, "Automation run ended"),
+            // The run stopped before it finished, which is work that stopped. The reason is
+            // words for the person and can carry a Harness's text, so only the run is
+            // logged.
+            Ok(true) => tracing::error!(automation_run_id = run_id, "Automation run abandoned"),
             Ok(false) => {}
             // The next pass finds it Running with nothing behind it and ends it.
             Err(error) => tracing::warn!(
