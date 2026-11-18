@@ -245,7 +245,11 @@ export function TicketList({
   const tokens = rowTokens();
   return (
     <>
-      <ul className="ticket-rows">
+      {/* Once the last rows are leaving, the list's own padding closes with them. */}
+      <ul
+        className="ticket-rows"
+        data-empty={entries.length === 0 || undefined}
+      >
         <Presence initial={mounted.cascading.size > 0}>
           {entries.map((entry, position) => {
             const key = keys[position]!;

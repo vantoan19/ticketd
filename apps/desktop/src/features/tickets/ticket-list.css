@@ -7,6 +7,12 @@
 .ticket-rows {
   margin: 0;
   padding: 4px 0 64px;
+  transition: padding var(--spring-smooth-t) var(--spring-smooth);
+}
+/* The rows of a list that just emptied are closing; its own 68px of padding
+   closes with them, so the empty state does not snap up when the list goes. */
+.ticket-rows[data-empty] {
+  padding-block: 0;
 }
 .ticket-rows li {
   display: flex;

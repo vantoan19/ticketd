@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import type { Ticket } from "@/lib/api/client";
 import { TestReads } from "@/lib/workspace-reads/testing";
+import { frames } from "@/test/motion-clock";
 import { motionTestbed } from "@/test/motion-testbed";
 import { TicketListPane } from "./TicketListPane";
 import { useBulkEdit } from "./useBulkEdit";
@@ -199,15 +200,37 @@ test("the scrolling list is a layoutScroll host, so rows glide from where they w
 const chipRow = () =>
   document.querySelector<HTMLElement>('.ticket-list > [data-slot="expand"]');
 
-test("the filter chip row is closed with no filter, and opens when one applies", () => {
+test("the filter chip row is closed with no filter, and opens when one applies", async () => {
   const { rerender } = render(
     <Pane loading={false} layout="list" tickets={rows} />,
   );
   expect(chipRow()?.getAttribute("data-open")).toBe("false");
   expect(screen.queryByLabelText("Active filters")).toBeNull();
   rerender(<Pane loading={false} layout="list" tickets={rows} tags="api" />);
-  expect(chipRow()?.getAttribute("data-open")).toBe("true");
   expect(screen.getByLabelText("Active filters").textContent).toContain("api");
+  await frames();
+  expect(chipRow()?.getAttribute("data-open")).toBe("true");
+});
+
+// Applying a filter re-renders the whole list in the same task. A transition
+// starts on the clock of the frame it was first drawn in, and that frame is
+// late by however long the task took, so a row that opens in the same commit
+// is already most of the way open when first seen (a 44px jump). The row
+// mounts closed and opens a frame after the list has drawn.
+test("the filter chip row mounts closed with its chips, and opens a frame later", async () => {
+  const { rerender } = render(
+    <Pane loading={false} layout="list" tickets={rows} />,
+  );
+  rerender(<Pane loading={false} layout="list" tickets={rows} tags="api" />);
+  expect(chipRow()?.getAttribute("data-open")).toBe("false");
+  expect(chipRow()?.querySelector(".filter-chips")).not.toBeNull();
+  await frames();
+  expect(chipRow()?.getAttribute("data-open")).toBe("true");
+});
+
+test("a pane that mounts with a filter already on shows the chip row open", () => {
+  render(<Pane loading={false} layout="list" tickets={rows} tags="api" />);
+  expect(chipRow()?.getAttribute("data-open")).toBe("true");
 });
 
 test("clearing the last filter closes the row while it still shows what it had, then removes it", () => {
