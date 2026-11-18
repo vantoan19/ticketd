@@ -1119,7 +1119,29 @@ fn describe(command: clap::Command, parents: &[String]) -> clap::Command {
         .mut_subcommands(move |child| describe(child, &path))
 }
 
-fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
+/// Who ran this command, when a Chat's harness or an Automation run did: the IDs it put in
+/// the environment. Read once at startup; blank values count as missing.
+struct Origin {
+    chat_id: Option<String>,
+    automation_run_id: Option<String>,
+}
+
+impl Origin {
+    fn from_environment() -> Self {
+        let read = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| !id.is_empty())
+        };
+        Self {
+            chat_id: read(ticketd_core::CHAT_ID_VARIABLE),
+            automation_run_id: read(ticketd_core::AUTOMATION_RUN_ID_VARIABLE),
+        }
+    }
+}
+
+fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::error::Error>> {
     use clap::{CommandFactory, FromArgMatches};
     let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
         .unwrap_or_else(|error| error.exit());
@@ -1169,16 +1191,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     };
     tracing::debug!("workspace opened");
     // Run by a Chat's harness: what this command writes is credited to that Chat.
-    if let Some(chat) = std::env::var(ticketd_core::CHAT_ID_VARIABLE)
-        .ok()
-        .filter(|id| !id.trim().is_empty())
-    {
-        workspace.act_for_chat(chat.trim())?;
+    if let Some(chat) = &origin.chat_id {
+        workspace.act_for_chat(chat)?;
     }
     // Run inside an Automation run: what this command writes cannot trigger Automations.
-    if std::env::var(ticketd_core::AUTOMATION_RUN_ID_VARIABLE)
-        .is_ok_and(|run| !run.trim().is_empty())
-    {
+    if origin.automation_run_id.is_some() {
         workspace.act_for_automation()?;
     }
     let text = match command {
@@ -2067,16 +2084,13 @@ const TOKEN_HINT: &str =
 
 fn main() {
     ticketd_diagnostics::init_cli();
+    let origin = Origin::from_environment();
     let correlation = ticketd_diagnostics::cli_span(
-        std::env::var(ticketd_core::CHAT_ID_VARIABLE)
-            .ok()
-            .as_deref(),
-        std::env::var(ticketd_core::AUTOMATION_RUN_ID_VARIABLE)
-            .ok()
-            .as_deref(),
+        origin.chat_id.as_deref(),
+        origin.automation_run_id.as_deref(),
     );
     let _correlation = correlation.enter();
-    if let Err(error) = run(&mut std::io::stdout().lock()) {
+    if let Err(error) = run(&mut std::io::stdout().lock(), &origin) {
         // The `error:` line below is the command's answer to the person or agent that ran
         // it. This is the diagnostic record of the same failure, for `TICKETD_LOG=debug`.
         tracing::debug!(
