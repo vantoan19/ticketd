@@ -463,11 +463,11 @@ export function AutomationsView({
       role="group"
       aria-label="Start from an example"
     >
-      <div {...enter(1)}>
+      <div {...enter(2)}>
         <p className="auto-starters-label">Start from an example</p>
       </div>
       {EXAMPLES.map(({ example, icon: Icon, title, sub }, index) => (
-        <div key={example} {...enter(index + 2)}>
+        <div key={example} {...enter(index + 3)}>
           <button
             type="button"
             className="auto-starter"
@@ -488,74 +488,76 @@ export function AutomationsView({
       data-empty={empty || undefined}
       aria-label={TAB_NAMES[tab].list}
     >
-      <PaneHeader
-        title={TAB_NAMES[tab].title}
-        titleControl={(title) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
-                <span className="truncate">{title}</span>
-                <ChevronDown aria-hidden />
-                {needsYou && (
-                  <>
-                    <StatusDot tone="attention" size={6} />
-                    <span className="sr-only">, a run needs you</span>
-                  </>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuRadioGroup
-                value={tab}
-                onValueChange={(next) => {
-                  setTab(next as Tab);
-                  setRun(null);
-                  setExpanded(false);
-                }}
-              >
-                {Object.entries(TAB_NAMES).map(([value, { title }]) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    {title}
-                    {value === "runs" && needsYou && (
-                      <>
-                        <StatusDot tone="attention" size={6} />
-                        <span className="sr-only">, a run needs you</span>
-                      </>
-                    )}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        count={
-          count !== undefined && (
-            <Count>
-              {count}
-              <span className="sr-only">
-                {" "}
-                {TAB_NAMES[tab].title.toLowerCase()}
-              </span>
-            </Count>
-          )
-        }
-        actions={
-          tab === "agents" ? (
-            <IconButton label="New agent" onClick={() => void createAgent()}>
-              <SquarePen aria-hidden />
-            </IconButton>
-          ) : (
-            tab === "automations" && (
-              <IconButton
-                label="New Automation"
-                onClick={() => void createAutomation()}
-              >
+      <div className="auto-list-head" {...enter(0)}>
+        <PaneHeader
+          title={TAB_NAMES[tab].title}
+          titleControl={(title) => (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  <span className="truncate">{title}</span>
+                  <ChevronDown aria-hidden />
+                  {needsYou && (
+                    <>
+                      <StatusDot tone="attention" size={6} />
+                      <span className="sr-only">, a run needs you</span>
+                    </>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={tab}
+                  onValueChange={(next) => {
+                    setTab(next as Tab);
+                    setRun(null);
+                    setExpanded(false);
+                  }}
+                >
+                  {Object.entries(TAB_NAMES).map(([value, { title }]) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      {title}
+                      {value === "runs" && needsYou && (
+                        <>
+                          <StatusDot tone="attention" size={6} />
+                          <span className="sr-only">, a run needs you</span>
+                        </>
+                      )}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          count={
+            count !== undefined && (
+              <>
+                <Count>{count}</Count>
+                <span className="sr-only">
+                  {" "}
+                  {TAB_NAMES[tab].title.toLowerCase()}
+                </span>
+              </>
+            )
+          }
+          actions={
+            tab === "agents" ? (
+              <IconButton label="New agent" onClick={() => void createAgent()}>
                 <SquarePen aria-hidden />
               </IconButton>
+            ) : (
+              tab === "automations" && (
+                <IconButton
+                  label="New Automation"
+                  onClick={() => void createAutomation()}
+                >
+                  <SquarePen aria-hidden />
+                </IconButton>
+              )
             )
-          )
-        }
-      />
+          }
+        />
+      </div>
       {error && (
         <p className="chat-list-empty" role="alert">
           {error}
@@ -564,11 +566,11 @@ export function AutomationsView({
       {empty &&
         (tab === "automations" && narrow ? (
           <div className="auto-empty auto-start">
-            {emptyList}
+            <div {...enter(1)}>{emptyList}</div>
             {examples}
           </div>
         ) : (
-          emptyList
+          <div {...enter(1)}>{emptyList}</div>
         ))}
       {tab === "runs" ? (
         !empty &&
@@ -577,7 +579,11 @@ export function AutomationsView({
         )
       ) : tab === "automations" ? (
         <>
-          <ul className="chat-rows" aria-label="Automations">
+          <ul
+            className="chat-rows"
+            aria-label="Automations"
+            {...(!empty && enter(1))}
+          >
             {automations?.map((automation) => {
               // Runs arrive newest first: the first of its runs is the latest.
               const latest = runs?.find(
@@ -634,7 +640,11 @@ export function AutomationsView({
         </>
       ) : (
         <>
-          <ul className="chat-rows" aria-label="Agents">
+          <ul
+            className="chat-rows"
+            aria-label="Agents"
+            {...(!empty && enter(1))}
+          >
             {agents?.map((agent) => (
               <li key={agent.id}>
                 <button
@@ -734,7 +744,7 @@ export function AutomationsView({
     >
       {empty && tab === "automations" ? (
         <div className="auto-empty auto-start">
-          <div {...enter(0)}>
+          <div {...enter(1)}>
             <EmptyState
               icon={<Workflow />}
               title="Let agents act on tickets for you"

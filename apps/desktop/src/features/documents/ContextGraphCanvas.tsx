@@ -14,7 +14,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { FileText, Layers } from "lucide-react";
-import { graphGlide, GRAPH_ZOOM } from "@/components/ui/graph-zoom";
+import { GRAPH_ZOOM, useViewportGlide } from "@/components/ui/graph-zoom";
 import {
   GraphCanvas,
   AvailabilityMark,
@@ -307,6 +307,9 @@ export function ContextGraphCanvas({
     };
   }, [topology, islands]);
   const instance = useRef<ReactFlowInstance | null>(null);
+  // Every move the app makes on purpose goes through `glide`, which keeps the
+  // controlled `viewport` out of React Flow's way until it ends.
+  const { gliding, glide, stop } = useViewportGlide();
   const settleTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(settleTimer.current), []);
   // Whether the view is still the one a fit chose. A resize refits only then;
@@ -357,14 +360,17 @@ export function ContextGraphCanvas({
       if (centerOn && island && instance.current) {
         // A focused island fills the view.
         autoFitted.current = false;
-        void instance.current.fitBounds(
-          {
-            x: island.x,
-            y: island.y,
-            width: island.width,
-            height: island.height,
-          },
-          { padding: 0.1, ...graphGlide() },
+        const flow = instance.current;
+        glide((glideOptions) =>
+          flow.fitBounds(
+            {
+              x: island.x,
+              y: island.y,
+              width: island.width,
+              height: island.height,
+            },
+            { padding: 0.1, ...glideOptions },
+          ),
         );
         setFitting(false);
         setShown(true);
@@ -372,15 +378,18 @@ export function ContextGraphCanvas({
         // Centre on the card's middle; a focused card is also zoomed in on.
         autoFitted.current = false;
         const zoom = instance.current.getZoom();
-        void instance.current.setCenter(
-          target.x + CARD_WIDTH / 2,
-          target.y + CARD_HEIGHT / 2,
-          {
-            zoom: focusId
-              ? Math.min(MAX_ZOOM, centerZoom(zoom) * FOCUS_ZOOM_IN)
-              : centerZoom(zoom),
-            ...graphGlide(),
-          },
+        const flow = instance.current;
+        glide((glideOptions) =>
+          flow.setCenter(
+            target.x + CARD_WIDTH / 2,
+            target.y + CARD_HEIGHT / 2,
+            {
+              zoom: focusId
+                ? Math.min(MAX_ZOOM, centerZoom(zoom) * FOCUS_ZOOM_IN)
+                : centerZoom(zoom),
+              ...glideOptions,
+            },
+          ),
         );
         setFitting(false);
         setShown(true);
@@ -391,9 +400,14 @@ export function ContextGraphCanvas({
         // The first fit is not animated: it is applied before anything is shown.
         const first = !shownRef.current;
         autoFitted.current = true;
-        const applied = instance.current?.fitView(
-          first ? options : { ...options, ...graphGlide() },
-        );
+        const flow = instance.current;
+        const applied = !flow
+          ? undefined
+          : first
+            ? flow.fitView(options)
+            : glide((glideOptions) =>
+                flow.fitView({ ...options, ...glideOptions }),
+              );
         fitSized.current = sized;
         // Reveal once the viewport the fit chose has been painted into place.
         void Promise.resolve(applied).then(() => {
@@ -415,7 +429,7 @@ export function ContextGraphCanvas({
     };
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit, centerOn, focusId, islands, placed, ready, positions]);
+  }, [fit, centerOn, focusId, islands, placed, ready, positions, glide]);
   const container = useRef<HTMLElement | null>(null);
   // Steps from the zoom the person sees, so repeated presses always move by one
   // step and never restart from a half-finished animation.
@@ -490,8 +504,8 @@ export function ContextGraphCanvas({
       next.y !== viewportRef.current.y ||
       next.zoom !== viewportRef.current.zoom
     )
-      void instance.current.setViewport(next, graphGlide());
-  }, [positions, nodes, fit, centerOn, ready]);
+      void glide((options) => instance.current?.setViewport(next, options));
+  }, [positions, nodes, fit, centerOn, ready, glide]);
   const [size, setSize] = useState({ width: 0, height: 0 });
   // Fit again when the panel is resized, so the map never stays clipped.
   useEffect(() => {
@@ -688,10 +702,12 @@ export function ContextGraphCanvas({
   );
   const fitAll = () => {
     autoFitted.current = true;
-    void instance.current?.fitView({
-      ...fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-      ...graphGlide(),
-    });
+    void glide((options) =>
+      instance.current?.fitView({
+        ...fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+        ...options,
+      }),
+    );
     onShowAll?.();
   };
   return (
@@ -742,12 +758,16 @@ export function ContextGraphCanvas({
           instance.current = value;
           setReady(true);
         }}
-        viewport={viewport}
+        // Not while the view glides: see useViewportGlide.
+        {...(!gliding && { viewport })}
         onViewportChange={onViewport}
         onMoveStart={(event) => {
           // Only a pointer or wheel move is the person's own: Fit and the
           // controlled viewport syncing back also start moves, with no DOM event.
-          if (isUserMove(event)) autoFitted.current = false;
+          if (isUserMove(event)) {
+            autoFitted.current = false;
+            stop();
+          }
         }}
         nodesDraggable={false}
         // Each card is a button of its own, so the node wrapper is not a stop.
