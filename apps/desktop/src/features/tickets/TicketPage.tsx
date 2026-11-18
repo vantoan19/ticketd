@@ -335,7 +335,7 @@ export function TicketPage({
     <div
       ref={page}
       className="detail-content"
-      hidden={!active}
+      hidden={!active && !leaving}
       inert={opening || leaving}
       aria-busy={opening}
       data-swap={swap || undefined}

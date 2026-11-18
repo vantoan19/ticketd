@@ -2892,6 +2892,18 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
     opacity var(--dur-enter) var(--ease-out),
     transform var(--spring-glide-t) var(--spring-glide);
 }
+/* Forced colours drop backgrounds and box shadows, and the tick's mask takes its
+   colour from a background: the box would vanish. Like .ui-progress, the box
+   gets an edge and the tick a system colour. */
+@media (forced-colors: active) {
+  .markdown-check,
+  .rich-document li > input[type="checkbox"] {
+    border: 1px solid CanvasText;
+  }
+  .rich-document li > input[type="checkbox"]::after {
+    background: CanvasText;
+  }
+}
 /* An attachment picture in the text: up to the column's width; opens the preview. */
 .markdown-image {
   display: inline-block;

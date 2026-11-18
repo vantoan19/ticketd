@@ -89,3 +89,16 @@ test("the editor's box does not animate on mount", () => {
   ])
     expect(rule(selector)).not.toContain("animation");
 });
+
+// Forced colours drop backgrounds and box shadows, which are all the boxes and
+// the editor's mask tick are drawn with: each needs an edge and a system colour.
+test("both checklist boxes keep an edge and a visible tick under forced colours", () => {
+  const forced = styles.slice(
+    styles.indexOf("@media (forced-colors: active)", styles.indexOf(box)),
+  );
+  const block = forced.slice(0, forced.indexOf("\n}\n"));
+  expect(block).toContain(".markdown-check,");
+  expect(block).toContain(box + " {");
+  expect(block).toMatch(/border:\s*1px solid CanvasText/);
+  expect(block).toMatch(/::after\s*\{\s*background:\s*CanvasText/);
+});

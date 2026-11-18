@@ -147,7 +147,7 @@ export function TicketDetails({
                 onScroll={(event) => {
                   const scroller = event.currentTarget;
                   const title = scroller.querySelector<HTMLElement>(
-                    ".detail-content:not([hidden]) .editor-title, .detail-content:not([hidden]) .detail-title",
+                    ".detail-content:not([hidden], [data-leaving]) .editor-title, .detail-content:not([hidden], [data-leaving]) .detail-title",
                   );
                   const titleBottom = title
                     ? title.getBoundingClientRect().bottom -
