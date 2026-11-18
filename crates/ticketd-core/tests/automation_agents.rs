@@ -30,26 +30,24 @@ fn triage() -> AutomationAgentSettings {
 /// keep it; a list with commands, and commands switched off, never gain it.
 #[test]
 fn agents_saved_with_an_empty_command_list_keep_any_command_after_migrating() {
-    let (dir, mut workspace) = workspace();
-    let mut ids = Vec::new();
-    for (run_commands, commands) in [(true, "[]"), (true, "[\"npm test\"]"), (false, "[]")] {
-        let agent = workspace.create_automation_agent(triage()).unwrap();
-        ids.push((agent.id, run_commands, commands));
-    }
-    drop(workspace);
+    let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("agents.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 80).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    for (id, run_commands, commands) in &ids {
+    let mut ids = Vec::new();
+    for (n, (run_commands, commands)) in [(true, "[]"), (true, "[\"npm test\"]"), (false, "[]")]
+        .into_iter()
+        .enumerate()
+    {
+        let id = format!("00000000-0000-4000-8000-00000000000{n}");
         db.execute(
-            "UPDATE automation_agents SET run_commands = ?2, allowed_commands = ?3 WHERE id = ?1",
+            "INSERT INTO automation_agents (id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes) \
+             VALUES (?1, 'Triage', 'codex', NULL, 'Triage new tickets.', 1, 1, ?2, ?3, 0, 12, 5)",
             rusqlite::params![id, run_commands, commands],
         )
         .unwrap();
+        ids.push((id, run_commands, commands));
     }
-    db.execute_batch(
-        "ALTER TABLE automation_agents DROP COLUMN any_command; PRAGMA user_version = 80;",
-    )
-    .unwrap();
     drop(db);
 
     let workspace = Workspace::open(&path).unwrap();
@@ -227,19 +225,33 @@ fn a_deleted_agent_is_gone_from_the_list_and_cannot_be_read_or_changed() {
 fn a_workspace_in_the_previous_format_gains_agent_storage_quietly() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("agents.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Kept").unwrap();
-    let token = workspace.change_token().unwrap();
-    let events = workspace.workspace_event_head().unwrap();
-    drop(workspace);
+    // Format 73 had Workspace events but no Automation agents.
+    ticketd_core::create_workspace_at_format_version(&path, 73).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE automation_agents; PRAGMA user_version = 73;")
+    db.execute(
+        "INSERT INTO tickets (id, title, status, reference) VALUES ('11111111-1111-4111-8111-111111111111', 'Kept', 'Todo', 'T-1')",
+        [],
+    )
+    .unwrap();
+    let token: i64 = db
+        .query_row(
+            "SELECT token FROM workspace_changes WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let events: i64 = db
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'workspace_events'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     drop(db);
 
     let mut workspace = Workspace::open(&path).unwrap();
 
-    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert_eq!(workspace.show_ticket("T-1").unwrap().title, "Kept");
     // Migrating changes nothing a view shows and is not a Workspace event.
     assert_eq!(workspace.change_token().unwrap(), token);
     assert_eq!(workspace.workspace_event_head().unwrap(), events);

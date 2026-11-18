@@ -1,3 +1,6 @@
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use ticketd_core::Workspace;
 
 #[test]
@@ -93,22 +96,13 @@ fn screenshot_capture_cancels_independently_and_replays_completed_bytes() {
 fn upload_configuration_upgrade_and_backup_preserve_existing_snapshots_and_identity() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let source = dir.path().join("existing.txt");
-    std::fs::write(&source, b"preserve").unwrap();
-    let mut workspace = Workspace::open(&path).unwrap();
-    let file = workspace
-        .import_attachment("existing", &source, None)
-        .unwrap();
-    let uri = workspace.attachment_uri(&file.id).unwrap();
-    drop(workspace);
-    let fixture = rusqlite::Connection::open(&path).unwrap();
-    fixture
-        .execute_batch("DROP TABLE attachment_upload_settings; PRAGMA user_version=48;")
-        .unwrap();
-    drop(fixture);
+    // Format 48 had local snapshots but no upload configuration.
+    let id = old_workspace::workspace_with_attachment(&path, 48, "existing.txt", b"preserve");
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.attachment_upload_limit().unwrap(), 104857600);
-    assert_eq!(workspace.attachment_uri(&file.id).unwrap(), uri);
+    let uri = workspace.attachment_uri(&id).unwrap();
+    let file = workspace.resolve_attachment_uri(&uri).unwrap();
+    assert_eq!(file.id, id);
     workspace.set_attachment_upload_limit(17).unwrap();
     let backup = dir.path().join("backup.sqlite3");
     workspace.backup(&backup).unwrap();

@@ -321,22 +321,48 @@ fn a_failed_run_without_a_ticket_needs_you_but_has_no_ticket_to_put_it_in_the_in
 fn the_previous_format_gains_schedule_state_and_keeps_what_is_on() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let automation = automation(&mut workspace, every(1));
-    workspace
-        .set_automation_enabled(&automation.id, true)
-        .unwrap();
-    drop(workspace);
+    // Format 79 kept no time a schedule counts from.
+    ticketd_core::create_workspace_at_format_version(&path, 79).unwrap();
+    let (agent, automation) = (
+        "00000000-0000-4000-8000-0000000000a1",
+        "00000000-0000-4000-8000-0000000000a2",
+    );
+    let stored = serde_json::json!({
+        "schema_version": 1,
+        "trigger": every(1),
+        "conditions": [],
+        "steps": [Step {
+            id: "summarise".into(),
+            action: StepAction::RunAgent {
+                agent_id: Some(agent.into()),
+                execution_folder: Some(std::env::temp_dir().to_string_lossy().into_owned()),
+                on_failure: None,
+            },
+        }],
+    });
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "ALTER TABLE automation_device_state DROP COLUMN schedule_from; PRAGMA user_version = 79;",
+    db.execute(
+        "INSERT INTO automation_agents (id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes) \
+         VALUES (?1, 'Agent', 'claude-code', NULL, '', 1, 0, 0, '[]', 0, 40, 20)",
+        [agent],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO automations (id, name, definition) VALUES (?1, 'Weekly summary', ?2)",
+        rusqlite::params![automation, stored.to_string()],
+    )
+    .unwrap();
+    // Switched on.
+    db.execute(
+        "INSERT INTO automation_device_state (automation_id, cursor) VALUES (?1, 0)",
+        [automation],
     )
     .unwrap();
     drop(db);
 
     let mut workspace = Workspace::open(&path).unwrap();
 
-    assert!(workspace.automation(&automation.id).unwrap().enabled);
+    assert!(workspace.automation(automation).unwrap().enabled);
     assert_eq!(fired(&mut workspace, SUNDAY_NOON), 0);
     assert_eq!(fired(&mut workspace, "2026-11-15T13:00:00"), 1);
 }

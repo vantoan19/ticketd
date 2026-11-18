@@ -837,34 +837,22 @@ fn the_upkeep_removes_finished_runs_older_than_90_days_with_their_chats() {
 fn the_previous_format_gains_run_storage_without_losing_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Kept").unwrap();
-    let chat = workspace
-        .create_chat(
-            None,
-            NewChat {
-                title: Some("Mine".into()),
-                harness: "codex".into(),
-                execution_folder: "/work/app".into(),
-                folder_managed: false,
-                links: Vec::new(),
-            },
-        )
-        .unwrap();
-    drop(workspace);
+    // Format 76 had Automations but no runs, and Chats that no run owned.
+    ticketd_core::create_workspace_at_format_version(&path, 76).unwrap();
+    let chat = "22222222-2222-4222-8222-222222222222";
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "DROP TABLE automation_run_steps; DROP TABLE automation_runs;
-         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 76;",
-    )
+    db.execute_batch(&format!(
+        "INSERT INTO tickets (id, title, status, reference) VALUES ('11111111-1111-4111-8111-111111111111', 'Kept', 'Todo', 'T-1');
+         INSERT INTO chats (id, title, harness, execution_folder) VALUES ('{chat}', 'Mine', 'codex', '/work/app');"
+    ))
     .unwrap();
     drop(db);
 
     let mut workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert_eq!(workspace.show_ticket("T-1").unwrap().title, "Kept");
     assert_eq!(
         workspace.list_chats(ChatListFilter::Active).unwrap()[0].id,
-        chat.id
+        chat
     );
     triage(&mut workspace);
     assert_eq!(started(&mut workspace).status, AutomationRunStatus::Running);
@@ -1312,20 +1300,66 @@ fn a_ticket_lists_the_runs_that_acted_on_it_newest_first() {
 fn the_previous_format_keeps_its_runs_and_the_ones_needing_attention_still_need_you() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    triage(&mut workspace);
-    let (run, _chat) = needing_attention(&mut workspace);
-    drop(workspace);
+    // Format 78 had runs but did not record whether the person answered one.
+    ticketd_core::create_workspace_at_format_version(&path, 78).unwrap();
+    let (ticket, agent, automation, run) = (
+        "11111111-1111-4111-8111-111111111111",
+        "00000000-0000-4000-8000-0000000000a1",
+        "00000000-0000-4000-8000-0000000000a2",
+        "00000000-0000-4000-8000-0000000000a3",
+    );
+    let definition = AutomationDefinition {
+        name: "Triage".into(),
+        trigger: Some(Trigger::TagAdded { tag: TAG.into() }),
+        conditions: Vec::new(),
+        steps: vec![run_agent("triage", agent, None)],
+    };
+    let stored = serde_json::json!({
+        "schema_version": 1,
+        "trigger": definition.trigger,
+        "conditions": definition.conditions,
+        "steps": definition.steps,
+    });
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 78;",
+    db.execute(
+        "INSERT INTO tickets (id, title, status, reference) VALUES (?1, 'Fix login', 'Todo', 'T-1')",
+        [ticket],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO automation_agents (id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes) \
+         VALUES (?1, 'Agent', 'claude-code', NULL, '', 1, 0, 0, '[]', 0, 40, 20)",
+        [agent],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO automations (id, name, definition) VALUES (?1, 'Triage', ?2)",
+        rusqlite::params![automation, stored.to_string()],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO automation_device_state (automation_id, cursor) VALUES (?1, 0)",
+        [automation],
+    )
+    .unwrap();
+    // A run whose agent step failed with no failure path.
+    db.execute(
+        "INSERT INTO automation_runs (id, automation_id, event_id, event, ticket_id, definition, status, reason, started_at, ended_at) \
+         VALUES (?1, ?2, 0, 'null', ?3, ?4, 'needs_attention', ?5, '2026-11-01T10:00:00.000Z', '2026-11-01T10:05:00.000Z')",
+        rusqlite::params![run, automation, ticket, serde_json::to_string(&definition).unwrap(), LIMIT],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO automation_run_steps (run_id, position, step_id, status, reason, ended_at) \
+         VALUES (?1, 0, 'triage', 'failed', ?2, '2026-11-01T10:05:00.000Z')",
+        rusqlite::params![run, LIMIT],
     )
     .unwrap();
     drop(db);
 
     let workspace = Workspace::open(&path).unwrap();
 
-    assert!(workspace.automation_run(&run.id).unwrap().needs_you);
+    assert!(workspace.automation_run(run).unwrap().needs_you);
     assert_eq!(needing_you(&workspace), 1);
 }
 
