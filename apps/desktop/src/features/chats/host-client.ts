@@ -175,6 +175,11 @@ export function createHostChatClient(
     listener?.({ seq: feed.last + 1, kind: "resync" });
   }
   function receive(id: string, feed: Feed, message: unknown) {
+    // An update's changes come as one array, so the view draws once for them.
+    if (Array.isArray(message)) {
+      for (const each of message) receive(id, feed, each);
+      return;
+    }
     if (feed.closed) return;
     const change = chatChangeSchema.safeParse(message);
     // An entry the view cannot read is a gap; never guess at what it said.

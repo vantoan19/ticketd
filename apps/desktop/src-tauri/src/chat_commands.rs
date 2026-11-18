@@ -429,7 +429,8 @@ pub async fn chat_create(bridge: State<'_, ChatBridge>, input: NewChatInput) -> 
 }
 
 /// Attaches a view. Changes after the snapshot arrive on `changes` in order, numbered
-/// one apart from the snapshot's cursor; a `resync` entry is the last one.
+/// one apart from the snapshot's cursor, each update's as one array; a `resync` entry is
+/// the last one.
 #[tauri::command]
 pub async fn chat_open(
     bridge: State<'_, ChatBridge>,
