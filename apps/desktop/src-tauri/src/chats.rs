@@ -82,13 +82,14 @@ impl From<HostError> for ChatFailure {
 type Outcome<T> = Result<T, ChatFailure>;
 
 /// Work nothing waits on, such as marking a Chat seen while a view opens: a failure
-/// does not stop the caller, and it is written to the log rather than lost.
-pub fn log_failure<T>(what: &str, result: Outcome<T>) {
+/// does not stop the caller, and it is written to the log rather than lost. The failure's
+/// text is left out: it can carry the Harness's own words.
+pub fn log_failure<T>(chat_id: Option<&str>, what: &str, result: Outcome<T>) {
     if let Err(failure) = result {
         tracing::warn!(
+            chat_id,
             action = what,
             error_kind = failure.code,
-            error = %failure.message,
             "a Chat action could not be done"
         );
     }
@@ -1119,8 +1120,16 @@ impl Chats {
         self.focused.store(focused, Ordering::SeqCst);
         if focused {
             for chat_id in self.in_view() {
-                log_failure("mark the Chat seen", self.mark_seen(&chat_id).await);
-                log_failure("read the Chat again", self.reread(&chat_id).await);
+                log_failure(
+                    Some(&chat_id),
+                    "mark the Chat seen",
+                    self.mark_seen(&chat_id).await,
+                );
+                log_failure(
+                    Some(&chat_id),
+                    "read the Chat again",
+                    self.reread(&chat_id).await,
+                );
             }
         }
     }
@@ -1512,7 +1521,11 @@ impl Chats {
     pub async fn open(self: &Arc<Self>, chat_id: &str, sink: Sink) -> Outcome<Opened> {
         let host = self.host()?;
         // Opening a Chat any way marks it seen. A view keeps working if that fails.
-        log_failure("mark the Chat seen", self.mark_seen(chat_id).await);
+        log_failure(
+            Some(chat_id),
+            "mark the Chat seen",
+            self.mark_seen(chat_id).await,
+        );
         let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
         let tracker = Tracker::from_items(&attached.snapshot.items);
@@ -1722,7 +1735,11 @@ impl Chats {
             };
             // A turn that ends while its Chat is in view is seen.
             if ended && self.focused.load(Ordering::SeqCst) {
-                log_failure("mark the Chat seen", self.mark_seen(&view.chat.id).await);
+                log_failure(
+                    Some(&view.chat.id),
+                    "mark the Chat seen",
+                    self.mark_seen(&view.chat.id).await,
+                );
             }
             // At most one workspace use per update, and only when something needs it.
             let mut lent = None;

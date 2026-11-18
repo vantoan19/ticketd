@@ -64,8 +64,7 @@ fn is_identifier(name: &str) -> bool {
 /// `file:line:column`, where the file is a base name and the position is numeric.
 fn is_frame(frame: &str) -> bool {
     let mut parts = frame.rsplitn(3, ':');
-    let (Some(column), Some(line), Some(file)) = (parts.next(), parts.next(), parts.next())
-    else {
+    let (Some(column), Some(line), Some(file)) = (parts.next(), parts.next(), parts.next()) else {
         return false;
     };
     let number = |text: &str| {
