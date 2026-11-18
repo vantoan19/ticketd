@@ -70,9 +70,9 @@ export function WorkspaceBand({
   const current = useWorkspaceState();
   // While the band fades out the condition has already cleared; keep saying
   // what it said until the band is gone.
-  const last = useRef(current);
-  if (current) last.current = current;
-  const state = current ?? last.current;
+  const [last, setLast] = useState(current);
+  if (current && current !== last) setLast(current);
+  const state = current ?? last;
   if (!state) return null;
   return (
     <div role="status" data-slot="workspace-band" className="workspace-band">
