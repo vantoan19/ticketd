@@ -234,6 +234,6 @@ test("a lane's panel arrives with its heading, on the heading's step, not before
     /@keyframes plan-flow-lane-in\s*\{\s*from\s*\{\s*background-color:\s*transparent/,
   );
   expect(css).toMatch(
-    /\.plan-flow-lanes > \.ui-graph-flow-lane\s*\{\s*animation:\s*plan-flow-lane-in var\(--dur-enter\) var\(--ease-out\) backwards;\s*animation-delay:\s*calc\(var\(--stagger\) \* min\(var\(--enter-step, 0\), 7\)\)/,
+    /\.plan-flow-lanes > \.ui-graph-flow-lane\s*\{\s*animation:\s*plan-flow-lane-in var\(--dur-enter\) var\(--ease-out\) backwards;\s*animation-delay:\s*calc\(\s*var\(--stagger\) \* min\(var\(--enter-step, 0\), var\(--stagger-steps\)\)\s*\)/,
   );
 });
