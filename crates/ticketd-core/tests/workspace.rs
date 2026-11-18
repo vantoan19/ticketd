@@ -4977,3 +4977,32 @@ fn search_finds_partial_references_beyond_the_visible_page() {
         .unwrap();
     assert_eq!(exact[0].reference, first.reference);
 }
+
+#[test]
+fn the_next_reminder_is_due_when_its_time_comes_and_none_after_delivery() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert_eq!(workspace.next_reminder_due_in().unwrap(), None);
+    let later = workspace.create_ticket("Later").unwrap();
+    let in_an_hour = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    workspace
+        .set_reminder(&later.reference, Some(&in_an_hour))
+        .unwrap();
+    let wait = workspace.next_reminder_due_in().unwrap().unwrap();
+    assert!(
+        wait > std::time::Duration::from_secs(3590) && wait <= std::time::Duration::from_secs(3600),
+        "{wait:?}"
+    );
+    let overdue = workspace.create_ticket("Overdue").unwrap();
+    workspace
+        .set_reminder(&overdue.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    assert_eq!(
+        workspace.next_reminder_due_in().unwrap(),
+        Some(std::time::Duration::ZERO)
+    );
+    workspace.deliver_due_reminders().unwrap();
+    assert!(
+        workspace.next_reminder_due_in().unwrap().unwrap() > std::time::Duration::from_secs(3590)
+    );
+}

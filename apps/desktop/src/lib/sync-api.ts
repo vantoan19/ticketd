@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { z } from "zod";
 import { invoke as bridge, structured } from "@/lib/api/bridge-failure";
 
@@ -161,7 +162,7 @@ const invoke = (...call: Parameters<typeof bridge>) =>
 const status = async (call: Promise<unknown>) => statusSchema.parse(await call);
 
 export const syncApi = {
-  /** `sync_status`: read only and cheap; the app polls it every two seconds. */
+  /** `sync_status`: read only and cheap; read once, then followed by `onSyncStatus`. */
   status: () => status(invoke("sync_status")),
 
   /**
@@ -234,3 +235,18 @@ export const syncApi = {
     return exitReportSchema.parse(await invoke("sync_flush_on_exit"));
   },
 };
+
+/**
+ * Calls `handler` with the sync status each time the desktop sees it change
+ * (`sync-status`), so nothing polls it. Resolves to a function that stops
+ * listening. Outside the desktop shell nothing is sent.
+ */
+export async function onSyncStatus(
+  handler: (status: SyncStatus) => void,
+): Promise<() => void> {
+  if (!("__TAURI_INTERNALS__" in window)) return () => {};
+  return listen<unknown>("sync-status", (event) => {
+    const status = statusSchema.safeParse(event.payload);
+    if (status.success) handler(status.data);
+  });
+}

@@ -316,6 +316,8 @@ pub async fn chat_set_enabled(
         // Starting the host here lets its change signal be watched from now on.
         bridge.chats.start()?;
         watch_overview(&app);
+        // The Automation runner waits for a host.
+        crate::wake::CHANGED.notify();
     }
     let _ = app.emit(OVERVIEW_EVENT, bridge.chats.overview()?);
     if unconfirmed.is_empty() {
@@ -346,7 +348,7 @@ pub async fn chat_mark_read(bridge: State<'_, ChatBridge>, chat_id: String) -> O
 }
 
 /// The person read the transcript through `item_id`; the New marker goes after it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_read_through(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
@@ -415,7 +417,7 @@ pub async fn chat_folder_use(bridge: State<'_, ChatBridge>, path: String) -> Out
 }
 
 /// The Project whose checkout holds a folder New Chat may use.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_folder_project(
     bridge: State<'_, ChatBridge>,
     path: String,
@@ -519,7 +521,7 @@ pub async fn chat_change_setting(
 /// system's default app for its type, as attachments open. A program or script is
 /// shown in the file manager instead of being run. Fails as `gone` when the
 /// file is no longer there.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_open_file(
     app: AppHandle,
     bridge: State<'_, ChatBridge>,
@@ -539,7 +541,7 @@ pub fn chat_open_file(
 }
 
 /// Opens the Chat's own folder in the file manager (Finder, File Explorer, Files).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_open_folder(
     app: AppHandle,
     bridge: State<'_, ChatBridge>,
@@ -700,6 +702,8 @@ pub async fn restore_workspace(
                 .map_err(|error| error.to_string())
         })
         .await;
+    // Everything the background loops follow was replaced.
+    crate::wake::CHANGED.notify();
     if let Ok(overview) = chats.overview() {
         let _ = app.emit(OVERVIEW_EVENT, overview);
     }

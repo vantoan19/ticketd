@@ -163,6 +163,21 @@ impl Scheduler {
             .map(Some)
     }
 
+    /// How long the loop may sleep before a tick has something to do: the next
+    /// poll, upload or upkeep, and never more than [`crate::wake::IDLE`]. A local
+    /// change or a request wakes it sooner.
+    pub fn until_due(&self, now: Duration) -> Duration {
+        let mut next = lock(&self.upkeep_at).0.min(now + crate::wake::IDLE);
+        let watch = lock(&self.watch);
+        if watch.connected {
+            let runs = watch
+                .upload_at
+                .map_or(watch.poll_at, |at| at.min(watch.poll_at));
+            next = next.min(runs.max(watch.not_before));
+        }
+        next.saturating_sub(now)
+    }
+
     /// Runs the upkeep when it is due. A failure is tried again after
     /// [`UPKEEP_RETRY`] and never holds up sync.
     fn keep_up(&self, workspace: &mut Workspace, now: Duration) {
@@ -260,8 +275,9 @@ impl Scheduler {
         Ok((status.pending_uploads, status.pending_total))
     }
 
-    /// Starts sync for as long as the app runs: `at_launch` once, then asks
-    /// every second whether a run is due.
+    /// Starts sync for as long as the app runs: `at_launch` once, then a tick
+    /// whenever one may be due, or something it follows changed (see
+    /// [`crate::wake`]).
     pub fn start(self: Arc<Self>, started: Instant, at_launch: impl FnOnce() + Send + 'static) {
         let spawned = std::thread::Builder::new()
             .name("workspace-sync".into())
@@ -269,6 +285,7 @@ impl Scheduler {
                 at_launch();
                 // Said once on stderr, and again only if it changes or comes back.
                 let mut reported: Option<String> = None;
+                let mut seen = 0;
                 loop {
                     match self.tick(started.elapsed()) {
                         // Nothing was due: what was last said still stands.
@@ -281,9 +298,13 @@ impl Scheduler {
                                 eprintln!("Workspace sync could not run: {message}");
                             }
                             reported = message;
+                            // A run changed the status the interface is shown.
+                            if tick.is_ok() {
+                                crate::wake::CHANGED.notify();
+                            }
                         }
                     }
-                    std::thread::sleep(Duration::from_secs(1));
+                    crate::wake::CHANGED.wait(&mut seen, self.until_due(started.elapsed()));
                 }
             });
         if let Err(error) = spawned {
@@ -505,6 +526,24 @@ mod tests {
         let status = desk.scheduler.tick(6 * SECOND).unwrap().unwrap();
         assert_eq!(status.pending_uploads, []);
         assert_eq!(desk.scheduler.tick(7 * SECOND).unwrap(), None);
+    }
+
+    /// The loop sleeps until something is due, and no longer than the idle
+    /// fallback: a Workspace that does not sync is looked at twice a minute.
+    #[test]
+    fn waits_until_the_next_run_is_due_and_at_most_thirty_seconds() {
+        let desk = desk();
+        desk.bind(None);
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+        assert_eq!(desk.scheduler.until_due(Duration::ZERO), 30 * SECOND);
+
+        desk.bind(Some(desk.binding(MINUTE)));
+        assert!(desk.scheduler.tick(SECOND).unwrap().is_some());
+        assert_eq!(desk.scheduler.until_due(45 * SECOND), 16 * SECOND);
+
+        desk.workspace().create_ticket("Second").unwrap();
+        assert_eq!(desk.scheduler.tick(2 * SECOND).unwrap(), None);
+        assert_eq!(desk.scheduler.until_due(2 * SECOND), 3 * SECOND);
     }
 
     #[test]

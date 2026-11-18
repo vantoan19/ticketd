@@ -16,7 +16,7 @@ use std::time::Duration;
 use ticketd_chat_host::{ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
     AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
-    RunAction, StepOutcome,
+    RunAction, StepOutcome, Workspace,
 };
 
 use first_message::first_message;
@@ -126,25 +126,37 @@ impl Runner {
     /// missed while ticketd was not running. Started runs execute on tasks of their
     /// own, so this returns at once; it must be called inside a Tokio runtime.
     ///
+    /// A pass is one use of the Workspace. It returns whether anything needs the
+    /// runner (an Automation is on, or a run is Queued or Running); when nothing
+    /// does, the pass ends after that one read and the host may wait longer.
+    ///
     /// Every part is tried, so one that fails does not hold up the others; the
     /// first failure is returned for the host to report.
-    pub fn tick(&self) -> Result<(), Error> {
+    pub fn tick(&self) -> Result<bool, Error> {
         // Chat off or a restore under way: nothing is matched, and each cursor holds.
         if (self.inner.host)().is_err() {
-            return Ok(());
+            return Ok(false);
         }
-        let recovered = self.recover();
-        let deleted = self.end_deleted();
-        let queued = self.queue();
-        let started = self.start_queued();
-        recovered.and(deleted).and(queued).and(started)
+        let mut workspace = (self.inner.open_workspace)()?;
+        if !workspace.automations_need_the_runner()? {
+            return Ok(false);
+        }
+        let recovered = self.recover(&mut workspace);
+        let deleted = self.end_deleted(&mut workspace);
+        let queued = queue(&mut workspace);
+        let started = self.start_queued_in(&mut workspace);
+        recovered
+            .and(deleted)
+            .and(queued)
+            .and(started)
+            .map(|()| true)
     }
 
     /// Ends the runs of Automations deleted on another desktop and brought here by
     /// Workspace sync, as deleting one here does: its Queued runs never start, and
     /// the agents of its Running runs are closed.
-    fn end_deleted(&self) -> Result<(), Error> {
-        let chats = (self.inner.open_workspace)()?.end_runs_of_deleted_automations()?;
+    fn end_deleted(&self, workspace: &mut Workspace) -> Result<(), Error> {
+        let chats = workspace.end_runs_of_deleted_automations()?;
         if !chats.is_empty() {
             let runner = self.clone();
             tokio::spawn(async move { runner.interrupt(&chats).await });
@@ -153,25 +165,23 @@ impl Runner {
     }
 
     /// Ends every Running run this runner is not executing as Needs attention.
-    fn recover(&self) -> Result<(), Error> {
+    fn recover(&self, workspace: &mut Workspace) -> Result<(), Error> {
         // Held across the write, so a run `start_queued` is starting is either not
         // Running yet or already listed.
         let going = self.going();
         let ids: Vec<String> = going.iter().cloned().collect();
-        (self.inner.open_workspace)()?.end_running_automation_runs(&ids, ABANDONED)?;
+        workspace.end_running_automation_runs(&ids, ABANDONED)?;
         Ok(())
-    }
-
-    fn queue(&self) -> Result<(), Error> {
-        let mut workspace = (self.inner.open_workspace)()?;
-        let matched = workspace.queue_automation_runs().map(drop);
-        let scheduled = workspace.queue_scheduled_automation_runs(None).map(drop);
-        matched.and(scheduled)
     }
 
     /// Starts queued runs up to the limit, and none while Chat is not served (off,
     /// quitting, restoring): they wait until it is again (#387 M3).
     fn start_queued(&self) -> Result<(), Error> {
+        let mut workspace = (self.inner.open_workspace)()?;
+        self.start_queued_in(&mut workspace)
+    }
+
+    fn start_queued_in(&self, workspace: &mut Workspace) -> Result<(), Error> {
         match (self.inner.host)() {
             Ok(host) if host.serving().is_ok() => {}
             _ => return Ok(()),
@@ -179,7 +189,6 @@ impl Runner {
         let started = {
             let mut going = self.going();
             // Read each time, so a change in Settings counts from the next run.
-            let mut workspace = (self.inner.open_workspace)()?;
             let at_once = workspace.automation_runs_at_once()?;
             let started = workspace.start_automation_runs(at_once)?;
             going.extend(started.iter().map(|run| run.id.clone()));
@@ -362,6 +371,11 @@ impl Runner {
     }
 }
 
+fn queue(workspace: &mut Workspace) -> Result<(), Error> {
+    let matched = workspace.queue_automation_runs().map(drop);
+    let scheduled = workspace.queue_scheduled_automation_runs(None).map(drop);
+    matched.and(scheduled)
+}
 /// `text` trimmed and ending as a sentence: a full stop is added unless it already
 /// ends with one, a question or exclamation mark, or a closing quote after one.
 fn sentence(text: &str) -> String {
