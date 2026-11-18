@@ -61,3 +61,21 @@ it("the check's pop leaves no fill, which would hold the box at full opacity and
   expect(pop?.body).toMatch(/animation:\s*ticket-check-in/);
   expect(pop?.body).not.toMatch(/\b(both|forwards)\b/);
 });
+
+it("the reference column fits the longest reference with a gap before the title, at every width", () => {
+  // The list sets --reference-chars to its longest reference; the Geist Mono
+  // reference reserves that many `ch` and a gap, and the column grows to it
+  // from its 62px floor, the same for every row (#289).
+  const reference = list.find(
+    (rule) => rule.selector === '.ticket-row > [data-slot="reference"]',
+  );
+  expect(reference?.body).toMatch(
+    /min-width:\s*calc\(var\(--reference-chars, 0\) \* 1ch \+ 6px\)/,
+  );
+  const templates = list
+    .filter((rule) => rule.selector === ".ticket-list .ticket-row")
+    .map((rule) => /grid-template-columns:\s*([^;]+)/.exec(rule.body)?.[1]);
+  expect(templates).toHaveLength(4);
+  for (const template of templates)
+    expect(template).toMatch(/^26px minmax\(62px, max-content\) /);
+});

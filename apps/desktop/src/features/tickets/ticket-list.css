@@ -29,7 +29,9 @@
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 26px 62px minmax(0, 1fr) 168px 140px 152px 44px;
+  grid-template-columns:
+    26px minmax(62px, max-content) minmax(0, 1fr)
+    168px 140px 152px 44px;
   align-items: center;
   width: 100%;
   min-width: 0;
@@ -40,7 +42,12 @@
   display: flex;
   align-items: center;
 }
+/* Every row reserves room for the list's longest reference (--reference-chars,
+   set by the list) and a gap, so an eight-character reference such as T-VT1000
+   never touches its title and the titles stay aligned. Up to seven characters
+   this stays under the column's 62px floor (#289). */
 .ticket-row > [data-slot="reference"] {
+  min-width: calc(var(--reference-chars, 0) * 1ch + 6px);
   margin-left: 0;
 }
 .ticket-title-lane {
@@ -189,7 +196,9 @@
 }
 @container (max-width: 999px) {
   .ticket-list .ticket-row {
-    grid-template-columns: 26px 62px minmax(0, 1fr) 168px 152px 44px;
+    grid-template-columns:
+      26px minmax(62px, max-content) minmax(0, 1fr)
+      168px 152px 44px;
   }
   .ticket-row-tags-lane {
     display: none;
@@ -197,7 +206,9 @@
 }
 @container (max-width: 799px) {
   .ticket-list .ticket-row {
-    grid-template-columns: 26px 62px minmax(0, 1fr) 168px 44px;
+    grid-template-columns:
+      26px minmax(62px, max-content) minmax(0, 1fr)
+      168px 44px;
   }
   .ticket-row-context {
     display: none;
@@ -205,7 +216,9 @@
 }
 @container (max-width: 619px) {
   .ticket-list .ticket-row {
-    grid-template-columns: 26px 62px minmax(0, 1fr) 32px 44px;
+    grid-template-columns:
+      26px minmax(62px, max-content) minmax(0, 1fr)
+      32px 44px;
   }
   .ticket-row-state {
     margin-left: 16px;

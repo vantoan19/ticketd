@@ -251,6 +251,15 @@ test("rows end with the core update time, never a progress excerpt or a lone no-
   expect(screen.queryByText("Update unavailable")).toBeNull();
 });
 
+test("the list sizes its reference column to its longest reference", () => {
+  const { container } = renderList([
+    ticket({ id: "1", reference: "T-KQ1" }),
+    ticket({ id: "2", reference: "T-VT1000" }),
+  ]);
+  const rows = container.querySelector<HTMLElement>(".ticket-rows");
+  expect(rows?.style.getPropertyValue("--reference-chars")).toBe("8");
+});
+
 test("a Plan and a project carry different icons", () => {
   const { container } = renderList([
     ticket({ id: "1", reference: "T-KQ1", plan_id: "e1" }),

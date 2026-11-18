@@ -1,5 +1,12 @@
 import { useNow } from "@/lib/use-now";
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { m } from "motion/react";
 import {
   AlarmClock,
@@ -157,6 +164,10 @@ export function TicketList({
   simple?: boolean;
 }) {
   const navigator = selected !== null;
+  // Sizes the reference column to the longest reference in the list (#289).
+  let referenceChars = 0;
+  for (const { reference } of tickets)
+    referenceChars = Math.max(referenceChars, reference.length);
   const attention = useInboxAttention();
   const ticketChats = new Map<string, ChatSummary>();
   for (const chat of attention?.chats ?? []) {
@@ -262,6 +273,7 @@ export function TicketList({
       <ul
         className="ticket-rows"
         data-empty={entries.length === 0 || undefined}
+        style={{ "--reference-chars": referenceChars } as CSSProperties}
       >
         <Presence initial={mounted.cascading.size > 0}>
           {entries.map((entry, position) => {
