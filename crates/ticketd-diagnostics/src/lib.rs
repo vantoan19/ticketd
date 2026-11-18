@@ -9,6 +9,7 @@
 
 mod desktop;
 mod sink;
+mod webview;
 
 use std::path::Path;
 
@@ -19,6 +20,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt};
 
 pub use desktop::{Config, DesktopLogs};
+pub use webview::{WebviewError, record_webview_error};
 
 /// The environment variable that sets the filter, for the CLI and the desktop alike.
 pub const FILTER_VARIABLE: &str = "TICKETD_LOG";

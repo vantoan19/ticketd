@@ -4702,6 +4702,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "ticketd-core",
+ "ticketd-diagnostics",
  "tokio",
  "tracing",
  "uuid",
@@ -4776,6 +4777,7 @@ name = "ticketd-diagnostics"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "serde",
  "serde_json",
  "tempfile",
  "tracing",

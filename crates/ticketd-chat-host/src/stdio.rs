@@ -14,9 +14,11 @@ use tokio::io::{
 };
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
+use tracing::Instrument;
 
-use crate::{CloseOutcome, EventKind};
+use crate::{CloseOutcome, EventKind, Harness};
 
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -90,18 +92,36 @@ where
 pub(crate) struct StderrTail(Arc<Mutex<VecDeque<u8>>>);
 
 impl StderrTail {
-    /// Drains `stderr` to its end, keeping only the tail.
-    pub async fn drain<R: AsyncRead + Unpin>(self, mut stderr: R) {
+    /// Drains `stderr` on its own task, inside the span that is current now (the Chat's),
+    /// so the lines it logs are correlated with the Chat.
+    pub fn spawn_drain<R>(self, stderr: R, harness: Harness) -> JoinHandle<()>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        tokio::spawn(self.drain(stderr, harness).in_current_span())
+    }
+
+    /// Drains `stderr` to its end, keeping only the tail and logging each line at `debug`.
+    pub async fn drain<R: AsyncRead + Unpin>(self, mut stderr: R, harness: Harness) {
+        let harness = match harness {
+            Harness::ClaudeCode => "claude_code",
+            Harness::Codex => "codex",
+        };
+        let mut lines = LogLines::default();
         let mut buffer = [0u8; 4096];
         while let Ok(read) = stderr.read(&mut buffer).await {
             if read == 0 {
                 break;
             }
-            let mut tail = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            tail.extend(&buffer[..read]);
-            let excess = tail.len().saturating_sub(MAX_STDERR_TAIL_BYTES);
-            tail.drain(..excess);
+            {
+                let mut tail = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+                tail.extend(&buffer[..read]);
+                let excess = tail.len().saturating_sub(MAX_STDERR_TAIL_BYTES);
+                tail.drain(..excess);
+            }
+            lines.push(&buffer[..read], harness);
         }
+        lines.finish(harness);
     }
 
     /// The raw tail, kept exactly for the diagnostic detail.
@@ -116,6 +136,40 @@ impl StderrTail {
     /// only the last lines, since earlier ones are rarely about the loss.
     pub fn readable(&self) -> String {
         readable_lines(&self.snapshot())
+    }
+}
+
+/// Splits stderr into lines for the log. A line longer than the tail is cut: the log needs
+/// the gist, and the tail keeps the raw bytes.
+#[derive(Default)]
+struct LogLines(Vec<u8>);
+
+impl LogLines {
+    fn push(&mut self, bytes: &[u8], harness: &str) {
+        for piece in bytes.split_inclusive(|byte| *byte == b'\n') {
+            let room = MAX_STDERR_TAIL_BYTES.saturating_sub(self.0.len());
+            self.0.extend_from_slice(&piece[..piece.len().min(room)]);
+            if piece.ends_with(b"\n") {
+                self.finish(harness);
+            }
+        }
+    }
+
+    fn finish(&mut self, harness: &str) {
+        let line = std::mem::take(&mut self.0);
+        if !tracing::enabled!(target: "ticketd_chat_host::harness_stderr", tracing::Level::DEBUG) {
+            return;
+        }
+        let text = strip_terminal_codes(&String::from_utf8_lossy(&line));
+        let text = text.trim();
+        if !text.is_empty() {
+            tracing::debug!(
+                target: "ticketd_chat_host::harness_stderr",
+                harness,
+                line = %text,
+                "harness stderr"
+            );
+        }
     }
 }
 
@@ -474,6 +528,71 @@ mod tests {
         );
         assert_eq!(variable(Serving::Nothing, "PATH"), None);
         assert_eq!(variable(chat(None), "PATH"), None);
+    }
+
+    #[test]
+    fn harness_stderr_lines_reach_the_log_inside_the_chats_span_and_the_tail_is_unchanged() {
+        let dir = tempfile::tempdir().expect("log folder");
+        let logs = ticketd_diagnostics::DesktopLogs::open(
+            dir.path(),
+            ticketd_diagnostics::Config::default(),
+        );
+        logs.set_debug(true);
+        let stderr =
+            "warning: noisy\n\u{1b}[31mfatal: connection reset\u{1b}[0m\nno newline at the end";
+        let tail = StderrTail::default();
+
+        // A current-thread runtime polls the spawned drain on this thread, so the
+        // handle's subscriber applies to it.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        logs.with_default(|| {
+            runtime.block_on(async {
+                let chat = tracing::info_span!("chat", chat_id = "chat-1");
+                let drain = chat.in_scope(|| {
+                    tail.clone()
+                        .spawn_drain(stderr.as_bytes(), crate::Harness::Codex)
+                });
+                drain.await.expect("drain");
+            });
+        });
+
+        // The tail keeps the raw bytes, as before.
+        assert_eq!(tail.snapshot(), stderr);
+
+        let lines: Vec<serde_json::Value> = std::fs::read_dir(dir.path())
+            .expect("log folder")
+            .flat_map(|entry| {
+                let text = std::fs::read_to_string(entry.expect("entry").path()).expect("file");
+                text.lines()
+                    .map(|line| serde_json::from_str(line).expect("json line"))
+                    .collect::<Vec<serde_json::Value>>()
+            })
+            .collect();
+        let events: Vec<_> = lines
+            .iter()
+            .filter(|line| line["message"] == "harness stderr")
+            .collect();
+        let seen: Vec<_> = events
+            .iter()
+            .map(|event| event["line"].as_str().expect("line"))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                "warning: noisy",
+                "fatal: connection reset",
+                "no newline at the end"
+            ]
+        );
+        for event in events {
+            assert_eq!(event["level"], "DEBUG");
+            assert_eq!(event["harness"], "codex");
+            assert_eq!(event["target"], "ticketd_chat_host::harness_stderr");
+            assert_eq!(event["spans"][0]["name"], "chat");
+            assert_eq!(event["spans"][0]["chat_id"], "chat-1");
+        }
     }
 
     #[test]
