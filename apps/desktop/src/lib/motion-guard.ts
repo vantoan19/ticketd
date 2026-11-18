@@ -13,11 +13,24 @@ const HOLD_MS = 300;
 /** Two clicks closer than this are rapid. */
 const RAPID_MS = 350;
 
-/** What the motion library hands the inspector for each animation it starts. */
-type Started = { animation: Running };
+/**
+ * What the motion library hands the inspector for each animation it starts. It
+ * is the library's own record, so nothing about it is trusted: a record can
+ * lack its animation, and an animation its `state` or `complete`.
+ */
+type Started = { animation?: Running };
 interface Running {
-  state: unknown;
-  complete(): void;
+  state?: unknown;
+  complete?(): void;
+}
+
+/** Whether the animation is in flight; a handle that cannot say is not. */
+function inFlight(one: Running | undefined, states: string[]): boolean {
+  try {
+    return states.includes(one?.state as string);
+  } catch {
+    return false;
+  }
 }
 declare global {
   var __MOTION_INSPECT__: ((record: Started) => void) | undefined;
@@ -33,28 +46,43 @@ class RunningMotion {
   private started = new Set<Running>();
   private sweepAt = 64;
 
-  add({ animation }: Started) {
+  add({ animation }: Started = {}) {
+    if (!animation) return;
     this.started.add(animation);
     if (this.started.size < this.sweepAt) return;
     for (const one of this.started)
-      if (one.state !== "running" && one.state !== "paused")
-        this.started.delete(one);
+      if (!inFlight(one, ["running", "paused"])) this.started.delete(one);
     this.sweepAt = Math.max(64, this.started.size * 2);
   }
 
-  /** Jump the animations still running to their end. */
+  /**
+   * Jump the animations still running to their end. One that cannot be
+   * finished is skipped, and the rest still are.
+   */
   finish() {
-    for (const one of this.started) if (one.state === "running") one.complete();
+    const all = [...this.started];
     this.started.clear();
+    for (const one of all) {
+      if (!inFlight(one, ["running"])) continue;
+      try {
+        one.complete?.();
+      } catch {
+        // Gone already; nothing is left to finish.
+      }
+    }
   }
 }
 
 /** Finish what the browser is running: CSS transitions and animations. */
 function finishBrowserMotion() {
   for (const animation of document.getAnimations?.() ?? []) {
-    // A loop (the skeleton sheen) has no end to finish at.
-    const end = animation.effect?.getComputedTiming().endTime;
-    if (typeof end === "number" && Number.isFinite(end)) animation.finish();
+    try {
+      // A loop (the skeleton sheen) has no end to finish at.
+      const end = animation.effect?.getComputedTiming().endTime;
+      if (typeof end === "number" && Number.isFinite(end)) animation.finish();
+    } catch {
+      // A detached animation cannot finish; the others still do.
+    }
   }
 }
 
@@ -79,12 +107,17 @@ export function installMotionGuard(): () => void {
   const hold = () => {
     const engaging = root.dataset.motion !== "instant";
     setInstant(true);
-    if (engaging) {
-      running.finish();
-      finishBrowserMotion();
-    }
+    // Armed first: whatever finishing does, the window never stays instant.
     clearTimeout(release);
     release = setTimeout(() => setInstant(false), HOLD_MS);
+    if (!engaging) return;
+    // Each skips the one handle it cannot finish; the browser's motion is
+    // finished even if the library's somehow fails as a whole.
+    try {
+      running.finish();
+    } finally {
+      finishBrowserMotion();
+    }
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) hold();
