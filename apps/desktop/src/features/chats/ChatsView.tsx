@@ -414,10 +414,11 @@ export function ChatsView({
         )}
         count={
           list?.known && (
-            <Count>
-              {list.chats.length}
+            <>
+              {/* One child, so the number crossfades; the noun is for readers. */}
+              <Count>{list.chats.length}</Count>
               <span className="sr-only"> chats</span>
-            </Count>
+            </>
           )
         }
         actions={

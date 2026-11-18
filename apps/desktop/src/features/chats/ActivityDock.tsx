@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { Presence } from "@/components/ui/motion";
-import { Rise } from "@/features/chats/arrivals";
+import { Rise, Space } from "@/features/chats/arrivals";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -326,7 +326,8 @@ function QueueCard({
   const textId = useId();
   const [sending, setSending] = useState(false);
   return (
-    <li className="chat-queue-card">
+    // Its own space closes with its fade, so the cards below glide up.
+    <Space as="li" className="chat-queue-card">
       <Rise className="flex w-full items-center min-h-8">
         <span className="chat-queue-main">
           <span id={textId} className="chat-queue-text">
@@ -372,7 +373,7 @@ function QueueCard({
           </span>
         )}
       </Rise>
-    </li>
+    </Space>
   );
 }
 
@@ -420,7 +421,8 @@ export function ActivityDock({
   // fades out here while the tray closes its space (DockSlot).
   return (
     <div ref={dockRef} className="chat-activity">
-      <Presence initial={false}>
+      {/* One request at a time: the next waits for the answered one to leave. */}
+      <Presence initial={false} mode="wait">
         {request && (
           <Request
             key={request.id}
@@ -479,9 +481,11 @@ export function ActivityDock({
 /** The queue's section: it fades up with its first card and out with its last. */
 function QueueSection({ children }: { children: ReactNode }) {
   return (
-    <Rise>
-      <section className="chat-queue">{children}</section>
-    </Rise>
+    <Space>
+      <Rise>
+        <section className="chat-queue">{children}</section>
+      </Rise>
+    </Space>
   );
 }
 

@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { ChatClientContext } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
@@ -9,6 +15,7 @@ import { chatState, createMockChatClient } from "@/features/chats/mock-client";
 import * as rowMotion from "@/components/ui/row-motion";
 import { motionTestbed } from "@/test/motion-testbed";
 import { applyTokens, instantTokens } from "@/test/motion-tokens";
+import { spring } from "@/lib/motion-tokens";
 
 // A Chat row moves as every list row does (DESIGN.md section 12): the shared
 // row motion, read as the row renders so a held key and reduced motion reach it.
@@ -25,6 +32,7 @@ window.ResizeObserver = class {
 };
 
 motionTestbed();
+const travelMs = () => spring("travel").duration * 1000;
 
 async function showList() {
   const client = createMockChatClient({
@@ -77,4 +85,74 @@ test("the rows share one order, so they are measured when it changes", async () 
   const orders = new Set(glide.mock.calls.map(([order]) => String(order)));
   // One list order, with each row's group: not undefined, which measures always.
   expect([...orders].every((order) => order.startsWith("c1,c2:"))).toBe(true);
+});
+
+test("the header count is one child, so a changed number crossfades", async () => {
+  await showList();
+  const count = document.querySelector('[data-slot="count"]');
+  expect(count?.querySelector('[data-slot="crossfade"]')?.textContent).toBe(
+    "2",
+  );
+  // Read aloud with its noun, outside what crossfades.
+  expect(count?.parentElement?.textContent).toContain("2 chats");
+});
+
+test("a Chat that now needs you travels to its group, then its fill arrives", async () => {
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      { chat: chatState({ id: "c1", title: "Limiter" }) },
+      { chat: chatState({ id: "c2", title: "Retries" }) },
+    ],
+    records: [],
+  });
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <StatusLineRegion>
+          <ChatsView />
+        </StatusLineRegion>
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  await screen.findByRole("button", { name: /^Retries/ });
+  const glide = vi.mocked(rowMotion.glide);
+  glide.mockClear();
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  expect(document.querySelector(".ui-arrival")).toBeNull();
+  act(() => {
+    client.push("c2", {
+      id: "req-1",
+      at: "2026-11-10T10:00:00Z",
+      kind: "request",
+      request: "approval",
+      title: "Codex wants to run",
+      subject: "npm test",
+      options: [{ id: "once", label: "Allow once" }],
+      free_text: false,
+      state: "pending",
+    });
+    client.patch("c2", { activity: "waiting" });
+  });
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll(".chat-list-group")].map(
+        (group) => group.textContent,
+      ),
+    ).toContain("Needs you"),
+  );
+  // The row that moved glides on the travel spring; the one that stayed does not.
+  expect(glide.mock.calls.some(([, name]) => name === "travel")).toBe(true);
+  // The fill waits for the row to get there: it is scheduled for the end of
+  // the travel spring, and is not on the page before.
+  expect(document.querySelector(".ui-arrival")).toBeNull();
+  expect(timers).toHaveBeenCalledWith(expect.any(Function), travelMs());
+  await waitFor(() =>
+    expect(document.querySelector(".ui-arrival")).toBeTruthy(),
+  );
+  const fill = document.querySelector(".ui-arrival");
+  expect(fill).toBeTruthy();
+  expect(fill?.closest(".chat-row-item")?.textContent).toContain("Retries");
+  expect(document.querySelectorAll(".ui-arrival")).toHaveLength(1);
+  timers.mockRestore();
 });
