@@ -237,7 +237,39 @@ test("the list's own spacing closes with its last rows", async () => {
   expect(rows.hasAttribute("data-empty")).toBe(false);
 });
 
-test("the stylesheet closes the list's padding on the smooth spring when it empties", () => {
+test.each([false, true])(
+  "the empty list closes its padding with pane overlays (bulk bar: %s)",
+  async (bulkBar) => {
+    const css = readFileSync(
+      join(__dirname, "ticket-list.css"),
+      "utf8",
+    ).replace(/@import [^;]+;/g, "");
+    const view = (rows: Ticket[]) => (
+      <>
+        <style>{css}</style>
+        <div className="ticket-list">
+          <List tickets={rows} empty="No tickets match" />
+          {bulkBar && <div className="bulk-bar" />}
+        </div>
+      </>
+    );
+    const { container, rerender } = render(view([ticket(1)]));
+    container
+      .querySelector<HTMLElement>(".ticket-list")!
+      .style.setProperty("--list-overlays-height", "4px");
+    const rows = container.querySelector(".ticket-rows")!;
+    expect(getComputedStyle(rows).paddingBottom).not.toBe("0px");
+    rerender(view([]));
+    await frames();
+    // Use the complete owning stylesheet: a correct empty rule alone can be
+    // overridden by the pane's later overlay or bulk-bar inset.
+    const style = getComputedStyle(rows);
+    expect(style.paddingBottom).toBe("0px");
+    expect(style.paddingTop).toBe("0px");
+  },
+);
+
+test("the stylesheet closes the list's padding on the smooth spring", () => {
   const css = readFileSync(join(__dirname, "ticket-list.css"), "utf8").replace(
     /\/\*[\s\S]*?\*\//g,
     "",
@@ -248,7 +280,6 @@ test("the stylesheet closes the list's padding on the smooth spring when it empt
   expect(rule(".ticket-rows")).toContain(
     "transition: padding var(--spring-smooth-t) var(--spring-smooth)",
   );
-  expect(rule(".ticket-rows[data-empty]")).toContain("padding-block: 0");
 });
 
 test("an empty list shows its empty state at once, without fading in", () => {
