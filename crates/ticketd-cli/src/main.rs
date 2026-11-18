@@ -1167,6 +1167,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Workspace::open(path)?,
         None => Workspace::open_default()?,
     };
+    tracing::debug!("workspace opened");
     // Run by a Chat's harness: what this command writes is credited to that Chat.
     if let Some(chat) = std::env::var(ticketd_core::CHAT_ID_VARIABLE)
         .ok()
@@ -2065,7 +2066,16 @@ const TOKEN_HINT: &str =
     " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
 
 fn main() {
+    ticketd_diagnostics::init_cli();
     if let Err(error) = run(&mut std::io::stdout().lock()) {
+        // The `error:` line below is the command's answer to the person or agent that ran
+        // it. This is the diagnostic record of the same failure, for `TICKETD_LOG=debug`.
+        tracing::debug!(
+            error_kind = error
+                .downcast_ref::<ticketd_core::Error>()
+                .map_or("other", |error| error.kind().code()),
+            "command failed"
+        );
         use ticketd_core::source::SourceError;
         let unauthenticated = match error.downcast_ref::<ticketd_core::Error>() {
             Some(ticketd_core::Error::Source(SourceError::Unauthenticated(_))) => true,
