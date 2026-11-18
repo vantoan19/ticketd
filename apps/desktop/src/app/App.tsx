@@ -403,6 +403,9 @@ function AppContent() {
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(
     null,
   );
+  // Whether the info has been read yet, whatever it said: until then nobody
+  // knows if this Workspace is new.
+  const [infoRead, setInfoRead] = useState(false);
   useEffect(() => {
     let live = true;
     void workspaceClient
@@ -414,10 +417,14 @@ function AppContent() {
       })
       .then(
         (info) => {
-          if (live) setWorkspaceInfo(info);
+          if (!live) return;
+          setWorkspaceInfo(info);
+          setInfoRead(true);
         },
         () => {
-          if (live) setWorkspaceInfo(null);
+          if (!live) return;
+          setWorkspaceInfo(null);
+          setInfoRead(true);
         },
       );
     return () => {
@@ -477,6 +484,24 @@ function AppContent() {
   // guide goes and the list arrives in its place, which `ViewRegion` plays as a
   // switch.
   const guideShown = firstRun && view === "tickets" && graphOrigin === null;
+  // Before the guide or the list can be chosen, the list shows neither its
+  // placeholders nor "No tickets yet": in a new Workspace the guide is the first
+  // thing seen. A Workspace the info says has tickets, documents, projects or
+  // Plans is known not to be new, so its list shows at once; a failed read gives
+  // up the wait.
+  const looksNew =
+    workspaceInfo?.tickets === 0 &&
+    workspaceInfo.documents === 0 &&
+    workspaceInfo.projects === 0 &&
+    workspaceInfo.active_plans === 0;
+  const firstRunPending =
+    view === "tickets" &&
+    graphOrigin === null &&
+    !firstRun &&
+    workspace.tickets.length === 0 &&
+    !workspace.queryError &&
+    !workspace.plansFailure &&
+    (!infoRead || (looksNew && !(workspace.listKnown && workspace.plansKnown)));
   const goTo = (target: GoTo) => {
     if ((target === "chats" || target === "automations") && !chat.enabled)
       return;
@@ -1096,7 +1121,7 @@ function AppContent() {
                                   create={createTicket}
                                 />
                                 <ViewRegion
-                                  page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : ""}`}
+                                  page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : firstRunPending ? "pending" : ""}`}
                                 >
                                   {view === "settings" &&
                                     graphOrigin === null && (
@@ -1325,7 +1350,8 @@ function AppContent() {
                                           workspace={workspace}
                                           bulk={bulk}
                                           hidden={
-                                            (firstRun && view === "tickets") ||
+                                            ((firstRun || firstRunPending) &&
+                                              view === "tickets") ||
                                             (view !== "tickets" &&
                                               view !== "inbox") ||
                                             graphOrigin !== null

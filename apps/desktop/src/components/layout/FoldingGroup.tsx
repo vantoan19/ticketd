@@ -21,16 +21,8 @@ export function FoldingGroup({
   const list = useHeldExpand(!collapsed);
   return (
     <>
-      {icon.mounted && (
-        <Expand open={icon.expanded} className="sidebar-fold">
-          {rail}
-        </Expand>
-      )}
-      {list.mounted && (
-        <Expand open={list.expanded} className="sidebar-fold">
-          {children}
-        </Expand>
-      )}
+      {icon.mounted && <Expand open={icon.expanded}>{rail}</Expand>}
+      {list.mounted && <Expand open={list.expanded}>{children}</Expand>}
     </>
   );
 }

@@ -7,11 +7,13 @@ import { useTicketWorkspace } from "./useTicketWorkspace";
 import { bridgeDefault } from "@/test/bridge-defaults";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import { TestReads } from "@/lib/workspace-reads/testing";
+import { setPreference } from "@/lib/preferences";
 
 // The stacked layout follows one state (DESIGN.md section 5): the content
-// panel's width once it has held still. The stylesheet stacks the panes from
-// the `data-narrow` the workspace carries, so a panel that is still resizing
-// (the sidebar's width spring) never flips them halfway.
+// panel's width, once it has held still while the sidebar's width spring sweeps
+// it. The stylesheet stacks the panes from the `data-narrow` the workspace
+// carries, so a panel that the sidebar is still resizing never flips them
+// halfway; any other change of width is followed at once.
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -79,6 +81,7 @@ afterEach(() => {
   if (clientWidth)
     Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth);
   paneWidth = 1000;
+  setPreference("sidebarCollapsed", false);
   vi.unstubAllGlobals();
   observers.length = 0;
   bridge.invoke.mockReset();
@@ -121,11 +124,12 @@ test("a wide pane is not narrow, and a narrow one is from its first layout", asy
   expect(group().hasAttribute("data-narrow")).toBe(true);
 });
 
-test("the stacked layout waits for the width to hold still", async () => {
+test("the stacked layout waits for the width to hold still while the sidebar sweeps it", async () => {
   paneWidth = 1000;
   await setUp();
   // The observer's first report is taken at once; the sweep after it is not.
   act(() => resize(1000));
+  act(() => void setPreference("sidebarCollapsed", true));
   act(() => resize(900));
   act(() => resize(700));
   expect(group().hasAttribute("data-narrow")).toBe(false);
@@ -133,4 +137,14 @@ test("the stacked layout waits for the width to hold still", async () => {
   act(() => resize(1000));
   expect(group().hasAttribute("data-narrow")).toBe(true);
   await waitFor(() => expect(group().hasAttribute("data-narrow")).toBe(false));
+});
+
+test("a window edge dragged across the switch point is followed at once", async () => {
+  paneWidth = 1000;
+  await setUp();
+  act(() => resize(1000));
+  act(() => resize(700));
+  expect(group().hasAttribute("data-narrow")).toBe(true);
+  act(() => resize(1000));
+  expect(group().hasAttribute("data-narrow")).toBe(false);
 });

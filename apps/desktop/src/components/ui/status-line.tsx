@@ -236,6 +236,9 @@ function FloatingLine({
     )?.focus();
   }, [shown.focusAction]);
 
+  // The line waits for the action on purpose: a failed Undo replaces it with
+  // "Couldn't undo…" (and Retry), so closing it at the click would flash it away
+  // and back. It fades in --dur-exit once the action has succeeded.
   async function act() {
     if (!action) return;
     setRunning(true);

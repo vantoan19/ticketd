@@ -334,7 +334,7 @@ it("the unfold holds a count's words but never the dot the rail already shows", 
 
 it("a folding group's closing side fades out sooner than the Expand's own exit, so no sliver of its icon outlives the height", () => {
   const rule = css.match(
-    /\.sidebar-fold\[data-open="false"\] > \.ui-expand-body\s*\{([^}]*)\}/,
+    /\.sidebar-group \.ui-expand\[data-open="false"\] > \.ui-expand-body\s*\{([^}]*)\}/,
   );
   expect(rule?.[1]).toMatch(/transition-duration:\s*var\(--dur-1\)/);
 });

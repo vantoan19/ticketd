@@ -749,6 +749,35 @@ test('the first-run guide stays until the list holds the first ticket, so "No ti
   expect(emptyShown()).toBe(false);
 });
 
+test('a new Workspace shows neither placeholders nor "No tickets yet" while it is still unknown, only the guide', async () => {
+  // The list's own read finishes (nothing in it) before the Workspace says how
+  // many tickets it has; in between the list must show nothing of its own.
+  let release = () => {};
+  const infoRead = new Promise<void>((resolve) => (release = resolve));
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "workspace_info") await infoRead;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const onShow = (text: string | RegExp) => {
+    const found = screen.queryAllByText(text);
+    return found.some((node) => node.closest("[hidden]") === null);
+  };
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(onShow("No tickets yet")).toBe(false);
+  expect(onShow("Loading tickets…")).toBe(false);
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).toBeNull();
+  release();
+  await screen.findByRole("region", { name: "Your workspace is ready" });
+  expect(onShow("No tickets yet")).toBe(false);
+});
+
 test("Settings' way back names the view it returns to", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(bridgeDefault);

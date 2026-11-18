@@ -2105,7 +2105,7 @@ html[data-window-bar] {
 /* A folding group's side that is closing is gone before its height reaches the
    icon. On the Expand's usual exit fade the icon was still faintly there when
    the height had clipped it to its top edge, which showed as a dash. */
-.sidebar-fold[data-open="false"] > .ui-expand-body {
+.sidebar-group .ui-expand[data-open="false"] > .ui-expand-body {
   transition-duration: var(--dur-1);
 }
 /* Settings and Trash sit at explicit places, like the top row, so the rail's

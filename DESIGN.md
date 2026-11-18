@@ -1103,7 +1103,11 @@ states. The guide stays until the list actually holds the first Ticket (the
 workspace and its counts know of it first), so "No tickets yet" never shows in
 between; then it is replaced by the normal ticket workspace: the shell's picture
 of the guide fades out over `--dur-exit` once, and the list arrives as a page
-arrival. **Motion:** the guide arranges its own entrance (see Plans and
+arrival (its first row and everything else that mounts in that commit are simply
+there, so each has one owner). While the workspace has not yet said whether it
+is new (its info is unread, or says it is empty and the list and Plans are
+still being read) the list shows nothing of its own, neither placeholders nor
+the empty state, so the guide is the first thing a new workspace shows. **Motion:** the guide arranges its own entrance (see Plans and
 Projects, section 10): the pane header, icon, title, lede, the steps card together
 with its first step, then the other two steps and the hint fade up one `--stagger`
 apart, so the card is never an empty box. A step that completes while on screen draws its
