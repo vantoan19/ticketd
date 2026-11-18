@@ -259,6 +259,18 @@ it("CrossfadeText swaps at once under reduced motion", async () => {
   expect(screen.queryByText("Open")).toBeNull();
 });
 
+it("CrossfadeText swaps in one frame, never through a blank one, when motion is off", () => {
+  for (const off of [useReducedMotion, holdKey]) {
+    off();
+    const { rerender, unmount } = render(<Swapped text="1" />);
+    rerender(<Swapped text="2" />);
+    // Straight after the commit: the old words gone, the new ones shown.
+    expect(screen.queryByText("1")).toBeNull();
+    expect(screen.getByText("2").style.opacity).not.toBe("0");
+    unmount();
+  }
+});
+
 it("CrossfadeText swaps at once while a key repeats", async () => {
   const { rerender } = render(<Swapped text="Open" />);
   holdKey();

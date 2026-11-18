@@ -145,6 +145,25 @@ function cascade(root: HTMLElement, first: number, delay: number): Animation[] {
   ];
 }
 
+/**
+ * The page's own opacity, so that what carries no marker (group headings, a
+ * switch at the foot) is hidden until the arrival starts and then fades in with
+ * the header, instead of showing at once over the page that is leaving. It only
+ * fades: the marked header and rows add the rise and the blur.
+ */
+function veil(page: HTMLElement, delay: number): Animation[] {
+  const enter = enterTransition();
+  if (enter.duration === 0 || !canAnimate(page)) return [];
+  return [
+    page.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: seconds(enter.duration),
+      delay: seconds(delay),
+      easing: cssEasing("--ease-out"),
+      fill: "backwards",
+    }),
+  ];
+}
+
 /** `root` carries `data-arriving` until the last of `animations` has settled. */
 function holdArriving(root: HTMLElement, animations: Animation[]) {
   if (animations.length === 0) return;
@@ -159,12 +178,18 @@ function holdArriving(root: HTMLElement, animations: Animation[]) {
 
 /**
  * A page arrives (DESIGN.md section 12): its header fades up, then its visible
- * rows follow a stagger step apart. A page with neither marker fades up whole.
- * `delay` is how long the old page takes to leave.
+ * rows follow a stagger step apart, and whatever carries no marker fades in
+ * with the header. A page with neither marker fades up whole. `delay` is how
+ * long the old page takes to leave; the new page is hidden until then.
  */
 export function arrivePage(page: HTMLElement, delay = 0): void {
   const parts = cascade(page, 0, delay);
-  holdArriving(page, parts.length > 0 ? parts : arrive(page, { delay }));
+  holdArriving(
+    page,
+    parts.length > 0
+      ? [...veil(page, delay), ...parts]
+      : arrive(page, { delay }),
+  );
 }
 
 /**

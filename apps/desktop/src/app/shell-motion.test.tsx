@@ -322,6 +322,23 @@ it("what the rail drops stays hidden until the width has opened", () => {
   expect(rules).toMatch(/transition:\s*none/);
 });
 
+it("the unfold holds a count's words but never the dot the rail already shows", () => {
+  const rules = css.match(
+    /@container sidebar \(max-width: \d+px\)\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+  // A bare .sidebar-count would hide the dot too, and it would blink.
+  expect(rules).not.toMatch(/\.sidebar-count\s*[,)]/);
+  expect(rules).toContain('.sidebar-count > :not([data-slot="status-dot"])');
+  expect(rules).toContain('.sidebar-count:not(:has([data-slot="status-dot"]))');
+});
+
+it("a folding group's closing side fades out sooner than the Expand's own exit, so no sliver of its icon outlives the height", () => {
+  const rule = css.match(
+    /\.sidebar-group \.ui-expand\[data-open="false"\] > \.ui-expand-body\s*\{([^}]*)\}/,
+  );
+  expect(rule?.[1]).toMatch(/transition-duration:\s*var\(--dur-1\)/);
+});
+
 it("the labels fade back in with no delay of their own", () => {
   const rule = css.match(
     /\.sidebar-label,\s*\.sidebar-wordmark[^{]*\{([^}]*)\}/,

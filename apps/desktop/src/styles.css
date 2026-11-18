@@ -2059,7 +2059,8 @@ html[data-window-bar] {
 .sidebar-label,
 .sidebar-wordmark,
 .sidebar-heading,
-.sidebar-count,
+.sidebar-count:not(:has([data-slot="status-dot"])),
+.sidebar-count > :not([data-slot="status-dot"]),
 .ui-button-jump > span,
 .ui-button-jump kbd {
   transition:
@@ -2083,14 +2084,16 @@ html[data-window-bar] {
    once, until the sidebar is nearly open; the width itself is the clock, so a
    busy main thread cannot let them run ahead of it (a timed delay did, and
    labels showed beside the 56px rail). Elements that mount as the rail opens
-   (the Context heading, a count) start hidden the same way. */
+   (the Context heading, a count) start hidden the same way. Only words are
+   held: the dot a count carries is what the rail already shows, and it stays. */
 @container sidebar (max-width: 184px) {
   .sidebar:not([data-collapsed])
     :is(
       .sidebar-label,
       .sidebar-wordmark,
       .sidebar-heading,
-      .sidebar-count,
+      .sidebar-count:not(:has([data-slot="status-dot"])),
+      .sidebar-count > :not([data-slot="status-dot"]),
       .ui-button-jump > span,
       .ui-button-jump kbd
     ) {
@@ -2098,6 +2101,12 @@ html[data-window-bar] {
     filter: blur(var(--motion-blur-out));
     transition: none;
   }
+}
+/* A folding group's side that is closing is gone before its height reaches the
+   icon. On the Expand's usual exit fade the icon was still faintly there when
+   the height had clipped it to its top edge, which showed as a dash. */
+.sidebar-group .ui-expand[data-open="false"] > .ui-expand-body {
+  transition-duration: var(--dur-1);
 }
 /* Settings and Trash sit at explicit places, like the top row, so the rail's
    column and the row's pair are one transition on the smooth spring. */

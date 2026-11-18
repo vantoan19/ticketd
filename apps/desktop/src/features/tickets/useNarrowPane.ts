@@ -1,9 +1,11 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { spring } from "@/lib/motion-tokens";
+import { usePreferences } from "@/lib/preferences";
 
 /** The ticket-detail container query's switch point: a 528px document column, so the text keeps about 480px, plus a 232px rail. */
 const RAIL_MIN_WIDTH = 760;
 
-/** How long the width must hold still before the layout follows it. */
+/** How long the width must hold still before the layout follows it, while the sidebar's width spring runs. */
 const SETTLE_MS = 120;
 
 /**
@@ -12,16 +14,32 @@ const SETTLE_MS = 120;
  * rail and the drafts inside it are not remounted when the workspace is shown
  * again.
  *
- * The first measure, and the observer's first report, are immediate; later ones
- * wait for the width to settle, so a
- * panel that is resizing (the sidebar's width spring sweeps the content panel)
- * never flips the layout halfway through its motion.
+ * The layout follows the width at once, except while the sidebar's width
+ * spring runs: that sweeps the content panel through every width between the
+ * two, and the layout must not flip halfway through the motion, so it waits
+ * for the width to settle. A window edge being dragged, the first report, and
+ * the first report after the pane was hidden are all followed at once.
  */
 export function useNarrowPane(
   ref: RefObject<HTMLElement | null>,
   minWidth = RAIL_MIN_WIDTH,
 ) {
   const [narrow, setNarrow] = useState(false);
+  // The sidebar folds or unfolds on its width spring; that is the only motion
+  // of the panel's width the layout waits out.
+  const { sidebarCollapsed } = usePreferences();
+  const sweeping = useRef(false);
+  const folded = useRef(sidebarCollapsed);
+  useLayoutEffect(() => {
+    if (folded.current === sidebarCollapsed) return;
+    folded.current = sidebarCollapsed;
+    sweeping.current = true;
+    const done = setTimeout(
+      () => (sweeping.current = false),
+      spring("smooth").duration * 1000,
+    );
+    return () => clearTimeout(done);
+  }, [sidebarCollapsed]);
   useLayoutEffect(() => {
     const pane = ref.current;
     if (!pane || typeof ResizeObserver === "undefined") return;
@@ -30,17 +48,17 @@ export function useNarrowPane(
     };
     measure(pane.clientWidth);
     let settle: ReturnType<typeof setTimeout> | undefined;
-    let reported = false;
+    // Nothing reported yet, or hidden at the last report: the next one is
+    // taken as it stands.
+    let last = 0;
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       const { width } = entry.contentRect;
-      if (!reported) {
-        reported = true;
-        measure(width);
-        return;
-      }
+      const shown = last === 0;
+      last = width;
       clearTimeout(settle);
-      settle = setTimeout(() => measure(width), SETTLE_MS);
+      if (shown || !sweeping.current) measure(width);
+      else settle = setTimeout(() => measure(width), SETTLE_MS);
     });
     observer.observe(pane);
     return () => {

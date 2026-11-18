@@ -553,6 +553,27 @@ test("lists No project after the named projects and shows a quiet hint with noth
   expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
 });
 
+test("the project names are sidebar labels, so the rail's fade and the unfold's hold reach them", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) =>
+      command === "list_projects"
+        ? [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }]
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const names = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  ).getAllByRole("button");
+  for (const row of names)
+    expect(row.querySelector(".sidebar-label")?.textContent).toBe(
+      row.textContent?.trim(),
+    );
+});
+
 test("changing the scope drops an open ticket that is outside it", async () => {
   vi.useFakeTimers();
   const ticket = {
@@ -726,6 +747,35 @@ test('the first-run guide stays until the list holds the first ticket, so "No ti
     screen.queryByRole("region", { name: "Your workspace is ready" }),
   ).toBeNull();
   expect(emptyShown()).toBe(false);
+});
+
+test('a new Workspace shows neither placeholders nor "No tickets yet" while it is still unknown, only the guide', async () => {
+  // The list's own read finishes (nothing in it) before the Workspace says how
+  // many tickets it has; in between the list must show nothing of its own.
+  let release = () => {};
+  const infoRead = new Promise<void>((resolve) => (release = resolve));
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "workspace_info") await infoRead;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const onShow = (text: string | RegExp) => {
+    const found = screen.queryAllByText(text);
+    return found.some((node) => node.closest("[hidden]") === null);
+  };
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(onShow("No tickets yet")).toBe(false);
+  expect(onShow("Loading tickets…")).toBe(false);
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).toBeNull();
+  release();
+  await screen.findByRole("region", { name: "Your workspace is ready" });
+  expect(onShow("No tickets yet")).toBe(false);
 });
 
 test("Settings' way back names the view it returns to", async () => {

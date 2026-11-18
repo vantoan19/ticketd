@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ViewRegion } from "@/components/layout/ViewRegion";
 import type { Ticket } from "@/lib/api/client";
 import { TestReads } from "@/lib/workspace-reads/testing";
+import { Visibility } from "@/lib/workspace-reads/Visibility";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import { TicketList } from "./TicketList";
 import { TicketRowsSkeleton } from "./TicketRowsSkeleton";
@@ -22,6 +23,7 @@ vi.mock("@tauri-apps/api/core", () => bridge);
 
 type Played = {
   element: Element;
+  keyframes: Keyframe[];
   options: KeyframeAnimationOptions;
   finished: Promise<unknown>;
   settle: () => void;
@@ -29,7 +31,7 @@ type Played = {
 const played: Played[] = [];
 const animate = vi.fn(function (
   this: Element,
-  _keyframes: unknown,
+  keyframes: Keyframe[],
   options: KeyframeAnimationOptions,
 ) {
   let settle = () => {};
@@ -38,6 +40,7 @@ const animate = vi.fn(function (
   );
   const animation = {
     element: this,
+    keyframes,
     options,
     onfinish: null,
     oncancel: null,
@@ -130,12 +133,14 @@ function Panel({ page, children }: { page: string; children?: ReactNode }) {
 }
 
 const rowOf = (title: string) => screen.getByText(title).closest("li")!;
-// Opacity and blur only; each rising element also has a transform animation.
+// Opacity and blur only; each rising element also has a transform animation,
+// and the page's own plain fade (what holds its unmarked parts back) has no blur.
 const arrivals = () =>
   played.filter(
     (one) =>
       one.options.easing?.startsWith("cubic-bezier") &&
-      one.options.fill === "backwards",
+      one.options.fill === "backwards" &&
+      "filter" in one.keyframes[0]!,
   );
 
 test("the shell cascades the list's rows with the page, in order, and the list adds nothing", () => {
@@ -219,4 +224,47 @@ test("placeholders are not rows of the arrival, and the real rows that replace t
   expect(
     document.querySelectorAll('ul.ticket-rows > li[data-arrive="row"]'),
   ).toHaveLength(3);
+});
+
+// The First-run handover: the list is hidden under the guide, then the first
+// ticket arrives in the very commit that shows the list.
+function Handover({ hidden, tickets }: { hidden: boolean; tickets: Ticket[] }) {
+  return (
+    <Visibility hidden={hidden}>
+      <TestReads>
+        <TicketList
+          tickets={tickets}
+          empty={<p>No tickets yet</p>}
+          selected={null}
+          onOpen={vi.fn()}
+          bulkSelection={[]}
+          onToggle={vi.fn()}
+          selectable
+          scope={scope}
+        />
+      </TestReads>
+    </Visibility>
+  );
+}
+
+test("while the list is hidden its empty state is not there to fade out behind the guide", () => {
+  const { rerender } = render(<Handover hidden tickets={[]} />);
+  expect(screen.queryByText("No tickets yet")).toBeNull();
+  rerender(<Handover hidden={false} tickets={[]} />);
+  expect(screen.queryByText("No tickets yet")).not.toBeNull();
+});
+
+test("the first row that arrives as the list is shown has no arrival of its own, the shell's is the only one", () => {
+  const { rerender } = render(<Handover hidden tickets={[]} />);
+  rerender(<Handover hidden={false} tickets={[ticket(1)]} />);
+  expect(screen.queryByText("No tickets yet")).toBeNull();
+  // Not left at the start of its own entrance (opacity 0, below its place).
+  expect(rowOf("Ticket 1").style.opacity).toBe("1");
+  expect(rowOf("Ticket 1").style.transform).not.toContain("translateY(6px)");
+});
+
+test("a row added to a list that stays shown still arrives by itself", () => {
+  const { rerender } = render(<Handover hidden={false} tickets={[]} />);
+  rerender(<Handover hidden={false} tickets={[ticket(1)]} />);
+  expect(rowOf("Ticket 1").style.opacity).toBe("0");
 });

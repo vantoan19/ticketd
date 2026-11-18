@@ -139,3 +139,30 @@ test("moving straight to a neighbouring control opens its label at once", async 
     Element.prototype.getBoundingClientRect = original;
   }
 });
+
+test("a label held shut never opens the next one at once", () => {
+  vi.useFakeTimers();
+  try {
+    render(
+      <TooltipProvider>
+        <Tooltip content="Held shut" disabled>
+          <button type="button">First</button>
+        </Tooltip>
+        <Tooltip content="Next">
+          <button type="button">Second</button>
+        </Tooltip>
+      </TooltipProvider>,
+    );
+    fireEvent.pointerMove(screen.getByRole("button", { name: "First" }));
+    act(() => void vi.advanceTimersByTime(1000));
+    fireEvent.pointerMove(screen.getByRole("button", { name: "Second" }));
+    // The first label still waits its delay: nothing opened before it.
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    act(() => void vi.advanceTimersByTime(399));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    act(() => void vi.advanceTimersByTime(1));
+    expect(screen.queryByRole("tooltip")).not.toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});

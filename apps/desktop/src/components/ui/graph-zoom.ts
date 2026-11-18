@@ -15,7 +15,7 @@ export type GraphGlide = {
  * takes. The tokens own the time and zero it under reduced motion and a held
  * key, so the view then jumps. Panning and zooming by hand never use it.
  */
-export function graphGlide(): GraphGlide {
+function graphGlide(): GraphGlide {
   const { duration, ease } = spring("smooth");
   return {
     duration: duration * 1000,

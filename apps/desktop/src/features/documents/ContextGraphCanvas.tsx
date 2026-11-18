@@ -54,7 +54,8 @@ const FULL_MARGIN_WIDTH = 1000;
  * Fit options for a container this wide. Margins shrink with a narrow window so
  * they do not swallow the canvas; top and bottom keep the legend row and the
  * zoom control clear of the cards. The fit is instant: a window resize must not
- * animate; the callers that move the view on purpose add `graphGlide()`.
+ * animate; the callers that move the view on purpose go through
+ * `useViewportGlide().glide`.
  */
 function fitOptions(width: number): FitViewOptions {
   const scale = Math.min(1, Math.max(0.4, width / FULL_MARGIN_WIDTH));

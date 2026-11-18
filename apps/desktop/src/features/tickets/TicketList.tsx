@@ -1,5 +1,5 @@
 import { useNow } from "@/lib/use-now";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { m } from "motion/react";
 import {
   AlarmClock,
@@ -29,6 +29,7 @@ import {
   pageArriving,
   rowTokens,
 } from "@/components/ui/row-motion";
+import { HiddenContext } from "@/lib/workspace-reads/visibility-context";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -238,6 +239,18 @@ export function TicketList({
   );
   const kept = stillHere(mounted, new Set(keys));
   if (kept !== mounted) setMounted(kept);
+  // A list that is shown again after being hidden (the First-run guide giving
+  // way, a page coming back) arrives with its page: the shell cascades it. What
+  // mounts in that same commit is simply there, so a row has one owner for its
+  // arrival and its rise does not play twice. (`wasHidden` lags the reveal by a
+  // frame, which is what makes it visible in the commit that shows the list.)
+  const hidden = useContext(HiddenContext);
+  const [wasHidden, setWasHidden] = useState(hidden);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setWasHidden(hidden));
+    return () => cancelAnimationFrame(frame);
+  }, [hidden]);
+  const revealed = wasHidden && !hidden;
   useEffect(() => {
     if (cascadeRequested) onCascaded?.();
   }, [cascadeRequested, onCascaded]);
@@ -257,7 +270,9 @@ export function TicketList({
                 ...arrival(cascades ? position : 0, shape, tokens),
                 ...departure({ space: true, gap }, tokens),
                 // Below the first screen of a cascade: there, not arriving.
-                ...(mounted.still.has(key) && { initial: false as const }),
+                ...((revealed || mounted.still.has(key)) && {
+                  initial: false as const,
+                }),
               };
             };
             if ("header" in entry) {
@@ -512,7 +527,8 @@ export function TicketList({
         </Presence>
       </ul>
       <Presence initial={false}>
-        {sticky.tickets.length === 0 && empty && (
+        {/* Nobody sees it while the list is hidden, and it must not be left to fade out over the page that replaces the list. */}
+        {!hidden && sticky.tickets.length === 0 && empty && (
           <Appear key="empty" rise="overlay">
             {empty}
           </Appear>
