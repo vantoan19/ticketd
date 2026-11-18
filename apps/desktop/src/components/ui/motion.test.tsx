@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
@@ -321,4 +323,22 @@ it("DrawnPath measures itself so its length is 1 whatever it draws", () => {
 it("Shimmer keeps its words in the document", () => {
   render(<Shimmer>Working</Shimmer>);
   expect(screen.getByText("Working").getAttribute("data-slot")).toBe("shimmer");
+});
+
+// The pass is a light: its band reads lighter than the words, whichever theme
+// and whichever text colour (jsdom paints nothing, so this reads the rule).
+it("Shimmer's band is lighter than the text in both themes", () => {
+  const css = readFileSync(join(__dirname, "motion.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const rule = css.match(/\.ui-shimmer\s*\{([^}]*)\}/)?.[1] ?? "";
+  // Not a fixed grey: --disabled-foreground is #6b6b6b over #4d4d4d text in
+  // light (barely lighter) and #8a8a8a under rgb(161,161,161) in dark (darker).
+  expect(rule).not.toContain("--disabled-foreground");
+  // The text's own colour mixed toward white is lighter than it by
+  // construction, in any theme.
+  const band = rule.match(/color-mix\(in srgb, currentcolor,? white (\d+)%\)/);
+  expect(band).not.toBeNull();
+  expect(Number(band?.[1])).toBeGreaterThanOrEqual(40);
 });
