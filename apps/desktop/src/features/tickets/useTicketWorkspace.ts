@@ -146,8 +146,8 @@ export function useTicketWorkspace(
   const [pendingNext, setPendingNext] = useState<number | null>(null);
   const [selected, selectTicket] = useState<string | null>(null);
   const [mention, setMention] = useState<FollowedMention | null>(null);
-  // The Tickets opened in this session, in the order they were first selected.
-  // Each keeps its page mounted (hidden unless selected) in its Open Ticket.
+  // The Tickets opened in this session, least recently selected first. The
+  // most recent keep their pages mounted (hidden unless selected); see TicketDetails.
   const [opened, setOpened] = useState<string[]>([]);
   // Every selection ends the previous mention; following a backlink starts one.
   const setSelected = useCallback(
@@ -155,7 +155,9 @@ export function useTicketWorkspace(
       selectTicket(reference);
       if (reference)
         setOpened((items) =>
-          items.includes(reference) ? items : [...items, reference],
+          items.at(-1) === reference
+            ? items
+            : [...items.filter((item) => item !== reference), reference],
         );
       setMention(target ? { ...target, key: Date.now(), ready: false } : null);
     },

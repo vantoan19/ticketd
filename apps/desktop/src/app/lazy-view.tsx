@@ -11,10 +11,12 @@ import { describeFailure } from "@/lib/api/describe-failure";
 
 /**
  * A view whose module loads when it first renders, or earlier through
- * `preload`. A loaded view renders at once, without suspending.
+ * `preload`. A loaded view renders at once, without suspending; until then
+ * `Fallback` (or nothing) stands in its place with the same props.
  */
 export function lazyView<P extends object>(
   load: () => Promise<ComponentType<P>>,
+  Fallback?: ComponentType<P>,
 ) {
   let loaded: ComponentType<P> | undefined;
   const preload = () =>
@@ -30,7 +32,7 @@ export function lazyView<P extends object>(
     const [View] = useState<ComponentType<P>>(() => loaded ?? Pending);
     return (
       <LoadFailure>
-        <Suspense fallback={null}>
+        <Suspense fallback={Fallback ? <Fallback {...props} /> : null}>
           <View {...props} />
         </Suspense>
       </LoadFailure>

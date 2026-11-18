@@ -12,8 +12,6 @@ export type SyncStatusValue = {
   openSettings: () => void;
   /** Opens the records that need review. */
   openReview: () => void;
-  /** How the app shell opens those two places; see `useSyncNavigation`. */
-  setNavigation: (navigation: SyncNavigation) => void;
 };
 
 export type SyncNavigation = {
@@ -28,8 +26,12 @@ export const SyncStatusContext = createContext<SyncStatusValue>({
   refresh: () => Promise.reject(new Error("sync status is not available")),
   openSettings: () => {},
   openReview: () => {},
-  setNavigation: () => {},
 });
+
+/** How the app shell opens Settings › Sync and the records to review; see `useSyncNavigation`. */
+export const SyncNavigationContext = createContext<
+  (navigation: SyncNavigation) => void
+>(() => {});
 
 /** Sync status for every place that shows it; `SyncStatusProvider` owns the one poll. */
 export function useSyncStatus(): SyncStatusValue {
@@ -38,7 +40,7 @@ export function useSyncStatus(): SyncStatusValue {
 
 /** The app shell says where Settings › Sync and the records to review open. */
 export function useSyncNavigation(navigation: SyncNavigation) {
-  const { setNavigation } = useSyncStatus();
+  const setNavigation = useContext(SyncNavigationContext);
   useEffect(() => setNavigation(navigation));
 }
 

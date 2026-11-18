@@ -166,6 +166,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "an index derived from Activity text, rebuilt from it",
     ),
     (
+        "activity_search_fts",
+        "a search index derived from Activity briefs",
+    ),
+    (
         "attachment_draft_cutover",
         "device-local retention of recoverable drafts",
     ),
@@ -225,6 +229,7 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     ("sync_notices", "device-local Workspace sync state"),
     ("sync_state", "device-local Workspace sync state"),
     ("ticket_graph_fts", "a search index derived from tickets"),
+    ("ticket_search_fts", "a search index derived from tickets"),
     (
         "workspace_changes",
         "the counter views poll to notice a change",

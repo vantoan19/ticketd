@@ -115,13 +115,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         let kind = kind.as_str();
         // An upsert, not INSERT OR REPLACE: a conflict clause on the statement that
         // fired the trigger (INSERT OR IGNORE INTO ticket_tags) would override it.
-        let mark = |row: &str| {
-            format!(
-                "UPDATE sync_capture SET marks = marks + 1;
-                 INSERT INTO sync_dirty (kind, id, mark) VALUES ('{kind}', {row}.{owner}, (SELECT marks FROM sync_capture))
-                 ON CONFLICT(kind, id) DO UPDATE SET mark = excluded.mark;"
-            )
-        };
+        let mark = |row: &str| mark(kind, row, owner);
         // Delivering a due reminder is this device's inbox state, not a change to the reminder.
         let update = if table == "ticket_reminders" {
             "UPDATE OF due_at"
@@ -139,6 +133,40 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             ))?;
         }
     }
+    Ok(())
+}
+
+/// Statements that mark the record owning `row` (`NEW` or `OLD`) dirty.
+fn mark(kind: &str, row: &str, owner: &str) -> String {
+    format!(
+        "UPDATE sync_capture SET marks = marks + 1;
+         INSERT INTO sync_dirty (kind, id, mark) VALUES ('{kind}', {row}.{owner}, (SELECT marks FROM sync_capture))
+         ON CONFLICT(kind, id) DO UPDATE SET mark = excluded.mark;"
+    )
+}
+
+/// Format version 84: an update that leaves a ticket row as it was no longer marks the
+/// ticket for upload. Saving an unchanged ticket writes its title, body and status again,
+/// and every such save used to upload it.
+///
+/// The guard names the columns the table has now. A later step that adds a column to
+/// `tickets` makes this trigger again, or a change to that column alone is not uploaded;
+/// a test checks it.
+pub(crate) fn migrate_unchanged_tickets(connection: &Connection) -> Result<(), Error> {
+    let mut statement = connection.prepare("SELECT name FROM pragma_table_info('tickets')")?;
+    let changed = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .map(|column| column.map(|column| format!("OLD.\"{column}\" IS NOT NEW.\"{column}\"")))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(" OR ");
+    drop(statement);
+    let kind = Ticket.as_str();
+    let (old, new) = (mark(kind, "OLD", "id"), mark(kind, "NEW", "id"));
+    connection.execute_batch(&format!(
+        "DROP TRIGGER IF EXISTS sync_capture_tickets_update;
+         CREATE TRIGGER sync_capture_tickets_update AFTER UPDATE ON tickets
+         WHEN (SELECT applying FROM sync_capture) = 0 AND ({changed}) BEGIN {old}{new} END;"
+    ))?;
     Ok(())
 }
 

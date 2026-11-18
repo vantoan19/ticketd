@@ -122,6 +122,60 @@ pub struct AutomationRun {
     pub steps: Vec<AutomationRunStep>,
 }
 
+/// A run as a list shows it: no definition, event or steps. The run view reads the
+/// whole run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AutomationRunSummary {
+    pub id: String,
+    pub automation_id: String,
+    /// The Automation as it is called now.
+    pub automation_name: String,
+    pub status: AutomationRunStatus,
+    /// Why it needs attention.
+    pub reason: Option<String>,
+    /// It needs attention and the person has not yet acted on it.
+    pub needs_you: bool,
+    /// How the person answered it, once it no longer needs them.
+    pub answer: Option<RunAnswer>,
+    /// Its Automation was deleted: it cannot be run again.
+    pub automation_deleted: bool,
+    pub ticket: Option<AutomationRunTicket>,
+    pub created_at: String,
+}
+
+impl From<AutomationRun> for AutomationRunSummary {
+    fn from(run: AutomationRun) -> Self {
+        Self {
+            id: run.id,
+            automation_id: run.automation_id,
+            automation_name: run.automation_name,
+            status: run.status,
+            reason: run.reason,
+            needs_you: run.needs_you,
+            answer: run.answer,
+            automation_deleted: run.automation_deleted,
+            ticket: run.ticket,
+            created_at: run.created_at,
+        }
+    }
+}
+
+/// Whose runs a run list shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutomationRunScope {
+    All,
+    Automation(String),
+    /// The runs that acted on the ticket with this reference.
+    Ticket(String),
+}
+
+/// The runs going now and the Chats their agents work in: what quitting would stop.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunningAutomationRuns {
+    pub runs: usize,
+    pub chat_ids: Vec<String>,
+}
+
 impl AutomationRun {
     /// The step with `id` in the definition the run executes, at any depth.
     pub fn step(&self, id: &str) -> Option<&Step> {
@@ -394,8 +448,8 @@ pub(crate) fn expire(connection: &Connection, now: &str) -> Result<(), Error> {
     )?;
     connection.execute(
         "INSERT INTO expired_runs SELECT id FROM automation_runs
-         WHERE status NOT IN ('queued', 'running') AND julianday(created_at) < julianday(?1) - ?2",
-        params![now, RETENTION_DAYS],
+         WHERE status NOT IN ('queued', 'running') AND created_at < ?1",
+        [crate::events::cutoff(connection, now, RETENTION_DAYS)?],
     )?;
     crate::chats::delete_where(
         connection,
@@ -880,6 +934,112 @@ impl Workspace {
         self.read(|_| {
             // `read` filters on one value; this filter passes every run.
             read(&self.connection, "?1 = ''", "")
+        })
+    }
+
+    /// A page of the runs in `scope`, newest first, as a run list shows them: one query,
+    /// with no definition or steps read.
+    pub fn automation_run_summaries(
+        &self,
+        scope: &AutomationRunScope,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<AutomationRunSummary>, Error> {
+        let (filter, value) = match scope {
+            AutomationRunScope::All => ("?1 = ''", ""),
+            AutomationRunScope::Automation(id) => ("r.automation_id = ?1", id.as_str()),
+            AutomationRunScope::Ticket(reference) => (
+                "r.ticket_id = (SELECT id FROM tickets WHERE reference = ?1)",
+                reference.as_str(),
+            ),
+        };
+        let mut statement = self.connection.prepare_cached(&format!(
+            "SELECT r.id, r.automation_id, a.name, r.status, r.reason, r.{NEEDS_YOU},
+               CASE WHEN r.status = 'needs_attention' THEN r.attention_cleared ELSE 0 END, a.trashed,
+               t.id, t.reference, t.title, r.created_at
+             FROM automation_runs r JOIN automations a ON a.id = r.automation_id LEFT JOIN tickets t ON t.id = r.ticket_id
+             WHERE {filter} ORDER BY r.rowid DESC LIMIT ?2 OFFSET ?3"
+        ))?;
+        let rows = statement
+            .query_map(params![value, limit, offset], |row| {
+                let ticket = match row.get::<_, Option<String>>(8)? {
+                    Some(id) => Some(AutomationRunTicket {
+                        id,
+                        reference: row.get(9)?,
+                        title: row.get(10)?,
+                    }),
+                    None => None,
+                };
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, bool>(7)?,
+                    ticket,
+                    row.get::<_, String>(11)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(
+                |(
+                    id,
+                    automation_id,
+                    automation_name,
+                    status,
+                    reason,
+                    needs_you,
+                    answer,
+                    automation_deleted,
+                    ticket,
+                    created_at,
+                )| {
+                    Ok(AutomationRunSummary {
+                        id,
+                        automation_id,
+                        automation_name,
+                        status: named(status)?,
+                        reason,
+                        needs_you,
+                        answer: match answer {
+                            0 => None,
+                            RAN_AGAIN => Some(RunAnswer::RanAgain),
+                            _ => Some(RunAnswer::Dismissed),
+                        },
+                        automation_deleted,
+                        ticket,
+                        created_at,
+                    })
+                },
+            )
+            .collect()
+    }
+
+    /// The runs going now and the Chats their agent steps work in.
+    pub fn running_automation_runs(&self) -> Result<RunningAutomationRuns, Error> {
+        let mut statement = self.connection.prepare_cached(
+            "SELECT r.id, s.chat_id FROM automation_runs r
+               LEFT JOIN automation_run_steps s ON s.run_id = r.id AND s.chat_id IS NOT NULL
+              WHERE r.status = 'running' ORDER BY r.rowid DESC, s.position",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut runs = std::collections::HashSet::new();
+        let mut chat_ids = Vec::new();
+        for (run, chat) in rows {
+            runs.insert(run);
+            chat_ids.extend(chat);
+        }
+        Ok(RunningAutomationRuns {
+            runs: runs.len(),
+            chat_ids,
         })
     }
 

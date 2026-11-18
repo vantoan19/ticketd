@@ -228,28 +228,17 @@ fn final_canonical(conn: &Connection, canonical_id: &str) -> Result<String, Erro
     }
 }
 
-pub(crate) fn populate(conn: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    ticket.duplicate_redirect = None;
-    let direct: Option<String> = conn
-        .prepare_cached("SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1")?
-        .query_row([&ticket.id], |r| r.get(0))
-        .optional()?;
-    if let Some(direct) = direct
-        && let Ok(resolved) = final_canonical(conn, &direct)
-        && resolved != direct
-    {
-        ticket.duplicate_redirect = Some(conn.query_row(
+/// For a duplicate of `direct`: the reference of the ticket that is now the original,
+/// when `direct` has itself become a Duplicate since (see `Ticket::duplicate_redirect`).
+pub(crate) fn redirect(conn: &Connection, direct: &str) -> Result<Option<String>, Error> {
+    match final_canonical(conn, direct) {
+        Ok(resolved) if resolved != direct => Ok(Some(conn.query_row(
             "SELECT reference FROM tickets WHERE id = ?1",
             [&resolved],
             |r| r.get(0),
-        )?);
+        )?)),
+        _ => Ok(None),
     }
-    ticket.duplicate_of = conn.prepare_cached("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1")?.query_row([&ticket.id], |r| r.get(0)).optional()?;
-    let mut stmt = conn.prepare_cached("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1 ORDER BY t.number")?;
-    ticket.duplicates = stmt
-        .query_map([&ticket.id], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
-    Ok(())
 }
 
 impl Workspace {

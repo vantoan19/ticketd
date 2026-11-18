@@ -21,11 +21,15 @@ import {
 } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { LazySourceEditor, MarkdownEditor } from "./MarkdownEditor";
 import { EditorView } from "@codemirror/view";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
+
+// Source mode's editor loads lazily (see SourceEditorLoading.test.tsx); load it
+// up front so these tests can read it at once.
+beforeAll(() => LazySourceEditor.preload());
 
 const nativeDrop = vi.hoisted(() => ({ listen: vi.fn() }));
 vi.mock("@tauri-apps/api/webview", () => ({

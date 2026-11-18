@@ -268,3 +268,33 @@ fn a_failed_apply_changes_nothing_and_leaves_capture_on() {
         BTreeSet::from([(RecordKind::Ticket, existing.id)])
     );
 }
+
+#[test]
+fn saving_a_ticket_unchanged_does_not_mark_it_for_upload() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = open(&dir);
+    let ticket = workspace.create_ticket("Same").unwrap();
+    take(&mut workspace);
+
+    // An editor saving what it loaded writes the title, body and status again.
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                title: Some(ticket.title.clone()),
+                body: Some(ticket.body.clone()),
+                status: Some(ticket.status),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(take(&mut workspace), BTreeSet::new());
+
+    workspace
+        .change_ticket(&ticket.reference, title("Different"))
+        .unwrap();
+    assert_eq!(
+        take(&mut workspace),
+        BTreeSet::from([(RecordKind::Ticket, ticket.id)])
+    );
+}

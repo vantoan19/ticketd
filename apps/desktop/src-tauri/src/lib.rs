@@ -12,12 +12,12 @@ mod chats;
 mod cli_status;
 mod drive_commands;
 mod folder_probe;
+#[cfg(test)]
+mod runtime_trace;
 mod sync_commands;
 mod sync_scheduler;
 mod wake;
 mod workspace_session;
-#[cfg(test)]
-mod runtime_trace;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
@@ -589,6 +589,20 @@ fn find_tickets_with_updates(
                 .map(TicketPage::Metadata),
             None => w.find_tickets_with_updates(&filter).map(TicketPage::Full),
         })
+        .map_err(BridgeFailure::from)
+}
+/// Every Inbox entry with whether it still needs the person, in one read.
+#[tauri::command(async)]
+fn inbox_attention() -> Result<ticketd_core::InboxAttention, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.inbox_attention())
+        .map_err(BridgeFailure::from)
+}
+/// A page of list or board rows: what `find_tickets_with_updates` finds, without bodies.
+#[tauri::command(async)]
+fn find_ticket_rows(filter: TicketFilter) -> Result<Vec<ticketd_core::TicketRow>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.find_ticket_rows(&filter))
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
@@ -1925,6 +1939,8 @@ pub fn run() -> Result<(), tauri::Error> {
             show_ticket,
             search_tickets,
             find_tickets_with_updates,
+            find_ticket_rows,
+            inbox_attention,
             count_tickets,
             context_graph,
             workspace_graph,

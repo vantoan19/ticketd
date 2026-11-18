@@ -87,6 +87,11 @@
    refused column says so in its header. */
 .board-card-container {
   position: relative;
+  /* Cards out of view skip layout and paint; a column holds hundreds. The
+     margin keeps the card's focus ring and lift unclipped. */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 88px;
+  overflow-clip-margin: 8px;
 }
 /* The card being dragged leaves a dashed slot; so does a card that moved
    at once, until the core confirms it. */
@@ -175,13 +180,16 @@
 }
 [data-board-drag-preview] {
   position: fixed;
+  top: 0;
+  left: 0;
   z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 0;
 
-  transform: scale(1.02) rotate(-1.2deg);
+  /* The pointer moves it through these, without a React render. */
+  transform: translate(var(--drag-x), var(--drag-y)) scale(1.02) rotate(-1.2deg);
   pointer-events: none;
 }
 .board-read-error {

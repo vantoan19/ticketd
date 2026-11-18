@@ -1,4 +1,5 @@
 import { Check, LoaderCircle, Circle } from "lucide-react";
+import { ticketDraftKey } from "./ticket-draft";
 import { Tooltip } from "@/components/ui/tooltip";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -56,7 +57,7 @@ const storedDraftSchema = z.object({
   baseTitle: z.string(),
   baseBody: z.string(),
 });
-const draftKey = (id: string) => `ticketd:ticket-draft:${id}`;
+const draftKey = ticketDraftKey;
 
 function storeDraft(id: string, draft: Content, saved: Content) {
   try {

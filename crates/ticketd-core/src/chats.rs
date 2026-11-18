@@ -6,6 +6,8 @@
 //! terminal outcome are separate writes, so a saved message is never mistaken for a
 //! delivered or completed one. Nothing here dispatches work.
 
+use std::collections::HashMap;
+
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -273,6 +275,24 @@ impl Chat {
     pub fn unseen(&self, turn: &ChatTurn) -> bool {
         turn.state != ChatTurnState::Active && turn.position > self.seen_through
     }
+}
+
+/// A Chat as the Chat list and overview read it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChatSummary {
+    pub chat: Chat,
+    /// The other Chats outside the trash that work in the same folder ("Chats in this
+    /// folder"), Active ones first, each most recently changed first.
+    pub folder_chats: Vec<FolderChat>,
+}
+
+/// Another Chat working in a Chat's folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FolderChat {
+    pub id: String,
+    pub title: Option<String>,
+    pub archived: bool,
+    pub trashed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -813,36 +833,52 @@ fn turn_from_row(row: &Row<'_>) -> rusqlite::Result<ChatTurn> {
 
 const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending FROM chat_turns";
 
+/// A Chat's own columns, for `FROM chats`, in the order [`chat_from_row`] reads them.
+const CHAT_COLUMNS: &str = "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
+    (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
+    seen_through, muted, read_through, marked_unread";
+
+/// A Chat from [`CHAT_COLUMNS`], without its links and active turn.
+fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<Chat> {
+    Ok(Chat {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        harness: row.get(2)?,
+        execution_folder: row.get(3)?,
+        folder_managed: row.get(4)?,
+        archived: row.get(5)?,
+        trashed: row.get(6)?,
+        queue_paused: row.get(7)?,
+        created_at: row.get(8)?,
+        effective_settings: row.get(9)?,
+        native_session_id: row.get(10)?,
+        seen_through: row.get(11)?,
+        muted: row.get(12)?,
+        read_through: row.get(13)?,
+        marked_unread: row.get(14)?,
+        links: Vec::new(),
+        active_turn: None,
+    })
+}
+
+/// Which Chats a list shows, as SQL over `chats`. A Chat owned by an Automation run is
+/// reached from its run, not from a list.
+fn list_scope(filter: ChatListFilter) -> &'static str {
+    match filter {
+        ChatListFilter::Active => "trashed = 0 AND archived = 0 AND automation_run_id IS NULL",
+        ChatListFilter::Archived => "trashed = 0 AND archived = 1 AND automation_run_id IS NULL",
+        ChatListFilter::Trashed => "trashed = 1 AND automation_run_id IS NULL",
+    }
+}
+
+/// Most recently changed first.
+const LIST_ORDER: &str =
+    "(SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id";
+
 fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
-        .query_row(
-            "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
-                    (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
-                    seen_through, muted, read_through, marked_unread
-             FROM chats WHERE id = ?1",
-            [id],
-            |row| {
-                Ok(Chat {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    harness: row.get(2)?,
-                    execution_folder: row.get(3)?,
-                    folder_managed: row.get(4)?,
-                    archived: row.get(5)?,
-                    trashed: row.get(6)?,
-                    queue_paused: row.get(7)?,
-                    created_at: row.get(8)?,
-                    effective_settings: row.get(9)?,
-                    native_session_id: row.get(10)?,
-                    seen_through: row.get(11)?,
-                    muted: row.get(12)?,
-                    read_through: row.get(13)?,
-                    marked_unread: row.get(14)?,
-                    links: Vec::new(),
-                    active_turn: None,
-                })
-            },
-        )
+        .prepare_cached(&format!("SELECT {CHAT_COLUMNS} FROM chats WHERE id = ?1"))?
+        .query_row([id], chat_from_row)
         .optional()?
         .ok_or_else(|| Error::ChatNotFound(id.to_owned()))?;
     let mut statement = connection
@@ -1656,14 +1692,9 @@ impl Workspace {
     /// Chats with the most recently changed first.
     // ponytail: unpaged; add a limit when workspaces hold thousands of Chats.
     pub fn list_chats(&self, filter: ChatListFilter) -> Result<Vec<Chat>, Error> {
-        let scope = match filter {
-            ChatListFilter::Active => "trashed = 0 AND archived = 0",
-            ChatListFilter::Archived => "trashed = 0 AND archived = 1",
-            ChatListFilter::Trashed => "trashed = 1",
-        };
-        // A Chat owned by an Automation run is reached from its run, not from here.
         let mut statement = self.connection.prepare(&format!(
-            "SELECT id FROM chats WHERE {scope} AND automation_run_id IS NULL ORDER BY (SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id"
+            "SELECT id FROM chats WHERE {} ORDER BY {LIST_ORDER}",
+            list_scope(filter)
         ))?;
         let ids = statement
             .query_map([], |row| row.get::<_, String>(0))?
@@ -1671,6 +1702,91 @@ impl Workspace {
         ids.iter()
             .map(|id| read_chat(&self.connection, id))
             .collect()
+    }
+
+    /// The Chats a list shows, as [`Workspace::list_chats`] reads them, each with the
+    /// other Chats outside the trash that work in its folder. A fixed number of queries
+    /// however many Chats there are.
+    pub fn chat_summaries(&self, filter: ChatListFilter) -> Result<Vec<ChatSummary>, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            let mut statement = connection.prepare_cached(&format!(
+                "SELECT {CHAT_COLUMNS} FROM chats WHERE {} ORDER BY {LIST_ORDER}",
+                list_scope(filter)
+            ))?;
+            let mut chats = statement
+                .query_map([], chat_from_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            let ids =
+                serde_json::to_string(&chats.iter().map(|chat| &chat.id).collect::<Vec<_>>())?;
+            let mut links: HashMap<String, Vec<ChatLink>> = HashMap::new();
+            let mut statement = connection.prepare_cached(
+                "SELECT chat_id, kind, target_id FROM chat_links WHERE chat_id IN (SELECT value FROM json_each(?1)) ORDER BY rowid",
+            )?;
+            for link in statement.query_map([&ids], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    ChatLink {
+                        kind: named(row, 1)?,
+                        id: row.get(2)?,
+                    },
+                ))
+            })? {
+                let (chat_id, link) = link?;
+                links.entry(chat_id).or_default().push(link);
+            }
+            // The columns of `TURN`, then the Chat.
+            let mut statement = connection.prepare_cached(
+                "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, chat_id
+                   FROM chat_turns WHERE chat_id IN (SELECT value FROM json_each(?1)) AND state = 'active'",
+            )?;
+            let mut turns: HashMap<String, ChatTurn> = statement
+                .query_map([&ids], |row| {
+                    Ok((row.get::<_, String>(10)?, turn_from_row(row)?))
+                })?
+                .collect::<Result<_, _>>()?;
+            // The Chats outside the trash, in the order the Active and then the Archived
+            // list show them, that share a folder with a Chat of this list.
+            let mut statement = connection.prepare_cached(&format!(
+                "SELECT id, title, archived, trashed, execution_folder FROM chats
+                  WHERE trashed = 0 AND automation_run_id IS NULL
+                    AND execution_folder IN (SELECT execution_folder FROM chats WHERE id IN (SELECT value FROM json_each(?1)))
+                  ORDER BY archived, {LIST_ORDER}"
+            ))?;
+            let mut by_folder: HashMap<String, Vec<FolderChat>> = HashMap::new();
+            for found in statement.query_map([&ids], |row| {
+                Ok((
+                    row.get::<_, String>(4)?,
+                    FolderChat {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        archived: row.get(2)?,
+                        trashed: row.get(3)?,
+                    },
+                ))
+            })? {
+                let (folder, chat) = found?;
+                by_folder.entry(folder).or_default().push(chat);
+            }
+            Ok(chats
+                .drain(..)
+                .map(|mut chat| {
+                    chat.links = links.remove(&chat.id).unwrap_or_default();
+                    chat.active_turn = turns.remove(&chat.id);
+                    let folder_chats = by_folder
+                        .get(&chat.execution_folder)
+                        .map(|chats| {
+                            chats
+                                .iter()
+                                .filter(|other| other.id != chat.id)
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    ChatSummary { chat, folder_chats }
+                })
+                .collect())
+        })
     }
 
     pub fn set_chat_title(&mut self, id: &str, title: Option<&str>) -> Result<Chat, Error> {

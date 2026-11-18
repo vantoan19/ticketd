@@ -15,10 +15,11 @@ import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { DraftRetention } from "@/lib/api/attachments";
 import { CreateTicketDialog } from "./CreateTicketDialog";
 
-// The description editor loads lazily. Load it once up front so no test waits on
+// The description editor and its source editor load lazily. Load them once up front so no test waits on
 // the import, which is slow when many test files start together.
 beforeAll(async () => {
-  await import("@/features/markdown/MarkdownEditor");
+  const editor = await import("@/features/markdown/MarkdownEditor");
+  await editor.LazySourceEditor.preload();
 });
 
 // What the tag search answers; empty unless a test sets it.

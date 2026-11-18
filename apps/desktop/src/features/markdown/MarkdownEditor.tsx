@@ -15,17 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { Prec } from "@codemirror/state";
-import {
-  HighlightStyle,
-  LanguageSupport,
-  syntaxHighlighting,
-  syntaxTree,
-} from "@codemirror/language";
-import { tags } from "@lezer/highlight";
-import { commonmarkLanguage } from "@codemirror/lang-markdown";
-import { EditorView, keymap } from "@codemirror/view";
+import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { RangeApi, TextApi, NodeApi, type Value } from "platejs";
 import {
   Plate,
@@ -163,55 +153,29 @@ import { slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
 import { codeBlockText, readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
+import { lazyView } from "@/app/lazy-view";
+import type { SourceEditorProps } from "./SourceEditor";
 const AttachmentProtection = createContext<(uri: string) => Promise<void>>(
   async () => {},
 );
 
-// Source colours come from the --syntax-* tokens, so light and dark each get their
-// own palette (CodeMirror's default style is light only). Headings are not underlined:
-// only links look like links.
-const sourceHighlight = HighlightStyle.define([
-  { tag: tags.heading, color: "var(--syntax-title)", fontWeight: "600" },
-  { tag: tags.strong, fontWeight: "600" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strikethrough, textDecoration: "line-through" },
-  { tag: [tags.link, tags.url], color: "var(--link-foreground)" },
-  { tag: tags.labelName, color: "var(--syntax-keyword)" },
-  { tag: [tags.monospace, tags.string], color: "var(--syntax-string)" },
-  { tag: [tags.escape, tags.character], color: "var(--syntax-number)" },
-  {
-    tag: [
-      tags.processingInstruction,
-      tags.comment,
-      tags.contentSeparator,
-      tags.quote,
-    ],
-    color: "var(--syntax-comment)",
-  },
-]);
+/** CodeMirror source editing, in its own chunk: loaded on first use or `preload`. */
+export const LazySourceEditor = lazyView(
+  () => import("./SourceEditor").then((module) => module.SourceEditor),
+  SourceLoading,
+);
 
-// Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
-// doubled and a closing fence never inherits indentation.
-const sourceExtensions = [
-  // CommonMark alone: markdown()'s defaults add the HTML, CSS and JS parsers.
-  new LanguageSupport(commonmarkLanguage),
-  syntaxHighlighting(sourceHighlight),
-  EditorView.lineWrapping,
-  Prec.highest(
-    keymap.of([
-      {
-        key: "Enter",
-        run: (view) => {
-          view.dispatch(view.state.replaceSelection("\n"), {
-            scrollIntoView: true,
-            userEvent: "input",
-          });
-          return true;
-        },
-      },
-    ]),
-  ),
-];
+/** The source as plain text while CodeMirror loads. */
+function SourceLoading({ value }: SourceEditorProps) {
+  return (
+    <div className="cm-editor">
+      <pre className="cm-content whitespace-pre-wrap">{value}</pre>
+      <span className="sr-only" role="status">
+        Loading source editor…
+      </span>
+    </div>
+  );
+}
 
 /** The icon each block in the slash menu wears (P3: every row has one). */
 const blockIcons: Record<string, LucideIcon> = {
@@ -467,13 +431,11 @@ function Diagram(props: PlateElementProps) {
           onOpenChange={setSourceOpen}
         >
           {sourceOpen && (
-            <CodeMirror
+            <LazySourceEditor
               value={source}
               readOnly={readOnly}
               editable={!readOnly}
               aria-label="Mermaid source"
-              theme="none"
-              extensions={sourceExtensions}
               onChange={(next) => {
                 const path = editor.api.findPath(props.element);
                 if (!readOnly && path && next !== source)
@@ -1244,13 +1206,6 @@ export function MarkdownEditor({
   const source = sourceMode || forced;
   const container = useRef<HTMLElement>(null);
   const sourceEditor = useRef<ReactCodeMirrorRef>(null);
-  const sourceEditorExtensions = useMemo(
-    () => [
-      ...sourceExtensions,
-      EditorView.contentAttributes.of({ "aria-label": `${label} source` }),
-    ],
-    [label],
-  );
   const [attachmentPicker, setAttachmentPicker] = useState(false);
   const [capture, setCapture] = useState<{ sources: CaptureSource[] }>();
   const focusAfterInsertion = useRef(false);
@@ -1458,6 +1413,9 @@ export function MarkdownEditor({
     const pending = insertion.current;
     const uri = await attachments.uri(file.id);
     await recovery.put(historyOwner, null, [`[File](${uri})`], "undo");
+    // Already loaded when source mode shows its editor; awaited before the
+    // checks below so nothing can change between them and the insertion.
+    const sourceModule = source ? await import("./source-links") : undefined;
     if (!pending || pending !== insertion.current) return;
     report();
     if (pending.markdown !== emitted.current)
@@ -1472,13 +1430,11 @@ export function MarkdownEditor({
       const caret = pending.source ?? view.state.selection.main;
       let from = before?.from ?? caret.from;
       let to = before?.from ?? caret.to;
-      if (!before) {
-        let node = syntaxTree(view.state).resolveInner(caret.from, -1);
-        const linkNodes = ["Link", "Image", "Autolink"];
-        while (node.parent && !linkNodes.includes(node.name))
-          node = node.parent;
-        if (linkNodes.includes(node.name)) from = to = node.to;
-      }
+      const linkEnd =
+        before || !sourceModule
+          ? undefined
+          : sourceModule.linkInsertionPoint(view.state, caret.from);
+      if (linkEnd !== undefined) from = to = linkEnd;
       // Source insertion may be inside a GFM table; a filename pipe must stay in its cell.
       const link = writeMarkdown([
         {
@@ -1973,15 +1929,14 @@ export function MarkdownEditor({
       {source ? (
         <>
           {controls(null)}
-          <CodeMirror
+          <LazySourceEditor
             ref={sourceEditor}
             value={value}
             autoFocus={autoFocus}
             readOnly={readOnly}
             editable={!readOnly}
             aria-label={`${label} source`}
-            theme="none"
-            extensions={sourceEditorExtensions}
+            contentLabel={`${label} source`}
             onChange={(next) => {
               if (readOnly || next === value) return;
               // The host takes the text as typed. The rich value reads it

@@ -236,3 +236,23 @@ it("only the open Ticket's dropped row is watched", () => {
   });
   expect(hook.result.current.watching).toBeNull();
 });
+
+it("pointing at a row re-renders nothing, and the row under the pointer holds its place", () => {
+  let renders = 0;
+  const view = renderHook(
+    (props: { tickets: Ticket[] }) => {
+      renders += 1;
+      return useStickyRows(props.tickets, null, () => undefined, [], "all");
+    },
+    { initialProps: { tickets: [listed, other] } },
+  );
+  const before = renders;
+  act(() => view.result.current.onPointerEnter(other.id));
+  expect(renders).toBe(before);
+  const moved = { ...other, status: "Done" };
+  view.rerender({ tickets: [listed, moved] });
+  const shown = view.result.current.tickets.find(
+    (item) => item.id === other.id,
+  )!;
+  expect(view.result.current.status(shown)).toBe("In progress");
+});

@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { onSyncStatus, syncApi, type SyncStatus } from "@/lib/sync-api";
-import { SyncStatusContext, type SyncNavigation } from "./sync-status";
+import {
+  SyncNavigationContext,
+  SyncStatusContext,
+  type SyncNavigation,
+} from "./sync-status";
+
+/** The status the bridge sent is plain JSON, so equal text is an equal status. */
+const unchanged = (previous: SyncStatus | null, next: SyncStatus) =>
+  previous !== null && JSON.stringify(previous) === JSON.stringify(next);
 
 /**
  * Holds the sync status for every place that shows it. It is read once on
@@ -13,10 +21,16 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
   // A read that started before a newer status arrived must not put the old one back.
   const generation = useRef(0);
   const navigation = useRef<SyncNavigation | null>(null);
+  // The same status again keeps the old object, so nothing re-renders.
+  const show = useMemo(
+    () => (next: SyncStatus) =>
+      setStatus((previous) => (unchanged(previous, next) ? previous : next)),
+    [],
+  );
   const actions = useMemo(() => {
     const apply = (next: SyncStatus) => {
       generation.current += 1;
-      setStatus(next);
+      show(next);
     };
     return {
       apply,
@@ -27,11 +41,15 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
       },
       openSettings: () => navigation.current?.openSettings(),
       openReview: () => navigation.current?.openReview(),
-      setNavigation: (next: SyncNavigation) => {
-        navigation.current = next;
-      },
     };
-  }, []);
+  }, [show]);
+  // Its own context: the shell registers navigation without following the status.
+  const setNavigation = useMemo(
+    () => (next: SyncNavigation) => {
+      navigation.current = next;
+    },
+    [],
+  );
   useEffect(() => {
     let active = true;
     let stop: (() => void) | undefined;
@@ -49,7 +67,7 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
         void syncApi
           .status()
           .then((next) => {
-            if (active && started === generation.current) setStatus(next);
+            if (active && started === generation.current) show(next);
           })
           .catch(() => {
             // Nothing is shown until the desktop sends a status.
@@ -59,7 +77,11 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
       active = false;
       stop?.();
     };
-  }, [actions]);
+  }, [actions, show]);
   const value = useMemo(() => ({ status, ...actions }), [status, actions]);
-  return <SyncStatusContext value={value}>{children}</SyncStatusContext>;
+  return (
+    <SyncNavigationContext value={setNavigation}>
+      <SyncStatusContext value={value}>{children}</SyncStatusContext>
+    </SyncNavigationContext>
+  );
 }
