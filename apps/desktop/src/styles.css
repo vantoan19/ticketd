@@ -2960,6 +2960,16 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   .rich-document li > input[type="checkbox"]::after {
     background: CanvasText;
   }
+  /* A done item's strike is a background, which forced colours remove: a
+     plain line-through takes its place. */
+  .markdown-document
+    li:has(> .markdown-check[data-checked])
+    > .markdown-task-text,
+  .rich-document
+    li:has(> input[type="checkbox"]:checked)
+    > div[data-slate-node] {
+    text-decoration: line-through;
+  }
 }
 /* An attachment picture in the text: up to the column's width; opens the preview. */
 .markdown-image {

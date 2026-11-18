@@ -12,7 +12,7 @@ import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 export function TicketDetailPane({
   workspace,
   hidden = false,
-  expanded,
+  expanded: expandedNow,
   inboxTarget,
   onExpand,
   onReturn,
@@ -46,8 +46,11 @@ export function TicketDetailPane({
     plans,
     openAdjacent,
   } = workspace;
-  const { selected, position } = useHeld(
+  // `expanded` is held with the ticket: closing from full width clears it at
+  // once, and the document would re-lay out at the split's width as it fades.
+  const { selected, position, expanded } = useHeld(
     {
+      expanded: expandedNow,
       selected: workspace.selected,
       position:
         context === "inbox"

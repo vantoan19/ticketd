@@ -26,6 +26,16 @@
     filter: blur(var(--motion-blur-out));
   }
 }
+/* Coming back, the document was on screen a moment ago and the layout's long
+   task holds its first frame, so it does not start from nothing: with the list
+   also at opacity 0 that frame would be blank. */
+@keyframes ticket-pane-return {
+  from {
+    opacity: 0.5;
+    transform: translateX(var(--pane-from));
+    filter: blur(var(--motion-blur-in));
+  }
+}
 @keyframes ticket-list-in {
   from {
     opacity: 0;
@@ -64,6 +74,7 @@
   :is(#detail, [data-view-id="detail"])
   .ticket-detail {
   --pane-from: calc(var(--pane-glide-wide) * -1);
+  animation-name: ticket-pane-return;
 }
 .ticket-workspace[data-pane-arrival="return"]
   :is(#list, [data-view-id="list"])

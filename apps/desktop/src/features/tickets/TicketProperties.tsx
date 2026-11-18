@@ -6,7 +6,14 @@ import {
   ticketCommandActions,
 } from "@/lib/ticket-command-actions";
 import { LatestUpdate } from "./LatestUpdate";
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ChoiceList, type Choice } from "@/components/ui/choice-list";
 import { Folder, Layers, type LucideIcon } from "lucide-react";
 import { SourceRail } from "./SourceRail";
@@ -69,11 +76,29 @@ const PILL_GAP = 4;
  * that glided to a new line, as layout motion would move it, was clipped by its
  * row and vanished mid-way). A pill's gap opens and closes with it. The pills
  * present when the row appears do not animate.
+ *
+ * In the strip the whole row is one wrapping item, so a narrowing row would
+ * hop to the line above (and leave its "+" behind) part-way through the exit.
+ * The row keeps the width it had until the last leaving pill is gone.
  */
 function TagPills({ tags }: { tags: string[] }) {
+  const root = useRef<HTMLSpanElement>(null);
+  const before = useRef(tags);
+  const [kept, setKept] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const removed = before.current.some((tag) => !tags.includes(tag));
+    before.current = tags;
+    // The leaving pill is still laid out here, so this is the width it had.
+    if (removed && exitTransition().duration > 0 && root.current)
+      setKept((width) => width ?? root.current?.offsetWidth ?? null);
+  }, [tags]);
   return (
-    <span className="rail-tags">
-      <Presence initial={false}>
+    <span
+      ref={root}
+      className="rail-tags"
+      style={kept === null ? undefined : { minWidth: kept }}
+    >
+      <Presence initial={false} onExitComplete={() => setKept(null)}>
         {tags.map((tag) => {
           const smooth = spring("smooth");
           return (
