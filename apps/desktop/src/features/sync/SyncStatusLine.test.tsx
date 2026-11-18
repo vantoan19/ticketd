@@ -1,6 +1,7 @@
 import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -316,9 +317,13 @@ test("offline with something else to look at: the line says Offline and counts w
   expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
-test("a poll that finds the same status re-renders nothing", async () => {
+test("the same status sent again re-renders nothing", async () => {
   const status = syncStatus();
   api.status.mockImplementation(async () => structuredClone(status));
+  vi.mocked(onSyncStatus).mockImplementation(async (handler) => {
+    push = handler;
+    return () => {};
+  });
   const shellRendered = vi.fn();
   const readerRendered = vi.fn();
   function CountedShell() {
@@ -341,10 +346,8 @@ test("a poll that finds the same status re-renders nothing", async () => {
     shellRendered.mock.calls.length,
     readerRendered.mock.calls.length,
   ];
-  // The 2 s poll reads the status again and finds nothing new.
-  await waitFor(() => expect(api.status).toHaveBeenCalledTimes(2), {
-    timeout: 4000,
-  });
+  // The desktop sends a status equal to the one shown.
+  act(() => push(structuredClone(status)));
   await Promise.resolve();
   expect([
     shellRendered.mock.calls.length,
