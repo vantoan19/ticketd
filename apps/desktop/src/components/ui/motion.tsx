@@ -125,7 +125,9 @@ export function Glide({ id, className }: { id: string; className?: string }) {
 /**
  * Text that changes in place: the old words fade out while the new fade in.
  * `delay` (seconds) holds the new words back, for something else to arrive
- * first. Put it inside `MotionProvider`.
+ * first. Under reduced motion or a held key the words just change, in one
+ * frame: there is no exit to wait for and no entrance to start from blank.
+ * Put it inside `MotionProvider`.
  */
 export function CrossfadeText({
   children,
@@ -136,18 +138,26 @@ export function CrossfadeText({
   className?: string;
   delay?: number;
 }) {
+  const instant = enterTransition().duration === 0;
   return (
     <span data-slot="crossfade" className={cn("ui-crossfade", className)}>
-      <AnimatePresence initial={false}>
-        <m.span
-          key={children}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1, transition: { ...enterTransition(), delay } }}
-          exit={{ opacity: 0, transition: exitTransition() }}
-        >
-          {children}
-        </m.span>
-      </AnimatePresence>
+      {instant ? (
+        <span key={children}>{children}</span>
+      ) : (
+        <AnimatePresence initial={false}>
+          <m.span
+            key={children}
+            initial={{ opacity: 0 }}
+            animate={{
+              opacity: 1,
+              transition: { ...enterTransition(), delay },
+            }}
+            exit={{ opacity: 0, transition: exitTransition() }}
+          >
+            {children}
+          </m.span>
+        </AnimatePresence>
+      )}
     </span>
   );
 }
