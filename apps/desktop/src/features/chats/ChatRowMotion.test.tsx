@@ -1,11 +1,5 @@
 // @vitest-environment jsdom
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { ChatClientContext } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
@@ -118,41 +112,41 @@ test("a Chat that now needs you travels to its group, then its fill arrives", as
   await screen.findByRole("button", { name: /^Retries/ });
   const glide = vi.mocked(rowMotion.glide);
   glide.mockClear();
-  const timers = vi.spyOn(globalThis, "setTimeout");
-  expect(document.querySelector(".ui-arrival")).toBeNull();
-  act(() => {
-    client.push("c2", {
-      id: "req-1",
-      at: "2026-11-10T10:00:00Z",
-      kind: "request",
-      request: "approval",
-      title: "Codex wants to run",
-      subject: "npm test",
-      options: [{ id: "once", label: "Allow once" }],
-      free_text: false,
-      state: "pending",
+  // Only timers are faked: the fill waits on one, and time is the test's.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    expect(document.querySelector(".ui-arrival")).toBeNull();
+    await act(async () => {
+      client.push("c2", {
+        id: "req-1",
+        at: "2026-11-10T10:00:00Z",
+        kind: "request",
+        request: "approval",
+        title: "Codex wants to run",
+        subject: "npm test",
+        options: [{ id: "once", label: "Allow once" }],
+        free_text: false,
+        state: "pending",
+      });
+      client.patch("c2", { activity: "waiting" });
     });
-    client.patch("c2", { activity: "waiting" });
-  });
-  await waitFor(() =>
     expect(
       [...document.querySelectorAll(".chat-list-group")].map(
         (group) => group.textContent,
       ),
-    ).toContain("Needs you"),
-  );
-  // The row that moved glides on the travel spring; the one that stayed does not.
-  expect(glide.mock.calls.some(([, name]) => name === "travel")).toBe(true);
-  // The fill waits for the row to get there: it is scheduled for the end of
-  // the travel spring, and is not on the page before.
-  expect(document.querySelector(".ui-arrival")).toBeNull();
-  expect(timers).toHaveBeenCalledWith(expect.any(Function), travelMs());
-  await waitFor(() =>
-    expect(document.querySelector(".ui-arrival")).toBeTruthy(),
-  );
-  const fill = document.querySelector(".ui-arrival");
-  expect(fill).toBeTruthy();
-  expect(fill?.closest(".chat-row-item")?.textContent).toContain("Retries");
-  expect(document.querySelectorAll(".ui-arrival")).toHaveLength(1);
-  timers.mockRestore();
+    ).toContain("Needs you");
+    // The row that moved glides on the travel spring; the one that stayed does not.
+    expect(glide.mock.calls.some(([, name]) => name === "travel")).toBe(true);
+    // The fill waits for the row to get there: it is not on the page before
+    // the travel spring ends, and is when it has.
+    act(() => void vi.advanceTimersByTime(travelMs() - 1));
+    expect(document.querySelector(".ui-arrival")).toBeNull();
+    act(() => void vi.advanceTimersByTime(1));
+    const fill = document.querySelector(".ui-arrival");
+    expect(fill).toBeTruthy();
+    expect(fill?.closest(".chat-row-item")?.textContent).toContain("Retries");
+    expect(document.querySelectorAll(".ui-arrival")).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

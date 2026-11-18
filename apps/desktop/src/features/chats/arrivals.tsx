@@ -45,6 +45,11 @@ export function Rise(props: ComponentProps<typeof Appear>) {
  * sits below glides up as the words in it fade (a `Rise` inside) instead of
  * jumping when they have gone. It adds no fade of its own. Timing is read as it
  * renders, so reduced motion and a held key reach it.
+ *
+ * A box that comes back while it leaves returns to its own height (`auto`),
+ * never staying at the height it had reached. While its height is a number of
+ * pixels it is moving, and `DockSlot` follows it instead of springing after it.
+ * Once it leaves it takes no pointer (`data-leaving`).
  */
 export function Space({
   as = "div",
@@ -56,9 +61,13 @@ export function Space({
   children: ReactNode;
 }) {
   const Box = as === "li" ? m.li : m.div;
+  const present = useIsPresent();
   return (
     <Box
+      data-space=""
       {...(className && { className })}
+      {...(!present && { "data-leaving": "" })}
+      animate={{ height: "auto", transitionEnd: { overflow: "visible" } }}
       exit={{
         height: 0,
         overflow: "clip",

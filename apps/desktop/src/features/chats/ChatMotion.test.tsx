@@ -291,24 +291,13 @@ test("queued messages open and close their own space; the queue leaves with its 
   );
 });
 
-// jsdom lays nothing out, so a popLayout exit (which measures the leaving
-// element before lifting it out of the flow) never takes effect. Report a size
-// for every element so that it would.
+// jsdom lays nothing out, so a box leaving from `auto` has no height to close
+// from. Report a size for every element.
 function withLayoutSize() {
-  const real = window.getComputedStyle.bind(window);
-  const spy = vi
-    .spyOn(window, "getComputedStyle")
-    .mockImplementation((element, pseudo) => {
-      const style = real(element, pseudo);
-      return new Proxy(style, {
-        get(target, key) {
-          if (key === "width" || key === "height") return "40px";
-          const value: unknown = Reflect.get(target, key);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-    });
-  return () => spy.mockRestore();
+  const box = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockReturnValue(new DOMRect(0, 0, 40, 40));
+  return () => box.mockRestore();
 }
 
 test("a removed queue card fades out, out of reach, as its space closes; the cards below glide up", async () => {
