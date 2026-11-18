@@ -234,10 +234,10 @@ fn watch_overview(app: &AppHandle) {
         let (mut seen, mut shown) = (None, None);
         let mut notifier = Notifier::default();
         // The first reading sets what is already there; nothing in it is announced.
-        if let Ok((overview, digest, rows)) = chats.overview_digest() {
-            shown = Some(digest);
-            set_badge(&app, overview.app_icon);
+        if let Ok((overview, rows, trashed)) = chats.overview_digest() {
             notify(&app, &chats, &mut notifier, &rows);
+            shown = Some((rows, trashed));
+            set_badge(&app, overview.app_icon);
         }
         loop {
             // A quiet window that ends is a reason to read again, like a change.
@@ -261,10 +261,11 @@ fn watch_overview(app: &AppHandle) {
                 continue;
             }
             seen = written;
-            let Ok((overview, digest, rows)) = chats.overview_digest() else {
+            let Ok((overview, rows, trashed)) = chats.overview_digest() else {
                 continue;
             };
             notify(&app, &chats, &mut notifier, &rows);
+            let digest = (rows, trashed);
             // Lists are fetched again on this event, so it fires only when a row or the
             // counts would read differently; a text checkpoint alone changes neither.
             if shown.as_ref() != Some(&digest) {

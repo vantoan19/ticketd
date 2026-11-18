@@ -2390,3 +2390,35 @@ async fn a_long_codex_turn_reads_the_workspace_at_most_once_per_update_and_sends
         "an item is never sent twice unchanged in a row"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn an_overview_wake_reads_again_only_the_chat_that_changed() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let mut core = f.core();
+    for _ in 0..99 {
+        core.create_chat(
+            None,
+            NewChat {
+                title: Some("Quiet".to_owned()),
+                harness: "codex".to_owned(),
+                execution_folder: f.dir.path().to_string_lossy().into_owned(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    }
+    f.chats.overview_digest().unwrap();
+    f.emit(command_tool("cmd-1", "cargo test", ToolStatus::Running))
+        .await;
+    let built = f.chats.rows_built.load(Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let (_, rows, _) = f.chats.overview_digest().unwrap();
+    println!(
+        "overview wake, 100 Chats, one changed: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(rows.len(), 100);
+    assert_eq!(f.chats.rows_built.load(Ordering::SeqCst) - built, 1);
+}

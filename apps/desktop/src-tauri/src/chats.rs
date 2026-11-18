@@ -762,6 +762,21 @@ struct View {
     around: Option<Surroundings>,
 }
 
+/// The overview's rows as last built, kept between wakes.
+#[derive(Default)]
+struct BuiltRows {
+    /// The change sequence they were built at.
+    sequence: i64,
+    rows: HashMap<String, BuiltRow>,
+}
+
+/// One Chat's row, with the live state and check it was built with.
+struct BuiltRow {
+    live: ChatLive,
+    checked: Option<String>,
+    summary: Summary,
+}
+
 pub struct Chats {
     open_workspace: WorkspaceOpener,
     adapters: Vec<Arc<dyn HarnessAdapter>>,
@@ -793,9 +808,13 @@ pub struct Chats {
     options: Mutex<HashMap<&'static str, (Option<String>, HarnessOptionsView)>>,
     /// The version each harness reported at its last check.
     versions: Mutex<HashMap<&'static str, Option<String>>>,
+    built_rows: Mutex<BuiltRows>,
     /// How often this service borrowed the workspace, for tests that bound it.
     #[cfg(test)]
     workspace_uses: AtomicU64,
+    /// How many list rows were built from history.
+    #[cfg(test)]
+    rows_built: AtomicU64,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -826,8 +845,11 @@ impl Chats {
             notify: AtomicBool::new(true),
             options: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
+            built_rows: Mutex::default(),
             #[cfg(test)]
             workspace_uses: AtomicU64::new(0),
+            #[cfg(test)]
+            rows_built: AtomicU64::new(0),
         })
     }
 
@@ -900,12 +922,12 @@ impl Chats {
     }
 
     /// Moves whenever any Chat record was written or live state changed; cheap to read.
-    pub fn digest(&self) -> Option<String> {
+    pub fn digest(&self) -> Option<(i64, Vec<(String, ChatLive)>)> {
         let host = self.started_host()?;
         let sequence = self.workspace().ok()?.chat_change_sequence().ok()?;
         let mut live: Vec<_> = host.live().into_iter().collect();
         live.sort_by(|a, b| a.0.cmp(&b.0));
-        Some(format!("{sequence} {live:?}"))
+        Some((sequence, live))
     }
 
     fn started_host(&self) -> Option<ChatHost> {
@@ -1163,38 +1185,92 @@ impl Chats {
         let folder_users = folder_users(&workspace)?;
         let mut summaries = Vec::new();
         for chat in workspace.list_chats(filter)? {
-            let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
             let live = live
                 .as_ref()
                 .and_then(|live| live.get(&chat.id).cloned())
                 .unwrap_or_else(ChatLive::idle);
-            summaries.push(chat_view::summary(
-                &chat,
-                &live,
-                &Tracker::from_items(&items),
-                &surroundings(
-                    &workspace,
-                    &chat,
-                    &folder_users,
-                    self.checked(&chat.id),
-                    &live,
-                    &self.missing_folders,
-                )?,
-            ));
+            summaries.push(self.summary(&workspace, &chat, &folder_users, &live)?);
         }
         Ok(summaries)
     }
 
-    /// The counts, the rows outside the trash, and a text that differs exactly when a
-    /// list row or the counts would read differently. Streamed text being checkpointed
-    /// changes neither, so lists are not fetched again for it.
-    pub fn overview_digest(&self) -> Outcome<(Overview, String, Vec<Summary>)> {
-        let mut rows = self.summaries(ChatListFilter::Active)?;
-        rows.extend(self.summaries(ChatListFilter::Archived)?);
-        let overview = overview_of(&rows);
-        let trashed = self.summaries(ChatListFilter::Trashed)?;
-        let digest = format!("{rows:?}{trashed:?}");
-        Ok((overview, digest, rows))
+    /// One Chat's list row, read from its latest history.
+    fn summary(
+        &self,
+        workspace: &Workspace,
+        chat: &Chat,
+        folder_users: &[Chat],
+        live: &ChatLive,
+    ) -> Outcome<Summary> {
+        #[cfg(test)]
+        self.rows_built.fetch_add(1, Ordering::SeqCst);
+        let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
+        Ok(chat_view::summary(
+            chat,
+            live,
+            &Tracker::from_items(&items),
+            &surroundings(
+                workspace,
+                chat,
+                folder_users,
+                self.checked(&chat.id),
+                live,
+                &self.missing_folders,
+            )?,
+        ))
+    }
+
+    /// The counts, the rows outside the trash, and the trashed rows. Only the Chats
+    /// written since the last call, or whose live state moved, are read again; the
+    /// others keep the row built before. A list row may lag a change outside its Chat,
+    /// such as a linked ticket's status, until its Chat next changes.
+    pub fn overview_digest(&self) -> Outcome<(Overview, Vec<Summary>, Vec<Summary>)> {
+        let workspace = self.workspace()?;
+        let live = self
+            .started_host()
+            .map(|host| host.live())
+            .unwrap_or_default();
+        let mut built = lock(&self.built_rows);
+        // Read first: a write after it is caught by the next call.
+        let sequence = workspace.chat_change_sequence()?;
+        let changed: HashSet<String> = workspace
+            .chats_changed_since(built.sequence)?
+            .into_iter()
+            .map(|(chat_id, _)| chat_id)
+            .collect();
+        let users = folder_users(&workspace)?;
+        let trashed = workspace.list_chats(ChatListFilter::Trashed)?;
+        let mut kept = HashMap::new();
+        let mut row = |chat: &Chat| -> Outcome<Summary> {
+            let live = live.get(&chat.id).cloned().unwrap_or_else(ChatLive::idle);
+            let checked = self.checked(&chat.id);
+            let summary = match built.rows.remove(&chat.id) {
+                Some(row)
+                    if !changed.contains(&chat.id)
+                        && row.live == live
+                        && row.checked == checked =>
+                {
+                    row.summary
+                }
+                _ => self.summary(&workspace, chat, &users, &live)?,
+            };
+            kept.insert(
+                chat.id.clone(),
+                BuiltRow {
+                    live,
+                    checked,
+                    summary: summary.clone(),
+                },
+            );
+            Ok(summary)
+        };
+        let rows = users.iter().map(&mut row).collect::<Outcome<Vec<_>>>()?;
+        let trashed = trashed.iter().map(&mut row).collect::<Outcome<Vec<_>>>()?;
+        *built = BuiltRows {
+            sequence,
+            rows: kept,
+        };
+        Ok((overview_of(&rows), rows, trashed))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {
