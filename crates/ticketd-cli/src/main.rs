@@ -2068,7 +2068,9 @@ const TOKEN_HINT: &str =
 fn main() {
     ticketd_diagnostics::init_cli();
     let correlation = ticketd_diagnostics::cli_span(
-        std::env::var(ticketd_core::CHAT_ID_VARIABLE).ok().as_deref(),
+        std::env::var(ticketd_core::CHAT_ID_VARIABLE)
+            .ok()
+            .as_deref(),
         std::env::var(ticketd_core::AUTOMATION_RUN_ID_VARIABLE)
             .ok()
             .as_deref(),

@@ -194,7 +194,9 @@ impl Scheduler {
         if now < *at {
             return;
         }
-        let error = (self.upkeep)(workspace).err();
+        let error = tracing::info_span!("workspace_upkeep")
+            .in_scope(|| (self.upkeep)(workspace))
+            .err();
         let failed = error.as_ref().map(ToString::to_string);
         *at = now + failed.as_ref().map_or(UPKEEP_INTERVAL, |_| UPKEEP_RETRY);
         // Logged once, and again only if it changes or comes back.
@@ -241,9 +243,11 @@ impl Scheduler {
     ) -> Result<SyncStatus, Error> {
         // What this run takes with it needs no upload of its own afterwards.
         let mut taken = None;
-        let result = workspace.and_then(|mut workspace| {
-            taken = Some(workspace.change_mark()?);
-            run(&mut workspace, binding.remote.as_ref())
+        let result = tracing::info_span!("workspace_sync_pass").in_scope(|| {
+            workspace.and_then(|mut workspace| {
+                taken = Some(workspace.change_mark()?);
+                run(&mut workspace, binding.remote.as_ref())
+            })
         });
         let mut watch = lock(&self.watch);
         if let Some(taken) = taken {

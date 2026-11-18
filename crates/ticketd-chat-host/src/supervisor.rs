@@ -16,6 +16,7 @@ use ticketd_core::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::host::{
@@ -175,6 +176,9 @@ struct ActiveTurn {
     /// The workspace change token when the turn started; unchanged means nothing in
     /// the workspace changed, so the agent changed no record.
     token: Option<i64>,
+    /// Open for as long as the Turn is, so every line about it is correlated and its close
+    /// records how long it took.
+    span: tracing::Span,
 }
 
 struct LiveRequest {
@@ -334,7 +338,17 @@ impl Supervisor {
             refreshing: None,
             start_settings: StartSettings::default(),
         };
-        tokio::spawn(supervisor.run());
+        // A root span, so a Chat opened from inside a command or a pass is not held open by it.
+        let span = tracing::info_span!(
+            parent: None,
+            "chat",
+            chat_id = supervisor.chat_id.as_str(),
+            automation_run_id = supervisor
+                .unattended
+                .as_ref()
+                .map(|unattended| unattended.run_id.as_str()),
+        );
+        tokio::spawn(supervisor.run().instrument(span));
         sender
     }
 
@@ -359,7 +373,10 @@ impl Supervisor {
                         let _ = reply.send(unconfirmed);
                         return;
                     }
-                    Some(command) => self.on_command(command).await,
+                    Some(command) => {
+                        let turn = self.turn_span();
+                        self.on_command(command).instrument(turn).await;
+                    }
                     None => {
                         self.shutting_down = true;
                         self.stop_runtime(StopReason::Quit).await;
@@ -367,9 +384,13 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv() => self.on_done(done),
-                event = next_event(&mut self.runtime) => self.on_event(event),
-                () = sleep_until_some(timer) => self.on_timer(),
+                Some(done) = self.finished.recv() => {
+                    self.turn_span().in_scope(|| self.on_done(done));
+                }
+                event = next_event(&mut self.runtime) => {
+                    self.turn_span().in_scope(|| self.on_event(event));
+                }
+                () = sleep_until_some(timer) => self.turn_span().in_scope(|| self.on_timer()),
             }
             if self.storage_failed.is_some() && (self.runtime.is_some() || self.opening.is_some()) {
                 // Controlled shutdown: nothing more can be recorded, so nothing more runs.
@@ -1622,6 +1643,7 @@ impl Supervisor {
             turn_id: turn_id.clone(),
             native: native.clone(),
             token,
+            span: tracing::info_span!("chat_turn"),
         });
         self.unconfirmed_start = None;
         if self.stop_when_turn_known {
@@ -1629,6 +1651,13 @@ impl Supervisor {
             self.interrupt();
         }
         Some(turn_id)
+    }
+
+    /// The Turn in progress, for the work done on its behalf; the Chat's own span when none is.
+    fn turn_span(&self) -> tracing::Span {
+        self.active
+            .as_ref()
+            .map_or_else(tracing::Span::current, |active| active.span.clone())
     }
 
     fn on_event(&mut self, event: Option<RuntimeEvent>) {
