@@ -296,8 +296,17 @@ impl Supervisor {
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
-        let mut supervisor = Self {
-            span: tracing::Span::none(),
+        // A root span, so a Chat opened from inside a command or a pass is not held open by it.
+        let span = tracing::info_span!(
+            parent: None,
+            "chat",
+            chat_id = chat.id.as_str(),
+            automation_run_id = unattended
+                .as_ref()
+                .map(|unattended| unattended.run_id.as_str()),
+        );
+        let supervisor = Self {
+            span: span.clone(),
             chat_id: chat.id.clone(),
             open_workspace,
             adapter,
@@ -342,17 +351,6 @@ impl Supervisor {
             refreshing: None,
             start_settings: StartSettings::default(),
         };
-        // A root span, so a Chat opened from inside a command or a pass is not held open by it.
-        let span = tracing::info_span!(
-            parent: None,
-            "chat",
-            chat_id = supervisor.chat_id.as_str(),
-            automation_run_id = supervisor
-                .unattended
-                .as_ref()
-                .map(|unattended| unattended.run_id.as_str()),
-        );
-        supervisor.span = span.clone();
         tokio::spawn(supervisor.run().instrument(span));
         sender
     }
