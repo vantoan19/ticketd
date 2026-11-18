@@ -569,6 +569,62 @@ test("an unavailable source never claims a fresh sync or a green configuration",
   ).toBeNull();
 });
 
+test("a saved source without a credential shows one row that says how to sign in", async () => {
+  vi.mocked(sourcesClient.checkConnection).mockRejectedValue(
+    new SourceFailure("unauthenticated", "no GitHub credential found"),
+  );
+  render(
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [
+          {
+            provider: "github",
+            health: "unavailable",
+            last_attempt_at: new Date().toISOString(),
+            last_refreshed_at: null,
+            error: {
+              code: "unauthenticated",
+              message: "no GitHub credential found",
+            },
+            failing_since: new Date().toISOString(),
+            retry_after: null,
+            unavailable_tickets: 0,
+            partial_message: null,
+          },
+        ],
+        entries: null,
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourceCard
+        entry={{
+          ...entry,
+          saved: {
+            provider: "github",
+            config: { repositories: ["o/r"] },
+            account: "octo",
+            saved_at: "2026-02-01T00:00:00Z",
+          },
+        }}
+      />
+    </SourceActivityContext.Provider>,
+  );
+  await screen.findByText("Not signed in to GitHub");
+  expect(
+    screen.getByText(
+      "Run “gh auth login” in a terminal, then choose Check connection.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/needs to be connected again/)).toBeNull();
+  // The same cause is not told a second time, nor does the first row claim a connection.
+  expect(screen.queryByText(/GitHub is unavailable/)).toBeNull();
+  expect(screen.queryByText("Connected as octo")).toBeNull();
+  expect(screen.getByText("Saved for octo")).toBeTruthy();
+});
+
 test("discovery uses the core's imported references and Discard restores saved rules", async () => {
   vi.mocked(sourcesClient.preview).mockResolvedValue({
     ...preview,
