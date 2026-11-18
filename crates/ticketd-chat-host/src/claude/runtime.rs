@@ -197,7 +197,7 @@ impl Connection {
             options,
         });
         if let Some(stderr) = io.stderr {
-            tokio::spawn(connection.stderr.clone().drain(stderr));
+            connection.stderr.clone().spawn_drain(stderr, crate::Harness::ClaudeCode);
         }
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
         tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));

@@ -107,7 +107,7 @@ impl Connection {
             ticket_tool: OnceLock::new(),
         });
         if let Some(stderr) = io.stderr {
-            tokio::spawn(connection.stderr.clone().drain(stderr));
+            connection.stderr.clone().spawn_drain(stderr, crate::Harness::Codex);
         }
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
         tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));
