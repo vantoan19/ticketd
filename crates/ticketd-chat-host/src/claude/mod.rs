@@ -44,6 +44,8 @@ pub struct ClaudeAdapter {
     /// What the last check found Claude Code offers: the check already asked, so
     /// `options` need not start it again.
     offered: Arc<Mutex<Option<HarnessOptions>>>,
+    /// Shared by every bridge it starts, so they share what `inspect` found.
+    options: Options,
 }
 
 impl ClaudeAdapter {
@@ -53,6 +55,7 @@ impl ClaudeAdapter {
             bridge: bridge.into(),
             selected: None,
             offered: Arc::default(),
+            options: Options::default(),
         }
     }
 
@@ -62,6 +65,7 @@ impl ClaudeAdapter {
             bridge: bridge.into(),
             selected: Some(executable.into()),
             offered: Arc::default(),
+            options: Options::default(),
         }
     }
 
@@ -89,7 +93,7 @@ impl HarnessAdapter for ClaudeAdapter {
         match spawn(&self.bridge, &[], Serving::Nothing) {
             Ok(io) => {
                 let (inspection, offered) =
-                    runtime::probe(io, &executable, Options::default()).await;
+                    runtime::probe(io, &executable, self.options.clone()).await;
                 *self.offered.lock().unwrap_or_else(PoisonError::into_inner) =
                     offered.and_then(Result::ok);
                 inspection
@@ -114,14 +118,14 @@ impl HarnessAdapter for ClaudeAdapter {
             .ok_or_else(|| "Claude Code was not found".to_owned())?;
         let io = spawn(&self.bridge, &[], Serving::Nothing)
             .map_err(|error| self.bridge_problem(&error).message)?;
-        runtime::probe_options(io, &executable, Options::default()).await
+        runtime::probe_options(io, &executable, self.options.clone()).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let executable = self.executable().ok_or_else(not_installed)?;
         let io = spawn(&self.bridge, &[], Serving::of(&request))
             .map_err(|error| self.bridge_problem(&error))?;
-        runtime::open_over(io, &request, &executable, Options::default()).await
+        runtime::open_over(io, &request, &executable, self.options.clone()).await
     }
 }
 
