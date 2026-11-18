@@ -1,5 +1,9 @@
 /* The Automations page reuses the Chats panes and rows (chats.css). */
 
+/* The header sits in a wrapper that takes step 0 of the page's entrance. */
+.auto-list-head {
+  flex: none;
+}
 .auto-list-pane[data-empty] > .chat-rows {
   flex: none;
   padding: 0;
