@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import {
@@ -53,6 +53,28 @@ it("is marked as resizing only while an expand or collapse plays", () => {
   expect(dialog().hasAttribute("data-resizing")).toBe(false);
 
   rerender(<Create expanded={false} />);
+  expect(dialog().hasAttribute("data-resizing")).toBe(true);
+});
+
+it("a window resize interrupts the size glide without stopping the next deliberate change", () => {
+  const { rerender } = render(<Create expanded={false} />);
+  rerender(<Create expanded />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(dialog().hasAttribute("data-resizing")).toBe(true);
+
+  fireEvent.resize(window);
+  expect(dialog().hasAttribute("data-resizing")).toBe(false);
+
+  act(() => vi.advanceTimersByTime(100));
+  rerender(<Create expanded={false} />);
+  expect(dialog().hasAttribute("data-resizing")).toBe(true);
+  // The interrupted expansion's old timer must not cut this collapse short.
+  act(() => vi.advanceTimersByTime(240));
+  expect(dialog().hasAttribute("data-resizing")).toBe(true);
+  act(() => vi.advanceTimersByTime(200));
+  expect(dialog().hasAttribute("data-resizing")).toBe(false);
+
+  rerender(<Create expanded />);
   expect(dialog().hasAttribute("data-resizing")).toBe(true);
 });
 
