@@ -2,9 +2,13 @@ import "./styles.css";
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { windowClient } from "@/lib/api/window";
+import { installErrorReporter } from "@/lib/error-report";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing application root");
+
+// Before anything else loads, so a failure while the modules load is recorded too.
+const errors = installErrorReporter();
 
 // The boot module: public/theme.js has painted the stored theme, so the window
 // shows now, while the application's modules load.
@@ -26,7 +30,13 @@ const [
   throw error;
 });
 void windowClient.booted();
-const applicationRoot = createRoot(root);
+const applicationRoot = createRoot(root, {
+  // React reports an error nothing caught here instead of to the window.
+  onUncaughtError(error) {
+    errors.report(error);
+    console.error(error);
+  },
+});
 
 /** Every way the app starts renders inside the one motion provider. */
 function render(children: ReactNode) {

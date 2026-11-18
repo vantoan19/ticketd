@@ -17,6 +17,7 @@ mod runtime_trace;
 mod sync_commands;
 mod sync_scheduler;
 mod wake;
+mod webview_report;
 mod workspace_session;
 
 use ticketd_core::{
@@ -2042,6 +2043,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_answer_quit,
             chat_commands::chat_stopping,
             chat_commands::close_keeps_running,
+            webview_report::report_webview_error,
             sync_commands::sync_conflicts,
             sync_commands::sync_conflict,
             sync_commands::resolve_sync_conflict,
