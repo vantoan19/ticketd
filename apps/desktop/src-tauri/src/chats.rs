@@ -20,7 +20,7 @@ use ticketd_chat_host::{
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
     ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
-    ChatTurnState, NewChat, Workspace,
+    ChatTurnState, NewChat, Workspace, WorkspaceGuard,
 };
 use tokio::sync::oneshot;
 
@@ -836,7 +836,7 @@ impl Chats {
         )
     }
 
-    fn workspace(&self) -> Outcome<Workspace> {
+    fn workspace(&self) -> Outcome<WorkspaceGuard> {
         Ok((self.open_workspace)()?)
     }
 

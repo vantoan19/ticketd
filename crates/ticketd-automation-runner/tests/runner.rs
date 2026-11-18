@@ -18,7 +18,7 @@ use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
     ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger,
-    Workspace,
+    Workspace, WorkspaceSession,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},
@@ -46,7 +46,7 @@ type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) + Send>>>>;
 
 fn opener(path: &Path) -> WorkspaceOpener {
     let path = path.to_owned();
-    Arc::new(move || Workspace::open(&path))
+    Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
 }
 
 fn tools() -> AutomationAgentTools {
@@ -125,7 +125,7 @@ impl Fixture {
         let host_opener: WorkspaceOpener = {
             let (path, looks) = (path.clone(), as_the_host_looks.clone());
             Arc::new(move || {
-                let mut workspace = Workspace::open(&path)?;
+                let mut workspace = WorkspaceSession::for_file(&path)?.workspace()?;
                 if let Some(happens) = looks.lock().unwrap().as_ref() {
                     happens(&mut workspace);
                 }
@@ -1012,7 +1012,7 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
                 "the disk is gone".into(),
             ));
         }
-        Workspace::open(&path)
+        WorkspaceSession::for_file(&path)?.workspace()
     });
     let host = f.host.clone();
     let runner = Runner::new(
@@ -1074,7 +1074,7 @@ async fn a_storage_failure_starting_the_agent_ends_the_run_without_its_failure_p
                 "the disk is gone".into(),
             ));
         }
-        Workspace::open(&path)
+        WorkspaceSession::for_file(&path)?.workspace()
     });
     let host = ChatHost::new(
         flaky,
@@ -1165,7 +1165,7 @@ async fn a_storage_failure_while_the_agent_works_ends_the_run_without_its_failur
                 "the disk is gone".into(),
             ));
         }
-        Workspace::open(&path)
+        WorkspaceSession::for_file(&path)?.workspace()
     });
     let host = ChatHost::new(
         flaky,

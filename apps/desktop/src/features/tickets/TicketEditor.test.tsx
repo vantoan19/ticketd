@@ -65,7 +65,8 @@ async function autosave() {
 async function editDescription() {
   await act(async () => {
     fireEvent.click(screen.getByRole("group", { name: "Read description" }));
-    await import("@/features/markdown/MarkdownEditor");
+    const editor = await import("@/features/markdown/MarkdownEditor");
+    await editor.LazySourceEditor.preload();
   });
 }
 

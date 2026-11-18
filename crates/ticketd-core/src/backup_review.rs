@@ -243,6 +243,7 @@ impl Workspace {
                 backup,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )?;
+            crate::session::configure(&connection)?;
             connection.execute_batch("BEGIN")?;
             let check = match check_backup(&connection, Ladder::Required) {
                 // Text or another format entirely, so there is nothing of ours to name.

@@ -2,20 +2,26 @@ import { useInboxTriage } from "./inbox-triage-context";
 import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
-import { useState } from "react";
+import { memo, useRef, useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { useContext, useEffect } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { type Project, type Ticket } from "@/lib/api/client";
-import { OpenTicket, useTicket } from "./open-ticket";
+import { OpenTicket, useKnownTicket, useTicket } from "./open-ticket";
+import { hasTicketDraft } from "./ticket-draft";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useMentionReadiness } from "./use-mention-readiness";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
 type NoteTarget = { id: string; key: number };
+type InboxTarget = { reference: string; id: string; key: number };
+
+/** Hidden pages kept besides the selected one; any page holding a draft is kept too. */
+const RECENT_PAGES = 3;
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
 function newest(
@@ -62,7 +68,11 @@ export function TicketDetails({
   onExpand: () => void;
   onReturn: () => void;
   setSelected: (value: string | null, mention?: MentionTarget) => void;
-  /** The tickets opened so far, each kept as a page (hidden unless selected). */
+  /**
+   * The tickets opened so far, least recently selected first. The selected
+   * page, the three before it and any page with an unsaved draft stay mounted
+   * (hidden unless selected); the others close and open again from the cache.
+   */
   opened?: string[];
   /** The followed mention can be judged: the selected ticket's record is current. */
   onMentionReady: (reference: string) => void;
@@ -105,8 +115,28 @@ export function TicketDetails({
     onReady: onMentionReady,
     onEnd: onClearMention,
   });
+  const recovery = useDraftRecovery();
+  const known = useKnownTicket();
+  const recent = opened
+    .filter((reference) => reference !== selected)
+    .slice(-RECENT_PAGES);
+  const kept = opened.filter((reference) => {
+    if (reference === selected || recent.includes(reference)) return true;
+    const id = known(reference)?.id;
+    return id !== undefined && hasTicketDraft(recovery, id);
+  });
   const pages =
-    selected && !opened.includes(selected) ? [...opened, selected] : opened;
+    selected && !kept.includes(selected) ? [...kept, selected] : kept;
+  // Pages are memoized, so what they call is the same object on every render.
+  const latest = useRef({ open, showGraph, setSelected });
+  useEffect(() => {
+    latest.current = { open, showGraph, setSelected };
+  });
+  const [pageActions] = useState<PageActions>(() => ({
+    select: (reference) => latest.current.open(reference),
+    openGraph: (reference) => latest.current.showGraph(reference),
+    mention: (target) => latest.current.setSelected(target.reference, target),
+  }));
   return (
     <section
       ref={setBoundary}
@@ -174,39 +204,21 @@ export function TicketDetails({
                   />
                 )}
                 {pages.map((reference) => (
-                  <OpenTicket
+                  <OpenedPage
                     key={reference}
                     reference={reference}
-                    seed={reference === selected ? preview : undefined}
+                    active={reference === selected}
                     hidden={hidden || reference !== selected}
-                  >
-                    <TicketPage
-                      active={reference === selected}
-                      outsideResults={outsideResults && reference === selected}
-                      projects={projects}
-                      plans={plans}
-                      select={open}
-                      onOpenGraph={() => showGraph(reference)}
-                      noteTarget={newest(
-                        inboxTarget?.reference === reference
-                          ? inboxTarget
-                          : null,
-                        mention?.reference === reference && mention.noteId
-                          ? { id: mention.noteId, key: mention.key }
-                          : null,
-                      )}
-                      mention={
-                        mention?.reference === reference &&
-                        !mention.noteId &&
-                        mention.ready
-                          ? mention
-                          : null
-                      }
-                      onMention={(target) =>
-                        setSelected(target.reference, target)
-                      }
-                    />
-                  </OpenTicket>
+                    seed={reference === selected ? preview : undefined}
+                    outsideResults={outsideResults && reference === selected}
+                    projects={projects}
+                    plans={plans}
+                    inboxTarget={
+                      inboxTarget?.reference === reference ? inboxTarget : null
+                    }
+                    mention={mention?.reference === reference ? mention : null}
+                    actions={pageActions}
+                  />
                 ))}
               </div>
             </>
@@ -216,3 +228,58 @@ export function TicketDetails({
     </section>
   );
 }
+
+type PageActions = {
+  select: (reference: string | null) => void;
+  openGraph: (reference: string) => void;
+  mention: (target: MentionTarget) => void;
+};
+
+/**
+ * One opened Ticket's page. It renders again only when its own inputs change,
+ * not for the other pages or for the header above them.
+ */
+const OpenedPage = memo(function OpenedPage({
+  reference,
+  active,
+  hidden,
+  seed,
+  outsideResults,
+  projects,
+  plans,
+  inboxTarget,
+  mention,
+  actions,
+}: {
+  reference: string;
+  active: boolean;
+  hidden: boolean;
+  seed: Ticket | undefined;
+  outsideResults: boolean;
+  projects: Project[];
+  plans: Plan[];
+  /** The Inbox note to show, when it is on this page. */
+  inboxTarget: InboxTarget | null;
+  /** The mention being followed, when it is on this page. */
+  mention: FollowedMention | null;
+  actions: PageActions;
+}) {
+  return (
+    <OpenTicket reference={reference} seed={seed} hidden={hidden}>
+      <TicketPage
+        active={active}
+        outsideResults={outsideResults}
+        projects={projects}
+        plans={plans}
+        select={actions.select}
+        onOpenGraph={() => actions.openGraph(reference)}
+        noteTarget={newest(
+          inboxTarget,
+          mention?.noteId ? { id: mention.noteId, key: mention.key } : null,
+        )}
+        mention={mention && !mention.noteId && mention.ready ? mention : null}
+        onMention={actions.mention}
+      />
+    </OpenTicket>
+  );
+});

@@ -10,11 +10,15 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { LazySourceEditor, MarkdownEditor } from "./MarkdownEditor";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import { slashChoices, slashMayOpen } from "./slash-menu";
+
+// Source mode's editor loads lazily (see SourceEditorLoading.test.tsx); load it
+// up front so these tests can read it at once.
+beforeAll(() => LazySourceEditor.preload());
 vi.mock("./MermaidDiagram", () => ({
   MermaidDiagram: () => <div>Diagram preview</div>,
 }));

@@ -33,9 +33,11 @@ impl Fixture {
     async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
+        // The desktop creates its workspace before its session opens it.
+        drop(Workspace::open(&path).unwrap());
         let fake = FakeAdapter::codex();
         let chats = Chats::new(
-            Arc::new(move || Workspace::open(&path)),
+            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
             vec![Arc::new(fake.clone())],
             vec![(
                 "claude-code",

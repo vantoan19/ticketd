@@ -46,7 +46,8 @@ impl Fixture {
             })
             .unwrap();
         core.set_automation_enabled(&automation.id, true).unwrap();
-        let opener: WorkspaceOpener = Arc::new(move || Workspace::open(&path));
+        let opener: WorkspaceOpener =
+            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace());
         let chats = Chats::new(opener.clone(), Vec::new(), Vec::new(), None);
         let runner = AutomationRunner::new(chats.clone(), opener, Arc::new(|_| Ok(())));
         let fixture = Self {

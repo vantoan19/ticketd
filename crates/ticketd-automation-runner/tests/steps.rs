@@ -10,7 +10,7 @@ use ticketd_chat_host::{ChatHost, WorkspaceOpener};
 use ticketd_core::{
     AutomationDefinition, AutomationNotification, AutomationRun, AutomationRunStatus,
     AutomationStepStatus, Check, NotifyTarget, Status, Step, StepAction, StepChange, Ticket,
-    Trigger, Workspace, WorkspaceActor,
+    Trigger, Workspace, WorkspaceActor, WorkspaceSession,
 };
 
 const TAG: &str = "ready-for-testing";
@@ -25,7 +25,7 @@ struct Fixture {
 
 fn opener(path: &Path) -> WorkspaceOpener {
     let path = path.to_owned();
-    Arc::new(move || Workspace::open(&path))
+    Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
 }
 
 fn change(id: &str, change: StepChange) -> Step {

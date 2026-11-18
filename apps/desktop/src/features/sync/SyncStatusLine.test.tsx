@@ -13,7 +13,7 @@ import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 import { invoke } from "@tauri-apps/api/core";
 import { syncApi, type SyncStatus } from "@/lib/sync-api";
 import { SyncStatusProvider } from "./SyncStatusProvider";
-import { useSyncNavigation } from "./sync-status";
+import { useSyncNavigation, useSyncStatus } from "./sync-status";
 import { hostFailure, notConnected, syncStatus } from "./sync-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -288,4 +288,40 @@ test("offline with something else to look at: the line says Offline and counts w
     "3 changes waiting to upload",
   );
   expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+test("a poll that finds the same status re-renders nothing", async () => {
+  const status = syncStatus();
+  api.status.mockImplementation(async () => structuredClone(status));
+  const shellRendered = vi.fn();
+  const readerRendered = vi.fn();
+  function CountedShell() {
+    shellRendered();
+    useSyncNavigation({ openSettings, openReview });
+    return null;
+  }
+  function Reader() {
+    readerRendered();
+    return <span>{useSyncStatus().status?.state}</span>;
+  }
+  render(
+    <SyncStatusProvider>
+      <CountedShell />
+      <Reader />
+    </SyncStatusProvider>,
+  );
+  await screen.findByText("uploaded");
+  const before = [
+    shellRendered.mock.calls.length,
+    readerRendered.mock.calls.length,
+  ];
+  // The 2 s poll reads the status again and finds nothing new.
+  await waitFor(() => expect(api.status).toHaveBeenCalledTimes(2), {
+    timeout: 4000,
+  });
+  await Promise.resolve();
+  expect([
+    shellRendered.mock.calls.length,
+    readerRendered.mock.calls.length,
+  ]).toEqual(before);
 });

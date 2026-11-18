@@ -8,7 +8,15 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type { ComponentProps } from "react";
 import type { ChangeSignal } from "@/lib/workspace-reads";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
@@ -47,6 +55,12 @@ vi.mock("@uiw/react-codemirror", () => ({
     />
   ),
 }));
+// The source editor loads lazily. Load it once up front so no test waits on
+// the import, which is slow when many test files start together.
+beforeAll(async () => {
+  const editor = await import("@/features/markdown/MarkdownEditor");
+  await editor.LazySourceEditor.preload();
+});
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();

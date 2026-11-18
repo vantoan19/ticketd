@@ -736,6 +736,8 @@ One default workspace lives in the operating system's application-data directory
 
 The core owns migrations, export, backup/restore, and data access. Domain validation and persistence must remain atomic across processes, including cycle checks and hierarchy rules. Validate lock handling, concurrent writes, migration coordination, and active-database backup behavior before finalizing the process model.
 
+The desktop, with the Chat host and Automation runner inside it, keeps the Workspace open through the core's one `WorkspaceSession` per file and process, instead of opening it per command; the CLI opens it once per invocation. Inside the session the file is in WAL mode with every commit synced, so readers and writers do not wait for each other. A restore or migration in another process asks warm sessions to let go through a release marker beside the Workspace, and a file swap first checkpoints the file back to a single file and removes any leftover WAL. Backups are always single files. See [one warm Workspace session per process](adr/0016-one-warm-workspace-session-per-process-wal-inside-it.md).
+
 ## External changes
 
 The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Plan counts. It polls the core's change token every two seconds. Any change makes every visible read stale, a hidden view catches up once when shown, and the desktop's own write causes one refresh rather than two and shows what it set at once. A read that failed is read again only on Retry, on a change while it is visible, or when it is shown after a change it missed. Views move onto one reads module that owns this, the open Ticket first; see [desktop reads from one change token](adr/0013-desktop-reads-from-one-change-token.md). Unsaved editor drafts remain owned by the UI.
@@ -863,6 +865,7 @@ A future server may call the same core workflow interface. Personal sync between
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
 - [Optional expected values guard editor saves](adr/0015-optional-expected-values-guard-editor-saves.md)
 - [Shared core and local workspace](adr/0004-shared-core-local-workspace.md)
+- [One warm Workspace session per process, WAL inside it](adr/0016-one-warm-workspace-session-per-process-wal-inside-it.md)
 - [Workspace sync through Google Drive](adr/0011-markdown-file-sync-through-google-drive.md)
 - [Sync file format](sync-file-format.md)
 

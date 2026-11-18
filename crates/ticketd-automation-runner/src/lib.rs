@@ -180,7 +180,8 @@ impl Runner {
             let mut going = self.going();
             // Read each time, so a change in Settings counts from the next run.
             let mut workspace = (self.inner.open_workspace)()?;
-            let started = workspace.start_automation_runs(workspace.automation_runs_at_once()?)?;
+            let at_once = workspace.automation_runs_at_once()?;
+            let started = workspace.start_automation_runs(at_once)?;
             going.extend(started.iter().map(|run| run.id.clone()));
             started
         };

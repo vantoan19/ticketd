@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { beforeAll, afterEach, expect, it, vi } from "vitest";
+import { LazySourceEditor, MarkdownEditor } from "./MarkdownEditor";
+
+// Source mode's editor loads lazily (see SourceEditorLoading.test.tsx); load it
+// up front so these tests can read it at once.
+beforeAll(() => LazySourceEditor.preload());
 
 afterEach(cleanup);
 

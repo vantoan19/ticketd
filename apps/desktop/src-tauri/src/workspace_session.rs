@@ -1,37 +1,44 @@
-//! Opens commands against the desktop's workspace for the lifetime of the app.
-use std::{path::PathBuf, sync::Mutex};
+//! The desktop's workspace for the lifetime of the app: the core's warm session on it,
+//! found the first time a command needs it (ADR 0016).
+use std::sync::{Arc, Mutex};
 
-use ticketd_core::{Error, Workspace};
+use ticketd_core::{Error, Workspace, WorkspaceGuard, WorkspaceSession};
 
 pub(crate) struct Session {
-    path: Mutex<Option<PathBuf>>,
+    session: Mutex<Option<Arc<WorkspaceSession>>>,
 }
 
 impl Session {
     pub(crate) const fn new() -> Self {
         Self {
-            path: Mutex::new(None),
+            session: Mutex::new(None),
         }
+    }
+
+    /// The core session, initializing the workspace on first use.
+    pub(crate) fn session(
+        &self,
+        initialize: impl FnOnce() -> Result<Workspace, Error>,
+    ) -> Result<Arc<WorkspaceSession>, Error> {
+        // Hold the lock through first initialization so simultaneous startup commands
+        // cannot initialize a second workspace after the first one has disappeared.
+        let mut session = self.session.lock().map_err(|_| {
+            Error::Path("workspace session is unavailable; restart ticketd and retry".into())
+        })?;
+        if let Some(session) = session.as_ref() {
+            return Ok(Arc::clone(session));
+        }
+        let path = initialize()?.workspace_info()?.path;
+        let found = WorkspaceSession::for_file(path)?;
+        *session = Some(Arc::clone(&found));
+        Ok(found)
     }
 
     pub(crate) fn open(
         &self,
         initialize: impl FnOnce() -> Result<Workspace, Error>,
-    ) -> Result<Workspace, Error> {
-        // Hold the lock through first initialization so simultaneous startup commands
-        // cannot initialize a second workspace after the first one has disappeared.
-        let mut path = self.path.lock().map_err(|_| {
-            Error::Path("workspace session is unavailable; restart ticketd and retry".into())
-        })?;
-        let mut workspace = match path.as_deref() {
-            Some(path) => Workspace::open_existing(path)?,
-            None => {
-                let workspace = initialize()?;
-                *path = Some(PathBuf::from(workspace.workspace_info()?.path));
-                workspace
-            }
-        };
-        drop(path);
+    ) -> Result<WorkspaceGuard, Error> {
+        let mut workspace = self.session(initialize)?.workspace()?;
         workspace.act_as_local_person()?;
         Ok(workspace)
     }
@@ -67,7 +74,10 @@ mod tests {
             .unwrap()
             .create_ticket("Preserve this outcome")
             .unwrap();
-        std::fs::rename(&path, &preserved).unwrap();
+        // The session lets go of the file for work that moves it, as a restore does.
+        let core = session.session(|| Workspace::open(&path)).unwrap();
+        core.exclusive(|path| Ok(std::fs::rename(path, &preserved)?))
+            .unwrap();
 
         let refresh = open().and_then(|workspace| workspace.list_tickets());
         let error = refresh.unwrap_err();
