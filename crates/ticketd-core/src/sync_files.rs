@@ -924,6 +924,36 @@ pub(crate) fn resolve_ticket_references(
     Ok(())
 }
 
+/// The most characters of a record's readable file name, before `.md`.
+const NAME_CHARS: usize = 80;
+
+/// A title as a file name a file system or storage listing shows as typed:
+/// characters they would not are dropped, each run of separators becomes one
+/// space, and a long title is cut at a word, marked with an ellipsis.
+fn readable_name(title: &str) -> String {
+    let words: Vec<String> = title
+        .split(|c: char| {
+            matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+                || c.is_control()
+                || c.is_whitespace()
+        })
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let name = words.join(" ");
+    if name.chars().count() <= NAME_CHARS {
+        return name;
+    }
+    // Room for the ellipsis; a single long word is cut mid-word.
+    let cut: String = name.chars().take(NAME_CHARS - 1).collect();
+    let next_is_space = name.chars().nth(NAME_CHARS - 1) == Some(' ');
+    let kept = match cut.rfind(' ') {
+        Some(at) if !next_is_space => &cut[..at],
+        _ => cut.as_str(),
+    };
+    format!("{}…", kept.trim_end())
+}
+
 impl SyncRecord {
     /// A path for the record's file that never changes, by kind and GUID. The
     /// storage does not use it: there a file carries a readable name
@@ -963,17 +993,7 @@ impl SyncRecord {
             | SyncKind::AutomationAgent
             | SyncKind::Automation => field("name").to_owned(),
         };
-        // Characters a file system or a storage listing would not show as typed.
-        let name: String = name
-            .chars()
-            .map(|c| match c {
-                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
-                c if c.is_control() => ' ',
-                c => c,
-            })
-            .take(80)
-            .collect();
-        match name.trim() {
+        match readable_name(&name).as_str() {
             "" => "Untitled.md".to_owned(),
             name => format!("{name}.md"),
         }
@@ -1843,6 +1863,25 @@ pub(crate) fn find_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_readable_name_collapses_separators_and_cuts_long_titles_at_a_word() {
+        assert_eq!(readable_name("Keyboard audit: B"), "Keyboard audit B");
+        assert_eq!(readable_name("  a/b\\c \t<d>  "), "a b c d");
+        assert_eq!(readable_name("short title"), "short title");
+        let exact = "x".repeat(NAME_CHARS);
+        assert_eq!(readable_name(&exact), exact);
+
+        let long = "word ".repeat(30);
+        let name = readable_name(&long);
+        assert!(name.chars().count() <= NAME_CHARS, "{name}");
+        assert!(name.ends_with("word…"), "{name}");
+
+        let one_word = "é".repeat(100);
+        let name = readable_name(&one_word);
+        assert_eq!(name.chars().count(), NAME_CHARS);
+        assert!(name.ends_with("é…"));
+    }
 
     /// What a file of format 1 holds after `kind`, `format` and `id`. Automations
     /// and their agents joined without a new number: a ticketd from before them
