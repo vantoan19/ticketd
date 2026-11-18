@@ -64,7 +64,9 @@ impl Sink {
         let path = self.dir.join(format!("ticketd.{today}.log"));
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         state.bytes = file.metadata().map_or(0, |meta| meta.len());
-        state.capped = false;
+        // A file that is already at the cap was capped by an earlier run, which wrote the
+        // notice; this one starts capped and does not write it again.
+        state.capped = state.bytes >= self.max_file_bytes;
         state.file = Some(file);
         state.day = Some(today);
         Ok(())

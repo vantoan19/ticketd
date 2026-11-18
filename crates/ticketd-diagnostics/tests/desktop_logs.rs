@@ -317,6 +317,48 @@ fn past_the_file_cap_only_warnings_and_errors_are_written_after_one_notice() {
 }
 
 #[test]
+fn reopening_a_day_file_that_is_already_capped_writes_no_second_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let capped = || {
+        DesktopLogs::open(
+            dir.path(),
+            Config {
+                max_file_bytes: 600,
+                ..Config::default()
+            },
+        )
+    };
+    let first = capped();
+    first.with_default(|| {
+        for _ in 0..10 {
+            tracing::info!(target: "ticketd_core::sync", "filling the day's file with routine lines");
+        }
+        tracing::info!(target: "ticketd_core::sync", "dropped info");
+    });
+    drop(first);
+
+    // A restart on the same day: the file is already over the cap.
+    let second = capped();
+    second.with_default(|| {
+        tracing::info!(target: "ticketd_core::sync", "dropped again");
+        tracing::warn!(target: "ticketd_core::sync", "kept warning");
+    });
+
+    let lines = lines(&log_files(dir.path())[0]);
+    let notices = lines
+        .iter()
+        .filter(|line| line["target"] == "ticketd_diagnostics")
+        .count();
+    assert_eq!(notices, 1);
+    let messages: Vec<_> = lines
+        .iter()
+        .map(|line| line["message"].as_str().unwrap())
+        .collect();
+    assert!(!messages.contains(&"dropped again"));
+    assert!(messages.contains(&"kept warning"));
+}
+
+#[test]
 fn an_unwritable_folder_never_breaks_the_caller() {
     let dir = tempfile::tempdir().unwrap();
     // A file where the folder should be: it can be neither created nor written.
