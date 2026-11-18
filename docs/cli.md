@@ -18,7 +18,8 @@ has not been validated.
 ### Atomic batches
 
 `ticketd batch plan.json` accepts a JSON array; use `ticketd batch -` to read
-standard input. A create names a ticket for later operations using `$name`:
+standard input. Every create needs a `name` and a `title`; later operations refer
+to the new ticket as `$name`:
 
 ```json
 [
@@ -40,7 +41,7 @@ standard input. A create names a ticket for later operations using `$name`:
 Changes also accept `title`, `body`, `status`, `editing_agent`, `project_id`,
 `plan_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
 `plan_id` to null to clear it; omit a field to leave it unchanged. Results are
-JSON ticket snapshots in operation order. Failures identify the zero-based
+JSON ticket snapshots in operation order. Failures, including a malformed operation, identify the zero-based
 operation index and roll back the entire request. Requests are limited to 1 MiB,
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
 between operations.
@@ -70,7 +71,7 @@ matches titles only, since bodies and briefs are searched through an index of
 three-character sequences. An empty query applies only
 the filters, like `ticketd list` (the desktop search box returns nothing for an
 empty query). Results exclude trash and are ordered by descending ticket reference.
-Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
+Use `--limit` (1–100, default 50; other values are rejected) and `--offset` for pages, and `--project ID`
 or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
 

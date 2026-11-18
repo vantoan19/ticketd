@@ -145,7 +145,7 @@ impl Error {
             | Self::InvalidGraphRequest(_)
             | Self::EmptyPlanName
             | Self::PlanNameTooLong(_)
-            | Self::AmbiguousProject
+            | Self::AmbiguousProject(_)
             | Self::CheckoutTaken(_)
             | Self::InvalidCheckoutPath
             | Self::EmptyProject
