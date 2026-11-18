@@ -563,8 +563,11 @@ mod tests {
 
         let lines: Vec<serde_json::Value> = std::fs::read_dir(dir.path())
             .expect("log folder")
-            .flat_map(|entry| {
-                let text = std::fs::read_to_string(entry.expect("entry").path()).expect("file");
+            .map(|entry| entry.expect("entry").path())
+            // The folder also holds the session marker.
+            .filter(|path| path.extension().is_some_and(|extension| extension == "log"))
+            .flat_map(|path| {
+                let text = std::fs::read_to_string(path).expect("file");
                 text.lines()
                     .map(|line| serde_json::from_str(line).expect("json line"))
                     .collect::<Vec<serde_json::Value>>()

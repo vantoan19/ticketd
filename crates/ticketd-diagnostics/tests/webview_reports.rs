@@ -9,7 +9,12 @@ use ticketd_diagnostics::{Config, DesktopLogs, WebviewError, record_webview_erro
 fn written(dir: &Path) -> Vec<serde_json::Value> {
     let mut lines = Vec::new();
     for entry in fs::read_dir(dir).unwrap() {
-        let text = fs::read_to_string(entry.unwrap().path()).unwrap();
+        let path = entry.unwrap().path();
+        // The folder also holds the session marker.
+        if path.extension().is_none_or(|extension| extension != "log") {
+            continue;
+        }
+        let text = fs::read_to_string(path).unwrap();
         lines.extend(text.lines().map(|line| serde_json::from_str(line).unwrap()));
     }
     lines
