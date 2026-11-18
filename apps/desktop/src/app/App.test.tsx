@@ -553,6 +553,27 @@ test("lists No project after the named projects and shows a quiet hint with noth
   expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
 });
 
+test("the project names are sidebar labels, so the rail's fade and the unfold's hold reach them", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) =>
+      command === "list_projects"
+        ? [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }]
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const names = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  ).getAllByRole("button");
+  for (const row of names)
+    expect(row.querySelector(".sidebar-label")?.textContent).toBe(
+      row.textContent?.trim(),
+    );
+});
+
 test("changing the scope drops an open ticket that is outside it", async () => {
   vi.useFakeTimers();
   const ticket = {

@@ -497,7 +497,9 @@ export function WorkspaceSidebar({
                           size={6}
                         />
                       )}
-                      {waiting > 0 ? waiting : working > 0 ? working : null}
+                      {(waiting > 0 || working > 0) && (
+                        <span>{waiting > 0 ? waiting : working}</span>
+                      )}
                     </span>
                   )}
                 </SidebarMenuButton>
@@ -516,7 +518,7 @@ export function WorkspaceSidebar({
                   {runsWaiting > 0 && (
                     <span className="sidebar-count" aria-hidden="true">
                       <StatusDot tone="attention" />
-                      {runsWaiting}
+                      <span>{runsWaiting}</span>
                     </span>
                   )}
                 </SidebarMenuButton>
@@ -572,7 +574,7 @@ export function WorkspaceSidebar({
                         >
                           {entry.icon}{" "}
                           <Tooltip content={entry.label} overflowOnly>
-                            <span>{entry.label}</span>
+                            <span className="sidebar-label">{entry.label}</span>
                           </Tooltip>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -622,7 +624,7 @@ export function WorkspaceSidebar({
                         >
                           {entry.icon}{" "}
                           <Tooltip content={entry.label} overflowOnly>
-                            <span>{entry.label}</span>
+                            <span className="sidebar-label">{entry.label}</span>
                           </Tooltip>
                           {entry.count && (
                             <span className="sidebar-count">{entry.count}</span>

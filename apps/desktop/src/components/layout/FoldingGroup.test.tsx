@@ -67,3 +67,10 @@ it("unfolding does the same in reverse", () => {
   settle(440);
   expect(expand("rail")).toBeUndefined();
 });
+
+it("both sides carry the fold class the stylesheet's quick fade keys on", () => {
+  const { rerender } = render(<Group collapsed={false} />);
+  rerender(<Group collapsed />);
+  expect(expand("list")?.classList.contains("sidebar-fold")).toBe(true);
+  expect(expand("rail")?.classList.contains("sidebar-fold")).toBe(true);
+});
