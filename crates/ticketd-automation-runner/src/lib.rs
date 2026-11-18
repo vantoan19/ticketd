@@ -13,6 +13,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use tracing::Instrument;
+
 use ticketd_chat_host::{ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
     AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
@@ -141,6 +143,8 @@ impl Runner {
         if !workspace.automations_need_the_runner()? {
             return Ok(false);
         }
+        // Only a pass with work to look at is a span: an idle one would log every few seconds.
+        let _pass = tracing::info_span!("automation_pass").entered();
         let recovered = self.recover(&mut workspace);
         let deleted = self.end_deleted(&mut workspace);
         let queued = queue(&mut workspace);
@@ -196,13 +200,19 @@ impl Runner {
         };
         for run in started {
             let runner = self.clone();
+            // A root span: the run outlives the pass that started it, and the pass's own
+            // duration must not wait for it.
+            let span =
+                tracing::info_span!(parent: None, "automation_run", automation_run_id = %run.id);
             tokio::spawn(async move {
-                {
+                async {
                     let _going = Going(&runner, &run.id);
                     if let Err(reason) = runner.execute(&run).await {
                         runner.abandon(&run.id, &reason);
                     }
                 }
+                .instrument(span)
+                .await;
                 // A slot is free: the next queued run need not wait for the timer.
                 if let Err(error) = runner.start_queued() {
                     tracing::warn!(

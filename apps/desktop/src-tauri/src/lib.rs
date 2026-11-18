@@ -1619,6 +1619,21 @@ fn start_reminder_timer(
     }
 }
 
+/// Runs each command handler inside a span named for the command, so the lines it logs say
+/// which command they belong to and the close records how long it took.
+///
+/// The span is at `debug`: the interface's change poll is a command and runs every second,
+/// so an `info` span would log a line for each one. Debug logging shows them. An `async`
+/// command only starts inside the span; the span ends when the handler returns its future.
+fn traced<R: tauri::Runtime>(
+    handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        let span = tracing::debug_span!("command", command = invoke.message.command());
+        span.in_scope(|| handler(invoke))
+    }
+}
+
 const QUIT_MENU_ID: &str = "quit";
 
 /// Whether a request to exit the app must first go through the window's close
@@ -1821,7 +1836,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(traced(tauri::generate_handler![
             drive_commands::drive_configuration,
             drive_commands::drive_reference,
             drive_commands::drive_uploaded_copy_status,
@@ -2065,7 +2080,7 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::set_sync_settings,
             sync_commands::attachment_availability,
             sync_commands::download_attachment
-        ])
+        ]))
         .build(tauri::generate_context!())?;
     // The log folder is named for the app's identifier, which only a built app knows. The
     // setup hook and the event loop have not started yet, so nothing before this is lost

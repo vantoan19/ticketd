@@ -4703,6 +4703,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ticketd-core",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -4740,6 +4741,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "ticketd-core",
+ "tracing",
  "ureq",
  "url",
  "uuid",

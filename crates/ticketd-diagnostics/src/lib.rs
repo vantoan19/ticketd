@@ -55,6 +55,23 @@ pub fn init_desktop(log_dir: impl AsRef<Path>) -> DesktopLogs {
     logs
 }
 
+/// The CLI's root span. When an agent runs the CLI inside a Chat or an Automation run, the
+/// harness sets the ID in the environment; carrying it here links every line the command
+/// logs back to that Chat or run. Missing or blank values are left off, and with neither
+/// the span is disabled so a plain invocation's lines are unchanged.
+///
+/// The span is at `error` level so that it is still present under the default `warn` filter.
+pub fn cli_span(chat_id: Option<&str>, automation_run_id: Option<&str>) -> tracing::Span {
+    fn present(id: Option<&str>) -> Option<&str> {
+        id.map(str::trim).filter(|id| !id.is_empty())
+    }
+    let (chat_id, automation_run_id) = (present(chat_id), present(automation_run_id));
+    if chat_id.is_none() && automation_run_id.is_none() {
+        return tracing::Span::none();
+    }
+    tracing::error_span!("cli", chat_id, automation_run_id)
+}
+
 /// A path as it may be logged: the home folder becomes `~`, so a log line never carries the
 /// OS username.
 pub fn display_path(path: &Path) -> String {

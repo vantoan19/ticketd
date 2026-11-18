@@ -212,6 +212,7 @@ impl Workspace {
         if !due {
             return Ok(());
         }
+        let _delivery = tracing::info_span!("reminder_delivery").entered();
         crate::write_scope::run(&self.connection, |scope| {
             let now: String =
                 scope.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
