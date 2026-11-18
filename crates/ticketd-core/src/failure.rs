@@ -139,7 +139,7 @@ impl Error {
             | Self::Serialization(_)
             | Self::InvalidBatch(_)
             | Self::EmptyPlanName
-            | Self::AmbiguousProject
+            | Self::AmbiguousProject(_)
             | Self::CheckoutTaken(_)
             | Self::InvalidCheckoutPath
             | Self::EmptyProject

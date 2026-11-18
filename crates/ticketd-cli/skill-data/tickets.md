@@ -51,8 +51,11 @@ prohibit starting work. Status transitions are explicit and never cascade.
 
 Duplicate designation also identifies a canonical ticket: use `mark-duplicate`
 and `preview-duplicate`, not just a status patch. Inspect their help and preview
-affected dependencies before deciding how to change them. Canceling, duplicating,
-or trashing an unfinished blocker does not satisfy its dependents.
+affected dependencies before deciding how to change them. `mark-duplicate`
+refuses a source with blocking dependencies; apply your reviewed decisions with
+`ticketd write` and a `mark_duplicate_reviewed` request (`docs/cli.md#duplicates`).
+Canceling, duplicating, or trashing an unfinished blocker does not satisfy its
+dependents.
 
 ## Relationships and evidence
 

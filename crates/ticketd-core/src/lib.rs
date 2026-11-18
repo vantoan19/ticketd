@@ -163,6 +163,19 @@ pub use format::FORMAT_VERSION;
 #[cfg(feature = "test-schema")]
 pub use format::create_workspace_at_format_version;
 
+/// What to add to "ticket ... was not found" when the text cannot be a reference.
+/// Identifiers (UUIDs) are left alone: the mistake there is not the format.
+fn not_found_hint(reference: &str) -> String {
+    if document_links::is_ticket_reference(reference) || reference.matches('-').count() >= 4 {
+        return String::new();
+    }
+    let upper = reference.to_ascii_uppercase();
+    if upper != reference && document_links::is_ticket_reference(&upper) {
+        return format!("; references are case-sensitive, did you mean '{upper}'?");
+    }
+    "; a reference is T-, a two-letter device code and a number, for example T-KQ12".to_owned()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("cannot reopen workspace at {}: {source}. Restore the workspace file or make its folder available, then retry", path.display())]
@@ -243,9 +256,9 @@ pub enum Error {
     #[error("plan '{0}' was not found")]
     PlanNotFound(String),
     #[error(
-        "checkout matches multiple projects; specify --project explicitly or remove a registration"
+        "checkout matches multiple projects ({0}); specify --project explicitly or remove a registration"
     )]
-    AmbiguousProject,
+    AmbiguousProject(String),
     #[error("This folder is registered to {0}.")]
     CheckoutTaken(String),
     #[error("checkout path must be valid Unicode")]
@@ -319,7 +332,7 @@ pub enum Error {
     MissingRelatedTicket,
     #[error("ticket title must not be empty")]
     EmptyTitle,
-    #[error("ticket '{0}' was not found")]
+    #[error("ticket '{0}' was not found{hint}", hint = not_found_hint(.0))]
     NotFound(String),
     #[error("invalid evidence: {0}")]
     InvalidEvidence(String),

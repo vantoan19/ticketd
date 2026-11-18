@@ -57,7 +57,13 @@ impl Workspace {
         match matches.len() {
             0 => Ok(None),
             1 => Ok(matches.pop()),
-            _ => Err(Error::AmbiguousProject),
+            _ => Err(Error::AmbiguousProject(
+                matches
+                    .iter()
+                    .map(|project| format!("{} ({})", project.name, project.id))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )),
         }
     }
 
