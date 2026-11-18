@@ -2067,6 +2067,13 @@ const TOKEN_HINT: &str =
 
 fn main() {
     ticketd_diagnostics::init_cli();
+    let correlation = ticketd_diagnostics::cli_span(
+        std::env::var(ticketd_core::CHAT_ID_VARIABLE).ok().as_deref(),
+        std::env::var(ticketd_core::AUTOMATION_RUN_ID_VARIABLE)
+            .ok()
+            .as_deref(),
+    );
+    let _correlation = correlation.enter();
     if let Err(error) = run(&mut std::io::stdout().lock()) {
         // The `error:` line below is the command's answer to the person or agent that ran
         // it. This is the diagnostic record of the same failure, for `TICKETD_LOG=debug`.
