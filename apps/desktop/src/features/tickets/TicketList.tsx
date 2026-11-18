@@ -27,6 +27,7 @@ import {
   departure,
   glide,
   pageArriving,
+  rowTokens,
 } from "@/components/ui/row-motion";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
@@ -54,6 +55,41 @@ import { useInboxAttention } from "./use-inbox-attention";
 import type { ChatSummary } from "@/features/chats/client";
 import { useConflicts } from "@/features/sync-review/use-conflicts";
 
+/** The rows a cascade moves, and the rest that mounted with them and stay still. */
+type Mounted = {
+  cascading: ReadonlySet<string>;
+  still: ReadonlySet<string>;
+};
+
+/** The shortest a row is, in px (list rows are 36px; Display can only make them taller). */
+const SHORTEST_ROW = 36;
+
+/**
+ * The rows that can be on screen as a list mounts, from the window's height:
+ * the list starts at its top, and a row below the window is never seen
+ * arriving. Rows that are a little out of view only cost a few animations.
+ */
+function firstScreen(keys: string[]): Mounted {
+  const shown = Math.ceil(window.innerHeight / SHORTEST_ROW);
+  return {
+    cascading: new Set(keys.slice(0, shown)),
+    still: new Set(keys.slice(shown)),
+  };
+}
+
+/** `mounted` without the rows that are no longer listed; the same object if none left. */
+function stillHere(mounted: Mounted, listed: ReadonlySet<string>): Mounted {
+  const keep = (keys: ReadonlySet<string>) =>
+    keys.size === 0 || [...keys].every((key) => listed.has(key))
+      ? keys
+      : new Set([...keys].filter((key) => listed.has(key)));
+  const cascading = keep(mounted.cascading);
+  const still = keep(mounted.still);
+  return cascading === mounted.cascading && still === mounted.still
+    ? mounted
+    : { cascading, still };
+}
+
 export function TicketList({
   tickets,
   selected,
@@ -78,8 +114,9 @@ export function TicketList({
   scopeKey?: string;
   /**
    * The rows present when the list mounts fade up top first, as when it
-   * replaces the board or the placeholders. A page arrival in progress does it
-   * instead.
+   * replaces the board or the placeholders. Only the rows in view take part, so
+   * a long list never starts hundreds of animations. A page arrival in progress
+   * does it instead.
    */
   cascade?: boolean;
   /** Called once the list has mounted with `cascade`, which is one-shot. */
@@ -188,29 +225,39 @@ export function TicketList({
     "header" in entry ? `group-${entry.header.status}` : entry.ticket.id;
   // Rows are measured for a glide only when the order changes, not on every
   // hover or focus.
-  const order = entries.map(keyOf).join();
-  // The cascade is one-shot: only the rows there at mount take part, and they
-  // fade up in place with no height. A row added later opens its own space.
-  const [cascading] = useState<ReadonlySet<string>>(() =>
+  const keys = entries.map(keyOf);
+  const order = keys.join();
+  // The cascade is one-shot: only the rows in view when the list mounts take
+  // part, and they fade up in place with no height. The rest of what mounted is
+  // simply there. A row added later opens its own space, and so does one that
+  // left and came back, so a row's place in either set ends when it leaves.
+  const [mounted, setMounted] = useState<Mounted>(() =>
     cascadeRequested && !pageArriving()
-      ? new Set(entries.map(keyOf))
-      : new Set(),
+      ? firstScreen(keys)
+      : { cascading: new Set(), still: new Set() },
   );
+  const kept = stillHere(mounted, new Set(keys));
+  if (kept !== mounted) setMounted(kept);
   useEffect(() => {
     if (cascadeRequested) onCascaded?.();
   }, [cascadeRequested, onCascaded]);
+  // The motion tokens, once for every row of this render.
+  const tokens = rowTokens();
   return (
     <>
       <ul className="ticket-rows">
-        <Presence initial={cascading.size > 0}>
+        <Presence initial={mounted.cascading.size > 0}>
           {entries.map((entry, position) => {
-            const cascades = cascading.has(keyOf(entry));
+            const key = keys[position]!;
+            const cascades = mounted.cascading.has(key);
             const rowMotion = (name: "smooth" | "travel", gap?: number) => {
               const shape = { space: !cascades, gap };
               return {
-                ...glide(order, name),
-                ...arrival(cascades ? position : 0, shape),
-                ...departure({ space: true, gap }),
+                ...glide(order, name, tokens),
+                ...arrival(cascades ? position : 0, shape, tokens),
+                ...departure({ space: true, gap }, tokens),
+                // Below the first screen of a cascade: there, not arriving.
+                ...(mounted.still.has(key) && { initial: false as const }),
               };
             };
             if ("header" in entry) {
@@ -279,7 +326,7 @@ export function TicketList({
                   // A row released from its hold travels to its new group.
                   {...rowMotion(arriving ? "travel" : "smooth")}
                   data-arrive="row"
-                  data-arriving={arriving || undefined}
+                  data-arrival-fill={arriving || undefined}
                   onAnimationEnd={(event) => {
                     if (
                       event.target instanceof HTMLElement &&

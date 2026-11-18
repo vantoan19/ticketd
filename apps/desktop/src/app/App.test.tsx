@@ -4390,7 +4390,7 @@ test("sticky ledger keeps palette mutations in place until J leaves, then target
   expect(list.querySelector("li")?.getAttribute("data-status")).toBe(
     "In review",
   );
-  expect(target.closest("li")?.getAttribute("data-arriving")).toBe("true");
+  expect(target.closest("li")?.getAttribute("data-arrival-fill")).toBe("true");
   await changeStatus(next, "4");
   expect(bridge.invoke).toHaveBeenCalledWith(
     "change_ticket",
@@ -4431,12 +4431,12 @@ test.each([false, true])(
     fireEvent.click(screen.getByRole("heading", { name: "All tickets" }));
     expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
-    expect(row.closest("li")?.getAttribute("data-arriving")).toBe("true");
+    expect(row.closest("li")?.getAttribute("data-arrival-fill")).toBe("true");
     if (reducedMotion) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(row.closest("li")?.hasAttribute("data-arriving")).toBe(false);
+      expect(row.closest("li")?.hasAttribute("data-arrival-fill")).toBe(false);
     }
   },
 );

@@ -192,7 +192,9 @@ test("a released row shows the arrival fill once it is let go", () => {
   fireEvent.click(document.body);
   const fill = row.querySelector('[data-slot="arrival"]');
   expect(fill).not.toBeNull();
-  expect(row.getAttribute("data-arriving")).toBe("true");
+  // Its own word: `data-arriving` is the page's, which keeps a cascade away.
+  expect(row.getAttribute("data-arrival-fill")).toBe("true");
+  expect(row.hasAttribute("data-arriving")).toBe(false);
 });
 
 test("no ticket is highlighted until one is open", () => {
@@ -337,4 +339,106 @@ test("a created group opens its gap with its height instead of popping it in", (
   )!;
   expect(added.style.height).toBe("0px");
   expect(added.style.marginTop).toBe("0px");
+});
+
+// The tokens: one read for the whole render (a long list is 300 rows).
+
+test("the motion tokens are read once for a render, not once per row", () => {
+  const rootReads = (count: number) => {
+    const { rerender, unmount } = render(<List tickets={tickets(count)} />);
+    const read = vi.spyOn(window, "getComputedStyle");
+    rerender(<List tickets={tickets(count)} />);
+    const reads = read.mock.calls.filter(
+      ([element]) => element === document.documentElement,
+    ).length;
+    read.mockRestore();
+    unmount();
+    return reads;
+  };
+  expect(rootReads(3)).toBeGreaterThan(0);
+  expect(rootReads(60)).toBe(rootReads(3));
+});
+
+// The cascade is one-shot and only for what can be seen.
+
+test("a row that leaves and comes back opens its own space; it does not take part in the cascade again", async () => {
+  const { rerender } = render(<List tickets={tickets(4)} cascade />);
+  await frames();
+  await testbed.advance(SETTLED_MS);
+  rerender(<List tickets={[ticket(1), ticket(2), ticket(4)]} cascade />);
+  await frames();
+  await testbed.advance(SETTLED_MS);
+  expect(screen.queryByText("Ticket 3")).toBeNull();
+  rerender(<List tickets={tickets(4)} cascade />);
+  const back = rowOf("Ticket 3");
+  expect(back.style.height).toBe("0px");
+  // The third row of a cascade waits two steps; a row opening its space does not.
+  await frames();
+  await testbed.advance(STAGGER_MS);
+  expect(Number(back.style.opacity)).toBeGreaterThan(0);
+});
+
+test("a cascade moves only the rows that can be on screen, and the rest are simply there", async () => {
+  const height = window.innerHeight;
+  // Ten rows of 36px.
+  Object.defineProperty(window, "innerHeight", {
+    value: 360,
+    configurable: true,
+  });
+  try {
+    render(<List tickets={tickets(60)} cascade />);
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>("ul.ticket-rows > li"),
+    ];
+    expect(rows.filter((row) => row.style.opacity === "0")).toHaveLength(10);
+    expect(rowOf("Ticket 10").style.opacity).toBe("0");
+    // Below the window: no fade, no rise, no blur.
+    const below = rowOf("Ticket 11");
+    expect(below.style.opacity).toBe("1");
+    expect(below.style.transform).not.toContain("translateY(6px)");
+    expect(below.style.filter).not.toContain("blur(4px)");
+    await frames();
+    await testbed.advance(SETTLED_MS);
+    expect(rowOf("Ticket 10").style.opacity).toBe("1");
+  } finally {
+    Object.defineProperty(window, "innerHeight", {
+      value: height,
+      configurable: true,
+    });
+  }
+});
+
+test("a row below the first screen, added by a later page, opens its own space", () => {
+  const { rerender } = render(<List tickets={tickets(60)} cascade />);
+  rerender(<List tickets={tickets(61)} cascade />);
+  expect(rowOf("Ticket 61").style.height).toBe("0px");
+});
+
+// A leaving row closes its space with its fade, so the rows below glide up.
+
+test("a leaving row closes its height with its fade instead of keeping it until it is gone", async () => {
+  const { rerender } = render(<List tickets={tickets(3)} />);
+  rerender(<List tickets={[ticket(1), ticket(3)]} />);
+  const leaving = rowOf("Ticket 2");
+  await frames();
+  await testbed.advance(EXIT_MS / 2);
+  expect(screen.queryByText("Ticket 2")).not.toBeNull();
+  expect(leaving.style.height).toBe("0px");
+  expect(leaving.style.overflow).toBe("clip");
+  expect(Number(leaving.style.opacity)).toBeLessThan(1);
+});
+
+test("a leaving group header closes its gap with its height", async () => {
+  const { rerender } = render(
+    <List tickets={[ticket(1), ticket(2, { status: "Done" })]} grouped />,
+  );
+  rerender(<List tickets={[ticket(1)]} grouped />);
+  const leaving = document.querySelector<HTMLElement>(
+    '.ticket-group-header[data-status="Done"]',
+  )!;
+  await frames();
+  await testbed.advance(EXIT_MS / 2);
+  expect(leaving.style.height).toBe("0px");
+  // The 6px above it is closing with it, not left standing.
+  expect(parseFloat(leaving.style.marginTop)).toBeLessThan(6);
 });

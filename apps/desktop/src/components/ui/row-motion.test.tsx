@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from "@testing-library/react";
 import { m } from "motion/react";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { MotionProvider, Presence } from "@/components/ui/motion";
-import { arrival, departure, glide, pageArriving } from "./row-motion";
+import {
+  arrival,
+  departure,
+  glide,
+  pageArriving,
+  rowTokens,
+} from "./row-motion";
 import { frames } from "@/test/motion-clock";
 import {
   EXIT_MS,
@@ -168,14 +174,61 @@ it("a glide takes the spring it is asked for", () => {
   expect(travel).toBeGreaterThan(smooth);
 });
 
-it("a page arrival is any marked element but a row's own fill marker", () => {
+it("a page arrival is whatever carries data-arriving; a row's fill marker is another word", () => {
   expect(pageArriving()).toBe(false);
   const li = document.body.appendChild(document.createElement("li"));
-  li.dataset.arriving = "true";
+  li.dataset.arrivalFill = "true";
   expect(pageArriving()).toBe(false);
   const page = document.body.appendChild(document.createElement("div"));
   page.dataset.arriving = "";
   expect(pageArriving()).toBe(true);
   li.remove();
   page.remove();
+});
+
+// One read of the tokens serves a whole list: a row built from a snapshot reads
+// nothing, so a long list costs a handful of reads a render, not one per row.
+const tokenReads = (build: () => void) => {
+  const read = vi.spyOn(window, "getComputedStyle");
+  build();
+  const reads = read.mock.calls.length;
+  read.mockRestore();
+  return reads;
+};
+
+it("rowTokens reads the tokens once, however many rows are built from it", () => {
+  const once = tokenReads(() => rowTokens());
+  expect(once).toBeGreaterThan(0);
+  const tokens = rowTokens();
+  const reads = tokenReads(() => {
+    for (let index = 0; index < 300; index++) {
+      glide("order", "travel", tokens);
+      arrival(index, { space: true, gap: 6 }, tokens);
+      departure({ space: true, gap: 6 }, tokens);
+    }
+  });
+  expect(reads).toBe(0);
+});
+
+it("a row built without a snapshot reads the tokens itself, so it is still right alone", () => {
+  expect(tokenReads(() => arrival(0))).toBeGreaterThan(0);
+  expect(tokenReads(() => departure())).toBeGreaterThan(0);
+  expect(tokenReads(() => glide())).toBeGreaterThan(0);
+});
+
+it("a snapshot's stagger waits index steps and stops at the last step", () => {
+  const { stagger } = rowTokens();
+  expect(stagger(0)).toBe(0);
+  expect(stagger(3)).toBeCloseTo(3 * 0.024);
+  expect(stagger(7)).toBeCloseTo(7 * 0.024);
+  expect(stagger(300)).toBeCloseTo(7 * 0.024);
+  expect(stagger(-2)).toBe(0);
+});
+
+it("a snapshot taken under reduced motion has no stagger and no springs", () => {
+  testbed.reduceMotion();
+  const tokens = rowTokens();
+  expect(tokens.stagger(5)).toBe(0);
+  expect(tokens.springs.smooth.duration).toBe(0);
+  expect(arrival(5, {}, tokens).animate.transition.default.delay).toBe(0);
 });
