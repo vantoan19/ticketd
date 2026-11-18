@@ -653,12 +653,28 @@ export function turns(
   const live = chat.activity === "working" || chat.activity === "waiting";
   return parts.flatMap((part): TranscriptPart[] => {
     if ("kind" in part) return [part];
-    if (part.members.length === 0) return [];
+    const first = part.members[0];
+    if (first === undefined) return [];
     const timing = part.turnId ? timings.get(part.turnId) : undefined;
     const active = timing ? timing.outcome === "active" : part === last && live;
     // A segment a steer ended folds while its turn goes on.
     const ongoing = active && !part.until;
     const unconfirmed = ongoing && unconfirmedStop;
+    // An unchanged segment keeps its Turn object, so its view is not drawn again.
+    const inputs: TurnInputs = {
+      members: part.members,
+      timing,
+      active,
+      unconfirmedStop,
+      steer: part.steer,
+      started: part.started,
+      until: part.until,
+      // Only an unconfirmed stop is measured against now.
+      now: unconfirmed ? now : undefined,
+    };
+    const cached = builtTurns.get(first);
+    if (cached && sameInputs(cached.inputs, inputs))
+      return [{ kind: "turn", turn: cached.turn }];
     const { rows, steps } = rowsOf(
       part.members,
       !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
@@ -723,27 +739,51 @@ export function turns(
       : words[1];
     const waitWords =
       waited > WAIT_SAID_FROM ? [`waited ${duration(waited)}`] : [];
-    return [
-      {
-        kind: "turn",
-        turn: {
-          key: part.members[0]?.id ?? "",
-          live: ongoing && !unconfirmed,
-          unconfirmed,
-          label: [span, ...waitWords, ...counts].join(" · "),
-          rows: rows.filter(
-            (row) => row.kind !== "response" || row.item !== final,
-          ),
-          ...(final && { final }),
-          ...(marker && { marker }),
-          ...(plan && planUnfinished(plan) && { plan }),
-          ...(files && { files, commandEdits }),
-          ids: part.members.map((item) => item.id),
-        },
-      },
-    ];
+    const turn: Turn = {
+      key: first.id,
+      live: ongoing && !unconfirmed,
+      unconfirmed,
+      label: [span, ...waitWords, ...counts].join(" · "),
+      rows: rows.filter((row) => row.kind !== "response" || row.item !== final),
+      ...(final && { final }),
+      ...(marker && { marker }),
+      ...(plan && planUnfinished(plan) && { plan }),
+      ...(files && { files, commandEdits }),
+      ids: part.members.map((item) => item.id),
+    };
+    builtTurns.set(first, { inputs, turn });
+    return [{ kind: "turn", turn }];
   });
 }
+
+/** What a segment's Turn is built from; the same inputs build the same Turn. */
+type TurnInputs = {
+  members: TranscriptItem[];
+  timing: ItemOf<"turn"> | undefined;
+  active: boolean;
+  unconfirmedStop: boolean;
+  steer: boolean;
+  started: string | undefined;
+  until: string | undefined;
+  now: number | undefined;
+};
+
+const sameInputs = (a: TurnInputs, b: TurnInputs) =>
+  a.timing === b.timing &&
+  a.active === b.active &&
+  a.unconfirmedStop === b.unconfirmedStop &&
+  a.steer === b.steer &&
+  a.started === b.started &&
+  a.until === b.until &&
+  a.now === b.now &&
+  a.members.length === b.members.length &&
+  a.members.every((item, index) => item === b.members[index]);
+
+/** The last Turn built for each segment, keyed by its first item, which keeps its identity. */
+const builtTurns = new WeakMap<
+  TranscriptItem,
+  { inputs: TurnInputs; turn: Turn }
+>();
 
 /**
  * The one polite status: a turn starting, waiting and ending, never each step.
