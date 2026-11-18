@@ -9,7 +9,7 @@
 //! for every effect below: a Stop, a take-over, turning the Automation off or
 //! deleting it waits for it, and then finds the step finished.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
 
@@ -172,26 +172,56 @@ fn unusable_folder(folder: &str) -> Option<String> {
     }
 }
 
-/// What `unusable_folder` said of each folder the run's agent steps have yet to use.
+/// What `unusable_folder` said of each folder an advance may start an agent in.
 /// Asked of the filesystem before the write lock is taken: a slow or unreachable
 /// folder (a network volume) must not hold every other writer.
 type FolderChecks = HashMap<String, Option<String>>;
 
-/// Adds the check of every agent step's folder in `steps`, at any depth.
-fn check_folders(steps: &[Step], unused: &dyn Fn(&str) -> bool, checks: &mut FolderChecks) {
-    for step in steps {
-        if let StepAction::RunAgent {
-            execution_folder: Some(folder),
-            ..
-        } = &step.action
-            && unused(&step.id)
-        {
-            checks
-                .entry(folder.clone())
-                .or_insert_with(|| unusable_folder(folder));
+/// Adds the check of the folder of every agent step this advance may start: the steps
+/// it can reach from `finished` (`None` begins the run) by running Change ticket and
+/// If steps, which it does itself, and through the failure paths of steps that fail
+/// to start. Each If is followed down both paths, since its answer is read under the
+/// lock. An agent step further on is checked by the advance that reaches it, so a
+/// folder on a path the run never takes is never asked about.
+fn check_folders(
+    steps: &[Step],
+    finished: Option<(&str, &StepOutcome)>,
+    checks: &mut FolderChecks,
+) {
+    let failed = StepOutcome::Failed {
+        reason: String::new(),
+    };
+    let mut reached = vec![next_action(steps, finished)];
+    let mut seen = HashSet::new();
+    while let Some(next) = reached.pop() {
+        let Next::Step(step_id) = next else { continue };
+        if !seen.insert(step_id.clone()) {
+            continue;
         }
-        for path in step.action.paths() {
-            check_folders(path, unused, checks);
+        let Some(step) = crate::automations::find_step(steps, &step_id) else {
+            continue;
+        };
+        let outcomes = match &step.action {
+            StepAction::RunAgent {
+                execution_folder, ..
+            } => {
+                if let Some(folder) = execution_folder {
+                    checks
+                        .entry(folder.clone())
+                        .or_insert_with(|| unusable_folder(folder));
+                }
+                vec![failed.clone()]
+            }
+            StepAction::Notify { .. } => vec![failed.clone()],
+            StepAction::ChangeTicket { .. } => vec![StepOutcome::Completed, failed.clone()],
+            StepAction::If { .. } => vec![
+                StepOutcome::Branched { yes: true },
+                StepOutcome::Branched { yes: false },
+                failed.clone(),
+            ],
+        };
+        for outcome in &outcomes {
+            reached.push(next_action(steps, Some((&step_id, outcome))));
         }
     }
 }
@@ -228,8 +258,19 @@ impl Workspace {
         let run = one(&self.connection, run_id)?;
         let mut folders = FolderChecks::new();
         if run.status == AutomationRunStatus::Running {
-            let begun = |id: &str| run.steps.iter().any(|step| step.step_id == id);
-            check_folders(&run.definition.steps, &|id| !begun(id), &mut folders);
+            let current = run
+                .steps
+                .iter()
+                .find(|step| step.status == AutomationStepStatus::Running);
+            match (current, &outcome) {
+                (Some(step), Some(outcome)) => {
+                    let finished = Some((step.step_id.as_str(), outcome));
+                    check_folders(&run.definition.steps, finished, &mut folders);
+                }
+                (None, None) => check_folders(&run.definition.steps, None, &mut folders),
+                // Refused under the lock.
+                (Some(_), None) | (None, Some(_)) => {}
+            }
         }
         self.in_write_scope(|workspace| workspace.advance_inside(run_id, outcome, &folders))
     }
@@ -362,8 +403,8 @@ impl Workspace {
             Err(error) => return Err(error),
         };
         // Before the Chat, so a step that cannot run leaves none behind.
-        // Checked before the lock. A folder not found there cannot happen, since a run
-        // keeps its own copy of the definition; it is checked here rather than trusted.
+        // Checked before the lock. A folder is missing there only when the run moved on
+        // between the two reads (another advance of it); it is then checked here.
         let unusable = match folders.get(folder) {
             Some(checked) => checked.clone(),
             None => unusable_folder(folder),
@@ -410,5 +451,84 @@ impl Workspace {
             agent,
             started_by: started_by(run),
         }))))
+    }
+}
+
+/// Which folders an advance asks about before it takes the write lock.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::automations::StepChange;
+
+    fn agent(id: &str, folder: &str, on_failure: Option<Vec<Step>>) -> Step {
+        Step {
+            id: id.into(),
+            action: StepAction::RunAgent {
+                agent_id: Some("agent".into()),
+                execution_folder: Some(folder.into()),
+                on_failure,
+            },
+        }
+    }
+
+    fn checked(steps: &[Step], finished: Option<(&str, &StepOutcome)>) -> Vec<String> {
+        let mut checks = FolderChecks::new();
+        check_folders(steps, finished, &mut checks);
+        let mut folders: Vec<String> = checks.into_keys().collect();
+        folders.sort();
+        folders
+    }
+
+    /// An agent, then an If whose Yes runs two agents and whose No tags the ticket,
+    /// with an agent to run if tagging fails.
+    fn flow() -> Vec<Step> {
+        vec![
+            agent("first", "/first", None),
+            Step {
+                id: "if".into(),
+                action: StepAction::If {
+                    checks: Vec::new(),
+                    yes: vec![agent("yes", "/yes", None), agent("later", "/later", None)],
+                    no: vec![Step {
+                        id: "tag".into(),
+                        action: StepAction::ChangeTicket {
+                            change: Some(StepChange::AddTag { tag: "seen".into() }),
+                            on_failure: Some(vec![agent("fix", "/fix", None)]),
+                        },
+                    }],
+                },
+            },
+        ]
+    }
+
+    #[test]
+    fn beginning_a_run_checks_only_the_folder_of_its_first_agent() {
+        assert_eq!(checked(&flow(), None), ["/first"]);
+    }
+
+    #[test]
+    fn an_advance_checks_every_agent_it_may_start_and_none_after_them() {
+        let finished = StepOutcome::Completed;
+        // Either answer of the If, and the failure path of the step it runs itself;
+        // not the agent after the one Yes starts.
+        assert_eq!(
+            checked(&flow(), Some(("first", &finished))),
+            ["/fix", "/yes"]
+        );
+    }
+
+    #[test]
+    fn an_agent_that_fails_to_start_leads_to_the_folders_on_its_failure_path() {
+        let steps = vec![agent(
+            "first",
+            "/first",
+            Some(vec![agent("retry", "/retry", None)]),
+        )];
+        assert_eq!(checked(&steps, None), ["/first", "/retry"]);
+        let failed = StepOutcome::Failed {
+            reason: "The agent stopped.".into(),
+        };
+        assert_eq!(checked(&steps, Some(("first", &failed))), ["/retry"]);
+        assert!(checked(&steps, Some(("first", &StepOutcome::Completed))).is_empty());
     }
 }
