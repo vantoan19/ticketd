@@ -89,6 +89,7 @@ pub(crate) fn add(
     if is_blank_brief(brief) {
         return Err(Error::EmptyActivityBrief);
     }
+    let agent = crate::history::clean_agent(agent);
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO activities (id, ticket_id, brief, editing_agent) VALUES (?1, ?2, ?3, ?4)",
@@ -110,7 +111,7 @@ pub(crate) fn edit(
     {
         return Err(Error::EmptyActivityBrief);
     }
-    let changed = conn.execute("UPDATE activities SET brief = COALESCE(?1, brief), editing_agent = COALESCE(?2, editing_agent), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ticket_id = ?3 AND id = ?4", params![patch.brief,patch.editing_agent,ticket,id])?;
+    let changed = conn.execute("UPDATE activities SET brief = COALESCE(?1, brief), editing_agent = COALESCE(?2, editing_agent), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ticket_id = ?3 AND id = ?4", params![patch.brief,crate::history::clean_agent(patch.editing_agent.as_deref()),ticket,id])?;
     if changed == 0 {
         return Err(Error::ActivityNotFound(id.to_owned()));
     }

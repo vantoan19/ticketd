@@ -24,23 +24,53 @@ pub(crate) fn migrate_checkouts(tx: &Transaction<'_>) -> Result<(), Error> {
 
 impl Workspace {
     pub fn register_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
-        find(&self.connection, id)?;
         let path = normalize(path)?;
-        ensure_path_free(&self.connection, &path, id)?;
-        self.connection.execute(
+        let tx = self.connection.savepoint()?;
+        crate::write_scope::lock(&tx)?;
+        let project = find(&tx, id)?;
+        ensure_path_free(&tx, &path, id)?;
+        tx.execute(
             "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
             params![id, path],
         )?;
+        // A Project that lost its last checkout has no primary path; the first one
+        // registered again becomes it.
+        if project.path.is_empty() {
+            tx.execute(
+                "UPDATE projects SET path = ?1 WHERE id = ?2",
+                params![path, id],
+            )?;
+        }
+        tx.commit()?;
         self.show_project(id)
     }
 
     pub fn remove_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
-        find(&self.connection, id)?;
-        let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
-        self.connection.execute(
+        let tx = self.connection.savepoint()?;
+        crate::write_scope::lock(&tx)?;
+        let project = find(&tx, id)?;
+        // The folder may be gone already, which is why it is being unregistered.
+        let normalized = normalize(path).unwrap_or_else(|_| path.trim().to_owned());
+        let removed = tx.execute(
             "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
             params![id, normalized],
         )?;
+        // A stale primary path that an older version left behind counts as registered:
+        // unregistering it clears it below.
+        if removed == 0 && project.path != normalized {
+            return Err(Error::CheckoutNotRegistered(project.name));
+        }
+        // `path` names the primary checkout and must stay one of `paths`: move it to a
+        // remaining checkout, or clear it when the last one is gone.
+        let remaining = paths(&tx, id)?;
+        if !remaining.contains(&project.path) {
+            let next = remaining.into_iter().next().unwrap_or_default();
+            tx.execute(
+                "UPDATE projects SET path = ?1 WHERE id = ?2",
+                params![next, id],
+            )?;
+        }
+        tx.commit()?;
         self.show_project(id)
     }
 
@@ -63,7 +93,7 @@ impl Workspace {
 
     pub fn create_project(&mut self, name: &str, path: &str) -> Result<Project, Error> {
         let (name, path) = validate(name, path)?;
-        let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
+        let normalized = normalize(path)?;
         let path = normalized.as_str();
         let project = Project {
             id: Uuid::new_v4().to_string(),
@@ -87,25 +117,42 @@ impl Workspace {
     }
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
-        let (name, path) = validate(name, path)?;
-        let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
-        let path = normalized.as_str();
+        let (name, path) = (name.trim(), path.trim());
+        if name.is_empty() {
+            return Err(Error::EmptyProject);
+        }
         let tx = self.connection.savepoint()?;
         crate::write_scope::lock(&tx)?;
         let old = find(&tx, id)?;
-        ensure_path_free(&tx, path, id)?;
-        if tx.execute(
-            "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
-            params![name, path, id],
-        )? == 0
-        {
-            return Err(Error::ProjectNotFound(id.to_owned()));
+        // Moving the checkout needs a folder that exists. Sending the path back
+        // unchanged is a rename: it must still work after the folder was moved away.
+        let target = match normalize(path) {
+            Ok(path) => Some(path),
+            Err(_) if path.is_empty() && old.path.is_empty() => None,
+            Err(Error::NoCheckoutFolder(_)) if !path.is_empty() && path == old.path => None,
+            Err(Error::NoCheckoutFolder(_)) if path.is_empty() => return Err(Error::EmptyProject),
+            Err(error) => return Err(error),
+        };
+        if let Some(path) = &target {
+            ensure_path_free(&tx, path, id)?;
         }
-        if old.path != path {
+        tx.execute(
+            "UPDATE projects SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
+        if let Some(path) = target {
             tx.execute(
-                "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
-                params![id, old.path],
+                "UPDATE projects SET path = ?1 WHERE id = ?2",
+                params![path, id],
             )?;
+            if old.path != path {
+                tx.execute(
+                    "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
+                    params![id, old.path],
+                )?;
+            }
+            // Also when the path is unchanged: a path an older version left behind after
+            // its checkout was unregistered is registered again by naming it.
             tx.execute(
                 "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
                 params![id, path],
@@ -204,7 +251,9 @@ fn paths(connection: &Connection, id: &str) -> Result<Vec<String>, Error> {
 
 fn normalize(path: &str) -> Result<String, Error> {
     let canonical = match std::fs::canonicalize(path) {
-        Ok(canonical) => canonical,
+        Ok(canonical) if canonical.is_dir() => canonical,
+        // A file is not the folder of a checkout.
+        Ok(_) => return Err(Error::NoCheckoutFolder(path.to_owned())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err(Error::NoCheckoutFolder(path.to_owned()));
         }

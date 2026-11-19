@@ -141,6 +141,7 @@ impl Error {
             | Self::EmptyPlanName
             | Self::AmbiguousProject
             | Self::CheckoutTaken(_)
+            | Self::CheckoutNotRegistered(_)
             | Self::InvalidCheckoutPath
             | Self::EmptyProject
             | Self::DuplicateDependencies
@@ -151,6 +152,7 @@ impl Error {
             | Self::DependencyReviewMode(_)
             | Self::PlanArchived
             | Self::EmptyTag
+            | Self::EmptyRequestId
             | Self::Trashed(_)
             | Self::DocumentTrashed(_)
             | Self::MissingRelatedTicket

@@ -159,10 +159,16 @@ pub enum WriteRequest {
     AddTag {
         reference: String,
         name: String,
+        // Omitted when absent so the canonical form of a request without an agent, which
+        // a stored outcome is compared against on replay, is unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
     },
     RemoveTag {
         reference: String,
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
     },
     MarkDuplicate {
         source: String,
@@ -302,6 +308,10 @@ impl Workspace {
         request_id: Option<&str>,
         request: WriteRequest,
     ) -> Result<WriteResult, Error> {
+        // A blank ID would key unrelated writes to one stored outcome (ADR 0002).
+        if request_id.is_some_and(|id| id.trim().is_empty()) {
+            return Err(Error::EmptyRequestId);
+        }
         if let WriteRequest::ImportAttachment {
             source,
             display_name,
@@ -560,12 +570,16 @@ impl Workspace {
                 self.delete_activity(&reference, &id)?;
                 WriteResult::Deleted
             }
-            WriteRequest::AddTag { reference, name } => {
-                WriteResult::Ticket(self.add_tag(&reference, &name)?)
-            }
-            WriteRequest::RemoveTag { reference, name } => {
-                WriteResult::Ticket(self.remove_tag(&reference, &name)?)
-            }
+            WriteRequest::AddTag {
+                reference,
+                name,
+                agent,
+            } => WriteResult::Ticket(self.add_tag_as(&reference, &name, agent.as_deref())?),
+            WriteRequest::RemoveTag {
+                reference,
+                name,
+                agent,
+            } => WriteResult::Ticket(self.remove_tag_as(&reference, &name, agent.as_deref())?),
             WriteRequest::MarkDuplicate {
                 source,
                 canonical,

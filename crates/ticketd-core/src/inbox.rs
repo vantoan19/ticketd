@@ -101,6 +101,7 @@ pub(crate) fn record(
     to: &str,
     agent: Option<&str>,
 ) -> Result<(), Error> {
+    let agent = crate::history::clean_agent(agent);
     // A connection acting as the local person never notifies them of their own
     // unattributed changes; changes attributed to an agent or a source still do.
     connection.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value, editing_agent) SELECT person, ticket_id, ?2, ?3, ?4, ?5 FROM ticket_follows WHERE ticket_id = ?1 AND (?5 IS NOT NULL OR NOT EXISTS (SELECT 1 FROM sqlite_temp_master WHERE name = 'acting_person'))", params![ticket_id, kind, from, to, agent])?;
