@@ -47,10 +47,10 @@ Every CLI error exits with status 1; the CLI does not tell failures apart by kin
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 
-## Planned native Chat runtime and storage
+## Native Chat runtime and storage
 
-The approved native Chat design extends the runtime above; it is not yet
-implemented. The Rust desktop host supervises a provider process for each active
+Native Chat extends the runtime above. It is experimental and off by default.
+The Rust desktop host supervises a provider process for each active
 Chat, using Codex app-server directly or a packaged TypeScript Claude Agent SDK
 bridge pointed at the user's installed official Claude Code executable. The
 harness owns authentication and native session state. The independently usable
