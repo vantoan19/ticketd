@@ -61,6 +61,9 @@ The guide teaches CLI operations while leaving work organization to you. See
 
 ## Contribute
 
+ticketd is licensed under the [MIT License](LICENSE). Third-party components
+retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
+
 Bug reports, docs, accessibility feedback, platform testing, and code improvements
 are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for contribution paths
 and the review process. You do not need an AI assistant or private skills.

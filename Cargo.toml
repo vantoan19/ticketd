@@ -9,6 +9,7 @@ edition = "2024"
 rust-version = "1.99"
 publish = false
 repository = "https://github.com/vantoan19/ticketd"
+license = "MIT"
 
 [workspace.dependencies]
 ticketd-core = { path = "crates/ticketd-core" }
