@@ -1923,6 +1923,7 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::attachment_uri,
             attachment_commands::resolve_attachment_uri,
             attachment_commands::attachment_preview,
+            attachment_media::attachment_media_bytes,
             attachment_commands::draft_retentions,
             attachment_commands::complete_draft_cutover,
             attachment_commands::draft_cutover_pending,

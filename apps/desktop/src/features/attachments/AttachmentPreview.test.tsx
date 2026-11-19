@@ -8,7 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { DocumentNavigation } from "@/features/documents/navigation";
@@ -506,6 +506,52 @@ test.each(["image/png", "video/mp4"])(
     expect(element.hasAttribute("src")).toBe(false);
   },
 );
+
+test("on Linux, audio plays from a blob of the whole file, released on close", async () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const createObjectURL = vi.fn<(blob: Blob) => string>(
+    () => "blob:tauri://localhost/wav",
+  );
+  const revokeObjectURL = vi.fn();
+  // jsdom has no object URLs; lend this test a pair.
+  Object.assign(URL, { createObjectURL, revokeObjectURL });
+  onTestFinished(() => {
+    Reflect.deleteProperty(URL, "createObjectURL");
+    Reflect.deleteProperty(URL, "revokeObjectURL");
+  });
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_media_bytes") return new ArrayBuffer(4);
+    return {
+      attachment: file,
+      status: "available",
+      media_type: "audio/wav",
+      message: null,
+      can_open: true,
+      usage: { total: 0, entries: [], legacy_drafts_pending: false },
+    };
+  });
+  const view = render(
+    <AttachmentPreview target={{ id: file.id }} onClose={() => {}} />,
+  );
+  const audio = await screen.findByLabelText("Screenshot", {
+    selector: "audio",
+  });
+  await waitFor(() =>
+    expect(audio.getAttribute("src")).toBe("blob:tauri://localhost/wav"),
+  );
+  expect(invoke).toHaveBeenCalledWith("attachment_media_bytes", {
+    workspace: "workspace",
+    id: file.id,
+  });
+  expect(createObjectURL.mock.calls[0]?.[0]).toMatchObject({
+    type: "audio/wav",
+  });
+  view.unmount();
+  expect(revokeObjectURL).toHaveBeenCalledWith("blob:tauri://localhost/wav");
+});
 
 test("viewer retains its media and owner until the closing animation completes", async () => {
   vi.mocked(invoke).mockImplementation(async (command) =>
