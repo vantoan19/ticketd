@@ -517,6 +517,7 @@ function TicketListBody({
                       }}
                       selected={selected}
                       readyView={navigation.kind === "ready"}
+                      trashView={trash}
                       simple={ticketRows === "simple"}
                       // A status filter keeps its group header (board C); only the
                       // dedicated Ready and In progress views drop it.
