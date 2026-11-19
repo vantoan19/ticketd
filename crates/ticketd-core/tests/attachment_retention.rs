@@ -201,10 +201,8 @@ fn older_workspace_with_retained_bytes_withholds_eligibility_until_browser_cutov
 fn attachment_free_upgrade_keeps_new_cli_uploads_eligible_without_a_desktop() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
-    drop(Workspace::open(&path).unwrap());
-    let old = rusqlite::Connection::open(&path).unwrap();
-    old.execute_batch("DROP TABLE attachment_draft_references; DROP TABLE attachment_drafts; DROP TABLE attachment_draft_cutover; PRAGMA user_version=49;").unwrap();
-    drop(old);
+    // Format 49 kept no draft retention yet.
+    ticketd_core::create_workspace_at_format_version(&path, 49).unwrap();
     let mut w = Workspace::open(&path).unwrap();
     assert!(!w.draft_cutover_pending().unwrap());
     let source = dir.path().join("new.txt");
