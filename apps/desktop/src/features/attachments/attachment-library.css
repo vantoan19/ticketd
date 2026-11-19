@@ -9,7 +9,9 @@
   min-width: 0;
 }
 .attachment-workspace {
-  container: attachment-workspace / inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
   display: flex;
   flex: 1 1 0;
   min-height: 0;
@@ -128,15 +130,15 @@
     visibility: visible;
   }
 }
-@container attachment-workspace (max-width:879px) {
-  .attachment-list-pane {
-    flex: 1 1 auto;
-    width: auto;
-  }
-  .attachment-workspace[data-open] .attachment-list-pane,
-  .attachment-workspace:not([data-open]) .attachment-detail-pane {
-    display: none;
-  }
+:where(.attachment-workspace[data-width~="max-879"]) .attachment-list-pane {
+  flex: 1 1 auto;
+  width: auto;
+}
+.attachment-workspace:where([data-width~="max-879"])[data-open]
+  .attachment-list-pane,
+.attachment-workspace:where([data-width~="max-879"]):not([data-open])
+  .attachment-detail-pane {
+  display: none;
 }
 /* Clean up: one list with the choice on the left. */
 .attachment-cleanup-files {

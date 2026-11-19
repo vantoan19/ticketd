@@ -2,6 +2,7 @@ import "./styles.css";
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { windowClient } from "@/lib/api/window";
+import { installWidthQueries } from "@/lib/width-queries";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing application root");
@@ -26,6 +27,9 @@ const [
   throw error;
 });
 void windowClient.booted();
+// The large panes' breakpoints, measured instead of container-queried (dialogs
+// portal outside the root, so the whole body).
+installWidthQueries(document.body);
 const applicationRoot = createRoot(root);
 
 /** Every way the app starts renders inside the one motion provider. */

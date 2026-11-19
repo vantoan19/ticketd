@@ -26,7 +26,9 @@
   visibility: hidden;
 }
 .chat-pane {
-  container: ticket-detail / inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -196,13 +198,16 @@
 }
 /* A narrow pane keeps the header on one line: the trigger keeps its chevron
    and accessible name, as the ticket header keeps the reminder's bell. */
-@container ticket-detail (max-width: 460px) {
-  .chat-pane .detail-title-group > button:not([data-context]) {
-    flex: none;
-  }
-  .chat-pane .detail-title-group > button:not([data-context]) > span {
-    display: none;
-  }
+.chat-pane:where([data-width~="max-460"])
+  .detail-title-group
+  > button:not([data-context]) {
+  flex: none;
+}
+.chat-pane:where([data-width~="max-460"])
+  .detail-title-group
+  > button:not([data-context])
+  > span {
+  display: none;
 }
 /* The header's one context button (#368): the Project icon (else a folder),
    the folder's name capped at 18ch, and the chevron. It holds nothing else, so
@@ -221,10 +226,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-@container ticket-detail (max-width: 459px) {
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-459"])
   .chat-context-name {
-    display: none;
-  }
+  display: none;
 }
 /* The composer's context count: quiet mono tokens, words from 80%. */
 [data-context-count] {
@@ -499,10 +503,9 @@
 .chat-below {
   margin-top: -12px;
 }
-@container ticket-detail (max-width: 400px) {
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-400"])
   .chat-turn-rows[data-folded] {
-    padding-left: 12px;
-  }
+  padding-left: 12px;
 }
 /* A command's detail: `$ command`, output and Copy, at most 12 lines. */
 .chat-output {
@@ -665,18 +668,28 @@
   height: 10px;
 }
 /* Below a 460px composer Permissions keeps only its shield and the effort
-   only its bars, so one row holds picker, Permissions, Stop and Send. */
+   only its bars, so one row holds picker, Permissions, Stop and Send. The
+   composer is measured by the Chat tray (a query container) or, outside one,
+   by its pane (data-width). */
 @container (max-width: 459px) {
   .chat-permission-label,
   [data-control] .chat-control-effort {
     display: none;
   }
 }
+:where([data-width~="max-459"]) .chat-permission-label,
+:where([data-width~="max-459"]) [data-control] .chat-control-effort {
+  display: none;
+}
 @container (max-width: 419px) {
   [data-control] .effort-glyph,
   [data-control] > .lucide-chevron-down {
     display: none;
   }
+}
+:where([data-width~="max-419"]) [data-control] .effort-glyph,
+:where([data-width~="max-419"]) [data-control] > .lucide-chevron-down {
+  display: none;
 }
 .chat-pick-option {
   display: flex;

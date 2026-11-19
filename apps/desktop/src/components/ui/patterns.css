@@ -259,19 +259,21 @@
   /* The header and its children must measure the same containing pane. */
   container-type: normal;
 }
-@container (max-width: 640px) {
-  .ui-pane-header-responsive {
-    flex-wrap: wrap;
-    height: 88px;
-    padding-block: 8px;
-  }
-  .ui-pane-header-responsive > .ui-pane-header-title {
-    flex: 1;
-  }
-  .ui-pane-header-responsive > .ui-pane-header-actions {
-    flex-basis: 100%;
-    justify-content: flex-end;
-  }
+:where([data-width~="max-640"]) .ui-pane-header-responsive {
+  flex-wrap: wrap;
+  height: 88px;
+  padding-block: 8px;
+}
+:where([data-width~="max-640"])
+  .ui-pane-header-responsive
+  > .ui-pane-header-title {
+  flex: 1;
+}
+:where([data-width~="max-640"])
+  .ui-pane-header-responsive
+  > .ui-pane-header-actions {
+  flex-basis: 100%;
+  justify-content: flex-end;
 }
 /* Search expands in place: the title gives way, Filters and Display stay. */
 .ui-pane-header:not([data-title-editor]):has([data-slot="pane-search"])
