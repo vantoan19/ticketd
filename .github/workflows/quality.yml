@@ -38,7 +38,8 @@ jobs:
     if: github.event.action != 'labeled' && (github.event_name != 'workflow_dispatch' || (!inputs.native_smoke && !inputs.distribution))
     name: Quality checks (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The full check takes about 26 minutes on a hosted runner without a warm cache.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -76,7 +77,8 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Windows runs the Rust tests for more than 30 minutes.
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
