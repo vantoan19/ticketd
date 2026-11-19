@@ -208,3 +208,15 @@ test("keeps a file that is not a picture as its label (MK-02)", async () => {
   expect(await screen.findByRole("button", { name: "Notes" })).toBeTruthy();
   expect(screen.queryByRole("img", { name: "Notes" })).toBeNull();
 });
+
+test("renders both Markdown hard breaks as line breaks", () => {
+  const { container } = render(
+    <MarkdownDocument
+      source={"Spaces break  \nhere.\n\nBackslash breaks\\\nthere."}
+    />,
+  );
+  const paragraphs = container.querySelectorAll("p");
+  expect(paragraphs).toHaveLength(2);
+  for (const paragraph of paragraphs)
+    expect(paragraph.querySelectorAll("br")).toHaveLength(1);
+});

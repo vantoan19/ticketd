@@ -390,6 +390,41 @@ export function searchSettings<T extends SettingsEntry>(
   return ranked.map(({ entry }) => entry);
 }
 
+/** Whether the row, or the whole Automations page, exists only while Chat is on. */
+const chatOnly = (entry: SettingsEntry) =>
+  entry.section === "automations" || entry.needsChat === true;
+
+/** Stands in for Chat-only rows while Chat is off: the Chat page is where it is turned on. */
+const CHAT_PAGE_ENTRY: SettingsEntry = {
+  title: "Chat",
+  description:
+    "Turn on Chat to set up harnesses, notifications and Automations.",
+  section: "chat",
+};
+
+/**
+ * `searchSettings` for the person's current Chat setting. While Chat is on every
+ * entry is searched. While it is off the Chat-only rows stay hidden, but a query
+ * that matches only them finds the Chat page entry instead, so the way to them
+ * is not a dead end.
+ */
+export function searchSettingsFor<T extends SettingsEntry>(
+  query: string,
+  entries: readonly T[],
+  chatEnabled: boolean,
+  pageName?: (entry: T) => string,
+): (T | SettingsEntry)[] {
+  if (chatEnabled) return searchSettings(query, entries, pageName);
+  const hits: (T | SettingsEntry)[] = searchSettings(
+    query,
+    entries.filter((entry) => !chatOnly(entry)),
+    pageName,
+  );
+  if (hits.some((hit) => hit.section === "chat")) return hits;
+  const hidden = searchSettings(query, entries.filter(chatOnly), pageName);
+  return hidden.length > 0 ? [...hits, CHAT_PAGE_ENTRY] : hits;
+}
+
 /**
  * `text` cut around the first place `query` matches: [before, match, after].
  * Marks the whole query where it stands at a word start, else its first word
