@@ -65,5 +65,9 @@ request a smaller scope, additional evidence, or a different approach. Agreeing
 on a problem does not guarantee acceptance of a particular implementation.
 There is no guaranteed review turnaround; a concise follow-up on the same PR is welcome.
 
+CodeRabbit also comments on pull requests, using the settings in `.coderabbit.yaml`.
+Its comments are advice: answer or resolve them, but a maintainer's review decides
+what merges. Comment `@coderabbitai review` to ask it to review your latest push.
+
 Version bumps, tags, and releases are maintainer-managed. Leave them out of ordinary
 contributions. See [the release guide](docs/releasing.md) for distribution requirements.
