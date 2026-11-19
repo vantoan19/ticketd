@@ -251,15 +251,6 @@ test("rows end with the core update time, never a progress excerpt or a lone no-
   expect(screen.queryByText("Update unavailable")).toBeNull();
 });
 
-test("the list sizes its reference column to its longest reference", () => {
-  const { container } = renderList([
-    ticket({ id: "1", reference: "T-KQ1" }),
-    ticket({ id: "2", reference: "T-VT1000" }),
-  ]);
-  const rows = container.querySelector<HTMLElement>(".ticket-rows");
-  expect(rows?.style.getPropertyValue("--reference-chars")).toBe("8");
-});
-
 test("a Plan and a project carry different icons", () => {
   const { container } = renderList([
     ticket({ id: "1", reference: "T-KQ1", plan_id: "e1" }),
@@ -439,4 +430,39 @@ test("the open Ticket's row that the list dropped follows the Ticket's own read"
   const { rerender } = render(view([listed, other]));
   rerender(view([other]));
   expect(await screen.findByRole("img", { name: "In review" })).toBeTruthy();
+});
+
+test("the list sizes its reference column to its longest reference", () => {
+  const { container } = renderList([
+    ticket({ id: "1", reference: "T-KQ1" }),
+    ticket({ id: "2", reference: "T-VT1000" }),
+  ]);
+  const rows = container.querySelector<HTMLElement>(".ticket-rows");
+  expect(rows?.style.getPropertyValue("--reference-chars")).toBe("8");
+});
+
+test("a row held after the list dropped it still has room for its reference", () => {
+  const view = (tickets: Ticket[]) => (
+    <TestReads>
+      <TicketList
+        tickets={tickets}
+        selected={null}
+        onOpen={vi.fn()}
+        bulkSelection={["T-VT1000"]}
+        onToggle={vi.fn()}
+        selectable
+        scope={scope}
+      />
+    </TestReads>
+  );
+  const short = ticket({ id: "1", reference: "T-VT999" });
+  const long = ticket({ id: "2", reference: "T-VT1000" });
+  const { container, rerender } = render(view([short, long]));
+  // A bulk edit moved the selected ticket out of the view; its row stays.
+  rerender(view([short]));
+  expect(
+    container.querySelector('[data-ticket-reference="T-VT1000"]'),
+  ).toBeTruthy();
+  const rows = container.querySelector<HTMLElement>(".ticket-rows");
+  expect(rows?.style.getPropertyValue("--reference-chars")).toBe("8");
 });

@@ -165,10 +165,6 @@ export function TicketList({
   simple?: boolean;
 }) {
   const navigator = selected !== null;
-  // Sizes the reference column to the longest reference in the list (#289).
-  let referenceChars = 0;
-  for (const { reference } of tickets)
-    referenceChars = Math.max(referenceChars, reference.length);
   const attention = useInboxAttention();
   const ticketChats = new Map<string, ChatSummary>();
   for (const chat of attention?.chats ?? []) {
@@ -191,6 +187,11 @@ export function TicketList({
   // Ticket's row that the list dropped follows its read; no other row, and the
   // list otherwise, re-renders for a Ticket's read.
   useTicket(sticky.watching);
+  // Sizes the reference column to the longest reference on screen (#289),
+  // counting the rows held after the list dropped them.
+  let referenceChars = 0;
+  for (const { reference } of sticky.tickets)
+    referenceChars = Math.max(referenceChars, reference.length);
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
