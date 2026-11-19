@@ -1,24 +1,43 @@
 #!/usr/bin/env bash
+# Usage: scripts/check [fast|slow|rust|ui]
+#   fast  checks that compile nothing: Markdown, versions, whitespace, formatting, lint, types
+#   rust  Clippy and the Rust tests
+#   ui    the frontend tests
+#   slow  rust, then ui
+# With no argument it runs everything. CI runs fast, rust and ui as separate jobs so the
+# fast result arrives first and the slow parts run side by side.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-npm exec --no -- markdownlint-cli2
-# The app, CLI check, and About page read the version from different files; keep them equal.
-node scripts/check-versions.mjs
-git diff --check
-git diff --cached --check
+mode="${1:-all}"
+case "$mode" in
+  all | fast | slow | rust | ui) ;;
+  *)
+    echo "usage: scripts/check [fast|slow|rust|ui]" >&2
+    exit 2
+    ;;
+esac
+runs() { [[ "$mode" == all || " $* " == *" $mode "* ]]; }
 
-if [[ -f Cargo.toml ]]; then
-  cargo fmt --all -- --check
+if runs fast; then
+  npm exec --no -- markdownlint-cli2
+  # The app, CLI check, and About page read the version from different files; keep them equal.
+  node scripts/check-versions.mjs
+  git diff --check
+  git diff --cached --check
+  if [[ -f Cargo.toml ]]; then cargo fmt --all -- --check; fi
+  if [[ -f package.json ]]; then
+    npm run format:check
+    npm run lint
+    npm run typecheck
+  fi
+fi
+
+if runs slow rust && [[ -f Cargo.toml ]]; then
   cargo clippy --workspace --all-targets --locked -- \
     -D warnings -D unsafe_code \
     -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
   cargo test --workspace --locked
 fi
 
-if [[ -f package.json ]]; then
-  npm run format:check
-  npm run lint
-  npm run typecheck
-  npm test
-fi
+if runs slow ui && [[ -f package.json ]]; then npm test; fi

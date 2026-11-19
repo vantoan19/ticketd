@@ -2,43 +2,60 @@ name: Quality
 
 on:
   workflow_dispatch:
-    inputs:
-      distribution:
-        description: Build platform distributions
-        type: boolean
-        default: false
-      linux_only:
-        description: Build only the Linux distribution
-        type: boolean
-        default: false
-      native_smoke:
-        description: Run the Linux native desktop smoke test
-        type: boolean
-        default: false
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   schedule:
-    # Nightly run of the platform checks on main (03:17 UTC).
+    # Nightly run on main, to catch runner image and toolchain drift (03:17 UTC).
     - cron: "17 3 * * *"
 
 permissions:
   contents: read
 
-# A new push to a PR cancels that PR's superseded run. The "labeled" run gets its own group, so
-# adding a label never cancels the Linux checks already running for the PR. Pushes to main queue.
+# A new push to a PR cancels that PR's superseded run. Every main commit gets its own group, so a
+# later merge never replaces a queued run and each main commit keeps its own result.
 concurrency:
-  group: quality-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action || 'push' }}
+  group: quality-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  fast:
+    # Everything that compiles nothing, so formatting, lint and type errors report in minutes.
+    name: Fast checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+          cache: npm
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - run: npm install --global npm@10.9.2
+      - run: npm ci
+      - run: ./scripts/check fast
+      - name: Lint workflows
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$archive" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
   quality:
-    # PR code runs on a fresh GitHub-hosted VM. The "labeled" event only starts platform checks.
-    if: github.event.action != 'labeled' && (github.event_name != 'workflow_dispatch' || (!inputs.native_smoke && !inputs.distribution))
+    # PR code runs on a fresh GitHub-hosted VM. Clippy, Rust tests and the desktop build.
     name: Quality checks (Linux)
     runs-on: ubuntu-24.04
-    # The full check takes about 26 minutes on a hosted runner without a warm cache.
+    # About 20 minutes without a warm cache: Clippy, test build, then 13 minutes of tests.
     timeout-minutes: 45
     defaults:
       run:
@@ -50,27 +67,48 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.23.4"
+          cache: npm
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Only main writes the cache. PRs read it and never fill the shared storage.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm install --global npm@10.9.2
       - run: npm ci
+      # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
       - run: npm run build
-      - run: ./scripts/check
+      - run: ./scripts/check rust
       - name: Build desktop and CLI
         run: cargo build --workspace --locked
 
+  ui:
+    # The frontend tests need no Rust build, so they run beside the Rust job.
+    name: Frontend tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+          cache: npm
+      - run: npm install --global npm@10.9.2
+      - run: npm ci
+      - run: ./scripts/check ui
+
   platform:
-    # Linux covers Markdown, lint, types and frontend tests on every PR. Broader platform
-    # builds run on main, nightly, manual runs and PRs labeled platform-check.
-    if: >-
-      github.event_name == 'push' ||
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && !inputs.native_smoke && !inputs.distribution) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'platform-check'))
+    # Rust tests and builds on the other two release platforms, for every PR and main commit.
     name: Platform checks (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -89,180 +127,56 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.23.4"
+          cache: npm
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Cache Rust build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: npm run build
+      # Report every failing test binary, not only the first, so one run shows them all.
       - name: Test Rust workspace
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       - name: Build desktop and CLI
         run: cargo build --workspace --locked
 
-  native-smoke:
-    if: github.event_name == 'workflow_dispatch' && inputs.native_smoke && !inputs.distribution
+  result:
+    # The one required check. It always reports, and fails unless every job above succeeded,
+    # so a failed, canceled or skipped job can never look like a pass.
+    name: CI result
+    if: always()
+    needs: [fast, quality, ui, platform]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 5
+    permissions:
+      actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22.23.4"
-      - name: Install desktop and WebDriver dependencies
+      - name: Summarize run times
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
-      - run: rustup show active-toolchain
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
-      - run: npm run build
-      - run: npm run desktop -- build --debug --no-bundle
-      - run: cargo build -p ticketd-cli --locked
-      - run: cargo install tauri-driver --version 2.1.0 --locked
-      - name: Run real desktop refresh smoke test
+          # Queue and run time per job, so slow feedback shows up as waiting or as work.
+          gh api --paginate "$RUN_URL/jobs" --jq '.jobs[]' | jq -rs '
+            def t: fromdateiso8601;
+            def mins: (. / 60 * 10 | round / 10 | tostring) + " min";
+            (map(select(.name != "CI result")) | sort_by(.started_at)) as $jobs
+            | ($jobs | map(.created_at | t) | min) as $start
+            | "| Job | Result | Queued | Ran | Done after |",
+              "| --- | --- | --- | --- | --- |",
+              ($jobs[] | select(.completed_at != null and .started_at != null)
+                | "| \(.name) | \(.conclusion) | \((.started_at | t) - (.created_at | t) | mins) | \((.completed_at | t) - (.started_at | t) | mins) | \((.completed_at | t) - $start | mins) |")
+          ' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Could not read job timings for the summary."
+      - name: Require every job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          export XDG_DATA_HOME="$(mktemp -d)"
-          active_group=
-          stop_group() {
-            local group="$1" attempt
-            if kill -0 -- "-$group" 2>/dev/null; then
-              kill -TERM -- "-$group" 2>/dev/null || true
-              for attempt in {1..40}; do
-                if ! kill -0 -- "-$group" 2>/dev/null; then return 0; fi
-                sleep 0.25
-              done
-              kill -KILL -- "-$group" 2>/dev/null || true
-              for attempt in {1..20}; do
-                if ! kill -0 -- "-$group" 2>/dev/null; then return 0; fi
-                sleep 0.25
-              done
-              echo "Native smoke process group $group did not stop" >&2
-              return 1
-            fi
-          }
-          cleanup() {
-            local status=$? attempt
-            trap - EXIT
-            if [[ -n "$active_group" ]]; then stop_group "$active_group" || status=1; fi
-            for attempt in {1..20}; do
-              if rm -rf "$XDG_DATA_HOME"; then exit "$status"; fi
-              sleep 0.25
-            done
-            echo "Could not remove native smoke workspace: $XDG_DATA_HOME" >&2
-            exit 1
-          }
-          trap cleanup EXIT
-          run_native() {
-            local script="$1" status=0
-            setsid xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node "$1"' sh "$script" &
-            active_group=$!
-            wait "$active_group" || status=$?
-            stop_group "$active_group" || status=1
-            active_group=
-            return "$status"
-          }
-          run_native tests/native/refresh.mjs
-          XDG_DATA_HOME="$XDG_DATA_HOME/extensions" run_native tests/native/extensions.mjs
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: success()
-        with:
-          name: native-smoke-screenshots
-          path: native-extensions-*.png
-          if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: failure()
-        with:
-          name: native-smoke-diagnostics
-          path: native-failure.*
-          if-no-files-found: ignore
-          retention-days: 7
-
-  distribution:
-    # Credential-bearing builds use reviewed main only, never a PR or arbitrary branch.
-    if: github.event_name == 'workflow_dispatch' && inputs.distribution && github.ref == 'refs/heads/main'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(inputs.linux_only && '[{"os":"ubuntu-24.04","platform":"ubuntu-24.04-x86_64","bundle":"deb","installer":"target/release/bundle/deb/*.deb","cli":"target/release/ticketd","google_oauth_secret":"TICKETD_GOOGLE_OAUTH_CLIENT_JSON_LINUX"}]' || '[{"os":"macos-26","platform":"macos-arm64","bundle":"dmg","installer":"target/release/bundle/dmg/*.dmg","cli":"target/release/ticketd","google_oauth_secret":"TICKETD_GOOGLE_OAUTH_CLIENT_JSON_MACOS"},{"os":"ubuntu-24.04","platform":"ubuntu-24.04-x86_64","bundle":"deb","installer":"target/release/bundle/deb/*.deb","cli":"target/release/ticketd","google_oauth_secret":"TICKETD_GOOGLE_OAUTH_CLIENT_JSON_LINUX"},{"os":"windows-2025","platform":"windows-x86_64","bundle":"msi","installer":"target/release/bundle/msi/*.msi","cli":"target/release/ticketd.exe","google_oauth_secret":"TICKETD_GOOGLE_OAUTH_CLIENT_JSON_WINDOWS"}]') }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    env:
-      TICKETD_GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets[matrix.google_oauth_secret] }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Require publisher Google app registration
-        run: |
-          if [[ -z "$TICKETD_GOOGLE_OAUTH_CLIENT_JSON" ]]; then
-            echo "::error::Configure the ${{ matrix.google_oauth_secret }} repository secret with the platform's Desktop OAuth client JSON before building a distribution."
+          failed=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$RESULTS")
+          if [[ -n "$failed" ]]; then
+            while IFS= read -r line; do echo "::error::Required job did not succeed: $line"; done <<<"$failed"
             exit 1
           fi
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22.23.4"
-      - name: Install Linux desktop dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      - run: rustup show active-toolchain
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
-      - name: Check package versions
-        run: node scripts/check-versions.mjs
-      - name: Validate bundled Google app registration
-        run: cargo test -p ticketd-core --lib drive::oauth::tests::distribution_client_is_valid --locked
-      - name: Build CLI
-        run: cargo build --release --locked -p ticketd-cli
-      - name: Build desktop installer
-        run: npm run desktop -- build --bundles ${{ matrix.bundle }} -- --locked
-      - name: Smoke-test installed Linux package
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y webkit2gtk-driver xvfb
-          cargo install tauri-driver --version 2.1.0 --locked
-          sudo apt-get install -y ./target/release/bundle/deb/*.deb
-          package=$(dpkg-deb -f target/release/bundle/deb/*.deb Package)
-          export XDG_DATA_HOME="$(mktemp -d)"
-          export TICKETD_SMOKE_CHECKOUT="$PWD"
-          export TICKETD_SMOKE_CLI="$PWD/target/release/ticketd"
-          export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
-          trap 'rm -rf "$XDG_DATA_HOME"' EXIT
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/install.mjs'
-          XDG_DATA_HOME="$XDG_DATA_HOME/refresh" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/refresh.mjs'
-          XDG_DATA_HOME="$XDG_DATA_HOME/workflow" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/workflow.mjs'
-          sudo apt-get remove -y "$package"
-          "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: failure() && runner.os == 'Linux'
-        with:
-          name: installed-workflow-diagnostics
-          path: native-failure.*
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Assemble download
-        run: |
-          mkdir -p distribution
-          cp ${{ matrix.installer }} distribution/
-          cp ${{ matrix.cli }} distribution/
-          cp docs/install.md distribution/INSTALL.md
-      - name: Smoke-test CLI installation and discovery
-        run: node tests/native/cli-install.mjs ${{ matrix.cli }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ticketd-${{ matrix.platform }}
-          path: distribution/
-          if-no-files-found: error
-          retention-days: 7
+          echo "All required jobs succeeded."

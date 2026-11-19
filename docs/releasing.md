@@ -6,10 +6,10 @@ have already been met.
 
 ## Current build workflow
 
-The [Quality workflow](../.github/workflows/quality.yml) has a manual `distribution`
-input, accepted only on `main`. It builds the standalone CLI and desktop installer for macOS Apple Silicon,
-Ubuntu 24.04 x86-64, and Windows x86-64. `linux_only` limits that distribution run
-to Linux. The workflow uploads artifacts with seven-day retention. It does not
+The manual [Package workflow](../.github/workflows/package.yml) builds the
+standalone CLI and desktop installer for macOS Apple Silicon, Ubuntu 24.04 x86-64,
+and Windows x86-64, and runs only on `main`. Its `linux-distribution` target limits
+the build to Linux, and `native-smoke` runs the Linux native desktop smoke test. The workflow uploads artifacts with seven-day retention. It does not
 publish a GitHub Release or configure signing/notarization.
 
 Distribution CI requires a platform-specific Google desktop app registration;
@@ -33,10 +33,10 @@ At public launch, configure and verify these settings:
 
 - Require workflow approval for all outside collaborators. This is an execution
   gate, not a substitute for runner isolation or code review.
-- Protect `main` with pull requests and the required `Quality checks (Linux)`
-  check from GitHub Actions; require the branch to be up to date. Keep force
-  pushes and branch deletion disabled. Optional labeled platform jobs are not
-  universally required checks.
+- Protect `main` with pull requests and the required `CI result` check from
+  GitHub Actions; require the branch to be up to date. Keep force pushes and
+  branch deletion disabled. `CI result` covers the Linux, macOS and Windows jobs,
+  so no other check needs to be required.
 - Verify a harmless PR from an outside fork: approval is required, Linux runs
   on a GitHub-hosted runner, distribution is skipped, and the required check
   reports against the PR before merge.
