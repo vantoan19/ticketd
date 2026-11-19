@@ -205,11 +205,17 @@ pub fn detect(
 const LOGIN_SHELL_VARIABLES: [&str; 3] = ["PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 
 /// The fixed script that prints each variable between markers naming it.
+/// `printenv` keeps the shell from expanding an unset variable, which fails
+/// under `set -u` in the user's rc files, and `|| true` keeps `set -e` going.
+/// Unlike `${NAME-}`, both work in fish too.
 #[cfg(any(unix, test))]
 fn login_shell_script() -> String {
     LOGIN_SHELL_VARIABLES
         .iter()
-        .map(|name| format!("printf '__ticketd_{name}__%s__ticketd_{name}__' \"${name}\""))
+        .map(|name| {
+            let mark = format!("__ticketd_{name}__");
+            format!("printf '{mark}'; printenv {name} || true; printf '{mark}'")
+        })
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -225,6 +231,8 @@ fn parse_login_shell_output(output: &str) -> Vec<(&'static str, String)> {
             let start = output.find(&mark)? + mark.len();
             let length = output[start..].find(&mark)?;
             let value = &output[start..start + length];
+            // printenv ends the value with a newline.
+            let value = value.strip_suffix('\n').unwrap_or(value);
             (!value.is_empty()).then(|| (name, value.to_string()))
         })
         .collect()
@@ -248,7 +256,7 @@ fn ask_login_shell() -> Vec<(&'static str, String)> {
     Vec::new()
 }
 
-/// One of `LOGIN_SHELL_VARIABLES` as the user's login shell sets it. Starting a
+/// One of `LOGIN_SHELL_VARIABLES` as the user's login shell exports it. Starting a
 /// login shell runs the user's rc files, so it is asked once per run of the
 /// app, not on every check. Blocking the first time on Unix.
 pub fn login_shell_variable(name: &str) -> Option<&'static str> {
@@ -383,8 +391,8 @@ mod tests {
 
     #[test]
     fn login_shell_variables_are_read_between_their_markers() {
-        let output = "rc noise __ticketd_PATH__/bin:/usr/bin__ticketd_PATH__\
-                      __ticketd_CLAUDE_CONFIG_DIR__/profile dir__ticketd_CLAUDE_CONFIG_DIR__\
+        let output = "rc noise __ticketd_PATH__/bin:/usr/bin\n__ticketd_PATH__\
+                      __ticketd_CLAUDE_CONFIG_DIR__/profile dir\n__ticketd_CLAUDE_CONFIG_DIR__\
                       __ticketd_CODEX_HOME____ticketd_CODEX_HOME__ more noise";
         assert_eq!(
             parse_login_shell_output(output),
@@ -397,10 +405,11 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn the_login_shell_script_prints_every_variable_it_reads() {
+    fn the_login_shell_script_reads_every_variable_even_when_rc_files_set_eu() {
+        // The rc files run first in the same shell; `set -eu` stands in for them.
         let mut command = Command::new("/bin/sh");
         command
-            .args(["-c", &login_shell_script()])
+            .args(["-c", &format!("set -eu; {}", login_shell_script())])
             .env("CLAUDE_CONFIG_DIR", "/profile")
             .env_remove("CODEX_HOME");
         let output = run_with_timeout(command, Duration::from_secs(5)).unwrap();

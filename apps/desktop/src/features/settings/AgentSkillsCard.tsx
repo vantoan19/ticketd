@@ -90,8 +90,11 @@ function summary(agents: AgentSkill[], status: Status) {
     return "No supported agent was found, so there is nothing to install yet.";
   const detected = agents.filter((agent) => agent.detected);
   switch (status) {
-    case INSTALLED:
-      return `Up to date for ${names(detected.filter(installed))}.`;
+    case INSTALLED: {
+      // A copy can be there before its agent is, e.g. one the CLI installed.
+      const found = detected.filter(installed);
+      return `Up to date for ${names(found.length > 0 ? found : agents.filter(installed))}.`;
+    }
     case UPDATE:
       return "A newer ticketd skill is ready. One click updates it for every supported agent found here.";
     case ATTENTION:
