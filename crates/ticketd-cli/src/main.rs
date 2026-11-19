@@ -5,7 +5,10 @@ use ticketd_core::{
     EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
+mod output;
 mod skills;
+
+use output::{bare, ok};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -1111,13 +1114,12 @@ enum ActivityCommand {
         offset: u32,
     },
 }
-/// The value of a write result without its `{"kind","value"}` wrapper, so a
-/// retried command prints the same object as the first run.
-fn bare(result: WriteResult) -> Result<String, Box<dyn std::error::Error>> {
-    let wrapped = serde_json::to_value(&result)?;
-    Ok(wrapped
-        .get("value")
-        .map_or_else(|| wrapped.to_string(), ToString::to_string))
+/// Rows of `list` or `search --latest-update`.
+fn update_rows(
+    rows: &[ticketd_core::TicketWithUpdate],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let rows: Vec<_> = rows.iter().map(output::UpdateRow).collect();
+    Ok(serde_json::to_string(&rows)?)
 }
 /// Read a text file, naming it in the error: the operating system's message alone
 /// ("No such file or directory") does not say which of several files failed.
@@ -1324,11 +1326,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         writeln!(
             output,
             "{}",
-            serde_json::to_string(&serde_json::json!({
-                "path": file.path,
-                "format_version": file.format_version,
-                "supported_format_version": ticketd_core::FORMAT_VERSION,
-            }))?
+            serde_json::to_string(&output::WorkspaceStatus {
+                path: file.path,
+                format_version: file.format_version,
+                supported_format_version: ticketd_core::FORMAT_VERSION,
+            })?
         )?;
         return Ok(());
     }
@@ -1445,12 +1447,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             DocumentCommand::Pin { id, remove } => {
                 workspace.set_document_pin(&id, !remove)?;
-                "ok".into()
+                ok()
             }
             DocumentCommand::Tags { id } => serde_json::to_string(&workspace.document_tags(&id)?)?,
             DocumentCommand::Tag { id, tag, remove } => {
                 workspace.set_document_tag(&id, &tag, !remove)?;
-                "ok".into()
+                ok()
             }
             DocumentCommand::Read { id, offset, limit } => {
                 let document = workspace.show_document(&id)?;
@@ -1461,9 +1463,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 let fetch = next_offset.map(|next| {
                     format!("ticketd document read {id} --offset {next} --limit {limit}")
                 });
-                serde_json::to_string(
-                    &serde_json::json!({"id": document.id, "title": document.title, "created_at": document.created_at, "updated_at": document.updated_at, "trashed": document.trashed, "body": body, "offset": offset, "next_offset": next_offset, "truncated": next_offset.is_some(), "fetch": fetch}),
-                )?
+                serde_json::to_string(&output::DocumentSlice {
+                    id: &document.id,
+                    title: &document.title,
+                    created_at: &document.created_at,
+                    updated_at: &document.updated_at,
+                    trashed: document.trashed,
+                    body: &body,
+                    offset,
+                    next_offset,
+                    truncated: next_offset.is_some(),
+                    fetch,
+                })?
             }
             DocumentCommand::TrashList { limit, offset } => {
                 serde_json::to_string(&workspace.trashed_documents_page(limit, offset)?)?
@@ -1599,6 +1610,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Export { file } => {
             if let Some(path) = file.filter(|path| path != "-") {
                 workspace.export_file(path)?;
+                writeln!(output, "{}", ok())?;
                 return Ok(());
             }
             serde_json::to_string_pretty(&workspace.export()?)?
@@ -1713,7 +1725,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             EvidenceCommand::Delete { reference, id } => {
                 workspace.delete_evidence(&reference, &id)?;
-                "null".into()
+                ok()
             }
             EvidenceCommand::List {
                 reference,
@@ -1787,7 +1799,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             ActivityCommand::Delete { reference, id } => {
                 workspace.delete_activity(&reference, &id)?;
-                "null".into()
+                ok()
             }
             ActivityCommand::Show { reference, id } => {
                 serde_json::to_string(&workspace.activity(&reference, &id)?)?
@@ -1949,7 +1961,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let filter = filters.filter(String::new())?;
             if latest_update {
-                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+                update_rows(&workspace.find_tickets_with_updates(&filter)?)?
             } else {
                 serde_json::to_string(&workspace.find_tickets(&filter)?)?
             }
@@ -1961,7 +1973,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let filter = filters.filter(query)?;
             if latest_update {
-                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+                update_rows(&workspace.find_tickets_with_updates(&filter)?)?
             } else {
                 serde_json::to_string(&workspace.find_tickets(&filter)?)?
             }
@@ -2256,7 +2268,10 @@ fn source_command(
             let mut sources = Vec::new();
             for descriptor in engine.connectors() {
                 let saved = workspace.saved_source(&descriptor.provider)?;
-                sources.push(serde_json::json!({ "connector": descriptor, "saved": saved }));
+                sources.push(output::SourceListing {
+                    connector: descriptor,
+                    saved,
+                });
             }
             serde_json::to_string(&sources)?
         }
@@ -2395,9 +2410,10 @@ fn attachment_command(
             if let Some(bytes) = bytes {
                 workspace.set_attachment_upload_limit(bytes)?;
             }
-            serde_json::to_string(
-                &serde_json::json!({ "limit_bytes": workspace.attachment_upload_limit()?, "default_bytes": ticketd_core::DEFAULT_ATTACHMENT_LIMIT }),
-            )?
+            serde_json::to_string(&output::AttachmentLimit {
+                limit_bytes: workspace.attachment_upload_limit()?,
+                default_bytes: ticketd_core::DEFAULT_ATTACHMENT_LIMIT,
+            })?
         }
         AttachmentCommand::Destination {
             local,
@@ -2635,7 +2651,9 @@ fn attachment_command(
             all_profiles_reviewed: _,
         } => {
             workspace.complete_draft_cutover()?;
-            serde_json::json!({"legacy_drafts_pending":false}).to_string()
+            serde_json::to_string(&output::DraftMigration {
+                legacy_drafts_pending: false,
+            })?
         }
         AttachmentCommand::RecoveryDrafts => serde_json::to_string(&workspace.draft_retentions()?)?,
         AttachmentCommand::ReleaseRecovery {
@@ -2652,7 +2670,10 @@ fn attachment_command(
         }
         AttachmentCommand::Export { id, path } => {
             workspace.export_attachment(&id, &path)?;
-            serde_json::to_string(&serde_json::json!({ "id": id, "path": path }))?
+            serde_json::to_string(&output::ExportedAttachment {
+                id: &id,
+                path: &path,
+            })?
         }
     })
 }

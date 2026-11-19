@@ -45,7 +45,13 @@ returned values. Each example illustrates an operation, not a required sequence.
 - Most data commands print JSON directly. There is no global `--json` flag.
   `write` returns a `kind`/`value` envelope; ordinary commands usually return the
   bare object or array. `list/search --latest-update` wrap each ticket with its
-  latest authored update. `document link` and management commands can print text.
+  latest authored update in a sibling `latest_update`; the wrapped ticket has no
+  `latest_update` of its own. `document link` and management commands can print
+  text. A write with no record to return, such as `evidence delete`, `activity
+  delete`, `document tag` or `document pin`, prints `{"ok":true}`. Status counts
+  always use the keys `todo`, `in_progress`, `in_review`, `done`, `canceled` and
+  `duplicate`; ticket `status` values keep their display spelling, such as
+  `In progress`. Keys print in a fixed order per record, the same in every command.
   Read/write results can contain full bodies: capture the JSON and display only
   needed fields, retaining the full data when preparing an edit.
 - Check the exit status and stderr as well as stdout. Runtime failures exit 1

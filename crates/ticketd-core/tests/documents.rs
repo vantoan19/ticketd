@@ -1058,7 +1058,7 @@ fn plan_context_flags_truncated_ticket_titles() {
     workspace
         .set_plan(&ticket.reference, Some(&plan.id), None)
         .unwrap();
-    let context = workspace.plan_context(&plan.id, false).unwrap();
+    let context = serde_json::to_value(workspace.plan_context(&plan.id, false).unwrap()).unwrap();
     assert_eq!(context["tickets"][0]["title_truncated"], true);
 }
 
