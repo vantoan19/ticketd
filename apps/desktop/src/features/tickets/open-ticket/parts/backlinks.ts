@@ -11,10 +11,9 @@ import { documentLinksRead } from "./files";
 type Backlink = Awaited<ReturnType<typeof client.backlinks>>[number];
 
 export type TicketBacklinks = {
-  /** The shown window; the previous one stays while the next is read. */
+  /** The shown window; the previous one stays while the next is read. Each
+   * mentioning update carries its `reported_at`. */
   links: Backlink[] | undefined;
-  /** When each mentioning update was reported, by its id. */
-  dates: Record<string, string>;
   failure: FailureDescription | null;
   retry(): void;
 };
@@ -23,28 +22,6 @@ const backlinksRead = read({
   key: "backlinks",
   call: (args: { reference: string; offset: number }) =>
     client.backlinks(args.reference, args.offset),
-  failure: "load mentions",
-});
-
-// The mention itself carries no date, so each update's is read. An update that
-// cannot be read just has no date.
-const noteDatesRead = read({
-  key: "backlinkDates",
-  call: async (notes: [source: string, id: string][]) => {
-    const dated = await Promise.all(
-      notes.map(([source, id]) =>
-        client
-          .activity(source, id)
-          .then((note) => [id, note?.reported_at] as const)
-          .catch(() => null),
-      ),
-    );
-    return Object.fromEntries(
-      dated.flatMap((entry) =>
-        entry?.[0] && entry[1] ? [[entry[0], entry[1]]] : [],
-      ),
-    ) as Record<string, string>;
-  },
   failure: "load mentions",
 });
 
@@ -66,7 +43,7 @@ const laterDocumentBacklinksRead = read({
   failure: "load mentions",
 });
 
-/** One window of 20 backlinks, from `offset`, with the dates of updates. */
+/** One window of 20 backlinks, from `offset`. */
 export function useBacklinks(
   record: Ticket | undefined,
   offset: number,
@@ -78,18 +55,8 @@ export function useBacklinks(
   // Show the previous window until the next one is read, so nothing jumps.
   const [shown, setShown] = useState(state.value);
   if (state.value && state.value !== shown) setShown(state.value);
-  const links = state.value ?? shown;
-  const notes = useMemo(
-    () =>
-      links?.flatMap((link): [string, string][] =>
-        link.activity_id ? [[link.source_reference, link.activity_id]] : [],
-      ) ?? [],
-    [links],
-  );
-  const dates = useRead(noteDatesRead, notes.length > 0 ? notes : skip);
   return {
-    links,
-    dates: dates.value ?? {},
+    links: state.value ?? shown,
     failure: state.failure,
     retry: state.retry,
   };

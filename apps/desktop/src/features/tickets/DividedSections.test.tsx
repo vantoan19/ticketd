@@ -29,6 +29,7 @@ test("each major ticket section opens with its heading row, set apart by space a
             source_reference: "T-KQ2",
             source_title: "Cache layer",
             activity_id: null,
+            reported_at: null,
             passage: "Blocked on T-KQ1.",
             mention_start: 11,
             mention_end: 14,

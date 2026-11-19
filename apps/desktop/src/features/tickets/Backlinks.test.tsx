@@ -28,6 +28,7 @@ test("lists each mention with its location and opens the source passage", async 
           source_reference: "T-KQ2",
           source_title: "Cache layer",
           activity_id: null,
+          reported_at: null,
           passage: "Blocked on T-KQ1 and T-KQ12.",
           mention_start: 11,
           mention_end: 14,
@@ -36,20 +37,12 @@ test("lists each mention with its location and opens the source passage", async 
           source_reference: "T-KQ3",
           source_title: "Docs",
           activity_id: "n1",
+          reported_at: "2026-10-31T10:00:00Z",
           passage: "See T-KQ1 for context.",
           mention_start: 4,
           mention_end: 7,
         },
       ];
-    if (command === "get_activity")
-      return {
-        id: "n1",
-        ticket_id: "ticket",
-        brief: "See T-KQ1 for context.",
-        reported_at: "2026-10-31T10:00:00Z",
-        updated_at: "2026-10-31T10:00:00Z",
-        editing_agent: null,
-      };
     throw new Error(`Unexpected ${command}`);
   });
   const select = vi.fn();
@@ -58,6 +51,10 @@ test("lists each mention with its location and opens the source passage", async 
   expect(screen.getByRole("heading", { name: /Mentioned in/ })).toBeTruthy();
   expect(screen.getByText("Description")).toBeTruthy();
   expect(await screen.findByText(/^Update · /)).toBeTruthy();
+  // The date comes with the mention: one backlinks read, no per-update reads.
+  const commands = bridge.invoke.mock.calls.map(([command]) => command);
+  expect(commands.filter((c) => c === "ticket_backlinks")).toHaveLength(1);
+  expect(commands).not.toContain("get_activity");
   // Only the whole reference is emphasized, not the prefix of T-KQ12.
   expect(
     screen
@@ -117,6 +114,7 @@ test("pages through backlinks by window, keeping the shown window while the next
     source_reference: `T-S${index}`,
     source_title: `Source ${index}`,
     activity_id: null,
+    reported_at: null,
     passage: "Mentions T-KQ1",
     mention_start: 9,
     mention_end: 14,

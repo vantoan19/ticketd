@@ -777,6 +777,7 @@ export const client = {
           source_reference: z.string(),
           source_title: z.string(),
           activity_id: z.string().nullable(),
+          reported_at: z.string().nullable(),
           passage: z.string(),
           mention_start: z.number().int().nonnegative(),
           mention_end: z.number().int().nonnegative(),
