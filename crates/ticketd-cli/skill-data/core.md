@@ -47,7 +47,7 @@ returned values. Each example illustrates an operation, not a required sequence.
   bare object or array. `list/search --latest-update` wrap each ticket with its
   latest authored update in a sibling `latest_update`; the wrapped ticket has no
   `latest_update` of its own. `document link` prints Markdown text. A write with no record to return, such as `evidence delete`, `activity
-  delete`, `document tag` or `document pin`, prints `{"ok":true}`. Status counts
+delete`, `document tag` or `document pin`, prints `{"ok":true}`. Status counts
   always use the keys `todo`, `in_progress`, `in_review`, `done`, `canceled` and
   `duplicate`; ticket `status` values keep their display spelling, such as
   `In progress`. Keys print in a fixed order per record, the same in every command.
