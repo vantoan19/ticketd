@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { coldTokenCache } from "@/test/motion-tokens";
 import { MotionProvider } from "@/components/ui/motion";
 import { Inbox } from "./Inbox";
 import { useNewEntries } from "./inbox-arrivals";
@@ -239,7 +240,10 @@ test("an arriving entry reads them for its own arrival, and not again as the lis
   const view = render(<Slots arriving count={1} />);
   const once = rootReads(() => view.rerender(<Slots arriving count={1} />));
   expect(once).toBe(0);
+  coldTokenCache();
   const first = rootReads(() => render(<Slots arriving count={1} />));
   expect(first).toBeGreaterThan(0);
-  expect(rootReads(() => render(<Slots arriving count={9} />))).toBe(first * 9);
+  // From a cold cache nine arrivals cost what one does: the reads are cached.
+  coldTokenCache();
+  expect(rootReads(() => render(<Slots arriving count={9} />))).toBe(first);
 });

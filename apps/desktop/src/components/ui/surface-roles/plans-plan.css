@@ -53,13 +53,11 @@ button.plan-purpose:focus-visible {
   white-space: nowrap;
 }
 
-@container plan-workspace (max-width: 640px) {
-  .plan-summary-legend {
-    white-space: normal;
-  }
-  .plan-context-note {
-    white-space: normal;
-  }
+:where(.plan-workspace[data-width~="max-640"]) .plan-summary-legend {
+  white-space: normal;
+}
+:where(.plan-workspace[data-width~="max-640"]) .plan-context-note {
+  white-space: normal;
 }
 .plan-index-list {
   list-style: none;

@@ -58,8 +58,6 @@
   line-height: var(--text-caption-line);
   white-space: nowrap;
 }
-@container (max-width: 640px) {
-  .cgraph-body .ui-graph-panel {
-    box-shadow: inset 0 1px 0 var(--border);
-  }
+:where([data-width~="max-640"]) .cgraph-body .ui-graph-panel {
+  box-shadow: inset 0 1px 0 var(--border);
 }
