@@ -33,7 +33,10 @@ import {
 import { BulkTagDialog } from "@/features/tickets/BulkTagDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { directStatuses } from "@/lib/statuses";
-import type { BulkEdit } from "@/features/tickets/useBulkEdit";
+import {
+  useSelectedTickets,
+  type BulkEdit,
+} from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -77,17 +80,20 @@ export function BulkControls({
   bulk,
   visible,
   total,
-  matchingTickets,
+  matchingReferences,
   projects,
   plans,
 }: {
   bulk: BulkEdit;
-  /** Tickets currently listed, for Select all and Plan membership counts. */
+  /**
+   * Tickets currently listed, for Select all. They stand in for the Status and
+   * Plan counts until the selection's own read answers.
+   */
   visible: Ticket[];
   /** Every ticket the search and filters match, listed or not. */
   total: number;
-  /** Reads every matching ticket, for "Select all 59 matching". */
-  matchingTickets: () => Promise<Ticket[]>;
+  /** Reads every matching reference, for "Select all 59 matching". */
+  matchingReferences: () => Promise<string[]>;
   projects: TicketWorkspace["projects"];
   plans: TicketWorkspace["plans"];
 }) {
@@ -98,15 +104,9 @@ export function BulkControls({
   // The bar stays drawn while it sinks away after the last ticket is cleared.
   const [leaving, setLeaving] = useState(false);
   const [hadSelection, setHadSelection] = useState(count > 0);
-  // The tickets "Select all n matching" read beyond the listed page, so the
-  // Status and Plan counts cover the whole selection. Dropped with it.
-  const [matched, setMatched] = useState<ReadonlyMap<string, Ticket>>(
-    () => new Map(),
-  );
   if (count > 0 !== hadSelection) {
     setHadSelection(count > 0);
     setLeaving(count === 0);
-    if (count === 0) setMatched(new Map());
   }
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
@@ -145,10 +145,12 @@ export function BulkControls({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [count, pending, bulk]);
-  // A listed ticket is the freshest copy; the rest come from the matching read.
+  // Every selected ticket as last read, listed or not; a listed one stands in
+  // until the read of this selection answers.
+  const asRead = useSelectedTickets(selection);
   const listed = new Map(visible.map((ticket) => [ticket.reference, ticket]));
   const selectedTickets = selection.flatMap((reference) => {
-    const ticket = listed.get(reference) ?? matched.get(reference);
+    const ticket = asRead?.[reference] ?? listed.get(reference);
     return ticket ? [ticket] : [];
   });
   const inStatus = (status: string) =>
@@ -165,9 +167,7 @@ export function BulkControls({
   async function selectMatching() {
     setSelecting(true);
     try {
-      const found = await matchingTickets();
-      setMatched(new Map(found.map((ticket) => [ticket.reference, ticket])));
-      bulk.selectAll(found.map((ticket) => ticket.reference));
+      bulk.selectAll(await matchingReferences());
     } catch (reason) {
       statusLine.show({
         tone: "error",

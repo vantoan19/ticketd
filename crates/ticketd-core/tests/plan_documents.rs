@@ -1,4 +1,4 @@
-use ticketd_core::Workspace;
+use ticketd_core::{MetadataSelection, Workspace};
 
 #[test]
 fn shared_documents_and_spec_survive_reopen_without_changing_ticket_membership() {
@@ -273,7 +273,11 @@ fn metadata_projection_omits_bodies_and_bounds_prerequisites_without_changing_le
         ..Default::default()
     };
     let projection = workspace
-        .find_ticket_metadata(&filter, Some(std::slice::from_ref(&ticket.id)), false)
+        .find_ticket_metadata(
+            &filter,
+            Some(MetadataSelection::Ids(std::slice::from_ref(&ticket.id))),
+            false,
+        )
         .unwrap();
     assert_eq!(projection.items.len(), 1);
     assert_eq!(projection.items[0].reference, ticket.reference);
@@ -300,7 +304,63 @@ fn metadata_projection_omits_bodies_and_bounds_prerequisites_without_changing_le
     assert_eq!(workspace.show_plan(&plan.id).unwrap().members.len(), 1);
     assert!(
         workspace
-            .find_ticket_metadata(&filter, Some(&vec![ticket.id; 251]), false)
+            .find_ticket_metadata(
+                &filter,
+                Some(MetadataSelection::Ids(&vec![ticket.id; 251])),
+                false
+            )
             .is_err()
+    );
+}
+
+#[test]
+fn metadata_names_tickets_by_reference_as_a_bulk_selection_does() {
+    use ticketd_core::{Status, TicketFilter, TicketPatch};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
+    let todo = workspace.create_ticket("Still to do").unwrap();
+    let done = workspace.create_ticket("Finished").unwrap();
+    workspace.create_ticket("Not selected").unwrap();
+    workspace
+        .change_ticket(
+            &done.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .set_plan(&done.reference, Some(&plan.id), None)
+        .unwrap();
+    // A reference that names no ticket is left out, not an error.
+    let selected = [
+        done.reference.clone(),
+        todo.reference.clone(),
+        "T-ZZ999".to_owned(),
+    ];
+    let filter = TicketFilter {
+        limit: 100,
+        ..Default::default()
+    };
+    let mut found: Vec<_> = workspace
+        .find_ticket_metadata(
+            &filter,
+            Some(MetadataSelection::References(&selected)),
+            false,
+        )
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|ticket| (ticket.reference, ticket.status, ticket.plan_id))
+        .collect();
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        found,
+        [
+            (todo.reference, Status::Todo, None),
+            (done.reference, Status::Done, Some(plan.id)),
+        ]
     );
 }

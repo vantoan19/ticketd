@@ -476,9 +476,13 @@ export function useTicketWorkspace(
       setPages((value) => value + 1);
     }
   }
-  /** Every ticket the current search and filters match, across pages. */
-  function matchingTickets(): Promise<Ticket[]> {
-    return readPages(filterArgs, Math.max(1, Math.ceil(total / PAGE_SIZE)));
+  /** Every reference the current search and filters match, across pages. */
+  async function matchingReferences(): Promise<string[]> {
+    const found = await readPages(
+      filterArgs,
+      Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    );
+    return found.map((ticket) => ticket.reference);
   }
   const scopeName =
     navigation.kind === "trash"
@@ -563,7 +567,7 @@ export function useTicketWorkspace(
     pages,
     resetPaging,
     showMore: () => setPages((value) => value + 1),
-    matchingTickets,
+    matchingReferences,
     plan,
     setPlan,
     status,

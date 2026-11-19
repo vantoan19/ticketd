@@ -379,7 +379,9 @@ fn an_outage_marks_tickets_unavailable_since_the_first_failure_and_keeps_everyth
         .workspace
         .find_ticket_metadata(
             &ticketd_core::TicketFilter::default(),
-            Some(std::slice::from_ref(&ticket.id)),
+            Some(ticketd_core::MetadataSelection::Ids(std::slice::from_ref(
+                &ticket.id,
+            ))),
             true,
         )
         .unwrap();
@@ -402,7 +404,9 @@ fn an_outage_marks_tickets_unavailable_since_the_first_failure_and_keeps_everyth
         .workspace
         .find_ticket_metadata(
             &ticketd_core::TicketFilter::default(),
-            Some(std::slice::from_ref(&ticket.id)),
+            Some(ticketd_core::MetadataSelection::Ids(std::slice::from_ref(
+                &ticket.id,
+            ))),
             true,
         )
         .unwrap();

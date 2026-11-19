@@ -856,6 +856,33 @@ export const client = {
         }),
       );
   },
+  /**
+   * The metadata of the tickets these references name, out of the Trash and
+   * whatever a list's search and filters say: at most 100 a read. A reference
+   * that names no such ticket is left out.
+   */
+  async findTicketMetadataByReference(references: string[]) {
+    const filter: FindFilter = {
+      query: "",
+      project: null,
+      unlinked: false,
+      plan: null,
+      status: null,
+      tags: [],
+      availability: null,
+      family: null,
+      limit: 100,
+      offset: 0,
+    };
+    const page = z.object({ items: z.array(ticketMetadataSchema) }).parse(
+      await invoke("find_tickets_with_updates", {
+        filter,
+        projection: "metadata",
+        references,
+      }),
+    );
+    return page.items;
+  },
   async findFlowMetadata(filter: FindFilter) {
     return z
       .object({
