@@ -17,6 +17,9 @@ export function FieldValue({
   against?: string;
   mark?: "ins" | "del";
 }) {
+  // Choosing an empty value clears the other side's text: say so, never a blank card.
+  if (!value.trim())
+    return <span className="sync-value text-muted-foreground">Empty</span>;
   if (field === "status")
     return (
       <span className="sync-value">

@@ -809,3 +809,59 @@ fn explicit_bounded_hydration_keeps_a_105_member_plan_and_cross_batch_links_with
     assert_eq!(limited.edges.len(), 1);
     assert!(limited.omitted);
 }
+
+#[test]
+fn a_continuation_as_emitted_is_accepted_back_as_a_page_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Hub").unwrap();
+    for n in 0..60 {
+        let ticket = workspace.create_ticket(&format!("Member {n}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+    }
+    let first = workspace.context_graph(&plan.id, false).unwrap();
+    // The command line passes the JSON a graph printed straight back to `--page`.
+    let printed = serde_json::to_string(&first.continuations[0]).unwrap();
+    let page: ticketd_core::ContextGraphPage = serde_json::from_str(&printed).unwrap();
+    let more = workspace
+        .context_graph_with_pages(&plan.id, false, &[], &[page])
+        .unwrap();
+    assert_eq!(more.nodes.len(), 61);
+}
+
+#[test]
+fn workspace_graph_rejects_unknown_filters_and_a_garbage_cursor() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    workspace.create_ticket("One").unwrap();
+    let rejected = |request: WorkspaceGraphRequest| {
+        workspace.workspace_graph(&request).unwrap_err().to_string()
+    };
+    let message = rejected(WorkspaceGraphRequest {
+        kind: Some("bogus".into()),
+        ..Default::default()
+    });
+    assert!(message.contains("unknown kind 'bogus'") && message.contains("ticket"));
+    let message = rejected(WorkspaceGraphRequest {
+        relationship: Some("bogus".into()),
+        ..Default::default()
+    });
+    assert!(message.contains("unknown relationship 'bogus'") && message.contains("blocks"));
+    let message = rejected(WorkspaceGraphRequest {
+        cursor: Some("garbage".into()),
+        ..Default::default()
+    });
+    assert!(message.contains("invalid cursor"));
+    // Names the desktop offers stay valid.
+    for relationship in ["spec", "blocks", "related"] {
+        workspace
+            .workspace_graph(&WorkspaceGraphRequest {
+                relationship: Some(relationship.into()),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+}

@@ -126,6 +126,12 @@ pub enum IneligibleReason {
     AttemptOpen,
     /// Workspace attachment links cannot be read by external readers.
     InternalAttachments,
+    /// The chosen destination is not well formed for the provider (for GitHub,
+    /// not `owner/name`), so publishing would be refused.
+    InvalidDestination,
+    /// The source lists the destinations it may publish to and the chosen one is
+    /// not among them, so ticket text cannot be sent anywhere else.
+    DestinationNotAllowed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -949,6 +955,15 @@ impl Workspace {
         {
             eligibility = ineligible(reason, message);
         }
+        // The same check the publish makes, so a preview never promises what the
+        // publish refuses.
+        if matches!(eligibility, Eligibility::Eligible)
+            && let Some(chosen) = &destination
+            && let Some((reason, message)) =
+                destination_refusal(engine, provider, chosen, &destinations)?
+        {
+            eligibility = ineligible(reason, message);
+        }
         Ok(PublicationPreview {
             reference: ticket.reference,
             provider: provider.to_owned(),
@@ -1048,6 +1063,14 @@ impl Workspace {
                     },
                 ])));
             };
+            // Refused before an attempt is recorded: nothing was tried.
+            engine.check_destination(provider, &destination)?;
+            if !engine.destination_allowed(provider, &destination, &target.destinations)? {
+                return Err(refuse(
+                    IneligibleReason::DestinationNotAllowed,
+                    not_allowed_message(&destination, &target.destinations),
+                ));
+            }
             // Send exactly what was previewed, or nothing.
             if let Some(expected) = &options.expected_fingerprint
                 && *expected != fingerprint(&ticket.title, &ticket.body, Some(&destination))
@@ -2108,8 +2131,12 @@ fn complete_attempt(
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let replaced_by_issue = sent.attached == Some(true);
+    let mut issue_title = crate::ticket_change::imported_title(&issue.title);
+    if issue_title.is_empty() {
+        issue_title.clone_from(&issue.display);
+    }
     let (new_title, new_body) = if replaced_by_issue {
-        (issue.title.as_str(), issue.body.as_str())
+        (issue_title.as_str(), issue.body.as_str())
     } else {
         (sent.title, sent.body)
     };
@@ -2172,6 +2199,48 @@ fn complete_attempt(
         [sent.attempt_id],
         |row| attempt_from_row(row, now),
     )?)
+}
+
+/// The reason a destination was refused, without the "invalid source
+/// configuration: destination" framing meant for settings.
+fn destination_problem(error: &SourceError) -> String {
+    match error.issues() {
+        [issue, ..] => issue.message.clone(),
+        [] => error.to_string(),
+    }
+}
+
+/// Why `chosen` cannot be published to, if it cannot: malformed for the
+/// provider, or outside the destinations the saved source lists.
+fn destination_refusal(
+    engine: &Engine,
+    provider: &str,
+    chosen: &str,
+    allowed: &[String],
+) -> Result<Option<(IneligibleReason, String)>, Error> {
+    if let Err(error) = engine.check_destination(provider, chosen) {
+        return Ok(Some((
+            IneligibleReason::InvalidDestination,
+            format!(
+                "cannot publish to '{chosen}': {}",
+                destination_problem(&error)
+            ),
+        )));
+    }
+    if !engine.destination_allowed(provider, chosen, allowed)? {
+        return Ok(Some((
+            IneligibleReason::DestinationNotAllowed,
+            not_allowed_message(chosen, allowed),
+        )));
+    }
+    Ok(None)
+}
+
+fn not_allowed_message(chosen: &str, allowed: &[String]) -> String {
+    format!(
+        "cannot publish to '{chosen}': this source only publishes to {}",
+        allowed.join(", ")
+    )
 }
 
 fn chosen_destination(requested: Option<&str>, suggested: &[String]) -> Option<String> {

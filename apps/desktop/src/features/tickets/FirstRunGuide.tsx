@@ -133,7 +133,7 @@ export function FirstRunGuide({
             settled={status !== null}
             title={
               <>
-                Keep it on every Mac{" "}
+                Keep it on every computer{" "}
                 <span className="ui-guide-optional">· optional</span>
                 {status?.connection === "connected" && (
                   <span className="sr-only"> — Complete</span>

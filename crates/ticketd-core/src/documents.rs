@@ -96,7 +96,7 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
     Ok(())
 }
 
-// A Document's heading: its explicit title, else the originating Activity's brief (docs/mvp-spec.md),
+// A Document's heading: its explicit title, else the originating Activity's brief (docs/product.md, Activities and activity details),
 // else the first plain-text line of its body. `ticketd_heading` is registered on every workspace connection.
 pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_brief_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), ticketd_heading(substr(d.body, 1, 4096)), 'Untitled')";
 /// Columns read by every Document list query; see `summary_from_row`.
@@ -135,15 +135,28 @@ const CAPTURE_PLACEHOLDER: &str = "Write a thought…";
 fn plain_snippet(body: &str, heading: &str, query: Option<&str>) -> String {
     const LIMIT: usize = 160;
     use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let body = body.strip_prefix('\u{feff}').unwrap_or(body);
     let mut text = String::new();
     let mut in_code_block = false;
+    let mut in_metadata = false;
     // A leading heading is the Document's own heading, which the list already shows.
     let mut skipping_heading = false;
     let mut started = false;
     for event in Parser::new_ext(
         body,
-        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES,
+        crate::document_links::HEADING_OPTIONS | Options::ENABLE_TABLES,
     ) {
+        match event {
+            Event::Start(Tag::MetadataBlock(_)) => in_metadata = true,
+            Event::End(TagEnd::MetadataBlock(_)) => {
+                in_metadata = false;
+                continue;
+            }
+            _ => {}
+        }
+        if in_metadata {
+            continue;
+        }
         if !started && matches!(event, Event::Start(_)) {
             started = true;
             skipping_heading = matches!(event, Event::Start(Tag::Heading { .. }));
@@ -464,10 +477,16 @@ impl Workspace {
     }
 
     pub fn set_document_tag(&mut self, id: &str, tag: &str, present: bool) -> Result<(), Error> {
-        let tag = tag.trim().to_lowercase();
-        if tag.is_empty() {
-            return Err(Error::EmptyTag);
-        }
+        // Adding follows the tag rules; removing accepts any stored tag.
+        let tag = if present {
+            crate::tags::normalize_new(tag)?
+        } else {
+            let tag = tag.trim().to_lowercase();
+            if tag.is_empty() {
+                return Err(Error::EmptyTag);
+            }
+            tag
+        };
         self.show_document(id)?;
         crate::write_scope::run(&self.connection, |tx| {
             if present {

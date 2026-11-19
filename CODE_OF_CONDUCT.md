@@ -19,8 +19,8 @@ disruption or retaliation against someone who raises a concern is also unaccepta
 
 ## Reporting
 
-**Preparation status:** a private reporting contact must be designated before
-public launch. This reporting section is not yet operational.
+Email [toan.tran.cqt@gmail.com](mailto:toan.tran.cqt@gmail.com) with the subject
+`ticketd conduct report` to report a concern privately.
 
 Reports should describe what happened, where it occurred, and any relevant links
 or evidence. Share sensitive details privately rather than in a public issue.

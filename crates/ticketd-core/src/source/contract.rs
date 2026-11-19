@@ -252,6 +252,14 @@ pub struct PublicationCandidates {
     pub complete: bool,
 }
 
+/// Where a message will be read. Guidance about signing in differs: a terminal
+/// user has environment variables, a desktop user has Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    Terminal,
+    Desktop,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
     #[error("{0}")]
@@ -442,6 +450,27 @@ impl SourceError {
         }
     }
 
+    /// The sentence that finishes a credential failure for the place it is read.
+    /// The error itself says what went wrong and names `gh auth login`, which
+    /// works anywhere; this adds the way to retry that only that surface has.
+    pub fn sign_in_hint(surface: Surface) -> &'static str {
+        match surface {
+            Surface::Terminal => {
+                "From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead."
+            }
+            Surface::Desktop => "Then choose Check connection in Settings.",
+        }
+    }
+
+    /// The message with the guidance that fits `surface`. Only credential
+    /// failures differ from [`Display`](std::fmt::Display).
+    pub fn message_for(&self, surface: Surface) -> String {
+        match self {
+            Self::Unauthenticated(_) => format!("{self} {}", Self::sign_in_hint(surface)),
+            other => other.to_string(),
+        }
+    }
+
     /// Field-level problems, when the failure is about configuration values.
     pub fn issues(&self) -> &[FieldIssue] {
         match self {
@@ -535,6 +564,21 @@ pub trait Connector: Send + Sync {
     /// [`PublishRequest::destination`]. Empty when the connector cannot say.
     fn destinations(&self, _config: &ConfigValues) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Whether `destination` is a well-formed place to publish, judged without
+    /// a network call. A preview reports a failure here as ineligible, and a
+    /// publish refuses before recording an attempt, so both agree. The default
+    /// accepts anything.
+    fn check_destination(&self, _destination: &str) -> Result<(), SourceError> {
+        Ok(())
+    }
+
+    /// Whether two destination spellings name the same place. Exact match by
+    /// default; a provider that ignores case overrides it. Used to hold a
+    /// publish to the saved [`Connector::destinations`].
+    fn same_destination(&self, a: &str, b: &str) -> bool {
+        a == b
     }
 
     /// Creates an ordinary open issue and returns it as the provider now reports

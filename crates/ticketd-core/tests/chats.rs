@@ -93,8 +93,13 @@ fn a_chat_links_to_several_records_without_belonging_to_them() {
     let ticket = workspace.create_ticket("Outcome").unwrap();
     let other = workspace.create_ticket("Other outcome").unwrap();
     let document = workspace.create_document(Some("Notes"), "Body").unwrap();
-    let first = workspace.create_project("App", "/work/app").unwrap();
-    let second = workspace.create_project("Site", "/work/site").unwrap();
+    let folder = |name: &str| {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path.to_str().unwrap().to_owned()
+    };
+    let first = workspace.create_project("App", &folder("app")).unwrap();
+    let second = workspace.create_project("Site", &folder("site")).unwrap();
     let link = |kind, id: &str| ChatLink {
         kind,
         id: id.into(),
@@ -932,7 +937,9 @@ fn linked_records_are_read_as_they_are_now_not_as_they_were_when_linked() {
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("First title").unwrap();
     let document = workspace.create_document(None, "# Notes\n\nBody").unwrap();
-    let project = workspace.create_project("App", "/work/app").unwrap();
+    let project = workspace
+        .create_project("App", dir.path().to_str().unwrap())
+        .unwrap();
     let link = |kind, id: &str| ChatLink {
         kind,
         id: id.into(),

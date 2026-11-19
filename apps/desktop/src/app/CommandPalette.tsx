@@ -91,12 +91,7 @@ const targets = [
   { id: "all", label: "All tickets", icon: ListTodo, key: "go-all" },
   { id: "ready", label: "Ready", icon: CircleCheck, key: "go-ready" },
   { id: "chats", label: "Chats", icon: MessagesSquare, key: "go-chats" },
-  {
-    id: "automations",
-    label: "Automations",
-    icon: Layers,
-    key: "go-automations",
-  },
+  { id: "automations", label: "Automations", icon: Layers },
   { id: "documents", label: "Documents", icon: Files, key: "go-documents" },
   { id: "projects", label: "Projects", icon: Folder },
   { id: "plans", label: "Plans", icon: Layers },

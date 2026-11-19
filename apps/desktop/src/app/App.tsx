@@ -11,6 +11,7 @@ import {
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
 import { keepWebviewInStep } from "@/lib/webview-scale";
+import { setReportedRoute } from "@/lib/error-report";
 import { usePageZoom } from "./use-page-zoom";
 import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
 import { PageZoomStatus } from "./PageZoomStatus";
@@ -226,6 +227,7 @@ function AppContent() {
       : editingBlockedReason(workspaceProblem);
   const recovery = useDraftRecovery();
   const [view, setViewState] = useState<View>("tickets");
+  useEffect(() => setReportedRoute(view), [view]);
   const chat = useChatFeature();
   // Turning Chat off hides its screen at once; the Chats themselves are kept.
   if ((view === "chats" || view === "automations") && !chat.enabled)
@@ -914,6 +916,13 @@ function AppContent() {
                                       ticketUnavailable(
                                         reference ? inboxRecord : undefined,
                                       );
+                                    // A reminder is the person's own, so Trash does not block it.
+                                    const reminderActionReason =
+                                      ticketReason ??
+                                      ticketUnavailable(
+                                        reference ? inboxRecord : undefined,
+                                        { allowTrashed: true },
+                                      );
                                     const isReview =
                                       entry?.kind === "status" &&
                                       entry.to_value === "In review";
@@ -931,7 +940,7 @@ function AppContent() {
                                             ? "The source does not allow moving this Ticket to Done."
                                             : null))
                                       : entry?.kind === "reminder"
-                                        ? ticketActionReason
+                                        ? reminderActionReason
                                         : blocked;
                                     const primaryLabel = chat
                                       ? "Review in Chat"
@@ -963,7 +972,7 @@ function AppContent() {
                                           entry?.kind === "reminder"
                                             ? "Snooze reminder"
                                             : "Remind me on this Ticket",
-                                        disabledReason: ticketActionReason,
+                                        disabledReason: reminderActionReason,
                                         run: () => requestInboxAction("remind"),
                                       },
                                       {

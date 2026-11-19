@@ -72,6 +72,9 @@ pub struct AutomationRunner {
     open_workspace: WorkspaceOpener,
     notifier: Notifier,
     runner: Arc<Mutex<Option<Runner>>>,
+    /// The kind of the failure last logged, while passes keep failing: a failing pass is
+    /// tried again every few seconds, and says so once.
+    failing: Arc<Mutex<Option<&'static str>>>,
 }
 
 impl AutomationRunner {
@@ -81,6 +84,7 @@ impl AutomationRunner {
             open_workspace,
             notifier,
             runner: Arc::default(),
+            failing: Arc::default(),
         }
     }
 
@@ -89,7 +93,11 @@ impl AutomationRunner {
     /// logged and tried again by whatever needs the runner next.
     pub fn start_up(&self) {
         if let Err(error) = self.get() {
-            eprintln!("ticketd: the Automation runner could not start: {error}");
+            tracing::error!(
+                error_kind = error.kind().code(),
+                %error,
+                "the Automation runner could not start"
+            );
         }
     }
 
@@ -119,10 +127,21 @@ impl AutomationRunner {
     /// Workspace is busy or unreadable) is tried again at the next tick, which also
     /// ends any run the failure left Running. Blocking.
     fn pass(&self) -> bool {
+        let mut failing = self.failing.lock().unwrap_or_else(PoisonError::into_inner);
         match self.get().and_then(|runner| runner.tick()) {
-            Ok(busy) => busy,
+            Ok(busy) => {
+                if failing.take().is_some() {
+                    tracing::info!("Automation passes work again");
+                }
+                busy
+            }
             Err(error) => {
-                eprintln!("ticketd: an Automation pass failed: {error}");
+                // Logged when it starts or its kind changes, not on every attempt.
+                let kind = error.kind().code();
+                if *failing != Some(kind) {
+                    tracing::warn!(error_kind = kind, %error, "an Automation pass failed");
+                }
+                *failing = Some(kind);
                 true
             }
         }

@@ -47,6 +47,10 @@ export const failureCodes = [
   "invalid_configuration",
   "unknown_provider",
   "incompatible_contract",
+  // Google sign-in: a build without the Drive app configuration, and a
+  // sign-in that was closed, cancelled or timed out.
+  "drive_unconfigured",
+  "sign_in_cancelled",
   "failed",
 ] as const;
 export type FailureCode = (typeof failureCodes)[number];

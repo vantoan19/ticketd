@@ -14,7 +14,9 @@ const flow: { onMoveStart?: ((event: unknown) => void) | undefined } = {};
 const instance = {
   fitView: vi.fn(),
   zoomTo: vi.fn(),
-  getNodes: () => [],
+  setViewport: vi.fn(),
+  getNodesBounds: vi.fn(),
+  getNodes: (): unknown[] => [],
   getZoom: () => 1,
 };
 vi.mock("@xyflow/react", () => ({
@@ -214,5 +216,41 @@ test("a resize refits after Fit, even when the viewport syncs back, but not afte
     expect(instance.fitView).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
+  }
+});
+
+test("Fit on a graph taller than the view lands on its top, not its middle", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+  instance.getNodes = () => [{ id: "a", measured: { width: 224 } }];
+  instance.getNodesBounds.mockReturnValue({
+    x: 0,
+    y: 0,
+    width: 700,
+    height: 2000,
+  });
+  try {
+    render(
+      <ContextGraphCanvas
+        edges={[]}
+        selected={null}
+        positions={{}}
+        onPositions={vi.fn()}
+        viewport={{ x: 0, y: 0, zoom: 1 }}
+        onViewport={vi.fn()}
+        onSelect={vi.fn()}
+        onError={vi.fn()}
+        nodes={[{ id: "a", label: "A" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
+    // Fit's top padding is 52px: the first card or island header sits there.
+    expect(instance.setViewport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ y: 52, zoom: 1 }),
+      expect.anything(),
+    );
+  } finally {
+    instance.getNodes = () => [];
+    vi.restoreAllMocks();
   }
 });

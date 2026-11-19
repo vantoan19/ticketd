@@ -12,6 +12,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { PublicationAttempt, Ticket } from "@/lib/api/client";
 import { SourceActivityContext } from "./source-activity";
 import { PublicationNotice, PublishDialog } from "./PublishToSource";
+import { publicationReason } from "./use-publication-preview";
+import type { PublicationPreview } from "@/lib/api/sources";
 import { TicketHeader } from "./TicketHeader";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import type { ComponentProps } from "react";
@@ -247,6 +249,36 @@ test("workspace links open the core preflight with affected files and no publica
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
   ).toBe(false);
+});
+
+test("a destination outside the saved list is refused with the core's reason", async () => {
+  const message =
+    "cannot publish to 'acme/secret-roadmap': this source only publishes to acme/api";
+  const refused = {
+    ...eligible,
+    destination: "acme/secret-roadmap",
+    eligibility: {
+      kind: "ineligible",
+      reason: "destination_not_allowed",
+      message,
+    },
+  };
+  expect(publicationReason(refused as PublicationPreview)).toBe(message);
+  bridgeAnswers(refused);
+  render(
+    <PublishDialog
+      ticket={ticket()}
+      provider="github"
+      onOpenChange={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  expect(await screen.findByText(message)).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Publish issue" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
 });
 
 test("publication preview explains that direct local files are not sent", async () => {

@@ -265,6 +265,9 @@ impl Workspace {
     pub(crate) fn quarantine_attachment_locked(&mut self, id: &str) -> Result<Attachment, Error> {
         crate::write_scope::run(&self.connection, |tx| {
             let current = review(tx, id)?;
+            if current.attachment.purge_state == AttachmentPurgeState::Purged {
+                return Err(Error::Attachment(purge_unavailable(&current.attachment)));
+            }
             if current.attachment.quarantined {
                 return Ok(current.attachment);
             }

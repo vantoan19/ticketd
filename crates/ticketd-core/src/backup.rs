@@ -30,19 +30,28 @@ pub(crate) fn resolve(path: &Path) -> Result<PathBuf, Error> {
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or(Path::new("."));
-            parent.canonicalize()?.join(
-                path.file_name()
-                    .ok_or_else(|| Error::Backup("invalid workspace path".into()))?,
-            )
+            parent
+                .canonicalize()
+                .map_err(|e| crate::path_error("workspace folder", parent, e))?
+                .join(
+                    path.file_name()
+                        .ok_or_else(|| Error::Backup("invalid workspace path".into()))?,
+                )
         }
         Err(error) => return Err(error.into()),
     })
 }
 
-pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
-    let resolved = resolve(path)?;
+/// The lock file beside a Workspace, given its resolved path.
+pub(crate) fn lock_path(resolved: &Path) -> PathBuf {
     let mut name = resolved.as_os_str().to_os_string();
     name.push(".lock");
+    PathBuf::from(name)
+}
+
+pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
+    let resolved = resolve(path)?;
+    let name = lock_path(&resolved);
     Ok(OpenOptions::new()
         .read(true)
         .write(true)
@@ -90,23 +99,16 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
 
 fn validate_against(connection: &Connection, ladder: Ladder) -> Result<(), Error> {
     // A backup from before Efforts became Plans gets the legacy-schema message, not a missing table.
-    if table_exists(connection, "efforts")? {
+    if table_exists(connection, "efforts").unwrap_or(false) {
         return Err(Error::LegacyEffortWorkspace);
     }
-    match check_backup(connection, ladder)? {
+    let check = check_backup(connection, ladder)?;
+    match &check {
         BackupCheck::Valid { .. } => Ok(()),
         BackupCheck::NewerFormat { backup_version, .. } => {
-            Err(Error::NewerSchema(i64::from(backup_version)))
+            Err(Error::NewerSchema(i64::from(*backup_version)))
         }
-        BackupCheck::NotTicketd => Err(Error::Backup("not a ticketd workspace backup".into())),
-        BackupCheck::MissingTables { tables } => Err(Error::Backup(format!(
-            "missing schema object {}",
-            tables.join(", ")
-        ))),
-        BackupCheck::Damaged { reason } => Err(Error::Backup(reason)),
-        BackupCheck::CurrentWorkspace => {
-            Err(Error::Backup("backup is the current workspace".into()))
-        }
+        other => Err(Error::Backup(other.refusal().unwrap_or_default())),
     }
 }
 

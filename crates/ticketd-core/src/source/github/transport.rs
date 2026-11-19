@@ -100,6 +100,33 @@ impl UreqTransport {
     }
 }
 
+/// What went wrong in words a person can act on, followed by the library's own
+/// text in parentheses so the underlying cause is never lost.
+fn describe_transport_error(error: &ureq::Error) -> String {
+    use std::io::ErrorKind;
+    let human = match error {
+        ureq::Error::HostNotFound => Some("the server's address could not be found"),
+        ureq::Error::ConnectionFailed => Some("the connection could not be made"),
+        ureq::Error::Timeout(_) => Some("the request timed out"),
+        ureq::Error::Io(io) => match io.kind() {
+            ErrorKind::ConnectionRefused => Some("the connection was refused"),
+            ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe => {
+                Some("the connection was dropped")
+            }
+            ErrorKind::TimedOut => Some("the request timed out"),
+            ErrorKind::NotConnected | ErrorKind::AddrNotAvailable => {
+                Some("there is no network connection")
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    match human {
+        Some(human) => format!("{human} ({error})"),
+        None => error.to_string(),
+    }
+}
+
 impl Default for UreqTransport {
     fn default() -> Self {
         Self::new()
@@ -132,7 +159,7 @@ impl HttpTransport for UreqTransport {
                     | ureq::Error::BadUri(_)
                     | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
             ),
-            message: error.to_string(),
+            message: describe_transport_error(&error),
         })?;
         let status = response.status().as_u16();
         let headers = response
@@ -154,5 +181,29 @@ impl HttpTransport for UreqTransport {
             headers,
             body,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn network_failures_read_as_sentences_and_keep_the_underlying_cause() {
+        let refused =
+            describe_transport_error(&ureq::Error::Io(Error::from(ErrorKind::ConnectionRefused)));
+        assert!(
+            refused.starts_with("the connection was refused ("),
+            "{refused}"
+        );
+        assert!(refused.contains("io:"), "{refused}");
+        assert!(
+            describe_transport_error(&ureq::Error::HostNotFound)
+                .starts_with("the server's address could not be found")
+        );
+        // An error without a better description is passed through unchanged.
+        let other = ureq::Error::TooManyRedirects;
+        assert_eq!(describe_transport_error(&other), other.to_string());
     }
 }

@@ -16,6 +16,7 @@ use ticketd_core::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::host::{
@@ -175,6 +176,9 @@ struct ActiveTurn {
     /// The workspace change token when the turn started; unchanged means nothing in
     /// the workspace changed, so the agent changed no record.
     token: Option<i64>,
+    /// Open for as long as the Turn is, so every line about it is correlated and its close
+    /// records how long it took.
+    span: tracing::Span,
 }
 
 struct LiveRequest {
@@ -199,6 +203,9 @@ struct TextBuffer {
 
 pub(crate) struct Supervisor {
     chat_id: String,
+    /// The Chat's span, for work spawned on its behalf (opening the Harness), so the Harness's
+    /// stderr lines are correlated with the Chat and do not hold a Turn's span open.
+    span: tracing::Span,
     open_workspace: WorkspaceOpener,
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
@@ -289,7 +296,17 @@ impl Supervisor {
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
+        // A root span, so a Chat opened from inside a command or a pass is not held open by it.
+        let span = tracing::info_span!(
+            parent: None,
+            "chat",
+            chat_id = chat.id.as_str(),
+            automation_run_id = unattended
+                .as_ref()
+                .map(|unattended| unattended.run_id.as_str()),
+        );
         let supervisor = Self {
+            span: span.clone(),
             chat_id: chat.id.clone(),
             open_workspace,
             adapter,
@@ -334,7 +351,7 @@ impl Supervisor {
             refreshing: None,
             start_settings: StartSettings::default(),
         };
-        tokio::spawn(supervisor.run());
+        tokio::spawn(supervisor.run().instrument(span));
         sender
     }
 
@@ -359,7 +376,10 @@ impl Supervisor {
                         let _ = reply.send(unconfirmed);
                         return;
                     }
-                    Some(command) => self.on_command(command).await,
+                    Some(command) => {
+                        let turn = self.turn_span();
+                        self.on_command(command).instrument(turn).await;
+                    }
                     None => {
                         self.shutting_down = true;
                         self.stop_runtime(StopReason::Quit).await;
@@ -367,9 +387,13 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv() => self.on_done(done),
-                event = next_event(&mut self.runtime) => self.on_event(event),
-                () = sleep_until_some(timer) => self.on_timer(),
+                Some(done) = self.finished.recv() => {
+                    self.turn_span().in_scope(|| self.on_done(done));
+                }
+                event = next_event(&mut self.runtime) => {
+                    self.turn_span().in_scope(|| self.on_event(event));
+                }
+                () = sleep_until_some(timer) => self.turn_span().in_scope(|| self.on_timer()),
             }
             if self.storage_failed.is_some() && (self.runtime.is_some() || self.opening.is_some()) {
                 // Controlled shutdown: nothing more can be recorded, so nothing more runs.
@@ -949,25 +973,29 @@ impl Supervisor {
             reply,
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
-        tokio::spawn(async move {
-            // Reading the context runs the CLI and can take seconds: off the async threads.
-            let context = match source {
-                Some(source) => tokio::task::spawn_blocking(move || source(&chat_id))
+        let chat_span = self.span.clone();
+        tokio::spawn(
+            async move {
+                // Reading the context runs the CLI and can take seconds: off the async threads.
+                let context = match source {
+                    Some(source) => tokio::task::spawn_blocking(move || source(&chat_id))
+                        .await
+                        .unwrap_or_else(|error| Err(error.to_string())),
+                    None => Ok(None),
+                };
+                request.ticketd_cli = tokio::task::spawn_blocking(crate::cli::executable)
                     .await
-                    .unwrap_or_else(|error| Err(error.to_string())),
-                None => Ok(None),
-            };
-            request.ticketd_cli = tokio::task::spawn_blocking(crate::cli::executable)
-                .await
-                .ok()
-                .flatten();
-            let result = adapter.open(request).await;
-            let _ = done.send(Done::Opened {
-                generation,
-                result,
-                context,
-            });
-        });
+                    .ok()
+                    .flatten();
+                let result = adapter.open(request).await;
+                let _ = done.send(Done::Opened {
+                    generation,
+                    result,
+                    context,
+                });
+            }
+            .instrument(chat_span),
+        );
     }
 
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
@@ -1622,6 +1650,7 @@ impl Supervisor {
             turn_id: turn_id.clone(),
             native: native.clone(),
             token,
+            span: tracing::info_span!("chat_turn"),
         });
         self.unconfirmed_start = None;
         if self.stop_when_turn_known {
@@ -1629,6 +1658,13 @@ impl Supervisor {
             self.interrupt();
         }
         Some(turn_id)
+    }
+
+    /// The Turn in progress, for the work done on its behalf; the Chat's own span when none is.
+    fn turn_span(&self) -> tracing::Span {
+        self.active
+            .as_ref()
+            .map_or_else(tracing::Span::current, |active| active.span.clone())
     }
 
     fn on_event(&mut self, event: Option<RuntimeEvent>) {

@@ -1,6 +1,7 @@
 {
   "name": "@ticketd/chat-bridge-claude",
   "private": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vantoan19/ticketd.git",

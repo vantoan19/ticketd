@@ -12,7 +12,7 @@ import {
 } from "@/features/settings/settings-sections";
 import {
   SETTINGS_ENTRIES,
-  searchSettings,
+  searchSettingsFor,
   sourceEntries,
   splitMatch,
   type SettingsEntry,
@@ -63,21 +63,20 @@ export function SearchPage() {
     const pages = new Map<SettingsPageId, PageInfo>(
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
-    // Automations settings are found only while Chat shows them.
-    const entries: SettingsEntry[] = SETTINGS_ENTRIES.filter(
-      (entry) => entry.section !== "automations" || chat.enabled,
-    );
+    const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
     for (const { connector } of sources) {
       const section = sourceSection(connector.provider, connector.name);
       pages.set(section.id, section);
       entries.push(...sourceEntries(connector.provider, connector.name));
     }
     return { pages, entries };
-  }, [sources, chat.enabled]);
+  }, [sources]);
 
-  const hits = searchSettings(
+  // Rows that Chat shows, and the Automations page, are listed only while it is on.
+  const hits = searchSettingsFor(
     query,
     entries,
+    chat.enabled,
     (entry) => pages.get(entry.section)?.label ?? "",
   );
   // Sections in the order of their best hit; rows keep their rank inside.

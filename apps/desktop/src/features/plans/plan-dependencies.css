@@ -1,7 +1,9 @@
 /* Plan Dependencies: one full-width canvas and the fixed 280px panel at its
    right (graph kit). Layout only. */
 .plan-dependencies {
-  container-type: inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -21,13 +23,11 @@
   align-self: flex-start;
   margin-left: -8px;
 }
-@container (max-width: 640px) {
-  .plan-dependencies {
-    flex-direction: column;
-  }
-  .plan-dependencies .ui-graph-panel {
-    width: auto;
-    height: 40%;
-    box-shadow: inset 0 1px 0 var(--border);
-  }
+:where([data-width~="max-640"]) .plan-dependencies {
+  flex-direction: column;
+}
+:where([data-width~="max-640"]) .plan-dependencies .ui-graph-panel {
+  width: auto;
+  height: 40%;
+  box-shadow: inset 0 1px 0 var(--border);
 }

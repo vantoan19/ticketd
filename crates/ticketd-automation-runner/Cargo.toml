@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
+license.workspace = true
 
 [lints]
 workspace = true
@@ -14,9 +15,12 @@ workspace = true
 ticketd-core.workspace = true
 ticketd-chat-host.workspace = true
 tokio = { version = "1", features = ["rt", "time"] }
+tracing.workspace = true
 
 [dev-dependencies]
 # Tests assert literal Ticket references, so they build the fixed device code in.
 ticketd-core = { workspace = true, features = ["test-device-code", "fake-remote"] }
 tempfile = "3"
+serde_json = "1"
+ticketd-diagnostics.workspace = true
 tokio = { version = "1", features = ["macros", "rt", "test-util"] }

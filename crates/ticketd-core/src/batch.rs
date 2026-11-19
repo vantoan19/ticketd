@@ -94,7 +94,7 @@ impl Workspace {
                 })();
                 results.push(result.map_err(|source| Error::BatchOperation {
                     index,
-                    source: Box::new(source),
+                    source: Box::new(name_created(source, &names)),
                 })?);
             }
             if follow_created {
@@ -105,4 +105,48 @@ impl Workspace {
             Ok(results)
         })
     }
+}
+
+/// Reword a failure so tickets the batch created are called by the caller's `$name`.
+/// They exist only inside the batch, so their references (which the next create reuses)
+/// would send the caller looking for tickets that were never saved. Tickets that existed
+/// before the batch keep their references. The original error stays as the cause.
+fn name_created(error: Error, names: &Names) -> Error {
+    let message = error.to_string();
+    let named = rename_references(&message, names);
+    if named == message {
+        return error;
+    }
+    Error::BatchNamed {
+        message: named,
+        source: Box::new(error),
+    }
+}
+
+/// Replace each whole reference token in `text` that a batch name stands for. A reference
+/// is only replaced as a whole word, so `T-NH2` never matches inside `T-NH23`.
+fn rename_references(text: &str, names: &Names) -> String {
+    let is_word = |c: char| c.is_alphanumeric() || c == '-' || c == '_' || c == '$';
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        match names.iter().find(|(_, reference)| **reference == *word) {
+            Some((name, _)) => {
+                out.push('$');
+                out.push_str(name);
+            }
+            None => out.push_str(word),
+        }
+        word.clear();
+    };
+    for c in text.chars() {
+        if is_word(c) {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
 }

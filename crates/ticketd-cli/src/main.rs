@@ -5,7 +5,10 @@ use ticketd_core::{
     EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
+mod output;
 mod skills;
+
+use output::{bare, ok};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -55,7 +58,8 @@ enum AttachmentCommand {
     /// Review unused local storage and protected references; never moves or deletes files
     CleanupReview {
         id: Option<String>,
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (0-1000)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(0..=1000))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -74,14 +78,17 @@ enum AttachmentCommand {
     },
     /// Search filenames and available metadata with usage context, recent first
     Search {
+        /// Only files whose name or available metadata contains this text; omit to list all
         #[arg(default_value = "")]
         search: String,
+        /// Which files to include
         #[arg(long, value_enum, default_value_t = AttachmentStateArg::All)]
         state: AttachmentStateArg,
         /// Prioritize related files without flattening Document ownership
         #[arg(long)]
         related_ticket: Option<String>,
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (0-1000)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(0..=1000))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -89,34 +96,42 @@ enum AttachmentCommand {
     /// Change the display name only; authored labels and original bytes stay unchanged
     Rename {
         id: String,
+        /// The new name to show for the file
         display_name: String,
         #[arg(long)]
         request_id: Option<String>,
     },
     /// Read or change the workspace's per-file upload limit (default 100 MiB); existing snapshots stay unchanged
     Limit {
-        /// Positive byte bound, enforced while copying actual bytes
+        /// Positive byte bound, enforced while copying actual bytes; at most 999000000, the largest file a backup can hold
         #[arg(long)]
         bytes: Option<u64>,
     },
     /// Read or change the default for new uploads; never moves existing files
     Destination {
+        /// Store new uploads in the workspace
         #[arg(long, conflicts_with = "drive")]
         local: bool,
+        /// Upload new files to a Google Drive folder; needs --connection and --folder
         #[arg(long, requires_all = ["connection", "folder"])]
         drive: bool,
+        /// The Drive connection handle (see `attachment drive-info`)
         #[arg(long, requires = "drive")]
         connection: Option<String>,
+        /// The Drive folder ID to upload into
         #[arg(long, requires = "drive")]
         folder: Option<String>,
+        /// The folder's resource key, when Drive requires one for a link-shared folder
         #[arg(long, requires = "drive")]
         resource_key: Option<String>,
     },
     /// Upload using the workspace default; retry keeps its original destination
     Add {
+        /// The file to upload
         path: String,
         #[arg(long)]
         ticket: Option<String>,
+        /// Display name for the file (default: its file name)
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
@@ -129,7 +144,8 @@ enum AttachmentCommand {
     List {
         #[arg(long)]
         ticket: Option<String>,
-        #[arg(long, default_value_t = 100)]
+        /// Return at most this many results (0-1000)
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(0..=1000))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -142,13 +158,18 @@ enum AttachmentCommand {
     DriveCopyStatus { id: String },
     /// Upload a new blob copy to an explicitly authorized writable Drive folder
     DriveUpload {
+        /// The file to upload
         path: String,
+        /// The Drive connection handle (see `attachment drive-info`)
         #[arg(long)]
         connection: String,
+        /// The Drive folder ID to upload into
         #[arg(long)]
         folder: String,
+        /// The folder's resource key, when Drive requires one for a link-shared folder
         #[arg(long)]
         resource_key: Option<String>,
+        /// Names this upload so a retry reconciles it instead of uploading twice (check it with `attachment drive-upload-status`)
         #[arg(long)]
         request_id: String,
         #[arg(long)]
@@ -158,13 +179,17 @@ enum AttachmentCommand {
     DriveUploads,
     /// Inspect an operation; --check reconciles the same remote ID without uploading
     DriveUploadStatus {
+        /// The request ID given to `attachment drive-upload` (see `attachment drive-uploads`)
         request_id: String,
+        /// Reconcile with Drive (needs the network)
         #[arg(long)]
         check: bool,
     },
     /// Reference an already-authorized Drive file using the shared OS credential store
     DriveAdd {
+        /// The Drive connection handle (see `attachment drive-info`)
         connection: String,
+        /// The Drive file ID
         file_id: String,
         #[arg(long)]
         resource_key: Option<String>,
@@ -181,6 +206,7 @@ enum AttachmentCommand {
     Usage { id: String },
     /// Finish legacy draft migration only after importing/reviewing every desktop profile
     CompleteDraftMigration {
+        /// Required acknowledgement that every desktop profile's drafts were imported or reviewed
         #[arg(long, required = true)]
         all_profiles_reviewed: bool,
     },
@@ -188,9 +214,12 @@ enum AttachmentCommand {
     RecoveryDrafts,
     /// Discard one reviewed recovery payload/protection, retaining attachment bytes
     ReleaseRecovery {
+        /// The owner of the recovery payload (see `attachment recovery-drafts`)
         owner: String,
+        /// The payload's revision, as listed by `attachment recovery-drafts`
         #[arg(long)]
         revision: i64,
+        /// Required acknowledgement that this recovery payload is discarded
         #[arg(long, required = true)]
         discard_recovery: bool,
     },
@@ -201,7 +230,11 @@ enum AttachmentCommand {
     /// Remove only this ticket's association, retaining the snapshot and all other uses
     Detach { id: String, ticket: String },
     /// Copy stored bytes to a new file without overwriting an existing destination
-    Export { id: String, path: String },
+    Export {
+        id: String,
+        /// The new file to copy the bytes to; it must not exist
+        path: String,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -255,10 +288,10 @@ enum DocumentCommand {
     /// Create a Document (JSON result includes its id)
     Create {
         /// Optional title; without one the first line of the body is its heading
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         title: Option<String>,
         /// The Markdown body
-        #[arg(long, conflicts_with = "body_file")]
+        #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
         body: Option<String>,
         /// Read the Markdown body from a file (- reads stdin)
         #[arg(long)]
@@ -277,7 +310,8 @@ enum DocumentCommand {
     Recent {
         #[arg(long)]
         include_support: bool,
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -289,14 +323,16 @@ enum DocumentCommand {
         tag: Option<String>,
         #[arg(long)]
         include_support: bool,
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
     /// List pinned Documents
     Pins {
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -319,14 +355,17 @@ enum DocumentCommand {
     /// Read a bounded page of Document body text (character offsets)
     Read {
         id: String,
+        /// Characters to skip (for paging)
         #[arg(long, default_value_t = 0)]
         offset: usize,
-        #[arg(long, default_value_t = 4096)]
-        limit: usize,
+        /// Characters to return (1-65536)
+        #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u32).range(1..=65536))]
+        limit: u32,
     },
     /// List trashed Documents
     TrashList {
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -339,13 +378,13 @@ enum DocumentCommand {
     Change {
         id: String,
         /// Set the title
-        #[arg(long, conflicts_with = "clear_title")]
+        #[arg(long, conflicts_with = "clear_title", allow_hyphen_values = true)]
         title: Option<String>,
         /// Remove the title so the heading comes from the body
         #[arg(long)]
         clear_title: bool,
         /// Replace the Markdown body
-        #[arg(long, conflicts_with = "body_file")]
+        #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
         body: Option<String>,
         /// Replace the body with a file's contents (- reads stdin)
         #[arg(long)]
@@ -375,17 +414,25 @@ enum Command {
     },
     /// List personal inbox entries (newest first)
     Inbox {
-        #[arg(long, default_value_t = 100)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
     /// Save a consistent workspace backup to a new file
-    Backup { path: String },
-    /// Review backup integrity and retained local bytes as JSON without restoring
-    InspectBackup { path: String },
+    Backup {
+        /// The new file to save the backup to; it must not exist
+        path: String,
+    },
+    /// Review backup integrity and retained local bytes as JSON without restoring; exits with an error when the backup cannot be restored
+    InspectBackup {
+        /// The backup file to review
+        path: String,
+    },
     /// Restore a workspace backup after closing other ticketd operations
     RestoreWorkspace {
+        /// The backup file to restore
         path: String,
         /// Recover into this database path instead of replacing the current workspace; does not switch the desktop workspace
         #[arg(long)]
@@ -393,14 +440,17 @@ enum Command {
     },
     /// Export a portable JSON snapshot to stdout or a new file
     Export {
+        /// Write the snapshot to this new file instead of stdout (- also means stdout)
         #[arg(long)]
         file: Option<String>,
     },
     /// Export portable Markdown, referenced files and manifest into a fresh folder; inspect JSON status for omissions
     #[command(group(clap::ArgGroup::new("content").required(true).multiple(false).args(["ticket", "document", "markdown_file"])))]
     ExportMarkdown {
+        /// Export this ticket (reference) with its Activities
         #[arg(long)]
         ticket: Option<String>,
+        /// Export this Document by ID
         #[arg(long)]
         document: Option<String>,
         /// Export selected/current Markdown from a file (- reads stdin)
@@ -412,12 +462,17 @@ enum Command {
     },
     /// Execute a JSON write request (file or - for stdin); prints {"kind","value"}. With --request-id, a retry returns the first result. Other commands print the bare object; `activity add/edit` and `document create/change` also accept --request-id with the same replay behavior
     Write {
+        /// The JSON request file (- reads stdin)
         file: String,
         #[arg(long)]
         request_id: Option<String>,
     },
     /// Apply a JSON array of operations from a file or - for stdin
-    Batch { file: String },
+    #[command(after_help = BATCH_HELP)]
+    Batch {
+        /// The JSON file of operations (- reads stdin)
+        file: String,
+    },
     /// Manage repository projects
     Project {
         #[command(subcommand)]
@@ -426,24 +481,27 @@ enum Command {
     /// Create a ticket with a title
     Create {
         title: String,
+        /// Link the new ticket to this project ID, overriding the one inferred from the current folder
         #[arg(long)]
         project: Option<String>,
+        /// Add the new ticket to this Plan ID
         #[arg(long)]
         plan: Option<String>,
     },
     /// Patch ticket content; use --body-file - to read stdin
     Change {
         reference: String,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         title: Option<String>,
-        #[arg(long, conflicts_with = "body_file")]
+        #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
         body: Option<String>,
         #[arg(long)]
         body_file: Option<String>,
-        #[arg(long)]
+        #[arg(long, value_parser = parse_status)]
         status: Option<Status>,
         #[arg(long)]
         agent: Option<String>,
+        /// Link the ticket to this project ID
         #[arg(long, conflicts_with = "clear_project")]
         project: Option<String>,
         #[arg(long)]
@@ -476,18 +534,30 @@ enum Command {
         command: ActivityCommand,
     },
     /// Add a tag (trimmed and lowercased; duplicates are ignored)
-    AddTag { reference: String, tag: String },
+    AddTag {
+        reference: String,
+        tag: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
-    RemoveTag { reference: String, tag: String },
-    /// Mark a ticket as a duplicate of a canonical ticket
+    RemoveTag {
+        reference: String,
+        tag: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Mark a ticket as a duplicate of a canonical ticket; one with blocking dependencies needs the reviewed path (see preview-duplicate)
     MarkDuplicate {
+        /// The duplicate ticket to close, for example T-KQ12
         source: String,
         canonical: String,
         #[arg(long)]
         agent: Option<String>,
     },
-    /// Preview dependencies before marking a duplicate
+    /// Preview dependencies before marking a duplicate; apply your decisions with `ticketd write` and a mark_duplicate_reviewed request (docs/cli.md#duplicates)
     PreviewDuplicate {
+        /// The duplicate ticket that would be closed, for example T-KQ12
         source: String,
         canonical: String,
         /// Judge readiness as a separate dependency review, which does not cancel the source
@@ -496,22 +566,29 @@ enum Command {
     },
     /// Remove a duplicate designation
     RemoveDuplicate {
+        /// The duplicate ticket to reopen, for example T-KQ12
         source: String,
         #[arg(long)]
         agent: Option<String>,
     },
     /// Add a contextual relationship (kind: related or discovered; source is the work being done)
     AddRelationship {
+        /// The ticket whose work led to the link, for example T-KQ12
         source: String,
+        /// The ticket it connects to
         target: String,
+        /// related or discovered (discovered: the target was found while working on the source)
         kind: String,
         #[arg(long)]
         agent: Option<String>,
     },
     /// Remove a contextual relationship
     RemoveRelationship {
+        /// The ticket the link starts from, for example T-KQ12
         source: String,
+        /// The ticket it connects to
         target: String,
+        /// related or discovered
         kind: String,
         #[arg(long)]
         agent: Option<String>,
@@ -553,7 +630,8 @@ enum Command {
     /// List incoming ticket references with passage context
     Backlinks {
         reference: String,
-        #[arg(long, default_value_t = 20)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -561,8 +639,10 @@ enum Command {
     /// Retrieve bounded context; select related scopes explicitly
     Context {
         reference: String,
+        /// Include the linked project
         #[arg(long)]
         project: bool,
+        /// Include the Plan
         #[arg(long)]
         plan: bool,
         #[arg(long)]
@@ -603,6 +683,7 @@ enum Command {
         workspace: bool,
         #[arg(long, requires = "workspace")]
         search: Option<String>,
+        /// Only items of this kind (for example ticket, plan or document)
         #[arg(long, requires = "workspace")]
         kind: Option<String>,
         #[arg(long, requires = "workspace")]
@@ -701,7 +782,8 @@ enum SourceCommand {
         #[arg(long, default_value = "github")]
         provider: String,
         /// Where to create the issue, for example owner/name; optional when only
-        /// one repository is configured
+        /// one repository is configured. Must be one of the saved source's
+        /// repositories (case-insensitive); anything else is refused
         #[arg(long)]
         destination: Option<String>,
         /// Print the title, description, destination and eligibility; create nothing
@@ -751,13 +833,15 @@ enum AvailabilityArg {
 
 #[derive(Args)]
 struct FindArgs {
+    /// Only tickets linked to this project ID
     #[arg(long, conflicts_with = "unlinked")]
     project: Option<String>,
     #[arg(long)]
     unlinked: bool,
+    /// Only tickets in this Plan ID
     #[arg(long)]
     plan: Option<String>,
-    #[arg(long)]
+    #[arg(long, value_parser = parse_status)]
     status: Option<Status>,
     /// Require every supplied tag (AND); repeat --tag for multiple tags
     #[arg(long)]
@@ -770,7 +854,8 @@ struct FindArgs {
     /// Only tickets owned by a source (for example github) or only local ones (local)
     #[arg(long)]
     source: Option<String>,
-    #[arg(long, default_value_t = 50)]
+    /// Return at most this many results (1-100)
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
     limit: u32,
     #[arg(long, default_value_t = 0)]
     offset: u32,
@@ -872,11 +957,18 @@ enum PlanCommand {
 #[derive(Subcommand)]
 enum ProjectCommand {
     /// Create a project for a repository path
-    Create { name: String, path: String },
+    Create {
+        /// The project's name
+        name: String,
+        /// The repository folder
+        path: String,
+    },
     /// Change a project's name and path
     Edit {
         id: String,
+        /// The project's new name
         name: String,
+        /// The repository folder
         path: String,
     },
     /// Show a project
@@ -884,13 +976,23 @@ enum ProjectCommand {
     /// List projects
     List,
     /// Register another checkout path for a project
-    Register { id: String, path: String },
+    Register {
+        id: String,
+        /// The checkout folder to register
+        path: String,
+    },
     /// Remove a registered checkout path from a project
-    Unregister { id: String, path: String },
+    Unregister {
+        id: String,
+        /// The registered checkout folder to remove
+        path: String,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
 enum EvidenceType {
+    // Output spells it `pull_request`; accept that spelling on input too.
+    #[value(alias = "pull_request")]
     PullRequest,
     Commit,
     Branch,
@@ -910,8 +1012,10 @@ impl From<EvidenceType> for EvidenceKind {
 }
 #[derive(Args)]
 struct EvidenceFields {
+    /// What the evidence is
     #[arg(long, value_enum)]
     kind: EvidenceType,
+    /// A short label, for example the PR title or check name
     #[arg(long)]
     name: String,
     #[arg(long)]
@@ -949,7 +1053,8 @@ enum EvidenceCommand {
     /// List a ticket's evidence
     List {
         reference: String,
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
@@ -961,7 +1066,7 @@ enum ActivityCommand {
     Add {
         reference: String,
         /// The brief: a short update that reads on its own. It is Markdown, so write \* and \_ (or wrap in backticks) to keep a literal * or _
-        #[arg(long, conflicts_with = "file")]
+        #[arg(long, conflicts_with = "file", allow_hyphen_values = true)]
         brief: Option<String>,
         /// Read the brief from a file (- reads stdin). The text is Markdown: escape \* and \_ (or use backticks) to keep them literal
         #[arg(long, visible_alias = "brief-file")]
@@ -984,7 +1089,7 @@ enum ActivityCommand {
         reference: String,
         id: String,
         /// The new brief text; it replaces the stored brief. It is Markdown, so write \* and \_ (or wrap in backticks) to keep a literal * or _
-        #[arg(long, conflicts_with = "file")]
+        #[arg(long, conflicts_with = "file", allow_hyphen_values = true)]
         brief: Option<String>,
         /// Read the new brief from a file (- reads stdin). The text is Markdown: escape \* and \_ (or use backticks) to keep them literal
         #[arg(long, visible_alias = "brief-file")]
@@ -1003,19 +1108,36 @@ enum ActivityCommand {
     /// Read the activity feed, newest first
     List {
         reference: String,
-        #[arg(long, default_value_t = 50)]
+        /// Return at most this many results (1-100)
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
 }
-/// The value of a write result without its `{"kind","value"}` wrapper, so a
-/// retried command prints the same object as the first run.
-fn bare(result: WriteResult) -> Result<String, Box<dyn std::error::Error>> {
-    let wrapped = serde_json::to_value(&result)?;
-    Ok(wrapped
-        .get("value")
-        .map_or_else(|| wrapped.to_string(), ToString::to_string))
+/// The reminder a ticket has now, as `reminder show` prints it.
+fn reminder_of(
+    workspace: &Workspace,
+    reference: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let reference = workspace.show_ticket(reference)?.reference;
+    let due_at = workspace.reminder(&reference)?;
+    Ok(serde_json::to_string(&output::Reminder {
+        reference,
+        due_at,
+    })?)
+}
+/// Rows of `list` or `search --latest-update`.
+fn update_rows(
+    rows: &[ticketd_core::TicketWithUpdate],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let rows: Vec<_> = rows.iter().map(output::UpdateRow).collect();
+    Ok(serde_json::to_string(&rows)?)
+}
+/// Read a text file, naming it in the error: the operating system's message alone
+/// ("No such file or directory") does not say which of several files failed.
+fn read_text_file(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    std::fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}").into())
 }
 fn read_content(
     content: Option<String>,
@@ -1027,9 +1149,73 @@ fn read_content(
             std::io::stdin().read_to_string(&mut text)?;
             Some(text)
         }
-        Some(path) => Some(std::fs::read_to_string(path)?),
+        Some(path) => Some(read_text_file(&path)?),
         None => content,
     })
+}
+/// An Activity brief read from a file or stdin, without the newline that ends the
+/// file, so it matches the same text given with `--brief` or in a write request.
+fn read_brief(
+    brief: Option<String>,
+    file: Option<String>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let from_file = file.is_some();
+    Ok(read_content(brief, file)?.map(|text| {
+        if from_file {
+            text.trim_end_matches(['\n', '\r']).to_owned()
+        } else {
+            text
+        }
+    }))
+}
+
+/// Parse a ticket status. The canonical spelling ("In progress") is what the app
+/// shows; the lowercase and hyphenated forms agents naturally type are accepted too.
+fn parse_status(value: &str) -> Result<Status, String> {
+    let normalized = value.trim().replace(['-', '_'], " ").to_lowercase();
+    const ALL: [Status; 6] = [
+        Status::Todo,
+        Status::InProgress,
+        Status::InReview,
+        Status::Done,
+        Status::Canceled,
+        Status::Duplicate,
+    ];
+    ALL.into_iter()
+        .find(|status| status.to_string().to_lowercase() == normalized)
+        .ok_or_else(|| {
+            let valid: Vec<String> = ALL.iter().map(Status::to_string).collect();
+            format!(
+                "'{value}' is not a status; choose one of: {}",
+                valid.join(", ")
+            )
+        })
+}
+
+const BATCH_HELP: &str = "Each operation is a JSON object with an \"operation\" field:\n  \
+{\"operation\":\"create\",\"name\":\"parent\",\"title\":\"...\"}   `name` and `title` are required; `project_id` is optional\n  \
+{\"operation\":\"change\",\"ticket\":\"$parent\",\"change\":{...}}   `$name` refers to an earlier create\n\
+A failure names the zero-based operation index and nothing is applied.";
+
+/// Parse a batch plan one operation at a time so a malformed operation is reported
+/// by its index instead of a line and column of the whole document.
+fn parse_batch(bytes: &[u8]) -> Result<Vec<BatchOperation>, Box<dyn std::error::Error>> {
+    let values: Vec<serde_json::Value> = serde_json::from_slice(bytes)
+        .map_err(|error| format!("a batch is a JSON array of operations: {error}"))?;
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            serde_json::from_value(value).map_err(|error| {
+                let hint = if error.to_string().starts_with("missing field `name`") {
+                    " (a create needs a `name` that later operations can use as $name)"
+                } else {
+                    ""
+                };
+                format!("batch operation {index}: {error}{hint}").into()
+            })
+        })
+        .collect()
 }
 
 /// Help for arguments that share a meaning everywhere; `parents` is the command
@@ -1056,21 +1242,21 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
         "path" => "A path",
         "target" => "The ticket, Plan or Document to link to",
         "query" => "Text to search for",
-        "tag" => "A tag name",
+        "tag" => "A tag name, for example needs-review",
         "remove" => "Remove instead of add",
-        "project" => "Restrict to a project ID",
-        "plan" => "Restrict to a Plan ID",
+        "project" => "A project ID (see `project list`)",
+        "plan" => "A Plan ID (see `plan list`)",
         "kind" => "The kind",
         "document_id" => "The Document ID",
         "include_support" => "Include activity-details Documents that were not kept",
         "canonical" => "The canonical (original) ticket reference",
         "blocker" => "The ticket that blocks",
         "dependent" => "The ticket that waits",
-        "status" => "A ticket status",
+        "status" => "A ticket status: Todo, In progress, In review, Done, Canceled or Duplicate",
         "parent" => "The parent ticket reference",
         "purpose" => "The Plan's purpose text",
         "due_at" => "RFC 3339 time with an offset, for example 2026-01-31T09:00:00-05:00",
-        "file" => "A JSON file (- reads stdin)",
+        "file" => "A file (- reads stdin)",
         "request_id" => {
             "Makes retries safe: repeating this ID with the same input returns the first result instead of writing again"
         }
@@ -1078,7 +1264,7 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
         "body_file" => "Read the description from a file (- reads stdin)",
         "clear_project" => "Unlink the ticket from its project",
         "value" => "The URL, reference, path or verification result",
-        "source" => "The ticket that is the source of the change, for example T-KQ12",
+        "source" => "The source ticket, for example T-KQ12",
         "bodies" => "Include the Documents' text, not only their titles",
         "all" => "Include archived Plans",
         "unlinked" => "Only tickets without a project",
@@ -1119,7 +1305,29 @@ fn describe(command: clap::Command, parents: &[String]) -> clap::Command {
         .mut_subcommands(move |child| describe(child, &path))
 }
 
-fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
+/// Who ran this command, when a Chat's harness or an Automation run did: the IDs it put in
+/// the environment. Read once at startup; blank values count as missing.
+struct Origin {
+    chat_id: Option<String>,
+    automation_run_id: Option<String>,
+}
+
+impl Origin {
+    fn from_environment() -> Self {
+        let read = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| !id.is_empty())
+        };
+        Self {
+            chat_id: read(ticketd_core::CHAT_ID_VARIABLE),
+            automation_run_id: read(ticketd_core::AUTOMATION_RUN_ID_VARIABLE),
+        }
+    }
+}
+
+fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::error::Error>> {
     use clap::{CommandFactory, FromArgMatches};
     let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
         .unwrap_or_else(|error| error.exit());
@@ -1132,14 +1340,21 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("TICKETD_TEST_WORKSPACE").map(std::path::PathBuf::from));
+        let restored = match &destination {
+            Some(workspace) => ticketd_core::workspace_file(workspace)?,
+            None => ticketd_core::default_workspace_file()?,
+        };
         let safety = match destination {
             Some(workspace) => Workspace::restore(workspace, path)?,
             None => Workspace::restore_default(path)?,
         };
         writeln!(
             output,
-            "Restored workspace. Safety backup: {}",
-            safety.display()
+            "{}",
+            serde_json::to_string(&output::Restored {
+                restored: restored.path,
+                safety_backup: safety,
+            })?
         )?;
         return Ok(());
     }
@@ -1153,11 +1368,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         writeln!(
             output,
             "{}",
-            serde_json::to_string(&serde_json::json!({
-                "path": file.path,
-                "format_version": file.format_version,
-                "supported_format_version": ticketd_core::FORMAT_VERSION,
-            }))?
+            serde_json::to_string(&output::WorkspaceStatus {
+                path: file.path,
+                format_version: file.format_version,
+                supported_format_version: ticketd_core::FORMAT_VERSION,
+            })?
         )?;
         return Ok(());
     }
@@ -1167,17 +1382,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Workspace::open(path)?,
         None => Workspace::open_default()?,
     };
+    tracing::debug!("workspace opened");
     // Run by a Chat's harness: what this command writes is credited to that Chat.
-    if let Some(chat) = std::env::var(ticketd_core::CHAT_ID_VARIABLE)
-        .ok()
-        .filter(|id| !id.trim().is_empty())
-    {
-        workspace.act_for_chat(chat.trim())?;
+    if let Some(chat) = &origin.chat_id {
+        workspace.act_for_chat(chat)?;
     }
     // Run inside an Automation run: what this command writes cannot trigger Automations.
-    if std::env::var(ticketd_core::AUTOMATION_RUN_ID_VARIABLE)
-        .is_ok_and(|run| !run.trim().is_empty())
-    {
+    if origin.automation_run_id.is_some() {
         workspace.act_for_automation()?;
     }
     let text = match command {
@@ -1226,6 +1437,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 body_file,
                 request_id,
             } => {
+                if title
+                    .as_deref()
+                    .is_some_and(|title| title.trim().is_empty())
+                {
+                    return Err("document title must not be empty; omit --title to use the first line of the body".into());
+                }
                 let body = read_content(body, body_file)?.unwrap_or_default();
                 match request_id {
                     None => {
@@ -1268,25 +1485,34 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             DocumentCommand::Pin { id, remove } => {
                 workspace.set_document_pin(&id, !remove)?;
-                "ok".into()
+                ok()
             }
             DocumentCommand::Tags { id } => serde_json::to_string(&workspace.document_tags(&id)?)?,
             DocumentCommand::Tag { id, tag, remove } => {
                 workspace.set_document_tag(&id, &tag, !remove)?;
-                "ok".into()
+                ok()
             }
             DocumentCommand::Read { id, offset, limit } => {
                 let document = workspace.show_document(&id)?;
-                let limit = limit.clamp(1, 65536);
+                let limit = usize::try_from(limit)?;
                 let mut chars = document.body.chars().skip(offset);
                 let body: String = chars.by_ref().take(limit).collect();
                 let next_offset = chars.next().map(|_| offset + body.chars().count());
                 let fetch = next_offset.map(|next| {
                     format!("ticketd document read {id} --offset {next} --limit {limit}")
                 });
-                serde_json::to_string(
-                    &serde_json::json!({"id": document.id, "title": document.title, "created_at": document.created_at, "updated_at": document.updated_at, "trashed": document.trashed, "body": body, "offset": offset, "next_offset": next_offset, "truncated": next_offset.is_some(), "fetch": fetch}),
-                )?
+                serde_json::to_string(&output::DocumentSlice {
+                    id: &document.id,
+                    title: &document.title,
+                    created_at: &document.created_at,
+                    updated_at: &document.updated_at,
+                    trashed: document.trashed,
+                    body: &body,
+                    offset,
+                    next_offset,
+                    truncated: next_offset.is_some(),
+                    fetch,
+                })?
             }
             DocumentCommand::TrashList { limit, offset } => {
                 serde_json::to_string(&workspace.trashed_documents_page(limit, offset)?)?
@@ -1305,6 +1531,14 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 body_file,
                 request_id,
             } => {
+                if title
+                    .as_deref()
+                    .is_some_and(|title| title.trim().is_empty())
+                {
+                    return Err(
+                        "document title must not be empty; use --clear-title to remove it".into(),
+                    );
+                }
                 let patch = DocumentPatch {
                     title: if clear_title {
                         Some(None)
@@ -1314,6 +1548,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     body: read_content(body, body_file)?,
                     expected_updated_at: None,
                 };
+                if patch.title.is_none() && patch.body.is_none() {
+                    return Err("provide --title, --clear-title, --body or --body-file".into());
+                }
                 match request_id {
                     None => serde_json::to_string(&workspace.change_document(&id, patch)?)?,
                     Some(request) => bare(
@@ -1324,27 +1561,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::Reminder { command } => match command {
-            ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
-                Some(value) => {
-                    let instant = chrono::DateTime::parse_from_rfc3339(&value)?;
-                    format!(
-                        "{} (UTC: {})",
-                        instant
-                            .with_timezone(&chrono::Local)
-                            .format("%Y-%m-%d %H:%M:%S %:z"),
-                        value
-                    )
-                }
-                None => "No reminder".into(),
-            },
-            ReminderCommand::Set { reference, due_at }
-            | ReminderCommand::Snooze { reference, due_at } => {
+            ReminderCommand::Show { reference } => reminder_of(&workspace, &reference)?,
+            ReminderCommand::Set { reference, due_at } => {
                 workspace.set_reminder(&reference, Some(&due_at))?;
-                "Reminder scheduled".into()
+                reminder_of(&workspace, &reference)?
+            }
+            ReminderCommand::Snooze { reference, due_at } => {
+                workspace.snooze_reminder(&reference, &due_at)?;
+                reminder_of(&workspace, &reference)?
             }
             ReminderCommand::Dismiss { reference } => {
-                workspace.set_reminder(&reference, None)?;
-                "Reminder dismissed".into()
+                let dismissed = workspace.dismiss_reminder(&reference)?;
+                serde_json::to_string(&output::Dismissed { dismissed })?
             }
         },
         Command::Inbox { limit, offset } => {
@@ -1354,9 +1582,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Backup { path } => {
             workspace.backup(&path)?;
-            format!("Backup saved: {path}")
+            serde_json::to_string(&output::BackupSaved { path })?
         }
-        Command::InspectBackup { path } => serde_json::to_string(&workspace.inspect_backup(path)?)?,
+        Command::InspectBackup { path } => {
+            let inspection = workspace.inspect_backup(path)?;
+            let text = serde_json::to_string(&inspection)?;
+            // The report is printed either way; a backup that cannot be restored also fails.
+            if let Some(refusal) = inspection.check.refusal() {
+                writeln!(output, "{text}")?;
+                return Err(refusal.into());
+            }
+            text
+        }
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
         Command::ExportMarkdown {
             ticket,
@@ -1394,8 +1631,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             serde_json::to_string_pretty(&workspace.export_markdown_with_files(source, output)?)?
         }
         Command::Export { file } => {
-            if let Some(path) = file {
+            if let Some(path) = file.filter(|path| path != "-") {
                 workspace.export_file(path)?;
+                writeln!(output, "{}", ok())?;
                 return Ok(());
             }
             serde_json::to_string_pretty(&workspace.export()?)?
@@ -1409,14 +1647,20 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             let reader: Box<dyn Read> = if file == "-" {
                 Box::new(std::io::stdin())
             } else {
-                Box::new(std::fs::File::open(file)?)
+                Box::new(
+                    std::fs::File::open(&file)
+                        .map_err(|error| format!("cannot read {file}: {error}"))?,
+                )
             };
             let mut bytes = Vec::new();
-            reader.take(1_048_577).read_to_end(&mut bytes)?;
+            reader
+                .take(1_048_577)
+                .read_to_end(&mut bytes)
+                .map_err(|error| format!("cannot read {file}: {error}"))?;
             if bytes.len() > 1_048_576 {
                 return Err("batch exceeds 1 MiB".into());
             }
-            let operations: Vec<BatchOperation> = serde_json::from_slice(&bytes)?;
+            let operations = parse_batch(&bytes)?;
             serde_json::to_string(&workspace.apply_batch(operations)?)?
         }
         Command::Project { command } => match command {
@@ -1470,7 +1714,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     std::io::stdin().read_to_string(&mut content)?;
                     Some(content)
                 }
-                Some(path) => Some(std::fs::read_to_string(path)?),
+                Some(path) => Some(read_text_file(&path)?),
                 None => body,
             };
             serde_json::to_string(&workspace.change_ticket(
@@ -1504,7 +1748,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             EvidenceCommand::Delete { reference, id } => {
                 workspace.delete_evidence(&reference, &id)?;
-                "null".into()
+                ok()
             }
             EvidenceCommand::List {
                 reference,
@@ -1525,7 +1769,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 if file.as_deref() == Some("-") && details_file.as_deref() == Some("-") {
                     return Err("brief and details cannot both read from stdin".into());
                 }
-                let brief = read_content(brief, file)?.ok_or("provide --brief or --file")?;
+                let brief = read_brief(brief, file)?.ok_or("provide --brief or --file")?;
                 let details = read_content(None, details_file)?;
                 if request_id.is_some() {
                     bare(workspace.write(
@@ -1557,9 +1801,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 request_id,
             } => {
                 let patch = ActivityPatch {
-                    brief: read_content(brief, file)?,
+                    brief: read_brief(brief, file)?,
                     editing_agent: agent,
                 };
+                if patch.brief.is_none() && patch.editing_agent.is_none() {
+                    return Err("provide --brief or --file (or --agent) to change".into());
+                }
                 if request_id.is_some() {
                     bare(workspace.write(
                         request_id.as_deref(),
@@ -1575,7 +1822,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             ActivityCommand::Delete { reference, id } => {
                 workspace.delete_activity(&reference, &id)?;
-                "null".into()
+                ok()
             }
             ActivityCommand::Show { reference, id } => {
                 serde_json::to_string(&workspace.activity(&reference, &id)?)?
@@ -1596,21 +1843,32 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::History { reference } => {
             serde_json::to_string(&workspace.ticket_history(&reference)?)?
         }
-        Command::AddTag { reference, tag } => {
-            serde_json::to_string(&workspace.add_tag(&reference, &tag)?)?
-        }
-        Command::RemoveTag { reference, tag } => {
-            serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
+        Command::AddTag {
+            reference,
+            tag,
+            agent,
+        } => serde_json::to_string(&workspace.add_tag_as(&reference, &tag, agent.as_deref())?)?,
+        Command::RemoveTag {
+            reference,
+            tag,
+            agent,
+        } => {
+            serde_json::to_string(&workspace.remove_tag_as(&reference, &tag, agent.as_deref())?)?
         }
         Command::MarkDuplicate {
             source,
             canonical,
             agent,
-        } => serde_json::to_string(&workspace.mark_duplicate(
-            &source,
-            &canonical,
-            agent.as_deref(),
-        )?)?,
+        } => serde_json::to_string(
+            &workspace
+                .mark_duplicate(&source, &canonical, agent.as_deref())
+                .map_err(|error| match error {
+                    ticketd_core::Error::DuplicateDependencies => format!(
+                        "{error}; run `ticketd preview-duplicate {source} {canonical}`, then apply the reviewed decisions with `ticketd write` (mark_duplicate_reviewed, see docs/cli.md#duplicates)"
+                    ),
+                    other => other.to_string(),
+                })?,
+        )?,
         Command::PreviewDuplicate {
             source,
             canonical,
@@ -1726,7 +1984,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let filter = filters.filter(String::new())?;
             if latest_update {
-                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+                update_rows(&workspace.find_tickets_with_updates(&filter)?)?
             } else {
                 serde_json::to_string(&workspace.find_tickets(&filter)?)?
             }
@@ -1738,7 +1996,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let filter = filters.filter(query)?;
             if latest_update {
-                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+                update_rows(&workspace.find_tickets_with_updates(&filter)?)?
             } else {
                 serde_json::to_string(&workspace.find_tickets(&filter)?)?
             }
@@ -1842,9 +2100,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     failure.code,
                     failure.message,
                     if failure.code == "unauthenticated" {
-                        TOKEN_HINT
+                        format!(" {}", token_hint())
                     } else {
-                        ""
+                        String::new()
                     }
                 )
                 .into());
@@ -1995,10 +2253,29 @@ fn source_command(
                 .unwrap_or_default());
         }
         let schema = engine.descriptor(provider)?.schema;
-        let mut values = match read_content(None, settings.config_file)? {
-            Some(text) => match serde_json::from_str(&text)? {
-                serde_json::Value::Object(values) => values,
-                _ => return Err("the configuration file must hold a JSON object".into()),
+        // Name the file in every failure, so a script knows which option caused it.
+        let file = settings.config_file.clone().unwrap_or_default();
+        let name = if file == "-" { "standard input" } else { &file };
+        let text = match read_content(None, settings.config_file) {
+            Ok(text) => text,
+            Err(error) => {
+                return Err(format!("could not read the --config-file {name}: {error}").into());
+            }
+        };
+        let mut values = match text {
+            Some(text) => match serde_json::from_str(&text) {
+                Ok(serde_json::Value::Object(values)) => values,
+                Ok(_) => {
+                    return Err(format!(
+                        "the --config-file {name} must hold a JSON object of settings"
+                    )
+                    .into());
+                }
+                Err(error) => {
+                    return Err(
+                        format!("the --config-file {name} is not valid JSON: {error}").into(),
+                    );
+                }
             },
             None => ConfigValues::new(),
         };
@@ -2014,7 +2291,10 @@ fn source_command(
             let mut sources = Vec::new();
             for descriptor in engine.connectors() {
                 let saved = workspace.saved_source(&descriptor.provider)?;
-                sources.push(serde_json::json!({ "connector": descriptor, "saved": saved }));
+                sources.push(output::SourceListing {
+                    connector: descriptor,
+                    saved,
+                });
             }
             serde_json::to_string(&sources)?
         }
@@ -2060,12 +2340,28 @@ fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
     Err("refresh and publish are handled before source configuration commands".into())
 }
 
-/// The command line's own way to sign in; the desktop app's guidance leaves it out.
-const TOKEN_HINT: &str =
-    " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
+/// The command line's own way to sign in; the desktop app has its own guidance.
+fn token_hint() -> &'static str {
+    ticketd_core::source::SourceError::sign_in_hint(ticketd_core::source::Surface::Terminal)
+}
 
 fn main() {
-    if let Err(error) = run(&mut std::io::stdout().lock()) {
+    ticketd_diagnostics::init_cli();
+    let origin = Origin::from_environment();
+    let correlation = ticketd_diagnostics::cli_span(
+        origin.chat_id.as_deref(),
+        origin.automation_run_id.as_deref(),
+    );
+    let _correlation = correlation.enter();
+    if let Err(error) = run(&mut std::io::stdout().lock(), &origin) {
+        // The `error:` line below is the command's answer to the person or agent that ran
+        // it. This is the diagnostic record of the same failure, for `TICKETD_LOG=debug`.
+        tracing::debug!(
+            error_kind = error
+                .downcast_ref::<ticketd_core::Error>()
+                .map_or("other", |error| error.kind().code()),
+            "command failed"
+        );
         use ticketd_core::source::SourceError;
         let unauthenticated = match error.downcast_ref::<ticketd_core::Error>() {
             Some(ticketd_core::Error::Source(SourceError::Unauthenticated(_))) => true,
@@ -2074,8 +2370,11 @@ fn main() {
                 Some(SourceError::Unauthenticated(_))
             ),
         };
-        let hint = if unauthenticated { TOKEN_HINT } else { "" };
-        eprintln!("error: {error}{hint}");
+        if unauthenticated {
+            eprintln!("error: {error} {}", token_hint());
+        } else {
+            eprintln!("error: {error}");
+        }
         std::process::exit(1);
     }
 }
@@ -2149,9 +2448,10 @@ fn attachment_command(
             if let Some(bytes) = bytes {
                 workspace.set_attachment_upload_limit(bytes)?;
             }
-            serde_json::to_string(
-                &serde_json::json!({ "limit_bytes": workspace.attachment_upload_limit()?, "default_bytes": ticketd_core::DEFAULT_ATTACHMENT_LIMIT }),
-            )?
+            serde_json::to_string(&output::AttachmentLimit {
+                limit_bytes: workspace.attachment_upload_limit()?,
+                default_bytes: ticketd_core::DEFAULT_ATTACHMENT_LIMIT,
+            })?
         }
         AttachmentCommand::Destination {
             local,
@@ -2389,7 +2689,9 @@ fn attachment_command(
             all_profiles_reviewed: _,
         } => {
             workspace.complete_draft_cutover()?;
-            serde_json::json!({"legacy_drafts_pending":false}).to_string()
+            serde_json::to_string(&output::DraftMigration {
+                legacy_drafts_pending: false,
+            })?
         }
         AttachmentCommand::RecoveryDrafts => serde_json::to_string(&workspace.draft_retentions()?)?,
         AttachmentCommand::ReleaseRecovery {
@@ -2406,7 +2708,10 @@ fn attachment_command(
         }
         AttachmentCommand::Export { id, path } => {
             workspace.export_attachment(&id, &path)?;
-            serde_json::to_string(&serde_json::json!({ "id": id, "path": path }))?
+            serde_json::to_string(&output::ExportedAttachment {
+                id: &id,
+                path: &path,
+            })?
         }
     })
 }

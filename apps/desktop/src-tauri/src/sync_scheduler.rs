@@ -70,18 +70,28 @@ pub struct Scheduler {
     running: Mutex<()>,
 }
 
-/// What a tick failed with, for stderr. The core keeps a failed run in the
-/// status, where the interface shows it; a tick that could not even open the
-/// Workspace or save that outcome is known only here.
-fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<String> {
+/// What a tick failed with, for the log: the stable kind and the text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Failure {
+    kind: &'static str,
+    message: String,
+}
+
+/// The core keeps a failed run in the status, where the interface shows it; a tick that
+/// could not even open the Workspace or save that outcome is known only here.
+fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<Failure> {
     match tick {
-        Err(error) => Some(error.to_string()),
-        Ok(Some(status)) if status.recovery == Some(SyncRecovery::Error) => Some(
-            status
+        Err(error) => Some(Failure {
+            kind: error.kind().code(),
+            message: error.to_string(),
+        }),
+        Ok(Some(status)) if status.recovery == Some(SyncRecovery::Error) => Some(Failure {
+            kind: "sync_recovery",
+            message: status
                 .recovery_message
                 .clone()
                 .unwrap_or_else(|| "unknown failure".into()),
-        ),
+        }),
         Ok(_) => None,
     }
 }
@@ -186,15 +196,20 @@ impl Scheduler {
         if now < *at {
             return;
         }
-        let failed = (self.upkeep)(workspace)
-            .err()
-            .map(|error| error.to_string());
+        let error = tracing::info_span!("workspace_upkeep")
+            .in_scope(|| (self.upkeep)(workspace))
+            .err();
+        let failed = error.as_ref().map(ToString::to_string);
         *at = now + failed.as_ref().map_or(UPKEEP_INTERVAL, |_| UPKEEP_RETRY);
-        // Said once on stderr, and again only if it changes or comes back.
-        if let Some(message) = &failed
-            && reported.as_ref() != Some(message)
+        // Logged once, and again only if it changes or comes back.
+        if let Some(error) = &error
+            && *reported != failed
         {
-            eprintln!("Workspace upkeep could not run: {message}");
+            tracing::warn!(
+                error_kind = error.kind().code(),
+                %error,
+                "Workspace upkeep could not run"
+            );
         }
         *reported = failed;
     }
@@ -230,9 +245,11 @@ impl Scheduler {
     ) -> Result<SyncStatus, Error> {
         // What this run takes with it needs no upload of its own afterwards.
         let mut taken = None;
-        let result = workspace.and_then(|mut workspace| {
-            taken = Some(workspace.change_mark()?);
-            run(&mut workspace, binding.remote.as_ref())
+        let result = tracing::info_span!("workspace_sync_pass").in_scope(|| {
+            workspace.and_then(|mut workspace| {
+                taken = Some(workspace.change_mark()?);
+                run(&mut workspace, binding.remote.as_ref())
+            })
         });
         let mut watch = lock(&self.watch);
         if let Some(taken) = taken {
@@ -283,21 +300,25 @@ impl Scheduler {
             .name("workspace-sync".into())
             .spawn(move || {
                 at_launch();
-                // Said once on stderr, and again only if it changes or comes back.
-                let mut reported: Option<String> = None;
+                // Logged once, and again only if it changes or comes back.
+                let mut reported: Option<Failure> = None;
                 let mut seen = 0;
                 loop {
                     match self.tick(started.elapsed()) {
                         // Nothing was due: what was last said still stands.
                         Ok(None) => {}
                         tick => {
-                            let message = failure(&tick);
-                            if let Some(message) = &message
-                                && reported.as_ref() != Some(message)
+                            let failed = failure(&tick);
+                            if let Some(failed) = &failed
+                                && reported.as_ref() != Some(failed)
                             {
-                                eprintln!("Workspace sync could not run: {message}");
+                                tracing::warn!(
+                                    error_kind = failed.kind,
+                                    error = %failed.message,
+                                    "Workspace sync could not run"
+                                );
                             }
-                            reported = message;
+                            reported = failed;
                             // A run changed the status the interface is shown.
                             if tick.is_ok() {
                                 crate::wake::CHANGED.notify();
@@ -308,7 +329,7 @@ impl Scheduler {
                 }
             });
         if let Err(error) = spawned {
-            eprintln!("could not start Workspace sync: {error}");
+            tracing::error!(%error, "could not start Workspace sync");
         }
     }
 }
@@ -719,13 +740,13 @@ mod tests {
     }
 
     #[test]
-    fn a_failure_with_no_state_of_its_own_is_kept_in_the_status_and_said_on_stderr() {
+    fn a_failure_with_no_state_of_its_own_is_kept_in_the_status_and_logged() {
         let desk = desk();
         desk.remote
             .fail(RemoteOp::List, 1, RemoteError::Other("nonsense".into()));
         let tick = desk.scheduler.tick(Duration::ZERO);
         assert_eq!(
-            failure(&tick).as_deref(),
+            failure(&tick).map(|failed| failed.message).as_deref(),
             Some("sync storage: storage: nonsense")
         );
         // The interface reads the same failure from the status.

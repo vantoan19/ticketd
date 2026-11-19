@@ -51,11 +51,18 @@ from Settings → Agent skills, or run:
 ticketd skills install --harness claude-code,codex
 ```
 
+Claude Code reads the installed skill from `~/.claude/skills/ticketd`, or from
+`$CLAUDE_CONFIG_DIR/skills` when that variable is set. Codex reads
+`~/.agents/skills/ticketd`.
+
 The guide teaches CLI operations while leaving work organization to you. See
 [agent skill installation](docs/install.md#agent-cli-skill) and
 [CLI workflows](docs/cli.md) for project context, atomic batches, search, and progress reports.
 
 ## Contribute
+
+ticketd is licensed under the [MIT License](LICENSE). Third-party components
+retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Bug reports, docs, accessibility feedback, platform testing, and code improvements
 are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for contribution paths
@@ -75,20 +82,22 @@ and the review process. You do not need an AI assistant or private skills.
 | [Export format](docs/export.md)               | Portable content and backup boundaries                       |
 | [Architecture](docs/architecture.md)          | Shared core, desktop, and CLI responsibilities               |
 | [Domain glossary](GLOSSARY.md)                | Canonical product terminology                                |
-| [Product specification](docs/mvp-spec.md)     | Product direction, including planned behavior                |
+| [Product description](docs/product.md)        | What ticketd does today                                      |
 | [Release guide](docs/releasing.md)            | Maintainer build and publication procedure                   |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Bundled assets and dependency attribution                    |
 
 Work tracking lives in [GitHub Issues](https://github.com/vantoan19/ticketd/issues).
-The product specification includes future direction and is not a list of shipped features.
 
 ## Repository layout
 
 ```text
-apps/desktop/src/            React UI and typed desktop bridge clients
-apps/desktop/src-tauri/      Tauri adapter, configuration, and capabilities
-crates/ticketd-core/         Shared domain behavior and persistence
-crates/ticketd-cli/          Standalone CLI named ticketd
-scripts/                    Shared development checks
-docs/                       Product and engineering guidance
+apps/desktop/src/                  React UI and typed desktop bridge clients
+apps/desktop/src-tauri/            Tauri adapter, configuration, and capabilities
+apps/chat-bridge-claude/           Claude Chat bridge, built into the desktop sidecar
+crates/ticketd-core/               Shared domain behavior and persistence
+crates/ticketd-cli/                Standalone CLI named ticketd
+crates/ticketd-chat-host/          Chat supervisor and harness adapter contract
+crates/ticketd-automation-runner/  Runs Automations from Workspace events
+scripts/                           Shared development checks
+docs/                              Product and engineering guidance
 ```

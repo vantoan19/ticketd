@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "apps/desktop/src-tauri"]
-default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner"]
+members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "apps/desktop/src-tauri"]
+default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics"]
 resolver = "3"
 
 [workspace.package]
@@ -9,11 +9,18 @@ edition = "2024"
 rust-version = "1.99"
 publish = false
 repository = "https://github.com/vantoan19/ticketd"
+license = "MIT"
 
 [workspace.dependencies]
 ticketd-core = { path = "crates/ticketd-core" }
 ticketd-chat-host = { path = "crates/ticketd-chat-host" }
 ticketd-automation-runner = { path = "crates/ticketd-automation-runner" }
+ticketd-diagnostics = { path = "crates/ticketd-diagnostics" }
+tracing = "0.1"
+# Only the pieces the two binaries install: the filter, the JSON and text formatters, and
+# the reload handle behind the Debug logging switch.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry", "fmt", "json", "env-filter", "smallvec", "tracing-log"] }
+tracing-log = "0.2"
 clap = { version = "4", features = ["derive"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-build = { version = "2", features = [] }

@@ -18,6 +18,26 @@ The current application does not implement product analytics, session replay,
 or automatic crash-report uploads to ticketd maintainers. This is not a promise
 that every action is offline: the integrations below make network requests.
 
+The desktop keeps a local log of what the app did, to find out why something went
+wrong afterwards. It is a set of JSON files in your OS's log folder (on macOS,
+`~/Library/Logs/com.vantoan19.ticketd/`), one per day. ticketd keeps the last 7 days
+and at most 50 MB, and deletes older files when it starts. A line holds the time, a
+level, the part of ticketd that wrote it, a short message, and IDs, counts, durations
+and error kinds. By design, it never holds the text of your tickets, Documents, Plans
+or Chats. Error messages from your operating system can still contain a file path.
+The files never leave your machine by themselves; sharing them is your choice. The
+CLI writes warnings and errors to your terminal and keeps no log file.
+
+Settings → Diagnostics can export those logs for a bug report: a `.zip` of under 5 MB
+with a summary (app, OS and WebView versions, log level, whether sync is on, Harness
+versions), the Workspace's health (Format version, a SQLite integrity check, file
+sizes, and the number of rows in each table), the kinds of warning and error with how
+often they happened, and the last 3 days of logs. Each log line is rebuilt from a short
+list of fields, so any other field is dropped, and your home folder, OS username,
+Workspace path and Drive account email are replaced wherever they appear. IDs are kept.
+Nothing is uploaded: ticketd saves the file where you choose, and anything you attach to
+a public GitHub issue can be read by anyone.
+
 Workspace files and exports are not encrypted by ticketd. Protect them with OS
 permissions, disk encryption, and appropriate backup storage. Anyone who can read
 these files may be able to read their content.

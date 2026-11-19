@@ -29,6 +29,7 @@ pub use contract::{
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
     ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
     PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
+    Surface,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};

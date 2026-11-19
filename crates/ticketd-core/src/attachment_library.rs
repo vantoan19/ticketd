@@ -51,11 +51,7 @@ pub struct AttachmentSearchResult {
 impl Workspace {
     /// Changes metadata only. Authored Markdown, upload replay outcomes and bytes stay literal.
     pub fn rename_attachment(&mut self, id: &str, display_name: &str) -> Result<Attachment, Error> {
-        if display_name.trim().is_empty() || display_name.contains('\0') {
-            return Err(Error::Attachment(
-                "supply a nonempty display name without NUL characters".into(),
-            ));
-        }
+        let display_name = attachments::normalize_display_name(display_name)?;
         crate::write_scope::run(&self.connection, |tx| {
             attachments::read_attachment(tx, id)?;
             tx.execute(
