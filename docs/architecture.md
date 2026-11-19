@@ -6,8 +6,8 @@ The direct-access process model is the selected direction, conditional on valida
 
 ## Runtime
 
-This diagram describes the existing direct-access runtime. The approved native
-Chat extension is shown separately below until its implementation is delivered.
+This diagram describes the direct-access runtime. Native Chat, which is
+experimental, is shown separately below.
 
 ```mermaid
 flowchart TB
