@@ -13,7 +13,7 @@ import {
 import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 import { LazySourceEditor, MarkdownEditor } from "./MarkdownEditor";
-import { readMarkdown, writeMarkdown } from "./plate-markdown";
+import { readMarkdown, writeMarkdownFrom } from "./plate-markdown";
 import { slashChoices, slashMayOpen } from "./slash-menu";
 
 // Source mode's editor loads lazily (see SourceEditorLoading.test.tsx); load it
@@ -28,7 +28,7 @@ vi.mock("./plate-markdown", async (original) => {
   return {
     ...actual,
     readMarkdown: vi.fn(actual.readMarkdown),
-    writeMarkdown: vi.fn(actual.writeMarkdown),
+    writeMarkdownFrom: vi.fn(actual.writeMarkdownFrom),
   };
 });
 afterEach(() => {
@@ -227,15 +227,15 @@ describe("Markdown draft editor", () => {
     fireEvent.click(screen.getByRole("option", { name: "Divider" }));
     await vi.waitFor(() =>
       expect(onChange).toHaveBeenCalledWith(
-        expect.stringMatching(/^\s*\*\*\*\s*$/),
+        expect.stringMatching(/^\s*---\s*$/),
       ),
     );
   });
   /** Mounts a controlled editor with the caret at `offset` inside the text `text`. */
-  async function mountWithCaret(text: string, offset: number) {
+  async function mountWithCaret(text: string, offset: number, doc = text) {
     const changes = vi.fn();
     function Draft() {
-      const [value, setValue] = useState(text);
+      const [value, setValue] = useState(doc);
       return (
         <MarkdownEditor
           value={value}
@@ -280,6 +280,24 @@ describe("Markdown draft editor", () => {
       expect(selection?.rangeCount).toBe(1);
       expect(quote?.contains(selection?.anchorNode ?? null)).toBe(true);
     });
+  });
+  it("leaves the blocks a rich edit did not touch exactly as written", async () => {
+    const untouched =
+      "A [link](https://a.com/?a=1&b=2) and [w](https://x.org/Foo_(bar))  \nbreak\n\n---\n\n- one\n\n- two\n\n1. a\n1. b\n\n* star\n* bar\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nSteps:\n- x\n- y\n\n**Run `npm test` first**";
+    const { editable, changes } = await mountWithCaret(
+      "Edit me",
+      7,
+      `${untouched}\n\nEdit me`,
+    );
+    expect(screen.queryByRole("note")).toBeNull();
+    const event = createEvent.paste(editable);
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: () => " now" },
+    });
+    fireEvent(editable, event);
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith(`${untouched}\n\nEdit me now`),
+    );
   });
   it("keeps the leading whitespace of pasted plain text", async () => {
     const { editable, changes } = await mountWithCaret("hello", 5);
@@ -538,24 +556,24 @@ describe("Save cadence", () => {
 
   it("converts the document only inside readMarkdown when it mounts", () => {
     vi.mocked(readMarkdown).mockClear();
-    vi.mocked(writeMarkdown).mockClear();
+    vi.mocked(writeMarkdownFrom).mockClear();
     render(<MarkdownEditor value={"# Title\n\nText"} onChange={vi.fn()} />);
     expect(readMarkdown).toHaveBeenCalledTimes(1);
-    expect(writeMarkdown).not.toHaveBeenCalled();
+    expect(writeMarkdownFrom).not.toHaveBeenCalled();
   });
 
   it("reports rich edits once the editor is idle, converting the document once", async () => {
     const onChange = vi.fn();
     render(<Controlled initial="Start" onChange={onChange} />);
-    vi.mocked(writeMarkdown).mockClear();
+    vi.mocked(writeMarkdownFrom).mockClear();
     await typeRich("one");
     await typeRich(" two");
     await typeRich(" three");
     expect(onChange).not.toHaveBeenCalled();
-    expect(writeMarkdown).not.toHaveBeenCalled();
+    expect(writeMarkdownFrom).not.toHaveBeenCalled();
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
     expect(onChange.mock.calls[0]?.[0]).toContain("one two three");
-    expect(writeMarkdown).toHaveBeenCalledTimes(1);
+    expect(writeMarkdownFrom).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -616,7 +634,7 @@ describe("Save cadence", () => {
     });
     const view = EditorView.findFromDOM(source);
     vi.mocked(readMarkdown).mockClear();
-    vi.mocked(writeMarkdown).mockClear();
+    vi.mocked(writeMarkdownFrom).mockClear();
     for (const letter of ["a", "b", "c"])
       act(() => {
         view?.dispatch({
@@ -630,7 +648,7 @@ describe("Save cadence", () => {
       "<aside>raw</aside>abc",
     ]);
     expect(readMarkdown).not.toHaveBeenCalled();
-    expect(writeMarkdown).not.toHaveBeenCalled();
+    expect(writeMarkdownFrom).not.toHaveBeenCalled();
     await waitFor(() => expect(readMarkdown).toHaveBeenCalledTimes(1));
   });
 

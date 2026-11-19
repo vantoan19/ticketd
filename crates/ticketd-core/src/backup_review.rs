@@ -49,6 +49,41 @@ pub enum BackupCheck {
     Damaged { reason: String },
 }
 
+impl BackupCheck {
+    /// Why this backup cannot be restored, in one sentence, or `None` when it can. Inspecting
+    /// and restoring a backup word the same failure the same way.
+    pub fn refusal(&self) -> Option<String> {
+        Some(match self {
+            Self::Valid { .. } => return None,
+            Self::NewerFormat { backup_version, .. } => {
+                Error::NewerSchema(i64::from(*backup_version)).to_string()
+            }
+            Self::NotTicketd => "this file is not a ticketd backup".into(),
+            Self::MissingTables { tables } => {
+                let shown = tables
+                    .iter()
+                    .take(5)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let more = tables.len().saturating_sub(5);
+                let more = if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "this backup lacks parts its format requires ({shown}{more}); choose another backup"
+                )
+            }
+            Self::CurrentWorkspace => {
+                "this file is the current workspace, not a backup; choose a backup file".into()
+            }
+            Self::Damaged { reason } => format!("this backup is damaged: {reason}"),
+        })
+    }
+}
+
 /// A backup file inspected without changing anything.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupInspection {
@@ -171,7 +206,64 @@ pub(crate) enum Ladder {
 
 /// Checks a database file. It must be a ticketd workspace before its format
 /// version means anything, because many unrelated databases use `user_version`.
+///
+/// A file SQLite cannot read through is a result, never a raw SQLite error: text or
+/// another format is `NotTicketd`, and a cut-short, corrupted or unreadable schema
+/// (for example a damaged full-text index) is `Damaged`.
 pub(crate) fn check_backup(connection: &Connection, ladder: Ladder) -> Result<BackupCheck, Error> {
+    use rusqlite::ErrorCode::{
+        DatabaseBusy, DatabaseCorrupt, DatabaseLocked, DiskFull, NotADatabase,
+        OperationInterrupted, OutOfMemory, PermissionDenied, ReadOnly, SystemIoFailure,
+    };
+    match check_backup_file(connection, ladder) {
+        Err(Error::Database(rusqlite::Error::SqliteFailure(failure, message))) => {
+            match failure.code {
+                NotADatabase => Ok(BackupCheck::NotTicketd),
+                DatabaseCorrupt | SystemIoFailure => Ok(BackupCheck::Damaged {
+                    reason: "the file is cut short or corrupted".into(),
+                }),
+                DatabaseBusy | DatabaseLocked | DiskFull | OutOfMemory | OperationInterrupted
+                | PermissionDenied | ReadOnly => Err(Error::Database(
+                    rusqlite::Error::SqliteFailure(failure, message),
+                )),
+                _ => Ok(BackupCheck::Damaged {
+                    reason: format!(
+                        "its schema could not be read ({})",
+                        first_line(&message.unwrap_or_else(|| failure.to_string()))
+                    ),
+                }),
+            }
+        }
+        other => other,
+    }
+}
+
+/// The first line of a SQLite message, bounded so a report stays short.
+fn first_line(text: &str) -> String {
+    let line = text.lines().next().unwrap_or_default().trim();
+    let mut shown: String = line.chars().take(120).collect();
+    if line.chars().count() > 120 {
+        shown.push('…');
+    }
+    shown
+}
+
+/// SQLite lists every problem it finds, sometimes hundreds: name the first and count the rest.
+fn integrity_summary(report: &str) -> String {
+    let mut problems = report
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("***"));
+    let first = problems.next().map(first_line).unwrap_or_default();
+    let more = problems.count();
+    if more == 0 {
+        format!("it failed the database integrity check ({first})")
+    } else {
+        format!("it failed the database integrity check ({first}, and {more} more problems)")
+    }
+}
+
+fn check_backup_file(connection: &Connection, ladder: Ladder) -> Result<BackupCheck, Error> {
     if !table_exists(connection, "tickets")? {
         return Ok(BackupCheck::NotTicketd);
     }
@@ -195,7 +287,7 @@ pub(crate) fn check_backup(connection: &Connection, ladder: Ladder) -> Result<Ba
         connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
     if integrity != "ok" {
         return Ok(BackupCheck::Damaged {
-            reason: format!("integrity check failed: {integrity}"),
+            reason: integrity_summary(&integrity),
         });
     }
     let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
@@ -206,13 +298,55 @@ pub(crate) fn check_backup(connection: &Connection, ladder: Ladder) -> Result<Ba
     }
     if let Err(error) = crate::backup_archive::validate(connection) {
         return Ok(BackupCheck::Damaged {
-            reason: error.to_string(),
+            reason: match error {
+                Error::Backup(reason) => reason,
+                // SQLite failed while reading the packaged bytes back.
+                _ => "its attachment bytes could not be read to the end; the file may be cut short or corrupted".into(),
+            },
         });
     }
     Ok(BackupCheck::Valid {
         format_version: u32::try_from(version).unwrap_or_default(),
         summary: summarize(connection)?,
     })
+}
+
+/// The backup path must name a readable file; restore and inspection say so alike.
+pub(crate) fn require_backup_file(path: &Path) -> Result<(), Error> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => Err(Error::Backup(format!(
+            "backup is a folder, not a file: {}",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(Error::Backup(format!(
+            "backup file not found: {}",
+            path.display()
+        ))),
+        Err(error) => Err(crate::path_error("backup file", path, error)),
+    }
+}
+
+/// A backup opened read-only inside one snapshot, so the check and a restore see the same bytes.
+pub(crate) fn open_backup(path: &Path) -> Result<Connection, Error> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| match error {
+        rusqlite::Error::SqliteFailure(failure, _)
+            if failure.code == rusqlite::ErrorCode::CannotOpen =>
+        {
+            Error::Path(format!(
+                "cannot open backup file {}; check that you can read it",
+                path.display()
+            ))
+        }
+        other => other.into(),
+    })?;
+    crate::session::configure(&connection)?;
+    connection.execute_batch("BEGIN")?;
+    Ok(connection)
 }
 
 fn supported_version() -> u32 {
@@ -239,29 +373,9 @@ impl Workspace {
         let check = if is_current {
             BackupCheck::CurrentWorkspace
         } else {
-            let connection = Connection::open_with_flags(
-                backup,
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )?;
-            crate::session::configure(&connection)?;
-            connection.execute_batch("BEGIN")?;
-            let check = match check_backup(&connection, Ladder::Required) {
-                // Text or another format entirely, so there is nothing of ours to name.
-                Err(Error::Database(rusqlite::Error::SqliteFailure(failure, _)))
-                    if failure.code == rusqlite::ErrorCode::NotADatabase =>
-                {
-                    BackupCheck::NotTicketd
-                }
-                // A SQLite file that cannot be read through; keep SQLite's reason.
-                Err(Error::Database(rusqlite::Error::SqliteFailure(failure, message)))
-                    if failure.code == rusqlite::ErrorCode::DatabaseCorrupt =>
-                {
-                    BackupCheck::Damaged {
-                        reason: message.unwrap_or_else(|| failure.to_string()),
-                    }
-                }
-                other => other?,
-            };
+            require_backup_file(backup)?;
+            let connection = open_backup(backup)?;
+            let check = check_backup(&connection, Ladder::Required)?;
             if matches!(check, BackupCheck::Valid { .. }) {
                 attachment_content = Some(crate::backup_archive::content(&connection)?);
             }

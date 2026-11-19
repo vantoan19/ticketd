@@ -246,7 +246,7 @@ impl Workspace {
 }
 
 pub(crate) fn read_usage(tx: &Connection, id: &str) -> Result<AttachmentUsage, Error> {
-    crate::attachments::read_attachment(tx, id)?;
+    let file = crate::attachments::read_attachment(tx, id)?;
     let mut statement = tx.prepare(
             "SELECT 'ticket_attachment', t.id, t.id, t.trashed FROM ticket_attachments a JOIN tickets t ON t.id=a.ticket_id WHERE a.attachment_id=?1
              UNION ALL SELECT 'ticket_body', t.id, t.id, t.trashed FROM embedded_attachments a JOIN tickets t ON t.id=a.source_id WHERE a.attachment_id=?1
@@ -272,7 +272,10 @@ pub(crate) fn read_usage(tx: &Connection, id: &str) -> Result<AttachmentUsage, E
         |r| r.get(0),
     )?;
     Ok(AttachmentUsage {
-        eligible: protections.is_empty() && !legacy_drafts_pending,
+        // Bytes already purged, or being purged, are nothing to clean up.
+        eligible: file.purge_state == crate::AttachmentPurgeState::Retained
+            && protections.is_empty()
+            && !legacy_drafts_pending,
         legacy_drafts_pending,
         protections,
     })

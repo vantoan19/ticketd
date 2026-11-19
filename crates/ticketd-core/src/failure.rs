@@ -117,7 +117,8 @@ impl Error {
             | Self::ActivityNotFound(_)
             | Self::AutomationAgentNotFound(_)
             | Self::AutomationNotFound(_)
-            | Self::AutomationRunNotFound(_) => FailureKind::NotFound,
+            | Self::AutomationRunNotFound(_)
+            | Self::InboxEntryNotFound(_) => FailureKind::NotFound,
             Self::DependencyCycle { .. }
             | Self::DependencySelf(_)
             | Self::DuplicateCycle
@@ -138,8 +139,13 @@ impl Error {
             | Self::LegacyEffortWorkspace
             | Self::Serialization(_)
             | Self::InvalidBatch(_)
+            | Self::InvalidReminderTime(_)
+            | Self::NoReminder(_)
+            | Self::SnoozeNotLater { .. }
+            | Self::InvalidGraphRequest(_)
             | Self::EmptyPlanName
-            | Self::AmbiguousProject
+            | Self::PlanNameTooLong(_)
+            | Self::AmbiguousProject(_)
             | Self::CheckoutTaken(_)
             | Self::CheckoutNotRegistered(_)
             | Self::InvalidCheckoutPath
@@ -163,6 +169,7 @@ impl Error {
             | Self::ExternalContent { .. }
             | Self::ExternalStatus { .. }
             | Self::NotSynchronized(_)
+            | Self::AlreadyLocal(_)
             | Self::SourceAvailable { .. }
             | Self::Source(_)
             | Self::Publication(_)

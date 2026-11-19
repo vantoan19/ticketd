@@ -3320,6 +3320,127 @@ fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
 }
 
 #[test]
+fn reminder_times_are_checked_and_stored_as_whole_second_utc() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember").unwrap();
+    let reference = ticket.reference.as_str();
+    let rejected = |ws: &mut Workspace, value: &str| {
+        ws.set_reminder(reference, Some(value))
+            .unwrap_err()
+            .to_string()
+    };
+    // The message says what is wrong, without a batch and without a false reason.
+    let impossible = rejected(&mut ws, "2030-02-30T09:00:00Z");
+    assert!(impossible.contains("not a valid date"), "{impossible}");
+    assert!(!impossible.contains("batch"), "{impossible}");
+    assert!(rejected(&mut ws, "2030-01-01T25:00:00Z").contains("not a valid date"));
+    assert!(rejected(&mut ws, "2030-01-01T09:00:00").contains("no UTC offset"));
+    assert!(rejected(&mut ws, "tomorrow").contains("RFC 3339"));
+    assert!(rejected(&mut ws, "9999-12-31T23:59:59-05:00").contains("0000 to 9999"));
+
+    for (given, stored) in [
+        ("2030-12-31T23:59:60Z", "2030-12-31T23:59:59Z"),
+        ("2030-01-01T09:00:00.5Z", "2030-01-01T09:00:00Z"),
+        ("2030-01-01T09:00:00+07:00", "2030-01-01T02:00:00Z"),
+        ("9999-12-31T23:59:59Z", "9999-12-31T23:59:59Z"),
+    ] {
+        ws.set_reminder(reference, Some(given)).unwrap();
+        assert_eq!(ws.reminder(reference).unwrap().as_deref(), Some(stored));
+    }
+}
+
+#[test]
+fn snoozing_needs_a_reminder_and_a_later_time_and_dismissing_says_what_it_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember").unwrap();
+    let reference = ticket.reference.as_str();
+    let no_reminder = ws
+        .snooze_reminder(reference, "2031-01-01T00:00:00Z")
+        .unwrap_err();
+    assert!(
+        no_reminder.to_string().contains("no reminder"),
+        "{no_reminder}"
+    );
+    assert_eq!(ws.reminder(reference).unwrap(), None);
+
+    ws.set_reminder(reference, Some("2031-06-01T00:00:00Z"))
+        .unwrap();
+    for not_later in ["2031-01-01T00:00:00Z", "2031-06-01T07:00:00+07:00"] {
+        let error = ws.snooze_reminder(reference, not_later).unwrap_err();
+        assert!(error.to_string().contains("later"), "{error}");
+    }
+    assert_eq!(
+        ws.reminder(reference).unwrap().as_deref(),
+        Some("2031-06-01T00:00:00Z")
+    );
+    ws.snooze_reminder(reference, "2031-06-02T00:00:00Z")
+        .unwrap();
+    assert_eq!(
+        ws.reminder(reference).unwrap().as_deref(),
+        Some("2031-06-02T00:00:00Z")
+    );
+
+    assert!(ws.dismiss_reminder(reference).unwrap());
+    assert!(!ws.dismiss_reminder(reference).unwrap());
+}
+
+#[test]
+fn personal_state_writes_report_their_outcome_and_refuse_unknown_inbox_entries() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Tracked").unwrap();
+    let follow = |following| WriteRequest::SetFollowing {
+        reference: ticket.reference.clone(),
+        following,
+    };
+    assert_eq!(
+        ws.write(None, follow(true)).unwrap(),
+        WriteResult::Following(true)
+    );
+    assert_eq!(
+        ws.write(None, follow(false)).unwrap(),
+        WriteResult::Following(false)
+    );
+    assert_eq!(
+        ws.write(
+            None,
+            WriteRequest::SetReminder {
+                reference: ticket.reference.clone(),
+                due_at: Some("2031-01-01T00:00:00.5+00:00".into()),
+            },
+        )
+        .unwrap(),
+        WriteResult::Reminder(Some("2031-01-01T00:00:00Z".into()))
+    );
+
+    ws.set_following(&ticket.reference, true).unwrap();
+    ws.change_ticket(
+        &ticket.reference,
+        TicketPatch {
+            status: Some(Status::Done),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let id = ws.inbox(100, 0).unwrap()[0].id;
+    let read = |ids: Vec<i64>| WriteRequest::SetInboxRead { ids, read: true };
+    let error = ws.write(None, read(vec![id, id + 1000])).unwrap_err();
+    assert!(error.to_string().contains("not found"), "{error}");
+    assert!(
+        !ws.inbox(100, 0).unwrap()[0].read,
+        "a refusal changes nothing"
+    );
+    assert_eq!(
+        ws.write(None, read(vec![id])).unwrap(),
+        WriteResult::InboxRead(true)
+    );
+    assert!(ws.inbox(100, 0).unwrap()[0].read);
+}
+
+#[test]
 fn workspace_info_reports_location_counts_size_and_format() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
@@ -5070,5 +5191,18 @@ fn the_next_reminder_is_due_when_its_time_comes_and_none_after_delivery() {
     workspace.deliver_due_reminders().unwrap();
     assert!(
         workspace.next_reminder_due_in().unwrap().unwrap() > std::time::Duration::from_secs(3590)
+    );
+}
+
+#[test]
+fn evidence_kind_is_accepted_in_the_command_line_and_the_written_spelling() {
+    use ticketd_core::EvidenceKind;
+    for spelling in ["pull-request", "pull_request"] {
+        let kind: EvidenceKind = serde_json::from_value(serde_json::json!(spelling)).unwrap();
+        assert_eq!(kind, EvidenceKind::PullRequest);
+    }
+    assert_eq!(
+        serde_json::to_value(EvidenceKind::PullRequest).unwrap(),
+        "pull_request"
     );
 }

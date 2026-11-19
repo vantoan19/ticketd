@@ -34,6 +34,7 @@ import {
 import { Snooze } from "./Inbox";
 import { useInboxTriage } from "./inbox-triage-context";
 import { useInboxAttention } from "./use-inbox-attention";
+import { progressBrief } from "./progress-brief";
 import { requestTicketUpdate } from "./activity-composer-request";
 import {
   summarize,
@@ -69,11 +70,12 @@ export function InboxTriageCard() {
   const ticket = record ?? undefined;
   const changed = useTicketChanged();
   const read = entry?.read ?? !chat?.status.unseen;
-  const ticketReason =
-    blocked ??
-    (!reference
-      ? "This Chat has no linked Ticket."
-      : ticketUnavailable(record));
+  const noTicket = !reference ? "This Chat has no linked Ticket." : null;
+  const ticketReason = blocked ?? noTicket ?? ticketUnavailable(record);
+  // A reminder is the person's own: a Ticket in Trash keeps it, so Clear and
+  // Snooze work there while Reply and status changes still need a restore.
+  const reminderReason =
+    blocked ?? noTicket ?? ticketUnavailable(record, { allowTrashed: true });
   const agent = entry?.editing_agent ?? chat?.harness_name;
   const harness = chat?.harness_id ?? editingHarness(agent);
   const description = entry
@@ -81,11 +83,13 @@ export function InboxTriageCard() {
     : chat?.status.detail
       ? `${agent} wants to run ${chat.status.detail}`
       : "Approval needed";
-  const latestBrief = chat
-    ? description
+  // An Activity's brief is Markdown; every other line here is already plain.
+  const markdownBrief = chat
+    ? null
     : entry?.kind === "activity"
       ? entry.to_value
-      : (agentContext?.update?.brief.text ?? description);
+      : (agentContext?.update?.brief.text ?? null);
+  const latestBrief = markdownBrief ?? description;
   // A Ticket the core says is gone has nothing left to wait for.
   const gone = reference !== null && record === null;
   const ready = !entry || gone || agentContext?.ready === true;
@@ -93,11 +97,21 @@ export function InboxTriageCard() {
     selection,
     ready,
     brief: latestBrief,
+    markdown: markdownBrief !== null,
   });
   if (bodySnapshot.selection !== selection || (!bodySnapshot.ready && ready))
-    setBodySnapshot({ selection, ready, brief: latestBrief });
-  const brief =
-    bodySnapshot.selection === selection ? bodySnapshot.brief : latestBrief;
+    setBodySnapshot({
+      selection,
+      ready,
+      brief: latestBrief,
+      markdown: markdownBrief !== null,
+    });
+  const shown =
+    bodySnapshot.selection === selection
+      ? bodySnapshot
+      : { brief: latestBrief, markdown: markdownBrief !== null };
+  // Reply quotes the brief as written.
+  const brief = shown.brief;
   const [evidenceState, setEvidenceState] = useState<{
     reference: string;
     items: Evidence[];
@@ -161,7 +175,7 @@ export function InboxTriageCard() {
     );
   }
   function remind(choice: SnoozeChoice) {
-    if (ticketReason || !reference || pending) return Promise.resolve();
+    if (reminderReason || !reference || pending) return Promise.resolve();
     const due = snoozeInstant(choice, new Date());
     const beforeRead = read;
     const id = crypto.randomUUID();
@@ -247,7 +261,7 @@ export function InboxTriageCard() {
       if (action === "primary") primary();
       else if (action === "reply") reply();
       else if (action === "read") mark(!read);
-      else if (action === "remind" && !ticketReason)
+      else if (action === "remind" && !reminderReason)
         setSnoozeRequest((n) => n + 1);
     });
   });
@@ -283,7 +297,7 @@ export function InboxTriageCard() {
       else if (matchesShortcut(event, "inbox-reply")) action = reply;
       else if (matchesShortcut(event, "inbox-remind"))
         action = () => {
-          if (!ticketReason) setSnoozeRequest((n) => n + 1);
+          if (!reminderReason) setSnoozeRequest((n) => n + 1);
         };
       if (action) {
         event.preventDefault();
@@ -307,7 +321,7 @@ export function InboxTriageCard() {
             ? "The source does not allow moving this Ticket to Done."
             : null))
       : isReminder
-        ? ticketReason
+        ? reminderReason
         : blocked;
   const primaryLabel = chat
     ? "Review in Chat"
@@ -344,7 +358,11 @@ export function InboxTriageCard() {
               {entry?.title ?? chat?.title}
             </p>
           )}
-          {ready ? <p>{brief}</p> : <Skeleton className="mt-2 h-12 w-full" />}
+          {ready ? (
+            <p>{shown.markdown ? progressBrief(brief) : brief}</p>
+          ) : (
+            <Skeleton className="mt-2 h-12 w-full" />
+          )}
           <div className="inbox-triage-evidence" data-slot="triage-evidence">
             {evidenceState?.reference === reference && evidenceState.error ? (
               <>
@@ -438,7 +456,7 @@ export function InboxTriageCard() {
               openRequest={snoozeRequest}
               snooze={remind}
               label={isReminder ? "Snooze" : "Remind me"}
-              disabled={!!ticketReason || pending}
+              disabled={!!reminderReason || pending}
             />
             <span className="inbox-triage-spacer" />
             <Tooltip

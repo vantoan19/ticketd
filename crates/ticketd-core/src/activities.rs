@@ -111,7 +111,18 @@ pub(crate) fn edit(
     {
         return Err(Error::EmptyActivityBrief);
     }
-    let changed = conn.execute("UPDATE activities SET brief = COALESCE(?1, brief), editing_agent = COALESCE(?2, editing_agent), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ticket_id = ?3 AND id = ?4", params![patch.brief,crate::history::clean_agent(patch.editing_agent.as_deref()),ticket,id])?;
+    let editing_agent = crate::history::clean_agent(patch.editing_agent.as_deref());
+    // Saving what is already stored changes nothing, so it must not move `updated_at` either.
+    let current = get(conn, ticket, id)?;
+    if patch
+        .brief
+        .as_ref()
+        .is_none_or(|brief| *brief == current.brief)
+        && editing_agent.is_none_or(|agent| current.editing_agent.as_deref() == Some(agent))
+    {
+        return Ok(current);
+    }
+    let changed = conn.execute("UPDATE activities SET brief = COALESCE(?1, brief), editing_agent = COALESCE(?2, editing_agent), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ticket_id = ?3 AND id = ?4", params![patch.brief,editing_agent,ticket,id])?;
     if changed == 0 {
         return Err(Error::ActivityNotFound(id.to_owned()));
     }

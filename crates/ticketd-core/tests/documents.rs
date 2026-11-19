@@ -1145,3 +1145,65 @@ fn an_update_brief_names_its_details_by_its_first_sentence() {
     let heading = derive_brief_heading(&long).unwrap();
     assert!(heading.chars().count() <= 80 && heading.ends_with('…'));
 }
+
+#[test]
+fn heading_and_snippet_skip_a_byte_order_mark_and_front_matter() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let bom = workspace
+        .create_document(None, "\u{feff}# BOM heading\n\ntext")
+        .unwrap();
+    assert_eq!(bom.heading, "BOM heading");
+    let front = workspace
+        .create_document(
+            None,
+            "---\ntitle: FM title\n---\n\n# Real heading\n\nDetail",
+        )
+        .unwrap();
+    assert_eq!(front.heading, "Real heading");
+    let rows = workspace.all_documents_page(50, 0, false).unwrap();
+    let snippet = |id: &str| {
+        rows.iter()
+            .find(|row| row.id == id)
+            .unwrap()
+            .snippet
+            .clone()
+    };
+    assert_eq!(snippet(&front.id), "Detail");
+    assert_eq!(snippet(&bom.id), "text");
+}
+
+#[test]
+fn document_backlinks_list_mentions_not_attachments_and_flag_trashed_tickets() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let document = workspace.create_document(Some("Spec"), "x").unwrap();
+    let attached = workspace.create_ticket("Attached").unwrap();
+    workspace
+        .set_ticket_document(&attached.reference, &document.id, true)
+        .unwrap();
+    assert!(
+        workspace
+            .document_backlinks(&document.id, 10, 0)
+            .unwrap()
+            .is_empty()
+    );
+    let mention = workspace.create_ticket("Mentions").unwrap();
+    workspace
+        .change_ticket(
+            &mention.reference,
+            ticketd_core::TicketPatch {
+                body: Some(format!("See [Spec](ticketd://document/{})", document.id)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.document_backlinks(&document.id, 10, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert!(!links[0].source_trashed && !links[0].passage.is_empty());
+    workspace
+        .set_trashed(&mention.reference, true, None)
+        .unwrap();
+    let links = workspace.document_backlinks(&document.id, 10, 0).unwrap();
+    assert!(links[0].source_trashed);
+}

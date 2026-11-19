@@ -139,6 +139,29 @@ pub enum ContextSourceEntry {
         created_at: String,
     },
 }
+/// The ticket's latest authored update in the same bounded shape as `ContextActivity`:
+/// attribution is a `BoundedText` like the rest of the context's user text.
+#[derive(Debug, Serialize)]
+pub struct ContextLatestUpdate {
+    pub activity_id: String,
+    pub supporting_document_id: Option<String>,
+    pub brief: crate::UpdateBrief,
+    pub reported_at: String,
+    pub updated_at: String,
+    pub editing_agent: Option<BoundedText>,
+}
+impl From<crate::LatestUpdate> for ContextLatestUpdate {
+    fn from(update: crate::LatestUpdate) -> Self {
+        Self {
+            activity_id: update.activity_id,
+            supporting_document_id: update.supporting_document_id,
+            brief: update.brief,
+            reported_at: update.reported_at,
+            updated_at: update.updated_at,
+            editing_agent: update.editing_agent.map(|agent| text(agent, LABEL)),
+        }
+    }
+}
 #[derive(Debug, Serialize)]
 pub struct TicketContext {
     pub ticket: ContextTicket,
@@ -151,7 +174,7 @@ pub struct TicketContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activities: Option<ContextPage<ContextActivity>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_update: Option<Option<crate::LatestUpdate>>,
+    pub latest_update: Option<Option<ContextLatestUpdate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -437,7 +460,7 @@ impl Workspace {
                 None
             };
             let latest_update = if options.latest_update {
-                Some(crate::activities::latest(tx, &id)?)
+                Some(crate::activities::latest(tx, &id)?.map(Into::into))
             } else {
                 None
             };

@@ -12,7 +12,7 @@ use std::{
 use serde_json::{Value, json};
 
 use super::{credentials::Secret, transport::TransportError, *};
-use crate::source::{Engine, schema::ConfigValues};
+use crate::source::{Engine, Surface, schema::ConfigValues};
 
 const API: &str = "https://api.example.test";
 const TOKEN: &str = "ghp_secret_token_value";
@@ -1372,4 +1372,84 @@ fn a_search_that_cannot_finish_is_incomplete_or_an_error_never_empty_and_complet
         search_for_title(&engine).unwrap_err().code(),
         "unauthenticated"
     );
+}
+
+/// A credential failure is two readable sentences: the shared cause, then the
+/// guidance for the surface reading it. The terminal never mentions a Settings
+/// button, and the desktop never mentions an environment variable.
+#[test]
+fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
+    let (_, engine) = setup(None);
+    let missing = engine
+        .check_connection("github", &config(json!({})))
+        .unwrap_err();
+    assert!(
+        matches!(missing, SourceError::Unauthenticated(_)),
+        "{missing}"
+    );
+    assert_eq!(
+        missing.to_string(),
+        "no GitHub credential found. Run `gh auth login` to sign in."
+    );
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/user"),
+        status(401, json!({"message": "Bad credentials"}), &[]),
+    );
+    let rejected = engine
+        .check_connection("github", &config(json!({})))
+        .unwrap_err();
+    assert_eq!(
+        rejected.to_string(),
+        "GitHub rejected the credential: Bad credentials. Run `gh auth login` to sign in again."
+    );
+
+    for error in [&missing, &rejected] {
+        let terminal = error.message_for(Surface::Terminal);
+        assert!(
+            terminal.ends_with(
+                ". From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead."
+            ),
+            "{terminal}"
+        );
+        assert!(!terminal.contains("Settings"), "{terminal}");
+        let desktop = error.message_for(Surface::Desktop);
+        assert!(
+            desktop.ends_with(". Then choose Check connection in Settings."),
+            "{desktop}"
+        );
+        assert!(!desktop.contains("TICKETD_GITHUB_TOKEN"), "{desktop}");
+    }
+    // Other failures read the same everywhere.
+    let other = SourceError::Unavailable("GitHub is unavailable".into());
+    assert_eq!(other.message_for(Surface::Desktop), other.to_string());
+}
+
+#[test]
+fn a_missing_repository_list_reads_as_a_sentence() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!(
+            "{API}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member"
+        ),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    let error = engine
+        .options("github", "repositories", "x", &config(json!({})))
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "the list of your repositories was not found, or the credential cannot see it"
+    );
+}
+
+#[test]
+fn only_owner_name_destinations_can_be_published_to() {
+    let (_, engine) = setup(Some(TOKEN));
+    assert!(engine.check_destination("github", "o/r").is_ok());
+    for bad in ["nonsense", "a b/c", "o/"] {
+        let error = engine.check_destination("github", bad).unwrap_err();
+        assert_eq!(error.issues()[0].field, "destination", "{bad}");
+    }
 }

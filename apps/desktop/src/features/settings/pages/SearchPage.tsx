@@ -63,9 +63,10 @@ export function SearchPage() {
     const pages = new Map<SettingsPageId, PageInfo>(
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
-    // Automations settings are found only while Chat shows them.
+    // Rows that Chat shows, and the Automations page, are found only while it is on.
     const entries: SettingsEntry[] = SETTINGS_ENTRIES.filter(
-      (entry) => entry.section !== "automations" || chat.enabled,
+      (entry) =>
+        chat.enabled || (entry.section !== "automations" && !entry.needsChat),
     );
     for (const { connector } of sources) {
       const section = sourceSection(connector.provider, connector.name);

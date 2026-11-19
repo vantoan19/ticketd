@@ -126,6 +126,9 @@ pub enum IneligibleReason {
     AttemptOpen,
     /// Workspace attachment links cannot be read by external readers.
     InternalAttachments,
+    /// The chosen destination is not well formed for the provider (for GitHub,
+    /// not `owner/name`), so publishing would be refused.
+    InvalidDestination,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -949,6 +952,20 @@ impl Workspace {
         {
             eligibility = ineligible(reason, message);
         }
+        // The same check the publish makes, so a preview never promises what the
+        // publish refuses.
+        if matches!(eligibility, Eligibility::Eligible)
+            && let Some(chosen) = &destination
+            && let Err(error) = engine.check_destination(provider, chosen)
+        {
+            eligibility = ineligible(
+                IneligibleReason::InvalidDestination,
+                format!(
+                    "cannot publish to '{chosen}': {}",
+                    destination_problem(&error)
+                ),
+            );
+        }
         Ok(PublicationPreview {
             reference: ticket.reference,
             provider: provider.to_owned(),
@@ -1053,6 +1070,8 @@ impl Workspace {
                     },
                 ])));
             };
+            // Refused before an attempt is recorded: nothing was tried.
+            engine.check_destination(provider, &destination)?;
             // Send exactly what was previewed, or nothing.
             if let Some(expected) = &options.expected_fingerprint
                 && *expected != fingerprint(&ticket.title, &ticket.body, Some(&destination))
@@ -2174,6 +2193,15 @@ fn complete_attempt(
         [sent.attempt_id],
         |row| attempt_from_row(row, now),
     )?)
+}
+
+/// The reason a destination was refused, without the "invalid source
+/// configuration: destination" framing meant for settings.
+fn destination_problem(error: &SourceError) -> String {
+    match error.issues() {
+        [issue, ..] => issue.message.clone(),
+        [] => error.to_string(),
+    }
 }
 
 fn chosen_destination(requested: Option<&str>, suggested: &[String]) -> Option<String> {

@@ -6,6 +6,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
+    /// Written `pull_request`; the command line's `pull-request` is accepted on input too.
+    #[serde(alias = "pull-request")]
     PullRequest,
     Commit,
     Branch,

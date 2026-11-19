@@ -999,3 +999,89 @@ fn cli_document_keep_trash_restore_print_the_bare_document() {
     let references = run(&["document", "references", "T-KQ1"]);
     assert!(references.as_array().unwrap().is_empty());
 }
+
+#[test]
+fn cli_rejects_empty_patches_and_titles_and_takes_back_what_it_printed() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let try_run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap()
+    };
+    let run = |args: &[&str]| {
+        let output = try_run(args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let fails_with = |args: &[&str], message: &str| {
+        let output = try_run(args);
+        assert!(!output.status.success(), "{args:?} succeeded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{stderr}");
+    };
+    run(&["create", "Ticket"]);
+    let document = run(&["document", "create", "--body", "x"]);
+    let id = document["id"].as_str().unwrap();
+    fails_with(&["document", "change", id], "provide --title");
+    fails_with(
+        &["document", "change", id, "--title", " "],
+        "must not be empty",
+    );
+    let activity = run(&["activity", "add", "T-KQ1", "--brief", "Hi"]);
+    let activity_id = activity["id"].as_str().unwrap();
+    fails_with(
+        &["activity", "edit", "T-KQ1", activity_id],
+        "provide --brief or --file",
+    );
+    let evidence = run(&[
+        "evidence",
+        "add",
+        "T-KQ1",
+        "--kind",
+        "pull-request",
+        "--name",
+        "PR",
+        "--value",
+        "https://example.com/p/1",
+    ]);
+    assert_eq!(evidence["kind"], "pull_request");
+    run(&[
+        "evidence",
+        "edit",
+        "T-KQ1",
+        evidence["id"].as_str().unwrap(),
+        "--kind",
+        "pull_request",
+        "--name",
+        "PR",
+        "--value",
+        "https://example.com/p/1",
+    ]);
+    let plan = run(&["plan", "create", "Hub"]);
+    let plan_id = plan["id"].as_str().unwrap();
+    for n in 0..55 {
+        let reference = run(&["create", &format!("Member {n}")])["reference"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        run(&["plan", "add", plan_id, &reference]);
+    }
+    let first = run(&["graph", plan_id, "--context"]);
+    let continuation = first["continuations"][0].to_string();
+    let more = run(&["graph", plan_id, "--context", "--page", &continuation]);
+    assert!(more["nodes"].as_array().unwrap().len() > first["nodes"].as_array().unwrap().len());
+    fails_with(
+        &["graph", "--context", "--workspace", "--kind", "bogus"],
+        "unknown kind",
+    );
+}

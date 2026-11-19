@@ -32,7 +32,7 @@ import {
   legendItems,
   panToInclude,
 } from "./graph-text";
-import { routeAll, type Rect } from "./edge-routing";
+import { placeLabels, routePaths, type Rect } from "./edge-routing";
 import { RoutedEdge } from "./RoutedEdge";
 import { CARD_HEIGHT, CARD_WIDTH, type Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
@@ -571,9 +571,9 @@ export function ContextGraphCanvas({
     const island = islands?.find((each) => each.id === focusId);
     return new Set([focusId, ...(island?.memberIds ?? [])]);
   }, [focusId, islands]);
-  // Every line names its relationship. Lines bend around the cards in their way
-  // and each label sits clear of every card and of the other labels.
-  const shownEdges = useMemo<Edge[]>(() => {
+  // Lines bend around the cards in their way. That depends only on where the
+  // cards are, so selecting a card does not route every line again.
+  const cardRects = useMemo(() => {
     const cards: Record<string, Rect> = {};
     for (const node of nodes) {
       const at = positions[node.id];
@@ -594,17 +594,37 @@ export function ContextGraphCanvas({
           height: 20,
         };
     }
-    const routes = routeAll(
-      cards,
+    return cards;
+  }, [nodes, positions, sizes, islands]);
+  const paths = useMemo(
+    () =>
+      routePaths(
+        cardRects,
+        edges.map((edge) => ({
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+        })),
+      ),
+    [cardRects, edges],
+  );
+  // A line names itself only beside the selected card, so labels never pile up
+  // over the map; the legend and the panel name the rest. Only those labels are
+  // placed, each clear of every card and of the other labels.
+  const shownEdges = useMemo<Edge[]>(() => {
+    const routes = placeLabels(
+      cardRects,
+      paths,
       edges.map((edge) => ({
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        ...(typeof edge.label === "string" ? { label: edge.label } : {}),
+        ...(typeof edge.label === "string" &&
+        (selected === edge.source || selected === edge.target)
+          ? { label: edge.label }
+          : {}),
       })),
     );
-    // A line names itself only beside the selected card, so labels never
-    // pile up over the map; the legend and the panel name the rest.
     return edges.map((edge) => ({
       ...edge,
       ...(lit &&
@@ -624,7 +644,7 @@ export function ContextGraphCanvas({
         }),
       },
     }));
-  }, [edges, nodes, positions, sizes, selected, islands, lit]);
+  }, [edges, cardRects, paths, selected, islands, lit]);
   const flowNodes = useMemo<Node[]>(
     () => [
       ...(islands ?? []).map((island) => ({

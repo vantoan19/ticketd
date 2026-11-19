@@ -283,6 +283,8 @@ export function PlanFlow({
         <span>→ blocks</span>
         <span>
           A ticket moves left as its blockers finish.
+          {flow.undrawn > 0 &&
+            ` ${flow.undrawn === 1 ? "1 link inside a lane isn’t" : `${flow.undrawn} links inside a lane aren’t`} drawn; each card says what it waits on.`}
           {selected
             ? ` Selected: ${selected} and the links into and out of it.`
             : ` ${shortcutLabel("flow-move")} to select; Enter to open.`}

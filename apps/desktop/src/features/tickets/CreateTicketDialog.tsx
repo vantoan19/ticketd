@@ -366,7 +366,6 @@ function RecoveredCreateTicketDialog({
         <IconButton
           type="button"
           label={expanded ? "Collapse" : "Expand"}
-          shortcut={shortcutLabel("create-expand")}
           onClick={() => setExpanded(!expanded)}
         >
           {expanded ? <Minimize2 /> : <Maximize2 />}

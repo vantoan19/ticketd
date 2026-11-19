@@ -29,7 +29,7 @@ test("every section has at least one entry and entries are complete", () => {
 test("an available source adds Connection, Discovery and Sync entries in its own section", () => {
   const entries = sourceEntries("github", "GitHub");
   expect(entries.map((entry) => entry.title)).toEqual([
-    "GitHub connection",
+    "Connection",
     "Discovery",
     "Sync",
   ]);
@@ -84,4 +84,52 @@ test("no two rows on one page share a title", () => {
     expect(seen.has(key), key).toBe(false);
     seen.add(key);
   }
+});
+
+test("a query matches the beginnings of words, never the middle of one", () => {
+  const titles = (query: string) =>
+    searchSettings(query, SETTINGS_ENTRIES).map((hit) => hit.title);
+  // "rows" sits inside "browser" and "board" inside "keyboard".
+  expect(titles("rows")).not.toContain("Report an issue");
+  expect(titles("board")).toEqual(["Lists"]);
+  expect(titles("key")).toContain("Everywhere");
+  expect(titles("back")).toContain("Back up now");
+});
+
+test("every word of a query must match", () => {
+  const titles = (query: string) =>
+    searchSettings(query, SETTINGS_ENTRIES).map((hit) => hit.title);
+  expect(titles("restore backup")).toContain("Restore from a backup");
+  expect(titles("restore zzzz")).toEqual([]);
+});
+
+test("harness finds the Harnesses section of the Chat page", () => {
+  const [first] = searchSettings("harness", SETTINGS_ENTRIES);
+  expect(first).toMatchObject({ title: "Harnesses", section: "chat" });
+});
+
+test("experimental finds the Chat and Automations pages as well as Show Chat", () => {
+  const sections = searchSettings("experimental", SETTINGS_ENTRIES).map(
+    (hit) => hit.section,
+  );
+  expect(sections).toEqual(expect.arrayContaining(["chat", "automations"]));
+});
+
+test("a description from the page finds its row", () => {
+  const [first] = searchSettings("all file types", SETTINGS_ENTRIES);
+  expect(first).toMatchObject({ title: "Upload limit" });
+});
+
+test("splitMatch marks a word start, not the middle of a word", () => {
+  expect(splitMatch("Report an issue in your browser", "rows")).toEqual([
+    "Report an issue in your browser",
+    "",
+    "",
+  ]);
+  expect(splitMatch("Back up now", "back up")).toEqual(["", "Back up", " now"]);
+  expect(splitMatch("Keyboard shortcuts", "short")).toEqual([
+    "Keyboard ",
+    "short",
+    "cuts",
+  ]);
 });

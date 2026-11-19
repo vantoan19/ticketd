@@ -585,6 +585,10 @@ older database-only backups remain readable. See
 [ADR 0008](adr/0008-attachment-backup-container.md) for the format and recovery
 trade-off. Desktop review and `ticketd inspect-backup <path>` expose completeness,
 local file totals, and the limits of remote references through the same core.
+`inspect-backup` prints its JSON report for every readable file and exits with an
+error, worded as a restore would word it, when `check.status` is anything but
+`valid`. Each file must fit one SQLite blob, so the upload limit is capped at
+999,000,000 bytes and an older, larger setting is held to it.
 
 ## Local media previews
 
@@ -942,8 +946,15 @@ edges; a retained duplicate prerequisite remains unresolved.
 Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
 `ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
 Set and snooze take an RFC 3339 instant with an explicit offset; show displays
-local time and UTC. The retryable `set_reminder` write takes `reference` and
-`due_at` (or null to dismiss). Reading the inbox atomically delivers due
+local time and UTC. Times are stored as whole-second UTC instants (fractions are
+dropped, a leap second reads as the second before it, years 0000 to 9999).
+`snooze` needs an existing reminder and a later time; `dismiss` says when there
+was nothing to dismiss. The retryable `set_reminder` write takes `reference` and
+`due_at` (or null to dismiss) and reschedules freely; it answers
+`{"kind":"reminder","value":<due time or null>}`. `set_following` answers
+`{"kind":"following","value":<bool>}` and `set_inbox_read` answers
+`{"kind":"inbox_read","value":<read>}`; an inbox ID that was never issued is refused.
+Reading the inbox atomically delivers due
 occurrences; reopening the inbox catches up after downtime without a daemon.
 
 Inbox entries for new Activities retain the Activity ID and its original brief in

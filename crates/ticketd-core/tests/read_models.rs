@@ -291,7 +291,7 @@ fn chat_summaries_are_the_listed_chats_with_the_chats_in_their_folder() {
 
 #[test]
 fn active_tickets_are_the_tickets_changed_last() {
-    let Seeded { workspace, .. } = seeded();
+    let Seeded { workspace, _dir } = seeded();
     let mut expected = workspace.list_tickets().unwrap();
     expected.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     for limit in [1, 4, 50] {
@@ -488,7 +488,7 @@ fn pages() -> Vec<TicketFilter> {
 
 #[test]
 fn a_ticket_row_says_what_the_full_ticket_says_without_its_body() {
-    let Seeded { workspace, .. } = seeded();
+    let Seeded { workspace, _dir } = seeded();
     for filter in pages() {
         let expected: Vec<TicketRow> = workspace
             .find_tickets_with_updates(&filter)
@@ -551,7 +551,7 @@ fn a_ticket_row_says_what_the_full_ticket_says_without_its_body() {
 
 #[test]
 fn a_listed_ticket_is_the_ticket_shown_on_its_own() {
-    let Seeded { workspace, .. } = seeded();
+    let Seeded { workspace, _dir } = seeded();
     let listed = workspace.list_tickets().unwrap();
     assert_eq!(listed.len(), 11);
     let numbered = |n: usize| {
