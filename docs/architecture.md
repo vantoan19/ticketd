@@ -32,7 +32,7 @@ The core is a shared library, not a shared running process. A background daemon,
 
 ## Source layout
 
-The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crates/ticketd-chat-host`, `crates/ticketd-automation-runner`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
+The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crates/ticketd-chat-host`, `crates/ticketd-automation-runner`, `crates/ticketd-diagnostics`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
 
 ## Module responsibilities
 
@@ -46,6 +46,10 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crate
 Every CLI error exits with status 1; the CLI does not tell failures apart by kind. The core classifies a failure as a `FailureKind` (`failure.rs`) so an interface can choose its words and next step, and only the desktop uses it.
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
+
+### Logging
+
+Rust code logs with `tracing`. The library crates (core, chat host, Automation runner) emit events and spans and never install a subscriber; only the two binaries do, through `ticketd-diagnostics`. The CLI's `main` calls `init_cli()` (readable lines on stderr, `warn` by default, `TICKETD_LOG` to change it). The desktop's `run()` calls `init_desktop(log_dir)` with Tauri's app log folder, keeps the returned handle in managed state and drops it on `RunEvent::Exit`; its subscriber writes JSON lines to a daily file. The event standard is in `docs/agents/quality.md`, and the decisions are in [ADR 0017](adr/0017-local-only-structured-logs.md).
 
 ## Planned native Chat runtime and storage
 

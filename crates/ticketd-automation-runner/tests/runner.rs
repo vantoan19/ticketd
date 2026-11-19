@@ -644,6 +644,38 @@ async fn the_runs_at_once_setting_decides_how_many_runs_execute() {
 
 /// #387 M3, M17: turning Chat off ends the going run, says why, and starts none of
 /// the queued ones, which wait for Chat to be on again.
+/// A run that stopped before it finished is work that stopped, so it is logged at `error`.
+/// Runs execute on spawned tasks, so this test installs the process-wide subscriber (each
+/// integration test file is its own process).
+#[tokio::test(start_paused = true)]
+async fn a_run_abandoned_because_chat_was_turned_off_is_logged_as_an_error() {
+    let dir = tempfile::tempdir().unwrap().keep();
+    let logs = ticketd_diagnostics::DesktopLogs::open(&dir, ticketd_diagnostics::Config::default());
+    assert!(logs.install());
+    // Dropping the handle would remove the session marker; the process ends soon enough.
+    std::mem::forget(logs);
+    let f = Fixture::new();
+    f.agent_working().await;
+    let run_id = f.runs()[0].id.clone();
+
+    f.host.turn_off().await;
+    settle().await;
+
+    let mut abandoned = Vec::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "log") {
+            for line in std::fs::read_to_string(path).unwrap().lines() {
+                let line: serde_json::Value = serde_json::from_str(line).unwrap();
+                if line["automation_run_id"] == run_id.as_str() && line["level"] == "ERROR" {
+                    abandoned.push(line["message"].as_str().unwrap().to_owned());
+                }
+            }
+        }
+    }
+    assert_eq!(abandoned, ["Automation run abandoned"]);
+}
+
 #[tokio::test(start_paused = true)]
 async fn turning_chat_off_stops_the_going_run_and_leaves_queued_runs_queued() {
     let f = Fixture::new();

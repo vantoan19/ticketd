@@ -282,7 +282,9 @@ mod tests {
         let mut noise = vec![b'a'; MAX_STDERR_TAIL_BYTES * 2];
         noise.extend_from_slice(b"final line\n");
 
-        tail.clone().drain(noise.as_slice()).await;
+        tail.clone()
+            .drain(noise.as_slice(), crate::Harness::Codex)
+            .await;
 
         let snapshot = tail.snapshot();
         assert!(snapshot.len() <= MAX_STDERR_TAIL_BYTES);

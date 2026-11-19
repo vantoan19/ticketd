@@ -39,7 +39,10 @@ pub use portable_export::{
 mod location;
 pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
-pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspace_file};
+pub use location::{
+    WorkspaceFile, WorkspaceHealth, WorkspaceInfo, default_workspace_file, workspace_file,
+    workspace_health,
+};
 
 mod plans;
 mod retry;
