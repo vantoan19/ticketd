@@ -424,7 +424,9 @@ fn the_issue_author_and_opening_fill_on_a_later_refresh_and_are_not_forgotten() 
     // A read that cannot say keeps what an earlier one said.
     f.publish(unknown, true);
     f.refresh();
-    assert_eq!(f.ticket(1).source.unwrap().author.as_deref(), Some("alice"));
+    let source = f.ticket(1).source.unwrap();
+    assert_eq!(source.author.as_deref(), Some("alice"));
+    assert_eq!(source.created_at.as_deref(), Some("2026-01-01T00:00:00Z"));
 }
 
 #[test]

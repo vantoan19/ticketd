@@ -436,6 +436,33 @@ test("a ticket imported before the author was stored shows neither until a refre
   expect(line?.textContent).not.toContain("opened");
 });
 
+test("an unavailable source still names who opened the issue and when", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const openedAt = new Date(Date.now() - 2 * 1440 * 60_000).toISOString();
+  const { container } = render(
+    <DetailsFixture
+      value={ticket({
+        source: source({
+          author: "alice",
+          created_at: openedAt,
+          unavailable: {
+            code: "unavailable",
+            message: "down",
+            since: openedAt,
+          },
+        }),
+      })}
+    />,
+  );
+  const line = container.querySelector(".ticket-state-line") as HTMLElement;
+  expect(line.textContent).toContain("Source unavailable");
+  expect(line.textContent).toContain("Last synced copy from");
+  expect(within(line).getByText("alice")).toBeTruthy();
+  expect(
+    within(line).getByText("opened 2 d ago").getAttribute("datetime"),
+  ).toBe(openedAt);
+});
+
 test("a closed state line uses the core's closure time and names its canonical issue", () => {
   bridge.invoke.mockResolvedValue([]);
   const closedAt = new Date(Date.now() - 210 * 60_000).toISOString();
