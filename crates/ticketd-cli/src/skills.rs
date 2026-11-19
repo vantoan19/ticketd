@@ -115,7 +115,9 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
                         .iter()
                         .map(|id| {
                             Agent::find(id)
-                                .map(|agent| agent.skill_directory(&home))
+                                .map(|agent| {
+                                    agent.skill_directory(&home, |name| std::env::var_os(name))
+                                })
                                 .ok_or_else(|| {
                                     let known: Vec<_> =
                                         AGENTS.iter().map(|agent| agent.id).collect();

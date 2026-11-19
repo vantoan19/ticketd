@@ -43,6 +43,11 @@ const CONFLICT: Partial<Record<NonNullable<AgentSkill["state"]>, string>> = {
     "SKILL.md here is a link or folder, so ticketd leaves it alone. Remove it, then choose Check again.",
 };
 
+/** Up to date: this build's copy, or one a newer ticketd wrote and nobody changed. */
+function installed(agent: AgentSkill) {
+  return agent.state === "installed" || agent.state === "newer";
+}
+
 /** A harness the one action covers: present on this computer, or already holding a copy. */
 function pending(agent: AgentSkill) {
   return (
@@ -54,6 +59,7 @@ function pending(agent: AgentSkill) {
 function rowStatus(agent: AgentSkill): Status | null {
   switch (agent.state) {
     case "installed":
+    case "newer":
       return INSTALLED;
     case "update_available":
       return UPDATE;
@@ -72,7 +78,7 @@ function overall(agents: AgentSkill[]): Status {
   if (agents.some((agent) => agent.state === "update_available")) return UPDATE;
   if (agents.some((agent) => agent.state === "not_installed" && agent.detected))
     return NOT_INSTALLED;
-  if (agents.some((agent) => agent.state === "installed")) return INSTALLED;
+  if (agents.some(installed)) return INSTALLED;
   return NOTHING_FOUND;
 }
 
@@ -84,8 +90,11 @@ function summary(agents: AgentSkill[], status: Status) {
     return "No supported agent was found, so there is nothing to install yet.";
   const detected = agents.filter((agent) => agent.detected);
   switch (status) {
-    case INSTALLED:
-      return `Up to date for ${names(detected.filter((agent) => agent.state === "installed"))}.`;
+    case INSTALLED: {
+      // A copy can be there before its agent is, e.g. one the CLI installed.
+      const found = detected.filter(installed);
+      return `Up to date for ${names(found.length > 0 ? found : agents.filter(installed))}.`;
+    }
     case UPDATE:
       return "A newer ticketd skill is ready. One click updates it for every supported agent found here.";
     case ATTENTION:

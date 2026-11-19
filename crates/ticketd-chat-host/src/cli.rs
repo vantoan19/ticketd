@@ -198,37 +198,74 @@ pub fn detect(
     status
 }
 
-/// Apps started from the Finder or Dock do not inherit the terminal PATH, so
-/// ask the login shell for it. The shell command is a fixed string.
+/// Variables an app started from the Finder or Dock does not inherit from the
+/// user's shell profile, read from the login shell instead: PATH to find
+/// `ticketd`, and the harness config folders that decide where skills go.
+#[cfg(any(unix, test))]
+const LOGIN_SHELL_VARIABLES: [&str; 3] = ["PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
+
+/// The fixed script that prints each variable between markers naming it.
+/// `printenv` keeps the shell from expanding an unset variable, which fails
+/// under `set -u` in the user's rc files, and `|| true` keeps `set -e` going.
+/// Unlike `${NAME-}`, both work in fish too.
+#[cfg(any(unix, test))]
+fn login_shell_script() -> String {
+    LOGIN_SHELL_VARIABLES
+        .iter()
+        .map(|name| {
+            let mark = format!("__ticketd_{name}__");
+            format!("printf '{mark}'; printenv {name} || true; printf '{mark}'")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Reads the variables the script printed; rc-file noise around the markers
+/// is ignored, and a variable that is unset or empty is left out.
+#[cfg(any(unix, test))]
+fn parse_login_shell_output(output: &str) -> Vec<(&'static str, String)> {
+    LOGIN_SHELL_VARIABLES
+        .iter()
+        .filter_map(|&name| {
+            let mark = format!("__ticketd_{name}__");
+            let start = output.find(&mark)? + mark.len();
+            let length = output[start..].find(&mark)?;
+            let value = &output[start..start + length];
+            // printenv ends the value with a newline.
+            let value = value.strip_suffix('\n').unwrap_or(value);
+            (!value.is_empty()).then(|| (name, value.to_string()))
+        })
+        .collect()
+}
+
+/// The shell command is a fixed string; no path or user input is part of it.
 #[cfg(unix)]
-fn ask_login_shell_for_path() -> Option<String> {
-    const MARK: &str = "__ticketd_path__";
+fn ask_login_shell() -> Vec<(&'static str, String)> {
     let shell = std::env::var_os("SHELL")
         .filter(|shell| is_executable(Path::new(shell)))
         .unwrap_or_else(|| "/bin/sh".into());
     let mut command = Command::new(shell);
-    command.args([
-        "-l",
-        "-i",
-        "-c",
-        "printf '__ticketd_path__%s__ticketd_path__' \"$PATH\"",
-    ]);
-    let output = run_with_timeout(command, Duration::from_secs(3))?;
-    let start = output.find(MARK)? + MARK.len();
-    let length = output[start..].find(MARK)?;
-    Some(output[start..start + length].to_string())
+    command.args(["-l", "-i", "-c", &login_shell_script()]);
+    run_with_timeout(command, Duration::from_secs(3))
+        .map(|output| parse_login_shell_output(&output))
+        .unwrap_or_default()
 }
 
 #[cfg(not(unix))]
-fn ask_login_shell_for_path() -> Option<String> {
-    None
+fn ask_login_shell() -> Vec<(&'static str, String)> {
+    Vec::new()
 }
 
-/// The login shell's PATH. Starting a login shell runs the user's rc files,
-/// so it is asked once per run of the app, not on every check.
-fn login_shell_path() -> Option<&'static str> {
-    static PATH: OnceLock<Option<String>> = OnceLock::new();
-    PATH.get_or_init(ask_login_shell_for_path).as_deref()
+/// One of `LOGIN_SHELL_VARIABLES` as the user's login shell exports it. Starting a
+/// login shell runs the user's rc files, so it is asked once per run of the
+/// app, not on every check. Blocking the first time on Unix.
+pub fn login_shell_variable(name: &str) -> Option<&'static str> {
+    static VARIABLES: OnceLock<Vec<(&'static str, String)>> = OnceLock::new();
+    VARIABLES
+        .get_or_init(ask_login_shell)
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, value)| value.as_str())
 }
 
 fn common_install_directories() -> Vec<PathBuf> {
@@ -275,7 +312,7 @@ fn path_directories() -> Vec<PathBuf> {
     if let Some(path) = std::env::var_os("PATH") {
         add(&path);
     }
-    if let Some(path) = login_shell_path() {
+    if let Some(path) = login_shell_variable("PATH") {
         add(OsStr::new(path));
     }
     directories
@@ -350,6 +387,36 @@ mod tests {
         assert!(!status.on_path);
         assert_eq!(status.path, None);
         assert_eq!(status.version_matches, None);
+    }
+
+    #[test]
+    fn login_shell_variables_are_read_between_their_markers() {
+        let output = "rc noise __ticketd_PATH__/bin:/usr/bin\n__ticketd_PATH__\
+                      __ticketd_CLAUDE_CONFIG_DIR__/profile dir\n__ticketd_CLAUDE_CONFIG_DIR__\
+                      __ticketd_CODEX_HOME____ticketd_CODEX_HOME__ more noise";
+        assert_eq!(
+            parse_login_shell_output(output),
+            [
+                ("PATH", "/bin:/usr/bin".to_string()),
+                ("CLAUDE_CONFIG_DIR", "/profile dir".to_string()),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_login_shell_script_reads_every_variable_even_when_rc_files_set_eu() {
+        // The rc files run first in the same shell; `set -eu` stands in for them.
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", &format!("set -eu; {}", login_shell_script())])
+            .env("CLAUDE_CONFIG_DIR", "/profile")
+            .env_remove("CODEX_HOME");
+        let output = run_with_timeout(command, Duration::from_secs(5)).unwrap();
+        let variables = parse_login_shell_output(&output);
+        assert!(variables.contains(&("CLAUDE_CONFIG_DIR", "/profile".to_string())));
+        assert!(variables.iter().any(|(name, _)| *name == "PATH"));
+        assert!(!variables.iter().any(|(name, _)| *name == "CODEX_HOME"));
     }
 
     #[cfg(unix)]

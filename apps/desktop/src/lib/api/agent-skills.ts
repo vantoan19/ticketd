@@ -13,6 +13,8 @@ const agentSkillSchema = lazySchema(() =>
       .enum([
         "installed",
         "update_available",
+        /** A newer ticketd wrote this copy; this build leaves it alone. */
+        "newer",
         "not_installed",
         "edited",
         "other",
