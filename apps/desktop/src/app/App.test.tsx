@@ -81,9 +81,16 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "find_tickets_with_updates") {
       const tickets: unknown[] = await bridge.invoke("find_tickets", args);
       if (args && typeof args === "object" && "projection" in args) {
-        const projection = args as { projection: string; ids?: string[] };
+        const projection = args as {
+          projection: string;
+          ids?: string[];
+          references?: string[];
+        };
         const metadata = (tickets as Ticket[]).filter(
-          (ticket) => !projection.ids || projection.ids.includes(ticket.id),
+          (ticket) =>
+            (!projection.ids || projection.ids.includes(ticket.id)) &&
+            (!projection.references ||
+              projection.references.includes(ticket.reference)),
         );
         return {
           items: metadata.map((ticket) => ({
@@ -1551,8 +1558,9 @@ test("moves selected tickets to a project from the direct Project control", asyn
 test("a bulk change reloads the list once: its write report already moves the shared version", async () => {
   let lists = 0;
   await renderBulk({
-    find_tickets: () => {
-      lists += 1;
+    // The selection's own read names its tickets; only list reads count here.
+    find_tickets: (args?: { references?: string[] }) => {
+      if (!args?.references) lists += 1;
       return [bulkTicket(1)];
     },
     list_projects: () => [
@@ -2559,16 +2567,32 @@ test("Show more adds the next page under the rows and keeps the selection", asyn
   expect(screen.getByText("1 selected")).toBeTruthy();
 });
 
-test("Select all reaches every matching ticket, beyond the listed page (list B-02)", async () => {
-  const all = Array.from({ length: 51 }, (_, index) => ({
-    ...bulkTicket(1),
+/** T-KQ1 to T-KQ51, all Todo unless `overrides` says otherwise for an index. */
+const matchingTickets = (overrides: (index: number) => object = () => ({})) =>
+  Array.from({ length: 51 }, (_, index) => ({
+    ...bulkTicket(1, overrides(index)),
     id: String(index + 1),
     reference: `T-KQ${index + 1}`,
   }));
+
+/**
+ * Lists the first 50 of `all` (51 tickets) and selects every one through
+ * "Select all 51 matching". A read by reference answers from `all` as it is.
+ */
+async function selectAllMatching(
+  all: ReturnType<typeof matchingTickets>,
+  handlers: Record<string, unknown> = {},
+) {
   await renderBulk({
-    find_tickets: (args: { filter: { offset: number } }) =>
-      all.slice(args.filter.offset, args.filter.offset + 50),
+    find_tickets: (args: {
+      filter: { offset: number };
+      references?: string[];
+    }) =>
+      args.references
+        ? all
+        : all.slice(args.filter.offset, args.filter.offset + 50),
     count_tickets: () => counted({ todo: 51 }),
+    ...handlers,
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   openMenu("More selected ticket actions");
@@ -2577,8 +2601,68 @@ test("Select all reaches every matching ticket, beyond the listed page (list B-0
   fireEvent.click(
     screen.getByRole("menuitem", { name: "Select all 51 matching" }),
   );
-  await act(async () => {});
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+test("Select all reaches every matching ticket, beyond the listed page (list B-02)", async () => {
+  await selectAllMatching(matchingTickets());
   expect(screen.getByText("51 selected")).toBeTruthy();
+});
+
+test("after Select all matching, the Status and Plan menus count every selected ticket, listed or not", async () => {
+  // T-KQ51, beyond the listed page, is the one Done ticket; it and T-KQ1 are in Launch.
+  const all = matchingTickets((index) => ({
+    ...(index === 50 && { status: "Done" }),
+    ...((index === 0 || index === 50) && { plan_id: "e1" }),
+  }));
+  await selectAllMatching(all, {
+    list_plans: () => [{ id: "e1", name: "Launch", archived: false }],
+  });
+  openMenu("Status of selected tickets");
+  expect(
+    screen.getByRole("menuitem", { name: /^Todo\s*50 of 51$/ }),
+  ).toBeTruthy();
+  const done = screen.getByRole("menuitem", { name: /^Done\s*1 of 51$/ });
+  fireEvent.keyDown(done, { key: "Escape" });
+  openMenu("Plan of selected tickets");
+  expect(screen.getByRole("menuitem", { name: "Launch 2 of 51" })).toBeTruthy();
+});
+
+test("the bulk counts follow a change made elsewhere and outlast a visit to the Inbox", async () => {
+  const all = matchingTickets();
+  await selectAllMatching(all);
+  openMenu("Status of selected tickets");
+  // Every selected ticket is Todo: a check, and no count.
+  const todo = screen.getByRole("menuitem", { name: "Todo" });
+  expect(todo.querySelector(".bulk-status-check")).toBeTruthy();
+  fireEvent.keyDown(todo, { key: "Escape" });
+  // An agent finishes T-KQ51, beyond the listed page; the next poll sees it.
+  all[50] = { ...all[50]!, status: "Done" };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  const expectCounts = () => {
+    openMenu("Status of selected tickets");
+    expect(
+      screen.getByRole("menuitem", { name: /^Todo\s*50 of 51$/ }),
+    ).toBeTruthy();
+    const done = screen.getByRole("menuitem", { name: /^Done\s*1 of 51$/ });
+    fireEvent.keyDown(done, { key: "Escape" });
+  };
+  expectCounts();
+  // The Inbox takes the list's place; the selection and its counts outlast it.
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText("51 selected")).toBeTruthy();
+  expectCounts();
 });
 
 test("Shift-click selects the range from the last ticket toggled", async () => {

@@ -33,7 +33,10 @@ import {
 import { BulkTagDialog } from "@/features/tickets/BulkTagDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { directStatuses } from "@/lib/statuses";
-import type { BulkEdit } from "@/features/tickets/useBulkEdit";
+import {
+  useSelectedTickets,
+  type BulkEdit,
+} from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -82,7 +85,10 @@ export function BulkControls({
   plans,
 }: {
   bulk: BulkEdit;
-  /** Tickets currently listed, for Select all and Plan membership counts. */
+  /**
+   * Tickets currently listed, for Select all. They stand in for the Status and
+   * Plan counts until the selection's own read answers.
+   */
   visible: Ticket[];
   /** Every ticket the search and filters match, listed or not. */
   total: number;
@@ -139,9 +145,14 @@ export function BulkControls({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [count, pending, bulk]);
-  const selectedTickets = visible.filter((ticket) =>
-    selection.includes(ticket.reference),
-  );
+  // Every selected ticket as last read, listed or not; a listed one stands in
+  // until the read of this selection answers.
+  const asRead = useSelectedTickets(selection);
+  const listed = new Map(visible.map((ticket) => [ticket.reference, ticket]));
+  const selectedTickets = selection.flatMap((reference) => {
+    const ticket = asRead?.[reference] ?? listed.get(reference);
+    return ticket ? [ticket] : [];
+  });
   const inStatus = (status: string) =>
     selectedTickets.filter((ticket) => ticket.status === status).length;
   const activePlans = plans.filter((item) => !item.archived);

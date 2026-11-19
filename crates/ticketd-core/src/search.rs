@@ -207,6 +207,14 @@ pub struct TicketMetadataPage {
     pub omitted: bool,
 }
 
+/// The tickets a metadata read is limited to, among those its filter matches: at most
+/// 250, by id as graphs name them, or by reference as a bulk selection does.
+#[derive(Debug, Clone, Copy)]
+pub enum MetadataSelection<'a> {
+    Ids(&'a [String]),
+    References(&'a [String]),
+}
+
 /// Format version 84: trigram indexes over what ticket search matches, a ticket's title,
 /// reference and body and its Activity briefs, kept in step by triggers. A trigram index
 /// finds every row holding a substring of three or more characters, folding case more
@@ -469,13 +477,14 @@ impl Workspace {
         })
     }
 
-    /// Metadata projection of the existing filtered page. Body, activity, parent,
-    /// child and unrelated source payloads are never selected or hydrated. Flow may request
-    /// at most 50 prerequisite values per Ticket; omissions are explicit.
+    /// Metadata projection of the existing filtered page, limited to `selection` when
+    /// given. Body, activity, parent, child and unrelated source payloads are never
+    /// selected or hydrated. Flow may request at most 50 prerequisite values per Ticket;
+    /// omissions are explicit.
     pub fn find_ticket_metadata(
         &self,
         filter: &TicketFilter,
-        ids: Option<&[String]>,
+        selection: Option<MetadataSelection<'_>>,
         prerequisites: bool,
     ) -> Result<TicketMetadataPage, Error> {
         read_scope::run(&self.connection, |tx| {
@@ -485,17 +494,21 @@ impl Workspace {
                 "SELECT t.id, t.reference, t.title, t.status, t.trashed, t.project_id, t.plan_id, t.updated_at, {} FROM tickets t WHERE {trashed} = 0{conditions}",
                 crate::readiness::indicator_sql("t")
             );
-            if let Some(ids) = ids {
-                if ids.len() > 250 {
+            if let Some(selection) = selection {
+                let (column, named) = match selection {
+                    MetadataSelection::Ids(ids) => ("id", ids),
+                    MetadataSelection::References(references) => ("reference", references),
+                };
+                if named.len() > 250 {
                     return Err(Error::InvalidBatch(
                         "Metadata selection exceeds 250 identities".into(),
                     ));
                 }
                 sql.push_str(&format!(
-                    " AND t.id IN ({})",
-                    vec!["?"; ids.len()].join(",")
+                    " AND t.{column} IN ({})",
+                    vec!["?"; named.len()].join(",")
                 ));
-                values.extend(ids.iter().cloned().map(Value::from));
+                values.extend(named.iter().cloned().map(Value::from));
             }
             match filter.order {
                 TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),

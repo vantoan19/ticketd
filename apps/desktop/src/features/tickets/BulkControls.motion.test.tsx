@@ -2,6 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { frames } from "@/test/motion-clock";
 import {
   EXIT_MS,
@@ -31,16 +32,18 @@ function Bar({ selection }: { selection: string[] }) {
     applyOrganization: vi.fn(),
   } as unknown as BulkEdit;
   return (
-    <MotionProvider>
-      <BulkControls
-        bulk={bulk}
-        visible={[]}
-        total={0}
-        matchingReferences={() => Promise.resolve([])}
-        projects={[]}
-        plans={[]}
-      />
-    </MotionProvider>
+    <TestReads>
+      <MotionProvider>
+        <BulkControls
+          bulk={bulk}
+          visible={[]}
+          total={0}
+          matchingReferences={() => Promise.resolve([])}
+          projects={[]}
+          plans={[]}
+        />
+      </MotionProvider>
+    </TestReads>
   );
 }
 

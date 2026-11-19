@@ -24,10 +24,10 @@ mod workspace_session;
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
     ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
-    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, Plan,
-    PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange,
-    TicketFilter, TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo,
-    WriteRequest, WriteResult,
+    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
+    MetadataSelection, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts,
+    Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
+    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -578,6 +578,7 @@ fn find_tickets_with_updates(
     filter: TicketFilter,
     projection: Option<String>,
     ids: Option<Vec<String>>,
+    references: Option<Vec<String>>,
 ) -> Result<TicketPage, BridgeFailure> {
     if projection
         .as_deref()
@@ -585,10 +586,16 @@ fn find_tickets_with_updates(
     {
         return Err("Unknown Ticket projection".into());
     }
+    let selection = match (ids.as_deref(), references.as_deref()) {
+        (Some(_), Some(_)) => return Err("Name tickets by id or by reference, not both".into()),
+        (Some(ids), None) => Some(MetadataSelection::Ids(ids)),
+        (None, Some(references)) => Some(MetadataSelection::References(references)),
+        (None, None) => None,
+    };
     open_workspace()
         .and_then(|w| match projection.as_deref() {
             Some(value) => w
-                .find_ticket_metadata(&filter, ids.as_deref(), value == "flow")
+                .find_ticket_metadata(&filter, selection, value == "flow")
                 .map(TicketPage::Metadata),
             None => w.find_tickets_with_updates(&filter).map(TicketPage::Full),
         })

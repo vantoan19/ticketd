@@ -1,12 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { client, type BulkChange } from "@/lib/api/client";
+import { client, type BulkChange, type TicketMetadata } from "@/lib/api/client";
 import { toFailure } from "@/lib/api/bridge-failure";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { read, skip, useRead } from "@/lib/workspace-reads";
 
 const NOTICE_MS = 4000;
+// How many tickets one metadata read names: the core's page limit.
+const PER_READ = 100;
+
+type SelectedTicket = Pick<TicketMetadata, "status" | "plan_id">;
+
+/**
+ * The Status and Plan of each selected ticket by reference, whether it is listed
+ * or not and wherever the filters put it now. Like every read it is read again
+ * after each change and own write, so the bulk menus count the whole selection
+ * (list B-04). A ticket gone to the Trash is left out.
+ */
+const selectionRead = read({
+  key: "bulk-selection",
+  call: async (references: string[]) => {
+    const found: Record<string, SelectedTicket> = {};
+    for (let start = 0; start < references.length; start += PER_READ) {
+      const page = await client.findTicketMetadataByReference(
+        references.slice(start, start + PER_READ),
+      );
+      for (const { reference, status, plan_id } of page)
+        found[reference] = { status, plan_id };
+    }
+    return found;
+  },
+  failure: "count the selected tickets",
+});
+
+/** The selected tickets as last read, by reference; undefined until read. */
+export function useSelectedTickets(selection: string[]) {
+  return useRead(selectionRead, selection.length > 0 ? selection : skip).value;
+}
 
 type Change =
   | { kind: "status"; status: string; summary: string }
