@@ -49,7 +49,8 @@ test("describes recorded changes as sentences without event keys", () => {
     "Marked as duplicate of T-KQ2",
   );
   expect(sentence("evidence", "", "Review")).toBe("Added evidence “Review”");
-  expect(sentence("trash", "active", "trashed")).toBe("Moved to trash");
+  expect(sentence("trash", "active", "trashed")).toBe("Moved to Trash");
+  expect(sentence("trash", "trashed", "active")).toBe("Restored from Trash");
 });
 
 test("words subticket changes, and the Inbox shares the same sentences", () => {
