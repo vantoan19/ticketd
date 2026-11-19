@@ -135,11 +135,13 @@ fn a_run_without_a_ticket_tells_its_agent_what_started_it_instead() {
 
 #[test]
 fn a_folder_that_is_gone_fails_the_step_before_any_chat_is_made() {
-    let (_dir, mut workspace) = workspace();
+    let (dir, mut workspace) = workspace();
+    // A full path on every platform, to a folder that does not exist.
+    let gone = dir.path().join("gone").to_string_lossy().into_owned();
     let run = started(&mut workspace, "Fix login", |agent| {
         vec![agent_step(
             agent,
-            "/no/such/folder/for/ticketd".into(),
+            gone.clone(),
             Some(vec![notify("tell-me-it-failed")]),
         )]
     });
@@ -152,13 +154,13 @@ fn a_folder_that_is_gone_fails_the_step_before_any_chat_is_made() {
     assert_eq!(
         run.steps
             .iter()
-            .map(|step| (step.step_id.as_str(), step.status, step.reason.as_deref()))
+            .map(|step| (step.step_id.as_str(), step.status, step.reason.clone()))
             .collect::<Vec<_>>(),
         [
             (
                 "triage",
                 AutomationStepStatus::Failed,
-                Some("The step's folder doesn't exist: /no/such/folder/for/ticketd.")
+                Some(format!("The step's folder doesn't exist: {gone}."))
             ),
             ("tell-me-it-failed", AutomationStepStatus::Running, None)
         ]
