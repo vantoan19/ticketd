@@ -1103,10 +1103,7 @@ fn an_uploaded_file_is_readable_in_the_storage() {
         text.replace("# synced from: Desk A\n", "")
     );
     let (name, _) = devices.remote_text(RemoteKind::Ticket, &blocker.id);
-    assert_eq!(
-        name,
-        format!("{} Set up  the  server.md", blocker.reference)
-    );
+    assert_eq!(name, format!("{} Set up the server.md", blocker.reference));
 }
 
 #[test]
