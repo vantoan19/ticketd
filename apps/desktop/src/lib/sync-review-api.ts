@@ -85,6 +85,8 @@ const fileNotice = {
   path: z.string(),
   /** Why, in words for the person: "unknown field 'priority' in a ticket". */
   reason: z.string(),
+  /** The Ticket the file belongs to, while it is in this Workspace. */
+  ticket_reference: z.string().optional(),
 };
 const noticeSchema = z.discriminatedUnion("kind", [
   /** Sync dropped a dependency edge that would have made a loop. */

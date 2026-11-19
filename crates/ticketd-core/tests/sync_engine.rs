@@ -720,6 +720,13 @@ fn an_unreadable_file_is_skipped_with_one_notice_and_changes_nothing() {
         assert_eq!(notices.len(), 2);
         assert!(notices.iter().all(|notice| !notice.read
             && matches!(&notice.notice, SyncNoticeKind::UnreadableFile { path, reason } if path.ends_with("edited by hand.md") && !reason.is_empty())));
+        // The Ticket's notice names the Ticket it belongs to; the stray file has none.
+        let mut named: Vec<_> = notices
+            .iter()
+            .map(|notice| notice.ticket_reference.as_deref())
+            .collect();
+        named.sort();
+        assert_eq!(named, [None, Some(reference.as_str())]);
     }
 
     // The next change made in ticketd replaces the broken file for everyone.

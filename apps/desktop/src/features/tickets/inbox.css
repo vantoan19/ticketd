@@ -97,6 +97,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A Drive file notice names a path: it wraps rather than being cut. */
+.inbox-entry[data-wrap] .inbox-summary {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* An entry with nothing to open does not look clickable. */
+.inbox-entry[data-static] .inbox-ticket {
+  cursor: default;
+}
 /* The time sits on the trailing edge; actions overlay it (list I-06). */
 .inbox-trailing {
   position: relative;
