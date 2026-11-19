@@ -1,7 +1,9 @@
 @import "../../components/ui/surface-roles/tickets-ticket-list.css";
 
 .ticket-list {
-  container-type: inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
   position: relative;
 }
 .ticket-rows {
@@ -187,36 +189,31 @@
     right: 8px;
   }
 }
-@container (max-width: 999px) {
-  .ticket-list .ticket-row {
-    grid-template-columns: 26px 62px minmax(0, 1fr) 168px 152px 44px;
-  }
-  .ticket-row-tags-lane {
-    display: none;
-  }
+/* The list's width (lib/width-queries) drops lanes as it narrows. */
+.ticket-list:where([data-width~="max-999"]) .ticket-row {
+  grid-template-columns: 26px 62px minmax(0, 1fr) 168px 152px 44px;
 }
-@container (max-width: 799px) {
-  .ticket-list .ticket-row {
-    grid-template-columns: 26px 62px minmax(0, 1fr) 168px 44px;
-  }
-  .ticket-row-context {
-    display: none;
-  }
+:where([data-width~="max-999"]) .ticket-row-tags-lane {
+  display: none;
 }
-@container (max-width: 619px) {
-  .ticket-list .ticket-row {
-    grid-template-columns: 26px 62px minmax(0, 1fr) 32px 44px;
-  }
-  .ticket-row-state {
-    margin-left: 16px;
-  }
-  .ticket-row-state-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    clip-path: inset(50%);
-    overflow: hidden;
-  }
+.ticket-list:where([data-width~="max-799"]) .ticket-row {
+  grid-template-columns: 26px 62px minmax(0, 1fr) 168px 44px;
+}
+:where([data-width~="max-799"]) .ticket-row-context {
+  display: none;
+}
+.ticket-list:where([data-width~="max-619"]) .ticket-row {
+  grid-template-columns: 26px 62px minmax(0, 1fr) 32px 44px;
+}
+:where([data-width~="max-619"]) .ticket-row-state {
+  margin-left: 16px;
+}
+:where([data-width~="max-619"]) .ticket-row-state-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
 }
 
 /* The bulk bar floats 8px above the bottom of the list (S4): popover surface,
@@ -294,6 +291,7 @@
   padding: 24px 20px;
 }
 
+/* In a pane header (a query container) or a measured pane (data-width). */
 @container (max-width: 600px) {
   .bulk-bar .bulk-control-label,
   .bulk-bar .bulk-control-chevron {
@@ -302,6 +300,13 @@
   .bulk-bar > .bulk-count {
     padding-inline: 0 4px;
   }
+}
+:where([data-width~="max-600"]) .bulk-bar .bulk-control-label,
+:where([data-width~="max-600"]) .bulk-bar .bulk-control-chevron {
+  display: none;
+}
+:where([data-width~="max-600"]) .bulk-bar > .bulk-count {
+  padding-inline: 0 4px;
 }
 
 .ticket-list-overlays {

@@ -12,12 +12,11 @@
   min-width: 0;
   padding: 20px 20px 48px;
 }
-@container ticket-detail (min-width: 760px) {
-  /* A flat rail split from the document by a 1px rule; it scrolls on its own
-     within the pane (no viewport arithmetic). */
+/* A flat rail split from the document by a 1px rule; it scrolls on its own
+   within the pane (no viewport arithmetic). */
+:where(:is(.ticket-detail, .chat-pane)[data-width~="min-760"])
   .ticket-properties {
-    padding: 20px;
-  }
+  padding: 20px;
 }
 
 /* RailSection: a 12px label (with its icon actions at the end), 4px, then

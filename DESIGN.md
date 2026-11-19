@@ -351,6 +351,8 @@ Measure the available content panel width after navigation, not just the screen 
 | Window near 390px            | One content column, 16px gutters, wrapping property values, full-width action forms where needed                                                                                                                                                                             |
 | Ticket at every width        | The same wrapping property bar stays under the title at every width                                                                                                                                                                                                          |
 
+Pane breakpoints follow the pane's own width. The large panes (the ticket workspace, list, ticket and Chat documents, Documents, graphs and attachments) are not CSS query containers: WebKit restyles a container's whole subtree each time it resizes, which is every frame of the sidebar's fold or a split drag. `lib/width-queries` measures them instead and writes the breakpoints a pane is within to `data-width` (`[data-width~="max-799"]` where a query would say `max-width: 799px`). Only small containers, such as the sidebar, pane headers and the Chat tray, keep `@container`.
+
 A workspace navigation sheet closes when the window becomes wide and stays closed on returning to narrow; its desktop sidebar preference and the responsive focus handoff are preserved.
 
 A navigation sheet is at most 280px or viewport width minus 32px. Popovers retain 16px viewport clearance and collide away from edges. Forms that cannot fit a popover use a sheet/dialog with a scrollable body. At short heights, keep form actions reachable without clipping the body.

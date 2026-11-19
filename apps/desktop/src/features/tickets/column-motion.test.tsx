@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { arrival } from "@/components/ui/row-motion";
-import { applyTokens, rootTokens } from "@/test/motion-tokens";
+import { applyTokens, coldTokenCache, rootTokens } from "@/test/motion-tokens";
 import { columnArrivals } from "./column-motion";
 
 let restoreTokens: () => void;
@@ -14,7 +14,9 @@ afterEach(() => {
 });
 
 it("the columns' entrance reads the tokens once, however many columns", () => {
+  // Each count starts from a cold token cache.
   const reads = () => {
+    coldTokenCache();
     const spy = vi.spyOn(window, "getComputedStyle");
     return { spy, count: () => spy.mock.calls.length };
   };
