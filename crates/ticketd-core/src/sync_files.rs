@@ -929,29 +929,62 @@ const NAME_CHARS: usize = 80;
 
 /// A title as a file name a file system or storage listing shows as typed:
 /// characters they would not are dropped, each run of separators becomes one
-/// space, and a long title is cut at a word, marked with an ellipsis.
+/// space, and a long title is cut, marked with an ellipsis.
 fn readable_name(title: &str) -> String {
-    let words: Vec<String> = title
-        .split(|c: char| {
-            matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-                || c.is_control()
-                || c.is_whitespace()
-        })
-        .filter(|word| !word.is_empty())
-        .map(str::to_owned)
-        .collect();
-    let name = words.join(" ");
-    if name.chars().count() <= NAME_CHARS {
+    let separator = |c: char| {
+        matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            || c.is_control()
+            || c.is_whitespace()
+    };
+    // Bidirectional embeddings, overrides and isolates can show the rest of the
+    // name, the `.md` too, out of the order it was typed in.
+    let reorders = |c: char| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+    // No more of the title is read than can show, and a character more, which
+    // tells that it is cut.
+    let mut name = String::new();
+    let mut length = 0;
+    let mut gap = false;
+    for c in title.chars() {
+        if separator(c) {
+            gap = true;
+            continue;
+        }
+        if reorders(c) {
+            continue;
+        }
+        if length > NAME_CHARS {
+            break;
+        }
+        if gap && length > 0 {
+            name.push(' ');
+            length += 1;
+        }
+        gap = false;
+        name.push(c);
+        length += 1;
+    }
+    if length <= NAME_CHARS {
         return name;
     }
-    // Room for the ellipsis; a single long word is cut mid-word.
-    let cut: String = name.chars().take(NAME_CHARS - 1).collect();
-    let next_is_space = name.chars().nth(NAME_CHARS - 1) == Some(' ');
-    let kept = match cut.rfind(' ') {
-        Some(at) if !next_is_space => &cut[..at],
-        _ => cut.as_str(),
+    // Room for the ellipsis. The cut goes back to the end of the last word that
+    // fits, unless that loses more than a third of the room: a long word, or a
+    // title in a script written without spaces, is cut mid-word.
+    let room = NAME_CHARS - 1;
+    let end = name
+        .char_indices()
+        .nth(room)
+        .map_or(name.len(), |(at, _)| at);
+    let (fits, rest) = name.split_at(end);
+    let word_end = if rest.starts_with(' ') {
+        Some(fits.len())
+    } else {
+        fits.rfind(' ')
     };
-    format!("{}…", kept.trim_end())
+    let kept = match word_end {
+        Some(at) if fits[..at].chars().count() >= room - room / 3 => &fits[..at],
+        _ => fits,
+    };
+    format!("{kept}…")
 }
 
 impl SyncRecord {
@@ -1869,18 +1902,38 @@ mod tests {
         assert_eq!(readable_name("Keyboard audit: B"), "Keyboard audit B");
         assert_eq!(readable_name("  a/b\\c \t<d>  "), "a b c d");
         assert_eq!(readable_name("short title"), "short title");
+        // An override would show what follows it, the `.md` too, reversed.
+        assert_eq!(readable_name("T-1 abc\u{202E}def"), "T-1 abcdef");
         let exact = "x".repeat(NAME_CHARS);
         assert_eq!(readable_name(&exact), exact);
 
+        // The room ends inside the eighth "alphabet": the cut goes back to the seventh.
+        let words = format!("Keyboard audit {}", "alphabet ".repeat(12));
+        assert_eq!(
+            readable_name(&words),
+            format!("Keyboard audit {}…", ["alphabet"; 7].join(" "))
+        );
+        // The room ends just before a space: every word that fits stays.
         let long = "word ".repeat(30);
-        let name = readable_name(&long);
-        assert!(name.chars().count() <= NAME_CHARS, "{name}");
-        assert!(name.ends_with("word…"), "{name}");
+        assert_eq!(readable_name(&long), format!("{}…", ["word"; 16].join(" ")));
 
+        // Going back to a word would leave only the reference or the first word:
+        // a long word, or a title in a script written without spaces, is cut mid-word.
+        let ticket = format!("T-KQ43 {}", "日本語".repeat(30));
+        assert_eq!(
+            readable_name(&ticket),
+            format!("T-KQ43 {}…", "日本語".repeat(24))
+        );
+        let token = format!("Crash {}", "com.example.".repeat(10));
+        assert_eq!(
+            readable_name(&token),
+            format!("Crash {}c…", "com.example.".repeat(6))
+        );
         let one_word = "é".repeat(100);
-        let name = readable_name(&one_word);
-        assert_eq!(name.chars().count(), NAME_CHARS);
-        assert!(name.ends_with("é…"));
+        assert_eq!(
+            readable_name(&one_word),
+            format!("{}…", "é".repeat(NAME_CHARS - 1))
+        );
     }
 
     /// What a file of format 1 holds after `kind`, `format` and `id`. Automations
