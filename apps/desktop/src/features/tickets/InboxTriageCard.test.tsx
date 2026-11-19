@@ -96,6 +96,10 @@ test("a due reminder on a Ticket in Trash can be cleared, but not replied to", a
     (screen.getByRole("button", { name: /Reply/ }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
+  // The copy names what is blocked; Clear and Snooze still work.
+  expect(
+    screen.getByText("Restore the Ticket to reply or change it."),
+  ).toBeTruthy();
   fireEvent.click(clear);
   await vi.waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
