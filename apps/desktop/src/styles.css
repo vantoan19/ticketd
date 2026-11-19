@@ -3798,10 +3798,9 @@ kbd,
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-@container ticket-detail (max-width: 599px) {
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-599"])
   .ticket-header-updated {
-    display: none;
-  }
+  display: none;
 }
 .ticket-detail[data-expanded] .editor-title textarea,
 .ticket-detail[data-expanded] .detail-title {
@@ -4698,6 +4697,7 @@ kbd,
 }
 
 /* Compact controls preserve their header/list lane when labels collapse. */
+/* In a pane header (a query container) or a measured pane (data-width). */
 @container (max-width: 600px) {
   .ui-button-compact-responsive,
   .ui-badge-compact-responsive {
@@ -4706,6 +4706,13 @@ kbd,
     padding-inline: 0;
     justify-content: center;
   }
+}
+:where([data-width~="max-600"])
+  :is(.ui-button-compact-responsive, .ui-badge-compact-responsive) {
+  width: var(--header-control-height);
+  min-width: var(--header-control-height);
+  padding-inline: 0;
+  justify-content: center;
 }
 
 /* A row action keeps its compact mouse geometry and a real touch target. */
