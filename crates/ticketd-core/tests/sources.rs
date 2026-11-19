@@ -145,6 +145,7 @@ fn issue(id: u64) -> ExternalIssue {
         labels: vec![],
         created_at: String::new(),
         updated_at: String::new(),
+        author: None,
         duplicate_of: None,
         duplicate_of_url: None,
         duplicate_withdrawn: false,

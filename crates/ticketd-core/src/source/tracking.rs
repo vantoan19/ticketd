@@ -127,6 +127,12 @@ pub struct TicketSource {
     pub ownership: Ownership,
     /// The external state last observed.
     pub state: ExternalState,
+    /// The source identity that opened the issue. `None` until a refresh reads it.
+    #[serde(default)]
+    pub author: Option<String>,
+    /// When the issue was opened at the source. `None` until a refresh reads it.
+    #[serde(default)]
+    pub created_at: Option<String>,
     /// The latest source closure time, only when the matching conversation is fresh.
     #[serde(default)]
     pub closed_at: Option<String>,
@@ -302,6 +308,36 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format version 85: who opened the issue and when, as the source last said. Tickets
+/// tracked before this version have neither until their next refresh. Each column is
+/// added only when missing, so a workspace reopened after its tables were rebuilt
+/// still migrates.
+pub(crate) fn migrate_issue_opening(connection: &Connection) -> Result<(), Error> {
+    for column in ["external_author", "external_created_at"] {
+        let present: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_sync') WHERE name = ?1)",
+            [column],
+            |row| row.get(0),
+        )?;
+        if !present {
+            connection
+                .execute_batch(&format!("ALTER TABLE source_sync ADD COLUMN {column} TEXT"))?;
+        }
+    }
+    Ok(())
+}
+
+/// The issue's author and opening time as stored: an empty value is unknown.
+fn opening(issue: &ExternalIssue) -> (Option<&str>, Option<&str>) {
+    fn known(value: &str) -> Option<&str> {
+        (!value.trim().is_empty()).then_some(value)
+    }
+    (
+        issue.author.as_deref().and_then(known),
+        known(&issue.created_at),
+    )
+}
+
 fn state_parts(state: ExternalState) -> (&'static str, Option<&'static str>) {
     match state {
         ExternalState::Open => ("open", None),
@@ -446,6 +482,8 @@ struct SourceRow {
     failing_since: Option<String>,
     conversation_error_code: Option<String>,
     conversation_error_message: Option<String>,
+    author: Option<String>,
+    created_at: Option<String>,
 }
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
@@ -454,7 +492,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
                     s.external_state, s.closure_reason, s.last_refreshed_at, \
                     s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
-                    s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at \
+                    s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at, \
+                    s.external_author, s.external_created_at \
              FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
@@ -482,6 +521,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     conversation_error_message: row.get(15)?,
                     discovery_matches: row.get(16)?,
                     ownership_changed_at: row.get(17)?,
+                    author: row.get(18)?,
+                    created_at: row.get(19)?,
                 })
             },
         )
@@ -551,6 +592,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         status_locked: external && status_choices.is_empty(),
         status_choices,
         state,
+        author: row.author,
+        created_at: row.created_at,
         closed_at,
         last_refreshed_at: row.refreshed,
         last_attempt_at: row.attempted,
@@ -1487,11 +1530,15 @@ fn apply_issue(
                 )?;
                 changed = true;
             }
+            // Who opened the issue and when is provenance, not a change to the
+            // ticket; it also fills tickets tracked before it was stored.
+            let (author, created_at) = opening(issue);
             connection.execute(
                 "UPDATE source_sync SET external_state = ?2, closure_reason = ?3, external_updated_at = ?4, \
-                 last_refreshed_at = ?5, last_attempt_at = ?5, last_error_code = NULL, last_error_message = NULL, failing_since = NULL \
+                 last_refreshed_at = ?5, last_attempt_at = ?5, last_error_code = NULL, last_error_message = NULL, failing_since = NULL, \
+                 external_author = COALESCE(?6, external_author), external_created_at = COALESCE(?7, external_created_at) \
                  WHERE ticket_id = ?1",
-                params![id, state, reason, issue.updated_at, now],
+                params![id, state, reason, issue.updated_at, now, author, created_at],
             )?;
             if let Some(read) = read {
                 changed |= conversation::store(connection, &id, read, &issue.updated_at)?;
@@ -1698,10 +1745,11 @@ pub(crate) fn link(
         "INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, 'external', ?2)",
         params![ticket_id, now],
     )?;
+    let (author, created_at) = opening(issue);
     connection.execute(
-        "INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        params![ticket_id, state, reason, issue.updated_at, now],
+        "INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, external_author, external_created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7)",
+        params![ticket_id, state, reason, issue.updated_at, now, author, created_at],
     )?;
     Ok(())
 }

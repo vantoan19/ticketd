@@ -806,7 +806,7 @@ An imported ticket stores three things apart, each keyed by the ticket:
 `external_identities` (provenance: which external issue it is or was, never
 deleted), `external_ownership` (authority: `external` means synchronized and
 read-only, `local` means ticketd owns it), and `source_sync` (the last observed
-external state and freshness). Imported title and description live in the
+external state, who opened the issue and when, and freshness). Imported title and description live in the
 ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
 with no transaction open and then applies the result in one short write that
 re-reads each ticket's ownership; the core rejects title, description and

@@ -1026,3 +1026,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + trigger ticket_search_fts_delete
 + trigger ticket_search_fts_insert
 + trigger ticket_search_fts_update
+
+## 85
++ column source_sync.external_author
++ column source_sync.external_created_at

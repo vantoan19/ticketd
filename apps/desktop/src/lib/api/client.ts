@@ -60,6 +60,10 @@ const ticketSourceSchema = lazySchema(() =>
     state: externalStateSchema,
     /** The source's latest closure time, only when the core can confirm it. */
     closed_at: z.string().nullish(),
+    /** Who opened the issue at the source; unknown until a refresh reads it. */
+    author: z.string().nullish(),
+    /** When the issue was opened at the source; unknown until a refresh reads it. */
+    created_at: z.string().nullish(),
     /** The source closed the issue with a reason ticketd does not recognize. */
     closure_unrecognized: z.boolean(),
     last_refreshed_at: z.string().nullable(),

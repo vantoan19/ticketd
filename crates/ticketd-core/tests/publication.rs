@@ -282,6 +282,7 @@ impl Connector for Fake {
                 labels: vec![],
                 created_at: now_rfc3339(),
                 updated_at: now_rfc3339(),
+                author: None,
                 duplicate_of: None,
                 duplicate_of_url: None,
                 duplicate_withdrawn: false,

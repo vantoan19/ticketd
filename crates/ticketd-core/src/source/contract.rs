@@ -117,8 +117,13 @@ pub struct ExternalIssue {
     pub state: ExternalState,
     pub assignees: Vec<String>,
     pub labels: Vec<String>,
+    /// When the issue was opened at the source.
     pub created_at: String,
     pub updated_at: String,
+    /// The source identity that opened the issue. Additive to contract 1;
+    /// connectors that cannot tell leave it `None`.
+    #[serde(default)]
+    pub author: Option<String>,
     /// For an issue closed as a duplicate: the canonical issue, when the provider
     /// names an accessible one. Absent means the target is unknown. Additive to
     /// contract 1; connectors that cannot tell leave it `None`.

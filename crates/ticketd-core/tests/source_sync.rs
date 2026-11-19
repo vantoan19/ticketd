@@ -267,6 +267,7 @@ fn issue(id: u64, title: &str) -> ExternalIssue {
         labels: vec![],
         created_at: "2026-01-01T00:00:00Z".into(),
         updated_at: "2026-01-01T00:00:00Z".into(),
+        author: Some("alice".into()),
         duplicate_of: None,
         duplicate_of_url: None,
         duplicate_withdrawn: false,
@@ -385,6 +386,8 @@ fn matching_issues_import_as_todo_with_stable_identity_across_pages_and_repeats(
     assert_eq!(source.id, "1");
     assert_eq!(source.display, "o/r#1");
     assert_eq!(source.url, "https://example.test/o/r/issues/1");
+    assert_eq!(source.author.as_deref(), Some("alice"));
+    assert_eq!(source.created_at.as_deref(), Some("2026-01-01T00:00:00Z"));
     assert_eq!(source.ownership, Ownership::External);
     assert!(source.content_locked && !source.status_locked);
     assert_eq!(
@@ -397,6 +400,33 @@ fn matching_issues_import_as_todo_with_stable_identity_across_pages_and_repeats(
     assert_eq!(second.unchanged, 5);
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 5);
     assert_eq!(f.ticket(1).reference, ticket.reference);
+}
+
+#[test]
+fn the_issue_author_and_opening_fill_on_a_later_refresh_and_are_not_forgotten() {
+    let mut f = Fixture::new();
+    let mut unknown = issue(1, "Older connector");
+    unknown.author = None;
+    unknown.created_at = String::new();
+    f.publish(unknown.clone(), true);
+    f.refresh();
+    let source = f.ticket(1).source.unwrap();
+    assert_eq!((source.author, source.created_at), (None, None));
+
+    f.publish(issue(1, "Older connector"), true);
+    let report = f.refresh();
+    // Provenance, not an edit of the ticket.
+    assert_eq!(report.unchanged, 1);
+    let source = f.ticket(1).source.unwrap();
+    assert_eq!(source.author.as_deref(), Some("alice"));
+    assert_eq!(source.created_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+
+    // A read that cannot say keeps what an earlier one said.
+    f.publish(unknown, true);
+    f.refresh();
+    let source = f.ticket(1).source.unwrap();
+    assert_eq!(source.author.as_deref(), Some("alice"));
+    assert_eq!(source.created_at.as_deref(), Some("2026-01-01T00:00:00Z"));
 }
 
 #[test]
@@ -862,6 +892,11 @@ fn imported_tickets_survive_reopening_export_backup_and_restore() {
     assert_eq!(exported["external_identities"][0]["external_id"], "1");
     assert_eq!(exported["external_ownership"][0]["authority"], "external");
     assert_eq!(exported["source_sync"][0]["external_state"], "open");
+    assert_eq!(exported["source_sync"][0]["external_author"], "alice");
+    assert_eq!(
+        exported["source_sync"][0]["external_created_at"],
+        "2026-01-01T00:00:00Z"
+    );
     f.workspace.backup(&backup).unwrap();
     let Fixture {
         workspace,
