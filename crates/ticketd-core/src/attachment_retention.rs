@@ -112,120 +112,118 @@ impl Workspace {
                 "invalid recovery owner, kind or revision".into(),
             ));
         }
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let previous: Option<i64> = tx
-            .query_row(
-                "SELECT revision FROM attachment_drafts WHERE owner=?1",
-                [&draft.owner],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if previous == Some(draft.revision + 1) {
-            let (kind, payload, markdown): (String, Option<String>, String) = tx.query_row(
-                "SELECT kind,payload,markdown FROM attachment_drafts WHERE owner=?1",
-                [&draft.owner],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?;
-            if kind == draft.kind
-                && payload
-                    == draft
-                        .payload
-                        .as_ref()
-                        .map(serde_json::to_string)
-                        .transpose()?
-                && markdown == serde_json::to_string(&draft.markdown)?
-            {
-                return Ok(DraftRetention {
-                    revision: draft.revision + 1,
-                    ..draft.clone()
-                });
+        crate::write_scope::run(&self.connection, |tx| {
+            let previous: Option<i64> = tx
+                .query_row(
+                    "SELECT revision FROM attachment_drafts WHERE owner=?1",
+                    [&draft.owner],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if previous == Some(draft.revision + 1) {
+                let (kind, payload, markdown): (String, Option<String>, String) = tx.query_row(
+                    "SELECT kind,payload,markdown FROM attachment_drafts WHERE owner=?1",
+                    [&draft.owner],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?;
+                if kind == draft.kind
+                    && payload
+                        == draft
+                            .payload
+                            .as_ref()
+                            .map(serde_json::to_string)
+                            .transpose()?
+                    && markdown == serde_json::to_string(&draft.markdown)?
+                {
+                    return Ok(DraftRetention {
+                        revision: draft.revision + 1,
+                        ..draft.clone()
+                    });
+                }
             }
-        }
-        let release = draft.payload.is_none() && draft.markdown.is_empty();
-        // A replayed release of editor history that is already gone.
-        if previous.is_none() && release && draft.revision > 0 {
-            return Ok(DraftRetention {
-                revision: 0,
-                ..draft.clone()
-            });
-        }
-        if previous.unwrap_or(0) != draft.revision {
-            return Err(Error::Attachment("recovery draft changed in another window; copy this window's draft before reloading to review the stored recovery".into()));
-        }
-        // Releasing editor history removes it: its owner belongs to one editor
-        // mount, so no other window can resume or resurrect it, and a tombstone
-        // would only grow the startup read.
-        if release && previous.is_some() {
-            let history: bool = tx.query_row(
-                "SELECT kind='undo' FROM attachment_drafts WHERE owner=?1",
-                [&draft.owner],
-                |r| r.get(0),
-            )?;
-            if history {
-                tx.execute(
-                    "DELETE FROM attachment_draft_references WHERE owner=?1",
-                    [&draft.owner],
-                )?;
-                tx.execute(
-                    "DELETE FROM attachment_drafts WHERE owner=?1",
-                    [&draft.owner],
-                )?;
-                tx.commit()?;
+            let release = draft.payload.is_none() && draft.markdown.is_empty();
+            // A replayed release of editor history that is already gone.
+            if previous.is_none() && release && draft.revision > 0 {
                 return Ok(DraftRetention {
                     revision: 0,
                     ..draft.clone()
                 });
             }
-        }
-        let next = draft.revision + 1;
-        tx.execute("INSERT INTO attachment_drafts(owner,kind,revision,payload,markdown) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(owner) DO UPDATE SET kind=excluded.kind,revision=excluded.revision,payload=excluded.payload,markdown=excluded.markdown",
-            params![draft.owner,draft.kind,next,draft.payload.as_ref().map(serde_json::to_string).transpose()?,serde_json::to_string(&draft.markdown)?])?;
-        // Undo/Redo can still reach older values after autosave or controlled replacement.
-        // Its union is retired only by an explicit history release/reset.
-        if draft.kind != "undo" {
-            tx.execute(
-                "DELETE FROM attachment_draft_references WHERE owner=?1",
-                [&draft.owner],
-            )?;
-        }
-        let prefix = format!(
-            "ticketd://attachment/{}/",
-            embedded_attachments::workspace_id(&tx)?
-        );
-        for uri in draft
-            .markdown
-            .iter()
-            .flat_map(|body| embedded_attachments::destinations(body))
-            .collect::<std::collections::BTreeSet<_>>()
-        {
-            // Recovery must preserve broken links too. An unknown ID is unresolved, never a valid stored file.
-            let id = if let Some(id) = uri.strip_prefix(&prefix) {
-                let exists: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM attachments WHERE id=?1)",
-                    [id],
+            if previous.unwrap_or(0) != draft.revision {
+                return Err(Error::Attachment("recovery draft changed in another window; copy this window's draft before reloading to review the stored recovery".into()));
+            }
+            // Releasing editor history removes it: its owner belongs to one editor
+            // mount, so no other window can resume or resurrect it, and a tombstone
+            // would only grow the startup read.
+            if release && previous.is_some() {
+                let history: bool = tx.query_row(
+                    "SELECT kind='undo' FROM attachment_drafts WHERE owner=?1",
+                    [&draft.owner],
                     |r| r.get(0),
                 )?;
-                if exists {
-                    let file = crate::attachments::read_attachment(&tx, id)?;
-                    // Private recovery must still save prose containing missing bytes.
-                    // A canonical save performs strict restore/validation before committing.
-                    if file.quarantined
-                        && crate::attachments::validate_attachment_bytes(&tx, &file).is_ok()
-                    {
-                        crate::attachment_cleanup::restore_reference(&tx, id)?;
-                    }
+                if history {
+                    tx.execute(
+                        "DELETE FROM attachment_draft_references WHERE owner=?1",
+                        [&draft.owner],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM attachment_drafts WHERE owner=?1",
+                        [&draft.owner],
+                    )?;
+                    return Ok(DraftRetention {
+                        revision: 0,
+                        ..draft.clone()
+                    });
                 }
-                exists.then_some(id)
-            } else {
-                None
-            };
-            tx.execute("INSERT OR IGNORE INTO attachment_draft_references(owner,uri,attachment_id) VALUES (?1,?2,?3)", params![draft.owner,uri,id])?;
-        }
-        tx.commit()?;
-        Ok(DraftRetention {
-            revision: next,
-            ..draft.clone()
+            }
+            let next = draft.revision + 1;
+            tx.execute("INSERT INTO attachment_drafts(owner,kind,revision,payload,markdown) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(owner) DO UPDATE SET kind=excluded.kind,revision=excluded.revision,payload=excluded.payload,markdown=excluded.markdown",
+            params![draft.owner,draft.kind,next,draft.payload.as_ref().map(serde_json::to_string).transpose()?,serde_json::to_string(&draft.markdown)?])?;
+            // Undo/Redo can still reach older values after autosave or controlled replacement.
+            // Its union is retired only by an explicit history release/reset.
+            if draft.kind != "undo" {
+                tx.execute(
+                    "DELETE FROM attachment_draft_references WHERE owner=?1",
+                    [&draft.owner],
+                )?;
+            }
+            let prefix = format!(
+                "ticketd://attachment/{}/",
+                embedded_attachments::workspace_id(tx)?
+            );
+            for uri in draft
+                .markdown
+                .iter()
+                .flat_map(|body| embedded_attachments::destinations(body))
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                // Recovery must preserve broken links too. An unknown ID is unresolved, never a valid stored file.
+                let id = if let Some(id) = uri.strip_prefix(&prefix) {
+                    let exists: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM attachments WHERE id=?1)",
+                        [id],
+                        |r| r.get(0),
+                    )?;
+                    if exists {
+                        let file = crate::attachments::read_attachment(tx, id)?;
+                        // Private recovery must still save prose containing missing bytes.
+                        // A canonical save performs strict restore/validation before committing.
+                        if file.quarantined
+                            && crate::attachments::validate_attachment_bytes(tx, &file).is_ok()
+                        {
+                            crate::attachment_cleanup::restore_reference(tx, id)?;
+                        }
+                    }
+                    exists.then_some(id)
+                } else {
+                    None
+                };
+                tx.execute("INSERT OR IGNORE INTO attachment_draft_references(owner,uri,attachment_id) VALUES (?1,?2,?3)", params![draft.owner,uri,id])?;
+            }
+            Ok(DraftRetention {
+                revision: next,
+                ..draft.clone()
+            })
         })
     }
 

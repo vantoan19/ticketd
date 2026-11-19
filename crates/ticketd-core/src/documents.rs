@@ -488,22 +488,21 @@ impl Workspace {
             tag
         };
         self.show_document(id)?;
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        if present {
-            tx.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [&tag])?;
-            tx.execute(
-                "INSERT OR IGNORE INTO document_tags(document_id, tag_name) VALUES (?1, ?2)",
-                params![id, tag],
-            )?;
-        } else {
-            tx.execute(
-                "DELETE FROM document_tags WHERE document_id = ?1 AND tag_name = ?2",
-                params![id, tag],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        crate::write_scope::run(&self.connection, |tx| {
+            if present {
+                tx.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [&tag])?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO document_tags(document_id, tag_name) VALUES (?1, ?2)",
+                    params![id, tag],
+                )?;
+            } else {
+                tx.execute(
+                    "DELETE FROM document_tags WHERE document_id = ?1 AND tag_name = ?2",
+                    params![id, tag],
+                )?;
+            }
+            Ok(())
+        })
     }
 
     pub fn document_tags(&self, id: &str) -> Result<Vec<String>, Error> {
@@ -522,42 +521,28 @@ impl Workspace {
         if self.show_document(id)?.trashed {
             return Err(Error::DocumentTrashed(id.to_owned()));
         }
-        self.connection.execute_batch("SAVEPOINT change_document")?;
-        let result = (|| {
-            // Take the write lock first so a busy database waits instead of failing.
-            crate::write_scope::lock(&self.connection)?;
+        self.in_write_scope(|workspace| {
             if let Some(expected) = &patch.expected_updated_at
-                && *expected != self.show_document(id)?.updated_at
+                && *expected != workspace.show_document(id)?.updated_at
             {
                 return Err(Error::DocumentChanged(id.to_owned()));
             }
             let body_to_index = patch.body.clone();
             let changes = match (patch.title, patch.body) {
-            (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
-            (Some(title), None) => self.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title])?,
-            (None, Some(body)) => self.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, body])?,
+            (Some(title), Some(body)) => workspace.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
+            (Some(title), None) => workspace.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title])?,
+            (None, Some(body)) => workspace.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, body])?,
             (None, None) => 0,
         };
-            let document = self.show_document(id)?;
+            let document = workspace.show_document(id)?;
             if changes == 0 && document.trashed {
                 return Err(Error::DocumentTrashed(id.to_owned()));
             }
             if let Some(body) = body_to_index {
-                crate::document_links::index_body(&self.connection, id, &body)?;
+                crate::document_links::index_body(&workspace.connection, id, &body)?;
             }
-            self.show_document(id)
-        })();
-        match result.and_then(|document| {
-            self.connection.execute_batch("RELEASE change_document")?;
-            Ok(document)
-        }) {
-            Ok(document) => Ok(document),
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO change_document; RELEASE change_document")?;
-                Err(error)
-            }
-        }
+            workspace.show_document(id)
+        })
     }
     pub fn trashed_documents(&self) -> Result<Vec<DocumentSummary>, Error> {
         self.trashed_documents_page(50, 0)

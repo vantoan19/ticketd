@@ -539,37 +539,36 @@ impl Workspace {
         if !readable_waiting {
             return Ok(0);
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let cursors = {
-            let mut statement =
-                transaction.prepare("SELECT automation_id, cursor FROM automation_device_state")?;
-            statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let mut created = 0;
-        for (automation_id, mut cursor) in cursors {
-            let definition = match crate::automations::one(&transaction, &automation_id) {
-                Ok(automation) => automation.definition,
-                // A definition this build cannot read (made by a newer ticketd) is
-                // left where it is, cursor and all, and the others still run.
-                Err(Error::InvalidAutomation(_)) => continue,
-                Err(error) => return Err(error),
+        crate::write_scope::run(&self.connection, |transaction| {
+            let cursors = {
+                let mut statement = transaction
+                    .prepare("SELECT automation_id, cursor FROM automation_device_state")?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
             };
-            let snapshot = serde_json::to_string(&definition)?;
-            loop {
-                let events = crate::events::after(&transaction, cursor, EVENT_BATCH)?;
-                let Some(last) = events.last() else { break };
-                cursor = last.id;
-                for event in &events {
-                    if !matches(&definition, event, &facts(&transaction, &event.ticket_id)?) {
-                        continue;
-                    }
-                    // The active-run index refuses a second run for the ticket.
-                    created += transaction.execute(
+            let mut created = 0;
+            for (automation_id, mut cursor) in cursors {
+                let definition = match crate::automations::one(transaction, &automation_id) {
+                    Ok(automation) => automation.definition,
+                    // A definition this build cannot read (made by a newer ticketd) is
+                    // left where it is, cursor and all, and the others still run.
+                    Err(Error::InvalidAutomation(_)) => continue,
+                    Err(error) => return Err(error),
+                };
+                let snapshot = serde_json::to_string(&definition)?;
+                loop {
+                    let events = crate::events::after(transaction, cursor, EVENT_BATCH)?;
+                    let Some(last) = events.last() else { break };
+                    cursor = last.id;
+                    for event in &events {
+                        if !matches(&definition, event, &facts(transaction, &event.ticket_id)?) {
+                            continue;
+                        }
+                        // The active-run index refuses a second run for the ticket.
+                        created += transaction.execute(
                         "INSERT OR IGNORE INTO automation_runs (id, automation_id, event_id, event, ticket_id, definition, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued')",
                         params![
                             Uuid::new_v4().to_string(),
@@ -580,15 +579,15 @@ impl Workspace {
                             snapshot
                         ],
                     )?;
+                    }
                 }
-            }
-            transaction.execute(
+                transaction.execute(
                 "UPDATE automation_device_state SET cursor = ?2 WHERE automation_id = ?1 AND cursor <> ?2",
                 params![automation_id, cursor],
             )?;
-        }
-        transaction.commit()?;
-        Ok(created)
+            }
+            Ok(created)
+        })
     }
 
     /// Queues a run for each switched-on Automation whose schedule has come due at
@@ -608,73 +607,75 @@ impl Workspace {
         if !schedules_to_update(&self.connection, now)? {
             return Ok(0);
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let on = {
-            let mut statement = transaction
-                .prepare("SELECT automation_id, schedule_from FROM automation_device_state")?;
-            statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let mut created = 0;
-        for (automation_id, since) in on {
-            let definition = match crate::automations::one(&transaction, &automation_id) {
-                Ok(automation) => automation.definition,
-                // As in matching: one this build cannot read is left alone.
-                Err(Error::InvalidAutomation(_)) => continue,
-                Err(error) => return Err(error),
+        crate::write_scope::run(&self.connection, |transaction| {
+            let on = {
+                let mut statement = transaction
+                    .prepare("SELECT automation_id, schedule_from FROM automation_device_state")?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
             };
-            let Some(Trigger::Schedule { schedule }) = &definition.trigger else {
-                continue;
-            };
-            let since = since
-                .and_then(|since| chrono::NaiveDateTime::parse_from_str(&since, LOCAL_TIME).ok());
-            // Seen on for the first time: it counts from now.
-            let fires = since.is_some_and(|since| due(schedule, since, now));
-            if since.is_some() && !fires {
-                continue;
-            }
-            if fires && queue_without_ticket(&transaction, &automation_id, &definition)?.is_some() {
-                created += 1;
-            }
-            transaction.execute(
+            let mut created = 0;
+            for (automation_id, since) in on {
+                let definition = match crate::automations::one(transaction, &automation_id) {
+                    Ok(automation) => automation.definition,
+                    // As in matching: one this build cannot read is left alone.
+                    Err(Error::InvalidAutomation(_)) => continue,
+                    Err(error) => return Err(error),
+                };
+                let Some(Trigger::Schedule { schedule }) = &definition.trigger else {
+                    continue;
+                };
+                let since = since.and_then(|since| {
+                    chrono::NaiveDateTime::parse_from_str(&since, LOCAL_TIME).ok()
+                });
+                // Seen on for the first time: it counts from now.
+                let fires = since.is_some_and(|since| due(schedule, since, now));
+                if since.is_some() && !fires {
+                    continue;
+                }
+                if fires
+                    && queue_without_ticket(transaction, &automation_id, &definition)?.is_some()
+                {
+                    created += 1;
+                }
+                transaction.execute(
                 "UPDATE automation_device_state SET schedule_from = ?2 WHERE automation_id = ?1",
                 params![automation_id, now.format(LOCAL_TIME).to_string()],
             )?;
-        }
-        transaction.commit()?;
-        Ok(created)
+            }
+            Ok(created)
+        })
     }
 
     /// "Run now": queues a run of an Automation that is run by hand. Refused while
     /// anything in it is unfinished, and while a run of it is already going.
     pub fn run_automation_now(&mut self, automation_id: &str) -> Result<AutomationRun, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let automation = crate::automations::one(&transaction, automation_id)?;
-        if automation.definition.trigger != Some(Trigger::ByHand) {
-            return Err(Error::AutomationRun(
-                "only an Automation you run by hand has Run now".into(),
-            ));
-        }
-        if let Some(problem) = automation.problems.first() {
-            return Err(Error::AutomationUnfinished(crate::automations::reason(
-                &automation.definition,
-                problem,
-            )));
-        }
-        let Some(id) = queue_without_ticket(&transaction, automation_id, &automation.definition)?
-        else {
-            return Err(Error::AutomationRun(
-                "a run of this Automation is already going".into(),
-            ));
-        };
-        let run = one(&transaction, &id)?;
-        transaction.commit()?;
-        Ok(run)
+        crate::write_scope::run(&self.connection, |transaction| {
+            let automation = crate::automations::one(transaction, automation_id)?;
+            if automation.definition.trigger != Some(Trigger::ByHand) {
+                return Err(Error::AutomationRun(
+                    "only an Automation you run by hand has Run now".into(),
+                ));
+            }
+            if let Some(problem) = automation.problems.first() {
+                return Err(Error::AutomationUnfinished(crate::automations::reason(
+                    &automation.definition,
+                    problem,
+                )));
+            }
+            let Some(id) =
+                queue_without_ticket(transaction, automation_id, &automation.definition)?
+            else {
+                return Err(Error::AutomationRun(
+                    "a run of this Automation is already going".into(),
+                ));
+            };
+            let run = one(transaction, &id)?;
+            Ok(run)
+        })
     }
 
     /// Moves Queued runs to Running, oldest triggering event first, until `limit`
@@ -695,33 +696,32 @@ impl Workspace {
         if running >= limit || !queued {
             return Ok(Vec::new());
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let running: usize = transaction.query_row(
-            "SELECT COUNT(*) FROM automation_runs WHERE status = 'running'",
-            [],
-            |row| row.get(0),
-        )?;
-        let ids = {
-            let mut statement = transaction.prepare(
+        crate::write_scope::run(&self.connection, |transaction| {
+            let running: usize = transaction.query_row(
+                "SELECT COUNT(*) FROM automation_runs WHERE status = 'running'",
+                [],
+                |row| row.get(0),
+            )?;
+            let ids = {
+                let mut statement = transaction.prepare(
                 "SELECT r.id FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE r.status = 'queued' AND a.trashed = 0 ORDER BY r.event_id, r.rowid LIMIT ?1",
             )?;
-            statement
-                .query_map([limit.saturating_sub(running)], |row| {
-                    row.get::<_, String>(0)
-                })?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let mut started = Vec::new();
-        for id in ids {
-            transaction.execute(
+                statement
+                    .query_map([limit.saturating_sub(running)], |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            let mut started = Vec::new();
+            for id in ids {
+                transaction.execute(
                 &format!("UPDATE automation_runs SET status = 'running', started_at = {NOW} WHERE id = ?1"),
                 [&id],
             )?;
-            started.push(one(&transaction, &id)?);
-        }
-        transaction.commit()?;
-        Ok(started)
+                started.push(one(transaction, &id)?);
+            }
+            Ok(started)
+        })
     }
 
     /// Ends every Running run that is not one of `going` as Needs attention with
@@ -737,28 +737,26 @@ impl Workspace {
         if running_but_not(&self.connection, going)?.is_empty() {
             return Ok(0);
         }
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let ids = running_but_not(&transaction, going)?;
-        let (ended, _) = end_each(&transaction, &ids, Cause::Abandoned(reason))?;
-        transaction.commit()?;
-        Ok(ended)
+        crate::write_scope::run(&self.connection, |transaction| {
+            let ids = running_but_not(transaction, going)?;
+            let (ended, _) = end_each(transaction, &ids, Cause::Abandoned(reason))?;
+            Ok(ended)
+        })
     }
 
     /// Ends one Running run as Needs attention with `reason`, failing the step it
     /// was on, for an executor that cannot go on with it. Returns whether it did:
     /// a run that has already ended (stopped, taken over) stays as it ended.
     pub fn fail_automation_run(&mut self, run_id: &str, reason: &str) -> Result<bool, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let ended = match end(&transaction, run_id, Cause::Abandoned(reason)) {
-            Ok(ended) => ended.is_some(),
-            // Removed meanwhile: there is nothing to end.
-            Err(Error::AutomationRunNotFound(_)) => false,
-            Err(error) => return Err(error),
-        };
-        transaction.commit()?;
-        Ok(ended)
+        crate::write_scope::run(&self.connection, |transaction| {
+            let ended = match end(transaction, run_id, Cause::Abandoned(reason)) {
+                Ok(ended) => ended.is_some(),
+                // Removed meanwhile: there is nothing to end.
+                Err(Error::AutomationRunNotFound(_)) => false,
+                Err(error) => return Err(error),
+            };
+            Ok(ended)
+        })
     }
 
     /// Ends a Queued or Running run as Needs attention because the person stopped
@@ -772,14 +770,13 @@ impl Workspace {
         &mut self,
         run_id: &str,
     ) -> Result<(AutomationRun, Vec<String>), Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let chats = end(&transaction, run_id, Cause::Stopped)?
-            .map(|ended| ended.chats)
-            .unwrap_or_default();
-        let run = one(&transaction, run_id)?;
-        transaction.commit()?;
-        Ok((run, chats))
+        crate::write_scope::run(&self.connection, |transaction| {
+            let chats = end(transaction, run_id, Cause::Stopped)?
+                .map(|ended| ended.chats)
+                .unwrap_or_default();
+            let run = one(transaction, run_id)?;
+            Ok((run, chats))
+        })
     }
 
     /// Queues a new run for the Workspace event that started a finished run. It
@@ -788,59 +785,57 @@ impl Workspace {
     /// Refused while anything in the Automation is unfinished, and while the ticket
     /// has an active run of it.
     pub fn run_automation_again(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let run = one(&transaction, run_id)?;
-        if matches!(
-            run.status,
-            AutomationRunStatus::Queued | AutomationRunStatus::Running
-        ) {
-            return Err(Error::AutomationRun("the run has not ended yet".into()));
-        }
-        if run.automation_deleted {
-            return Err(Error::AutomationRunAutomationDeleted);
-        }
-        let automation = crate::automations::one(&transaction, &run.automation_id)?;
-        // As for Run now and switching on: one that is unfinished cannot run.
-        if let Some(problem) = automation.problems.first() {
-            return Err(Error::AutomationUnfinished(crate::automations::reason(
-                &automation.definition,
-                problem,
-            )));
-        }
-        let definition = automation.definition;
-        let id = if run.ticket.is_some() {
-            let id = Uuid::new_v4().to_string();
-            // The active-run index refuses a second run for the ticket.
-            let created = transaction.execute(
+        crate::write_scope::run(&self.connection, |transaction| {
+            let run = one(transaction, run_id)?;
+            if matches!(
+                run.status,
+                AutomationRunStatus::Queued | AutomationRunStatus::Running
+            ) {
+                return Err(Error::AutomationRun("the run has not ended yet".into()));
+            }
+            if run.automation_deleted {
+                return Err(Error::AutomationRunAutomationDeleted);
+            }
+            let automation = crate::automations::one(transaction, &run.automation_id)?;
+            // As for Run now and switching on: one that is unfinished cannot run.
+            if let Some(problem) = automation.problems.first() {
+                return Err(Error::AutomationUnfinished(crate::automations::reason(
+                    &automation.definition,
+                    problem,
+                )));
+            }
+            let definition = automation.definition;
+            let id = if run.ticket.is_some() {
+                let id = Uuid::new_v4().to_string();
+                // The active-run index refuses a second run for the ticket.
+                let created = transaction.execute(
                 "INSERT OR IGNORE INTO automation_runs (id, automation_id, event_id, event, ticket_id, definition, status)
                  SELECT ?2, automation_id, event_id, event, ticket_id, ?3, 'queued' FROM automation_runs WHERE id = ?1",
                 params![run_id, id, serde_json::to_string(&definition)?],
             )?;
-            (created > 0).then_some(id)
-        } else {
-            queue_without_ticket(&transaction, &run.automation_id, &definition)?
-        };
-        let Some(id) = id else {
-            return Err(Error::AutomationRun(
-                "a run of this Automation is already going".into(),
-            ));
-        };
-        answer(&transaction, run_id, RAN_AGAIN)?;
-        let again = one(&transaction, &id)?;
-        transaction.commit()?;
-        Ok(again)
+                (created > 0).then_some(id)
+            } else {
+                queue_without_ticket(transaction, &run.automation_id, &definition)?
+            };
+            let Some(id) = id else {
+                return Err(Error::AutomationRun(
+                    "a run of this Automation is already going".into(),
+                ));
+            };
+            answer(transaction, run_id, RAN_AGAIN)?;
+            let again = one(transaction, &id)?;
+            Ok(again)
+        })
     }
 
     /// The person has seen that a run needs attention and wants nothing more from
     /// it. The run stays as it ended.
     pub fn dismiss_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        answer(&transaction, run_id, DISMISSED)?;
-        let run = one(&transaction, run_id)?;
-        transaction.commit()?;
-        Ok(run)
+        crate::write_scope::run(&self.connection, |transaction| {
+            answer(transaction, run_id, DISMISSED)?;
+            let run = one(transaction, run_id)?;
+            Ok(run)
+        })
     }
 
     /// The person replied in (`replied`) or stopped a Chat. When a run owns the
@@ -854,39 +849,38 @@ impl Workspace {
         chat_id: &str,
         replied: bool,
     ) -> Result<Option<AutomationRun>, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let owner: Option<String> = transaction
-            .query_row(
-                "SELECT automation_run_id FROM chats WHERE id = ?1",
+        crate::write_scope::run(&self.connection, |transaction| {
+            let owner: Option<String> = transaction
+                .query_row(
+                    "SELECT automation_run_id FROM chats WHERE id = ?1",
+                    [chat_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            let Some(run_id) = owner else {
+                return Ok(None);
+            };
+            let status = one(transaction, &run_id)?.status;
+            if !replied && status != AutomationRunStatus::Running {
+                return Ok(None);
+            }
+            transaction.execute(
+                "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
                 [chat_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten();
-        let Some(run_id) = owner else {
-            return Ok(None);
-        };
-        let status = one(&transaction, &run_id)?.status;
-        if !replied && status != AutomationRunStatus::Running {
-            return Ok(None);
-        }
-        transaction.execute(
-            "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
-            [chat_id],
-        )?;
-        // The Chat list follows the Chat log. A view of the run follows the change
-        // token, which Chat tables leave alone, and for a Completed run nothing
-        // else here moves it (#387 3B2).
-        crate::chats::log(&transaction, chat_id, "chat", chat_id)?;
-        transaction.execute(
-            "UPDATE workspace_changes SET token = token + 1 WHERE id = 1",
-            [],
-        )?;
-        end(&transaction, &run_id, Cause::TakenOver)?;
-        let run = one(&transaction, &run_id)?;
-        transaction.commit()?;
-        Ok(Some(run))
+            )?;
+            // The Chat list follows the Chat log. A view of the run follows the change
+            // token, which Chat tables leave alone, and for a Completed run nothing
+            // else here moves it (#387 3B2).
+            crate::chats::log(transaction, chat_id, "chat", chat_id)?;
+            transaction.execute(
+                "UPDATE workspace_changes SET token = token + 1 WHERE id = 1",
+                [],
+            )?;
+            end(transaction, &run_id, Cause::TakenOver)?;
+            let run = one(transaction, &run_id)?;
+            Ok(Some(run))
+        })
     }
 
     /// The run the person took over by replying in or stopping this Chat, which

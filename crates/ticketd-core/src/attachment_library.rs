@@ -52,16 +52,14 @@ impl Workspace {
     /// Changes metadata only. Authored Markdown, upload replay outcomes and bytes stay literal.
     pub fn rename_attachment(&mut self, id: &str, display_name: &str) -> Result<Attachment, Error> {
         let display_name = attachments::normalize_display_name(display_name)?;
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        attachments::read_attachment(&tx, id)?;
-        tx.execute(
-            "UPDATE attachments SET display_name=?2 WHERE id=?1",
-            params![id, display_name],
-        )?;
-        let attachment = attachments::read_attachment(&tx, id)?;
-        tx.commit()?;
-        Ok(attachment)
+        crate::write_scope::run(&self.connection, |tx| {
+            attachments::read_attachment(tx, id)?;
+            tx.execute(
+                "UPDATE attachments SET display_name=?2 WHERE id=?1",
+                params![id, display_name],
+            )?;
+            attachments::read_attachment(tx, id)
+        })
     }
 
     /// A bounded, consistent library snapshot, including completed abandoned uploads.

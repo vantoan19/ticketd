@@ -330,43 +330,44 @@ impl Workspace {
     }
 
     fn record_completed_upload(&self, completed: &CompletedUpload) -> Result<(), Error> {
-        let tx = self.connection.unchecked_transaction()?;
-        crate::write_scope::lock(&tx)?;
-        let stored: Option<String> = tx
-            .query_row(
-                "SELECT request FROM request_outcomes WHERE id=?1",
-                [&completed.request_id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let file = &completed.attachment;
-        tx.execute("INSERT OR IGNORE INTO attachments(id, display_name, original_filename, size_bytes, kind, locator, added_at) VALUES (?1, ?2, ?3, ?4, 'local_snapshot', ?5, ?6)",
+        // The operation's own `Err` is a conflict reported after the scope commits, so the
+        // completed file stays recorded.
+        crate::write_scope::run(&self.connection, |tx| {
+            let stored: Option<String> = tx
+                .query_row(
+                    "SELECT request FROM request_outcomes WHERE id=?1",
+                    [&completed.request_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let file = &completed.attachment;
+            tx.execute("INSERT OR IGNORE INTO attachments(id, display_name, original_filename, size_bytes, kind, locator, added_at) VALUES (?1, ?2, ?3, ?4, 'local_snapshot', ?5, ?6)",
             params![file.id, file.display_name, file.original_filename, file.size_bytes, file.locator, file.added_at])?;
-        if crate::drive::upload_request_claimed(&tx, &completed.request_id)? {
-            // A concurrent Drive allocation may have claimed this ID while the
-            // local copy ran. Preserve its bytes without poisoning later recovery.
-            tx.commit()?;
-            return Err(Error::RequestConflict(completed.request_id.clone()));
-        }
-        if let Some(stored) = stored {
-            if stored != completed.request {
-                // A competing ordinary write may have claimed the ID during the
-                // file copy. Preserve the completed file without replacing its outcome.
-                tx.commit()?;
-                return Err(Error::RequestConflict(completed.request_id.clone()));
+            if crate::drive::upload_request_claimed(tx, &completed.request_id)? {
+                // A concurrent Drive allocation may have claimed this ID while the
+                // local copy ran. Preserve its bytes without poisoning later recovery.
+                return Ok(Err(Error::RequestConflict(completed.request_id.clone())));
             }
-        } else {
-            tx.execute(
-                "INSERT INTO request_outcomes(id, request, outcome) VALUES (?1, ?2, ?3)",
-                params![
-                    completed.request_id,
-                    completed.request,
-                    serde_json::to_string(&WriteResult::Attachment(completed.attachment.clone()))?
-                ],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+            if let Some(stored) = stored {
+                if stored != completed.request {
+                    // A competing ordinary write may have claimed the ID during the
+                    // file copy. Preserve the completed file without replacing its outcome.
+                    return Ok(Err(Error::RequestConflict(completed.request_id.clone())));
+                }
+            } else {
+                tx.execute(
+                    "INSERT INTO request_outcomes(id, request, outcome) VALUES (?1, ?2, ?3)",
+                    params![
+                        completed.request_id,
+                        completed.request,
+                        serde_json::to_string(&WriteResult::Attachment(
+                            completed.attachment.clone()
+                        ))?
+                    ],
+                )?;
+            }
+            Ok(Ok(()))
+        })?
     }
 
     fn recover_uploads_locked(&self, root: &Path) -> Result<(), Error> {

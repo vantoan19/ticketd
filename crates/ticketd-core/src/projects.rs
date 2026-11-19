@@ -107,19 +107,18 @@ impl Workspace {
             path: path.to_owned(),
             paths: vec![path.to_owned()],
         };
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        ensure_path_free(&tx, path, &project.id)?;
-        tx.execute(
-            "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
-            params![project.id, project.name, project.path],
-        )?;
-        tx.execute(
-            "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
-            params![project.id, project.path],
-        )?;
-        tx.commit()?;
-        Ok(project)
+        crate::write_scope::run(&self.connection, |tx| {
+            ensure_path_free(tx, path, &project.id)?;
+            tx.execute(
+                "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
+                params![project.id, project.name, project.path],
+            )?;
+            tx.execute(
+                "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
+                params![project.id, project.path],
+            )?;
+            Ok(project)
+        })
     }
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
@@ -127,45 +126,46 @@ impl Workspace {
         if name.is_empty() {
             return Err(Error::EmptyProject);
         }
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let old = find(&tx, id)?;
-        // Moving the checkout needs a folder that exists. Sending the path back
-        // unchanged is a rename: it must still work after the folder was moved away.
-        let target = match normalize(path) {
-            Ok(path) => Some(path),
-            Err(_) if path.is_empty() && old.path.is_empty() => None,
-            Err(Error::NoCheckoutFolder(_)) if !path.is_empty() && path == old.path => None,
-            Err(Error::NoCheckoutFolder(_)) if path.is_empty() => return Err(Error::EmptyProject),
-            Err(error) => return Err(error),
-        };
-        if let Some(path) = &target {
-            ensure_path_free(&tx, path, id)?;
-        }
-        tx.execute(
-            "UPDATE projects SET name = ?1 WHERE id = ?2",
-            params![name, id],
-        )?;
-        if let Some(path) = target {
+        crate::write_scope::run(&self.connection, |tx| {
+            let old = find(tx, id)?;
+            // Moving the checkout needs a folder that exists. Sending the path back
+            // unchanged is a rename: it must still work after the folder was moved away.
+            let target = match normalize(path) {
+                Ok(path) => Some(path),
+                Err(_) if path.is_empty() && old.path.is_empty() => None,
+                Err(Error::NoCheckoutFolder(_)) if !path.is_empty() && path == old.path => None,
+                Err(Error::NoCheckoutFolder(_)) if path.is_empty() => {
+                    return Err(Error::EmptyProject);
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(path) = &target {
+                ensure_path_free(tx, path, id)?;
+            }
             tx.execute(
-                "UPDATE projects SET path = ?1 WHERE id = ?2",
-                params![path, id],
+                "UPDATE projects SET name = ?1 WHERE id = ?2",
+                params![name, id],
             )?;
-            if old.path != path {
+            if let Some(path) = target {
                 tx.execute(
-                    "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
-                    params![id, old.path],
+                    "UPDATE projects SET path = ?1 WHERE id = ?2",
+                    params![path, id],
+                )?;
+                if old.path != path {
+                    tx.execute(
+                        "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
+                        params![id, old.path],
+                    )?;
+                }
+                // Also when the path is unchanged: a path an older version left behind after
+                // its checkout was unregistered is registered again by naming it.
+                tx.execute(
+                    "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
+                    params![id, path],
                 )?;
             }
-            // Also when the path is unchanged: a path an older version left behind after
-            // its checkout was unregistered is registered again by naming it.
-            tx.execute(
-                "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
-                params![id, path],
-            )?;
-        }
-        tx.commit()?;
-        self.show_project(id)
+            self.show_project(id)
+        })
     }
 
     pub fn show_project(&self, id: &str) -> Result<Project, Error> {

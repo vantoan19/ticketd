@@ -819,6 +819,9 @@ impl Workspace {
         may_switch_off: bool,
     ) -> Result<Automation, Error> {
         let definition = tidied(definition)?;
+        // Keeps its own savepoint rather than the write scope: a draft that would switch
+        // the Automation off rolls its edit back and still succeeds, which a scope
+        // (committed on `Ok`) cannot express. It logs no Workspace event to fold.
         let transaction = self.connection.savepoint()?;
         crate::write_scope::lock(&transaction)?;
         // A schedule counts again from a change to what starts the Automation, so
@@ -861,26 +864,25 @@ impl Workspace {
     /// answered, since the person asked for this and has nothing left to do.
     /// Returns the Chats of the agents that were working, for the host to interrupt.
     pub fn delete_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let changed = transaction.execute(
-            "UPDATE automations SET trashed = 1 WHERE id = ?1 AND trashed = 0",
-            [id],
-        )?;
-        if changed == 0 {
-            return Err(Error::AutomationNotFound(id.to_owned()));
-        }
-        transaction.execute(
-            "DELETE FROM automation_device_state WHERE automation_id = ?1",
-            [id],
-        )?;
-        let chats = crate::automation_background::end_active_runs(
-            &transaction,
-            id,
-            crate::automation_endings::Cause::Deleted,
-        )?;
-        transaction.commit()?;
-        Ok(chats)
+        crate::write_scope::run(&self.connection, |transaction| {
+            let changed = transaction.execute(
+                "UPDATE automations SET trashed = 1 WHERE id = ?1 AND trashed = 0",
+                [id],
+            )?;
+            if changed == 0 {
+                return Err(Error::AutomationNotFound(id.to_owned()));
+            }
+            transaction.execute(
+                "DELETE FROM automation_device_state WHERE automation_id = ?1",
+                [id],
+            )?;
+            let chats = crate::automation_background::end_active_runs(
+                transaction,
+                id,
+                crate::automation_endings::Cause::Deleted,
+            )?;
+            Ok(chats)
+        })
     }
 
     pub fn automation(&self, id: &str) -> Result<Automation, Error> {
@@ -896,40 +898,39 @@ impl Workspace {
     /// while anything is unfinished and for one that is run by hand, and starts from the Workspace events logged so
     /// far: what happened while it was off never starts a run.
     pub fn set_automation_enabled(&mut self, id: &str, enabled: bool) -> Result<Automation, Error> {
-        let transaction = self.connection.savepoint()?;
-        crate::write_scope::lock(&transaction)?;
-        let mut automation = one(&transaction, id)?;
-        if enabled {
-            if let Some(problem) = automation.problems.first() {
-                return Err(Error::AutomationUnfinished(reason(
-                    &automation.definition,
-                    problem,
-                )));
-            }
-            if automation.definition.trigger == Some(Trigger::ByHand) {
-                return Err(Error::InvalidAutomation(
-                    "an Automation you run by hand is not switched on; use Run now".into(),
-                ));
-            }
-            // Already on keeps its place in the log.
-            transaction.execute(
+        crate::write_scope::run(&self.connection, |transaction| {
+            let mut automation = one(transaction, id)?;
+            if enabled {
+                if let Some(problem) = automation.problems.first() {
+                    return Err(Error::AutomationUnfinished(reason(
+                        &automation.definition,
+                        problem,
+                    )));
+                }
+                if automation.definition.trigger == Some(Trigger::ByHand) {
+                    return Err(Error::InvalidAutomation(
+                        "an Automation you run by hand is not switched on; use Run now".into(),
+                    ));
+                }
+                // Already on keeps its place in the log.
+                transaction.execute(
                 "INSERT OR IGNORE INTO automation_device_state (automation_id, cursor) VALUES (?1, ?2)",
-                params![id, crate::events::head(&transaction)?],
+                params![id, crate::events::head(transaction)?],
             )?;
-            transaction.execute(
-                "DELETE FROM automation_arrivals WHERE automation_id = ?1",
-                [id],
-            )?;
-            automation.arrived_off = false;
-        } else {
-            transaction.execute(
-                "DELETE FROM automation_device_state WHERE automation_id = ?1",
-                [id],
-            )?;
-        }
-        transaction.commit()?;
-        automation.enabled = enabled;
-        Ok(automation)
+                transaction.execute(
+                    "DELETE FROM automation_arrivals WHERE automation_id = ?1",
+                    [id],
+                )?;
+                automation.arrived_off = false;
+            } else {
+                transaction.execute(
+                    "DELETE FROM automation_device_state WHERE automation_id = ?1",
+                    [id],
+                )?;
+            }
+            automation.enabled = enabled;
+            Ok(automation)
+        })
     }
 
     /// The id of the last Workspace event this Automation has read on this device,
