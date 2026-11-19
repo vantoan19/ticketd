@@ -8,7 +8,9 @@
   flex-direction: column;
 }
 .plan-workspace {
-  container: plan-workspace / inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -152,36 +154,36 @@
   text-overflow: ellipsis;
 }
 
-@container plan-workspace (max-width: 640px) {
-  .plan-context {
-    height: 184px;
-  }
-  .plan-summary-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: 24px 48px 24px;
-    gap: 8px 14px;
-    height: 112px;
-  }
-  .plan-summary-bar,
-  .plan-summary-loading {
-    width: 100%;
-  }
-  .plan-summary-legend {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    align-self: start;
-  }
-  .plan-summary-row > .plan-documents {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    justify-self: start;
-    max-width: 100%;
-    margin-left: 0;
-  }
-  .plan-context-note {
-    grid-column: 1 / -1;
-  }
+:where(.plan-workspace[data-width~="max-640"]) .plan-context {
+  height: 184px;
+}
+:where(.plan-workspace[data-width~="max-640"]) .plan-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 24px 48px 24px;
+  gap: 8px 14px;
+  height: 112px;
+}
+:where(.plan-workspace[data-width~="max-640"]) .plan-summary-bar,
+:where(.plan-workspace[data-width~="max-640"]) .plan-summary-loading {
+  width: 100%;
+}
+:where(.plan-workspace[data-width~="max-640"]) .plan-summary-legend {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-self: start;
+}
+:where(.plan-workspace[data-width~="max-640"])
+  .plan-summary-row
+  > .plan-documents {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  justify-self: start;
+  max-width: 100%;
+  margin-left: 0;
+}
+:where(.plan-workspace[data-width~="max-640"]) .plan-context-note {
+  grid-column: 1 / -1;
 }
 
 /* Plans index: management rows (P12), 48px, full-row hover. */

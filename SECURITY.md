@@ -2,16 +2,15 @@
 
 ## Report a vulnerability privately
 
-**Preparation status:** the private reporting route must be configured and verified
-before public launch. Do not send vulnerability details to public issues, pull
-requests, or discussions while this setup is pending.
+Email [toan.tran.cqt@gmail.com](mailto:toan.tran.cqt@gmail.com) with the subject
+`ticketd security report`. Do not post vulnerability details in public issues,
+pull requests, or discussions.
 
-The intended route is GitHub's **Security → Report a vulnerability** for this
-repository. Maintainers must enable private vulnerability reporting and verify it
-from outside the maintainer account, or replace this section with a monitored
-private contact. No response-time or bounty commitment is currently offered.
+When available, you can instead use this repository's **Security → Report a
+vulnerability** form. If that option is absent, use the email address above.
+No response-time or bounty commitment is currently offered.
 
-Include the following in a private report once the route is available:
+Include the following in a private report:
 
 - Affected version or commit, operating system, and installation method.
 - Minimal reproduction steps using synthetic data.

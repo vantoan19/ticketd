@@ -1,6 +1,7 @@
 {
   "name": "ticketd",
   "private": true,
+  "license": "MIT",
   "repository": "github:vantoan19/ticketd",
   "version": "0.1.0",
   "type": "module",

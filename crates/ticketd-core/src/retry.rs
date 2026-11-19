@@ -159,10 +159,16 @@ pub enum WriteRequest {
     AddTag {
         reference: String,
         name: String,
+        // Omitted when absent so the canonical form of a request without an agent, which
+        // a stored outcome is compared against on replay, is unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
     },
     RemoveTag {
         reference: String,
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
     },
     MarkDuplicate {
         source: String,
@@ -291,6 +297,12 @@ pub enum WriteResult {
     Evidence(Evidence),
     Project(Project),
     Plan(Plan),
+    /// A reminder now: the due time as stored, or none after a dismissal.
+    Reminder(Option<String>),
+    /// Whether the ticket is now followed.
+    Following(bool),
+    /// The read state the given inbox entries now have.
+    InboxRead(bool),
     Deleted,
 }
 
@@ -302,6 +314,10 @@ impl Workspace {
         request_id: Option<&str>,
         request: WriteRequest,
     ) -> Result<WriteResult, Error> {
+        // A blank ID would key unrelated writes to one stored outcome (ADR 0002).
+        if request_id.is_some_and(|id| id.trim().is_empty()) {
+            return Err(Error::EmptyRequestId);
+        }
         if let WriteRequest::ImportAttachment {
             source,
             display_name,
@@ -463,18 +479,18 @@ impl Workspace {
             }
             WriteRequest::SetReminder { reference, due_at } => {
                 self.set_reminder(&reference, due_at.as_deref())?;
-                WriteResult::Deleted
+                WriteResult::Reminder(self.reminder(&reference)?)
             }
             WriteRequest::SetFollowing {
                 reference,
                 following,
             } => {
                 self.set_following(&reference, following)?;
-                WriteResult::Deleted
+                WriteResult::Following(following)
             }
             WriteRequest::SetInboxRead { ids, read } => {
                 self.set_inbox_read(&ids, read)?;
-                WriteResult::Deleted
+                WriteResult::InboxRead(read)
             }
             WriteRequest::CreateTicket { title, project_id } => {
                 WriteResult::Ticket(self.create_ticket_in_project(&title, project_id.as_deref())?)
@@ -560,12 +576,16 @@ impl Workspace {
                 self.delete_activity(&reference, &id)?;
                 WriteResult::Deleted
             }
-            WriteRequest::AddTag { reference, name } => {
-                WriteResult::Ticket(self.add_tag(&reference, &name)?)
-            }
-            WriteRequest::RemoveTag { reference, name } => {
-                WriteResult::Ticket(self.remove_tag(&reference, &name)?)
-            }
+            WriteRequest::AddTag {
+                reference,
+                name,
+                agent,
+            } => WriteResult::Ticket(self.add_tag_as(&reference, &name, agent.as_deref())?),
+            WriteRequest::RemoveTag {
+                reference,
+                name,
+                agent,
+            } => WriteResult::Ticket(self.remove_tag_as(&reference, &name, agent.as_deref())?),
             WriteRequest::MarkDuplicate {
                 source,
                 canonical,

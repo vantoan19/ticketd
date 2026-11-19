@@ -90,10 +90,21 @@ export function planFlow<T extends FlowTicket>(members: T[]) {
         dependent: ticket.reference,
       })),
   );
+  // Canceled and Duplicate prerequisites stay unresolved (spec 4.5), but Flow
+  // hides closed tickets, so name the status where the blocker is not on screen.
+  function blockerName(blocker: T["prerequisites"][number]) {
+    const notes = [
+      ...(!members.some((member) => member.reference === blocker.reference)
+        ? ["outside this Plan"]
+        : []),
+      ...(closed.has(blocker.status) ? [blocker.status] : []),
+    ];
+    return blocker.reference + (notes.length ? ` (${notes.join(", ")})` : "");
+  }
   function reason(ticket: T) {
     const blockers = ticket.prerequisites.filter((item) => item.unresolved);
     if (blockers.length)
-      return `Waits on ${blockers.map((item) => item.reference + (!members.some((member) => member.reference === item.reference) ? " (outside this Plan)" : "")).join(", ")}${cycles.has(ticket.reference) ? " (they block each other)" : ""}`;
+      return `Waits on ${blockers.map(blockerName).join(", ")}${cycles.has(ticket.reference) ? " (they block each other)" : ""}`;
     const dependents = edges
       .filter((edge) => edge.blocker === ticket.reference)
       .map((edge) => edge.dependent);
@@ -101,5 +112,100 @@ export function planFlow<T extends FlowTicket>(members: T[]) {
       ? `Blocks ${dependents.join(", ")}`
       : "No open blockers";
   }
-  return { lanes, edges, reason };
+  // Flow only draws lines that run to a later lane; the rest sit in one lane
+  // (every ticket two or more steps from Now shares "Later") or form a cycle.
+  const laneOf = new Map(
+    lanes.flatMap((lane, index) =>
+      lane.map((ticket) => [ticket.reference, index] as const),
+    ),
+  );
+  const undrawn = edges.filter(
+    (edge) => laneOf.get(edge.blocker)! >= laneOf.get(edge.dependent)!,
+  ).length;
+  return { lanes, edges, undrawn, reason };
+}
+
+/** A card's rectangle, in the Flow frame's coordinates. */
+export type FlowBox = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+export type FlowPoint = { x: number; y: number };
+
+/** How far under the lowest card a link that skips a lane runs. */
+const LANE_CLEARANCE = 6;
+const CORNER_RADIUS = 8;
+
+/**
+ * The corners of a link from `source` to `target`, running right, when cards
+ * of the lanes it skips (`between`) stand in its way: it leaves into the
+ * gutter after the source's lane, runs under the lowest of those cards, and
+ * rises in the gutter before the target's lane. Nothing is crossed. A link
+ * with no card in its way returns null and is drawn as one curve.
+ */
+export function flowDetour(
+  source: FlowBox,
+  target: FlowBox,
+  between: FlowBox[],
+): FlowPoint[] | null {
+  if (!between.length) return null;
+  const sy = (source.top + source.bottom) / 2;
+  const ty = (target.top + target.bottom) / 2;
+  const under = Math.max(...between.map((box) => box.bottom)) + LANE_CLEARANCE;
+  // Both ends already lie below every card in the way.
+  if (sy >= under && ty >= under) return null;
+  const first = (source.right + Math.min(...between.map((b) => b.left))) / 2;
+  const last = (Math.max(...between.map((b) => b.right)) + target.left) / 2;
+  return [
+    { x: source.right, y: sy },
+    { x: first, y: sy },
+    { x: first, y: under },
+    { x: last, y: under },
+    { x: last, y: ty },
+    { x: target.left, y: ty },
+  ];
+}
+
+/** An SVG path through right-angled corners, each rounded. */
+function roundedPath(points: FlowPoint[]) {
+  const toward = (from: FlowPoint, to: FlowPoint, by: number) => {
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    return {
+      x: from.x + ((to.x - from.x) / length) * by,
+      y: from.y + ((to.y - from.y) / length) * by,
+    };
+  };
+  const [start, ...rest] = points;
+  let d = `M${start!.x} ${start!.y}`;
+  rest.forEach((corner, index) => {
+    const before = points[index]!;
+    const after = rest[index + 1];
+    if (!after) return void (d += ` L${corner.x} ${corner.y}`);
+    const radius = (other: FlowPoint) =>
+      Math.min(
+        CORNER_RADIUS,
+        Math.hypot(other.x - corner.x, other.y - corner.y) / 2,
+      );
+    const enter = toward(corner, before, radius(before));
+    const leave = toward(corner, after, radius(after));
+    d += ` L${enter.x} ${enter.y} Q${corner.x} ${corner.y} ${leave.x} ${leave.y}`;
+  });
+  return d;
+}
+
+/** The SVG path of one Flow link; `between` as for `flowDetour`. */
+export function flowLinkPath(
+  source: FlowBox,
+  target: FlowBox,
+  between: FlowBox[],
+) {
+  const detour = flowDetour(source, target, between);
+  if (detour) return roundedPath(detour);
+  const x = source.right;
+  const y = (source.top + source.bottom) / 2;
+  const tx = target.left;
+  const ty = (target.top + target.bottom) / 2;
+  return `M${x} ${y} C${x + 20} ${y} ${tx - 20} ${ty} ${tx} ${ty}`;
 }

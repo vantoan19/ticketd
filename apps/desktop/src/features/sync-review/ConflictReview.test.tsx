@@ -154,6 +154,20 @@ test("the words that differ between the two sides are marked", async () => {
   expect(remote.querySelector("ins")?.textContent).toBe("10");
 });
 
+test("a side whose value was cleared is labelled Empty, not a blank card", async () => {
+  vi.mocked(syncReview.conflict).mockResolvedValue({
+    ...conflict,
+    fields: conflict.fields.map((field) =>
+      field.field === "body" ? { ...field, remote: "" } : field,
+    ),
+  });
+  open();
+  const remote = await screen.findByRole("radio", {
+    name: "Description from Studio desktop",
+  });
+  expect(remote.textContent).toContain("Empty");
+});
+
 test("Later closes without deciding, and a failed save stays open with its reason", async () => {
   vi.mocked(syncReview.resolve).mockRejectedValue(new Error("disk is full"));
   open();

@@ -14,7 +14,8 @@ use ticketd_core::{
     DocumentPatch, Error, RecordKind, Status, SyncKind, SyncPartKind, SyncRecord, SyncValue,
     TicketPatch, Version, Workspace, WriteRequest,
     drive::{
-        DesktopOAuthClient, DriveRemote, GoogleTransport, PickerSession, PlatformCredentialStore,
+        DesktopOAuthClient, DriveError, DriveErrorKind, DriveRemote, GoogleTransport,
+        PickerSession, PlatformCredentialStore,
     },
     sync::{
         AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, SetupOptions, SyncChoice,
@@ -129,7 +130,11 @@ pub fn at_launch() {
         Ok(())
     });
     if let Err(error) = prepared {
-        eprintln!("could not prepare Workspace sync: {error}");
+        tracing::warn!(
+            error_kind = error.kind().code(),
+            %error,
+            "could not prepare Workspace sync"
+        );
     }
 }
 
@@ -822,11 +827,26 @@ fn failed(error: impl std::fmt::Display) -> BridgeFailure {
     BridgeFailure::plain(&error.to_string())
 }
 
+/// What a failed Google sign-in is, so the interface can say it: a build
+/// without the Drive app configuration, a sign-in the person never finished
+/// (closed, cancelled or timed out) and an unreachable Google each have their
+/// own code. Anything else stays a plain failure.
+fn sign_in_failure(error: DriveError) -> BridgeFailure {
+    let code = match error.kind {
+        DriveErrorKind::Unconfigured => "drive_unconfigured",
+        DriveErrorKind::Cancelled => "sign_in_cancelled",
+        DriveErrorKind::Offline => "offline",
+        _ => "failed",
+    };
+    BridgeFailure::coded(code, error.message)
+}
+
 /// Google sign-in in the system browser. Returns the connection the credential
 /// is kept under and the account's email address when Google names it.
 fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
-    let client = DesktopOAuthClient::from_environment().map_err(failed)?;
-    let session = PickerSession::begin_sign_in(client, Duration::from_secs(180)).map_err(failed)?;
+    let client = DesktopOAuthClient::from_environment().map_err(sign_in_failure)?;
+    let session =
+        PickerSession::begin_sign_in(client, Duration::from_secs(180)).map_err(sign_in_failure)?;
     // The core generated this pinned Google URL. It never crosses the WebView.
     app.opener()
         .open_url(session.authorization_url(), None::<&str>)
@@ -837,7 +857,7 @@ fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
             &PlatformCredentialStore,
             &AtomicBool::new(false),
         )
-        .map_err(failed)?;
+        .map_err(sign_in_failure)?;
     // A kept adapter needs no reset: when Drive refuses its access token, it
     // renews with the credential this sign-in stored.
     Ok((
@@ -892,7 +912,7 @@ pub fn publish_status(app: tauri::AppHandle) {
                     && shown.as_ref() != Some(&status)
                 {
                     if let Err(error) = app.emit(STATUS_EVENT, &status) {
-                        eprintln!("could not send the sync status: {error}");
+                        tracing::warn!(%error, "could not send the sync status");
                     }
                     shown = Some(status);
                 }
@@ -908,7 +928,7 @@ pub fn publish_status(app: tauri::AppHandle) {
             }
         });
     if let Err(error) = spawned {
-        eprintln!("could not start sending the sync status: {error}");
+        tracing::error!(%error, "could not start sending the sync status");
     }
 }
 #[tauri::command(async)]
@@ -1157,8 +1177,13 @@ mod tests {
     /// Returns the ticket's GUID.
     fn conflicted(desks: &mut Desks) -> String {
         let ticket = desks.there.create_ticket("Fix login").unwrap();
-        let web = desks.there.create_project("Web", "/work/web").unwrap();
-        let api = desks.there.create_project("API", "/work/api").unwrap();
+        let folder = |name: &str| {
+            let path = desks._directory.path().join(name);
+            std::fs::create_dir_all(&path).unwrap();
+            path.to_str().unwrap().to_owned()
+        };
+        let web = desks.there.create_project("Web", &folder("web")).unwrap();
+        let api = desks.there.create_project("API", &folder("api")).unwrap();
         desks.sync_there();
         desks.sync_here();
         desks
@@ -1632,6 +1657,19 @@ mod tests {
         assert_eq!(
             (field.local.as_str(), field.remote.as_str()),
             ("Started here", "Started there")
+        );
+    }
+
+    #[test]
+    fn a_failed_sign_in_keeps_the_reason_it_failed_for() {
+        let code = |kind| sign_in_failure(DriveError::new(kind, "why")).code;
+        assert_eq!(code(DriveErrorKind::Unconfigured), "drive_unconfigured");
+        assert_eq!(code(DriveErrorKind::Cancelled), "sign_in_cancelled");
+        assert_eq!(code(DriveErrorKind::Offline), "offline");
+        assert_eq!(code(DriveErrorKind::InvalidResponse), "failed");
+        assert_eq!(
+            sign_in_failure(DriveError::new(DriveErrorKind::Unconfigured, "why")).message,
+            "why"
         );
     }
 

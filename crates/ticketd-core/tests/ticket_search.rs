@@ -105,7 +105,7 @@ const QUERIES: [&str; 17] = [
 
 #[test]
 fn search_finds_what_a_literal_ascii_case_insensitive_match_finds() {
-    let Searched { workspace, .. } = workspace();
+    let Searched { workspace, _dir } = workspace();
     for query in QUERIES {
         let mut found = references(
             workspace
@@ -122,7 +122,7 @@ fn search_finds_what_a_literal_ascii_case_insensitive_match_finds() {
 
 #[test]
 fn the_list_filter_finds_what_the_same_match_finds_without_references() {
-    let Searched { workspace, .. } = workspace();
+    let Searched { workspace, _dir } = workspace();
     for query in QUERIES {
         let filter = TicketFilter {
             query: query.into(),
@@ -138,7 +138,10 @@ fn the_list_filter_finds_what_the_same_match_finds_without_references() {
 
 #[test]
 fn search_follows_changes_to_bodies_and_briefs() {
-    let Searched { mut workspace, .. } = workspace();
+    let Searched {
+        mut workspace,
+        _dir,
+    } = workspace();
     let first = workspace.create_ticket("Plain").unwrap();
     assert!(
         workspace

@@ -29,7 +29,9 @@ fn populated(path: &std::path::Path) -> Workspace {
             },
         )
         .unwrap();
-    workspace.create_project("App", "/tmp/app").unwrap();
+    workspace
+        .create_project("App", path.parent().unwrap().to_str().unwrap())
+        .unwrap();
     workspace.create_plan("Release").unwrap();
     workspace.create_plan("Cleanup").unwrap();
     workspace

@@ -18,20 +18,24 @@ ticketd backup backup.sqlite3
 ticketd export --file snapshot.json
 ```
 
-Both file destinations must be new. `export` without `--file` prints JSON to
+`backup` prints `{"path":...}`. Both file destinations must be new. `export` without `--file` prints JSON to
 stdout. Export is a portable snapshot, not an import or restore command.
 Backup preserves workspace data and retained retry outcomes.
 
 `restore-workspace BACKUP_PATH` replaces the workspace after closing the desktop
-and other ticketd operations. It retains a safety backup and prints its path;
-keep that result. This operation affects the entire workspace, unlike `restore
+and other ticketd operations. It retains a safety backup and prints
+`{"restored":WORKSPACE_FILE,"safety_backup":PATH}`; keep that result. This operation affects the entire workspace, unlike `restore
 T-KQ1` or `document restore DOCUMENT_ID`, which restore items from trash.
 
 ## Personal data
 
 `inbox --limit 20 --offset 0` reads the local person's attention inbox.
 `reminder show`, `set`, `snooze`, and `dismiss` operate on a ticket's personal
-reminder; times require RFC 3339 with an offset. Following and inbox read state
+reminder; times require RFC 3339 with an offset, and `snooze` only moves an
+existing reminder to a later time. `show`, `set` and `snooze` print
+`{"reference":...,"due_at":...}` (`due_at` is null when there is no reminder);
+`dismiss` prints `{"dismissed":true}`, or `{"dismissed":false}` when there was
+nothing to dismiss. Following and inbox read state
 use the JSON write operations below. This state belongs to `local-person`, not
 to the agent named by `--agent`.
 

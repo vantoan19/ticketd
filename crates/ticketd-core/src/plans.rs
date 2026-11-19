@@ -37,9 +37,76 @@ pub struct PlanView {
     pub documents: Vec<PlanDocument>,
 }
 
+/// What `ticketd plan context` prints. Fields serialize in this order, which is the
+/// order of the printed JSON.
+#[derive(Debug, Serialize)]
+pub struct PlanContext {
+    pub plan: PlanContextHeader,
+    pub counts: PlanCounts,
+    pub tickets: Vec<PlanContextTicket>,
+    pub tickets_omitted: bool,
+    pub dependencies: Vec<PlanContextDependency>,
+    pub dependencies_omitted: bool,
+    pub documents: Vec<PlanContextDocument>,
+    pub documents_omitted: bool,
+    pub fetch_more: String,
+}
+#[derive(Debug, Serialize)]
+pub struct PlanContextHeader {
+    pub id: String,
+    pub name: String,
+    pub purpose: String,
+    pub archived: bool,
+    pub spec_document_id: Option<String>,
+    pub name_truncated: bool,
+    pub purpose_truncated: bool,
+}
+#[derive(Debug, Serialize)]
+pub struct PlanContextTicket {
+    pub reference: String,
+    pub title: String,
+    pub title_truncated: bool,
+    pub status: String,
+}
+#[derive(Debug, Serialize)]
+pub struct PlanContextDependency {
+    pub blocker: String,
+    pub dependent: String,
+}
+#[derive(Debug, Serialize)]
+pub struct PlanContextDocument {
+    pub id: String,
+    pub heading: String,
+    pub trashed: bool,
+    pub body: Option<String>,
+    pub body_truncated: bool,
+    pub fetch: String,
+}
+
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch("CREATE TABLE plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0); ALTER TABLE tickets ADD COLUMN plan_id TEXT REFERENCES plans(id);")?;
     Ok(())
+}
+/// A Plan's live tickets by status, keyed like every other count in the interface.
+fn plan_counts(connection: &Connection, id: &str) -> Result<PlanCounts, Error> {
+    let mut counts = PlanCounts::default();
+    let mut stmt = connection.prepare(
+        "SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status",
+    )?;
+    for row in stmt.query_map([id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+    })? {
+        let (status, count) = row?;
+        match status.parse::<Status>()? {
+            Status::Todo => counts.todo = count,
+            Status::InProgress => counts.in_progress = count,
+            Status::InReview => counts.in_review = count,
+            Status::Done => counts.done = count,
+            Status::Canceled => counts.canceled = count,
+            Status::Duplicate => counts.duplicate = count,
+        }
+    }
+    Ok(counts)
 }
 pub(crate) fn get(connection: &Connection, id: &str) -> Result<Plan, Error> {
     connection
@@ -67,12 +134,21 @@ pub(crate) fn ensure_active(connection: &Connection, id: &str) -> Result<Plan, E
     }
     Ok(plan)
 }
+/// The longest Plan name accepted for a new or renamed Plan. Existing longer names stay.
+const MAX_NAME: usize = 1000;
+fn valid_name(name: &str) -> Result<&str, Error> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::EmptyPlanName);
+    }
+    if name.chars().count() > MAX_NAME {
+        return Err(Error::PlanNameTooLong(MAX_NAME));
+    }
+    Ok(name)
+}
 impl Workspace {
     pub fn create_plan(&mut self, name: &str) -> Result<Plan, Error> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(Error::EmptyPlanName);
-        }
+        let name = valid_name(name)?;
         let id = Uuid::new_v4().to_string();
         self.connection.execute(
             "INSERT INTO plans (id, name) VALUES (?1, ?2)",
@@ -86,13 +162,14 @@ impl Workspace {
         name: Option<&str>,
         archived: Option<bool>,
     ) -> Result<Plan, Error> {
-        let name = name.map(str::trim);
-        if name == Some("") {
-            return Err(Error::EmptyPlanName);
-        }
+        let name = name.map(valid_name).transpose()?;
         // The archived check and the write share one locked transaction.
         crate::write_scope::run(&self.connection, |scope| {
             let current = get(scope, id)?;
+            // Archiving an archived Plan, like reactivating an active one, changes nothing.
+            if current.archived && archived == Some(true) && name.is_none() {
+                return Ok(current);
+            }
             if current.archived && archived != Some(false) {
                 return Err(Error::PlanArchived);
             }
@@ -172,23 +249,7 @@ impl Workspace {
     ) -> Result<PlanView, Error> {
         crate::read_scope::run(&self.connection, |tx| {
             let plan = get(tx, id)?;
-            let mut counts = PlanCounts::default();
-            {
-                let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status")?;
-                for row in stmt.query_map([id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
-                })? {
-                    let (status, count) = row?;
-                    match status.parse::<Status>()? {
-                        Status::Todo => counts.todo = count,
-                        Status::InProgress => counts.in_progress = count,
-                        Status::InReview => counts.in_review = count,
-                        Status::Done => counts.done = count,
-                        Status::Canceled => counts.canceled = count,
-                        Status::Duplicate => counts.duplicate = count,
-                    }
-                }
-            }
+            let counts = plan_counts(tx, id)?;
             let bound = limit.map(i64::from).unwrap_or(-1);
             let mut stmt = tx.prepare("SELECT reference FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT ?2 OFFSET ?3")?;
             let references = stmt
@@ -222,39 +283,72 @@ impl Workspace {
         })
     }
     /// Bounded, snapshot-consistent Plan context for agents. Bodies are opt-in.
-    pub fn plan_context(&self, id: &str, bodies: bool) -> Result<serde_json::Value, Error> {
+    pub fn plan_context(&self, id: &str, bodies: bool) -> Result<PlanContext, Error> {
         crate::read_scope::run(&self.connection, |tx| {
             let plan = get(tx, id)?;
-            let mut counts = serde_json::Map::new();
-            {
-                let mut stmt = tx.prepare("SELECT status, count(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0 GROUP BY status ORDER BY status")?;
-                for row in
-                    stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))?
-                {
-                    let (status, count) = row?;
-                    counts.insert(status, count.into());
-                }
-            }
-            let tickets = {
+            let counts = plan_counts(tx, id)?;
+            let mut tickets = {
                 let mut stmt = tx.prepare("SELECT reference, substr(title, 1, 256), status, length(title) > 256 FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
-                stmt.query_map([id], |r| Ok(serde_json::json!({"reference": r.get::<_, String>(0)?, "title": r.get::<_, String>(1)?, "title_truncated": r.get::<_, bool>(3)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
+                stmt.query_map([id], |r| {
+                    Ok(PlanContextTicket {
+                        reference: r.get(0)?,
+                        title: r.get(1)?,
+                        title_truncated: r.get(3)?,
+                        status: r.get(2)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?
             };
-            let dependencies = {
+            let mut dependencies = {
                 let mut stmt = tx.prepare("SELECT b.reference, d.reference FROM dependencies x JOIN tickets b ON b.id = x.blocker_id JOIN tickets d ON d.id = x.dependent_id WHERE (b.plan_id = ?1 OR d.plan_id = ?1) AND (b.trashed = 0 OR d.trashed = 0) ORDER BY b.number, d.number LIMIT 21")?;
-                stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": r.get::<_, String>(0)?, "dependent": r.get::<_, String>(1)?})))?.collect::<Result<Vec<_>, _>>()?
+                stmt.query_map([id], |r| {
+                    Ok(PlanContextDependency {
+                        blocker: r.get(0)?,
+                        dependent: r.get(1)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?
             };
-            let documents = {
-                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
-                stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document read {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
+            let mut documents = {
+                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 AND d.trashed = 0 THEN substr(d.body, 1, 4096) ELSE NULL END, ?2 AND d.trashed = 0 AND length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
+                stmt.query_map(params![id, bodies], |r| {
+                    let doc_id: String = r.get(0)?;
+                    Ok(PlanContextDocument {
+                        fetch: format!("ticketd document read {doc_id}"),
+                        id: doc_id,
+                        heading: r.get(1)?,
+                        trashed: r.get(2)?,
+                        body: r.get(3)?,
+                        body_truncated: r.get(4)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?
             };
-            Ok(serde_json::json!({
-                "plan": {"id": plan.id, "name": plan.name.chars().take(256).collect::<String>(), "purpose": plan.purpose.chars().take(4096).collect::<String>(), "archived": plan.archived, "spec_document_id": plan.spec_document_id, "name_truncated": plan.name.chars().count() > 256, "purpose_truncated": plan.purpose.chars().count() > 4096},
-                "counts": counts,
-                "tickets": &tickets[..tickets.len().min(20)], "tickets_omitted": tickets.len() > 20,
-                "dependencies": &dependencies[..dependencies.len().min(20)], "dependencies_omitted": dependencies.len() > 20,
-                "documents": &documents[..documents.len().min(20)], "documents_omitted": documents.len() > 20,
-                "fetch_more": format!("ticketd plan show {id}")
-            }))
+            let tickets_omitted = tickets.len() > 20;
+            let dependencies_omitted = dependencies.len() > 20;
+            let documents_omitted = documents.len() > 20;
+            tickets.truncate(20);
+            dependencies.truncate(20);
+            documents.truncate(20);
+            Ok(PlanContext {
+                plan: PlanContextHeader {
+                    id: plan.id,
+                    name: plan.name.chars().take(256).collect(),
+                    purpose: plan.purpose.chars().take(4096).collect(),
+                    archived: plan.archived,
+                    spec_document_id: plan.spec_document_id,
+                    name_truncated: plan.name.chars().count() > 256,
+                    purpose_truncated: plan.purpose.chars().count() > 4096,
+                },
+                counts,
+                tickets,
+                tickets_omitted,
+                dependencies,
+                dependencies_omitted,
+                documents,
+                documents_omitted,
+                fetch_more: format!("ticketd plan show {id}"),
+            })
         })
     }
     pub fn set_plan_document(
