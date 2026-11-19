@@ -30,10 +30,13 @@ fn cli_restores_to_an_explicit_recovery_target_without_replacing_the_current_wor
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(printed["safety_backup"].is_string(), "{printed}");
     assert!(
-        String::from_utf8(output.stdout)
+        printed["restored"]
+            .as_str()
             .unwrap()
-            .starts_with("Restored workspace. Safety backup:")
+            .ends_with("recovered.sqlite3")
     );
     assert_eq!(
         ticketd_core::Workspace::open(current)
@@ -82,7 +85,9 @@ fn cli_inspects_attachment_completeness_before_restore() {
     ]))
     .unwrap();
     let backup = dir.path().join("complete.sqlite3");
-    run(&["backup", backup.to_str().unwrap()]);
+    let saved: serde_json::Value =
+        serde_json::from_str(&run(&["backup", backup.to_str().unwrap()])).unwrap();
+    assert_eq!(saved["path"], backup.to_str().unwrap());
     assert!(
         !std::fs::read(&backup)
             .unwrap()
@@ -406,12 +411,27 @@ fn cli_schedules_and_dismisses_reminders() {
         String::from_utf8(output.stdout).unwrap()
     };
     run(&["create", "Remember"]);
-    run(&["reminder", "set", "T-KQ1", "2020-01-01T00:00:00Z"]);
-    assert!(run(&["reminder", "show", "T-KQ1"]).contains("2020"));
-    let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"])).unwrap();
+    let json = |args: &[&str]| serde_json::from_str::<serde_json::Value>(&run(args)).unwrap();
+    let set = json(&["reminder", "set", "T-KQ1", "2020-01-01T00:00:00Z"]);
+    assert_eq!(set["reference"], "T-KQ1");
+    assert!(set["due_at"].as_str().unwrap().contains("2020"));
+    assert_eq!(json(&["reminder", "show", "T-KQ1"]), set);
+    let snoozed = json(&["reminder", "snooze", "T-KQ1", "2021-01-01T00:00:00Z"]);
+    assert!(snoozed["due_at"].as_str().unwrap().contains("2021"));
+    let inbox = json(&["inbox"]);
     assert_eq!(inbox[0]["kind"], "reminder");
-    run(&["reminder", "dismiss", "T-KQ1"]);
-    assert!(run(&["reminder", "show", "T-KQ1"]).contains("No reminder"));
+    assert_eq!(
+        run(&["reminder", "dismiss", "T-KQ1"]).trim(),
+        r#"{"dismissed":true}"#
+    );
+    assert_eq!(
+        run(&["reminder", "dismiss", "T-KQ1"]).trim(),
+        r#"{"dismissed":false}"#
+    );
+    assert_eq!(
+        run(&["reminder", "show", "T-KQ1"]).trim(),
+        r#"{"reference":"T-KQ1","due_at":null}"#
+    );
 }
 
 #[test]
@@ -565,11 +585,15 @@ fn isolated_restore_replaces_only_the_test_workspace() {
     run(&["backup", backup.to_str().unwrap()]);
     run(&["create", "After backup"]);
     let result = run(&["restore-workspace", backup.to_str().unwrap()]);
-    let safety = result
-        .trim()
-        .strip_prefix("Restored workspace. Safety backup: ")
-        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let safety = result["safety_backup"].as_str().unwrap();
     assert!(std::path::Path::new(safety).starts_with(dir.path()));
+    assert!(
+        result["restored"]
+            .as_str()
+            .unwrap()
+            .ends_with("workspace.sqlite3")
+    );
     let restored: serde_json::Value = serde_json::from_str(&run(&["list"])).unwrap();
     assert_eq!(restored.as_array().unwrap().len(), 1);
     assert_eq!(restored[0]["title"], "Before backup");
@@ -998,4 +1022,90 @@ fn cli_document_keep_trash_restore_print_the_bare_document() {
     run(&["create", "Task"]);
     let references = run(&["document", "references", "T-KQ1"]);
     assert!(references.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cli_rejects_empty_patches_and_titles_and_takes_back_what_it_printed() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let try_run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap()
+    };
+    let run = |args: &[&str]| {
+        let output = try_run(args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let fails_with = |args: &[&str], message: &str| {
+        let output = try_run(args);
+        assert!(!output.status.success(), "{args:?} succeeded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{stderr}");
+    };
+    run(&["create", "Ticket"]);
+    let document = run(&["document", "create", "--body", "x"]);
+    let id = document["id"].as_str().unwrap();
+    fails_with(&["document", "change", id], "provide --title");
+    fails_with(
+        &["document", "change", id, "--title", " "],
+        "must not be empty",
+    );
+    let activity = run(&["activity", "add", "T-KQ1", "--brief", "Hi"]);
+    let activity_id = activity["id"].as_str().unwrap();
+    fails_with(
+        &["activity", "edit", "T-KQ1", activity_id],
+        "provide --brief or --file",
+    );
+    let evidence = run(&[
+        "evidence",
+        "add",
+        "T-KQ1",
+        "--kind",
+        "pull-request",
+        "--name",
+        "PR",
+        "--value",
+        "https://example.com/p/1",
+    ]);
+    assert_eq!(evidence["kind"], "pull_request");
+    run(&[
+        "evidence",
+        "edit",
+        "T-KQ1",
+        evidence["id"].as_str().unwrap(),
+        "--kind",
+        "pull_request",
+        "--name",
+        "PR",
+        "--value",
+        "https://example.com/p/1",
+    ]);
+    let plan = run(&["plan", "create", "Hub"]);
+    let plan_id = plan["id"].as_str().unwrap();
+    for n in 0..55 {
+        let reference = run(&["create", &format!("Member {n}")])["reference"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        run(&["plan", "add", plan_id, &reference]);
+    }
+    let first = run(&["graph", plan_id, "--context"]);
+    let continuation = first["continuations"][0].to_string();
+    let more = run(&["graph", plan_id, "--context", "--page", &continuation]);
+    assert!(more["nodes"].as_array().unwrap().len() > first["nodes"].as_array().unwrap().len());
+    fails_with(
+        &["graph", "--context", "--workspace", "--kind", "bogus"],
+        "unknown kind",
+    );
 }

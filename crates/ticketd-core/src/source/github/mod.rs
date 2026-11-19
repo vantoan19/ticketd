@@ -80,7 +80,7 @@ impl GithubConnector {
                 SchemaField {
                     key: "repositories".into(),
                     label: "Repositories".into(),
-                    help: Some("Issues from these repositories are discovered. Type owner/name, then press Enter.".into()),
+                    help: Some("Issues from these repositories are discovered, and tickets can be published only to them. Type owner/name, then press Enter.".into()),
                     required: true,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic { depends_on: vec![] },
@@ -153,11 +153,7 @@ impl GithubConnector {
                     "the source referred to an address outside its API".into(),
                 ));
             }
-            let token = self.credentials.token().ok_or_else(|| {
-                SourceError::Unauthenticated(
-                    "no GitHub credential found; run `gh auth login`, then use Check connection in Settings".into(),
-                )
-            })?;
+            let token = self.credentials.token().ok_or_else(missing_credential)?;
             let headers = request_headers(&token, body.is_some());
             let request = HttpRequest {
                 method,
@@ -192,11 +188,7 @@ impl GithubConnector {
         repository: &str,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
-        let token = self.credentials.token().ok_or_else(|| {
-            SourceError::Unauthenticated(
-                "no GitHub credential found; run `gh auth login`, then use Check connection in Settings".into(),
-            )
-        })?;
+        let token = self.credentials.token().ok_or_else(missing_credential)?;
         let body = serde_json::json!({ "title": request.title, "body": request.body });
         let http = HttpRequest {
             method: Method::Post,
@@ -402,7 +394,7 @@ impl Connector for GithubConnector {
                 ));
                 for _ in 0..OPTION_PAGES {
                     let Some(current) = url.take() else { break };
-                    let (page, next) = self.json(&current, "your repositories")?;
+                    let (page, next) = self.json(&current, "the list of your repositories")?;
                     for repository in page.as_array().into_iter().flatten() {
                         let Some(name) = repository.get("full_name").and_then(Value::as_str) else {
                             continue;
@@ -595,6 +587,15 @@ impl Connector for GithubConnector {
             scope.push(format!("labels={}", labels.join(",")));
         }
         scope.join("&")
+    }
+
+    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
+        require_repository(destination)
+    }
+
+    // GitHub does not tell `Owner/Name` from `owner/name`.
+    fn same_destination(&self, a: &str, b: &str) -> bool {
+        a.eq_ignore_ascii_case(b)
     }
 
     fn publish(
@@ -1051,6 +1052,14 @@ impl Cursor {
     }
 }
 
+/// The shared half of the guidance: each surface adds its own with
+/// [`SourceError::message_for`].
+fn missing_credential() -> SourceError {
+    SourceError::Unauthenticated(
+        "no GitHub credential found. Run `gh auth login` to sign in.".into(),
+    )
+}
+
 fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, SourceError> {
     let status = response.status;
     if (200..300).contains(&status) {
@@ -1062,8 +1071,9 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
         None => text.to_owned(),
     };
     match status {
-        401 => Err(SourceError::Unauthenticated(detail(
-            "GitHub rejected the credential; run `gh auth login`, then use Check connection in Settings",
+        401 => Err(SourceError::Unauthenticated(format!(
+            "{}. Run `gh auth login` to sign in again.",
+            detail("GitHub rejected the credential").trim_end_matches('.')
         ))),
         403 | 429 => {
             let limited = status == 429

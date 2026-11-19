@@ -98,6 +98,19 @@ test("a conflict is an Inbox entry that opens the comparison", async () => {
   expect(syncReview.setRead).toHaveBeenCalledWith(["guid-12"], true);
 });
 
+test("an unread conflict is not announced as all caught up, a read one is", async () => {
+  vi.mocked(syncReview.notices).mockResolvedValue([]);
+  open();
+  await screen.findByText(/^Needs review/);
+  expect(screen.queryByText("You're all caught up")).toBeNull();
+  cleanup();
+  vi.mocked(syncReview.conflicts).mockResolvedValue([
+    { ...conflict, read: true },
+  ]);
+  open();
+  expect(await screen.findByText("You're all caught up")).toBeTruthy();
+});
+
 test("notices need no decision: a removed dependency opens its ticket, an unreadable file only reads", async () => {
   open();
   fireEvent.click(

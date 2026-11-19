@@ -8,10 +8,34 @@ import type { Easing } from "motion/react";
 // A token that is missing (a test without the stylesheet) reads as zero: no
 // motion, never a guessed duration.
 
+// Reads are cached. Reading a computed value flushes any pending style change,
+// and rows read the tokens as they render, so uncached reads were hundreds of
+// forced style recalculations per commit (up to 25ms of one in WebKit). The
+// cache lasts while nothing that sets a token changes: the root's inline style
+// (a theme preview, a test), the input guard's `data-motion`, the system's
+// reduced-motion setting and the set of stylesheets. Each is read without
+// touching style, on every read, so a change is seen at once.
+const cache = new Map<string, string>();
+let cacheKey: string | undefined;
+let reduced: MediaQueryList | null | undefined;
+
 function token(name: string): string {
-  return getComputedStyle(document.documentElement)
-    .getPropertyValue(name)
-    .trim();
+  const root = document.documentElement;
+  reduced ??=
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)")
+      : null;
+  const key = `${root.getAttribute("style") ?? ""}\n${root.dataset.motion ?? ""}\n${reduced?.matches === true}\n${document.styleSheets.length}`;
+  if (key !== cacheKey) {
+    cache.clear();
+    cacheKey = key;
+  }
+  let value = cache.get(name);
+  if (value === undefined) {
+    value = getComputedStyle(root).getPropertyValue(name).trim();
+    cache.set(name, value);
+  }
+  return value;
 }
 
 function number(name: string): number {

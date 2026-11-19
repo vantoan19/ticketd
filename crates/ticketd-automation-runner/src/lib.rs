@@ -13,6 +13,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use tracing::Instrument;
+
 use ticketd_chat_host::{ChatHost, HostError, StopReason, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
     AgentStart, Automation, AutomationAgent, AutomationNotification, AutomationRun, Error,
@@ -141,6 +143,8 @@ impl Runner {
         if !workspace.automations_need_the_runner()? {
             return Ok(false);
         }
+        // Only a pass with work to look at is a span: an idle one would log every few seconds.
+        let _pass = tracing::info_span!("automation_pass").entered();
         let recovered = self.recover(&mut workspace);
         let deleted = self.end_deleted(&mut workspace);
         let queued = queue(&mut workspace);
@@ -196,16 +200,26 @@ impl Runner {
         };
         for run in started {
             let runner = self.clone();
+            // A root span: the run outlives the pass that started it, and the pass's own
+            // duration must not wait for it.
+            let span =
+                tracing::info_span!(parent: None, "automation_run", automation_run_id = %run.id);
             tokio::spawn(async move {
-                {
+                async {
                     let _going = Going(&runner, &run.id);
                     if let Err(reason) = runner.execute(&run).await {
                         runner.abandon(&run.id, &reason);
                     }
                 }
+                .instrument(span)
+                .await;
                 // A slot is free: the next queued run need not wait for the timer.
                 if let Err(error) = runner.start_queued() {
-                    eprintln!("ticketd: queued Automation runs could not be started: {error}");
+                    tracing::warn!(
+                        error_kind = error.kind().code(),
+                        %error,
+                        "queued Automation runs could not be started"
+                    );
                 }
             });
         }
@@ -219,12 +233,18 @@ impl Runner {
         let ended = (self.inner.open_workspace)()
             .and_then(|mut workspace| workspace.fail_automation_run(run_id, reason));
         match ended {
-            Ok(true) => eprintln!("ticketd: Automation run {run_id} ended: {reason}"),
+            // The run stopped before it finished, which is work that stopped. The reason is
+            // words for the person and can carry a Harness's text, so only the run is
+            // logged.
+            Ok(true) => tracing::error!(automation_run_id = run_id, "Automation run abandoned"),
             Ok(false) => {}
             // The next pass finds it Running with nothing behind it and ends it.
-            Err(error) => {
-                eprintln!("ticketd: Automation run {run_id} could not be ended ({reason}): {error}")
-            }
+            Err(error) => tracing::warn!(
+                automation_run_id = run_id,
+                error_kind = error.kind().code(),
+                %error,
+                "Automation run could not be ended"
+            ),
         }
     }
 
@@ -363,9 +383,10 @@ impl Runner {
             return;
         };
         for unconfirmed in host.end_run_agents(chats).await {
-            eprintln!(
-                "ticketd: the agent in Chat {} may still be running: {}",
-                unconfirmed.chat_id, unconfirmed.reason
+            // Why it could not be confirmed can carry the Harness's own output.
+            tracing::warn!(
+                chat_id = unconfirmed.chat_id,
+                "the agent in a Chat may still be running"
             );
         }
     }

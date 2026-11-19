@@ -14,7 +14,9 @@
   min-height: 0;
 }
 .context-view-wrapper {
-  container-type: inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
 }
 .documents-page {
   display: grid;
@@ -338,30 +340,28 @@
   margin: 0;
   padding: 0;
 }
-@container (max-width: 879px) {
-  .documents-page {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .documents-list-view {
-    width: 100%;
-  }
-  .documents-page[data-reading] > .documents-list-view {
-    display: none;
-  }
-  .document-main {
-    padding: 44px 24px 96px;
-  }
+:where([data-width~="max-879"]) .documents-page {
+  grid-template-columns: minmax(0, 1fr);
 }
-@container (max-width: 479px) {
-  .document-main {
-    padding-inline: 16px;
-  }
-  .document-state-row {
-    gap: 4px;
-  }
-  .document-actions {
-    gap: 2px;
-  }
+:where([data-width~="max-879"]) .documents-list-view {
+  width: 100%;
+}
+:where([data-width~="max-879"])
+  .documents-page[data-reading]
+  > .documents-list-view {
+  display: none;
+}
+:where([data-width~="max-879"]) .document-main {
+  padding: 44px 24px 96px;
+}
+:where([data-width~="max-479"]) .document-main {
+  padding-inline: 16px;
+}
+:where([data-width~="max-479"]) .document-state-row {
+  gap: 4px;
+}
+:where([data-width~="max-479"]) .document-actions {
+  gap: 2px;
 }
 
 .document-return {
@@ -375,11 +375,11 @@
 .document-bar:has(.document-plan-crumb) .document-return {
   display: none;
 }
-@container (max-width: 879px) {
-  .document-bar:has(.document-plan-crumb) .document-return {
-    display: flex;
-  }
-  .document-plan-crumb {
-    display: none;
-  }
+:where([data-width~="max-879"])
+  .document-bar:has(.document-plan-crumb)
+  .document-return {
+  display: flex;
+}
+:where([data-width~="max-879"]) .document-plan-crumb {
+  display: none;
 }

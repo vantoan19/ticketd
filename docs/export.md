@@ -22,7 +22,9 @@ nullable `kind` (`local_snapshot`, `external_reference`, or `uploaded_copy`), nu
 `external_url`, or an actionable `omission`. Missing/foreign references preserve
 their readable Markdown links and cause `partial`; consumers must inspect status
 even when the command succeeds. Files with the same name get identity-prefixed,
-portable filenames; repeated identities share copied bytes. Code examples are
+portable filenames (letters and digits of any script are kept; characters that are
+unsafe in a path, spaces and other punctuation become `_`, and a name over 120 bytes
+is cut from the end, keeping its extension); repeated identities share copied bytes. Code examples are
 left literal. No private storage locator or credential is exported.
 
 External Drive references use their last-known validated provider viewer URL,

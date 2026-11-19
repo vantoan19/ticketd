@@ -11,6 +11,7 @@ use std::io::{Read, Write};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
 use super::provider::{credential_lock, token_request};
@@ -66,9 +67,8 @@ impl Failure {
             .filter_map(|error| error["reason"].as_str())
             .collect();
         let has_reason = |wanted: &[&str]| reasons.iter().any(|reason| wanted.contains(reason));
-        let retry_after = header(response, "retry-after")
-            .and_then(|seconds| seconds.trim().parse().ok())
-            .map(Duration::from_secs);
+        let retry_after =
+            header(response, "retry-after").and_then(|value| retry_after(value, Utc::now()));
         match response.status {
             401 => Self::Unauthorized,
             429 => Self::RateLimited { retry_after },
@@ -167,6 +167,31 @@ fn select_file() -> DriveError {
         DriveErrorKind::SelectFile,
         "this file is not authorized for ticketd; open the Google Drive tab in the attachment picker and select this file; account access alone does not authorize it",
     )
+}
+
+/// A `Retry-After` value as the wait from `now`: delay-seconds, or an HTTP-date in
+/// any of the three forms RFC 9110 §5.6.7 has recipients accept. A date already past
+/// means no wait; the caller clamps a long one.
+fn retry_after(value: &str, now: DateTime<Utc>) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let date = http_date(value)?;
+    Some((date - now).to_std().unwrap_or_default())
+}
+
+fn http_date(value: &str) -> Option<DateTime<Utc>> {
+    // IMF-fixdate, the form senders must use: "Sun, 06 Nov 1994 08:49:37 GMT".
+    if let Ok(date) = DateTime::parse_from_rfc2822(value) {
+        return Some(date.with_timezone(&Utc));
+    }
+    // The obsolete RFC 850 ("Sunday, 06-Nov-94 08:49:37 GMT") and asctime
+    // ("Sun Nov  6 08:49:37 1994") forms.
+    ["%A, %d-%b-%y %H:%M:%S GMT", "%a %b %e %H:%M:%S %Y"]
+        .iter()
+        .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
+        .map(|date| date.and_utc())
 }
 
 pub(crate) fn header<'r>(response: &'r DriveResponse, name: &str) -> Option<&'r str> {
@@ -576,5 +601,37 @@ fn send_chunks<E: From<DriveError>>(
             )
             .into());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(rfc3339: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(rfc3339)
+            .map(|date| date.with_timezone(&Utc))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn retry_after_reads_seconds_and_every_http_date_form() {
+        let now = at("1994-11-06T08:49:07Z");
+        let thirty = Some(Duration::from_secs(30));
+        assert_eq!(retry_after(" 30 ", now), thirty);
+        assert_eq!(retry_after("Sun, 06 Nov 1994 08:49:37 GMT", now), thirty);
+        assert_eq!(retry_after("Sunday, 06-Nov-94 08:49:37 GMT", now), thirty);
+        assert_eq!(retry_after("Sun Nov  6 08:49:37 1994", now), thirty);
+    }
+
+    #[test]
+    fn retry_after_in_the_past_waits_nothing_and_nonsense_is_ignored() {
+        let now = at("1994-11-06T08:49:07Z");
+        assert_eq!(
+            retry_after("Sun, 06 Nov 1994 08:00:00 GMT", now),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(retry_after("soon", now), None);
+        assert_eq!(retry_after("-5", now), None);
     }
 }

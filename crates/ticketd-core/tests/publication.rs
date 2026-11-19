@@ -25,7 +25,7 @@ use ticketd_core::{
         ActionKind, AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema,
         ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
         DiscoveryRequest, Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
+        ExternalState, FieldIssue, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
         PublicationCandidates, PublicationError, PublicationSearch, PublishOptions, PublishRequest,
         RefreshOptions, Resolution, ResolveOptions, SchemaField, SourceError, ValueFormat,
     },
@@ -123,11 +123,11 @@ impl Connector for Fake {
                     key: "repositories".into(),
                     label: "Repositories".into(),
                     help: None,
-                    required: true,
+                    required: false,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic { depends_on: vec![] },
                         allow_custom: true,
-                        min_items: 1,
+                        min_items: 0,
                         max_items: 3,
                         format: Some(ValueFormat::OwnerName),
                     },
@@ -183,12 +183,10 @@ impl Connector for Fake {
         self.answer(|remote| {
             let (repository, number) = text.rsplit_once('#').unwrap_or((destination, text));
             if repository != destination {
-                return Err(SourceError::InvalidConfiguration(vec![
-                    ticketd_core::source::FieldIssue {
-                        field: "issue".into(),
-                        message: format!("is not in {destination}"),
-                    },
-                ]));
+                return Err(SourceError::InvalidConfiguration(vec![FieldIssue {
+                    field: "issue".into(),
+                    message: format!("is not in {destination}"),
+                }]));
             }
             let id: u64 = number
                 .parse()
@@ -222,11 +220,28 @@ impl Connector for Fake {
         })
     }
 
+    // Like GitHub, a destination must look like `owner/name`.
+    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
+        match destination.split_once('/') {
+            Some((owner, name)) if !owner.is_empty() && !name.is_empty() => Ok(()),
+            _ => Err(SourceError::InvalidConfiguration(vec![FieldIssue {
+                field: "destination".into(),
+                message: "must be a repository in the form owner/name".into(),
+            }])),
+        }
+    }
+
+    // Like GitHub, owner and repository names ignore case.
+    fn same_destination(&self, a: &str, b: &str) -> bool {
+        a.eq_ignore_ascii_case(b)
+    }
+
     fn destinations(&self, config: &ConfigValues) -> Vec<String> {
-        config["repositories"]
-            .as_array()
-            .unwrap()
-            .iter()
+        config
+            .get("repositories")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
             .map(|v| v.as_str().unwrap().to_owned())
             .collect()
     }
@@ -697,6 +712,151 @@ fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
     assert_eq!(preview.provider_name, "Fake");
     assert_eq!(preview.eligibility, Eligibility::Eligible);
     assert_eq!(f.created(), 0);
+}
+
+#[test]
+fn preview_refuses_a_malformed_destination_the_way_publishing_does() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body.");
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", Some("nonsense"))
+        .unwrap();
+    let Eligibility::Ineligible { reason, message } = preview.eligibility else {
+        panic!("a malformed destination must not be eligible");
+    };
+    assert_eq!(reason, IneligibleReason::InvalidDestination);
+    assert!(
+        message.contains("nonsense") && message.contains("owner/name"),
+        "{message}"
+    );
+    // The publish refuses it too, before recording an attempt.
+    let mut publish = options();
+    publish.destination = Some("nonsense".into());
+    assert!(
+        f.workspace
+            .publish_ticket(&f.engine, &ticket.reference, &publish)
+            .is_err()
+    );
+    assert!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(f.created(), 0);
+}
+
+fn save_repositories(f: &mut Fixture, repositories: &[&str]) {
+    f.workspace
+        .save_source(
+            &f.engine,
+            "fake",
+            &values(json!({"repositories": repositories})),
+        )
+        .unwrap();
+}
+
+fn preview_reason(f: &Fixture, reference: &str, destination: &str) -> Option<IneligibleReason> {
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, reference, "fake", Some(destination))
+        .unwrap();
+    match preview.eligibility {
+        Eligibility::Eligible => None,
+        Eligibility::Ineligible { reason, .. } => Some(reason),
+    }
+}
+
+#[test]
+fn a_listed_destination_is_an_allowlist_for_preview_and_publish() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &["acme/tracker"]);
+    let ticket = describe(&mut f, "Escalate", "Private roadmap text.");
+
+    assert_eq!(preview_reason(&f, &ticket.reference, "acme/tracker"), None);
+    let preview = f
+        .workspace
+        .preview_publication(
+            &f.engine,
+            &ticket.reference,
+            "fake",
+            Some("acme/secret-roadmap"),
+        )
+        .unwrap();
+    let Eligibility::Ineligible { reason, message } = preview.eligibility else {
+        panic!("a destination outside the list must not be eligible");
+    };
+    assert_eq!(reason, IneligibleReason::DestinationNotAllowed);
+    assert!(
+        message.contains("acme/secret-roadmap") && message.contains("acme/tracker"),
+        "{message}"
+    );
+
+    // The publish refuses it before any attempt is recorded or call is made.
+    let mut publish = options();
+    publish.destination = Some("acme/secret-roadmap".into());
+    let error = f
+        .workspace
+        .publish_ticket(&f.engine, &ticket.reference, &publish)
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::Publication(PublicationError::Ineligible {
+                reason: IneligibleReason::DestinationNotAllowed,
+                ..
+            })
+        ),
+        "{error:?}"
+    );
+    assert!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(f.created(), 0);
+
+    // The listed one still publishes.
+    publish.destination = Some("acme/tracker".into());
+    f.workspace
+        .publish_ticket(&f.engine, &ticket.reference, &publish)
+        .unwrap();
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn destination_names_are_compared_without_regard_to_case() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &["Acme/Tracker"]);
+    let ticket = describe(&mut f, "Escalate", "Body.");
+    assert_eq!(preview_reason(&f, &ticket.reference, "acme/tracker"), None);
+    let mut publish = options();
+    publish.destination = Some("ACME/TRACKER".into());
+    f.workspace
+        .publish_ticket(&f.engine, &ticket.reference, &publish)
+        .unwrap();
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn an_empty_destination_list_accepts_any_well_formed_destination() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &[]);
+    let ticket = describe(&mut f, "Escalate", "Body.");
+    assert_eq!(preview_reason(&f, &ticket.reference, "any/repo"), None);
+    // Still checked for form.
+    assert_eq!(
+        preview_reason(&f, &ticket.reference, "nonsense"),
+        Some(IneligibleReason::InvalidDestination)
+    );
+    let mut publish = options();
+    publish.destination = Some("any/repo".into());
+    f.workspace
+        .publish_ticket(&f.engine, &ticket.reference, &publish)
+        .unwrap();
+    assert_eq!(f.created(), 1);
 }
 
 #[test]

@@ -138,6 +138,43 @@ test("a failed sign-in is reported and leaves the card as it was", async () => {
   ).toBeTruthy();
 });
 
+test("a build without a Drive app configuration says so up front and holds back sign-in", async () => {
+  api.status.mockResolvedValue(notConnected());
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "drive_configuration"
+      ? { configured: false, message: "This build does not include Drive." }
+      : undefined,
+  );
+  show();
+  expect(
+    await screen.findByText("Google Drive isn't set up on this computer"),
+  ).toBeTruthy();
+  const connect = screen.getByRole("button", { name: "Connect Google Drive" });
+  expect(connect.hasAttribute("disabled")).toBe(true);
+});
+
+test("a sign-in that cannot start names the missing configuration, not an unconfirmed result", async () => {
+  api.status.mockResolvedValue(notConnected());
+  api.connect.mockImplementation(real.connect);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready" };
+    throw {
+      code: "drive_unconfigured",
+      message:
+        "This build does not include a valid Google Drive app configuration",
+    };
+  });
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Connect Google Drive" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("no Google Drive app configuration");
+  expect(alert.textContent).not.toContain("couldn't be confirmed");
+  expect(within(alert).queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
 test("uploading this Workspace is the preselected setup choice", async () => {
   api.status.mockResolvedValue(choosing());
   api.uploadWorkspace.mockResolvedValue(

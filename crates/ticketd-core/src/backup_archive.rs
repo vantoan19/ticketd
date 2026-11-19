@@ -1,7 +1,7 @@
 //! Single-file attachment backup container, independent of the workspace schema.
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -115,6 +115,29 @@ pub(crate) fn retained_file_inventory(root: &Path) -> Result<Vec<(String, PathBu
     Ok(files)
 }
 
+/// The retained file to read for `source`. Cleanup holds the upload lock, but canonical Undo may
+/// restore a file after inventory capture. It can only move quarantine -> bytes here.
+fn open_retained(source: &Path, relative: &str) -> Result<PathBuf, Error> {
+    match fs::metadata(source) {
+        Ok(_) => Ok(source.to_path_buf()),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && relative.contains("/quarantine/") =>
+        {
+            let parent = source
+                .parent()
+                .and_then(Path::parent)
+                .ok_or_else(|| Error::Backup("invalid retained byte path".into()))?;
+            Ok(parent.join("bytes").join(
+                source
+                    .file_name()
+                    .ok_or_else(|| Error::Backup("invalid retained filename".into()))?,
+            ))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// The caller holds the upload lock; ordinary writes can resume while bytes stream.
 pub(crate) fn pack(connection: &Connection, files: Vec<(String, PathBuf)>) -> Result<(), Error> {
     let has_attachments = table_exists(connection, "attachments")?
@@ -131,48 +154,32 @@ pub(crate) fn pack(connection: &Connection, files: Vec<(String, PathBuf)>) -> Re
          CREATE TABLE ticketd_backup_files(path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL);"
     )?;
     for (relative, source) in files {
-        let mut input = match File::open(&source) {
-            Ok(file) => file,
-            // Cleanup holds the upload lock, but canonical Undo may restore a file
-            // after inventory capture. It can only move quarantine -> bytes here.
-            Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound
-                    && relative.contains("/quarantine/") =>
-            {
-                let parent = source
-                    .parent()
-                    .and_then(Path::parent)
-                    .ok_or_else(|| Error::Backup("invalid retained byte path".into()))?;
-                File::open(
-                    parent.join("bytes").join(
-                        source
-                            .file_name()
-                            .ok_or_else(|| Error::Backup("invalid retained filename".into()))?,
-                    ),
-                )?
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let path = open_retained(&source, &relative)?;
+        let mut input = File::open(&path)?;
         let size = input.metadata()?.len();
-        let blob_size = i32::try_from(size).map_err(|_| {
-            Error::Backup(format!(
-                "retained file exceeds the backup file size limit: {relative}"
-            ))
-        })?;
-        tx.execute("INSERT INTO ticketd_backup_files(path, size_bytes, sha256, data) VALUES (?1, ?2, '', ?3)", params![relative, size, ZeroBlob(blob_size)])?;
-        let id = tx.last_insert_rowid();
-        let mut blob = tx.blob_open(MAIN_DB, "ticketd_backup_files", "data", id, false)?;
-        let (copied, hash) = transfer(&mut input, &mut blob)?;
-        drop(blob);
-        if copied != size {
+        let blob_size = i32::try_from(size)
+            .ok()
+            .filter(|_| size <= crate::attachments::MAX_BACKUP_FILE_BYTES)
+            .ok_or_else(|| too_large(&tx, &relative, size))?;
+        // The checksum is known before the row is written. Updating a row afterwards would
+        // rewrite its whole blob and leave the old pages free, doubling the backup's size.
+        let (hashed, hash) = transfer(&mut input, &mut std::io::sink())?;
+        if hashed != size {
             return Err(Error::Backup(format!(
                 "attachment changed during backup: {relative}"
             )));
         }
-        tx.execute(
-            "UPDATE ticketd_backup_files SET sha256=?1 WHERE rowid=?2",
-            params![hash, id],
-        )?;
+        tx.execute("INSERT INTO ticketd_backup_files(path, size_bytes, sha256, data) VALUES (?1, ?2, ?3, ?4)", params![relative, size, hash, ZeroBlob(blob_size)])?;
+        let id = tx.last_insert_rowid();
+        let mut blob = tx.blob_open(MAIN_DB, "ticketd_backup_files", "data", id, false)?;
+        input.seek(SeekFrom::Start(0))?;
+        let (copied, copied_hash) = transfer(&mut input, &mut blob)?;
+        drop(blob);
+        if copied != size || copied_hash != hash {
+            return Err(Error::Backup(format!(
+                "attachment changed during backup: {relative}"
+            )));
+        }
     }
     let inventory = inventory_digest(&tx)?;
     tx.execute(
@@ -181,6 +188,27 @@ pub(crate) fn pack(connection: &Connection, files: Vec<(String, PathBuf)>) -> Re
     )?;
     tx.commit()?;
     validate(connection)
+}
+
+/// A retained file too big for a backup. Name the Attachment and say what to do: the backup
+/// would otherwise fail on every attempt, and nothing else can fix it.
+fn too_large(connection: &Connection, relative: &str, size: u64) -> Error {
+    let limit = crate::attachments::MAX_BACKUP_FILE_BYTES;
+    let id = relative.split('/').next().unwrap_or_default();
+    let named: Option<String> = connection
+        .query_row(
+            "SELECT display_name FROM attachments WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .ok();
+    let which = match &named {
+        Some(name) => format!("the attachment '{name}' ({id})"),
+        None => format!("the retained file {relative}"),
+    };
+    Error::Backup(format!(
+        "{which} is {size} bytes, more than the {limit} bytes a backup can hold, so no backup can be made until it is removed from storage. Save a copy elsewhere with `ticketd attachment export {id} <new-path>`, then remove it with `ticketd attachment quarantine {id}` and `ticketd attachment purge --confirm {id}` (it must not be in use)"
+    ))
 }
 
 pub(crate) fn container_version(connection: &Connection) -> Result<Option<i64>, Error> {

@@ -345,18 +345,68 @@ impl Workspace {
     }
 }
 
+/// The most bytes of a file's own name kept in an export, so the identity prefix and the name
+/// stay within the 255 bytes most file systems allow.
+const EXPORT_NAME_BYTES: usize = 120;
+
+/// A portable name for an exported file, prefixed with its identity. Letters and digits of
+/// any script are kept; characters that are unsafe in a path on some system (`/ \ : * ? " < > |`,
+/// control characters, spaces and other punctuation) become `_`. A long name is cut from the
+/// end, keeping its extension.
 fn export_filename(id: &str, filename: &str) -> String {
-    let name: String = filename
+    let mut name: String = filename
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
                 c
             } else {
                 '_'
             }
         })
         .collect();
-    format!("files/{id}-{}", &name[name.len().saturating_sub(100)..])
+    // No hidden files, and no trailing dot, which Windows drops.
+    if name.starts_with('.') {
+        name.replace_range(..1, "_");
+    }
+    if name.ends_with('.') {
+        name.pop();
+        name.push('_');
+    }
+    let (stem, extension) = match name.rfind('.') {
+        Some(dot) if name.len() - dot <= 17 => name.split_at(dot),
+        _ => (name.as_str(), ""),
+    };
+    let mut stem = stem.to_owned();
+    // Device names are reserved on Windows whatever their extension.
+    if matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    ) {
+        stem.insert(0, '_');
+    }
+    while stem.len() + extension.len() > EXPORT_NAME_BYTES && stem.pop().is_some() {}
+    format!("files/{id}-{stem}{extension}")
 }
 
 fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -652,4 +702,31 @@ fn destination_range(body: &str, start: usize, end: usize) -> std::ops::Range<us
         }
     }
     start..end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_filename;
+
+    #[test]
+    fn exported_names_keep_letters_of_any_script_and_replace_unsafe_characters() {
+        assert_eq!(
+            export_filename("id", "日本語 фото.png"),
+            "files/id-日本語_фото.png"
+        );
+        assert_eq!(
+            export_filename("id", "a/b\\c:d*e?.txt"),
+            "files/id-a_b_c_d_e_.txt"
+        );
+        assert_eq!(export_filename("id", ".hidden"), "files/id-_hidden");
+        assert_eq!(export_filename("id", "CON.txt"), "files/id-_CON.txt");
+    }
+
+    #[test]
+    fn long_names_are_cut_from_the_end_on_a_character_boundary_keeping_the_extension() {
+        let long = format!("{}.png", "日".repeat(100));
+        let shown = export_filename("id", &long);
+        assert!(shown.ends_with(".png") && shown.starts_with("files/id-日"));
+        assert!(shown.len() <= "files/id-".len() + 120);
+    }
 }

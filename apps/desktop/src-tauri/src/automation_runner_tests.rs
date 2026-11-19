@@ -119,6 +119,66 @@ async fn asking_for_the_runner_again_does_not_end_runs_that_began_since() {
     assert_eq!(stopped.reason.as_deref(), Some("You stopped this run."));
 }
 
+/// A pass that fails is tried again every few seconds, so its log line must not repeat:
+/// one when the failure starts or changes kind, and one when passes work again.
+#[tokio::test]
+async fn a_failing_pass_logs_when_it_starts_changes_kind_and_recovers_not_on_every_attempt() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    Workspace::open(&path).unwrap();
+    let mode = Arc::new(AtomicU8::new(0));
+    let opener: WorkspaceOpener = {
+        let mode = Arc::clone(&mode);
+        Arc::new(move || match mode.load(Ordering::SeqCst) {
+            0 => Err(Error::ChatNotFound("c".into())),
+            1 => Err(Error::Attachment("a".into())),
+            _ => ticketd_core::WorkspaceSession::for_file(&path)?.workspace(),
+        })
+    };
+    let chats = Chats::new(opener.clone(), Vec::new(), Vec::new(), None);
+    let runner = AutomationRunner::new(chats, opener, Arc::new(|_| Ok(())));
+    let logs = ticketd_diagnostics::DesktopLogs::open(dir.path().join("logs"), Default::default());
+
+    logs.with_default(|| {
+        for step in [0, 0, 0, 1, 1, 2, 2, 2] {
+            mode.store(step, Ordering::SeqCst);
+            runner.pass();
+        }
+    });
+
+    let mut text = String::new();
+    for entry in std::fs::read_dir(dir.path().join("logs")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "log") {
+            text.push_str(&std::fs::read_to_string(path).unwrap());
+        }
+    }
+    let lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let summary: Vec<_> = lines
+        .iter()
+        .map(|line| {
+            (
+                line["level"].as_str().unwrap(),
+                line["message"].as_str().unwrap(),
+                line["error_kind"].as_str().unwrap_or(""),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("WARN", "an Automation pass failed", "not_found"),
+            ("WARN", "an Automation pass failed", "failed"),
+            ("INFO", "Automation passes work again", ""),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn the_runner_is_told_why_there_is_no_chat_host() {
     let f = Fixture::new();

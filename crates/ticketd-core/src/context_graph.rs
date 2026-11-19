@@ -132,6 +132,8 @@ pub struct ContextGraphEdge {
 pub struct ContextGraphPage {
     pub anchor: String,
     pub group: usize,
+    /// A continuation's `next_offset` is accepted as is, so what a graph emits can be passed back.
+    #[serde(alias = "next_offset")]
     pub offset: usize,
 }
 #[derive(Debug, Serialize)]
@@ -535,11 +537,62 @@ pub struct WorkspaceGraph {
     pub omitted_groups: Vec<String>,
 }
 
+/// The item types a workspace graph can be limited to.
+const NODE_KINDS: [&str; 3] = ["ticket", "document", "plan"];
+
+/// The relationship names a workspace graph can be limited to: every group's kind, and `spec`,
+/// the name of a Plan's primary-spec connection.
+fn relationship_names() -> Vec<&'static str> {
+    let mut names: Vec<&str> = GROUPS.iter().map(|(_, kind)| *kind).collect();
+    names.push("spec");
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Reject a filter or cursor that could only produce an empty or restarted page, so a caller
+/// is told instead of looping on a first page that never advances.
+fn validate_workspace_request(request: &WorkspaceGraphRequest) -> Result<(), Error> {
+    if let Some(kind) = request.kind.as_deref().filter(|kind| !kind.is_empty())
+        && !NODE_KINDS.contains(&kind)
+    {
+        return Err(Error::InvalidGraphRequest(format!(
+            "unknown kind '{kind}'; use one of {}",
+            NODE_KINDS.join(", ")
+        )));
+    }
+    if let Some(wanted) = request
+        .relationship
+        .as_deref()
+        .filter(|name| !name.is_empty())
+    {
+        let names = relationship_names();
+        if !names.contains(&wanted) {
+            return Err(Error::InvalidGraphRequest(format!(
+                "unknown relationship '{wanted}'; use one of {}",
+                names.join(", ")
+            )));
+        }
+    }
+    if let Some(cursor) = request
+        .cursor
+        .as_deref()
+        .filter(|cursor| !cursor.is_empty())
+        && !cursor.contains('|')
+    {
+        return Err(Error::InvalidGraphRequest(
+            "invalid cursor; pass a next_cursor returned by a previous page".into(),
+        ));
+    }
+    Ok(())
+}
+
 impl Workspace {
     pub fn workspace_graph(
         &self,
         request: &WorkspaceGraphRequest,
     ) -> Result<WorkspaceGraph, Error> {
+        validate_workspace_request(request)?;
         crate::read_scope::run(&self.connection, |tx| {
             let node_limit = if request.hydrate_only {
                 request.node_limit.unwrap_or(100).clamp(1, 250)
@@ -642,12 +695,18 @@ impl Workspace {
                 // deep in the workspace is not hidden behind pages of unrelated items.
                 let mut related = String::new();
                 if let Some(wanted) = request.relationship.as_deref() {
+                    // `spec` is the primary-spec flavour of a Document connection.
+                    let (group_kind, only_spec) = if wanted == "spec" {
+                        ("document", " AND c IS NOT NULL")
+                    } else {
+                        (wanted, "")
+                    };
                     let probes: Vec<String> = GROUPS
                         .iter()
-                        .filter(|(_, kind)| *kind == wanted)
+                        .filter(|(_, kind)| *kind == group_kind)
                         .map(|(sql, _)| {
                             format!(
-                                "EXISTS (WITH g(a, b, c) AS ({}) SELECT 1 FROM g WHERE b <> '')",
+                                "EXISTS (WITH g(a, b, c) AS ({}) SELECT 1 FROM g WHERE b <> ''{only_spec})",
                                 sql.replace("?1", "e.id").replace("?2", "1000")
                             )
                         })

@@ -4,6 +4,7 @@ import {
   centerZoom,
   connectionRows,
   describeEdge,
+  fitViewport,
   flowEdges,
   labelledConnections,
   opensAsMap,
@@ -319,5 +320,48 @@ describe("isUserMove", () => {
     expect(isUserMove(new Event("mousedown"))).toBe(true);
     expect(isUserMove({ sync: true })).toBe(false);
     expect(isUserMove(null)).toBe(false);
+  });
+});
+
+describe("fitViewport", () => {
+  const padding = { top: 52, right: 24, bottom: 56, left: 24 };
+  const size = { width: 1000, height: 600 };
+  const zoom = { min: 1, max: 1 };
+
+  it("centres a graph that fits in the padded view", () => {
+    expect(
+      fitViewport({ x: 0, y: 0, width: 500, height: 200 }, size, padding, zoom),
+    ).toEqual({ zoom: 1, x: 24 + (952 - 500) / 2, y: 52 + (492 - 200) / 2 });
+  });
+
+  it("opens a graph taller than the view on its top, not its middle", () => {
+    // 2000px of graph at 100%: React Flow would centre it and cut the first
+    // island's header off the top.
+    expect(
+      fitViewport(
+        { x: 100, y: 40, width: 500, height: 2000 },
+        size,
+        padding,
+        zoom,
+      ),
+    ).toEqual({ zoom: 1, x: 24 + (952 - 500) / 2 - 100, y: 52 - 40 });
+  });
+
+  it("aligns a graph wider than the view to its left padding", () => {
+    expect(
+      fitViewport({ x: 0, y: 0, width: 3000, height: 100 }, size, padding, zoom)
+        .x,
+    ).toBe(24);
+  });
+
+  it("zooms out to fit when the zoom range allows it", () => {
+    const view = fitViewport(
+      { x: 0, y: 0, width: 2000, height: 100 },
+      size,
+      padding,
+      { min: 0.1, max: 1 },
+    );
+    expect(view.zoom).toBeCloseTo(0.476, 3);
+    expect(view.x).toBeCloseTo(24, 5);
   });
 });

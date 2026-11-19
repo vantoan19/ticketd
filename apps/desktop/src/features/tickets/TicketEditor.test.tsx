@@ -532,6 +532,16 @@ test("an empty title is never sent: the field says why and the saved title stays
   expect(screen.getByRole("status").textContent).toBe("");
 });
 
+test("a title stays one line: pasted line breaks become spaces and Enter adds none", () => {
+  bridge.invoke.mockResolvedValue(initial);
+  render(<Harness />);
+  const title = screen.getByLabelText<HTMLTextAreaElement>("Title");
+  expect(title.maxLength).toBe(1000);
+  fireEvent.change(title, { target: { value: "First\r\n  second\nthird" } });
+  expect(title.value).toBe("First second third");
+  expect(fireEvent.keyDown(title, { key: "Enter" })).toBe(false);
+});
+
 test("a save the core refuses as stale keeps the draft and offers the choice", async () => {
   vi.useFakeTimers();
   const agent = { ...initial, title: "Agent title", body: "Agent wrote this" };

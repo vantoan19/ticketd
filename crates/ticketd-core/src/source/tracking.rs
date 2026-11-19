@@ -827,6 +827,8 @@ impl Workspace {
         engine: &Engine,
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
+        let _refresh =
+            tracing::info_span!("source_refresh", ticket_ref = options.ticket.as_deref()).entered();
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = self.tracked(options.ticket.as_deref())?;
         let mut gathered = Gathered {
@@ -857,6 +859,8 @@ impl Workspace {
             all
         };
         for provider in providers {
+            // Every line about this source, until the end of its turn in the loop.
+            let _source = tracing::info_span!("source", source_id = provider.as_str()).entered();
             let config = saved.iter().find(|s| s.provider == provider);
             if let Some(source) = config {
                 gathered
@@ -1421,7 +1425,10 @@ fn apply_issue(
             },
         )
         .optional()?;
-    let title = match issue.title.trim() {
+    // A provider's title may hold line breaks or run very long; the ticket keeps the
+    // same one-line, bounded title a person could write (see `imported_title`).
+    let imported = crate::ticket_change::imported_title(&issue.title);
+    let title = match imported.as_str() {
         "" => issue.display.as_str(),
         title => title,
     };

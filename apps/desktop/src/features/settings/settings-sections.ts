@@ -10,6 +10,7 @@ import {
   Keyboard,
   MessageCircle,
   Paperclip,
+  ScrollText,
   Search,
   Terminal,
   Upload,
@@ -69,6 +70,12 @@ export const SETTINGS_SECTIONS = [
     label: "Keyboard shortcuts",
     group: "Help",
     icon: Keyboard,
+  },
+  {
+    id: "diagnostics",
+    label: "Diagnostics",
+    group: "Help",
+    icon: ScrollText,
   },
   { id: "about", label: "About", group: "Help", icon: Info },
 ] as const satisfies readonly {

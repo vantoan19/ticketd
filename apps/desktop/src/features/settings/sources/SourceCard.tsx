@@ -68,6 +68,16 @@ const SIGNED_OUT: readonly string[] = [
   "forbidden",
 ];
 
+/**
+ * What to do when the credential is missing or refused. Not signed in needs a
+ * sign-in, not "connecting again", and the way to it is named.
+ */
+function signInStep(connector: SourceEntry["connector"]) {
+  return connector.provider === "github"
+    ? "Run “gh auth login” in a terminal, then choose Check connection."
+    : `Sign in to ${connector.name} on this computer, then choose Check connection.`;
+}
+
 function fieldErrors(failure: SourceFailure | null) {
   const grouped: Record<string, string[]> = {};
   for (const issue of failure?.fields ?? [])
@@ -456,6 +466,27 @@ export function SourceCard({
     account?.status === "signed_out" || account?.status === "failed"
       ? account.failure
       : null;
+  // Missing credentials are one fact told once, on the account row, with the
+  // way to fix it. The sync health row repeats it only when the account has
+  // not been found signed out itself.
+  const needsSignIn = (code: string) =>
+    code === "unauthenticated" || code === "not_signed_in";
+  const accountSentence =
+    accountFailure && needsSignIn(accountFailure.code)
+      ? signInStep(connector)
+      : accountFailure?.sentence;
+  const healthSentence = health?.error
+    ? needsSignIn(health.error.code)
+      ? signInStep(connector)
+      : describeFailure(
+          { code: health.error.code, message: health.error.message },
+          `sync ${connector.name}`,
+        ).sentence
+    : undefined;
+  const healthRepeatsAccount =
+    account?.status === "signed_out" &&
+    !!health?.error &&
+    SIGNED_OUT.includes(health.error.code);
 
   return (
     <SettingsPage
@@ -496,7 +527,9 @@ export function SourceCard({
             }
             title={
               <StatusLabel tone={savedTone}>
-                {saved ? `Connected as ${saved.account}` : "Not connected"}
+                {saved
+                  ? `${account?.status === "signed_out" ? "Saved for" : "Connected as"} ${saved.account}`
+                  : "Not connected"}
               </StatusLabel>
             }
             description={
@@ -513,8 +546,8 @@ export function SourceCard({
             }
             title={<span role="status">{accountLabel}</span>}
             description={
-              accountFailure
-                ? accountFailure.sentence
+              accountSentence
+                ? accountSentence
                 : signedIn
                   ? `ticketd uses your own ${connector.name} permissions.`
                   : `ticketd uses your own ${connector.name} sign-in and permissions.`
@@ -525,7 +558,7 @@ export function SourceCard({
               ) : undefined
             }
           />
-          {saved && health && !syncing && (
+          {saved && health && !syncing && !healthRepeatsAccount && (
             <SettingsRow
               title={
                 <StatusLabel tone="attention">
@@ -538,6 +571,7 @@ export function SourceCard({
                   </span>
                 </StatusLabel>
               }
+              description={healthSentence}
               trailing={
                 health.error && (
                   <FailureDetails small details={health.error.message} />
