@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Use GitHub Issues in `vantoan19/ticketd` for features, bugs, research, implementation plans, and progress. Use the `gh` CLI; keep durable product requirements in `docs/mvp-spec.md`.
+Use GitHub Issues in `vantoan19/ticketd` for features, bugs, research, implementation plans, and progress. Use the `gh` CLI; keep durable product requirements in `docs/product.md`.
 
 Before the first issue write in a session, verify the target with `gh repo view --json nameWithOwner`. Use `--repo vantoan19/ticketd` when outside this checkout or when the default target is ambiguous.
 

@@ -487,7 +487,7 @@ macOS, an autostart entry on Linux). The page reaches it through two ticketd
 commands; the plugin's own commands are granted to no window. There is no
 service: with ticketd quit, nothing runs.
 
-The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#21-native-agent-chats).
+The product behavior is in [Native Chats](product.md#native-chats).
 Provider support clarification and live compatibility checks remain requirements
 before release; this architecture does not claim they have passed. Exact SQL
 schema, Rust signatures, bridge framing, buffer limits and version ranges are
@@ -870,7 +870,7 @@ A future server may call the same core workflow interface. Personal sync between
 
 ## Related documents
 
-- [Product specification](mvp-spec.md)
+- [Product description](product.md)
 - [Domain glossary](../GLOSSARY.md)
 - [Atomic writes and retries](adr/0002-atomic-writes-and-retries.md)
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
@@ -966,7 +966,7 @@ change. New relationship types use that prefix to participate.
 
 ## Context-management extension
 
-The confirmed target model adds Documents, Activities, and Plans; see [product behavior](mvp-spec.md#16-context-management) and
+The confirmed target model adds Documents, Activities, and Plans; see [product behavior](product.md#context-management) and
 [ADR 0007](adr/0007-context-storage-and-graph-queries.md). Earlier implementation
 names and command examples in this architecture describe the current runtime,
 not compatibility requirements for the extension. No migration of development

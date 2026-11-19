@@ -79,12 +79,11 @@ and the review process. You do not need an AI assistant or private skills.
 | [Export format](docs/export.md)               | Portable content and backup boundaries                       |
 | [Architecture](docs/architecture.md)          | Shared core, desktop, and CLI responsibilities               |
 | [Domain glossary](GLOSSARY.md)                | Canonical product terminology                                |
-| [Product specification](docs/mvp-spec.md)     | Product direction, including planned behavior                |
+| [Product description](docs/product.md)        | What ticketd does today                                      |
 | [Release guide](docs/releasing.md)            | Maintainer build and publication procedure                   |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Bundled assets and dependency attribution                    |
 
 Work tracking lives in [GitHub Issues](https://github.com/vantoan19/ticketd/issues).
-The product specification includes future direction and is not a list of shipped features.
 
 ## Repository layout
 
