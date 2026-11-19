@@ -20,17 +20,19 @@ import { TestReads } from "@/lib/workspace-reads/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockImplementation(async (command: string) =>
-    command === "attachment_upload_destination"
-      ? {
-          kind: "google_drive",
-          destination: {
-            connection_id: "account",
-            folder_id: "folder",
-            resource_key: null,
-          },
-          folder_name: "Specs",
-        }
-      : 104857600,
+    command === "diagnostics_log_level"
+      ? { level: "info", debug: false, env_override: null }
+      : command === "attachment_upload_destination"
+        ? {
+            kind: "google_drive",
+            destination: {
+              connection_id: "account",
+              folder_id: "folder",
+              resource_key: null,
+            },
+            folder_name: "Specs",
+          }
+        : 104857600,
   ),
 }));
 vi.mock("@/lib/api/workspace", () => ({

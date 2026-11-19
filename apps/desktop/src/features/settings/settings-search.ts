@@ -294,15 +294,14 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Debug logging",
-    description:
-      "Records more detail until ticketd restarts. TICKETD_LOG overrides it.",
+    description: "Records more detail until ticketd restarts.",
     keywords: "diagnostics log level verbose troubleshoot",
     section: "diagnostics",
   },
   {
     title: "Log files",
     description:
-      "One file per day, and the oldest are removed automatically. Open the logs folder.",
+      "One file per day, and the oldest are removed automatically. They stay on this computer.",
     keywords: "diagnostics logs folder open finder",
     section: "diagnostics",
   },
