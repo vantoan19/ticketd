@@ -74,6 +74,9 @@ fn serve() -> String {
             } else if path.starts_with("/repos/o/flaky/issues?") {
                 // Nothing in the window matches.
                 ("200 OK", json!([]))
+            } else if path.starts_with("/repos/o/denied/issues") {
+                // A repository the account can read but not create issues in.
+                ("200 OK", json!([]))
             } else if path == "/user" {
                 ("200 OK", json!({"login": "octo"}))
             } else if path.starts_with("/user/repos") {
@@ -562,7 +565,13 @@ fn publish_previews_then_creates_one_issue_and_replays_without_another() {
 #[test]
 fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&[
+        "source",
+        "save",
+        "github",
+        "--set",
+        "repositories=o/r,o/denied",
+    ]);
     let reference = local_ticket(&cli);
     let output = cli.command(
         &["source", "publish", &reference, "--destination", "o/denied"],
@@ -580,7 +589,13 @@ fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
 #[test]
 fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&[
+        "source",
+        "save",
+        "github",
+        "--set",
+        "repositories=o/r,o/flaky",
+    ]);
     let reference = local_ticket(&cli);
     let args = ["source", "publish", &reference, "--destination", "o/flaky"];
     let output = cli.command(&args, Some(TOKEN));
@@ -605,7 +620,13 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
 }
 
 fn unresolved_ticket(cli: &Cli) -> String {
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&[
+        "source",
+        "save",
+        "github",
+        "--set",
+        "repositories=o/r,o/flaky",
+    ]);
     let reference = local_ticket(cli);
     let args = ["source", "publish", &reference, "--destination", "o/flaky"];
     assert_eq!(cli.command(&args, Some(TOKEN)).status.code(), Some(1));
