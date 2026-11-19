@@ -18,6 +18,11 @@ import {
   type Notice,
 } from "@/lib/sync-review-api";
 import { Inbox } from "@/features/tickets/Inbox";
+import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
+import {
+  triageId,
+  useInboxTriage,
+} from "@/features/tickets/inbox-triage-context";
 
 const hours = (n: number) => new Date(Date.now() - n * 3600000).toISOString();
 
@@ -122,6 +127,8 @@ test("notices need no decision: a removed dependency opens its ticket, an unread
     .getByText("A Drive file could not be read")
     .closest(".inbox-entry");
   expect(row?.hasAttribute("data-static")).toBe(true);
+  // It still takes focus, so E marks it.
+  expect(document.activeElement).toBe(row?.querySelector(".inbox-ticket"));
   // Its summary names a path, so it wraps rather than being cut off.
   expect(row?.hasAttribute("data-wrap")).toBe(true);
   // Already read, so its action marks it unread.
@@ -153,6 +160,63 @@ test("a Drive file notice opens the Ticket it belongs to when that Ticket is her
     .getByText("A Drive file could not be read")
     .closest(".inbox-entry");
   expect(row?.hasAttribute("data-static")).toBe(false);
+});
+
+test("a file notice opened during triage leaves no earlier entry's card or Chat above its Ticket", async () => {
+  ordinary = [
+    {
+      id: 1,
+      reference: "T-KQ12",
+      title: "Ordinary",
+      kind: "status",
+      from_value: "Todo",
+      to_value: "Done",
+      timestamp: hours(0.5),
+      read: true,
+      editing_agent: null,
+    },
+  ];
+  vi.mocked(syncReview.conflicts).mockResolvedValue([]);
+  vi.mocked(syncReview.notices).mockResolvedValue([
+    {
+      kind: "unreadable_file",
+      id: "notice-4",
+      timestamp: hours(1),
+      read: true,
+      path: "tickets/T-MW21 Fix login.md",
+      reason: "unknown field 'priority' in a ticket",
+      ticket_reference: "T-MW21",
+    },
+  ]);
+  // The triage card and the Chat beside the Inbox are drawn from these.
+  function Triage() {
+    const triage = useInboxTriage();
+    return (
+      <>
+        <output aria-label="Triage selection">
+          {triage?.selection ? triageId(triage.selection) : "none"}
+        </output>
+        <output aria-label="Triage Chat">{triage?.chatId ?? "none"}</output>
+        <button type="button" onClick={() => triage?.openChat("chat-1")}>
+          Open its Chat
+        </button>
+      </>
+    );
+  }
+  render(
+    <InboxTriageProvider active>
+      <Inbox revision={0} select={select} onBrowse={vi.fn()} />
+      <Triage />
+    </InboxTriageProvider>,
+  );
+  fireEvent.click(await screen.findByText("Ordinary"));
+  fireEvent.click(screen.getByRole("button", { name: "Open its Chat" }));
+  expect(screen.getByLabelText("Triage selection").textContent).toBe("entry:1");
+  expect(screen.getByLabelText("Triage Chat").textContent).toBe("chat-1");
+  fireEvent.click(await screen.findByText(/was skipped/));
+  expect(select).toHaveBeenLastCalledWith("T-MW21");
+  expect(screen.getByLabelText("Triage selection").textContent).toBe("none");
+  expect(screen.getByLabelText("Triage Chat").textContent).toBe("none");
 });
 
 test("a replaced file and a record too large to sync are worded as what they are", async () => {

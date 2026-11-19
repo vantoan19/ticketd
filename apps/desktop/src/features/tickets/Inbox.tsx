@@ -308,9 +308,10 @@ function InboxRow({
           className="inbox-ticket"
           aria-keyshortcuts={snooze ? "E H" : "E"}
           onClick={(event) => {
-            if (!opens) return;
-            onOpen();
-            // Opening the detail must leave entry shortcuts on the entry.
+            if (opens) onOpen();
+            // Opening the detail must leave entry shortcuts on the entry, and
+            // one with nothing to open still takes focus for E: WebKit does
+            // not focus a clicked button.
             event.currentTarget.focus();
           }}
           onKeyDown={(event) => {
@@ -467,17 +468,6 @@ function InboxContent({
   const [held, setHeld] = useState<Attention | null>(null);
   const [heldSync, setHeldSync] = useState<SyncEntry[] | null>(null);
   const [heldTime, setHeldTime] = useState<number | null>(null);
-  const [readingSelection, setReadingSelection] = useState(
-    triage?.selection ?? null,
-  );
-  if (readingSelection !== (triage?.selection ?? null)) {
-    setReadingSelection(triage?.selection ?? null);
-    if (!triage?.selection) {
-      setHeld(null);
-      setHeldSync(null);
-      setHeldTime(null);
-    }
-  }
   const projection = held ?? attention;
   const chats = useChatClient();
   const chatFeature = useChatFeature();
@@ -956,7 +946,13 @@ function InboxContent({
                       mark={(read) => void markSync([e.id], read)}
                       open={() => {
                         if (e.conflict) setReviewing(e.conflict);
-                        else if (e.reference) select(e.reference);
+                        else if (e.reference) {
+                          // This Ticket replaces the entry read before it:
+                          // that entry's triage card and Chat do not stay.
+                          triage?.choose(null);
+                          triage?.openChat(null);
+                          select(e.reference);
+                        }
                       }}
                     />
                   );
