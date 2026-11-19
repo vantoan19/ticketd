@@ -30,6 +30,17 @@ it("the collapsed sidebar keeps the manage menus and the source Retry reachable"
   );
 });
 
+it("a long sidebar name ellipsizes and never takes the count's room", () => {
+  // "Launch the public beta 1/7" read "1/" when the count shrank with the row.
+  expect(rule(".sidebar-count")).toMatch(/flex: none;/);
+  const label = /\n[.]sidebar-nav [.]sidebar-label [{]([^}]*)[}]/.exec(
+    css,
+  )?.[1];
+  expect(label).toMatch(/min-width: 0;/);
+  expect(label).toMatch(/overflow: hidden;/);
+  expect(label).toMatch(/text-overflow: ellipsis;/);
+});
+
 it("the Plan summary reserves its two rows and truncates the purpose", () => {
   const plan = readFileSync(
     join(__dirname, "..", "features/plans/plan.css"),

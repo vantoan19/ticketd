@@ -33,8 +33,40 @@
 .ticket-row-time {
   font-variant-numeric: tabular-nums;
 }
+/* The selection box is drawn, not native: WebKit paints an unchecked native box
+   with an accent-color as a solid square, which a hovered row showed as already
+   selected. Unchecked is an outline; checked is the primary fill and a tick. */
 .ticket-rows input[type="checkbox"] {
-  accent-color: var(--foreground);
+  appearance: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-segment);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+}
+.ticket-rows input[type="checkbox"]:checked {
+  background: var(--primary);
+  box-shadow: none;
+}
+.ticket-rows input[type="checkbox"]::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--primary-foreground);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  opacity: 0;
+}
+.ticket-rows input[type="checkbox"]:checked::after {
+  opacity: 1;
+}
+@media (forced-colors: active) {
+  .ticket-rows input[type="checkbox"] {
+    border: 1px solid CanvasText;
+  }
+  .ticket-rows input[type="checkbox"]::after {
+    background: CanvasText;
+  }
 }
 .ticket-rows input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--ring);
