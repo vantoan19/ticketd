@@ -5176,8 +5176,13 @@ fn the_next_reminder_is_due_when_its_time_comes_and_none_after_delivery() {
         .set_reminder(&later.reference, Some(&in_an_hour))
         .unwrap();
     let wait = workspace.next_reminder_due_in().unwrap().unwrap();
+    // SQLite's 'now' has millisecond precision and julianday arithmetic adds float
+    // error, so when the reminder is set within the same millisecond the wait can
+    // exceed an hour by up to about a millisecond.
+    let an_hour_and_slack =
+        std::time::Duration::from_secs(3600) + std::time::Duration::from_millis(2);
     assert!(
-        wait > std::time::Duration::from_secs(3590) && wait <= std::time::Duration::from_secs(3600),
+        wait > std::time::Duration::from_secs(3590) && wait <= an_hour_and_slack,
         "{wait:?}"
     );
     let overdue = workspace.create_ticket("Overdue").unwrap();
