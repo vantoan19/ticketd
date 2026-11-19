@@ -329,16 +329,16 @@ fn plan_names_are_bounded_and_archive_is_as_idempotent_as_reactivate() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     assert!(matches!(
-        workspace.create_plan(&"n".repeat(257)),
-        Err(Error::PlanNameTooLong(256))
+        workspace.create_plan(&"n".repeat(1001)),
+        Err(Error::PlanNameTooLong(1000))
     ));
     let plan = workspace
-        .create_plan(&format!("  {}  ", "n".repeat(256)))
+        .create_plan(&format!("  {}  ", "n".repeat(1000)))
         .unwrap();
-    assert_eq!(plan.name.chars().count(), 256);
+    assert_eq!(plan.name.chars().count(), 1000);
     assert!(matches!(
-        workspace.change_plan(&plan.id, Some(&"n".repeat(257)), None),
-        Err(Error::PlanNameTooLong(256))
+        workspace.change_plan(&plan.id, Some(&"n".repeat(1001)), None),
+        Err(Error::PlanNameTooLong(1000))
     ));
     workspace.change_plan(&plan.id, None, Some(true)).unwrap();
     let again = workspace.change_plan(&plan.id, None, Some(true)).unwrap();

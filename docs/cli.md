@@ -62,9 +62,26 @@ Changes also accept `title`, `body`, `status`, `editing_agent`, `project_id`,
 `plan_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
 `plan_id` to null to clear it; omit a field to leave it unchanged. Results are
 JSON ticket snapshots in operation order. Failures, including a malformed operation, identify the zero-based
-operation index and roll back the entire request. Requests are limited to 1 MiB,
+operation index and roll back the entire request. A failure refers to a ticket the
+batch created by its `$name` (for example `$a can't block $b`), because those
+tickets were never saved; tickets that existed before keep their `T-` references. Requests are limited to 1 MiB,
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
 between operations.
+
+### Input limits
+
+New writes (`create`, `change`, `batch`, `write`, and the desktop app) enforce
+these limits. Data saved earlier stays valid and is never rewritten.
+
+- A ticket title is one non-empty line (no line breaks) of at most 1000 characters.
+  Put anything longer in the description.
+- A tag is at most 100 characters and has no commas, tabs, or line breaks. Tags are
+  trimmed and lowercased. A tag that was saved before these limits can still be
+  removed.
+- A Plan name is at most 1000 characters. Two Plans may share a name.
+- A title imported from an external source is normalized instead of refused: line
+  breaks collapse to single spaces and the title is cut at 1000 characters. The
+  source keeps the original text.
 
 ### Bounded ticket context
 

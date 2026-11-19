@@ -8,6 +8,7 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { plansClient } from "@/lib/api/plans";
+import { PLAN_NAME_MAX_LENGTH } from "@/lib/limits";
 
 /**
  * Creates a Plan from its name (DialogShell sm), then opens it. The name is
@@ -82,6 +83,7 @@ export function NewPlanDialog({
           value={name}
           autoComplete="off"
           placeholder="e.g. Board polish"
+          maxLength={PLAN_NAME_MAX_LENGTH}
           onChange={(event) => setName(event.target.value)}
         />
       </Field>

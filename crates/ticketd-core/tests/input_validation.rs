@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use ticketd_core::{Error, TicketPatch, Workspace, WriteRequest};
+use ticketd_core::{BatchOperation, Error, TicketChange, TicketPatch, Workspace, WriteRequest};
 
 #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn open() -> (tempfile::TempDir, Workspace) {
@@ -211,4 +211,171 @@ fn unregistering_a_folder_that_is_not_registered_is_an_error() {
         workspace.show_project(&project.id).unwrap().paths,
         vec![checkout]
     );
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_ticket_title_is_one_line_of_at_most_a_thousand_characters() {
+    let (_dir, mut workspace) = open();
+    let ticket = workspace.create_ticket("Fine").unwrap().reference;
+    let longest = "t".repeat(1000);
+    let too_long = "t".repeat(1001);
+    let patch = |title: &str| TicketPatch {
+        title: Some(title.into()),
+        ..Default::default()
+    };
+
+    // Every way to write a title applies the same rules.
+    for bad in ["line one\nline two", "line one\rline two"] {
+        assert!(matches!(
+            workspace.create_ticket(bad),
+            Err(Error::TitleNotOneLine)
+        ));
+        assert!(matches!(
+            workspace.change_ticket(&ticket, patch(bad)),
+            Err(Error::TitleNotOneLine)
+        ));
+        let batch = vec![BatchOperation::Create {
+            name: "a".into(),
+            title: bad.into(),
+            project_id: None,
+        }];
+        assert!(matches!(
+            workspace.apply_batch(batch),
+            Err(Error::BatchOperation { source, .. }) if matches!(*source, Error::TitleNotOneLine)
+        ));
+    }
+    assert!(matches!(
+        workspace.create_ticket(&too_long),
+        Err(Error::TitleTooLong(1000))
+    ));
+    assert!(matches!(
+        workspace.change_ticket(&ticket, patch(&too_long)),
+        Err(Error::TitleTooLong(1000))
+    ));
+    let request = WriteRequest::CreateTicket {
+        title: too_long.clone(),
+        project_id: None,
+    };
+    assert!(matches!(
+        workspace.write(Some("limits-1"), request),
+        Err(Error::TitleTooLong(1000))
+    ));
+
+    // The limit itself is allowed, and a trailing line break is only whitespace.
+    assert_eq!(workspace.create_ticket(&longest).unwrap().title, longest);
+    let trimmed = workspace.create_ticket("Done\n").unwrap();
+    assert_eq!(trimmed.title, "Done");
+    assert_eq!(workspace.list_tickets().unwrap().len(), 3);
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_new_tag_is_short_and_free_of_commas_tabs_and_line_breaks() {
+    let (_dir, mut workspace) = open();
+    let ticket = workspace.create_ticket("Tagged").unwrap().reference;
+
+    for bad in ["a,b", "a\tb", "a\nb", "a\rb", &"z".repeat(101)] {
+        assert!(
+            matches!(
+                workspace.add_tag(&ticket, bad),
+                Err(Error::InvalidTag { max: 100 })
+            ),
+            "{bad:?}"
+        );
+        let change = TicketChange {
+            add_tags: vec![bad.into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            workspace.apply_ticket_change(&ticket, change),
+            Err(Error::BatchOperation { source, .. }) if matches!(*source, Error::InvalidTag { .. })
+        ));
+    }
+    let message = workspace.add_tag(&ticket, "a,b").unwrap_err().to_string();
+    assert!(message.contains("at most 100 characters"), "{message}");
+    assert!(
+        message.contains("no commas, tabs or line breaks"),
+        "{message}"
+    );
+
+    let longest = "z".repeat(100);
+    let tagged = workspace.add_tag(&ticket, &longest).unwrap();
+    assert_eq!(tagged.tags, [longest]);
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_tag_stored_before_the_limits_can_still_be_removed() {
+    let (dir, mut workspace) = open();
+    let ticket = workspace.create_ticket("Old tags").unwrap().reference;
+    let path = dir.path().join("workspace.sqlite3");
+    let legacy = "a,b";
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("INSERT INTO tags (name) VALUES (?1)", [legacy])
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO ticket_tags (ticket_id, tag_name) SELECT id, ?1 FROM tickets WHERE reference = ?2",
+            [legacy, ticket.as_str()],
+        )
+        .unwrap();
+    assert_eq!(workspace.show_ticket(&ticket).unwrap().tags, [legacy]);
+    assert!(
+        workspace
+            .remove_tag(&ticket, legacy)
+            .unwrap()
+            .tags
+            .is_empty()
+    );
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_batch_error_names_the_batchs_own_tickets_by_their_local_names() {
+    let (_dir, mut workspace) = open();
+    let before = workspace.create_ticket("Existing").unwrap().reference;
+    let blocks = |ticket: &str, blocker: &str| BatchOperation::Change {
+        ticket: ticket.into(),
+        change: Box::new(TicketChange {
+            add_blockers: vec![blocker.into()],
+            ..Default::default()
+        }),
+    };
+    let create = |name: &str| BatchOperation::Create {
+        name: name.into(),
+        title: name.to_uppercase(),
+        project_id: None,
+    };
+
+    let error = workspace
+        .apply_batch(vec![
+            create("a"),
+            create("b"),
+            blocks("$a", "$b"),
+            blocks("$b", "$a"),
+        ])
+        .unwrap_err();
+    let message = error.to_string();
+    assert!(message.starts_with("batch operation 3: "), "{message}");
+    assert!(
+        message.contains("$a") && message.contains("$b"),
+        "{message}"
+    );
+    assert!(!message.contains("T-"), "{message}");
+    // The cause is still the dependency cycle.
+    assert_eq!(error.kind(), ticketd_core::FailureKind::Cycle);
+
+    // A ticket that existed before the batch keeps its real reference.
+    let error = workspace
+        .apply_batch(vec![
+            create("c"),
+            blocks("$c", &before),
+            blocks(&before, "$c"),
+        ])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains(&before) && error.contains("$c"), "{error}");
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
 }

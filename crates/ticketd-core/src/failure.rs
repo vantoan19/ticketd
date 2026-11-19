@@ -72,7 +72,9 @@ impl Error {
                 kind if kind.is_workspace() => kind,
                 _ => FailureKind::WorkspaceUnreadable,
             },
-            Self::BatchOperation { source, .. } | Self::SafetyCopy { source } => source.kind(),
+            Self::BatchOperation { source, .. }
+            | Self::BatchNamed { source, .. }
+            | Self::SafetyCopy { source } => source.kind(),
             Self::Restore { source, .. } | Self::Migration { source, .. } => match source.kind() {
                 kind if kind.is_workspace() => kind,
                 _ => FailureKind::Failed,
@@ -158,11 +160,14 @@ impl Error {
             | Self::DependencyReviewMode(_)
             | Self::PlanArchived
             | Self::EmptyTag
+            | Self::InvalidTag { .. }
             | Self::EmptyRequestId
             | Self::Trashed(_)
             | Self::DocumentTrashed(_)
             | Self::MissingRelatedTicket
             | Self::EmptyTitle
+            | Self::TitleNotOneLine
+            | Self::TitleTooLong(_)
             | Self::InvalidEvidence(_)
             | Self::ConflictingActivitySupport
             | Self::EmptyActivityBrief

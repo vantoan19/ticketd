@@ -98,6 +98,8 @@ The single-ticket equivalent is `operation: "ticket_change"` with `reference`
 and `change`. A `change_ticket` request instead uses `patch` for field edits only.
 
 Failures identify the zero-based operation index and roll back the whole batch.
+They name tickets created in the batch by their `$name`, since those references
+were never saved; tickets that existed before keep their real references.
 Limits are 100 operations, 1 MiB, and 1,000 individual edits; execution checks a
 10-second bound between operations. Results are snapshots in operation order;
 later operations can change a ticket returned earlier in the same batch.

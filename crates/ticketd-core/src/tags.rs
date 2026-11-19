@@ -24,12 +24,27 @@ pub(crate) fn for_ticket(connection: &Connection, id: &str) -> Result<Vec<String
         .collect::<Result<_, _>>()?)
 }
 
+/// The longest tag a new tagging may use. Tags already stored stay valid.
+const MAX_TAG: usize = 100;
+
 /// The tag name as stored. A write checks this before it enters the write scope, so a
 /// blank name is refused at once instead of after waiting for another writer's lock.
+/// Finding or removing a tag accepts any stored name, so a tag from before the limits
+/// can still be removed.
 fn normalize(name: &str) -> Result<String, Error> {
     let name = name.trim().to_lowercase();
     if name.is_empty() {
         return Err(Error::EmptyTag);
+    }
+    Ok(name)
+}
+
+/// [`normalize`] for a name that is about to be added: it must also be short and free of
+/// the characters that make tags ambiguous (a comma does not split in `list --tag`).
+pub(crate) fn normalize_new(name: &str) -> Result<String, Error> {
+    let name = normalize(name)?;
+    if name.chars().count() > MAX_TAG || name.contains([',', '\t', '\n', '\r']) {
+        return Err(Error::InvalidTag { max: MAX_TAG });
     }
     Ok(name)
 }
@@ -59,7 +74,7 @@ impl Workspace {
         name: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        normalize(name)?;
+        normalize_new(name)?;
         ticket_change::commit(&self.connection, reference, |scope| {
             add(scope, reference, name, agent)
         })
@@ -84,7 +99,7 @@ impl Workspace {
     }
 }
 
-/// Tag a ticket. The name is checked before the ticket is looked up. Tagging a ticket
+/// Tag a ticket. The name is checked (see [`normalize_new`]) before the ticket is looked up. Tagging a ticket
 /// that already has the tag changes nothing and leaves no history. A change is recorded
 /// like any other, which also moves the ticket's `updated_at`.
 pub(crate) fn add(
@@ -93,7 +108,7 @@ pub(crate) fn add(
     name: &str,
     agent: Option<&str>,
 ) -> Result<(), Error> {
-    let name = normalize(name)?;
+    let name = normalize_new(name)?;
     let ticket_id = scope.editable(reference)?;
     scope.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
     let changed = scope.execute(

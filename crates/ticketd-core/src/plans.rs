@@ -134,8 +134,8 @@ pub(crate) fn ensure_active(connection: &Connection, id: &str) -> Result<Plan, E
     }
     Ok(plan)
 }
-/// The longest Plan name accepted, matching the bound context output gives names.
-const MAX_NAME: usize = 256;
+/// The longest Plan name accepted for a new or renamed Plan. Existing longer names stay.
+const MAX_NAME: usize = 1000;
 fn valid_name(name: &str) -> Result<&str, Error> {
     let name = name.trim();
     if name.is_empty() {
