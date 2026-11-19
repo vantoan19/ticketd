@@ -1802,6 +1802,9 @@ test("opening a folded column glides the columns to its right", async () => {
     );
   await clock.advance(3000); // the columns have entered
   expect(duplicate.style.transform).toMatch(/^(none)?$/);
+  // Choosing Board took two quick clicks, which hold motion instant for a
+  // moment of real time (the input guard); open the column after that.
+  await clock.restInput();
   fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
   await clock.advance(50);
   expect(duplicate.style.transform).toMatch(/translate3d[(]-/);
