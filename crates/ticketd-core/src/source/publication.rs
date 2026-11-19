@@ -2129,8 +2129,12 @@ fn complete_attempt(
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let replaced_by_issue = sent.attached == Some(true);
+    let mut issue_title = crate::ticket_change::imported_title(&issue.title);
+    if issue_title.is_empty() {
+        issue_title.clone_from(&issue.display);
+    }
     let (new_title, new_body) = if replaced_by_issue {
-        (issue.title.as_str(), issue.body.as_str())
+        (issue_title.as_str(), issue.body.as_str())
     } else {
         (sent.title, sent.body)
     };

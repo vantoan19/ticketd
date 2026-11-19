@@ -1378,7 +1378,10 @@ fn apply_issue(
             },
         )
         .optional()?;
-    let title = match issue.title.trim() {
+    // A provider's title may hold line breaks or run very long; the ticket keeps the
+    // same one-line, bounded title a person could write (see `imported_title`).
+    let imported = crate::ticket_change::imported_title(&issue.title);
+    let title = match imported.as_str() {
         "" => issue.display.as_str(),
         title => title,
     };

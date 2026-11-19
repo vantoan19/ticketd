@@ -477,10 +477,16 @@ impl Workspace {
     }
 
     pub fn set_document_tag(&mut self, id: &str, tag: &str, present: bool) -> Result<(), Error> {
-        let tag = tag.trim().to_lowercase();
-        if tag.is_empty() {
-            return Err(Error::EmptyTag);
-        }
+        // Adding follows the tag rules; removing accepts any stored tag.
+        let tag = if present {
+            crate::tags::normalize_new(tag)?
+        } else {
+            let tag = tag.trim().to_lowercase();
+            if tag.is_empty() {
+                return Err(Error::EmptyTag);
+            }
+            tag
+        };
         self.show_document(id)?;
         let tx = self.connection.savepoint()?;
         crate::write_scope::lock(&tx)?;

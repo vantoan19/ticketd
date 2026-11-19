@@ -253,6 +253,15 @@ pub enum Error {
     },
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
+    /// A failure inside a batch, worded with the batch's own `$name`s for tickets the
+    /// batch created. Those tickets were never saved, so their references mean nothing to
+    /// the caller. The cause is kept and decides the failure kind.
+    #[error("{message}")]
+    BatchNamed {
+        message: String,
+        #[source]
+        source: Box<Error>,
+    },
     #[error("invalid reminder time: {0}")]
     InvalidReminderTime(String),
     #[error("{0} has no reminder to snooze; set one first")]
@@ -340,6 +349,10 @@ pub enum Error {
     InvalidHierarchy,
     #[error("tag name must not be empty")]
     EmptyTag,
+    #[error(
+        "a tag must be at most {max} characters and contain no commas, tabs or line breaks; shorten it or split it into separate tags"
+    )]
+    InvalidTag { max: usize },
     #[error("ticket '{0}' is in trash; restore it before editing")]
     Trashed(String),
     #[error("document '{0}' is in trash; restore it with `ticketd document restore {0}` first")]
@@ -348,6 +361,10 @@ pub enum Error {
     MissingRelatedTicket,
     #[error("ticket title must not be empty")]
     EmptyTitle,
+    #[error("a ticket title must be one line; put the rest in the description")]
+    TitleNotOneLine,
+    #[error("a ticket title must be at most {0} characters; put the rest in the description")]
+    TitleTooLong(usize),
     #[error("ticket '{0}' was not found{hint}", hint = not_found_hint(.0))]
     NotFound(String),
     #[error("invalid evidence: {0}")]

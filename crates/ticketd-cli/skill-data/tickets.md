@@ -38,6 +38,10 @@ explicit project it checks registered checkout paths, including parent directori
 Ambiguous matches fail; no match creates an unlinked ticket. JSON creation and
 batches require explicit `project_id` to link a project.
 
+A title is one non-empty line of at most 1000 characters; put detail in the body. A
+new tag is at most 100 characters with no commas, tabs, or line breaks. Plan names
+are at most 1000 characters. Older data that exceeds these limits stays readable.
+
 `change` updates supplied fields only, but body/title values replace the complete
 field. Use full reads and the optional guards described in `skills get writes`
 when editing shared text. `--clear-project` unlinks the project. A request ID is

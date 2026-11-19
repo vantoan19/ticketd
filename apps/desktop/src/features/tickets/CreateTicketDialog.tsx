@@ -10,6 +10,7 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
+import { TITLE_MAX_LENGTH } from "@/lib/limits";
 import { Folder, Layers, Tags, Maximize2, Minimize2 } from "lucide-react";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { DraftPropertyPicker, DraftBlockerPicker } from "./DraftPropertyPicker";
@@ -442,6 +443,7 @@ function RecoveredCreateTicketDialog({
               ref={titleRef}
               autoFocus
               placeholder="Ticket title"
+              maxLength={TITLE_MAX_LENGTH}
               disabled={fieldsLocked}
               value={draft.title}
               onChange={(event) => update({ title: event.target.value })}

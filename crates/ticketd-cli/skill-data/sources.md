@@ -27,7 +27,8 @@ configuration. See each command's help for `--set` and `--config-file`.
 Credentials use the connector's authentication path, not authored ticket content.
 
 `source save` stores settings without importing. `source refresh` imports matches
-and updates externally owned tickets; `--ticket T-KQ1` refreshes one ticket. Refresh
+and updates externally owned tickets (titles are made one line of at most 1000
+characters; the source keeps the original); `--ticket T-KQ1` refreshes one ticket. Refresh
 can return a JSON report with failures and a nonzero exit code: inspect both.
 These commands can contact the external service even though ticketd stores data
 locally. `source take-ownership` is an explicit authority change for an unavailable

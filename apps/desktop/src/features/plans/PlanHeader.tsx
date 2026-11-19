@@ -39,6 +39,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { noun } from "@/lib/format";
+import { PLAN_NAME_MAX_LENGTH } from "@/lib/limits";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import { PlanDocuments } from "./PlanDocuments";
@@ -207,6 +208,7 @@ export function PlanHeader({
                 variant="inline"
                 className="h-8"
                 aria-label="Plan name"
+                maxLength={PLAN_NAME_MAX_LENGTH}
                 aria-invalid={nameError ? true : undefined}
                 aria-describedby="plan-context-note"
                 value={name}
