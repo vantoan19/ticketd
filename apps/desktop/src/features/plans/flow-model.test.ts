@@ -1,5 +1,11 @@
 import { expect, test } from "vitest";
-import { planFlow, type FlowTicket } from "./flow-model";
+import {
+  flowDetour,
+  flowLinkPath,
+  planFlow,
+  type FlowBox,
+  type FlowTicket,
+} from "./flow-model";
 const ticket = (
   reference: string,
   prerequisites: string[] = [],
@@ -118,4 +124,39 @@ test("links between tickets that share a lane are counted as not drawn", () => {
   ]);
   expect(flow.edges).toHaveLength(3);
   expect(flow.undrawn).toBe(1);
+});
+
+// Now, Next and Later columns of 280px with 32px gutters; cards are 80px tall.
+const card = (lane: number, row: number): FlowBox => ({
+  left: lane * 312,
+  right: lane * 312 + 280,
+  top: 50 + row * 88,
+  bottom: 130 + row * 88,
+});
+/** Whether an axis-aligned segment passes through a box. */
+const crosses = (a: { x: number; y: number }, b: typeof a, box: FlowBox) =>
+  Math.max(a.x, b.x) > box.left &&
+  Math.min(a.x, b.x) < box.right &&
+  Math.max(a.y, b.y) > box.top &&
+  Math.min(a.y, b.y) < box.bottom;
+
+test("a link that skips a lane runs around the cards of the lane it skips", () => {
+  // T-WL6 (Now, row 1) blocks T-WL5 (Later, row 0) past the Next lane's two cards.
+  const between = [card(1, 0), card(1, 1)];
+  const points = flowDetour(card(0, 1), card(2, 0), between)!;
+  expect(points.length).toBeGreaterThan(2);
+  expect(points[0]).toEqual({ x: 280, y: 178 });
+  expect(points.at(-1)).toEqual({ x: 624, y: 90 });
+  points.slice(1).forEach((point, index) =>
+    between.forEach((box) => {
+      expect(crosses(points[index]!, point, box)).toBe(false);
+    }),
+  );
+  // It is drawn through those corners, not as the curve that crossed the cards.
+  expect(flowLinkPath(card(0, 1), card(2, 0), between)).toContain("Q");
+});
+
+test("a link to the next lane, or past an empty one, stays a single curve", () => {
+  expect(flowDetour(card(0, 0), card(1, 0), [])).toBeNull();
+  expect(flowLinkPath(card(0, 0), card(2, 0), [])).toMatch(/^M280 90 C/);
 });
