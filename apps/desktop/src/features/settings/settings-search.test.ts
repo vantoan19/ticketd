@@ -3,6 +3,7 @@ import { SETTINGS_SECTIONS, sourceSection } from "./settings-sections";
 import {
   SETTINGS_ENTRIES,
   searchSettings,
+  searchSettingsFor,
   sourceEntries,
   splitMatch,
 } from "./settings-search";
@@ -132,4 +133,19 @@ test("splitMatch marks a word start, not the middle of a word", () => {
     "short",
     "cuts",
   ]);
+});
+
+test("while Chat is off, a Chat-only word finds the Chat page, not the hidden rows", () => {
+  const off = searchSettingsFor("harness", SETTINGS_ENTRIES, false);
+  expect(off).toHaveLength(1);
+  expect(off[0]).toMatchObject({ title: "Chat", section: "chat" });
+  expect(off[0]?.description).toMatch(/turn on chat.*harnesses/i);
+  const on = searchSettingsFor("harness", SETTINGS_ENTRIES, true);
+  expect(on.map((hit) => hit.title)).toEqual(["Harnesses"]);
+  // Words that already find a visible Chat row need no stand-in.
+  expect(
+    searchSettingsFor("chat", SETTINGS_ENTRIES, false).filter(
+      (hit) => hit.title === "Chat" && hit.section === "chat",
+    ),
+  ).toEqual([]);
 });
