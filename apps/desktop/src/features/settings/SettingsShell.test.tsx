@@ -152,7 +152,7 @@ test("the nav lists the groups and sections in order with Experimental on the Ch
     ["Workspace", ["Location", "Attachments", "Backups", "Export"]],
     ["Agents", ["Command line", "Agent skills", "Chat"]],
     ["Connections", ["Google Drive"]],
-    ["Help", ["Keyboard shortcuts", "About"]],
+    ["Help", ["Keyboard shortcuts", "Diagnostics", "About"]],
   ]);
   expect(navItem(/^Chat/).textContent).toContain("Experimental");
   fireEvent.click(navItem(/^Chat/));

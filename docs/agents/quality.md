@@ -15,6 +15,25 @@
 - Keep SQL and Tauri out of domain calculations. Use parameterized SQL and short transactions; test persistence through the core interface.
 - When scaffolding Rust, pin the toolchain in `rust-toolchain.toml`, commit `Cargo.lock`, and inherit workspace lint settings in every member. Scope any lint exception narrowly and explain it.
 
+## Logging
+
+Log with `tracing`, and only `tracing`; never `eprintln!` or `println!` for diagnostics. Library crates emit events and spans and never install a subscriber. The two binaries do, through `ticketd-diagnostics` (`init_cli`, `init_desktop`). The CLI's own `error: …` line and prompts are output for the person or agent that ran it, not logs. The reasons are in [ADR 0017](../adr/0017-local-only-structured-logs.md).
+
+Where the logs are: the desktop writes JSON lines to `ticketd.YYYY-MM-DD.log` (UTC) in the app's log folder (on macOS `~/Library/Logs/com.vantoan19.ticketd/`); read them with `jq`. The CLI writes readable lines to stderr at `warn`. `TICKETD_LOG` takes any `tracing` filter (`TICKETD_LOG=debug`, `TICKETD_LOG=warn,ticketd_core=debug`) for both and overrides the desktop's Debug logging switch.
+
+The event standard:
+
+- The message is a short lowercase phrase with no values in it: `"sync pass failed"`. Put values in fields. Start a message with a capital only for a proper term from the glossary.
+- Field names are snake_case. The fixed ID fields are `ticket_ref`, `chat_id`, `automation_run_id`, `source_id` and `request_id`; use them as they are rather than inventing `ticket` or `runId`.
+- An error logs `error_kind` (a stable variant name, such as `ticketd_core::Error::kind().code()`) and `error` (its `Display` text, as `%error`). `error_kind` is required when the error has a stable variant; it may be left out for an opaque `io` or Tauri error that has none. Never log an error's `Debug` output. Paths go through `ticketd_diagnostics::display_path`, which rewrites the home folder to `~`.
+- Allowed: IDs, counts, durations, error kinds, state names. Never: Ticket, Document, Plan or Chat text, titles, tokens, authorization URLs or query strings, email addresses. When an error's text can carry a Harness's or a person's words, log its kind and IDs and leave the text out.
+- Levels: `error` is for work the user lost or work that stopped. `warn` is degraded but recovered, such as a pass that failed and will be tried again. `info` is lifecycle and background passes. `debug` is detail. A failure that repeats on a timer logs when it changes or comes back, not on every attempt.
+- The target is the module path, which `tracing` sets by default. The default desktop filter is `warn,ticketd=info`, so a target must start with `ticketd` to be logged at `info`; dependencies log at `warn`.
+- Wrap work that has an ID in a span that carries it, so every line inside is correlated and the span's close records its duration. A line in the file has `timestamp` (RFC 3339, UTC), `level`, `target`, `message`, the event's fields and `spans` (the chain, outermost first). A closed span logs `message: "close"` with `time.busy` and `time.idle`.
+- Open a span for work, never for an idle tick: a loop that wakes every few seconds opens its span only after it finds something to do, because every span close is a line. Desktop command spans are at `debug` for the same reason (the change poll is a command), carry the `request_id` when the interface sent one, and cover only the synchronous start of an `async` command, so their close time is not that command's duration. A span that outlives the work that started it (an Automation run, a Chat) is a root span (`parent: None`), so it does not hold its starter open. The CLI's root span carries `chat_id` and `automation_run_id` from `TICKETD_CHAT_ID` and `TICKETD_AUTOMATION_RUN_ID` when set and not blank.
+- Two sources are forwarded rather than written by our code. Uncaught WebView errors arrive through one Tauri command (`report_webview_error`, from `apps/desktop/src/lib/error-report.ts`) as `error` events on the `ticketd::webview` target, with the error's name as `error_kind`, the `route`, a `repeat_count` and `frames` reduced to `file:line:column`; the error's message is never sent, because it can quote a Ticket or a Harness. The page drops repeats and sends at most ten a minute, and there is no frontend logger beyond it. Each line of a Harness's stderr is a `debug` event on `ticketd_chat_host::harness_stderr`, inside the span that was current when the Harness started, with its raw `line` (so never above `debug`).
+- A library crate that logs depends on `tracing` alone. Test what reaches the log folder or stderr through `ticketd-diagnostics` or the CLI process, not by mocking `tracing`.
+
 ## TypeScript, React, and desktop
 
 - Enable TypeScript `strict`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`. Validate data crossing process boundaries; type assertions do not validate input.

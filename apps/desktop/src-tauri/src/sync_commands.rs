@@ -129,7 +129,11 @@ pub fn at_launch() {
         Ok(())
     });
     if let Err(error) = prepared {
-        eprintln!("could not prepare Workspace sync: {error}");
+        tracing::warn!(
+            error_kind = error.kind().code(),
+            %error,
+            "could not prepare Workspace sync"
+        );
     }
 }
 
@@ -892,7 +896,7 @@ pub fn publish_status(app: tauri::AppHandle) {
                     && shown.as_ref() != Some(&status)
                 {
                     if let Err(error) = app.emit(STATUS_EVENT, &status) {
-                        eprintln!("could not send the sync status: {error}");
+                        tracing::warn!(%error, "could not send the sync status");
                     }
                     shown = Some(status);
                 }
@@ -908,7 +912,7 @@ pub fn publish_status(app: tauri::AppHandle) {
             }
         });
     if let Err(error) = spawned {
-        eprintln!("could not start sending the sync status: {error}");
+        tracing::error!(%error, "could not start sending the sync status");
     }
 }
 #[tauri::command(async)]
