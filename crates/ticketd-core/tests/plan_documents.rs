@@ -109,9 +109,9 @@ fn plan_context_bounds_explicit_document_bodies() {
     workspace
         .set_plan_document(&plan.id, &doc.id, true)
         .unwrap();
-    let overview = workspace.plan_context(&plan.id, false).unwrap();
+    let overview = serde_json::to_value(workspace.plan_context(&plan.id, false).unwrap()).unwrap();
     assert!(overview["documents"][0]["body"].is_null());
-    let context = workspace.plan_context(&plan.id, true).unwrap();
+    let context = serde_json::to_value(workspace.plan_context(&plan.id, true).unwrap()).unwrap();
     assert_eq!(
         context["documents"][0]["body"].as_str().unwrap().len(),
         4096
@@ -317,7 +317,7 @@ fn plan_context_marks_a_trashed_document_and_leaves_out_its_body() {
         .set_plan_document(&plan.id, &doc.id, true)
         .unwrap();
     workspace.set_document_trashed(&doc.id, true).unwrap();
-    let context = workspace.plan_context(&plan.id, true).unwrap();
+    let context = serde_json::to_value(workspace.plan_context(&plan.id, true).unwrap()).unwrap();
     assert_eq!(context["documents"][0]["trashed"], true);
     assert!(context["documents"][0]["body"].is_null());
     assert_eq!(context["documents"][0]["body_truncated"], false);

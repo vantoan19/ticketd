@@ -66,7 +66,10 @@ pub use session::{WorkspaceGuard, WorkspaceSession};
 mod tags;
 mod ticket_documents;
 mod write_scope;
-pub use plans::{Plan, PlanCounts, PlanView};
+pub use plans::{
+    Plan, PlanContext, PlanContextDependency, PlanContextDocument, PlanContextHeader,
+    PlanContextTicket, PlanCounts, PlanView,
+};
 
 use std::{
     path::Path,
