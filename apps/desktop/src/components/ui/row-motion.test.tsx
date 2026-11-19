@@ -2,6 +2,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { m } from "motion/react";
 import { expect, it, vi } from "vitest";
+import { coldTokenCache } from "@/test/motion-tokens";
 import { MotionProvider, Presence } from "@/components/ui/motion";
 import {
   arrival,
@@ -188,11 +189,14 @@ it("a page arrival is whatever carries data-arriving; a row's fill marker is ano
 
 // One read of the tokens serves a whole list: a row built from a snapshot reads
 // nothing, so a long list costs a handful of reads a render, not one per row.
+// Each count starts from a cold token cache.
 const tokenReads = (build: () => void) => {
+  coldTokenCache();
   const read = vi.spyOn(window, "getComputedStyle");
   build();
   const reads = read.mock.calls.length;
   read.mockRestore();
+  coldTokenCache();
   return reads;
 };
 
