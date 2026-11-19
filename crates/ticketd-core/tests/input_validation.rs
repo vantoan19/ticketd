@@ -75,10 +75,13 @@ fn a_project_checkout_is_an_existing_folder_stored_as_an_absolute_path() {
     assert_eq!(workspace.list_projects().unwrap().len(), 1);
 
     // A path that reaches the folder another way is stored as the folder's own path.
-    let indirect = format!("{real}/../real");
+    // Built from the temp path rather than `real`: on Windows `real` is a verbatim
+    // (\\?\) path, in which `..` is not resolved.
+    let indirect = dir.path().join("real").join("..").join("real");
+    let indirect = indirect.to_str().unwrap();
     assert_eq!(
         workspace
-            .edit_project(&project.id, "P", &indirect)
+            .edit_project(&project.id, "P", indirect)
             .unwrap()
             .path,
         real
