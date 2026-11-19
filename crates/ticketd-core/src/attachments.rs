@@ -448,12 +448,12 @@ impl Workspace {
         // Recover before the savepoint; the retryable write adapter recovers before BEGIN.
         crate::write_scope::run(&self.connection, |tx| {
             let attachment = read_attachment(tx, id)?;
+            // Check the ticket first: a refused write must not move quarantined bytes,
+            // because the savepoint cannot roll back a filesystem move.
+            let ticket_id = tx.editable(reference)?;
             if present {
                 crate::attachment_cleanup::restore_reference(tx, id)?;
                 validate_attachment_reference(tx, &attachment)?;
-            }
-            let ticket_id = tx.editable(reference)?;
-            if present {
                 tx.execute("INSERT OR IGNORE INTO ticket_attachments(ticket_id, attachment_id) VALUES (?1, ?2)", params![ticket_id, id])?;
             } else {
                 tx.execute(
@@ -481,8 +481,7 @@ impl Workspace {
         }
         crate::write_scope::run(&self.connection, |tx| {
             let replacement = read_attachment(tx, replacement_id)?;
-            crate::attachment_cleanup::restore_reference(tx, replacement_id)?;
-            validate_attachment_reference(tx, &replacement)?;
+            // Refuse before restoring: the savepoint cannot roll back a filesystem move.
             let ticket_id = tx.editable(reference)?;
             let selected: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2)", params![ticket_id, previous_id], |row| row.get(0))?;
             if !selected {
@@ -491,6 +490,8 @@ impl Workspace {
                         .into(),
                 ));
             }
+            crate::attachment_cleanup::restore_reference(tx, replacement_id)?;
+            validate_attachment_reference(tx, &replacement)?;
             tx.execute(
             "INSERT OR IGNORE INTO ticket_attachments(ticket_id, attachment_id) VALUES (?1, ?2)",
             params![ticket_id, replacement_id],

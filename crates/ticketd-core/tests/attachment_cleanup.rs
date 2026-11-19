@@ -680,3 +680,66 @@ fn real_schema52_upgrade_preserves_unknown_dates_receipts_protections_and_comple
     restored.export_attachment(id, &output).unwrap();
     assert_eq!(std::fs::read(output).unwrap(), b"real schema52 bytes");
 }
+
+#[test]
+fn refused_attach_leaves_quarantined_bytes_in_quarantine() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let previous = workspace
+        .import_attachment_bytes("previous", "previous.txt", b"previous", |_, _| true)
+        .unwrap();
+    let file = workspace
+        .import_attachment_bytes("upload", "trace.txt", b"stay put", |_, _| true)
+        .unwrap();
+    workspace.quarantine_attachment(&file.id).unwrap();
+    let root = dir.path().join("workspace.sqlite3.attachments");
+    let active = root.join(&file.locator);
+    let quarantined = root.join(file.locator.replacen("/bytes/", "/quarantine/", 1));
+    let in_quarantine = || quarantined.exists() && !active.exists();
+    assert!(in_quarantine());
+    // `previous` really is attached to the trashed ticket, so only Trash refuses its replacement.
+    let trashed = workspace.create_ticket("In Trash").unwrap();
+    workspace
+        .set_ticket_attachment(&trashed.reference, &previous.id, true)
+        .unwrap();
+    workspace
+        .set_trashed(&trashed.reference, true, None)
+        .unwrap();
+    let live = workspace.create_ticket("Live").unwrap();
+    let replace = |reference: &str| ticketd_core::WriteRequest::ReplaceTicketAttachment {
+        reference: reference.into(),
+        previous_id: previous.id.clone(),
+        replacement_id: file.id.clone(),
+    };
+    assert!(matches!(
+        workspace.set_ticket_attachment("T-9999", &file.id, true),
+        Err(ticketd_core::Error::NotFound(_))
+    ));
+    assert!(in_quarantine());
+    assert!(matches!(
+        workspace.set_ticket_attachment(&trashed.reference, &file.id, true),
+        Err(ticketd_core::Error::Trashed(_))
+    ));
+    assert!(in_quarantine());
+    assert!(matches!(
+        workspace.write(None, replace(&trashed.reference)),
+        Err(ticketd_core::Error::Trashed(_))
+    ));
+    assert!(in_quarantine());
+    // `previous` is not attached to the live ticket: a stale selection.
+    assert!(matches!(
+        workspace.write(None, replace(&live.reference)),
+        Err(ticketd_core::Error::Attachment(message)) if message.contains("association changed")
+    ));
+    assert!(in_quarantine());
+    assert!(workspace.attachment(&file.id).unwrap().quarantined);
+
+    // Once every check passes, the replacement restores the bytes it now references.
+    workspace
+        .set_ticket_attachment(&live.reference, &previous.id, true)
+        .unwrap();
+    workspace.write(None, replace(&live.reference)).unwrap();
+    assert!(!workspace.attachment(&file.id).unwrap().quarantined);
+    assert!(active.exists() && !quarantined.exists());
+}
