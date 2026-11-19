@@ -1558,8 +1558,9 @@ test("moves selected tickets to a project from the direct Project control", asyn
 test("a bulk change reloads the list once: its write report already moves the shared version", async () => {
   let lists = 0;
   await renderBulk({
-    find_tickets: () => {
-      lists += 1;
+    // The selection's own read names its tickets; only list reads count here.
+    find_tickets: (args?: { references?: string[] }) => {
+      if (!args?.references) lists += 1;
       return [bulkTicket(1)];
     },
     list_projects: () => [
