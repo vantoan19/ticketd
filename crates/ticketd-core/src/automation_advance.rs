@@ -181,8 +181,8 @@ type FolderChecks = HashMap<String, Option<String>>;
 /// it can reach from `finished` (`None` begins the run) by running Change ticket and
 /// If steps, which it does itself, and through the failure paths of steps that fail
 /// to start. Each If is followed down both paths, since its answer is read under the
-/// lock. An agent step further on is checked by the advance that reaches it, so a
-/// folder on a path the run never takes is never asked about.
+/// lock. An agent step after an agent or Notify step on its path is checked by the
+/// advance that reaches it.
 fn check_folders(
     steps: &[Step],
     finished: Option<(&str, &StepOutcome)>,
@@ -458,7 +458,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::StepChange;
+    use crate::automations::{NotifyTarget, StepChange};
 
     fn agent(id: &str, folder: &str, on_failure: Option<Vec<Step>>) -> Step {
         Step {
@@ -530,5 +530,41 @@ mod tests {
         };
         assert_eq!(checked(&steps, Some(("first", &failed))), ["/retry"]);
         assert!(checked(&steps, Some(("first", &StepOutcome::Completed))).is_empty());
+    }
+
+    #[test]
+    fn a_change_ticket_step_leads_to_the_agent_after_it_whether_it_completes_or_fails() {
+        let steps = vec![
+            Step {
+                id: "tag".into(),
+                action: StepAction::ChangeTicket {
+                    change: Some(StepChange::AddTag { tag: "seen".into() }),
+                    on_failure: Some(vec![agent("fix", "/fix", None)]),
+                },
+            },
+            agent("after", "/after", None),
+        ];
+        assert_eq!(checked(&steps, None), ["/after", "/fix"]);
+    }
+
+    #[test]
+    fn a_notify_step_that_fails_to_start_leads_to_the_folders_on_its_failure_path() {
+        let steps = vec![
+            Step {
+                id: "tell".into(),
+                action: StepAction::Notify {
+                    text: "Done".into(),
+                    opens: NotifyTarget::Ticket,
+                    on_failure: Some(vec![agent("instead", "/instead", None)]),
+                },
+            },
+            agent("after", "/after", None),
+        ];
+        // The agent after it starts in the advance that reports it shown.
+        assert_eq!(checked(&steps, None), ["/instead"]);
+        assert_eq!(
+            checked(&steps, Some(("tell", &StepOutcome::Completed))),
+            ["/after"]
+        );
     }
 }
