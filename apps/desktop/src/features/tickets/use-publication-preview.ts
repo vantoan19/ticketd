@@ -103,6 +103,7 @@ export function publicationReason(preview: PublicationPreview): string {
       return "This source does not support publication.";
     case "internal_attachments":
     case "invalid_destination":
+    case "destination_not_allowed":
       return preview.eligibility.message;
   }
 }
