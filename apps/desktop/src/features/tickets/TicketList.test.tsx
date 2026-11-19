@@ -219,6 +219,33 @@ test("a flat list has no group headers and names each status", () => {
   expect(screen.getByRole("img", { name: "In progress" })).toBeTruthy();
 });
 
+const shownAge = (container: HTMLElement) =>
+  container.querySelector('.ticket-row-time [aria-hidden="true"]')?.textContent;
+
+test("a Trash row shows only the compact age; the full age stays for screen readers", () => {
+  const when = new Date(Date.now() - 9 * 60_000).toISOString();
+  const { container } = renderList(
+    [ticket({ trashed: true, updated_at: when })],
+    { trashView: true },
+  );
+  expect(shownAge(container)).toBe("9m");
+  expect(screen.getByText("Trashed 9 min ago")).toBeTruthy();
+});
+
+test("a trashed row outside the Trash ledger still says Trashed", () => {
+  const when = new Date(Date.now() - 9 * 60_000).toISOString();
+  const trashed = ticket({ trashed: true, updated_at: when });
+  // Held in All tickets after Move to Trash.
+  expect(shownAge(renderList([trashed]).container)).toBe("Trashed 9m");
+  cleanup();
+  // The Trash navigator's time column fits the word.
+  const navigator = renderList([trashed], {
+    trashView: true,
+    selected: "T-KQ1",
+  });
+  expect(shownAge(navigator.container)).toBe("Trashed 9m");
+});
+
 test("rows end with the core update time, never a progress excerpt or a lone no-update note", () => {
   const when = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
   renderList([
@@ -249,16 +276,6 @@ test("rows end with the core update time, never a progress excerpt or a lone no-
   expect(screen.queryByText("Verified the fix")).toBeNull();
   expect(screen.queryByText("No update reported")).toBeNull();
   expect(screen.queryByText("Update unavailable")).toBeNull();
-});
-
-test("a Trash row shows only the compact age; the full age stays for screen readers", () => {
-  const when = new Date(Date.now() - 9 * 60_000).toISOString();
-  const { container } = renderList([
-    ticket({ trashed: true, updated_at: when }),
-  ]);
-  const time = container.querySelector(".ticket-row-time time");
-  expect(time?.querySelector('[aria-hidden="true"]')?.textContent).toBe("9m");
-  expect(screen.getByText("Trashed 9 min ago")).toBeTruthy();
 });
 
 test("a Plan and a project carry different icons", () => {

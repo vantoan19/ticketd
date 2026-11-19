@@ -111,6 +111,7 @@ export function TicketList({
   rowAction,
   grouping,
   singleStatus = false,
+  trashView = false,
   simple = true,
   empty,
   scopeKey = "",
@@ -160,6 +161,8 @@ export function TicketList({
   singleStatus?: boolean;
   /** Every row is Ready (the Ready view), so the per-row Ready dot is omitted. */
   readyView?: boolean;
+  /** Every row is trashed (the Trash view), so the ledger's time omits "Trashed". */
+  trashView?: boolean;
   /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
   simple?: boolean;
 }) {
@@ -497,6 +500,7 @@ export function TicketList({
                       scope={scope}
                       simple={simple}
                       navigator={navigator}
+                      trashView={trashView}
                       needsReview={needsReview.has(ticket.id)}
                       chat={ticketChats.get(ticket.reference)}
                       reminder={attention?.reminders.get(ticket.reference)}
@@ -568,6 +572,7 @@ type RowFaceProps = {
   scope: RowScope;
   simple: boolean;
   navigator: boolean;
+  trashView: boolean;
   needsReview: boolean;
   chat: ChatSummary | undefined;
   reminder: string | null | undefined;
@@ -632,6 +637,7 @@ function RowDetails({
   scope,
   simple,
   navigator,
+  trashView,
   needsReview,
   chat,
   reminder,
@@ -640,6 +646,7 @@ function RowDetails({
   scope: RowScope;
   simple: boolean;
   navigator: boolean;
+  trashView: boolean;
   needsReview: boolean;
   chat: ChatSummary | undefined;
   reminder: string | null | undefined;
@@ -760,10 +767,12 @@ function RowDetails({
                 {ticket.trashed ? "Trashed" : "Updated"}{" "}
                 {ago(ticket.updated_at, now)}
               </span>
-              {/* The view is titled Trash, and "Trashed 9m" overflows the
-                  44px time column (#454); the word stays for screen readers
-                  and in the tooltip. */}
+              {/* The Trash view's title already says it, and in the ledger
+                  "Trashed 9m" overflows the 44px time column (#454). A trashed
+                  row anywhere else (one held after Move to Trash, or in the
+                  navigator, whose time column fits it) still says Trashed. */}
               <span aria-hidden="true">
+                {ticket.trashed && (navigator || !trashView) ? "Trashed " : ""}
                 {compactAgo(ticket.updated_at, now)}
               </span>
             </time>
