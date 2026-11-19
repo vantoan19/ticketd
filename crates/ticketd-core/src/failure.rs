@@ -147,6 +147,7 @@ impl Error {
             | Self::PlanNameTooLong(_)
             | Self::AmbiguousProject(_)
             | Self::CheckoutTaken(_)
+            | Self::CheckoutNotRegistered(_)
             | Self::InvalidCheckoutPath
             | Self::EmptyProject
             | Self::DuplicateDependencies
@@ -157,6 +158,7 @@ impl Error {
             | Self::DependencyReviewMode(_)
             | Self::PlanArchived
             | Self::EmptyTag
+            | Self::EmptyRequestId
             | Self::Trashed(_)
             | Self::DocumentTrashed(_)
             | Self::MissingRelatedTicket

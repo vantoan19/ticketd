@@ -531,9 +531,19 @@ enum Command {
         command: ActivityCommand,
     },
     /// Add a tag (trimmed and lowercased; duplicates are ignored)
-    AddTag { reference: String, tag: String },
+    AddTag {
+        reference: String,
+        tag: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
-    RemoveTag { reference: String, tag: String },
+    RemoveTag {
+        reference: String,
+        tag: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Mark a ticket as a duplicate of a canonical ticket; one with blocking dependencies needs the reviewed path (see preview-duplicate)
     MarkDuplicate {
         /// The duplicate ticket to close, for example T-KQ12
@@ -1798,11 +1808,17 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::History { reference } => {
             serde_json::to_string(&workspace.ticket_history(&reference)?)?
         }
-        Command::AddTag { reference, tag } => {
-            serde_json::to_string(&workspace.add_tag(&reference, &tag)?)?
-        }
-        Command::RemoveTag { reference, tag } => {
-            serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
+        Command::AddTag {
+            reference,
+            tag,
+            agent,
+        } => serde_json::to_string(&workspace.add_tag_as(&reference, &tag, agent.as_deref())?)?,
+        Command::RemoveTag {
+            reference,
+            tag,
+            agent,
+        } => {
+            serde_json::to_string(&workspace.remove_tag_as(&reference, &tag, agent.as_deref())?)?
         }
         Command::MarkDuplicate {
             source,

@@ -241,6 +241,8 @@ pub enum Error {
     LegacyEffortWorkspace,
     #[error("request ID was already used for different content: {0}")]
     RequestConflict(String),
+    #[error("request ID must not be empty")]
+    EmptyRequestId,
     #[error("request serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
     #[error("batch operation {index}: {source}")]
@@ -273,6 +275,8 @@ pub enum Error {
     AmbiguousProject(String),
     #[error("This folder is registered to {0}.")]
     CheckoutTaken(String),
+    #[error("This folder is not registered to {0}.")]
+    CheckoutNotRegistered(String),
     #[error("checkout path must be valid Unicode")]
     InvalidCheckoutPath,
     #[error("project name and path must not be empty")]

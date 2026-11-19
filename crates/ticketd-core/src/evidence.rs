@@ -99,7 +99,7 @@ impl Workspace {
         write_scope::run(&self.connection, |tx| {
             let ticket = tx.editable(reference)?;
             let id = Uuid::new_v4().to_string();
-            tx.execute("INSERT INTO evidence (id,ticket_id,kind,name,value,editing_agent) VALUES (?1,?2,?3,?4,?5,?6)", params![id,ticket,kind_string(input.kind),input.name,input.value,input.editing_agent])?;
+            tx.execute("INSERT INTO evidence (id,ticket_id,kind,name,value,editing_agent) VALUES (?1,?2,?3,?4,?5,?6)", params![id,ticket,kind_string(input.kind),input.name,input.value,crate::history::clean_agent(input.editing_agent.as_deref())])?;
             history::record(
                 tx,
                 &ticket,
@@ -121,7 +121,7 @@ impl Workspace {
         write_scope::run(&self.connection, |tx| {
             let ticket = tx.editable(reference)?;
             let old = get(tx, &ticket, id)?;
-            tx.execute("UPDATE evidence SET kind=?1,name=?2,value=?3,editing_agent=?4,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ticket_id=?5 AND id=?6", params![kind_string(input.kind),input.name,input.value,input.editing_agent,ticket,id])?;
+            tx.execute("UPDATE evidence SET kind=?1,name=?2,value=?3,editing_agent=?4,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ticket_id=?5 AND id=?6", params![kind_string(input.kind),input.name,input.value,crate::history::clean_agent(input.editing_agent.as_deref()),ticket,id])?;
             history::record(
                 tx,
                 &ticket,

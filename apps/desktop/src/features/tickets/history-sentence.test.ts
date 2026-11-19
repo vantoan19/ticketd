@@ -40,6 +40,8 @@ test("describes recorded changes as sentences without event keys", () => {
   );
   expect(sentence("plan", "e1", "")).toBe("Plan cleared");
   expect(sentence("dependency", "", "T-KQ3")).toBe("Blocked by T-KQ3");
+  expect(sentence("tag", "", "urgent")).toBe("Added tag urgent");
+  expect(sentence("tag", "urgent", "")).toBe("Removed tag urgent");
   expect(sentence("relationship:blocks", "T-KQ4", "")).toBe(
     "No longer blocks T-KQ4",
   );

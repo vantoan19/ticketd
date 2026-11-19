@@ -63,7 +63,9 @@ fn the_commands_a_chat_offers_return_records_as_they_are_now() {
     let document = workspace
         .create_document(Some("Design"), "First draft")
         .unwrap();
-    let project = workspace.create_project("App", "/work/app").unwrap();
+    let project = workspace
+        .create_project("App", dir.path().to_str().unwrap())
+        .unwrap();
     workspace
         .change_ticket(
             "T-KQ1",

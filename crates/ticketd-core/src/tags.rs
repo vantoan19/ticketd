@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 
 use crate::write_scope::WriteScope;
-use crate::{Error, Ticket, Workspace, ticket_change};
+use crate::{Error, Ticket, Workspace, history, ticket_change};
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
@@ -49,39 +49,77 @@ impl Workspace {
 
     /// Add a normalized workspace tag without replacing other memberships.
     pub fn add_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
+        self.add_tag_as(reference, name, None)
+    }
+
+    /// [`Self::add_tag`], attributed to an editing agent.
+    pub fn add_tag_as(
+        &mut self,
+        reference: &str,
+        name: &str,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
         normalize(name)?;
         ticket_change::commit(&self.connection, reference, |scope| {
-            add(scope, reference, name)
+            add(scope, reference, name, agent)
         })
     }
 
     /// Remove one normalized tag without replacing other memberships.
     pub fn remove_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
+        self.remove_tag_as(reference, name, None)
+    }
+
+    /// [`Self::remove_tag`], attributed to an editing agent.
+    pub fn remove_tag_as(
+        &mut self,
+        reference: &str,
+        name: &str,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
         normalize(name)?;
         ticket_change::commit(&self.connection, reference, |scope| {
-            remove(scope, reference, name)
+            remove(scope, reference, name, agent)
         })
     }
 }
 
-/// Tag a ticket. The name is checked before the ticket is looked up.
-pub(crate) fn add(scope: &WriteScope<'_>, reference: &str, name: &str) -> Result<(), Error> {
+/// Tag a ticket. The name is checked before the ticket is looked up. Tagging a ticket
+/// that already has the tag changes nothing and leaves no history. A change is recorded
+/// like any other, which also moves the ticket's `updated_at`.
+pub(crate) fn add(
+    scope: &WriteScope<'_>,
+    reference: &str,
+    name: &str,
+    agent: Option<&str>,
+) -> Result<(), Error> {
     let name = normalize(name)?;
     let ticket_id = scope.editable(reference)?;
     scope.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
-    scope.execute(
+    let changed = scope.execute(
         "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_name) VALUES (?1, ?2)",
         params![ticket_id, name],
     )?;
+    if changed != 0 {
+        history::record(scope, &ticket_id, "tag", "", &name, agent)?;
+    }
     Ok(())
 }
 
-pub(crate) fn remove(scope: &WriteScope<'_>, reference: &str, name: &str) -> Result<(), Error> {
+pub(crate) fn remove(
+    scope: &WriteScope<'_>,
+    reference: &str,
+    name: &str,
+    agent: Option<&str>,
+) -> Result<(), Error> {
     let name = normalize(name)?;
     let ticket_id = scope.editable(reference)?;
-    scope.execute(
+    let changed = scope.execute(
         "DELETE FROM ticket_tags WHERE ticket_id = ?1 AND tag_name = ?2",
         params![ticket_id, name],
     )?;
+    if changed != 0 {
+        history::record(scope, &ticket_id, "tag", &name, "", agent)?;
+    }
     Ok(())
 }

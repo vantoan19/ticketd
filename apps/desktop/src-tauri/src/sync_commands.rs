@@ -1173,8 +1173,13 @@ mod tests {
     /// Returns the ticket's GUID.
     fn conflicted(desks: &mut Desks) -> String {
         let ticket = desks.there.create_ticket("Fix login").unwrap();
-        let web = desks.there.create_project("Web", "/work/web").unwrap();
-        let api = desks.there.create_project("API", "/work/api").unwrap();
+        let folder = |name: &str| {
+            let path = desks._directory.path().join(name);
+            std::fs::create_dir_all(&path).unwrap();
+            path.to_str().unwrap().to_owned()
+        };
+        let web = desks.there.create_project("Web", &folder("web")).unwrap();
+        let api = desks.there.create_project("API", &folder("api")).unwrap();
         desks.sync_there();
         desks.sync_here();
         desks

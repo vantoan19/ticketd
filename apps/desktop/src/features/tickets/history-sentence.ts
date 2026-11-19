@@ -57,6 +57,8 @@ export function describeChange(
           : `Removed from parent ${from}`;
     case "dependency":
       return addedOrRemoved("Blocked by", "No longer blocked by");
+    case "tag":
+      return addedOrRemoved("Added tag", "Removed tag");
     case "relationship:child":
       return addedOrRemoved("Added subticket", "Removed subticket");
     case "relationship:blocks":

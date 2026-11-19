@@ -321,11 +321,11 @@ pub(crate) fn apply(
     }
     for tag in &change.add_tags {
         deadline.check()?;
-        tags::add(scope, reference, tag)?;
+        tags::add(scope, reference, tag, agent)?;
     }
     for tag in &change.remove_tags {
         deadline.check()?;
-        tags::remove(scope, reference, tag)?;
+        tags::remove(scope, reference, tag, agent)?;
     }
     if let Some(parent) = &change.parent {
         let parent = parent

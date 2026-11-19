@@ -261,7 +261,8 @@ fn version_one_workspace_upgrades_content_history_and_tags() {
         .unwrap();
     assert_eq!(updated.body, "Details");
     assert_eq!(updated.tags, vec!["bug"]);
-    assert_eq!(workspace.ticket_history("T-KQ1").unwrap().len(), 1);
+    // The tag and the status change.
+    assert_eq!(workspace.ticket_history("T-KQ1").unwrap().len(), 2);
     drop(workspace);
     let reopened = Workspace::open(&path).unwrap();
     assert_eq!(reopened.show_ticket("T-KQ1").unwrap(), updated);
@@ -627,7 +628,12 @@ fn project_membership_preserves_ticket_identity_and_records_changes() {
     use ticketd_core::TicketPatch;
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    let project = workspace.create_project("Alpha", "/repo/a").unwrap();
+    let (first, second) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let project = workspace
+        .create_project("Alpha", first.to_str().unwrap())
+        .unwrap();
     let ticket = workspace.create_ticket("Outcome").unwrap();
     let linked = workspace
         .change_ticket(
@@ -641,7 +647,7 @@ fn project_membership_preserves_ticket_identity_and_records_changes() {
     assert_eq!(linked.id, ticket.id);
     assert_eq!(linked.reference, ticket.reference);
     workspace
-        .edit_project(&project.id, "Renamed", "/repo/b")
+        .edit_project(&project.id, "Renamed", second.to_str().unwrap())
         .unwrap();
     assert_eq!(workspace.show_project(&project.id).unwrap().name, "Renamed");
     let cleared = workspace
@@ -1484,7 +1490,13 @@ fn concurrent_project_moves_remove_the_previous_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&database).unwrap();
-    let project = workspace.create_project("Project", "initial").unwrap();
+    let (initial, last) = (dir.path().join("initial"), dir.path().join("final"));
+    std::fs::create_dir_all(&initial).unwrap();
+    std::fs::create_dir_all(&last).unwrap();
+    let last = last.canonicalize().unwrap().to_str().unwrap().to_owned();
+    let project = workspace
+        .create_project("Project", initial.to_str().unwrap())
+        .unwrap();
     let lock = rusqlite::Connection::open(&database).unwrap();
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
     lock.execute(
@@ -1504,18 +1516,19 @@ fn concurrent_project_moves_remove_the_previous_checkout() {
     .unwrap();
     let (started, receiver) = mpsc::channel();
     let id = project.id.clone();
+    let target = last.clone();
     let worker = thread::spawn(move || {
         let mut workspace = Workspace::open(database).unwrap();
         started.send(()).unwrap();
-        workspace.edit_project(&id, "Project", "final").unwrap()
+        workspace.edit_project(&id, "Project", &target).unwrap()
     });
     receiver.recv().unwrap();
     // Give the worker time to reach the blocked SQLite write while the transaction is held.
     thread::sleep(Duration::from_millis(100));
     lock.execute_batch("COMMIT").unwrap();
     let result = worker.join().unwrap();
-    assert_eq!(result.path, "final");
-    assert_eq!(result.paths, vec!["final"]);
+    assert_eq!(result.path, last);
+    assert_eq!(result.paths, vec![last]);
 }
 
 #[test]
@@ -3084,7 +3097,9 @@ fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection()
     use ticketd_core::{BatchOperation, WriteRequest};
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("bulk-organization.sqlite")).unwrap();
-    let project = workspace.create_project("Project", "/project").unwrap();
+    let project = workspace
+        .create_project("Project", dir.path().to_str().unwrap())
+        .unwrap();
     let plan = workspace.create_plan("Plan").unwrap();
     let first = workspace.create_ticket("First").unwrap();
     let second = workspace.create_ticket("Second").unwrap();
@@ -3435,7 +3450,9 @@ fn workspace_info_reports_location_counts_size_and_format() {
     workspace
         .set_trashed(&trashed.reference, true, None)
         .unwrap();
-    workspace.create_project("Core", "/tmp/core").unwrap();
+    workspace
+        .create_project("Core", dir.path().to_str().unwrap())
+        .unwrap();
     workspace.create_plan("Active").unwrap();
     let archived = workspace.create_plan("Old").unwrap();
     workspace
@@ -4872,8 +4889,15 @@ fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("plan-graph.sqlite")).unwrap();
     let plan = workspace.create_plan("Launch").unwrap();
-    let first = workspace.create_project("First", "/first").unwrap();
-    let second = workspace.create_project("Second", "/second").unwrap();
+    let folder = |name: &str| {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path.to_str().unwrap().to_owned()
+    };
+    let first = workspace.create_project("First", &folder("first")).unwrap();
+    let second = workspace
+        .create_project("Second", &folder("second"))
+        .unwrap();
     let member = workspace
         .create_ticket_in_project("Member", Some(&first.id))
         .unwrap();
