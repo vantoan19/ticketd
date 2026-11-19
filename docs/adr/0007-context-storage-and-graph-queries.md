@@ -81,4 +81,4 @@ changing canonical Markdown, and ADR 0006 without changing external authority.
 - [SQLite query planning](https://www.sqlite.org/queryplanner.html)
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [React Flow performance](https://reactflow.dev/learn/advanced-use/performance)
-- [Product behavior](../mvp-spec.md#16-context-management)
+- [Product behavior](../product.md#context-management)

@@ -574,6 +574,13 @@ pub trait Connector: Send + Sync {
         Ok(())
     }
 
+    /// Whether two destination spellings name the same place. Exact match by
+    /// default; a provider that ignores case overrides it. Used to hold a
+    /// publish to the saved [`Connector::destinations`].
+    fn same_destination(&self, a: &str, b: &str) -> bool {
+        a == b
+    }
+
     /// Creates an ordinary open issue and returns it as the provider now reports
     /// it. Only called when the descriptor declares [`Capability::Publish`].
     ///

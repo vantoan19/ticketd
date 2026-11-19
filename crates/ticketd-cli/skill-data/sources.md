@@ -41,6 +41,9 @@ When publication is requested, first inspect its exact payload and destination:
 ticketd source publish T-KQ1 --destination owner/repository --preview
 ```
 
+A saved source publishes only to the repositories it lists: any other
+`--destination` is refused in the preview and the publish, before anything is sent.
+
 Use the returned fingerprint with `--expect FINGERPRINT` when executing the
 publication. It creates an external issue and transfers authority while preserving
 ticketd identity. A changed payload or destination invalidates the preview.

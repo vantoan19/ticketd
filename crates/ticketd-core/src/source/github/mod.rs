@@ -80,7 +80,7 @@ impl GithubConnector {
                 SchemaField {
                     key: "repositories".into(),
                     label: "Repositories".into(),
-                    help: Some("Issues from these repositories are discovered. Type owner/name, then press Enter.".into()),
+                    help: Some("Issues from these repositories are discovered, and tickets can be published only to them. Type owner/name, then press Enter.".into()),
                     required: true,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic { depends_on: vec![] },
@@ -591,6 +591,11 @@ impl Connector for GithubConnector {
 
     fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
         require_repository(destination)
+    }
+
+    // GitHub does not tell `Owner/Name` from `owner/name`.
+    fn same_destination(&self, a: &str, b: &str) -> bool {
+        a.eq_ignore_ascii_case(b)
     }
 
     fn publish(

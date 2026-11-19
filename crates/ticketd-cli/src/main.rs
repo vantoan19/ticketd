@@ -782,7 +782,8 @@ enum SourceCommand {
         #[arg(long, default_value = "github")]
         provider: String,
         /// Where to create the issue, for example owner/name; optional when only
-        /// one repository is configured
+        /// one repository is configured. Must be one of the saved source's
+        /// repositories (case-insensitive); anything else is refused
         #[arg(long)]
         destination: Option<String>,
         /// Print the title, description, destination and eligibility; create nothing
