@@ -118,7 +118,8 @@ impl DesktopLogs {
                 .json()
                 .flatten_event(true)
                 .with_span_list(true)
-                .with_current_span(false)
+                // A close line is outside its own span, so only `span` says which one closed.
+                .with_current_span(true)
                 .with_span_events(FmtSpan::CLOSE)
                 .with_timer(Timestamp)
                 .with_ansi(false)

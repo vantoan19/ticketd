@@ -213,19 +213,25 @@ impl Redactor {
             let spans: Vec<_> = spans
                 .iter()
                 .filter_map(Value::as_object)
-                .map(|span| {
-                    let mut kept = Map::new();
-                    for key in ["name"].iter().chain(&ID_FIELDS).chain(&SAFE_FIELDS) {
-                        self.keep(&mut kept, span, key);
-                    }
-                    Value::Object(kept)
-                })
+                .map(|span| self.span(span))
                 .collect();
             if !spans.is_empty() {
                 kept.insert("spans".into(), Value::Array(spans));
             }
         }
+        if let Some(Value::Object(span)) = line.get("span") {
+            kept.insert("span".into(), self.span(span));
+        }
         serde_json::to_string(&kept).ok()
+    }
+
+    /// A span rebuilt from its name and the allowlisted fields.
+    fn span(&self, span: &Map<String, Value>) -> Value {
+        let mut kept = Map::new();
+        for key in ["name"].iter().chain(&ID_FIELDS).chain(&SAFE_FIELDS) {
+            self.keep(&mut kept, span, key);
+        }
+        Value::Object(kept)
     }
 
     fn keep(&self, into: &mut Map<String, Value>, from: &Map<String, Value>, key: &str) {

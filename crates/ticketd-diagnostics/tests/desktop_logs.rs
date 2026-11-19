@@ -107,6 +107,9 @@ fn a_span_chain_is_recorded_and_closing_it_records_its_duration() {
         .find(|line| line["message"] == "close")
         .unwrap();
     assert!(closed["time.busy"].is_string());
+    // A close line names the span it closes, or its duration can't be attributed.
+    assert_eq!(closed["span"]["name"], "sync_pass");
+    assert_eq!(closed["span"]["source_id"], "s-1");
 }
 
 #[test]
