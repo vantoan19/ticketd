@@ -2193,8 +2193,15 @@ html[data-window-bar] {
 .sidebar-nav button svg {
   flex: none;
 }
+/* A long name gives way, never the count beside it (a Plan's "1/7"). */
+.sidebar-nav .sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sidebar-count {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   margin-left: auto;
@@ -4543,9 +4550,14 @@ kbd,
 .ui-dialog[data-surface="create"][data-expanded] .dialog-shell-body {
   flex: 1;
 }
+/* The focus ring is the field's outline: it takes 8px of inset on each side,
+   cancelled by a negative margin, so the text stays on the dialog's edge and
+   the ring sits clear of the first letter. */
 .ui-input[data-variant="document-title"],
 .ui-input[data-variant="capture-title"] {
-  padding: 0;
+  width: calc(100% + 16px);
+  margin-inline: -8px;
+  padding: 0 8px;
   background: transparent;
   box-shadow: none;
   font-weight: 600;
