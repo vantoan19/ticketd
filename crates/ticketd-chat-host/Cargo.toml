@@ -24,6 +24,8 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 # Tests assert literal Ticket references, so they build the fixed device code in.
 ticketd-core = { workspace = true, features = ["test-device-code"] }
+# Writes a multi-line title the way an older version could have saved it.
+rusqlite = "0.37"
 tempfile = "3"
 # Tests read what reaches the log folder, as the logging standard says.
 ticketd-diagnostics.workspace = true
