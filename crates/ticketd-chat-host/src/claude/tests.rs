@@ -637,7 +637,8 @@ async fn a_resumed_chat_opens_with_the_settings_it_last_ran_with() {
         "claude_code_version": "2.1.322",
         "cwd": "/work/chat-1",
         "model": "claude-opus-test",
-        "permission_mode": "default",
+        "permission_mode": "plan",
+        "reopen_with": {"permission_mode": "plan"},
     });
     let request = OpenRequest {
         generation: GENERATION,
@@ -648,6 +649,36 @@ async fn a_resumed_chat_opens_with_the_settings_it_last_ran_with() {
         ticketd_cli: None,
         taken_over: false,
         recorded_settings: Some(recorded.to_string()),
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// #408: an earlier ticketd recorded only a session's first report, so its record can
+/// name a mode the person has left since, such as Accept edits after they chose Ask
+/// before edits. Its mode is not reopened with: the Chat asks before edits.
+#[tokio::test(start_paused = true)]
+async fn a_record_from_an_earlier_ticketd_reopens_asking_before_edits() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_unrecorded"));
+    let earlier = json!({
+        "claude_code_version": "2.1.322",
+        "cwd": "/work/chat-1",
+        "model": "claude-opus-test",
+        "permission_mode": "acceptEdits",
+    });
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: Some(earlier.to_string()),
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -702,6 +733,10 @@ fn the_settings_in_effect_are_recorded_each_time_they_change() {
     assert!(
         applied[0].contains(r#""model":"claude-opus-test""#),
         "{applied:?}"
+    );
+    assert!(
+        applied[0].contains(r#""reopen_with":{"permission_mode":"default"}"#),
+        "the mode a reopened session asks with is the one applied: {applied:?}"
     );
 }
 

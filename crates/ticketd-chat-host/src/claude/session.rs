@@ -16,6 +16,11 @@ use crate::{
 
 use super::report::{PLAN_TOOLS, Reports};
 
+/// Where the Chat's record keeps the permission mode a reopened session asks with
+/// (#408). Only a record written each time the mode changes has it: one an earlier
+/// ticketd wrote kept a session's first report, maybe a mode the person has left since.
+pub(super) const REOPEN_WITH: &str = "reopen_with";
+
 #[derive(Debug)]
 struct Turn {
     id: NativeTurnId,
@@ -204,6 +209,7 @@ impl Session {
             "cwd": event.get("cwd"),
             "model": event.get("model"),
             "permission_mode": event.get("permission_mode"),
+            REOPEN_WITH: {"permission_mode": event.get("permission_mode")},
         });
         events.extend(self.report_settings(settings));
         events.extend(self.reports.session_info(event));
@@ -219,6 +225,9 @@ impl Session {
         };
         let mut settings = self.reported_settings.clone()?;
         settings[field] = json!(value);
+        if setting == SettingKey::Permission {
+            settings[REOPEN_WITH][field] = json!(value);
+        }
         self.report_settings(settings)
     }
 

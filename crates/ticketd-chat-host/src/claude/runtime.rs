@@ -29,7 +29,7 @@ use crate::{
     SubmissionId, SubmissionKind,
 };
 
-use super::session::{Session, unknown};
+use super::session::{REOPEN_WITH, Session, unknown};
 
 /// The bridge protocol version this adapter speaks.
 const PROTOCOL: u64 = 1;
@@ -405,6 +405,15 @@ impl Connection {
             if picks.permission.is_none() {
                 picks.permission = recorded.permission;
             }
+            // Nor does Claude Code's own `defaultMode` decide for a Chat that already
+            // ran when its record names no mode ticketd offers: it asks before edits.
+            let reopened = request.recorded_settings.is_some()
+                || matches!(request.session, SessionStart::Resume(_));
+            if reopened {
+                picks
+                    .permission
+                    .get_or_insert_with(|| super::report::DEFAULT_PERMISSION_MODE.to_owned());
+            }
         }
         if request.taken_over {
             picks
@@ -731,9 +740,9 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
 }
 
 /// The model and permission mode a Chat's sessions last reported in effect, from
-/// what `Session` recorded. A mode ticketd does not offer is left out, so Claude
-/// Code's own setting decides it as before; a record of an Automation agent's
-/// session ("don't ask") is not the person's and gives nothing.
+/// what `Session` recorded. The mode is read from `REOPEN_WITH` only, and one ticketd
+/// does not offer is left out; a record of an Automation agent's session ("don't
+/// ask") is not the person's and gives nothing.
 fn recorded_settings(recorded: Option<&str>) -> StartSettings {
     let Some(Value::Object(recorded)) = recorded.and_then(|text| serde_json::from_str(text).ok())
     else {
@@ -745,14 +754,17 @@ fn recorded_settings(recorded: Option<&str>) -> StartSettings {
             .and_then(Value::as_str)
             .filter(|text| !text.is_empty())
     };
-    let permission = field("permission_mode");
-    if permission == Some("dontAsk") {
+    if field("permission_mode") == Some("dontAsk") {
         return StartSettings::default();
     }
+    let reopen = recorded
+        .get(REOPEN_WITH)
+        .and_then(|reopen| reopen.get("permission_mode"))
+        .and_then(Value::as_str);
     StartSettings {
         model: field("model").map(str::to_owned),
         effort: None,
-        permission: permission
+        permission: reopen
             .filter(|mode| super::report::offered_permission(mode))
             .map(str::to_owned),
     }
