@@ -730,7 +730,10 @@ function InboxContent({
       ? queue.findIndex((entry) => triageId(entry) === triageId(selected))
       : -1;
     triage?.setPosition(
-      index < 0 ? null : { index: index + 1, total: queue.length },
+      // Rows not paged in yet still count, as they do in the group headings.
+      index < 0
+        ? null
+        : { index: index + 1, total: queue.length + hidden.length },
     );
   });
   useEffect(() => {
