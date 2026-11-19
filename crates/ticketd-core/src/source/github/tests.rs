@@ -1453,3 +1453,24 @@ fn only_owner_name_destinations_can_be_published_to() {
         assert_eq!(error.issues()[0].field, "destination", "{bad}");
     }
 }
+
+#[test]
+fn github_destinations_are_compared_without_regard_to_case() {
+    let (_, engine) = setup(Some(TOKEN));
+    let allowed = vec!["Acme/Tracker".to_owned()];
+    assert!(
+        engine
+            .destination_allowed("github", "acme/tracker", &allowed)
+            .unwrap()
+    );
+    assert!(
+        !engine
+            .destination_allowed("github", "acme/secret-roadmap", &allowed)
+            .unwrap()
+    );
+    assert!(
+        engine
+            .destination_allowed("github", "any/repo", &[])
+            .unwrap()
+    );
+}
