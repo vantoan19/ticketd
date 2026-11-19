@@ -11,6 +11,7 @@ import {
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
 import { keepWebviewInStep } from "@/lib/webview-scale";
+import { setReportedRoute } from "@/lib/error-report";
 import { usePageZoom } from "./use-page-zoom";
 import { useResponsiveNavigationFocus } from "./use-responsive-navigation-focus";
 import { PageZoomStatus } from "./PageZoomStatus";
@@ -226,6 +227,7 @@ function AppContent() {
       : editingBlockedReason(workspaceProblem);
   const recovery = useDraftRecovery();
   const [view, setViewState] = useState<View>("tickets");
+  useEffect(() => setReportedRoute(view), [view]);
   const chat = useChatFeature();
   // Turning Chat off hides its screen at once; the Chats themselves are kept.
   if ((view === "chats" || view === "automations") && !chat.enabled)

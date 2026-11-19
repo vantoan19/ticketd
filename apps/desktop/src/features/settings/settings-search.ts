@@ -293,6 +293,34 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "keyboard-shortcuts",
   },
   {
+    title: "Debug logging",
+    description:
+      "Records more detail until ticketd restarts. TICKETD_LOG overrides it.",
+    keywords: "diagnostics log level verbose troubleshoot",
+    section: "diagnostics",
+  },
+  {
+    title: "Log files",
+    description:
+      "One file per day, and the oldest are removed automatically. Open the logs folder.",
+    keywords: "diagnostics logs folder open finder",
+    section: "diagnostics",
+  },
+  {
+    title: "Export diagnostics",
+    description:
+      "A small .zip of redacted logs and Workspace health to attach to a bug report.",
+    keywords: "diagnostics bug report issue support summary copy zip logs",
+    section: "diagnostics",
+  },
+  {
+    title: "Recent errors",
+    description:
+      "The last kinds of warning and error ticketd logged, from the files still kept.",
+    keywords: "diagnostics crash failure warning unexpected quit",
+    section: "diagnostics",
+  },
+  {
     title: "Documentation",
     description: "Guides for the desktop app and the command line.",
     keywords: "about version help docs guides",

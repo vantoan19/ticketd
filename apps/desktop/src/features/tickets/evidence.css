@@ -115,9 +115,9 @@
 .ticket-add-row:not(:has(button)) {
   display: none;
 }
-@container ticket-detail (max-width: 460px) {
-  .evidence-item > :last-child {
-    grid-column: 2 / -1;
-    grid-row: 3;
-  }
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
+  .evidence-item
+  > :last-child {
+  grid-column: 2 / -1;
+  grid-row: 3;
 }

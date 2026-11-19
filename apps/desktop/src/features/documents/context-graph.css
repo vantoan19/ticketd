@@ -3,7 +3,9 @@
 /* Workspace and item graphs (cgraph-): layout only. The canvas, legend, zoom
    control, cards, panel and rows are the graph kit (components/ui/graph-kit). */
 .cgraph-page {
-  container-type: inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -118,18 +120,16 @@
 
 /* Below 640px of pane the panel moves under the canvas or list at a fixed
    share, so neither is squeezed to a sliver. */
-@container (max-width: 640px) {
-  .cgraph-body:not([data-state]) {
-    flex-direction: column;
-  }
-  .cgraph-body .ui-graph-panel {
-    width: auto;
-    height: 40%;
-  }
-  .cgraph-search {
-    flex: 1 1 160px;
-    width: auto;
-  }
+:where([data-width~="max-640"]) .cgraph-body:not([data-state]) {
+  flex-direction: column;
+}
+:where([data-width~="max-640"]) .cgraph-body .ui-graph-panel {
+  width: auto;
+  height: 40%;
+}
+:where([data-width~="max-640"]) .cgraph-search {
+  flex: 1 1 160px;
+  width: auto;
 }
 
 .cgraph-workspace-filters {

@@ -878,6 +878,7 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
                 chats.set_focused(focused).await;
                 if focused {
                     crate::chats::log_failure(
+                        None,
                         "check the Chats' folders",
                         chats.recheck_folders().await,
                     );

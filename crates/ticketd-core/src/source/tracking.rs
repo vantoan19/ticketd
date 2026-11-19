@@ -784,6 +784,8 @@ impl Workspace {
         engine: &Engine,
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
+        let _refresh =
+            tracing::info_span!("source_refresh", ticket_ref = options.ticket.as_deref()).entered();
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = self.tracked(options.ticket.as_deref())?;
         let mut gathered = Gathered {
@@ -814,6 +816,8 @@ impl Workspace {
             all
         };
         for provider in providers {
+            // Every line about this source, until the end of its turn in the loop.
+            let _source = tracing::info_span!("source", source_id = provider.as_str()).entered();
             let config = saved.iter().find(|s| s.provider == provider);
             if let Some(source) = config {
                 gathered

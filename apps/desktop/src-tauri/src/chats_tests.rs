@@ -2467,3 +2467,29 @@ async fn a_step_s_whole_output_is_read_when_its_row_opens() {
         Some(output)
     );
 }
+
+#[test]
+fn a_failed_background_action_logs_the_chat_and_the_kind_but_not_the_failure_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = ticketd_diagnostics::DesktopLogs::open(dir.path(), Default::default());
+    logs.with_default(|| {
+        log_failure::<()>(
+            Some("chat-1"),
+            "mark the Chat seen",
+            Err(failed("the agent said: Quarterly plan for jdoe")),
+        );
+    });
+
+    let groups = logs.recent_errors();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].kind, "failed");
+    let mut text = String::new();
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "log") {
+            text.push_str(&std::fs::read_to_string(path).unwrap());
+        }
+    }
+    assert!(text.contains("\"chat_id\":\"chat-1\""), "{text}");
+    assert!(!text.contains("jdoe"), "{text}");
+}

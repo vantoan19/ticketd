@@ -46,6 +46,7 @@
 .chat-plan-save-narrow {
   display: none;
 }
+/* In a pane header (a query container) or a measured pane (data-width). */
 @container (max-width: 420px) {
   .chat-plan-save-wide {
     display: none;
@@ -53,6 +54,12 @@
   .chat-plan-save-narrow {
     display: inline-flex;
   }
+}
+:where([data-width~="max-420"]) .chat-plan-save-wide {
+  display: none;
+}
+:where([data-width~="max-420"]) .chat-plan-save-narrow {
+  display: inline-flex;
 }
 .chat-plan-note {
   margin: 0 8px 2px 0;

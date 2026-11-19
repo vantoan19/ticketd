@@ -41,3 +41,12 @@ export function applyTokens(tokens: Record<string, string>): () => void {
     for (const name of names) root.style.removeProperty(name);
   };
 }
+
+let cold = 0;
+/**
+ * Empty lib/motion-tokens' cache as a token change would (a change to the
+ * root's inline style), so the next read is a real one a test can count.
+ */
+export function coldTokenCache() {
+  document.documentElement.style.setProperty("--test-cold", String(++cold));
+}
