@@ -356,6 +356,26 @@ impl Engine {
         Ok(connector.destinations(&config))
     }
 
+    /// Whether `destination` is well formed for `provider`; no network call.
+    pub fn check_destination(&self, provider: &str, destination: &str) -> Result<(), SourceError> {
+        self.connector(provider)?.check_destination(destination)
+    }
+
+    /// Whether `destination` is one of `allowed` (the saved destinations) for
+    /// `provider`. An empty `allowed` list places no restriction.
+    pub fn destination_allowed(
+        &self,
+        provider: &str,
+        destination: &str,
+        allowed: &[String],
+    ) -> Result<bool, SourceError> {
+        let connector = self.connector(provider)?;
+        Ok(allowed.is_empty()
+            || allowed
+                .iter()
+                .any(|saved| connector.same_destination(saved, destination)))
+    }
+
     /// Whether `provider` declares the optional publication capability.
     pub fn can_publish(&self, provider: &str) -> bool {
         self.descriptor(provider)

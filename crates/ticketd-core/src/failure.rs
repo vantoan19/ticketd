@@ -72,7 +72,9 @@ impl Error {
                 kind if kind.is_workspace() => kind,
                 _ => FailureKind::WorkspaceUnreadable,
             },
-            Self::BatchOperation { source, .. } | Self::SafetyCopy { source } => source.kind(),
+            Self::BatchOperation { source, .. }
+            | Self::BatchNamed { source, .. }
+            | Self::SafetyCopy { source } => source.kind(),
             Self::Restore { source, .. } | Self::Migration { source, .. } => match source.kind() {
                 kind if kind.is_workspace() => kind,
                 _ => FailureKind::Failed,
@@ -117,7 +119,8 @@ impl Error {
             | Self::ActivityNotFound(_)
             | Self::AutomationAgentNotFound(_)
             | Self::AutomationNotFound(_)
-            | Self::AutomationRunNotFound(_) => FailureKind::NotFound,
+            | Self::AutomationRunNotFound(_)
+            | Self::InboxEntryNotFound(_) => FailureKind::NotFound,
             Self::DependencyCycle { .. }
             | Self::DependencySelf(_)
             | Self::DuplicateCycle
@@ -138,9 +141,15 @@ impl Error {
             | Self::LegacyEffortWorkspace
             | Self::Serialization(_)
             | Self::InvalidBatch(_)
+            | Self::InvalidReminderTime(_)
+            | Self::NoReminder(_)
+            | Self::SnoozeNotLater { .. }
+            | Self::InvalidGraphRequest(_)
             | Self::EmptyPlanName
-            | Self::AmbiguousProject
+            | Self::PlanNameTooLong(_)
+            | Self::AmbiguousProject(_)
             | Self::CheckoutTaken(_)
+            | Self::CheckoutNotRegistered(_)
             | Self::InvalidCheckoutPath
             | Self::EmptyProject
             | Self::DuplicateDependencies
@@ -151,16 +160,21 @@ impl Error {
             | Self::DependencyReviewMode(_)
             | Self::PlanArchived
             | Self::EmptyTag
+            | Self::InvalidTag { .. }
+            | Self::EmptyRequestId
             | Self::Trashed(_)
             | Self::DocumentTrashed(_)
             | Self::MissingRelatedTicket
             | Self::EmptyTitle
+            | Self::TitleNotOneLine
+            | Self::TitleTooLong(_)
             | Self::InvalidEvidence(_)
             | Self::ConflictingActivitySupport
             | Self::EmptyActivityBrief
             | Self::ExternalContent { .. }
             | Self::ExternalStatus { .. }
             | Self::NotSynchronized(_)
+            | Self::AlreadyLocal(_)
             | Self::SourceAvailable { .. }
             | Self::Source(_)
             | Self::Publication(_)

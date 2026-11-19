@@ -151,7 +151,12 @@ import {
 import { linkPluginOptions } from "./link-options";
 import { slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
-import { codeBlockText, readMarkdown, writeMarkdown } from "./plate-markdown";
+import {
+  codeBlockText,
+  readMarkdown,
+  writeMarkdown,
+  writeMarkdownFrom,
+} from "./plate-markdown";
 import "./markdown-editor.css";
 import { lazyView } from "@/app/lazy-view";
 import type { SourceEditorProps } from "./SourceEditor";
@@ -1180,7 +1185,7 @@ export function MarkdownEditor({
     source: string;
     document: Pick<
       ReturnType<typeof readMarkdown>,
-      "value" | "reasons" | "markdown"
+      "value" | "reasons" | "markdown" | "baseline"
     >;
   }>(() => ({ source: value, document: readMarkdown(value) }));
   // The text the host holds, as last reported here or given from outside.
@@ -1225,6 +1230,8 @@ export function MarkdownEditor({
   // The canonical Markdown of the text the host holds: rich text that still
   // writes this has nothing new to report.
   const canonical = useRef(document.markdown);
+  // The text the rich value came from, so blocks that were not edited keep their own text.
+  const baseline = useRef(document.baseline);
   // When rich edits not yet reported began, or null.
   const pendingSince = useRef<number | null>(null);
   // Source typing the rich value has not read yet.
@@ -1282,6 +1289,7 @@ export function MarkdownEditor({
       sourceUnread.current = false;
       const parsed = readMarkdown(emitted.current);
       canonical.current = parsed.markdown;
+      baseline.current = parsed.baseline;
       setAssessed({ source: emitted.current, document: parsed });
       setEmpty(emitted.current.trim() === "");
       editor.tf.setValue(parsed.value);
@@ -1291,13 +1299,20 @@ export function MarkdownEditor({
     if (pendingSince.current === null) return;
     pendingSince.current = null;
     latest.current.onPendingChange?.(false);
-    const markdown = writeMarkdown(editor.children);
+    const written = writeMarkdownFrom(editor.children, baseline.current);
+    const markdown = written.markdown;
     if (markdown === canonical.current) return;
     canonical.current = markdown;
     emitted.current = markdown;
+    baseline.current = written.baseline;
     setAssessed({
       source: markdown,
-      document: { value: editor.children, reasons: [], markdown },
+      document: {
+        value: editor.children,
+        reasons: [],
+        markdown,
+        baseline: written.baseline,
+      },
     });
     latest.current.onChange(markdown);
   }, [editor]);
@@ -1537,6 +1552,7 @@ export function MarkdownEditor({
     sourceUnread.current = false;
     emitted.current = value;
     canonical.current = document.markdown;
+    baseline.current = document.baseline;
     applyExternalValue(editor, document.value, lastSelection.current);
     // Slate reports these with the next change; they are not typing.
     for (const operation of editor.operations)

@@ -99,7 +99,7 @@ function problems(status: CliStatus): ReactNode[] {
     found.push("ticketd was found but did not report a version.");
   else if (status.version_matches === false)
     found.push(
-      `Its version ${status.version} does not match this app (${status.app_version}). Replace it with the ticketd executable from this app's download, then check again.`,
+      `Its version ${status.version} does not match this app (${status.app_version}). Replace it with the ticketd executable built or packaged with this version of the app, then check again.`,
     );
   if (status.workspace_matches === false)
     found.push(
@@ -107,7 +107,7 @@ function problems(status: CliStatus): ReactNode[] {
     );
   else if (status.workspace_matches === null)
     found.push(
-      "It could not confirm which workspace it uses. Replace it with the ticketd executable from this app's download.",
+      "It could not confirm which workspace it uses. Replace it with the ticketd executable built or packaged with this version of the app.",
     );
   return found;
 }
@@ -173,7 +173,12 @@ function StatusRows({
           <Steps>
             <Step
               title="Get the ticketd executable"
-              description="It comes with this app's download."
+              description={
+                <>
+                  A packaged download includes it. From a source build, run{" "}
+                  <code className={mono}>cargo build -p ticketd-cli</code>.
+                </>
+              }
               action={<InstallGuideLink onFailure={onGuideFailure} />}
             />
             <Step

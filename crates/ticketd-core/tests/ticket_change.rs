@@ -186,6 +186,7 @@ fn adding_a_tag_is_the_same_change_through_every_entry() {
                     let request = WriteRequest::AddTag {
                         reference: w.subject.clone(),
                         name: "Urgent".into(),
+                        agent: None,
                     };
                     w.workspace.write(Some("r1"), request).unwrap();
                 }),
@@ -248,6 +249,7 @@ fn removing_a_tag_is_the_same_change_through_every_entry() {
                     let request = WriteRequest::RemoveTag {
                         reference: w.subject.clone(),
                         name: "urgent".into(),
+                        agent: None,
                     };
                     w.workspace.write(Some("r1"), request).unwrap();
                 }),

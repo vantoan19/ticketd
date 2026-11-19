@@ -19,7 +19,9 @@ chrono = { version = "0.4", features = ["clock"] }
 ticketd-core.workspace = true
 ticketd-diagnostics.workspace = true
 clap.workspace = true
-serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+# raw_value lets the CLI drop one key from a record without reordering the rest.
+serde_json = { version = "1", features = ["raw_value"] }
 tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
 

@@ -306,7 +306,7 @@ fn only_an_unavailable_external_ticket_can_be_taken_over() {
     let local = f.workspace.create_ticket("Plain").unwrap();
     assert!(matches!(
         f.workspace.take_ownership(&local.reference, None),
-        Err(Error::NotSynchronized(_))
+        Err(Error::AlreadyLocal(_))
     ));
     assert!(matches!(
         f.workspace.take_ownership("T-KQ99", None),

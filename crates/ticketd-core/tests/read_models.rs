@@ -385,7 +385,11 @@ fn status(workspace: &mut Workspace, ticket: &Ticket, status: Status) {
 fn seeded() -> Seeded {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("models.sqlite3")).unwrap();
-    let project = workspace.create_project("App", "/tmp/app").unwrap();
+    let checkout = dir.path().join("app");
+    std::fs::create_dir_all(&checkout).unwrap();
+    let project = workspace
+        .create_project("App", checkout.to_str().unwrap())
+        .unwrap();
     let tickets: Vec<Ticket> = (1..=12)
         .map(|n| {
             workspace

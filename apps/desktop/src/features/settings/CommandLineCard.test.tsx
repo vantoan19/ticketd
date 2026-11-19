@@ -187,6 +187,16 @@ test("a missing CLI walks through three steps with the suggested folder", async 
   ]);
 });
 
+test("the missing-CLI copy is true for a source build and a packaged one", async () => {
+  invoke.mockResolvedValueOnce(missing);
+  render(<CommandLineCard />);
+  await screen.findByText("Not found");
+  const step = screen.getByRole("list").textContent ?? "";
+  expect(step).toContain("cargo build -p ticketd-cli");
+  expect(step).toContain("packaged download");
+  expect(step).not.toContain("comes with this app");
+});
+
 test("Check again sits in the Status section and is disabled while checking", async () => {
   invoke.mockResolvedValueOnce(base);
   render(<CommandLineCard />);

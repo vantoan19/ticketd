@@ -123,14 +123,50 @@ pub(crate) fn commit(
     })
 }
 
-/// The trimmed title. A write checks this before it enters the write scope, so a blank
-/// title is refused at once instead of after waiting for another writer's lock.
+/// The longest title a new or changed ticket may have. Titles already stored stay valid.
+pub(crate) const MAX_TITLE: usize = 1000;
+
+/// The trimmed title. A write checks this before it enters the write scope, so a bad
+/// title is refused at once instead of after waiting for another writer's lock. A title
+/// is one non-empty line of at most [`MAX_TITLE`] characters.
 fn non_empty_title(title: &str) -> Result<&str, Error> {
     let title = title.trim();
     if title.is_empty() {
         return Err(Error::EmptyTitle);
     }
+    if title.contains(['\n', '\r']) {
+        return Err(Error::TitleNotOneLine);
+    }
+    if title.chars().count() > MAX_TITLE {
+        return Err(Error::TitleTooLong(MAX_TITLE));
+    }
     Ok(title)
+}
+
+/// A title taken from another system, made to fit the rules above instead of refused:
+/// line breaks (and the space around them) become one space, and a title over
+/// [`MAX_TITLE`] characters is cut there. An import must not fail over how the provider
+/// wrote a title; the full title stays at the provider. Blank stays blank, so the caller
+/// can fall back to something else.
+pub(crate) fn imported_title(title: &str) -> String {
+    let mut one_line = String::with_capacity(title.len());
+    for (index, line) in title
+        .split(['\n', '\r'])
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .enumerate()
+    {
+        if index > 0 {
+            one_line.push(' ');
+        }
+        one_line.push_str(line);
+    }
+    one_line
+        .chars()
+        .take(MAX_TITLE)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 /// A new ticket, in a project and a Plan if given, read back.
@@ -321,11 +357,11 @@ pub(crate) fn apply(
     }
     for tag in &change.add_tags {
         deadline.check()?;
-        tags::add(scope, reference, tag)?;
+        tags::add(scope, reference, tag, agent)?;
     }
     for tag in &change.remove_tags {
         deadline.check()?;
-        tags::remove(scope, reference, tag)?;
+        tags::remove(scope, reference, tag, agent)?;
     }
     if let Some(parent) = &change.parent {
         let parent = parent

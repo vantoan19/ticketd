@@ -4,7 +4,7 @@
 
 This document defines the target visual and interaction design for ticketd's desktop application and the design system it is built from (section 11). It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
 
-Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens (product specification section 21) are off by default and follow this guide’s tokens and components; their layout is specified in section 15. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
+Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product description](docs/product.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens ([product description](docs/product.md#native-chats)) are off by default and follow this guide’s tokens and components; their layout is specified in section 15. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
 
 ### Reference and adaptation
 
@@ -533,7 +533,7 @@ A ticket is either Local or owned by an external source. Retained provenance is 
 
 ## 8. Documents and activity
 
-Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with-canonical-markdown.md). Reading and focusing a document never rewrite it. Unsupported rich content retains a source-editing path.
+Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with-canonical-markdown.md). Reading and focusing a document never rewrite it, and a rich edit rewrites only the blocks it changed: every other block keeps its own text, spacing, divider, list and table spelling, link destinations and line breaks. Nested bold, italic, code and links stay in rich editing; when Markdown must go to source editing, the caption names the construct (“Source editing · has raw HTML”). Unsupported rich content retains a source-editing path.
 
 - Description and Document editing keeps the reading geometry: the ticket uses 15/24 prose (16/26 expanded), and the frame sits outside the text. The Document reader owns zero inner editor padding so lazy editor styles cannot inset its prose on entry. Formatting lives in the floating edit bar (see Ticket detail). The slash menu opens at the caret with an icon, block name and Markdown shortcut on every row, and says "No matching blocks" rather than closing. An accessible reading group retains headings, links, and attachment controls; only clicks within the prose start editing, so portalled menus keep their own interaction.
 - Quick composers (the update composer, Capture, New ticket) have no docked toolbar: formatting is a small bar over the selected text, slash, and Markdown shortcuts; only Insert attachment and the source switch sit in the composer’s existing controls host. Capture hosts them in its header, without adding a toolbar below the body.
@@ -993,7 +993,7 @@ The ticket title is the strongest heading in the split workspace. The list headi
 
 The Chats list is 300px wide and groups active conversations into Needs you (pending approvals) and Recent, preserving recency inside each group. The transcript and tray share a centred column up to 760px with 40px gutters (16px in narrow panes). Split-pane messages and replies use the document role (15/24); expanded Chat uses reading (16/26). The composer control row is 44px tall. Harness tab names keep their full width; setup status gives way first. An approval shows its exact command in the dock before the reason, with the existing Command disclosure retaining Copy.
 
-A Chat (product specification section 21) opens in the detail pane: a 48px header, the transcript, then the problem notice, activity dock and composer. It uses the shared components and existing tokens and adds none. A spaced middle dot separates items, a chevron marks disclosure, and at most two disclosure levels show at once.
+A Chat ([product description](docs/product.md#native-chats)) opens in the detail pane: a 48px header, the transcript, then the problem notice, activity dock and composer. It uses the shared components and existing tokens and adds none. A spaced middle dot separates items, a chevron marks disclosure, and at most two disclosure levels show at once.
 
 ### Identity and header
 

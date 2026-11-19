@@ -41,6 +41,7 @@ import {
   type SyncStatus,
 } from "@/lib/sync-api";
 import { syncReview } from "@/lib/sync-review-api";
+import { attachments } from "@/lib/api/attachments";
 import { useNow } from "@/lib/use-now";
 import { recoveryCopy } from "./sync-recovery";
 import { useSyncStatus } from "./sync-status";
@@ -275,6 +276,23 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
 
 function Connect() {
   const { busy, failure, run } = useCommand();
+  // Whether this build has a Google Drive app configuration. Unknown until
+  // read; only a plain "no" holds back the button.
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    let current = true;
+    void attachments
+      .driveConfiguration()
+      .then((config) => {
+        if (current) setConfigured(config.configured);
+      })
+      .catch(() => {
+        // Sign-in still reports why it cannot start.
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
   return (
     <>
       <div className="sync-block">
@@ -301,7 +319,7 @@ function Connect() {
             trailing={
               <Button
                 size="sm"
-                disabled={busy}
+                disabled={busy || configured === false}
                 onClick={() =>
                   void run(syncApi.connect, "connect Google Drive")
                 }
@@ -312,6 +330,16 @@ function Connect() {
             }
           />
         </SettingsList>
+        {configured === false && (
+          <Alert role="status" className="mt-3">
+            <AlertTitle>Google Drive isn't set up on this computer</AlertTitle>
+            <AlertDescription>
+              This build of ticketd has no Google Drive app configuration, so
+              sign-in can't start. Install a build with Google Drive enabled.
+              Your local files are unaffected.
+            </AlertDescription>
+          </Alert>
+        )}
         <Failure>{failure}</Failure>
       </div>
       {/* The track above numbers the stages; these rows only explain them. */}

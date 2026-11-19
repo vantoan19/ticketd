@@ -4728,6 +4728,7 @@ dependencies = [
  "chrono",
  "clap",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "ticketd-chat-host",

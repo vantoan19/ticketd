@@ -11,9 +11,11 @@
   list-style: none;
   counter-reset: sync-step;
 }
+/* Each step is as wide as its label and the joining lines share the rest, so
+   the longest label ("Choose a workspace") is never cut by an equal share. */
 .sync-track li {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
   min-width: 0;

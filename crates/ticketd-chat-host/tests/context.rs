@@ -54,7 +54,9 @@ fn the_reference_names_current_records_and_how_to_fetch_them_without_their_conte
     let document = workspace
         .create_document(Some("Design notes"), "document body stays in ticketd")
         .unwrap();
-    let project = workspace.create_project("App", "/work/app").unwrap();
+    let project = workspace
+        .create_project("App", dir.path().to_str().unwrap())
+        .unwrap();
     let chat = workspace
         .create_chat(
             None,

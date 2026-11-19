@@ -126,6 +126,13 @@ pub(crate) fn migrate(transaction: &Transaction<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// The editing agent as stored: trimmed, and absent when blank, so a missing attribution
+/// never looks like an attribution (an empty name would also notify the local person of
+/// their own change in the Inbox).
+pub(crate) fn clean_agent(agent: Option<&str>) -> Option<&str> {
+    agent.map(str::trim).filter(|name| !name.is_empty())
+}
+
 pub(crate) fn record(
     transaction: &Connection,
     ticket_id: &str,
@@ -134,6 +141,7 @@ pub(crate) fn record(
     to: &str,
     agent: Option<&str>,
 ) -> Result<(), Error> {
+    let agent = clean_agent(agent);
     transaction.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value, editing_agent) VALUES (?1, ?2, ?3, ?4, ?5)", params![ticket_id, kind, from, to, agent])?;
     if matches!(kind, "status" | "parent" | "dependency") || kind.starts_with("relationship:") {
         crate::inbox::record(transaction, ticket_id, kind, from, to, agent)?;

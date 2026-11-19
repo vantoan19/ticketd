@@ -69,7 +69,10 @@ pub use session::{WorkspaceGuard, WorkspaceSession};
 mod tags;
 mod ticket_documents;
 mod write_scope;
-pub use plans::{Plan, PlanCounts, PlanView};
+pub use plans::{
+    Plan, PlanContext, PlanContextDependency, PlanContextDocument, PlanContextHeader,
+    PlanContextTicket, PlanCounts, PlanView,
+};
 
 use std::{
     path::Path,
@@ -108,7 +111,7 @@ mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
-    DEFAULT_ATTACHMENT_LIMIT,
+    DEFAULT_ATTACHMENT_LIMIT, DISPLAY_NAME_LIMIT, MAX_BACKUP_FILE_BYTES,
 };
 mod automation_advance;
 mod automation_agents;
@@ -165,6 +168,19 @@ mod format;
 pub use format::FORMAT_VERSION;
 #[cfg(feature = "test-schema")]
 pub use format::create_workspace_at_format_version;
+
+/// What to add to "ticket ... was not found" when the text cannot be a reference.
+/// Identifiers (UUIDs) are left alone: the mistake there is not the format.
+fn not_found_hint(reference: &str) -> String {
+    if document_links::is_ticket_reference(reference) || reference.matches('-').count() >= 4 {
+        return String::new();
+    }
+    let upper = reference.to_ascii_uppercase();
+    if upper != reference && document_links::is_ticket_reference(&upper) {
+        return format!("; references are case-sensitive, did you mean '{upper}'?");
+    }
+    "; a reference is T-, a two-letter device code and a number, for example T-KQ12".to_owned()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -231,6 +247,8 @@ pub enum Error {
     LegacyEffortWorkspace,
     #[error("request ID was already used for different content: {0}")]
     RequestConflict(String),
+    #[error("request ID must not be empty")]
+    EmptyRequestId,
     #[error("request serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
     #[error("batch operation {index}: {source}")]
@@ -241,16 +259,39 @@ pub enum Error {
     },
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
+    /// A failure inside a batch, worded with the batch's own `$name`s for tickets the
+    /// batch created. Those tickets were never saved, so their references mean nothing to
+    /// the caller. The cause is kept and decides the failure kind.
+    #[error("{message}")]
+    BatchNamed {
+        message: String,
+        #[source]
+        source: Box<Error>,
+    },
+    #[error("invalid reminder time: {0}")]
+    InvalidReminderTime(String),
+    #[error("{0} has no reminder to snooze; set one first")]
+    NoReminder(String),
+    #[error("{reference} is already due at {current}; a snooze must move the reminder later")]
+    SnoozeNotLater { reference: String, current: String },
+    #[error("inbox entry {0} was not found")]
+    InboxEntryNotFound(i64),
+    #[error("invalid graph request: {0}")]
+    InvalidGraphRequest(String),
     #[error("plan name must not be empty")]
     EmptyPlanName,
+    #[error("plan name must be at most {0} characters")]
+    PlanNameTooLong(usize),
     #[error("plan '{0}' was not found")]
     PlanNotFound(String),
     #[error(
-        "checkout matches multiple projects; specify --project explicitly or remove a registration"
+        "checkout matches multiple projects ({0}); specify --project explicitly or remove a registration"
     )]
-    AmbiguousProject,
+    AmbiguousProject(String),
     #[error("This folder is registered to {0}.")]
     CheckoutTaken(String),
+    #[error("This folder is not registered to {0}.")]
+    CheckoutNotRegistered(String),
     #[error("checkout path must be valid Unicode")]
     InvalidCheckoutPath,
     #[error("project name and path must not be empty")]
@@ -314,6 +355,10 @@ pub enum Error {
     InvalidHierarchy,
     #[error("tag name must not be empty")]
     EmptyTag,
+    #[error(
+        "a tag must be at most {max} characters and contain no commas, tabs or line breaks; shorten it or split it into separate tags"
+    )]
+    InvalidTag { max: usize },
     #[error("ticket '{0}' is in trash; restore it before editing")]
     Trashed(String),
     #[error("document '{0}' is in trash; restore it with `ticketd document restore {0}` first")]
@@ -322,7 +367,11 @@ pub enum Error {
     MissingRelatedTicket,
     #[error("ticket title must not be empty")]
     EmptyTitle,
-    #[error("ticket '{0}' was not found")]
+    #[error("a ticket title must be one line; put the rest in the description")]
+    TitleNotOneLine,
+    #[error("a ticket title must be at most {0} characters; put the rest in the description")]
+    TitleTooLong(usize),
+    #[error("ticket '{0}' was not found{hint}", hint = not_found_hint(.0))]
     NotFound(String),
     #[error("invalid evidence: {0}")]
     InvalidEvidence(String),
@@ -349,6 +398,8 @@ pub enum Error {
     },
     #[error("{0} is not owned by an external source, so there is nothing to refresh")]
     NotSynchronized(String),
+    #[error("{0} is already a local ticket, so there is nothing to take over")]
+    AlreadyLocal(String),
     #[error(
         "{reference} can still be read from {provider}, so ticketd cannot take ownership of it; refresh it or retry later"
     )]
@@ -376,7 +427,9 @@ pub enum Error {
     SyncFile(String),
     #[error("sync: {0}")]
     Sync(String),
-    #[error("workspace schema version {0} is newer than this application supports")]
+    #[error(
+        "workspace schema version {0} is newer than this application supports; update ticketd to open it"
+    )]
     NewerSchema(i64),
 }
 
@@ -462,6 +515,11 @@ fn upload_limit_message(limit: u64) -> String {
     } else {
         format!("{limit} bytes")
     };
+    if limit >= attachments::MAX_BACKUP_FILE_BYTES {
+        return format!(
+            "file is larger than the {bound} ticketd can keep, the most a backup can hold; choose a smaller file"
+        );
+    }
     format!(
         "file exceeds the workspace upload limit of {bound}; change it in Settings > Attachments or `ticketd attachment limit --bytes <bytes>`"
     )
@@ -937,8 +995,9 @@ fn default_path() -> Result<std::path::PathBuf, Error> {
     Ok(path)
 }
 
-/// Name the file or folder a person supplied when it is missing or of the wrong
-/// kind. Other I/O failures keep the generic workspace wording.
+/// Name the file or folder a person supplied when it is missing, unreadable, not
+/// writable or of the wrong kind. A full disk keeps the generic workspace wording,
+/// so it is still reported as a full disk.
 pub(crate) fn path_error(role: &str, path: &std::path::Path, error: std::io::Error) -> Error {
     let shown = if path.as_os_str().is_empty() {
         std::path::Path::new(".")
@@ -952,6 +1011,28 @@ pub(crate) fn path_error(role: &str, path: &std::path::Path, error: std::io::Err
         std::io::ErrorKind::NotADirectory => {
             Error::Path(format!("{role} is not a folder: {}", shown.display()))
         }
-        _ => Error::Directory(error),
+        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
+            Error::Directory(error)
+        }
+        _ => Error::Path(format!(
+            "cannot access {role} {}: {}",
+            shown.display(),
+            io_reason(&error)
+        )),
+    }
+}
+
+/// The cause of an I/O error in plain words, without the operating system's code or
+/// the path some libraries append.
+fn io_reason(error: &std::io::Error) -> String {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "permission denied".into(),
+        std::io::ErrorKind::ReadOnlyFilesystem => "the folder is read-only".into(),
+        std::io::ErrorKind::IsADirectory => "it is a folder".into(),
+        _ => {
+            let text = error.to_string();
+            let text = text.split(" (os error").next().unwrap_or(&text);
+            text.split(" at path").next().unwrap_or(text).to_lowercase()
+        }
     }
 }

@@ -1351,9 +1351,11 @@ async fn the_list_is_not_read_again_for_checkpointed_text_and_shared_folders_are
 #[tokio::test(start_paused = true)]
 async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the_chat() {
     let f = Fixture::new().await;
+    let store = f.dir.path().join("store");
+    std::fs::create_dir_all(&store).unwrap();
     let project = f
         .core()
-        .create_project("Storefront", "/work/store")
+        .create_project("Storefront", store.to_str().unwrap())
         .unwrap();
     let link = || LinkRef {
         kind: LinkKind::Project,

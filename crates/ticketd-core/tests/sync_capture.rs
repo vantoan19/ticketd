@@ -102,7 +102,7 @@ fn a_write_to_synced_content_marks_the_record_that_owns_it() {
     assert_eq!(take(&mut workspace), BTreeSet::from([plan_owner]));
 
     let project = workspace
-        .create_project("Project", "C:/work/project")
+        .create_project("Project", dir.path().to_str().unwrap())
         .unwrap();
     assert_eq!(
         take(&mut workspace),
@@ -117,7 +117,7 @@ fn device_local_writes_and_reads_leave_no_mark() {
     let ticket = workspace.create_ticket("First").unwrap();
     let document = workspace.create_document(Some("Doc"), "Body").unwrap();
     let project = workspace
-        .create_project("Project", "C:/work/project")
+        .create_project("Project", dir.path().to_str().unwrap())
         .unwrap();
     take(&mut workspace);
 

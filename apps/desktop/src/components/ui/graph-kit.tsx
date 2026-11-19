@@ -137,6 +137,7 @@ export function GraphCanvas({
   zoom,
   notice,
   footnote,
+  legendInFoot = false,
   className,
   ...props
 }: Omit<ComponentProps<"section">, "children"> & {
@@ -147,6 +148,13 @@ export function GraphCanvas({
   notice?: ReactNode;
   /** One caption at the canvas foot, beside the zoom control ("Showing 7 of 30"). */
   footnote?: ReactNode;
+  /**
+   * Seat the legend at the end of the foot row instead of top-right, for a
+   * canvas whose top edge carries content (the workspace graph's island
+   * titles). The zoom control, caption and legend then share one row and wrap
+   * rather than overlap.
+   */
+  legendInFoot?: boolean;
 }) {
   return (
     <section
@@ -157,11 +165,12 @@ export function GraphCanvas({
     >
       {children}
       {notice && <div className="ui-graph-notice">{notice}</div>}
-      {legend}
-      {(zoom || footnote) && (
+      {!legendInFoot && legend}
+      {(zoom || footnote || (legendInFoot && legend)) && (
         <div className="ui-graph-foot">
           {zoom}
           {footnote && <p className="ui-graph-footnote">{footnote}</p>}
+          {legendInFoot && legend}
         </div>
       )}
     </section>

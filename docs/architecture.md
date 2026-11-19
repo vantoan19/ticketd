@@ -6,8 +6,8 @@ The direct-access process model is the selected direction, conditional on valida
 
 ## Runtime
 
-This diagram describes the existing direct-access runtime. The approved native
-Chat extension is shown separately below until its implementation is delivered.
+This diagram describes the direct-access runtime. Native Chat, which is
+experimental, is shown separately below.
 
 ```mermaid
 flowchart TB
@@ -51,10 +51,10 @@ The core has one public workflow interface. Its implementation is organized inte
 
 Rust code logs with `tracing`. The library crates (core, chat host, Automation runner) emit events and spans and never install a subscriber; only the two binaries do, through `ticketd-diagnostics`. The CLI's `main` calls `init_cli()` (readable lines on stderr, `warn` by default, `TICKETD_LOG` to change it). The desktop's `run()` calls `init_desktop(log_dir)` with Tauri's app log folder, keeps the returned handle in managed state and drops it on `RunEvent::Exit`; its subscriber writes JSON lines to a daily file. The event standard is in `docs/agents/quality.md`, and the decisions are in [ADR 0017](adr/0017-local-only-structured-logs.md).
 
-## Planned native Chat runtime and storage
+## Native Chat runtime and storage
 
-The approved native Chat design extends the runtime above; it is not yet
-implemented. The Rust desktop host supervises a provider process for each active
+Native Chat extends the runtime above. It is experimental and off by default.
+The Rust desktop host supervises a provider process for each active
 Chat, using Codex app-server directly or a packaged TypeScript Claude Agent SDK
 bridge pointed at the user's installed official Claude Code executable. The
 harness owns authentication and native session state. The independently usable
@@ -491,7 +491,7 @@ macOS, an autostart entry on Linux). The page reaches it through two ticketd
 commands; the plugin's own commands are granted to no window. There is no
 service: with ticketd quit, nothing runs.
 
-The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#20-native-agent-chats).
+The product behavior is in [Native Chats](product.md#native-chats).
 Provider support clarification and live compatibility checks remain requirements
 before release; this architecture does not claim they have passed. Exact SQL
 schema, Rust signatures, bridge framing, buffer limits and version ranges are
@@ -589,6 +589,10 @@ older database-only backups remain readable. See
 [ADR 0008](adr/0008-attachment-backup-container.md) for the format and recovery
 trade-off. Desktop review and `ticketd inspect-backup <path>` expose completeness,
 local file totals, and the limits of remote references through the same core.
+`inspect-backup` prints its JSON report for every readable file and exits with an
+error, worded as a restore would word it, when `check.status` is anything but
+`valid`. Each file must fit one SQLite blob, so the upload limit is capped at
+999,000,000 bytes and an older, larger setting is held to it.
 
 ## Local media previews
 
@@ -870,7 +874,7 @@ A future server may call the same core workflow interface. Personal sync between
 
 ## Related documents
 
-- [Product specification](mvp-spec.md)
+- [Product description](product.md)
 - [Domain glossary](../GLOSSARY.md)
 - [Atomic writes and retries](adr/0002-atomic-writes-and-retries.md)
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
@@ -946,8 +950,15 @@ edges; a retained duplicate prerequisite remains unresolved.
 Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
 `ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
 Set and snooze take an RFC 3339 instant with an explicit offset; show displays
-local time and UTC. The retryable `set_reminder` write takes `reference` and
-`due_at` (or null to dismiss). Reading the inbox atomically delivers due
+local time and UTC. Times are stored as whole-second UTC instants (fractions are
+dropped, a leap second reads as the second before it, years 0000 to 9999).
+`snooze` needs an existing reminder and a later time; `dismiss` says when there
+was nothing to dismiss. The retryable `set_reminder` write takes `reference` and
+`due_at` (or null to dismiss) and reschedules freely; it answers
+`{"kind":"reminder","value":<due time or null>}`. `set_following` answers
+`{"kind":"following","value":<bool>}` and `set_inbox_read` answers
+`{"kind":"inbox_read","value":<read>}`; an inbox ID that was never issued is refused.
+Reading the inbox atomically delivers due
 occurrences; reopening the inbox catches up after downtime without a daemon.
 
 Inbox entries for new Activities retain the Activity ID and its original brief in
@@ -959,7 +970,7 @@ change. New relationship types use that prefix to participate.
 
 ## Context-management extension
 
-The confirmed target model adds Documents, Activities, and Plans; see [product behavior](mvp-spec.md#16-context-management) and
+The confirmed target model adds Documents, Activities, and Plans; see [product behavior](product.md#context-management) and
 [ADR 0007](adr/0007-context-storage-and-graph-queries.md). Earlier implementation
 names and command examples in this architecture describe the current runtime,
 not compatibility requirements for the extension. No migration of development

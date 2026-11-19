@@ -16,6 +16,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, vi, test, expect } from "vitest";
 import { Inbox } from "./Inbox";
+import { InboxTriageContext } from "./inbox-triage-context";
 import type { Entry } from "./inboxModel";
 
 const hours = (n: number) => new Date(Date.now() - n * 3600000).toISOString();
@@ -145,11 +146,32 @@ test("loads older entries on request", async () => {
   store = Array.from({ length: 70 }, (_, i) => entry({ id: 200 - i }));
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+  // The heading counts every update, not just the rows shown, and the pager
+  // names how many the next page holds.
+  expect(screen.getByRole("heading", { name: /^Updates\s*70$/ })).toBeTruthy();
   fireEvent.click(
-    screen.getByRole("button", { name: "Show more Inbox entries" }),
+    screen.getByRole("button", { name: "Show 20 more Inbox entries" }),
   );
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(70));
-  expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+  expect(screen.getByRole("heading", { name: /^Updates\s*70$/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Show .* more/ })).toBeNull();
+});
+
+test("an Activity's Markdown brief reads as plain text in its row", async () => {
+  store = [
+    entry({
+      id: 3,
+      title: "Protocol",
+      kind: "activity",
+      from_value: "note-id",
+      to_value: "Needs review of the **conflict** section.",
+      editing_agent: "claude-code",
+    }),
+  ];
+  render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
+  expect((await screen.findByText(/Needs review/)).textContent).toBe(
+    "claude-code: Needs review of the conflict section.",
+  );
 });
 
 test("row actions are real buttons reachable by keyboard focus and mark one entry", async () => {
@@ -324,4 +346,34 @@ test("approvals lead with the first linked ticket and keep Chat read and open ac
       ),
   ).toBe(true);
   expect(screen.getByRole("heading", { name: /Needs you/ })).toBeTruthy();
+});
+
+test("the open entry's position counts every entry, not only the loaded rows", async () => {
+  store = Array.from({ length: 60 }, (_, i) =>
+    entry({ id: i + 1, timestamp: hours(i / 100) }),
+  );
+  const setPosition = vi.fn();
+  const first = store[0]!;
+  render(
+    <InboxTriageContext
+      value={{
+        selection: { kind: "entry", entry: first },
+        line: { show: () => {}, dismiss: () => {} },
+        chatId: null,
+        openChat: () => {},
+        position: null,
+        setPosition,
+        adjacent: () => {},
+        registerWalk: () => {},
+        choose: () => {},
+      }}
+    >
+      <Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />
+    </InboxTriageContext>,
+  );
+  await waitFor(() =>
+    expect(setPosition).toHaveBeenLastCalledWith({ index: 1, total: 60 }),
+  );
+  // The first page holds 50 rows, so 10 are still paged out of the list.
+  expect(screen.getAllByRole("listitem")).toHaveLength(50);
 });

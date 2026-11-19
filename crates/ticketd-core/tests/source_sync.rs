@@ -400,6 +400,26 @@ fn matching_issues_import_as_todo_with_stable_identity_across_pages_and_repeats(
 }
 
 #[test]
+fn an_imported_title_becomes_one_bounded_line_instead_of_failing_the_import() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "First line\r\n\r\n  second line\nthird"), true);
+    f.publish(issue(2, &"x".repeat(1500)), true);
+    f.publish(issue(3, " \n "), true);
+    let report = f.refresh();
+    assert_eq!(report.imported.len(), 3);
+    assert!(report.failures.is_empty());
+    assert_eq!(f.ticket(1).title, "First line second line third");
+    assert_eq!(f.ticket(2).title, "x".repeat(1000));
+    // A title with nothing in it falls back to the issue's own name.
+    assert_eq!(f.ticket(3).title, "o/r#3");
+
+    // A later edit at the provider is normalized the same way.
+    f.publish(issue(1, "Edited\nagain"), true);
+    f.refresh_at("2026-02-02T00:00:00Z");
+    assert_eq!(f.ticket(1).title, "Edited again");
+}
+
+#[test]
 fn refresh_follows_external_edits_and_preserves_local_progress_and_organization() {
     let mut f = Fixture::new();
     f.publish(issue(1, "Original"), true);

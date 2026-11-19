@@ -222,7 +222,7 @@ export function ConflictReview({
                   >
                     <ChoiceTile
                       value="local"
-                      aria-label={`${label} from this desktop${body ? "" : `: ${local}`}`}
+                      aria-label={`${label} from this desktop${body ? "" : `: ${local || "empty"}`}`}
                       title={
                         <FieldValue
                           field={field}
@@ -233,7 +233,7 @@ export function ConflictReview({
                     />
                     <ChoiceTile
                       value="remote"
-                      aria-label={`${label} from ${remote_device}${body ? "" : `: ${remote}`}`}
+                      aria-label={`${label} from ${remote_device}${body ? "" : `: ${remote || "empty"}`}`}
                       title={
                         <FieldValue
                           field={field}

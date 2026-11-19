@@ -14,7 +14,10 @@ an untrusted backup author.
 
 The core streams blobs in 64 KiB buffers. Each file must fit SQLite's blob limit
 (and its signed 32-bit incremental-blob API); ordinary uploads retain their
-existing smaller upload limit. No compression or encryption is introduced.
+existing smaller upload limit, and the workspace upload limit is capped at 999,000,000
+bytes (SQLite's 1,000,000,000-byte row limit, with room for the row's path and
+checksum), so every file that can be attached can be backed up. No compression or
+encryption is introduced.
 Database integrity, foreign keys, schema requirements, inventory, per-file
 checksums, and every local record's required locator and size are checked.
 Unknown container versions are refused with instructions to update ticketd.

@@ -2,8 +2,20 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import remarkGfm from "remark-gfm";
+import { defaultHandlers, type Handle } from "mdast-util-to-markdown";
 import { TextApi, type Descendant, type TElement, type Value } from "platejs";
 import type { Root, RootContent, PhrasingContent } from "mdast";
+
+declare module "mdast" {
+  interface LinkData {
+    /** The link was a bare URL in the source: write it back without `<>` or `[]()`. */
+    autolink?: "bare";
+  }
+  interface BreakData {
+    /** The break was written as trailing spaces, not a backslash. */
+    spaces?: boolean;
+  }
+}
 
 /** The current fence source, joining Plate code lines without losing line breaks. */
 export function codeBlockText(node: TElement): string {
@@ -22,11 +34,66 @@ const stringifyOptions = {
   bullet: "-",
   fences: true,
   listItemIndent: "one",
+  // `---`, the divider people and agents write; the default is `***`.
+  rule: "-",
 } as const;
+
+const urlHole = "TICKETDLINKURL";
+/** A link destination with only the escapes Markdown needs; remark also escapes `&`, `(` and `)`. */
+function destination(url: string, titled: boolean): string {
+  // An entity-looking `&amp;` would read back as `&`; every other `&` is plain text.
+  const entities = (text: string) =>
+    text.replace(/&(?=[#A-Za-z0-9]+;)/g, "\\&");
+  if (!url) return titled ? "<>" : "";
+  if (/[\0- \u007F\\<>]/.test(url) || !balanced(url))
+    return `<${entities(url.replace(/[<>\\]/g, "\\$&"))}>`;
+  return entities(url);
+}
+function balanced(url: string): boolean {
+  let depth = 0;
+  for (const character of url) {
+    if (character === "(") depth += 1;
+    else if (character === ")" && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+/** Whether `<url>` says what this link says: its text is its address. */
+function isAutolink(label: string, url: string): boolean {
+  return (
+    !!label &&
+    (label === url || url === `mailto:${label}`) &&
+    /^[a-z][a-z+.-]+:/i.test(url) &&
+    !/[\0- <>\u007F]/.test(url)
+  );
+}
+
+const handlers: { link: Handle; break: Handle } = {
+  link(node, parent, state, info) {
+    const only = node.children.length === 1 ? node.children[0] : undefined;
+    const label = only?.type === "text" ? only.value : "";
+    if (!node.title && node.data?.autolink === "bare") return label;
+    // The `<address>` form remark writes, without its `&` escape.
+    if (!node.title && isAutolink(label, node.url)) return `<${label}>`;
+    // remark escapes `&`, `(` and `)` in a destination; write the destination ourselves.
+    const written = defaultHandlers.link(
+      { ...node, url: urlHole },
+      parent,
+      state,
+      info,
+    );
+    return written.replace(urlHole, () =>
+      destination(node.url, Boolean(node.title)),
+    );
+  },
+  break(node, parent, state, info) {
+    const written = defaultHandlers.break(node, parent, state, info);
+    return written === "\\\n" && node.data?.spaces ? "  \n" : written;
+  },
+};
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
-  .use(remarkStringify, stringifyOptions);
+  .use(remarkStringify, { ...stringifyOptions, handlers });
 
 /**
  * remark escapes punctuation (`*`, `[`, `_`, `.`) that is only sometimes syntax. Each escape is
@@ -40,6 +107,7 @@ const lenient = unified()
   .use(remarkStringify, {
     ...stringifyOptions,
     handlers: {
+      ...handlers,
       text(node, _parent, state, info) {
         let text = state.safe(node.value, info);
         // Table cells, HTML, entities and code need their escapes wherever they appear.
@@ -101,6 +169,9 @@ const supported = new Set([
   "break",
 ]);
 
+/** Keys that change how a node is spelled, not what it means. */
+const ignored = ["position", "spread", "data", "autolink", "spaces"];
+
 function meaning(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(meaning);
   if (node && typeof node === "object") {
@@ -108,9 +179,7 @@ function meaning(node: unknown): unknown {
       Object.entries(node)
         .filter(
           ([key, value]) =>
-            !["position", "spread", "data"].includes(key) &&
-            value !== null &&
-            value !== undefined,
+            !ignored.includes(key) && value !== null && value !== undefined,
         )
         .map(([key, value]) => [key, meaning(value)]),
     );
@@ -119,8 +188,8 @@ function meaning(node: unknown): unknown {
 }
 
 /**
- * Whether two trees mean the same thing: `JSON.stringify(meaning(a)) === JSON.stringify(meaning(b))`
- * without building either copy. Keys compare in order, as the JSON text would.
+ * Whether two trees mean the same thing: `meaning(a)` equals `meaning(b)`, without building
+ * either copy. Keys compare in any order: Plate marks are written in the order they were nested.
  */
 function sameMeaning(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -132,17 +201,14 @@ function sameMeaning(a: unknown, b: unknown): boolean {
     const entries = (node: object) =>
       Object.entries(node).filter(
         ([key, value]) =>
-          !["position", "spread", "data"].includes(key) &&
-          value !== null &&
-          value !== undefined,
+          !ignored.includes(key) && value !== null && value !== undefined,
       );
     const left = entries(a);
-    const right = entries(b);
+    const right = new Map(entries(b));
     return (
-      left.length === right.length &&
+      left.length === right.size &&
       left.every(
-        ([key, value], index) =>
-          right[index]?.[0] === key && sameMeaning(value, right[index]?.[1]),
+        ([key, value]) => right.has(key) && sameMeaning(value, right.get(key)),
       )
     );
   }
@@ -196,21 +262,39 @@ function convert(
       const children = inline(node.children, source);
       // Nested inline marks apply to every leaf, including leaves in links.
       function mark(child: Descendant): Descendant {
-        return TextApi.isText(child)
-          ? { ...child, [key]: true }
-          : { ...child, children: child.children.map(mark) };
+        if (TextApi.isText(child)) return { ...child, [key]: true };
+        // A break or picture has no text to style.
+        if (child.type === "br" || child.type === "img") return child;
+        return { ...child, children: child.children.map(mark) };
       }
       return { type: "inline-group", children: children.map(mark) };
     }
-    case "link":
+    case "link": {
+      const only = node.children.length === 1 ? node.children[0] : undefined;
+      // A URL typed in prose, with no `<>` or `[]()` around it, is written back the same way.
+      const bare =
+        only?.type === "text" &&
+        source.slice(node.position?.start.offset, node.position?.end.offset) ===
+          only.value;
       return {
         type: "a",
         url: node.url,
         title: node.title ?? "",
+        ...(bare ? { autolink: "bare" } : {}),
         children: inline(node.children, source),
       };
-    case "break":
-      return { type: "br", children: [{ text: "" }] };
+    }
+    case "break": {
+      // Two trailing spaces and a backslash both break the line; keep the one the author used.
+      const spaces = !source
+        .slice(node.position?.start.offset, node.position?.end.offset)
+        .startsWith("\\");
+      return {
+        type: "br",
+        ...(spaces ? { spaces: true } : {}),
+        children: [{ text: "" }],
+      };
+    }
     case "image":
       // An inline void: the editor shows the picture (or its label) as one unit.
       return {
@@ -266,6 +350,8 @@ function convert(
             ? "taskList"
             : "ul",
         start: node.start ?? 1,
+        // A blank line between items; a list that had one keeps it.
+        ...(node.spread ? { spread: true } : {}),
         children: node.children.map((child) => convert(child, source)),
       };
     case "listItem":
@@ -274,6 +360,7 @@ function convert(
         ...(node.checked === null || node.checked === undefined
           ? {}
           : { checked: node.checked }),
+        ...(node.spread ? { spread: true } : {}),
         children: node.children.map((child) =>
           child.type === "paragraph"
             ? { type: "lic", children: inline(child.children, source) }
@@ -309,38 +396,144 @@ function inline(nodes: PhrasingContent[], source: string): Descendant[] {
   return result.length ? result : [{ text: "" }];
 }
 
-function phrasing(nodes: Descendant[]): PhrasingContent[] {
-  return nodes.flatMap((node): PhrasingContent[] => {
-    if (TextApi.isText(node)) {
-      let result: PhrasingContent = node.code
-        ? { type: "inlineCode", value: node.text }
-        : { type: "text", value: node.text };
-      if (node.bold) result = { type: "strong", children: [result] };
-      if (node.italic) result = { type: "emphasis", children: [result] };
-      if (node.strikethrough) result = { type: "delete", children: [result] };
-      return [result];
+type Mark = "italic" | "bold" | "strikethrough";
+/** Outermost first: when two marks cover the same text, the earlier one wraps the later. */
+const marks: Mark[] = ["italic", "bold", "strikethrough"];
+const markNode = {
+  italic: "emphasis",
+  bold: "strong",
+  strikethrough: "delete",
+} as const;
+
+/** The marks that cover all of this node's text. */
+function marksOf(node: Descendant): Set<Mark> {
+  if (TextApi.isText(node)) return new Set(marks.filter((mark) => node[mark]));
+  if (node.type === "br" || node.type === "img" || !node.children.length)
+    return new Set();
+  const [first, ...rest] = node.children.map(marksOf);
+  return new Set(
+    [...(first ?? [])].filter((mark) => rest.every((set) => set.has(mark))),
+  );
+}
+
+/** Whether `mark` covers the node at `index`; a line break inside a marked run is covered too. */
+function covers(nodes: Descendant[], index: number, mark: Mark): boolean {
+  const node = nodes[index];
+  if (!node) return false;
+  if (!TextApi.isText(node) && node.type === "br") {
+    const before = nodes[index - 1];
+    const after = nodes[index + 1];
+    return (
+      !!before &&
+      !!after &&
+      marksOf(before).has(mark) &&
+      marksOf(after).has(mark)
+    );
+  }
+  return marksOf(node).has(mark);
+}
+
+/**
+ * Plate marks sit on each text leaf; Markdown nests them. Leaves that share a mark share one
+ * wrapper, so `**a *b* c**` stays one strong holding an emphasis, not three strongs.
+ * `outside` holds the marks already written by an enclosing wrapper.
+ */
+function phrasing(
+  nodes: Descendant[],
+  outside: ReadonlySet<Mark> = new Set(),
+): PhrasingContent[] {
+  const kept = nodes.filter(
+    (node) => !TextApi.isText(node) || node.text !== "" || node.code,
+  );
+  const result: PhrasingContent[] = [];
+  let index = 0;
+  while (index < kept.length) {
+    const node = kept[index];
+    if (!node) break;
+    const own = marks.filter(
+      (mark) => marksOf(node).has(mark) && !outside.has(mark),
+    );
+    // Wrap the mark that runs longest from here, so wrappers nest instead of splitting.
+    let best: { mark: Mark; end: number } | undefined;
+    for (const mark of own) {
+      let end = index + 1;
+      while (end < kept.length && covers(kept, end, mark)) end += 1;
+      if (!best || end > best.end) best = { mark, end };
     }
-    if (node.type === "br") return [{ type: "break" }];
-    if (node.type === "img")
-      return [
-        {
-          type: "image",
-          url: String(node.url ?? ""),
-          alt: String(node.alt ?? ""),
-          title: String(node.title ?? "") || null,
-        },
-      ];
-    if (node.type === "a")
-      return [
-        {
-          type: "link",
-          url: String(node.url ?? ""),
-          title: String(node.title ?? "") || null,
-          children: phrasing(node.children),
-        },
-      ];
-    return phrasing(node.children);
-  });
+    if (best) {
+      result.push({
+        type: markNode[best.mark],
+        children: phrasing(
+          kept.slice(index, best.end),
+          new Set([...outside, best.mark]),
+        ),
+      });
+      index = best.end;
+      continue;
+    }
+    result.push(...unmarked(kept, index, outside));
+    index += 1;
+  }
+  return result;
+}
+
+/** A node that has no mark left to write. */
+function unmarked(
+  nodes: Descendant[],
+  index: number,
+  outside: ReadonlySet<Mark>,
+): PhrasingContent[] {
+  const node = nodes[index];
+  if (!node) return [];
+  if (TextApi.isText(node))
+    return [
+      node.code
+        ? { type: "inlineCode", value: node.text }
+        : { type: "text", value: node.text },
+    ];
+  if (node.type === "br")
+    return [
+      { type: "break", ...(node.spaces ? { data: { spaces: true } } : {}) },
+    ];
+  if (node.type === "img")
+    return [
+      {
+        type: "image",
+        url: String(node.url ?? ""),
+        alt: String(node.alt ?? ""),
+        title: String(node.title ?? "") || null,
+      },
+    ];
+  if (node.type === "a") {
+    const children = phrasing(node.children, outside);
+    const label = children[0]?.type === "text" ? children[0].value : "";
+    const url = String(node.url ?? "");
+    const title = String(node.title ?? "") || null;
+    const before = nodes[index - 1];
+    const after = nodes[index + 1];
+    // Bare only when nothing glues to it: `https://a.comx` would be another address.
+    const bare =
+      node.autolink === "bare" &&
+      !title &&
+      outside.size === 0 &&
+      children.length === 1 &&
+      (label === url ||
+        url === `mailto:${label}` ||
+        url === `http://${label}`) &&
+      /^[^\s|<>`\\]*[^\s|<>`\\.,:;!?*_~)]$/.test(label) &&
+      (!before || !TextApi.isText(before) || /[\s(]$/.test(before.text)) &&
+      (!after || !TextApi.isText(after) || /^[\s,.;:!?)]/.test(after.text));
+    return [
+      {
+        type: "link",
+        url,
+        title,
+        ...(bare ? { data: { autolink: "bare" as const } } : {}),
+        children,
+      },
+    ];
+  }
+  return phrasing(node.children, outside);
 }
 
 /** Leading and trailing spaces in a line are not Markdown content; remark would store them as `&#x20;`. */
@@ -389,14 +582,14 @@ function block(node: TElement, diagrams: string[]): RootContent {
         type: "list",
         ordered: node.type === "ol",
         start: node.type === "ol" ? Number(node.start ?? 1) : null,
-        spread: false,
+        spread: node.spread === true,
         children: children() as import("mdast").ListItem[],
       };
     case "li":
       return {
         type: "listItem",
         checked: typeof node.checked === "boolean" ? node.checked : null,
-        spread: false,
+        spread: node.spread === true,
         children: children() as import("mdast").BlockContent[],
       };
     case "code_block":
@@ -439,15 +632,12 @@ function block(node: TElement, diagrams: string[]): RootContent {
   }
 }
 
-/** The sole rich-to-storage boundary: emits CommonMark/GFM, never editor JSON/MDX. */
-export function writeMarkdown(value: Value): string {
+/** The canonical Markdown of these blocks, written together. */
+function stringifyBlocks(blocks: TElement[]): string {
   const diagrams: string[] = [];
   const tree: Root = {
     type: "root",
-    // Empty paragraphs (Enter pressed twice) are spacing, not content.
-    children: value
-      .filter((node) => !isBlank(node))
-      .map((node) => block(node, diagrams)),
+    children: blocks.map((node) => block(node, diagrams)),
   };
   relaxed = false;
   let result = lenient.stringify(tree);
@@ -474,31 +664,238 @@ export function writeMarkdown(value: Value): string {
 }
 
 /**
- * The rich value for `source`, why it must stay in source editing (if it must), and `markdown`:
- * the canonical text the rich value writes, so callers need not write it again.
+ * The Markdown a rich value was read from, block by block. A block the editor has not changed
+ * is written as its own text, so a rich edit rewrites only the blocks it touched. `start` and
+ * `end` locate a block in `source`; a block without them is written from the rich value.
+ */
+export interface Baseline {
+  source: string;
+  blocks: Array<{
+    node: TElement;
+    span?: { start: number; end: number };
+  }>;
+}
+
+function sameNode(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  if (Array.isArray(a) || Array.isArray(b))
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => sameNode(item, b[index]))
+    );
+  const left = Object.entries(a);
+  return (
+    left.length === Object.keys(b).length &&
+    left.every(([key, value]) => key in b && sameNode(value, (b as never)[key]))
+  );
+}
+
+/** For each block, the baseline block with the same content and text in `source`, or -1. */
+function matchBlocks(blocks: TElement[], from: Baseline): number[] {
+  let cursor = 0;
+  return blocks.map((node) => {
+    for (let index = cursor; index < from.blocks.length; index += 1) {
+      const candidate = from.blocks[index];
+      if (candidate?.span && sameNode(candidate.node, node)) {
+        cursor = index + 1;
+        return index;
+      }
+    }
+    return -1;
+  });
+}
+
+const isList = (node: TElement) =>
+  node.type === "ul" || node.type === "ol" || node.type === "taskList";
+/** Only blank space and line breaks between two blocks. */
+const separator = /^[ \t]*(?:\r?\n[ \t]*)+$/;
+
+/**
+ * The sole rich-to-storage boundary: emits CommonMark/GFM, never editor JSON/MDX.
+ * With the `from` the value was read from, blocks it did not change keep their own text and
+ * spacing; without it every block is written in the canonical form.
+ */
+export function writeMarkdownFrom(
+  value: Value,
+  from?: Baseline,
+): { markdown: string; baseline: Baseline } {
+  // Empty paragraphs (Enter pressed twice) are spacing, not content.
+  const blocks = value.filter((node) => !isBlank(node));
+  const canonical = () => {
+    const markdown = stringifyBlocks(blocks);
+    return {
+      markdown,
+      baseline: { source: markdown, blocks: blocks.map((node) => ({ node })) },
+    };
+  };
+  const matched = from ? matchBlocks(blocks, from) : [];
+  if (!from || matched.every((index) => index < 0)) return canonical();
+
+  // Unchanged blocks are kept; each run of changed blocks is written together.
+  const pieces: Array<{ kept?: number; blocks: TElement[] }> = [];
+  for (let index = 0; index < blocks.length;) {
+    const kept = matched[index] ?? -1;
+    let end = index + 1;
+    if (kept < 0)
+      while (end < blocks.length && (matched[end] ?? -1) < 0) end += 1;
+    pieces.push({
+      ...(kept >= 0 ? { kept } : {}),
+      blocks: blocks.slice(index, end),
+    });
+    index = end;
+  }
+  let markdown = "";
+  const written: Baseline["blocks"] = [];
+  let previous: (typeof pieces)[number] | undefined;
+  for (const piece of pieces) {
+    const span =
+      piece.kept === undefined ? undefined : from.blocks[piece.kept]?.span;
+    const text = span
+      ? from.source.slice(span.start, span.end)
+      : stringifyBlocks(piece.blocks);
+    if (previous) {
+      // Kept neighbours keep the spacing they had: `Steps:` straight above its list.
+      const before =
+        previous.kept === undefined ? undefined : from.blocks[previous.kept];
+      const gap =
+        piece.kept !== undefined &&
+        piece.kept === (previous.kept ?? -2) + 1 &&
+        before?.span &&
+        span
+          ? from.source.slice(before.span.end, span.start)
+          : "";
+      const original = separator.test(gap);
+      const last = previous.blocks[previous.blocks.length - 1];
+      const first = piece.blocks[0];
+      // Written next to each other, these would read as one list or as list content.
+      if (
+        !original &&
+        last &&
+        first &&
+        isList(last) &&
+        (isList(first) || (span && /^(?: {4}|\t)/.test(text)))
+      )
+        return canonical();
+      markdown += original ? gap : "\n\n";
+    }
+    if (span) {
+      const start = markdown.length;
+      markdown += text;
+      written.push({
+        node: piece.blocks[0] as TElement,
+        span: { start, end: markdown.length },
+      });
+    } else {
+      markdown += text;
+      written.push(...piece.blocks.map((node) => ({ node })));
+    }
+    previous = piece;
+  }
+  return { markdown, baseline: { source: markdown, blocks: written } };
+}
+
+export function writeMarkdown(value: Value, from?: Baseline): string {
+  return writeMarkdownFrom(value, from).markdown;
+}
+
+/** What each block is called when the banner says which one the rich editor would rewrite. */
+function blockName(node: TElement | undefined): string {
+  if (!node) return "a block";
+  if (/^h[1-6]$/.test(node.type)) return "a heading";
+  return (
+    {
+      p: "a paragraph",
+      ul: "a list",
+      ol: "a list",
+      taskList: "a list",
+      blockquote: "a quote",
+      code_block: "a code block",
+      table: "a table",
+      mermaid: "a diagram",
+      hr: "a divider",
+    }[node.type] ?? "a block"
+  );
+}
+
+/** Adjacent text with the same marks is one run of text; Markdown cannot tell them apart. */
+function runs(nodes: readonly Descendant[]): Descendant[] {
+  const result: Descendant[] = [];
+  for (const node of nodes) {
+    const previous = result[result.length - 1];
+    if (TextApi.isText(node)) {
+      if (
+        previous &&
+        TextApi.isText(previous) &&
+        sameMeaning({ ...previous, text: "" }, { ...node, text: "" })
+      ) {
+        result[result.length - 1] = {
+          ...previous,
+          text: previous.text + node.text,
+        };
+      } else result.push(node);
+    } else result.push({ ...node, children: runs(node.children) });
+  }
+  return result;
+}
+
+/**
+ * The rich value for `source`, why it must stay in source editing (if it must), `markdown`
+ * (the text that value writes, which is `source`'s own text for what the editor has not
+ * changed) and the `baseline` that keeps it so.
  */
 export function readMarkdown(source: string) {
   const tree = processor.parse(source);
   const reasons = new Set<string>();
   scan(tree, reasons);
-  const value: Value = tree.children
-    .map((node) => convert(node, source))
-    .filter((node): node is TElement => !TextApi.isText(node));
+  const baseline: Baseline = { source, blocks: [] };
+  const value: Value = [];
+  for (const node of tree.children) {
+    const converted = convert(node, source);
+    if (TextApi.isText(converted)) continue;
+    value.push(converted);
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    baseline.blocks.push({
+      node: converted,
+      ...(start === undefined || end === undefined
+        ? {}
+        : { span: { start, end } }),
+    });
+  }
   if (!value.length) value.push({ type: "p", children: [{ text: "" }] });
-  const markdown = writeMarkdown(value);
-  if (
-    !reasons.size &&
-    source.trim() &&
-    // Identical text needs no second parse to mean the same thing.
-    markdown !== source &&
-    !sameMeaning(processor.parse(markdown), tree)
-  ) {
-    reasons.add("Markdown it would rewrite");
+  const markdown = writeMarkdown(value, baseline);
+  if (!reasons.size && source.trim()) {
+    // The editor writes a block it changes in its own canonical form. If that form would
+    // mean something else, say which block, and keep the text in source editing.
+    const canonical = stringifyBlocks(value);
+    if (canonical !== source && `${canonical}\n` !== source) {
+      const reread = processor
+        .parse(canonical)
+        .children.map((node) => convert(node, canonical))
+        .filter((node): node is TElement => !TextApi.isText(node));
+      const before = runs(value);
+      const after = runs(reread);
+      const changed = before.findIndex(
+        (node, index) => !sameMeaning(node, after[index]),
+      );
+      if (changed >= 0 || before.length !== after.length) {
+        const line = tree.children[changed]?.position?.start.line;
+        reasons.add(
+          changed >= 0
+            ? `${blockName(value[changed])}${line ? ` at line ${line}` : ""} it would rewrite`
+            : "Markdown it would rewrite",
+        );
+      }
+    }
   }
   return {
     value,
     reasons: [...reasons],
     markdown,
+    baseline,
     /** The tree's meaning, built only when asked for. */
     get meaning() {
       return meaning(tree);

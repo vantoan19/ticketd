@@ -127,9 +127,10 @@ impl From<ticketd_core::Error> for BridgeFailure {
             ticketd_core::Error::DependencyReviewMode(_) => {
                 Self::coded("review_mode", error.to_string())
             }
-            ticketd_core::Error::Source(ref source) => {
-                Self::coded(source.code(), error.to_string())
-            }
+            ticketd_core::Error::Source(ref source) => Self::coded(
+                source.code(),
+                source.message_for(ticketd_core::source::Surface::Desktop),
+            ),
             ticketd_core::Error::Publication(ref publication) => {
                 Self::coded(publication.code(), error.to_string())
             }
@@ -1336,7 +1337,7 @@ impl From<ticketd_core::Error> for SourceFailure {
             ticketd_core::Error::Source(source) => Self {
                 code: source.code(),
                 fields: source.issues().to_vec(),
-                message: source.to_string(),
+                message: source.message_for(ticketd_core::source::Surface::Desktop),
             },
             ticketd_core::Error::Publication(publication) => Self {
                 code: publication.code(),
