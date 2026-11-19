@@ -72,8 +72,11 @@ it("the reference column fits the longest reference with a gap before the title,
   expect(reference?.body).toMatch(
     /min-width:\s*calc\(var\(--reference-chars, 0\) \* 1ch \+ 6px\)/,
   );
+  // The full-width row and the three widths lib/width-queries measures.
+  const row =
+    /^\.ticket-list(:where\(\[data-width~="max-\d+"\]\))? \.ticket-row$/;
   const templates = list
-    .filter((rule) => rule.selector === ".ticket-list .ticket-row")
+    .filter((rule) => row.test(rule.selector))
     .map((rule) => /grid-template-columns:\s*([^;]+)/.exec(rule.body)?.[1]);
   expect(templates).toHaveLength(4);
   for (const template of templates)

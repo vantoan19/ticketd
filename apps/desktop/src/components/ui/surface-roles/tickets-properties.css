@@ -3,10 +3,9 @@
 .ticket-properties {
   background: var(--surface);
 }
-@container ticket-detail (min-width: 760px) {
+:where(:is(.ticket-detail, .chat-pane)[data-width~="min-760"])
   .ticket-properties {
-    box-shadow: inset 1px 0 0 0 var(--header-boundary);
-  }
+  box-shadow: inset 1px 0 0 0 var(--header-boundary);
 }
 .rail-label {
   color: var(--muted-foreground);

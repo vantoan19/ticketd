@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
+import { coldTokenCache } from "@/test/motion-tokens";
 import { MotionProvider } from "@/components/ui/motion";
 import type { StatusCounts, Ticket } from "@/lib/api/client";
 import { TestReads } from "@/lib/workspace-reads/testing";
@@ -418,6 +419,7 @@ test("a created group opens its gap with its height instead of popping it in", (
 test("the motion tokens are read once for a render, not once per row", () => {
   const rootReads = (count: number) => {
     const { rerender, unmount } = render(<List tickets={tickets(count)} />);
+    coldTokenCache();
     const read = vi.spyOn(window, "getComputedStyle");
     rerender(<List tickets={tickets(count)} />);
     const reads = read.mock.calls.filter(
