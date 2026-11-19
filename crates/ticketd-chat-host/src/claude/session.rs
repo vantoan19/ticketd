@@ -11,10 +11,15 @@ use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
     InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
     NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question,
-    Refusal, SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
+    Refusal, SettingKey, SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
+
+/// Where the Chat's record keeps the permission mode a reopened session asks with
+/// (#408). Only a record written each time the mode changes has it: one an earlier
+/// ticketd wrote kept a session's first report, maybe a mode the person has left since.
+pub(super) const REOPEN_WITH: &str = "reopen_with";
 
 #[derive(Debug)]
 struct Turn {
@@ -41,7 +46,9 @@ pub(super) struct Session {
     items_started: u64,
     turn: Option<Turn>,
     native_session: Option<String>,
-    settings_reported: bool,
+    /// The settings last reported in effect. The Chat keeps them: a resumed session
+    /// is opened with them, as Claude Code's own resume does not keep them (#408).
+    reported_settings: Option<Value>,
     requests: HashMap<NativeRequestId, LiveRequest>,
     /// Name and input of each tool the open turn started, by tool-use id.
     tools: HashMap<String, (String, ProviderDetail)>,
@@ -197,22 +204,46 @@ impl Session {
 
     fn session_info(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         self.identify(text(event, "session_id"), events);
-        if !self.settings_reported {
-            self.settings_reported = true;
-            let settings = json!({
-                "claude_code_version": event.get("claude_code_version"),
-                "cwd": event.get("cwd"),
-                "model": event.get("model"),
-                "permission_mode": event.get("permission_mode"),
-            });
-            events.push(EventKind::Notice {
-                turn: None,
-                kind: NoticeKind::EffectiveSettings,
-                message: "Claude Code reported the settings in effect".to_owned(),
-                detail: Some(ProviderDetail::new("session_info", &settings.to_string())),
-            });
-        }
+        let settings = json!({
+            "claude_code_version": event.get("claude_code_version"),
+            "cwd": event.get("cwd"),
+            "model": event.get("model"),
+            "permission_mode": event.get("permission_mode"),
+            REOPEN_WITH: {"permission_mode": event.get("permission_mode")},
+        });
+        events.extend(self.report_settings(settings));
         events.extend(self.reports.session_info(event));
+    }
+
+    /// A model or permission mode Claude Code applied mid-session, kept with the
+    /// settings in effect so a resumed session opens with it.
+    pub fn setting_applied(&mut self, setting: SettingKey, value: &str) -> Option<EventKind> {
+        let field = match setting {
+            SettingKey::Model => "model",
+            SettingKey::Permission => "permission_mode",
+            SettingKey::Effort => return None,
+        };
+        let mut settings = self.reported_settings.clone()?;
+        settings[field] = json!(value);
+        if setting == SettingKey::Permission {
+            settings[REOPEN_WITH][field] = json!(value);
+        }
+        self.report_settings(settings)
+    }
+
+    /// The settings in effect, said each time they change.
+    fn report_settings(&mut self, settings: Value) -> Option<EventKind> {
+        if self.reported_settings.as_ref() == Some(&settings) {
+            return None;
+        }
+        let detail = ProviderDetail::new("session_info", &settings.to_string());
+        self.reported_settings = Some(settings);
+        Some(EventKind::Notice {
+            turn: None,
+            kind: NoticeKind::EffectiveSettings,
+            message: "Claude Code reported the settings in effect".to_owned(),
+            detail: Some(detail),
+        })
     }
 
     /// The effort the person picked, or a change Claude Code applied: in effect

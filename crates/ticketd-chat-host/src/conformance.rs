@@ -48,6 +48,7 @@ pub(crate) fn open_request() -> OpenRequest {
         unattended: None,
         ticketd_cli: None,
         taken_over: false,
+        recorded_settings: None,
         settings: StartSettings::default(),
     }
 }

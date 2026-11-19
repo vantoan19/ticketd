@@ -25,11 +25,11 @@ use crate::{
     EventStream, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
     InterruptRequest, LoginState, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
     ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
-    SessionStart, SettingChange, SettingKey, SettingOutcome, Submission, SubmissionId,
-    SubmissionKind,
+    SessionStart, SettingChange, SettingKey, SettingOutcome, StartSettings, Submission,
+    SubmissionId, SubmissionKind,
 };
 
-use super::session::{Session, unknown};
+use super::session::{REOPEN_WITH, Session, unknown};
 
 /// The bridge protocol version this adapter speaks.
 const PROTOCOL: u64 = 1;
@@ -75,7 +75,8 @@ enum Kind {
     Submit(SubmissionId),
     Respond(NativeRequestId),
     Interrupt,
-    Setting,
+    /// The change asked for: once applied, it is what the session runs with.
+    Setting(SettingKey, String),
 }
 
 /// How the bridge settled a command. A dropped sender means the runtime was lost.
@@ -396,6 +397,27 @@ impl Connection {
         // Chat sends, so neither the agent's "don't ask" nor Claude Code's own
         // `defaultMode` decides how the person's session asks.
         let mut picks = request.settings.clone();
+        // Claude Code resumes a session's history, not its model or permission mode:
+        // without them its own settings would decide (#408). What the Chat last ran
+        // with is what it shows, so a session opened for it again gets that.
+        if request.unattended.is_none() {
+            let recorded = recorded_settings(request.recorded_settings.as_deref());
+            if picks.model.is_none() {
+                picks.model = recorded.model;
+            }
+            if picks.permission.is_none() {
+                picks.permission = recorded.permission;
+            }
+            // Nor does Claude Code's own `defaultMode` decide for a Chat that already
+            // ran when its record names no mode ticketd offers: it asks before edits.
+            let reopened = request.recorded_settings.is_some()
+                || matches!(request.session, SessionStart::Resume(_));
+            if reopened {
+                picks
+                    .permission
+                    .get_or_insert_with(|| super::report::DEFAULT_PERMISSION_MODE.to_owned());
+            }
+        }
         if request.taken_over {
             picks
                 .model
@@ -538,8 +560,26 @@ impl Connection {
         let id = event["id"].as_str().unwrap_or_default();
         let by_id = |command: &str, _: &Kind| command == id;
         match name {
-            "hello" | "inspection" | "options" | "interrupt_result" | "setting_result" => {
+            "hello" | "inspection" | "options" | "interrupt_result" => {
                 state.settle(by_id, Reply::Event(event.clone()));
+            }
+            "setting_result" => {
+                let applied = match state.commands.get(id).map(|command| &command.kind) {
+                    Some(Kind::Setting(setting, value)) if event["outcome"] == "applied" => {
+                        Some((*setting, value.clone()))
+                    }
+                    _ => None,
+                };
+                state.settle(by_id, Reply::Event(event.clone()));
+                if let Some((setting, value)) = applied {
+                    return events(
+                        state
+                            .session
+                            .setting_applied(setting, &value)
+                            .into_iter()
+                            .collect(),
+                    );
+                }
             }
             // The SDK object exists; Claude Code has not answered yet.
             "session_opened" => {}
@@ -695,10 +735,41 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
             }
             Vec::new()
         }
-        Kind::Plain | Kind::Open | Kind::Interrupt | Kind::Setting => {
+        Kind::Plain | Kind::Open | Kind::Interrupt | Kind::Setting(..) => {
             waiter_gone(command.waiter, reason);
             Vec::new()
         }
+    }
+}
+
+/// The model and permission mode a Chat's sessions last reported in effect, from
+/// what `Session` recorded. The mode is read from `REOPEN_WITH` only, and one ticketd
+/// does not offer is left out; a record of an Automation agent's session ("don't
+/// ask") is not the person's and gives nothing.
+fn recorded_settings(recorded: Option<&str>) -> StartSettings {
+    let Some(Value::Object(recorded)) = recorded.and_then(|text| serde_json::from_str(text).ok())
+    else {
+        return StartSettings::default();
+    };
+    let field = |name: &str| {
+        recorded
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+    };
+    if field("permission_mode") == Some("dontAsk") {
+        return StartSettings::default();
+    }
+    let reopen = recorded
+        .get(REOPEN_WITH)
+        .and_then(|reopen| reopen.get("permission_mode"))
+        .and_then(Value::as_str);
+    StartSettings {
+        model: field("model").map(str::to_owned),
+        effort: None,
+        permission: reopen
+            .filter(|mode| super::report::offered_permission(mode))
+            .map(str::to_owned),
     }
 }
 
@@ -1001,7 +1072,8 @@ impl HarnessRuntime for ClaudeRuntime {
             "generation": self.connection.generation.0,
             "setting": {"kind": kind, "value": change.value},
         });
-        match self.connection.call(|_| Ok((command, Kind::Setting))).await {
+        let kind = Kind::Setting(change.setting, change.value.clone());
+        match self.connection.call(|_| Ok((command, kind))).await {
             CallOutcome::Event(event) if event["outcome"] == "applied" => {
                 if change.setting == SettingKey::Effort {
                     self.connection

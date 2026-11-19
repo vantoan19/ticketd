@@ -582,6 +582,11 @@ fn effort_options(entry: &Value) -> Vec<SettingOption> {
         .collect()
 }
 
+/// Whether ticketd offers `mode`, and so may open a session in it.
+pub(super) fn offered_permission(mode: &str) -> bool {
+    PERMISSION_MODES.iter().any(|(id, ..)| *id == mode)
+}
+
 fn permission_options() -> Vec<SettingOption> {
     PERMISSION_MODES
         .iter()
