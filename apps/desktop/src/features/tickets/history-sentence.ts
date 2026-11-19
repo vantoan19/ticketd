@@ -117,7 +117,7 @@ export function describeChange(
       // `from` is the other ticket; `to` says what it was to this one.
       return `Sync removed ${quote(`${to === "child" ? "subticket" : "parent"} ${from}`)}; it would have made a loop`;
     case "trash":
-      return to === "trashed" ? "Moved to trash" : "Restored from trash";
+      return to === "trashed" ? "Moved to Trash" : "Restored from Trash";
     default:
       return "Ticket updated";
   }
@@ -141,4 +141,40 @@ export function describeAdditions(kind: string, values: string[]): string {
   return kind === "evidence"
     ? `Added evidence ${list}`
     : `Added subtickets ${list}`;
+}
+
+/** A compact inventory of actual records; full values and attribution expand below. */
+export function changeSummary(changes: Entry[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of changes) {
+    const kind =
+      entry.kind === "dependency" ||
+      entry.kind === "parent" ||
+      entry.kind.startsWith("relationship:") ||
+      entry.kind.startsWith("sync_")
+        ? "link"
+        : entry.kind;
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const parts = [...counts].map(([kind, count]) => {
+    if (kind === "evidence")
+      return `${count} ${count === 1 ? "piece" : "pieces"} of evidence`;
+    if (kind === "link") return `${count} ${count === 1 ? "link" : "links"}`;
+    if (kind === "status")
+      return `status to ${changes.find((entry) => entry.kind === "status")?.to_value}`;
+    if (kind === "plan") return "Plan";
+    if (kind === "project") return "project";
+    if (kind === "tag") return `${count} ${count === 1 ? "tag" : "tags"}`;
+    if (kind === "trash")
+      return changes.find((entry) => entry.kind === "trash")?.to_value ===
+        "trashed"
+        ? "moved to Trash"
+        : "restored from Trash";
+    if (kind === "ownership") return "ownership";
+    if (kind === "external_duplicate") return "duplicate";
+    if (kind.startsWith("source") || kind.startsWith("publication"))
+      return "source";
+    return `${count} ${count === 1 ? "other change" : "other changes"}`;
+  });
+  return `${changes.length} ${changes.length === 1 ? "change" : "changes"}: ${parts.join(", ")}`;
 }

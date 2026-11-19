@@ -20,7 +20,7 @@ export function ticketUnavailable(
   if (record === undefined) return "The Ticket is still loading.";
   if (record === null) return "The Ticket no longer exists.";
   return record.trashed && !allowTrashed
-    ? "Restore the Ticket before changing it."
+    ? "Restore the Ticket to reply or change it."
     : null;
 }
 

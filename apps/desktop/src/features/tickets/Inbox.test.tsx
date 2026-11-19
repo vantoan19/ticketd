@@ -16,6 +16,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, vi, test, expect } from "vitest";
 import { Inbox } from "./Inbox";
+import { InboxTriageContext } from "./inbox-triage-context";
 import type { Entry } from "./inboxModel";
 
 const hours = (n: number) => new Date(Date.now() - n * 3600000).toISOString();
@@ -345,4 +346,34 @@ test("approvals lead with the first linked ticket and keep Chat read and open ac
       ),
   ).toBe(true);
   expect(screen.getByRole("heading", { name: /Needs you/ })).toBeTruthy();
+});
+
+test("the open entry's position counts every entry, not only the loaded rows", async () => {
+  store = Array.from({ length: 60 }, (_, i) =>
+    entry({ id: i + 1, timestamp: hours(i / 100) }),
+  );
+  const setPosition = vi.fn();
+  const first = store[0]!;
+  render(
+    <InboxTriageContext
+      value={{
+        selection: { kind: "entry", entry: first },
+        line: { show: () => {}, dismiss: () => {} },
+        chatId: null,
+        openChat: () => {},
+        position: null,
+        setPosition,
+        adjacent: () => {},
+        registerWalk: () => {},
+        choose: () => {},
+      }}
+    >
+      <Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />
+    </InboxTriageContext>,
+  );
+  await waitFor(() =>
+    expect(setPosition).toHaveBeenLastCalledWith({ index: 1, total: 60 }),
+  );
+  // The first page holds 50 rows, so 10 are still paged out of the list.
+  expect(screen.getAllByRole("listitem")).toHaveLength(50);
 });

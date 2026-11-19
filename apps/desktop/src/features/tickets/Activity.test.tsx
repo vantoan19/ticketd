@@ -928,8 +928,11 @@ test("shows more activity a page at a time, and a change re-reads every page sho
   );
   render(<Activity {...props} reference="T-KQ90" signal={signal} />);
   await screen.findByText("Update 0");
+  // The read gives no total, so a full page can only say "at least 50".
+  expect(screen.getByRole("heading", { name: "Activity 50+" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Show more activity" }));
   await screen.findByText("Update 52");
+  expect(screen.getByRole("heading", { name: "Activity 53" })).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Show more activity" }),
   ).toBeNull();
