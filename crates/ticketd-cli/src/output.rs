@@ -143,3 +143,30 @@ pub struct ExportedAttachment<'a> {
 pub struct DraftMigration {
     pub legacy_drafts_pending: bool,
 }
+
+/// `ticketd reminder show`, `set` and `snooze`: the reminder the ticket has now.
+#[derive(Serialize)]
+pub struct Reminder {
+    pub reference: String,
+    pub due_at: Option<String>,
+}
+
+/// `ticketd reminder dismiss`: whether there was a reminder to remove.
+#[derive(Serialize)]
+pub struct Dismissed {
+    pub dismissed: bool,
+}
+
+/// `ticketd backup`.
+#[derive(Serialize)]
+pub struct BackupSaved {
+    pub path: String,
+}
+
+/// `ticketd restore-workspace`: the workspace file now holding the backup, and the
+/// complete copy of what it replaced.
+#[derive(Serialize)]
+pub struct Restored {
+    pub restored: std::path::PathBuf,
+    pub safety_backup: std::path::PathBuf,
+}

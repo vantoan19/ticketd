@@ -25,6 +25,10 @@ Agents parse command output, so its shape is the same in every command:
 - A write with no record to return prints `{"ok":true}`. This covers `evidence
   delete`, `activity delete`, `document tag`, `document pin` and `export --file`.
   A write that changes a record prints that record.
+- Reminders print `{"reference":...,"due_at":...}` from `reminder show`, `set` and
+  `snooze`, with `due_at` null when there is none; `reminder dismiss` prints
+  `{"dismissed":true}` or `{"dismissed":false}`. `backup` prints `{"path":...}` and
+  `restore-workspace` prints `{"restored":...,"safety_backup":...}`.
 - Keys appear in the order of the record's definition, so `document keep`,
   `document trash` and `document restore` print exactly what `document show` does.
 - `list --latest-update` and `search --latest-update` print `{"ticket": ...,

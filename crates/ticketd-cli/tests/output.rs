@@ -30,10 +30,13 @@ fn cli_restores_to_an_explicit_recovery_target_without_replacing_the_current_wor
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(printed["safety_backup"].is_string(), "{printed}");
     assert!(
-        String::from_utf8(output.stdout)
+        printed["restored"]
+            .as_str()
             .unwrap()
-            .starts_with("Restored workspace. Safety backup:")
+            .ends_with("recovered.sqlite3")
     );
     assert_eq!(
         ticketd_core::Workspace::open(current)
@@ -82,7 +85,9 @@ fn cli_inspects_attachment_completeness_before_restore() {
     ]))
     .unwrap();
     let backup = dir.path().join("complete.sqlite3");
-    run(&["backup", backup.to_str().unwrap()]);
+    let saved: serde_json::Value =
+        serde_json::from_str(&run(&["backup", backup.to_str().unwrap()])).unwrap();
+    assert_eq!(saved["path"], backup.to_str().unwrap());
     assert!(
         !std::fs::read(&backup)
             .unwrap()
@@ -406,12 +411,27 @@ fn cli_schedules_and_dismisses_reminders() {
         String::from_utf8(output.stdout).unwrap()
     };
     run(&["create", "Remember"]);
-    run(&["reminder", "set", "T-KQ1", "2020-01-01T00:00:00Z"]);
-    assert!(run(&["reminder", "show", "T-KQ1"]).contains("2020"));
-    let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"])).unwrap();
+    let json = |args: &[&str]| serde_json::from_str::<serde_json::Value>(&run(args)).unwrap();
+    let set = json(&["reminder", "set", "T-KQ1", "2020-01-01T00:00:00Z"]);
+    assert_eq!(set["reference"], "T-KQ1");
+    assert!(set["due_at"].as_str().unwrap().contains("2020"));
+    assert_eq!(json(&["reminder", "show", "T-KQ1"]), set);
+    let snoozed = json(&["reminder", "snooze", "T-KQ1", "2021-01-01T00:00:00Z"]);
+    assert!(snoozed["due_at"].as_str().unwrap().contains("2021"));
+    let inbox = json(&["inbox"]);
     assert_eq!(inbox[0]["kind"], "reminder");
-    run(&["reminder", "dismiss", "T-KQ1"]);
-    assert!(run(&["reminder", "show", "T-KQ1"]).contains("No reminder"));
+    assert_eq!(
+        run(&["reminder", "dismiss", "T-KQ1"]).trim(),
+        r#"{"dismissed":true}"#
+    );
+    assert_eq!(
+        run(&["reminder", "dismiss", "T-KQ1"]).trim(),
+        r#"{"dismissed":false}"#
+    );
+    assert_eq!(
+        run(&["reminder", "show", "T-KQ1"]).trim(),
+        r#"{"reference":"T-KQ1","due_at":null}"#
+    );
 }
 
 #[test]
@@ -565,11 +585,15 @@ fn isolated_restore_replaces_only_the_test_workspace() {
     run(&["backup", backup.to_str().unwrap()]);
     run(&["create", "After backup"]);
     let result = run(&["restore-workspace", backup.to_str().unwrap()]);
-    let safety = result
-        .trim()
-        .strip_prefix("Restored workspace. Safety backup: ")
-        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let safety = result["safety_backup"].as_str().unwrap();
     assert!(std::path::Path::new(safety).starts_with(dir.path()));
+    assert!(
+        result["restored"]
+            .as_str()
+            .unwrap()
+            .ends_with("workspace.sqlite3")
+    );
     let restored: serde_json::Value = serde_json::from_str(&run(&["list"])).unwrap();
     assert_eq!(restored.as_array().unwrap().len(), 1);
     assert_eq!(restored[0]["title"], "Before backup");

@@ -152,3 +152,31 @@ fn latest_update_rows_carry_one_latest_update() {
         "{raw}"
     );
 }
+
+#[test]
+fn reminders_backups_and_restores_print_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    json(path, &["create", "Remember"]);
+    assert_eq!(
+        text(path, &["reminder", "show", "T-KQ1"]),
+        r#"{"reference":"T-KQ1","due_at":null}"#
+    );
+    let set = json(path, &["reminder", "set", "T-KQ1", "2030-01-01T00:00:00Z"]);
+    assert_eq!(set["reference"], "T-KQ1");
+    assert!(set["due_at"].as_str().unwrap().starts_with("2030-01-01"));
+    assert_eq!(
+        text(path, &["reminder", "dismiss", "T-KQ1"]),
+        r#"{"dismissed":true}"#
+    );
+    assert_eq!(
+        text(path, &["reminder", "dismiss", "T-KQ1"]),
+        r#"{"dismissed":false}"#
+    );
+    let backup = path.join("backup.sqlite3");
+    let backup = backup.to_str().unwrap();
+    assert_eq!(json(path, &["backup", backup])["path"], backup);
+    let restored = json(path, &["restore-workspace", backup]);
+    assert!(restored["restored"].is_string());
+    assert!(restored["safety_backup"].is_string());
+}

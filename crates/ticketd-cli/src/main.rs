@@ -1115,6 +1115,18 @@ enum ActivityCommand {
         offset: u32,
     },
 }
+/// The reminder a ticket has now, as `reminder show` prints it.
+fn reminder_of(
+    workspace: &Workspace,
+    reference: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let reference = workspace.show_ticket(reference)?.reference;
+    let due_at = workspace.reminder(&reference)?;
+    Ok(serde_json::to_string(&output::Reminder {
+        reference,
+        due_at,
+    })?)
+}
 /// Rows of `list` or `search --latest-update`.
 fn update_rows(
     rows: &[ticketd_core::TicketWithUpdate],
@@ -1306,14 +1318,21 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("TICKETD_TEST_WORKSPACE").map(std::path::PathBuf::from));
+        let restored = match &destination {
+            Some(workspace) => ticketd_core::workspace_file(workspace)?,
+            None => ticketd_core::default_workspace_file()?,
+        };
         let safety = match destination {
             Some(workspace) => Workspace::restore(workspace, path)?,
             None => Workspace::restore_default(path)?,
         };
         writeln!(
             output,
-            "Restored workspace. Safety backup: {}",
-            safety.display()
+            "{}",
+            serde_json::to_string(&output::Restored {
+                restored: restored.path,
+                safety_backup: safety,
+            })?
         )?;
         return Ok(());
     }
@@ -1524,33 +1543,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::Reminder { command } => match command {
-            ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
-                Some(value) => {
-                    let instant = chrono::DateTime::parse_from_rfc3339(&value)?;
-                    format!(
-                        "{} (UTC: {})",
-                        instant
-                            .with_timezone(&chrono::Local)
-                            .format("%Y-%m-%d %H:%M:%S %:z"),
-                        value
-                    )
-                }
-                None => "No reminder".into(),
-            },
+            ReminderCommand::Show { reference } => reminder_of(&workspace, &reference)?,
             ReminderCommand::Set { reference, due_at } => {
                 workspace.set_reminder(&reference, Some(&due_at))?;
-                "Reminder scheduled".into()
+                reminder_of(&workspace, &reference)?
             }
             ReminderCommand::Snooze { reference, due_at } => {
                 workspace.snooze_reminder(&reference, &due_at)?;
-                "Reminder snoozed".into()
+                reminder_of(&workspace, &reference)?
             }
             ReminderCommand::Dismiss { reference } => {
-                if workspace.dismiss_reminder(&reference)? {
-                    "Reminder dismissed".into()
-                } else {
-                    "No reminder to dismiss".into()
-                }
+                let dismissed = workspace.dismiss_reminder(&reference)?;
+                serde_json::to_string(&output::Dismissed { dismissed })?
             }
         },
         Command::Inbox { limit, offset } => {
@@ -1560,7 +1564,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Backup { path } => {
             workspace.backup(&path)?;
-            format!("Backup saved: {path}")
+            serde_json::to_string(&output::BackupSaved { path })?
         }
         Command::InspectBackup { path } => {
             let inspection = workspace.inspect_backup(path)?;
