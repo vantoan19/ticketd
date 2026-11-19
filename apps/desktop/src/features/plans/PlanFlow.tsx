@@ -27,7 +27,7 @@ import {
 import { matchesShortcut, shortcutLabel } from "@/lib/shortcuts";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import { flowPlanMembers, PlanMemberWindow } from "./plan-members";
-import { planFlow } from "./flow-model";
+import { flowLinkPath, planFlow, type FlowBox } from "./flow-model";
 import "./plan-flow.css";
 
 const names = ["Now", "Next", "Later"];
@@ -94,6 +94,17 @@ export function PlanFlow({
     if (!element) return;
     function measure() {
       const bounds = element!.getBoundingClientRect();
+      const relative = (rect: DOMRect): FlowBox => ({
+        left: rect.left - bounds.left,
+        right: rect.right - bounds.left,
+        top: rect.top - bounds.top,
+        bottom: rect.bottom - bounds.top,
+      });
+      const laneOf = new Map(
+        flow.lanes.flatMap((lane, index) =>
+          lane.map((ticket) => [ticket.reference, index] as const),
+        ),
+      );
       setLines(
         flow.edges.flatMap((edge) => {
           const source = cards.current
@@ -104,14 +115,22 @@ export function PlanFlow({
             ?.getBoundingClientRect();
           // Cycles and same-lane relationships are explained on the cards; Flow never points left.
           if (!source || !target || target.left <= source.right) return [];
-          const x = source.right - bounds.left,
-            y = source.top + source.height / 2 - bounds.top;
-          const tx = target.left - bounds.left,
-            ty = target.top + target.height / 2 - bounds.top;
+          // A link that skips a lane goes around the cards of the lanes it
+          // skips instead of through them.
+          const skipped = flow.lanes
+            .slice(
+              (laneOf.get(edge.blocker) ?? 0) + 1,
+              laneOf.get(edge.dependent) ?? 0,
+            )
+            .flat();
+          const between = skipped.flatMap((ticket) => {
+            const box = cards.current.get(ticket.reference);
+            return box ? [relative(box.getBoundingClientRect())] : [];
+          });
           return [
             {
               key: `${edge.blocker}:${edge.dependent}`,
-              d: `M${x} ${y} C${x + 20} ${y} ${tx - 20} ${ty} ${tx} ${ty}`,
+              d: flowLinkPath(relative(source), relative(target), between),
               hot: edge.blocker === selected || edge.dependent === selected,
             },
           ];
@@ -125,7 +144,7 @@ export function PlanFlow({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [flow.edges, selected]);
+  }, [flow, selected]);
   return (
     <section
       className="plan-flow"

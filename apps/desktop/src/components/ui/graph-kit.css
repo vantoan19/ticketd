@@ -119,7 +119,8 @@
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   pointer-events: none;
 }
 .ui-graph-foot > * {
@@ -127,8 +128,13 @@
 }
 .ui-graph-footnote {
   min-width: 0;
+  max-width: 100%;
   margin: 0;
+  padding: 4px 10px;
   overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
@@ -576,9 +582,11 @@
     0 0 0 1.5px var(--ring),
     var(--shadow-card);
 }
-.ui-graph-canvas[data-variant="workspace"] .ui-graph-legend {
-  top: auto;
-  bottom: 52px;
+/* In the foot row (legendInFoot) the legend is a row item, pushed to the end. */
+.ui-graph-foot .ui-graph-legend {
+  position: static;
+  max-width: 100%;
+  margin-left: auto;
 }
 
 .ui-graph-island[data-unplanned] {

@@ -5,7 +5,6 @@ import {
   Handle,
   ReactFlow,
   type Edge,
-  type FitViewOptions,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -14,7 +13,11 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { FileText, Layers } from "lucide-react";
-import { GRAPH_ZOOM, useViewportGlide } from "@/components/ui/graph-zoom";
+import {
+  GRAPH_ZOOM,
+  useViewportGlide,
+  type GraphGlide,
+} from "@/components/ui/graph-zoom";
 import {
   GraphCanvas,
   AvailabilityMark,
@@ -28,6 +31,7 @@ import {
   centerZoom,
   countNotFullyShown,
   edgeLineLabels,
+  fitViewport,
   isUserMove,
   legendItems,
   panToInclude,
@@ -51,24 +55,54 @@ const MIN_FIT_ZOOM = GRAPH_ZOOM.fit;
 const FULL_MARGIN_WIDTH = 1000;
 
 /**
- * Fit options for a container this wide. Margins shrink with a narrow window so
+ * Fit padding for a container this wide. Margins shrink with a narrow window so
  * they do not swallow the canvas; top and bottom keep the legend row and the
- * zoom control clear of the cards. The fit is instant: a window resize must not
- * animate; the callers that move the view on purpose go through
- * `useViewportGlide().glide`.
+ * zoom control clear of the cards.
  */
-function fitOptions(width: number): FitViewOptions {
+function fitPadding(width: number) {
   const scale = Math.min(1, Math.max(0.4, width / FULL_MARGIN_WIDTH));
   return {
-    padding: {
-      top: "52px",
-      right: `${Math.round(24 * scale)}px`,
-      bottom: "56px",
-      left: `${Math.round(24 * scale)}px`,
-    },
-    minZoom: MIN_FIT_ZOOM,
-    maxZoom: MAX_FIT_ZOOM,
+    top: 52,
+    right: Math.round(24 * scale),
+    bottom: 56,
+    left: Math.round(24 * scale),
   };
+}
+
+/** Fits every card into the canvas. Instant unless `glideOptions` move it. */
+function fitAll(
+  flow: ReactFlowInstance,
+  element: HTMLElement | null,
+  glideOptions?: GraphGlide,
+) {
+  const width = element?.clientWidth || FULL_MARGIN_WIDTH;
+  const height = element?.clientHeight ?? 0;
+  const nodes = flow.getNodes();
+  if (!nodes.length || !height) {
+    const padding = fitPadding(width);
+    return flow.fitView({
+      padding: {
+        top: `${padding.top}px`,
+        right: `${padding.right}px`,
+        bottom: `${padding.bottom}px`,
+        left: `${padding.left}px`,
+      },
+      minZoom: MIN_FIT_ZOOM,
+      maxZoom: MAX_FIT_ZOOM,
+      ...glideOptions,
+    });
+  }
+  // Fit never zooms out past 100%, so a tall graph overflows: the view then
+  // opens on its top (fitViewport), not on its middle.
+  return flow.setViewport(
+    fitViewport(
+      flow.getNodesBounds(nodes),
+      { width, height },
+      fitPadding(width),
+      { min: MIN_FIT_ZOOM, max: MAX_FIT_ZOOM },
+    ),
+    glideOptions,
+  );
 }
 
 type CardData = {
@@ -395,9 +429,6 @@ export function ContextGraphCanvas({
         setFitting(false);
         setShown(true);
       } else {
-        const options = fitOptions(
-          container.current?.clientWidth || FULL_MARGIN_WIDTH,
-        );
         // The first fit is not animated: it is applied before anything is shown.
         const first = !shownRef.current;
         autoFitted.current = true;
@@ -405,9 +436,9 @@ export function ContextGraphCanvas({
         const applied = !flow
           ? undefined
           : first
-            ? flow.fitView(options)
+            ? fitAll(flow, container.current)
             : glide((glideOptions) =>
-                flow.fitView({ ...options, ...glideOptions }),
+                fitAll(flow, container.current, glideOptions),
               );
         fitSized.current = sized;
         // Reveal once the viewport the fit chose has been painted into place.
@@ -423,7 +454,8 @@ export function ContextGraphCanvas({
         // more so a card is never left cut at the edge.
         window.clearTimeout(settleTimer.current);
         settleTimer.current = window.setTimeout(() => {
-          if (autoFitted.current) void instance.current?.fitView(options);
+          if (autoFitted.current && instance.current)
+            void fitAll(instance.current, container.current);
         }, 400);
       }
       onFittedRef.current?.();
@@ -523,9 +555,7 @@ export function ContextGraphCanvas({
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         if (!autoFitted.current) return;
-        void instance.current?.fitView(
-          fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-        );
+        if (instance.current) void fitAll(instance.current, container.current);
       }, 150);
     });
     observer.observe(element);
@@ -721,13 +751,12 @@ export function ContextGraphCanvas({
       return kind ?? kindByLabel[String(edge.label ?? "")] ?? "";
     }),
   );
-  const fitAll = () => {
+  const showAll = () => {
     autoFitted.current = true;
     void glide((options) =>
-      instance.current?.fitView({
-        ...fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-        ...options,
-      }),
+      instance.current
+        ? fitAll(instance.current, container.current, options)
+        : undefined,
     );
     onShowAll?.();
   };
@@ -745,6 +774,9 @@ export function ContextGraphCanvas({
           : ""
       }
       legend={<GraphLegend items={legend} />}
+      // The workspace graph's top edge carries island titles, so its legend
+      // joins the zoom control and caption in one foot row.
+      legendInFoot={!!islands}
       zoom={
         (nodes.length > 0 || !!islands?.length) && (
           <ZoomControls
@@ -755,7 +787,7 @@ export function ContextGraphCanvas({
               autoFitted.current = false;
               void instance.current?.zoomTo(1, { duration: 0 });
             }}
-            onFit={fitAll}
+            onFit={showAll}
             notInView={notFullyShown}
           />
         )
