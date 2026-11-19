@@ -7,7 +7,13 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { SHORTCUTS } from "@/lib/shortcuts";
+import { ChatFeatureContext } from "@/features/chats/use-chats";
+import {
+  SHORTCUTS,
+  requiresChat,
+  shortcutLabel,
+  type Shortcut,
+} from "@/lib/shortcuts";
 import { isMacPlatform } from "@/lib/platform";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 
@@ -24,15 +30,33 @@ const ALL = [
   "Lists",
   "Ticket",
   "Plans",
-  "Chat",
   "Dialogs and menus",
   "First run",
 ];
+const WITH_CHAT = [...ALL.slice(0, 4), "Chat", ...ALL.slice(4)];
+
+function renderWithChat() {
+  return render(
+    <ChatFeatureContext
+      value={{
+        enabled: true,
+        setEnabled: async () => {},
+        overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
+        revision: 0,
+        openRequest: null,
+        chatRequest: null,
+        requestChat: () => {},
+      }}
+    >
+      <KeyboardShortcutsPage />
+    </ChatFeatureContext>,
+  );
+}
 
 test("every real shortcut is listed under its scope", () => {
   render(<KeyboardShortcutsPage />);
   expect(groupNames()).toEqual(ALL);
-  for (const shortcut of SHORTCUTS) {
+  for (const shortcut of SHORTCUTS.filter((item) => !requiresChat(item))) {
     const scope = screen.getByRole("region", { name: shortcut.scope });
     expect(within(scope).getByText(shortcut.label)).toBeTruthy();
   }
@@ -81,9 +105,65 @@ test("no match says so and Clear search brings everything back", () => {
 
 test("navigation sequences are spoken as ordered keys from the registry", () => {
   render(<KeyboardShortcutsPage />);
-  for (const key of ["I", "A", "R", "C", "D"])
+  for (const key of ["I", "A", "R", "D"])
     expect(screen.getByRole("img", { name: `G then ${key}` })).toBeTruthy();
   fireEvent.change(filter(), { target: { value: "G then D" } });
   expect(screen.getByText("Go to Documents")).toBeTruthy();
   expect(screen.queryByText("Go to Inbox")).toBeNull();
+});
+
+test("every listed row has a key, and no Inbox key is listed twice", () => {
+  renderWithChat();
+  expect(
+    (SHORTCUTS as readonly Shortcut[]).filter(
+      (item) => item.keys.length + (item.sequences?.length ?? 0) === 0,
+    ),
+  ).toEqual([]);
+  expect(
+    screen.getAllByText(/Mark the .*Inbox entry read or unread/),
+  ).toHaveLength(1);
+  expect(screen.getAllByText(/Snooze .*Inbox/)).toHaveLength(1);
+  const seen = new Map<string, string>();
+  for (const item of SHORTCUTS.filter((entry) => entry.scope === "Lists")) {
+    const key = JSON.stringify(item.keys);
+    if (key.includes('"E"') || key.includes('"H"')) {
+      expect(seen.get(key), item.label).toBeUndefined();
+      seen.set(key, item.label);
+    }
+  }
+  expect(screen.queryByText("Review workspace notice")).toBeNull();
+  expect(screen.queryByText("Go to Automations")).toBeNull();
+  expect(screen.queryByText("Expand the New ticket draft")).toBeNull();
+  expect(shortcutLabel("new-ticket")).not.toBe("");
+});
+
+test("Chat-only keys are hidden while Chat is off and shown when it is on", () => {
+  const { unmount } = render(<KeyboardShortcutsPage />);
+  expect(groupNames()).toEqual(ALL);
+  for (const label of [
+    "Go to Chats",
+    "Open the approval in Chat",
+    "Add the selected text to a Chat",
+    "Send, steer or queue, as the button says",
+  ])
+    expect(screen.queryByText(label)).toBeNull();
+  expect(screen.getByText("Go to Documents")).toBeTruthy();
+  expect(
+    screen.getByText(/In ticket lists and boards, the Inbox, Attachments/),
+  ).toBeTruthy();
+  unmount();
+
+  renderWithChat();
+  expect(groupNames()).toEqual(WITH_CHAT);
+  expect(screen.getByText("Go to Chats")).toBeTruthy();
+  expect(screen.getByText("Open the approval in Chat")).toBeTruthy();
+  expect(screen.getByText("Add the selected text to a Chat")).toBeTruthy();
+});
+
+test("the Escape key has one name, Esc, in every key and note", () => {
+  for (const item of SHORTCUTS as readonly Shortcut[]) {
+    expect(item.keys.flat(), item.id).not.toContain("Escape");
+    expect(item.note ?? "", item.id).not.toMatch(/\bEscape\b/);
+  }
+  expect(shortcutLabel("attachments-back")).toMatch(/Esc/);
 });

@@ -1351,9 +1351,11 @@ async fn the_list_is_not_read_again_for_checkpointed_text_and_shared_folders_are
 #[tokio::test(start_paused = true)]
 async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the_chat() {
     let f = Fixture::new().await;
+    let store = f.dir.path().join("store");
+    std::fs::create_dir_all(&store).unwrap();
     let project = f
         .core()
-        .create_project("Storefront", "/work/store")
+        .create_project("Storefront", store.to_str().unwrap())
         .unwrap();
     let link = || LinkRef {
         kind: LinkKind::Project,
@@ -2464,4 +2466,30 @@ async fn a_step_s_whole_output_is_read_when_its_row_opens() {
         f.chats.step_output(&id, &full.tool_id).unwrap(),
         Some(output)
     );
+}
+
+#[test]
+fn a_failed_background_action_logs_the_chat_and_the_kind_but_not_the_failure_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = ticketd_diagnostics::DesktopLogs::open(dir.path(), Default::default());
+    logs.with_default(|| {
+        log_failure::<()>(
+            Some("chat-1"),
+            "mark the Chat seen",
+            Err(failed("the agent said: Quarterly plan for jdoe")),
+        );
+    });
+
+    let groups = logs.recent_errors();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].kind, "failed");
+    let mut text = String::new();
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "log") {
+            text.push_str(&std::fs::read_to_string(path).unwrap());
+        }
+    }
+    assert!(text.contains("\"chat_id\":\"chat-1\""), "{text}");
+    assert!(!text.contains("jdoe"), "{text}");
 }

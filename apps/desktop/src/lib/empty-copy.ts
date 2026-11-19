@@ -173,6 +173,10 @@ const COPY = {
     title: "No shortcuts match “{query}”",
     sentence: "Try a key's name, such as Enter or Escape.",
   },
+  "diagnostics-errors": {
+    title: "No recent errors",
+    sentence: "Warnings and errors ticketd logs appear here.",
+  },
   cleanup: {
     title: "No unused files",
     sentence: "Files no ticket or Document uses show up here.",

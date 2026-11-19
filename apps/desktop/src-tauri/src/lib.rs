@@ -10,6 +10,7 @@ mod chat_ticketd;
 mod chat_view;
 mod chats;
 mod cli_status;
+mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
 #[cfg(test)]
@@ -17,6 +18,7 @@ mod runtime_trace;
 mod sync_commands;
 mod sync_scheduler;
 mod wake;
+mod webview_report;
 mod workspace_session;
 
 use ticketd_core::{
@@ -125,9 +127,10 @@ impl From<ticketd_core::Error> for BridgeFailure {
             ticketd_core::Error::DependencyReviewMode(_) => {
                 Self::coded("review_mode", error.to_string())
             }
-            ticketd_core::Error::Source(ref source) => {
-                Self::coded(source.code(), error.to_string())
-            }
+            ticketd_core::Error::Source(ref source) => Self::coded(
+                source.code(),
+                source.message_for(ticketd_core::source::Surface::Desktop),
+            ),
             ticketd_core::Error::Publication(ref publication) => {
                 Self::coded(publication.code(), error.to_string())
             }
@@ -1341,7 +1344,7 @@ impl From<ticketd_core::Error> for SourceFailure {
             ticketd_core::Error::Source(source) => Self {
                 code: source.code(),
                 fields: source.issues().to_vec(),
-                message: source.to_string(),
+                message: source.message_for(ticketd_core::source::Surface::Desktop),
             },
             ticketd_core::Error::Publication(publication) => Self {
                 code: publication.code(),
@@ -1565,7 +1568,11 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
                     Err(error) => {
                         let message = error.to_string();
                         if reported.as_deref() != Some(message.as_str()) {
-                            eprintln!("periodic source refresh could not run: {message}");
+                            tracing::warn!(
+                                error_kind = error.kind().code(),
+                                %error,
+                                "periodic source refresh could not run"
+                            );
                             reported = Some(message);
                         }
                     }
@@ -1574,7 +1581,7 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
             }
         });
     if let Err(error) = spawned {
-        eprintln!("could not start periodic source refresh: {error}");
+        tracing::error!(%error, "could not start periodic source refresh");
     }
 }
 
@@ -1604,7 +1611,11 @@ fn start_reminder_timer(
                     Err(error) => {
                         let message = error.to_string();
                         if reported.as_deref() != Some(message.as_str()) {
-                            eprintln!("due reminders could not be delivered: {message}");
+                            tracing::warn!(
+                                error_kind = error.kind().code(),
+                                %error,
+                                "due reminders could not be delivered"
+                            );
                             reported = Some(message);
                         }
                         wake::IDLE
@@ -1614,7 +1625,39 @@ fn start_reminder_timer(
             }
         });
     if let Err(error) = spawned {
-        eprintln!("could not start the reminder timer: {error}");
+        tracing::error!(%error, "could not start the reminder timer");
+    }
+}
+
+/// The span a command handler runs in: the command's name, and the `request_id` when the
+/// interface sent one with it (a write's request ID, which the core also records).
+fn command_span(command: &str, payload: &tauri::ipc::InvokeBody) -> tracing::Span {
+    let request_id = match payload {
+        tauri::ipc::InvokeBody::Json(arguments) => arguments
+            .get("requestId")
+            .and_then(serde_json::Value::as_str),
+        tauri::ipc::InvokeBody::Raw(_) => None,
+    };
+    tracing::debug_span!("command", command, request_id)
+}
+
+/// Runs each command handler inside a span named for the command, so the lines it logs say
+/// which command they belong to.
+///
+/// The span is at `debug`: the interface's change poll is a command and runs every second,
+/// so an `info` span would log a line for each one. Debug logging shows them.
+///
+/// Only the synchronous part of a command is inside the span. Tauri runs an `async`
+/// command's future on its own runtime, where the handler cannot reach it, so for those the
+/// span ends when the future is created: its close time is not the command's duration, and
+/// lines the future logs later do not carry it. A command whose duration matters opens its
+/// own span around its work.
+fn traced<R: tauri::Runtime>(
+    handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        let span = command_span(invoke.message.command(), invoke.message.payload());
+        span.in_scope(|| handler(invoke))
     }
 }
 
@@ -1637,7 +1680,7 @@ fn request_quit(app: &tauri::AppHandle) {
     match app.get_webview_window("main") {
         Some(window) => {
             if let Err(error) = window.close() {
-                eprintln!("could not ask the window to close: {error}");
+                tracing::warn!(%error, "could not ask the window to close");
             }
         }
         None => app.exit(0),
@@ -1666,6 +1709,10 @@ fn guard_menu_quit(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The desktop's logs handle, held in managed state for the whole run and dropped on exit.
+/// Commands that read or change the logs take it from here.
+struct Logs(std::sync::Mutex<Option<ticketd_diagnostics::DesktopLogs>>);
+
 /// What the startup watchdog has heard from the boot module.
 #[derive(Default)]
 struct StartupProgress {
@@ -1693,7 +1740,7 @@ pub fn run() -> Result<(), tauri::Error> {
         std::sync::Arc::new(ticketd_core::source::SystemClock),
         ticketd_core::source::RefreshPolicy::default(),
     ));
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // Must be the first plugin. One process owns Chat execution: starting ticketd
         // again shows the running app's window instead of starting a second host.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -1755,7 +1802,7 @@ pub fn run() -> Result<(), tauri::Error> {
                         && let Err(error) =
                             window.eval(include_str!("../../public/startup-fallback.js"))
                     {
-                        eprintln!("Could not display startup guidance: {error}");
+                        tracing::warn!(%error, "could not display startup guidance");
                     }
                     // Once shown, visibility belongs to the person. In
                     // particular, Cmd+H during these five seconds must stay hidden.
@@ -1766,11 +1813,11 @@ pub fn run() -> Result<(), tauri::Error> {
                         Ok(true) => return,
                         Ok(false) => {}
                         Err(error) => {
-                            eprintln!("Could not check startup window visibility: {error}");
+                            tracing::warn!(%error, "could not check startup window visibility");
                         }
                     }
                     if let Err(error) = window.show() {
-                        eprintln!("Could not reveal ticketd after startup: {error}");
+                        tracing::warn!(%error, "could not reveal ticketd after startup");
                     }
                 }
             });
@@ -1816,7 +1863,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(traced(tauri::generate_handler![
             drive_commands::drive_configuration,
             drive_commands::drive_reference,
             drive_commands::drive_uploaded_copy_status,
@@ -2037,6 +2084,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_answer_quit,
             chat_commands::chat_stopping,
             chat_commands::close_keeps_running,
+            webview_report::report_webview_error,
             sync_commands::sync_conflicts,
             sync_commands::sync_conflict,
             sync_commands::resolve_sync_conflict,
@@ -2047,6 +2095,13 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::restore_record_version,
             sync_commands::sync_flush_on_exit,
             sync_commands::sync_status,
+            diagnostics_commands::diagnostics_log_level,
+            diagnostics_commands::diagnostics_set_debug,
+            diagnostics_commands::diagnostics_open_logs_folder,
+            diagnostics_commands::diagnostics_recent_errors,
+            diagnostics_commands::diagnostics_export_file_name,
+            diagnostics_commands::diagnostics_summary,
+            diagnostics_commands::diagnostics_export,
             sync_commands::sync_connect,
             sync_commands::sync_setup_options,
             sync_commands::sync_upload_workspace,
@@ -2060,19 +2115,39 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::set_sync_settings,
             sync_commands::attachment_availability,
             sync_commands::download_attachment
-        ])
-        .build(tauri::generate_context!())?
-        .run(|app, event| {
-            use tauri::Manager;
-            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
-                && holds_exit(*code, app.get_webview_window("main").is_some())
-            {
-                api.prevent_exit();
-                request_quit(app);
-                return;
-            }
-            chat_commands::on_run_event(app, &event);
-        });
+        ]))
+        .build(tauri::generate_context!())?;
+    // The log folder is named for the app's identifier, which only a built app knows. The
+    // setup hook and the event loop have not started yet, so nothing before this is lost
+    // but the app's own construction. A path the platform cannot give is an empty one,
+    // which makes logging fall back to stderr like any other unusable folder.
+    {
+        use tauri::Manager;
+        let log_dir = app.path().app_log_dir().unwrap_or_default();
+        app.manage(Logs(std::sync::Mutex::new(Some(
+            ticketd_diagnostics::init_desktop(log_dir),
+        ))));
+        tracing::info!(version = %app.package_info().version, "ticketd started");
+    }
+    app.run(|app, event| {
+        use tauri::Manager;
+        if let tauri::RunEvent::Exit = event {
+            // Tauri ends the process with `std::process::exit`, so the handle is dropped
+            // here, where it still runs.
+            let logs = app
+                .try_state::<Logs>()
+                .and_then(|logs| logs.0.lock().ok()?.take());
+            drop(logs);
+        }
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
+            && holds_exit(*code, app.get_webview_window("main").is_some())
+        {
+            api.prevent_exit();
+            request_quit(app);
+            return;
+        }
+        chat_commands::on_run_event(app, &event);
+    });
     Ok(())
 }
 
@@ -2087,6 +2162,46 @@ mod tests {
         assert!(!holds_exit(Some(0), false));
         assert!(!holds_exit(None, false));
         assert!(!holds_exit(Some(tauri::RESTART_EXIT_CODE), true));
+    }
+
+    #[test]
+    fn a_command_span_carries_the_command_and_the_request_id_when_it_has_one() {
+        let dir = tempfile::tempdir().expect("log folder");
+        let logs = ticketd_diagnostics::DesktopLogs::open(dir.path(), Default::default());
+        logs.set_debug(true);
+        let with =
+            tauri::ipc::InvokeBody::Json(serde_json::json!({"id": "T-1", "requestId": "req-7"}));
+        let without = tauri::ipc::InvokeBody::Json(serde_json::json!({"id": "T-1"}));
+        let raw = tauri::ipc::InvokeBody::Raw(vec![1, 2, 3]);
+        logs.with_default(|| {
+            for (command, payload) in [("one", &with), ("two", &without), ("three", &raw)] {
+                super::command_span(command, payload).in_scope(|| tracing::warn!("inside"));
+            }
+        });
+
+        let mut seen = Vec::new();
+        for entry in std::fs::read_dir(dir.path()).expect("folder") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|extension| extension == "log") {
+                for line in std::fs::read_to_string(path).expect("file").lines() {
+                    let line: serde_json::Value = serde_json::from_str(line).expect("json line");
+                    if line["message"] == "inside" {
+                        seen.push((
+                            line["spans"][0]["command"].as_str().map(str::to_owned),
+                            line["spans"][0]["request_id"].as_str().map(str::to_owned),
+                        ));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                (Some("one".to_owned()), Some("req-7".to_owned())),
+                (Some("two".to_owned()), None),
+                (Some("three".to_owned()), None),
+            ]
+        );
     }
 
     #[test]

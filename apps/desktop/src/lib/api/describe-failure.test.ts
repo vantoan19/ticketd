@@ -49,4 +49,21 @@ describe("sentence", () => {
       "The Claude bridge stopped during hello.",
     );
   });
+
+  it("tells a sign-in that never finished from one that cannot start, and neither as unconfirmed", () => {
+    const unconfigured = describeFailure(
+      { code: "drive_unconfigured", message: "no configuration" },
+      "connect Google Drive",
+    );
+    expect(unconfigured.sentence).toContain(
+      "no Google Drive app configuration",
+    );
+    expect(unconfigured.action).toBeNull();
+    const cancelled = describeFailure(
+      { code: "sign_in_cancelled", message: "timed out" },
+      "connect Google Drive",
+    );
+    expect(cancelled.sentence).not.toContain("confirmed");
+    expect(cancelled.action).toBe("retry");
+  });
 });

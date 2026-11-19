@@ -2193,8 +2193,15 @@ html[data-window-bar] {
 .sidebar-nav button svg {
   flex: none;
 }
+/* A long name gives way, never the count beside it (a Plan's "1/7"). */
+.sidebar-nav .sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sidebar-count {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   margin-left: auto;
@@ -3798,10 +3805,9 @@ kbd,
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-@container ticket-detail (max-width: 599px) {
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-599"])
   .ticket-header-updated {
-    display: none;
-  }
+  display: none;
 }
 .ticket-detail[data-expanded] .editor-title textarea,
 .ticket-detail[data-expanded] .detail-title {
@@ -4543,9 +4549,14 @@ kbd,
 .ui-dialog[data-surface="create"][data-expanded] .dialog-shell-body {
   flex: 1;
 }
+/* The focus ring is the field's outline: it takes 8px of inset on each side,
+   cancelled by a negative margin, so the text stays on the dialog's edge and
+   the ring sits clear of the first letter. */
 .ui-input[data-variant="document-title"],
 .ui-input[data-variant="capture-title"] {
-  padding: 0;
+  width: calc(100% + 16px);
+  margin-inline: -8px;
+  padding: 0 8px;
   background: transparent;
   box-shadow: none;
   font-weight: 600;
@@ -4698,6 +4709,7 @@ kbd,
 }
 
 /* Compact controls preserve their header/list lane when labels collapse. */
+/* In a pane header (a query container) or a measured pane (data-width). */
 @container (max-width: 600px) {
   .ui-button-compact-responsive,
   .ui-badge-compact-responsive {
@@ -4706,6 +4718,13 @@ kbd,
     padding-inline: 0;
     justify-content: center;
   }
+}
+:where([data-width~="max-600"])
+  :is(.ui-button-compact-responsive, .ui-badge-compact-responsive) {
+  width: var(--header-control-height);
+  min-width: var(--header-control-height);
+  padding-inline: 0;
+  justify-content: center;
 }
 
 /* A row action keeps its compact mouse geometry and a real touch target. */

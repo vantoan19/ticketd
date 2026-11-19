@@ -11,6 +11,7 @@ import { AutomationsPage } from "@/features/settings/pages/AutomationsPage";
 import { BackupsPage } from "@/features/settings/pages/BackupsPage";
 import { ChatPage } from "@/features/settings/pages/ChatPage";
 import { CommandLinePage } from "@/features/settings/pages/CommandLinePage";
+import { DiagnosticsPage } from "@/features/settings/pages/DiagnosticsPage";
 import { ExportPage } from "@/features/settings/pages/ExportPage";
 import { GoogleDrivePage } from "@/features/settings/pages/GoogleDrivePage";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
@@ -104,6 +105,7 @@ export function SettingsView({
       {selected === "automations" && <AutomationsPage />}
       {selected === "google-drive" && <GoogleDrivePage onReplaced={replaced} />}
       {selected === "keyboard-shortcuts" && <KeyboardShortcutsPage />}
+      {selected === "diagnostics" && <DiagnosticsPage />}
       {selected === "about" && <AboutPage />}
       {selected === "search" && <SearchPage />}
       {sources.map((entry) => (

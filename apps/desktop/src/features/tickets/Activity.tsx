@@ -76,7 +76,7 @@ import {
   type Project,
 } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
-import { historySentence } from "./history-sentence";
+import { changeSummary, historySentence } from "./history-sentence";
 import type { Entry } from "@/lib/api/history";
 import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
@@ -822,7 +822,13 @@ function RecoveredActivity({
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
         title="Activity"
-        count={notes.length || undefined}
+        // The read gives no total, so while more is waiting the count only
+        // says how many updates are loaded so far.
+        count={
+          notes.length
+            ? `${notes.length}${activity.more ? "+" : ""}`
+            : undefined
+        }
         caption={
           sourceName && <>Only in ticketd · never sent to {sourceName}</>
         }
@@ -1232,31 +1238,6 @@ function RecoveredActivity({
       )}
     </section>
   );
-}
-
-/** A compact inventory of actual records; full values and attribution expand below. */
-function changeSummary(changes: Entry[]): string {
-  const counts = new Map<string, number>();
-  for (const entry of changes) {
-    const kind =
-      entry.kind === "dependency" ||
-      entry.kind === "parent" ||
-      entry.kind.startsWith("relationship:")
-        ? "link"
-        : entry.kind;
-    counts.set(kind, (counts.get(kind) ?? 0) + 1);
-  }
-  const parts = [...counts].map(([kind, count]) => {
-    if (kind === "evidence")
-      return `${count} ${count === 1 ? "piece" : "pieces"} of evidence`;
-    if (kind === "link") return `${count} ${count === 1 ? "link" : "links"}`;
-    if (kind === "status")
-      return `status to ${changes.find((entry) => entry.kind === "status")?.to_value}`;
-    if (kind === "plan") return "Plan";
-    if (kind === "project") return "project";
-    return `${count} ${count === 1 ? "other change" : "other changes"}`;
-  });
-  return `${changes.length} ${changes.length === 1 ? "change" : "changes"}: ${parts.join(", ")}`;
 }
 
 /**

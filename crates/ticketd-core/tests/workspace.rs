@@ -261,7 +261,8 @@ fn version_one_workspace_upgrades_content_history_and_tags() {
         .unwrap();
     assert_eq!(updated.body, "Details");
     assert_eq!(updated.tags, vec!["bug"]);
-    assert_eq!(workspace.ticket_history("T-KQ1").unwrap().len(), 1);
+    // The tag and the status change.
+    assert_eq!(workspace.ticket_history("T-KQ1").unwrap().len(), 2);
     drop(workspace);
     let reopened = Workspace::open(&path).unwrap();
     assert_eq!(reopened.show_ticket("T-KQ1").unwrap(), updated);
@@ -627,7 +628,12 @@ fn project_membership_preserves_ticket_identity_and_records_changes() {
     use ticketd_core::TicketPatch;
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    let project = workspace.create_project("Alpha", "/repo/a").unwrap();
+    let (first, second) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let project = workspace
+        .create_project("Alpha", first.to_str().unwrap())
+        .unwrap();
     let ticket = workspace.create_ticket("Outcome").unwrap();
     let linked = workspace
         .change_ticket(
@@ -641,7 +647,7 @@ fn project_membership_preserves_ticket_identity_and_records_changes() {
     assert_eq!(linked.id, ticket.id);
     assert_eq!(linked.reference, ticket.reference);
     workspace
-        .edit_project(&project.id, "Renamed", "/repo/b")
+        .edit_project(&project.id, "Renamed", second.to_str().unwrap())
         .unwrap();
     assert_eq!(workspace.show_project(&project.id).unwrap().name, "Renamed");
     let cleared = workspace
@@ -1484,7 +1490,13 @@ fn concurrent_project_moves_remove_the_previous_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&database).unwrap();
-    let project = workspace.create_project("Project", "initial").unwrap();
+    let (initial, last) = (dir.path().join("initial"), dir.path().join("final"));
+    std::fs::create_dir_all(&initial).unwrap();
+    std::fs::create_dir_all(&last).unwrap();
+    let last = last.canonicalize().unwrap().to_str().unwrap().to_owned();
+    let project = workspace
+        .create_project("Project", initial.to_str().unwrap())
+        .unwrap();
     let lock = rusqlite::Connection::open(&database).unwrap();
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
     lock.execute(
@@ -1504,18 +1516,19 @@ fn concurrent_project_moves_remove_the_previous_checkout() {
     .unwrap();
     let (started, receiver) = mpsc::channel();
     let id = project.id.clone();
+    let target = last.clone();
     let worker = thread::spawn(move || {
         let mut workspace = Workspace::open(database).unwrap();
         started.send(()).unwrap();
-        workspace.edit_project(&id, "Project", "final").unwrap()
+        workspace.edit_project(&id, "Project", &target).unwrap()
     });
     receiver.recv().unwrap();
     // Give the worker time to reach the blocked SQLite write while the transaction is held.
     thread::sleep(Duration::from_millis(100));
     lock.execute_batch("COMMIT").unwrap();
     let result = worker.join().unwrap();
-    assert_eq!(result.path, "final");
-    assert_eq!(result.paths, vec!["final"]);
+    assert_eq!(result.path, last);
+    assert_eq!(result.paths, vec![last]);
 }
 
 #[test]
@@ -3084,7 +3097,9 @@ fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection()
     use ticketd_core::{BatchOperation, WriteRequest};
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("bulk-organization.sqlite")).unwrap();
-    let project = workspace.create_project("Project", "/project").unwrap();
+    let project = workspace
+        .create_project("Project", dir.path().to_str().unwrap())
+        .unwrap();
     let plan = workspace.create_plan("Plan").unwrap();
     let first = workspace.create_ticket("First").unwrap();
     let second = workspace.create_ticket("Second").unwrap();
@@ -3305,6 +3320,127 @@ fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
 }
 
 #[test]
+fn reminder_times_are_checked_and_stored_as_whole_second_utc() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember").unwrap();
+    let reference = ticket.reference.as_str();
+    let rejected = |ws: &mut Workspace, value: &str| {
+        ws.set_reminder(reference, Some(value))
+            .unwrap_err()
+            .to_string()
+    };
+    // The message says what is wrong, without a batch and without a false reason.
+    let impossible = rejected(&mut ws, "2030-02-30T09:00:00Z");
+    assert!(impossible.contains("not a valid date"), "{impossible}");
+    assert!(!impossible.contains("batch"), "{impossible}");
+    assert!(rejected(&mut ws, "2030-01-01T25:00:00Z").contains("not a valid date"));
+    assert!(rejected(&mut ws, "2030-01-01T09:00:00").contains("no UTC offset"));
+    assert!(rejected(&mut ws, "tomorrow").contains("RFC 3339"));
+    assert!(rejected(&mut ws, "9999-12-31T23:59:59-05:00").contains("0000 to 9999"));
+
+    for (given, stored) in [
+        ("2030-12-31T23:59:60Z", "2030-12-31T23:59:59Z"),
+        ("2030-01-01T09:00:00.5Z", "2030-01-01T09:00:00Z"),
+        ("2030-01-01T09:00:00+07:00", "2030-01-01T02:00:00Z"),
+        ("9999-12-31T23:59:59Z", "9999-12-31T23:59:59Z"),
+    ] {
+        ws.set_reminder(reference, Some(given)).unwrap();
+        assert_eq!(ws.reminder(reference).unwrap().as_deref(), Some(stored));
+    }
+}
+
+#[test]
+fn snoozing_needs_a_reminder_and_a_later_time_and_dismissing_says_what_it_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember").unwrap();
+    let reference = ticket.reference.as_str();
+    let no_reminder = ws
+        .snooze_reminder(reference, "2031-01-01T00:00:00Z")
+        .unwrap_err();
+    assert!(
+        no_reminder.to_string().contains("no reminder"),
+        "{no_reminder}"
+    );
+    assert_eq!(ws.reminder(reference).unwrap(), None);
+
+    ws.set_reminder(reference, Some("2031-06-01T00:00:00Z"))
+        .unwrap();
+    for not_later in ["2031-01-01T00:00:00Z", "2031-06-01T07:00:00+07:00"] {
+        let error = ws.snooze_reminder(reference, not_later).unwrap_err();
+        assert!(error.to_string().contains("later"), "{error}");
+    }
+    assert_eq!(
+        ws.reminder(reference).unwrap().as_deref(),
+        Some("2031-06-01T00:00:00Z")
+    );
+    ws.snooze_reminder(reference, "2031-06-02T00:00:00Z")
+        .unwrap();
+    assert_eq!(
+        ws.reminder(reference).unwrap().as_deref(),
+        Some("2031-06-02T00:00:00Z")
+    );
+
+    assert!(ws.dismiss_reminder(reference).unwrap());
+    assert!(!ws.dismiss_reminder(reference).unwrap());
+}
+
+#[test]
+fn personal_state_writes_report_their_outcome_and_refuse_unknown_inbox_entries() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Tracked").unwrap();
+    let follow = |following| WriteRequest::SetFollowing {
+        reference: ticket.reference.clone(),
+        following,
+    };
+    assert_eq!(
+        ws.write(None, follow(true)).unwrap(),
+        WriteResult::Following(true)
+    );
+    assert_eq!(
+        ws.write(None, follow(false)).unwrap(),
+        WriteResult::Following(false)
+    );
+    assert_eq!(
+        ws.write(
+            None,
+            WriteRequest::SetReminder {
+                reference: ticket.reference.clone(),
+                due_at: Some("2031-01-01T00:00:00.5+00:00".into()),
+            },
+        )
+        .unwrap(),
+        WriteResult::Reminder(Some("2031-01-01T00:00:00Z".into()))
+    );
+
+    ws.set_following(&ticket.reference, true).unwrap();
+    ws.change_ticket(
+        &ticket.reference,
+        TicketPatch {
+            status: Some(Status::Done),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let id = ws.inbox(100, 0).unwrap()[0].id;
+    let read = |ids: Vec<i64>| WriteRequest::SetInboxRead { ids, read: true };
+    let error = ws.write(None, read(vec![id, id + 1000])).unwrap_err();
+    assert!(error.to_string().contains("not found"), "{error}");
+    assert!(
+        !ws.inbox(100, 0).unwrap()[0].read,
+        "a refusal changes nothing"
+    );
+    assert_eq!(
+        ws.write(None, read(vec![id])).unwrap(),
+        WriteResult::InboxRead(true)
+    );
+    assert!(ws.inbox(100, 0).unwrap()[0].read);
+}
+
+#[test]
 fn workspace_info_reports_location_counts_size_and_format() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
@@ -3314,7 +3450,9 @@ fn workspace_info_reports_location_counts_size_and_format() {
     workspace
         .set_trashed(&trashed.reference, true, None)
         .unwrap();
-    workspace.create_project("Core", "/tmp/core").unwrap();
+    workspace
+        .create_project("Core", dir.path().to_str().unwrap())
+        .unwrap();
     workspace.create_plan("Active").unwrap();
     let archived = workspace.create_plan("Old").unwrap();
     workspace
@@ -4751,8 +4889,15 @@ fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("plan-graph.sqlite")).unwrap();
     let plan = workspace.create_plan("Launch").unwrap();
-    let first = workspace.create_project("First", "/first").unwrap();
-    let second = workspace.create_project("Second", "/second").unwrap();
+    let folder = |name: &str| {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path.to_str().unwrap().to_owned()
+    };
+    let first = workspace.create_project("First", &folder("first")).unwrap();
+    let second = workspace
+        .create_project("Second", &folder("second"))
+        .unwrap();
     let member = workspace
         .create_ticket_in_project("Member", Some(&first.id))
         .unwrap();
@@ -5031,8 +5176,13 @@ fn the_next_reminder_is_due_when_its_time_comes_and_none_after_delivery() {
         .set_reminder(&later.reference, Some(&in_an_hour))
         .unwrap();
     let wait = workspace.next_reminder_due_in().unwrap().unwrap();
+    // SQLite's 'now' has millisecond precision and julianday arithmetic adds float
+    // error, so when the reminder is set within the same millisecond the wait can
+    // exceed an hour by up to about a millisecond.
+    let an_hour_and_slack =
+        std::time::Duration::from_secs(3600) + std::time::Duration::from_millis(2);
     assert!(
-        wait > std::time::Duration::from_secs(3590) && wait <= std::time::Duration::from_secs(3600),
+        wait > std::time::Duration::from_secs(3590) && wait <= an_hour_and_slack,
         "{wait:?}"
     );
     let overdue = workspace.create_ticket("Overdue").unwrap();
@@ -5046,5 +5196,18 @@ fn the_next_reminder_is_due_when_its_time_comes_and_none_after_delivery() {
     workspace.deliver_due_reminders().unwrap();
     assert!(
         workspace.next_reminder_due_in().unwrap().unwrap() > std::time::Duration::from_secs(3590)
+    );
+}
+
+#[test]
+fn evidence_kind_is_accepted_in_the_command_line_and_the_written_spelling() {
+    use ticketd_core::EvidenceKind;
+    for spelling in ["pull-request", "pull_request"] {
+        let kind: EvidenceKind = serde_json::from_value(serde_json::json!(spelling)).unwrap();
+        assert_eq!(kind, EvidenceKind::PullRequest);
+    }
+    assert_eq!(
+        serde_json::to_value(EvidenceKind::PullRequest).unwrap(),
+        "pull_request"
     );
 }

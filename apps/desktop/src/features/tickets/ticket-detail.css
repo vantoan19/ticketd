@@ -12,7 +12,9 @@
   flex: none;
 }
 .ticket-detail {
-  container: ticket-detail / inline-size;
+  /* Measured by lib/width-queries (data-width), not a query container: WebKit
+     restyles a container's whole subtree each time it resizes. */
+  contain: inline-size layout style;
 }
 /* The same document stays in place when it opens full width. */
 .ticket-detail[data-expanded] .detail-document {
@@ -160,11 +162,11 @@
 .ticket-agent-header-short {
   display: none;
 }
-@container ticket-detail (max-width: 600px) {
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-600"])
   .ticket-agent-header-long {
-    display: none;
-  }
+  display: none;
+}
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-600"])
   .ticket-agent-header-short {
-    display: inline;
-  }
+  display: inline;
 }

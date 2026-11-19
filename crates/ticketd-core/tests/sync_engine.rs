@@ -154,7 +154,9 @@ const ORDERS: [[usize; 3]; 3] = [[0, 1, 2], [2, 1, 0], [1, 2, 0]];
 fn records_made_on_one_device_arrive_on_the_others_and_are_not_uploaded_again() {
     let mut devices = devices();
     let a = &mut devices.workspaces[0];
-    a.create_project("Project", "C:/work/project").unwrap();
+    let checkout = tempfile::tempdir().unwrap();
+    a.create_project("Project", checkout.path().to_str().unwrap())
+        .unwrap();
     let plan = a.create_plan("Plan").unwrap();
     let document = a.create_document(Some("Notes"), "Body").unwrap();
     let first = a.create_ticket("First").unwrap();

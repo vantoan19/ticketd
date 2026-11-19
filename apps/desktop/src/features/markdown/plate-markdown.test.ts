@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readMarkdown, writeMarkdown } from "./plate-markdown";
+import {
+  readMarkdown,
+  writeMarkdown,
+  writeMarkdownFrom,
+} from "./plate-markdown";
 
 describe("canonical Markdown rich-edit boundary", () => {
   it("keeps attachment links inline in prose, standalone paragraphs, lists and tables with literal labels", () => {
@@ -48,7 +52,7 @@ describe("canonical Markdown rich-edit boundary", () => {
     ).toEqual([]);
   });
 
-  it("returns the canonical Markdown it already wrote, so a caller need not write it again", () => {
+  it("returns the Markdown it already wrote, so a caller need not write it again", () => {
     for (const source of [
       "###   Keep exact opening source\n\n- [x] Done\n\n3. Third\n",
       "Status [WIP] - 5 * 3, see snake_case_name",
@@ -56,7 +60,9 @@ describe("canonical Markdown rich-edit boundary", () => {
       "",
     ]) {
       const document = readMarkdown(source);
-      expect(document.markdown).toBe(writeMarkdown(document.value));
+      expect(document.markdown).toBe(
+        writeMarkdown(document.value, document.baseline),
+      );
     }
   });
 
@@ -178,6 +184,194 @@ describe("typed text is stored as typed", () => {
   it("does not escape the colon of a typed URL", () => {
     expect(writeMarkdown(p("See https://example.org/x now"))).toBe(
       "See https://example.org/x now",
+    );
+  });
+});
+
+/** Types `text` over the first text in a block, as an edit inside it would. */
+function retext(node: unknown, text: string) {
+  let current = node as { children?: unknown[]; text?: string } | undefined;
+  while (current?.children)
+    current = current.children[0] as typeof current | undefined;
+  if (!current) throw new Error("Expected a text node");
+  current.text = text;
+}
+
+/** What the editor saves after a change elsewhere in the document: text added after, and before. */
+function afterUnrelatedEdits(source: string) {
+  const document = readMarkdown(source);
+  const paragraph = (text: string) => ({ type: "p", children: [{ text }] });
+  return [
+    writeMarkdown([...document.value, paragraph("After")], document.baseline),
+    writeMarkdown([paragraph("Before"), ...document.value], document.baseline),
+  ];
+}
+
+describe("nested inline marks stay in rich editing (editor-1)", () => {
+  const sources = [
+    "Run **`npm test` first** please",
+    "**bold *italic* bold**",
+    "**bold [link](https://a.com) bold**",
+    "*italic **bold** italic*",
+    "***both***",
+    "**a  \nb**",
+    "# **Head** `code`",
+    "- **a `b`**\n- c",
+  ];
+  it.each(sources)("%j needs no source editing and round trips", (source) => {
+    const document = readMarkdown(source);
+    expect(document.reasons).toEqual([]);
+    expect(document.markdown).toBe(source);
+    // The canonical writer itself keeps the nesting, for the block a person edits.
+    expect(writeMarkdown(document.value)).toBe(source);
+    expect(afterUnrelatedEdits(source)).toEqual([
+      `${source}\n\nAfter`,
+      `Before\n\n${source}`,
+    ]);
+  });
+  it("writes one wrapper around leaves that share a mark, not one per leaf", () => {
+    const leaf = (text: string, marks: object = {}) => ({ text, ...marks });
+    const written = writeMarkdown([
+      {
+        type: "p",
+        children: [
+          leaf("bold ", { bold: true }),
+          leaf("both", { bold: true, italic: true }),
+          leaf(" bold", { bold: true }),
+        ],
+      },
+    ]);
+    expect(written).toBe("**bold *both* bold**");
+  });
+  it("treats marks nested in the other order as the same text", () => {
+    expect(readMarkdown("~~**x**~~ and **~~y~~**").reasons).toEqual([]);
+  });
+});
+
+describe("a rich edit does not rewrite link destinations, breaks or bare URLs (editor-2)", () => {
+  const sources = [
+    "Link [x](https://a.com/?a=1&b=2&c=3) end",
+    "[w](https://en.wikipedia.org/wiki/Foo_(bar))",
+    '[t](https://a.com/x "Title")',
+    "[s](<https://a.com/a b>)",
+    "line one  \nline two",
+    "line one\\\nline two",
+    "see https://example.com/a_b, ok",
+    "(https://example.com)",
+    "mail a@b.co ok",
+    "see www.example.com/a_b ok",
+    "<https://a.com/?a=1&b=2>",
+  ];
+  it.each(sources)("%j", (source) => {
+    const document = readMarkdown(source);
+    expect(document.reasons).toEqual([]);
+    expect(writeMarkdown(document.value)).toBe(source);
+    expect(afterUnrelatedEdits(source)).toEqual([
+      `${source}\n\nAfter`,
+      `Before\n\n${source}`,
+    ]);
+  });
+  it("still escapes what a destination needs", () => {
+    for (const url of [
+      "https://a.com/x)y(z",
+      "https://a.com/?q=&amp;",
+      "https://a.com/a b",
+      "https://a.com/a\\(b",
+    ]) {
+      const value = [
+        {
+          type: "p",
+          children: [{ type: "a", url, children: [{ text: "t" }] }],
+        },
+      ];
+      const reread = readMarkdown(writeMarkdown(value)).value[0];
+      expect(reread?.children).toMatchObject([{ type: "a", url }]);
+    }
+  });
+  it("does not glue text onto a bare URL", () => {
+    const value = [
+      {
+        type: "p",
+        children: [
+          { text: "" },
+          {
+            type: "a",
+            url: "https://a.com",
+            autolink: "bare",
+            children: [{ text: "https://a.com" }],
+          },
+          { text: "x" },
+        ],
+      },
+    ];
+    const written = writeMarkdown(value);
+    expect(written).toBe("<https://a.com>x");
+    expect(readMarkdown(written).value[0]?.children).toMatchObject([
+      { type: "a", url: "https://a.com" },
+      { text: "x" },
+    ]);
+  });
+});
+
+describe("a rich edit keeps the spelling of blocks it did not touch (editor-3)", () => {
+  const sources = [
+    "a\n\n***\n\nb",
+    "a\n\n___\n\nb",
+    "- one\n\n- two",
+    "1. a\n1. b",
+    "3) a\n4) b",
+    "* star\n* bar",
+    "| a | b |\n| --- | --- |\n| 1 | 2 |",
+    "| a |\n|---|\n| long cell |",
+    "Steps:\n- x\n- y",
+    "a\n\n\n\nb",
+    "~~~\ncode\n~~~",
+    "```mermaid\ngraph TD\n  A-->B\n```",
+    "- a\n\n* b",
+  ];
+  it.each(sources)("%j", (source) => {
+    const document = readMarkdown(source);
+    expect(document.reasons).toEqual([]);
+    expect(document.markdown).toBe(source);
+    expect(afterUnrelatedEdits(source)).toEqual([
+      `${source}\n\nAfter`,
+      `Before\n\n${source}`,
+    ]);
+  });
+  it("keeps the spacing between untouched neighbours and only the edited block changes", () => {
+    const source = "Steps:\n- x\n- y\n\n\n---\n\nlast";
+    const document = readMarkdown(source);
+    const value = structuredClone(document.value);
+    retext(value.at(-1), "edited");
+    expect(writeMarkdown(value, document.baseline)).toBe(
+      "Steps:\n- x\n- y\n\n\n---\n\nedited",
+    );
+  });
+  it("writes a divider as --- and keeps a list loose in the canonical form", () => {
+    expect(writeMarkdown([{ type: "hr", children: [{ text: "" }] }])).toBe(
+      "---",
+    );
+    const loose = readMarkdown("- a\n\n- b");
+    const value = structuredClone(loose.value);
+    retext(value[0], "A");
+    // Without the baseline the list is written in the canonical form, and it stays loose.
+    expect(writeMarkdown(value)).toBe("- A\n\n- b");
+  });
+  it("never lets a kept list merge with an edited list next to it", () => {
+    const document = readMarkdown("- a\n\n* b");
+    const value = structuredClone(document.value);
+    retext(value[1], "B");
+    const written = writeMarkdown(value, document.baseline);
+    expect(readMarkdown(written).value).toHaveLength(2);
+  });
+  it("hands the next write a baseline that matches what was written", () => {
+    const document = readMarkdown("* a\n\n---\n\nb");
+    const value = structuredClone(document.value);
+    value.push({ type: "p", children: [{ text: "c" }] });
+    const first = writeMarkdownFrom(value, document.baseline);
+    value.push({ type: "p", children: [{ text: "d" }] });
+    expect(writeMarkdown(value, first.baseline)).toBe(
+      "* a\n\n---\n\nb\n\nc\n\nd",
     );
   });
 });

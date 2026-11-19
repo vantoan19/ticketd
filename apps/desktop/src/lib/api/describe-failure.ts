@@ -84,6 +84,10 @@ function plainCause(code: FailureCode, message: string): string {
     case "not_signed_in":
     case "unauthenticated":
       return "The account needs to be connected again.";
+    case "drive_unconfigured":
+      return "This build of ticketd has no Google Drive app configuration. Install a build with Google Drive enabled. Your local files are unaffected.";
+    case "sign_in_cancelled":
+      return "Sign-in wasn't finished in your browser, so nothing changed.";
     case "offline":
     case "unavailable":
       return "ticketd can't reach the service. Check the connection.";
@@ -145,6 +149,7 @@ function nextStep(code: FailureCode): FailureDescription["action"] {
     case "publication_mismatch":
       return "choose_another";
     case "forbidden":
+    case "drive_unconfigured":
     case "workspace_unreadable":
     case "publication_different_content":
     case "publication_candidates":

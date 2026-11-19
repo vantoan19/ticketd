@@ -74,6 +74,9 @@ fn serve() -> String {
             } else if path.starts_with("/repos/o/flaky/issues?") {
                 // Nothing in the window matches.
                 ("200 OK", json!([]))
+            } else if path.starts_with("/repos/o/denied/issues") {
+                // A repository the account can read but not create issues in.
+                ("200 OK", json!([]))
             } else if path == "/user" {
                 ("200 OK", json!({"login": "octo"}))
             } else if path.starts_with("/user/repos") {
@@ -203,7 +206,57 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
     assert!(!stderr.contains("wrong-token"));
     let stderr = cli.fail(&["source", "test", "github"], None);
     assert!(stderr.contains("gh auth login"), "{stderr}");
-    assert!(stderr.contains("TICKETD_GITHUB_TOKEN"), "{stderr}");
+    // The cause and the script hint are separate sentences, and a terminal is
+    // never sent to a desktop Settings button.
+    assert!(
+        stderr.contains("to sign in. From a script, set TICKETD_GITHUB_TOKEN"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Settings"), "{stderr}");
+}
+
+#[test]
+fn a_settings_file_that_cannot_be_used_is_named_with_what_was_wrong() {
+    let cli = Cli::new();
+    let missing = cli.dir.path().join("missing.json");
+    let stderr = cli.fail(
+        &[
+            "source",
+            "preview",
+            "github",
+            "--config-file",
+            missing.to_str().unwrap(),
+        ],
+        Some(TOKEN),
+    );
+    assert!(
+        stderr.contains("could not read the --config-file"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("missing.json"), "{stderr}");
+    let bad = cli.dir.path().join("bad.json");
+    std::fs::write(&bad, "{bad").unwrap();
+    let stderr = cli.fail(
+        &[
+            "source",
+            "preview",
+            "github",
+            "--config-file",
+            bad.to_str().unwrap(),
+        ],
+        Some(TOKEN),
+    );
+    assert!(stderr.contains("bad.json is not valid JSON"), "{stderr}");
+}
+
+#[test]
+fn taking_over_a_local_ticket_says_it_is_already_local() {
+    let cli = Cli::new();
+    let created = cli.run(&["create", "Mine"]);
+    let reference = created["reference"].as_str().unwrap();
+    let stderr = cli.fail(&["source", "take-ownership", reference], Some(TOKEN));
+    assert!(stderr.contains("already a local ticket"), "{stderr}");
+    assert!(!stderr.contains("refresh"), "{stderr}");
 }
 
 #[test]
@@ -512,7 +565,13 @@ fn publish_previews_then_creates_one_issue_and_replays_without_another() {
 #[test]
 fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&[
+        "source",
+        "save",
+        "github",
+        "--set",
+        "repositories=o/r,o/denied",
+    ]);
     let reference = local_ticket(&cli);
     let output = cli.command(
         &["source", "publish", &reference, "--destination", "o/denied"],
@@ -530,7 +589,13 @@ fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
 #[test]
 fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&[
+        "source",
+        "save",
+        "github",
+        "--set",
+        "repositories=o/r,o/flaky",
+    ]);
     let reference = local_ticket(&cli);
     let args = ["source", "publish", &reference, "--destination", "o/flaky"];
     let output = cli.command(&args, Some(TOKEN));
@@ -555,7 +620,13 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
 }
 
 fn unresolved_ticket(cli: &Cli) -> String {
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&[
+        "source",
+        "save",
+        "github",
+        "--set",
+        "repositories=o/r,o/flaky",
+    ]);
     let reference = local_ticket(cli);
     let args = ["source", "publish", &reference, "--destination", "o/flaky"];
     assert_eq!(cli.command(&args, Some(TOKEN)).status.code(), Some(1));

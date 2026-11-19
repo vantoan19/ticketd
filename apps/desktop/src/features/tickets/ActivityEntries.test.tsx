@@ -4,6 +4,8 @@ import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { ChangeSignal } from "@/lib/workspace-reads";
 import { Activity as ActivitySection } from "./Activity";
+import { changeSummary } from "./history-sentence";
+import type { Entry } from "@/lib/api/history";
 import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -335,4 +337,29 @@ test("offers only what can be added instead of a disabled button with a hidden r
     screen.getByRole("button", { name: "Add details or a Document" }),
   ).toHaveProperty("disabled", false);
   localStorage.clear();
+});
+
+test("the summary of a group of changes names every kind of change", () => {
+  const change = (kind: string, to_value: string): Entry => ({
+    kind,
+    from_value: "",
+    to_value,
+    timestamp: "2026-10-31T11:00:00Z",
+    editing_agent: null,
+  });
+  expect(changeSummary([change("trash", "trashed")])).toBe(
+    "1 change: moved to Trash",
+  );
+  expect(changeSummary([change("trash", "active")])).toBe(
+    "1 change: restored from Trash",
+  );
+  expect(changeSummary([change("tag", "a"), change("tag", "b")])).toBe(
+    "2 changes: 2 tags",
+  );
+  expect(
+    changeSummary([
+      change("sync_parent_removed", "child"),
+      change("source", "x"),
+    ]),
+  ).toBe("2 changes: 1 link, source");
 });

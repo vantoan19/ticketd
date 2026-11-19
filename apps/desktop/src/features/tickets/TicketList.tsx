@@ -1,5 +1,12 @@
 import { useNow } from "@/lib/use-now";
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { m } from "motion/react";
 import {
   AlarmClock,
@@ -484,28 +491,9 @@ export function TicketList({
                         : undefined
                     }
                   >
-                    {grouping && !singleStatus ? (
-                      // The group header already names the status (list R-02).
-                      <span className="ticket-row-status">
-                        <StatusIcon status={ticket.status} />
-                      </span>
-                    ) : (
-                      <Tooltip content={ticket.status}>
-                        <span className="ticket-row-status">
-                          <StatusIcon status={ticket.status} />
-                        </span>
-                      </Tooltip>
-                    )}
-                    {!navigator && <Reference>{ticket.reference}</Reference>}
-
-                    <span className="ticket-title-lane">
-                      <Tooltip content={ticket.title} overflowOnly>
-                        <span className="ticket-title">{ticket.title}</span>
-                      </Tooltip>
-                      <SourcePill ticket={ticket} />
-                    </span>
-                    <RowDetails
+                    <RowFace
                       ticket={ticket}
+                      grouped={Boolean(grouping && !singleStatus)}
                       scope={scope}
                       simple={simple}
                       navigator={navigator}
@@ -571,6 +559,71 @@ function ContextIcon({ kind }: { kind: RowContextKind | "unlinked" }) {
   if (kind === "subticket") return <CornerDownRight {...props} />;
   if (kind === "unlinked") return <Folder {...props} strokeDasharray="2 3" />;
   return kind === "plan" ? <Layers {...props} /> : <Folder {...props} />;
+}
+
+type RowFaceProps = {
+  ticket: Ticket;
+  /** The group header names the status, so the row's glyph has no tooltip. */
+  grouped: boolean;
+  scope: RowScope;
+  simple: boolean;
+  navigator: boolean;
+  needsReview: boolean;
+  chat: ChatSummary | undefined;
+  reminder: string | null | undefined;
+};
+
+/**
+ * What a row shows. The list re-renders for every open, hover target, focus and
+ * selection change, and the motion of the ticket pane, the sidebar and the
+ * palette starts in that same commit, so a row re-renders only when what it
+ * shows changes. The scope arrives as a new object each render; its parts are
+ * compared.
+ */
+const RowFace = memo(function RowFace({
+  ticket,
+  grouped,
+  ...details
+}: RowFaceProps) {
+  return (
+    <>
+      {grouped ? (
+        // The group header already names the status (list R-02).
+        <span className="ticket-row-status">
+          <StatusIcon status={ticket.status} />
+        </span>
+      ) : (
+        <Tooltip content={ticket.status}>
+          <span className="ticket-row-status">
+            <StatusIcon status={ticket.status} />
+          </span>
+        </Tooltip>
+      )}
+      {!details.navigator && <Reference>{ticket.reference}</Reference>}
+
+      <span className="ticket-title-lane">
+        <Tooltip content={ticket.title} overflowOnly>
+          <span className="ticket-title">{ticket.title}</span>
+        </Tooltip>
+        <SourcePill ticket={ticket} />
+      </span>
+      <RowDetails ticket={ticket} {...details} />
+    </>
+  );
+}, sameRowFace);
+
+function sameRowFace(before: RowFaceProps, after: RowFaceProps): boolean {
+  const { scope: a, ...restBefore } = before;
+  const { scope: b, ...restAfter } = after;
+  return (
+    a.showPlan === b.showPlan &&
+    a.showProject === b.showProject &&
+    a.plans === b.plans &&
+    a.projects === b.projects &&
+    (Object.keys(restBefore) as (keyof typeof restBefore)[]).every(
+      (key) => restBefore[key] === restAfter[key],
+    )
+  );
 }
 
 /** Each mode renders only its own caption or lanes, with shared state labels. */

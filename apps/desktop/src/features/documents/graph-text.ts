@@ -374,6 +374,46 @@ export function panToInclude(
   };
 }
 
+/**
+ * The view that fits `bounds` (flow coordinates) into a view of `size` pixels
+ * inside `padding`, zoomed within `zoom`. It is React Flow's fit, except for
+ * one case: a graph larger than the view at the lowest zoom (Fit never goes
+ * below 100%) is aligned to the top and left padding, so the view opens on the
+ * start of the graph rather than partway down its middle.
+ */
+export function fitViewport(
+  bounds: { x: number; y: number; width: number; height: number },
+  size: { width: number; height: number },
+  padding: { top: number; right: number; bottom: number; left: number },
+  zoom: { min: number; max: number },
+): { x: number; y: number; zoom: number } {
+  const room = {
+    width: size.width - padding.left - padding.right,
+    height: size.height - padding.top - padding.bottom,
+  };
+  const fitted = Math.min(
+    room.width / bounds.width,
+    room.height / bounds.height,
+  );
+  const scale = Math.min(zoom.max, Math.max(zoom.min, fitted));
+  const place = (
+    start: number,
+    length: number,
+    space: number,
+    before: number,
+  ) => {
+    const shown = length * scale;
+    // Centred when it fits; otherwise its start sits on the padding.
+    const slack = Math.max(0, space - shown);
+    return before + slack / 2 - start * scale;
+  };
+  return {
+    zoom: scale,
+    x: place(bounds.x, bounds.width, room.width, padding.left),
+    y: place(bounds.y, bounds.height, room.height, padding.top),
+  };
+}
+
 /** "Open T-FV1", "Open Plan", "Open Document". */
 export function openLabel(node: GraphNode) {
   const ref = cardParts(node).ref;

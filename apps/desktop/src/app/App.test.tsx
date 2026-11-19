@@ -9435,7 +9435,7 @@ test("first run reads completed steps and opens the exact existing Settings sect
   ).toBe("done");
   expect(
     within(guide)
-      .getByText(/Keep it on every Mac/)
+      .getByText(/Keep it on every computer/)
       .closest('[data-slot="step"]')
       ?.getAttribute("data-state"),
   ).toBe("done");

@@ -172,21 +172,22 @@
 .linked-work-document .reference-row {
   min-height: 34px;
 }
-@container ticket-detail (max-width: 460px) {
-  .linked-work-document > section {
-    grid-template-columns: minmax(0, 1fr);
-  }
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
+  .linked-work-document
+  > section {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .linked-work-subtickets > .source-caption,
 .linked-work-subtickets > .reference-rows {
   grid-column: 2;
 }
-@container ticket-detail (max-width: 460px) {
-  .linked-work-subtickets > .source-caption,
-  .linked-work-subtickets > .reference-rows {
-    grid-column: 1;
-  }
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
+  :is(
+    .linked-work-subtickets > .source-caption,
+    .linked-work-subtickets > .reference-rows
+  ) {
+  grid-column: 1;
 }
 
 .linked-work-confirm [data-slot="popover-header"],

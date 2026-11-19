@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit pull request reviews. Reference: https://docs.coderabbit.ai/reference/configuration
+# CodeRabbit is advisory. CI ("CI result") and the maintainer's review decide what merges.
+language: en-US
+tone_instructions: >-
+  Be brief and direct. Report bugs, regressions and risks the change introduces. Skip praise,
+  restating the diff, and style points that formatting and lint already enforce.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  in_progress_fortune: false
+  poem: false
+  # Labels follow a fixed vocabulary (docs/agents/triage-labels.md), and there is one maintainer.
+  suggested_labels: false
+  suggested_reviewers: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/package-lock.json"
+    - "!Cargo.lock"
+    - "!apps/desktop/src-tauri/icons/**"
+    - "!crates/ticketd-core/tests/fixtures/format/**"
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: >-
+        Domain rules belong in ticketd-core behind the workflow interface (docs/architecture.md);
+        the desktop and CLI only translate requests and results. Flag unwrap, expect and panics
+        in production paths, SQL built from strings, and long transactions. Logging uses tracing
+        only, never println or eprintln, and must never include Ticket, Document, Plan or Chat
+        text, titles, tokens, authorization URLs or email addresses (docs/agents/quality.md).
+    - path: "crates/ticketd-core/src/**"
+      instructions: >-
+        A change to the workspace format must extend the migration ladder (ADR 0014) with a new
+        step and keep old format fixtures opening. Check that writes stay atomic and retries stay
+        deduplicated (ADR 0002).
+    - path: "apps/desktop/src/**"
+      instructions: >-
+        React owns view state and drafts only; domain decisions stay in Rust. Validate data that
+        crosses the Tauri bridge instead of asserting its type. Check accessibility: labels,
+        keyboard support and visible focus. UI conventions are in docs/agents/ui.md.
+    - path: "apps/desktop/src-tauri/**"
+      instructions: >-
+        Grant Tauri only the capabilities the app uses. Commands take structured arguments, never
+        shell command strings.
+    - path: ".github/workflows/**"
+      instructions: >-
+        This is a public repository. Pin actions to full commit SHAs, keep persist-credentials
+        false, keep the default token read-only, and never expose secrets to pull_request jobs or
+        use pull_request_target. All jobs run on GitHub-hosted runners; flag any self-hosted runner.
+        Distribution credentials belong only in the manual main-branch Package workflow.
+    - path: "docs/adr/**"
+      instructions: >-
+        ADRs record decisions. Flag an edit that changes what an accepted decision means instead
+        of adding a new ADR that supersedes it.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - AGENTS.md
+      - GLOSSARY.md
+      - docs/agents/*.md
+      - docs/architecture.md
+      - docs/adr/*.md

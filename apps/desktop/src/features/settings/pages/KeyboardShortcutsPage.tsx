@@ -9,6 +9,7 @@ import {
   SCOPE_CAPTIONS,
   SHORTCUTS,
   SHORTCUT_SCOPES,
+  requiresChat,
   spokenKeys,
   type Shortcut,
   type ShortcutScope,
@@ -20,6 +21,7 @@ import {
   SettingsList,
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
+import { useChatFeature } from "@/features/chats/use-chats";
 import "@/features/settings/pages/shortcuts-page.css";
 
 function matches(shortcut: Shortcut, query: string) {
@@ -38,10 +40,14 @@ function matches(shortcut: Shortcut, query: string) {
 export function KeyboardShortcutsPage() {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
+  const { enabled: chatEnabled } = useChatFeature();
   const visible = SHORTCUT_SCOPES.map((scope: ShortcutScope) => ({
     scope,
     shortcuts: (SHORTCUTS as readonly Shortcut[]).filter(
-      (item) => item.scope === scope && (!needle || matches(item, needle)),
+      (item) =>
+        item.scope === scope &&
+        (chatEnabled || !requiresChat(item)) &&
+        (!needle || matches(item, needle)),
     ),
   })).filter((group) => group.shortcuts.length > 0);
   const none = emptyCopy("settings-shortcuts-search", { query: query.trim() });

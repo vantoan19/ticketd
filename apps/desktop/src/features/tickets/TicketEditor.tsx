@@ -1,5 +1,6 @@
 import { Check, LoaderCircle, Circle } from "lucide-react";
 import { ticketDraftKey } from "./ticket-draft";
+import { TITLE_MAX_LENGTH } from "@/lib/limits";
 import { Tooltip } from "@/components/ui/tooltip";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -646,12 +647,24 @@ function RecoveredTicketEditor({
           aria-label="Title"
           disabled={Boolean(blockedReason)}
           rows={1}
+          maxLength={TITLE_MAX_LENGTH}
           value={draft.title}
           aria-invalid={titleInvalid || undefined}
           aria-describedby={
             titleInvalid ? `title-error-${ticket.id}` : undefined
           }
-          onChange={(event) => edit({ ...draft, title: event.target.value })}
+          // A title is one line: pasted line breaks become spaces, and Enter
+          // does not add one (the core refuses a multi-line title).
+          onChange={(event) =>
+            edit({
+              ...draft,
+              title: event.target.value.replace(/\s*[\r\n]+\s*/g, " "),
+            })
+          }
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing)
+              event.preventDefault();
+          }}
         />
       </label>
       {titleInvalid && (

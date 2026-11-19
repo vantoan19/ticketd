@@ -98,9 +98,96 @@ function ends(source: Rect, target: Rect, via: Point[]): Point[] {
   return [borderPoint(source, first), ...via, borderPoint(target, last)];
 }
 
+/** True when the point lies strictly inside the rect. */
+function inside(point: Point, rect: Rect): boolean {
+  return (
+    point.x > rect.x &&
+    point.x < rect.x + rect.width &&
+    point.y > rect.y &&
+    point.y < rect.y + rect.height
+  );
+}
+
+/**
+ * The shortest way from `from` to `to` that stays out of every blocker: A* over
+ * the visibility graph of the blockers' corners. Visibility is checked lazily,
+ * when a candidate leg is first taken off the queue, so the many corners that
+ * the search never nears cost nothing. Returns the corners passed, in order, or
+ * undefined when the ends are walled in.
+ */
+function detour(from: Point, to: Point, blockers: Rect[]): Point[] | undefined {
+  const corner = blockers
+    .flatMap((rect) => corners(inflate(rect, 2)))
+    .filter((spot) => !blockers.some((rect) => inside(spot, rect)));
+  const nodes = [from, ...corner, to];
+  const goal = nodes.length - 1;
+  const cost = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+  const best = new Array<number>(nodes.length).fill(Infinity);
+  const before = new Array<number>(nodes.length).fill(-1);
+  const done = new Array<boolean>(nodes.length).fill(false);
+  // Binary min-heap of legs, ordered by cost so far plus the straight-line rest.
+  type Leg = { node: number; parent: number; walked: number; rank: number };
+  const heap: Leg[] = [];
+  const push = (leg: Leg) => {
+    heap.push(leg);
+    for (let i = heap.length - 1; i > 0;) {
+      const up = (i - 1) >> 1;
+      if (heap[up]!.rank <= heap[i]!.rank) break;
+      [heap[up], heap[i]] = [heap[i]!, heap[up]!];
+      i = up;
+    }
+  };
+  const pop = (): Leg | undefined => {
+    const top = heap[0];
+    const last = heap.pop();
+    if (top && last && heap.length) {
+      heap[0] = last;
+      for (let i = 0; ;) {
+        let small = i;
+        for (const child of [2 * i + 1, 2 * i + 2])
+          if (child < heap.length && heap[child]!.rank < heap[small]!.rank)
+            small = child;
+        if (small === i) break;
+        [heap[small], heap[i]] = [heap[i]!, heap[small]!];
+        i = small;
+      }
+    }
+    return top;
+  };
+  push({ node: 0, parent: -1, walked: 0, rank: cost(from, to) });
+  for (let leg = pop(); leg; leg = pop()) {
+    if (done[leg.node]) continue;
+    if (
+      leg.parent >= 0 &&
+      pathHits([nodes[leg.parent]!, nodes[leg.node]!], blockers)
+    )
+      continue;
+    done[leg.node] = true;
+    best[leg.node] = leg.walked;
+    before[leg.node] = leg.parent;
+    if (leg.node === goal) break;
+    for (let next = 1; next < nodes.length; next++) {
+      if (done[next]) continue;
+      const walked = leg.walked + cost(nodes[leg.node]!, nodes[next]!);
+      if (walked >= best[next]!) continue;
+      push({
+        node: next,
+        parent: leg.node,
+        walked,
+        rank: walked + cost(nodes[next]!, to),
+      });
+    }
+  }
+  if (!done[goal]) return undefined;
+  const via: Point[] = [];
+  for (let at = before[goal]!; at > 0; at = before[at]!)
+    via.unshift(nodes[at]!);
+  return via;
+}
+
 /**
  * A line from `source` to `target` that goes straight when it can and otherwise
- * bends around the corners of the cards in its way, never through them.
+ * takes the shortest way around the cards in its path, never through them.
  */
 export function routeEdge(
   source: Rect,
@@ -108,21 +195,18 @@ export function routeEdge(
   others: Rect[],
   clearance = CLEARANCE,
 ): Point[] {
-  const blockers = others.map((rect) => inflate(rect, clearance));
   const straight = ends(source, target, []);
-  if (!pathHits(straight, blockers)) return straight;
-  const hit = blockers.filter((rect) => pathHits(straight, [rect]));
-  const spots = hit.flatMap((rect) => corners(inflate(rect, 2)));
-  let best: Point[] | undefined;
-  const consider = (via: Point[]) => {
+  // Where a card is walled in, the margin kept around the others shrinks until
+  // a way out through the gaps opens; the line then runs closer to the cards.
+  for (const margin of [clearance, clearance / 2, 0]) {
+    const blockers = others.map((rect) => inflate(rect, margin));
+    if (!pathHits(straight, blockers)) return straight;
+    const via = detour(centre(source), centre(target), blockers);
+    if (!via) continue;
     const path = ends(source, target, via);
-    if (pathHits(path, blockers)) return;
-    if (!best || length(path) < length(best)) best = path;
-  };
-  for (const spot of spots) consider([spot]);
-  if (!best)
-    for (const a of spots) for (const b of spots) if (a !== b) consider([a, b]);
-  return best ?? straight;
+    if (!pathHits(path, blockers)) return path;
+  }
+  return straight;
 }
 
 function pointAt(points: Point[], fraction: number): Point {
@@ -164,6 +248,25 @@ function overlap(a: Rect, b: Rect): boolean {
   );
 }
 
+/** Area of `box` that the rects cover, counting overlaps between them twice. */
+function coverage(box: Rect, rects: Rect[]): number {
+  return rects.reduce(
+    (sum, rect) =>
+      sum +
+      Math.max(
+        0,
+        Math.min(box.x + box.width, rect.x + rect.width) -
+          Math.max(box.x, rect.x),
+      ) *
+        Math.max(
+          0,
+          Math.min(box.y + box.height, rect.y + rect.height) -
+            Math.max(box.y, rect.y),
+        ),
+    0,
+  );
+}
+
 /** A label centre keeps this far from a bend, past where the corner is rounded. */
 const BEND_CLEAR = 12;
 /** Half the box around an arrowhead's tip that labels keep clear. */
@@ -192,7 +295,6 @@ export function placeLabel(
     width: size.width,
     height: size.height,
   });
-  const avoidCards = cards.map((rect) => inflate(rect, LABEL_GAP));
   const clear = (at: Point, rects: Rect[]) => {
     const box = boxAt(at);
     return !rects.some((rect) => overlap(box, rect));
@@ -216,10 +318,14 @@ export function placeLabel(
     points
       .slice(1, -1)
       .every((bend) => Math.hypot(bend.x - at.x, bend.y - at.y) >= BEND_CLEAR);
-  for (const fraction of fractions) {
-    const at = pointAt(points, fraction);
-    if (inside(at) && straight(at) && clear(at, [...avoidCards, ...taken]))
-      return at;
+  // First choice keeps a gap around every card; failing that, a label may sit
+  // right against one, as long as it covers nothing.
+  for (const gap of [LABEL_GAP, 0]) {
+    const avoid = [...cards.map((rect) => inflate(rect, gap)), ...taken];
+    for (const fraction of fractions) {
+      const at = pointAt(points, fraction);
+      if (inside(at) && straight(at) && clear(at, avoid)) return at;
+    }
   }
   // No point of the line is clear of the cards: the label rides on the line,
   // above the cards, at the point nearest the middle that misses other labels.
@@ -229,21 +335,8 @@ export function placeLabel(
     const at = pointAt(points, fraction);
     if (!straight(at)) continue;
     const box = boxAt(at);
-    const covered = taken.reduce(
-      (sum, rect) =>
-        sum +
-        Math.max(
-          0,
-          Math.min(box.x + box.width, rect.x + rect.width) -
-            Math.max(box.x, rect.x),
-        ) *
-          Math.max(
-            0,
-            Math.min(box.y + box.height, rect.y + rect.height) -
-              Math.max(box.y, rect.y),
-          ),
-      0,
-    );
+    // Hiding another label loses its words; hiding part of a card does not.
+    const covered = 20 * coverage(box, taken) + coverage(box, cards);
     if (covered < least) {
       least = covered;
       best = at;
@@ -257,24 +350,44 @@ export function labelSize(text: string): { width: number; height: number } {
   return { width: Math.round(text.length * 6.8 + 16), height: 18 };
 }
 
-/** Routes every edge around the cards and places each label clear of cards and earlier labels. */
-export function routeAll(
+type EdgeSpec = { id: string; source: string; target: string; label?: string };
+
+/** The line of every edge, bent around the cards in its way. Independent of labels. */
+export function routePaths(
   cards: Record<string, Rect>,
-  edges: { id: string; source: string; target: string; label?: string }[],
-): Record<string, Route> {
+  edges: EdgeSpec[],
+): Record<string, Point[]> {
   const all = Object.values(cards);
-  const bounds = all.length ? inflate(boundsOf(all), 40) : undefined;
-  const taken: Rect[] = [];
-  const routes: Record<string, Route> = {};
   const paths: Record<string, Point[]> = {};
   for (const edge of edges) {
     const source = cards[edge.source];
     const target = cards[edge.target];
     if (!source || !target) continue;
-    const others = all.filter((rect) => rect !== source && rect !== target);
-    paths[edge.id] = routeEdge(source, target, others);
-    // Every arrowhead stays visible: no label is placed over one.
-    const tip = paths[edge.id]![paths[edge.id]!.length - 1]!;
+    paths[edge.id] = routeEdge(
+      source,
+      target,
+      all.filter((rect) => rect !== source && rect !== target),
+    );
+  }
+  return paths;
+}
+
+/**
+ * Places the label of every edge that has one, clear of cards, arrowheads and
+ * earlier labels. An edge without a label reserves no room.
+ */
+export function placeLabels(
+  cards: Record<string, Rect>,
+  paths: Record<string, Point[]>,
+  edges: EdgeSpec[],
+): Record<string, Route> {
+  const all = Object.values(cards);
+  const bounds = all.length ? inflate(boundsOf(all), 40) : undefined;
+  const taken: Rect[] = [];
+  const routes: Record<string, Route> = {};
+  // Every arrowhead stays visible: no label is placed over one.
+  for (const points of Object.values(paths)) {
+    const tip = points[points.length - 1]!;
     taken.push({
       x: tip.x - ARROW_REACH,
       y: tip.y - ARROW_REACH,
@@ -282,20 +395,39 @@ export function routeAll(
       height: 2 * ARROW_REACH,
     });
   }
-  for (const edge of edges) {
-    const points = paths[edge.id];
-    if (!points) continue;
-    const size = labelSize(edge.label ?? "");
-    const label = placeLabel(points, size, all, taken, bounds);
+  // Longest labels first: they are the hardest to fit.
+  const labelled = edges
+    .filter((edge) => edge.label && paths[edge.id])
+    .sort((a, b) => b.label!.length - a.label!.length);
+  const spots: Record<string, Point> = {};
+  for (const edge of labelled) {
+    const size = labelSize(edge.label!);
+    const label = placeLabel(paths[edge.id]!, size, all, taken, bounds);
     taken.push({
       x: label.x - size.width / 2,
       y: label.y - size.height / 2,
       width: size.width,
       height: size.height,
     });
-    routes[edge.id] = { points, label };
+    spots[edge.id] = label;
+  }
+  for (const edge of edges) {
+    const points = paths[edge.id];
+    if (points)
+      routes[edge.id] = {
+        points,
+        label: spots[edge.id] ?? pointAt(points, 0.5),
+      };
   }
   return routes;
+}
+
+/** Routes every edge around the cards and places each label clear of cards and other labels. */
+export function routeAll(
+  cards: Record<string, Rect>,
+  edges: EdgeSpec[],
+): Record<string, Route> {
+  return placeLabels(cards, routePaths(cards, edges), edges);
 }
 
 /** SVG path through the points with rounded bends. */

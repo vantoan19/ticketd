@@ -40,6 +40,8 @@ test("describes recorded changes as sentences without event keys", () => {
   );
   expect(sentence("plan", "e1", "")).toBe("Plan cleared");
   expect(sentence("dependency", "", "T-KQ3")).toBe("Blocked by T-KQ3");
+  expect(sentence("tag", "", "urgent")).toBe("Added tag urgent");
+  expect(sentence("tag", "urgent", "")).toBe("Removed tag urgent");
   expect(sentence("relationship:blocks", "T-KQ4", "")).toBe(
     "No longer blocks T-KQ4",
   );
@@ -47,7 +49,8 @@ test("describes recorded changes as sentences without event keys", () => {
     "Marked as duplicate of T-KQ2",
   );
   expect(sentence("evidence", "", "Review")).toBe("Added evidence “Review”");
-  expect(sentence("trash", "active", "trashed")).toBe("Moved to trash");
+  expect(sentence("trash", "active", "trashed")).toBe("Moved to Trash");
+  expect(sentence("trash", "trashed", "active")).toBe("Restored from Trash");
 });
 
 test("words subticket changes, and the Inbox shares the same sentences", () => {
