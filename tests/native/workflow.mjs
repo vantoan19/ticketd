@@ -263,15 +263,15 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Blocked");
-  await browser.waitUntil(rowReports(harness.title, "In review"), {
-    timeout: 10000,
-    timeoutMsg: "External status change did not refresh the ticket row",
-  });
+  // A row names its status through its icon; its text shows availability.
   await (
     await (
       await ticketRow(harness.title)
     ).$('[role="img"][aria-label="In review"]')
-  ).waitForExist({ timeout: 10000 });
+  ).waitForExist({
+    timeout: 10000,
+    timeoutMsg: "External status change did not refresh the ticket row",
+  });
   await browser.waitUntil(
     rowReports(evidence.title, `Blocked by ${harness.reference}`),
     {
