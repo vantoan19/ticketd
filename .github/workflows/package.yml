@@ -98,14 +98,6 @@ jobs:
           XDG_DATA_HOME="$XDG_DATA_HOME/workflow" run_native tests/native/workflow.mjs
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: success()
-        with:
-          name: native-smoke-screenshots
-          path: native-extensions-*.png
-          if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: native-smoke-diagnostics
