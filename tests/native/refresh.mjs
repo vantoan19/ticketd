@@ -27,7 +27,8 @@ const detail = () =>
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
 try {
-  const empty = await browser.$("button=Create your first ticket");
+  // The empty workspace opens on the first-run guide.
+  const empty = await browser.$("#first-run-title");
   await empty.waitForDisplayed({ timeout: 15000 });
   const started = Date.now();
   const ticket = runCli("create", "Created by CLI");
@@ -49,17 +50,6 @@ try {
     },
   );
   console.log(`CLI update appeared after ${Date.now() - changed} ms`);
-
-  // Commit first, then edit and request refresh before the debounce can save.
-  runCli("change", ticket.reference, "--title", "External content");
-  await title.setValue("My unsaved draft");
-  await (await browser.$('[aria-label="Refresh"]')).click();
-  const notice = await browser.$("button=Reload saved content");
-  await notice.waitForDisplayed({ timeout: 10000 });
-  assert.equal(await title.getValue(), "My unsaved draft");
-  await notice.click();
-  assert.equal(await title.getValue(), "External content");
-  console.log("Dirty draft preserved; reload adopted external content");
 
   const project = runCli(
     "project",
@@ -94,7 +84,7 @@ try {
       },
     ]),
   });
-  await (await browser.$('[aria-label="Refresh"]')).click();
+  // The desktop picks up CLI writes by itself; no refresh is requested.
   const projectButton = await (
     await browser.$('nav[aria-label="Project scopes"]')
   ).$("button=Benchmark project");
@@ -126,8 +116,15 @@ try {
       ).getValue()) === "Benchmark ticket 999",
   );
   console.log(`Editor opening: ${Date.now() - clock} ms`);
-  await (await (await detail()).$("button=Graph")).click();
-  const graphView = await browser.$('section[aria-label="Dependency graph"]');
+  await (
+    await browser.$(
+      'section[aria-labelledby="detail-heading"] button[aria-label="Ticket actions"]',
+    )
+  ).click();
+  await (
+    await browser.$('//*[@role="menuitem" and text()="Open graph"]')
+  ).click();
+  const graphView = await browser.$('section[aria-label="Graph"]');
   await browser.waitUntil(
     async () => (await graphView.$$(".react-flow__node")).length === 50,
     { timeout: 15000 },

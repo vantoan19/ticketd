@@ -99,31 +99,32 @@ try {
   const newTicket = await browser.$('button[aria-label="New ticket"]');
   await newTicket.waitForDisplayed({ timeout: 15000 });
   await newTicket.click();
-  const creation = await browser.$('.create-panel[role="dialog"]');
+  const creation = await browser.$('[role="dialog"]');
   await (
     await creation.$('[aria-label="Description rich text"]')
   ).waitForDisplayed({ timeout: 15000 });
   await browser.waitUntil(
     () =>
       browser.execute(() => {
-        const dialog = document.querySelector('.create-panel[role="dialog"]');
+        const dialog = document.querySelector('[role="dialog"]');
         if (!dialog) return false;
         const bounds = dialog.getBoundingClientRect();
+        // Dialogs open near the top of the window, centered horizontally.
         return (
           bounds.left >= 0 &&
           bounds.top >= 0 &&
           bounds.right <= window.innerWidth &&
           bounds.bottom <= window.innerHeight &&
-          Math.abs(bounds.x + bounds.width / 2 - window.innerWidth / 2) < 2 &&
-          Math.abs(bounds.y + bounds.height / 2 - window.innerHeight / 2) < 2
+          Math.abs(bounds.x + bounds.width / 2 - window.innerWidth / 2) < 2
         );
       }),
     {
       timeout: 5000,
-      timeoutMsg: "New ticket dialog is off-center or outside the app window",
+      timeoutMsg:
+        "New ticket dialog is not centered horizontally or outside the app window",
     },
   );
-  await (await creation.$('[aria-label="Close new ticket"]')).click();
+  await (await creation.$('button[aria-label="Close"]')).click();
   await creation.waitForDisplayed({ reverse: true });
 
   const row = await ticketRow("Exercise installed desktop and CLI together");
@@ -148,7 +149,7 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
-  await (await (await detail()).$("button=Add update")).click();
+  await (await (await detail()).$("button*=Write an update")).click();
   const noteEditor = await (
     await detail()
   ).$('[role="textbox"][aria-label="New update rich text"]');
@@ -212,8 +213,13 @@ try {
     timeout: 5000,
     timeoutMsg: "Search did not clear",
   });
-  await (await (await detail()).$("button=Graph")).click();
-  const graphView = await browser.$('section[aria-label="Dependency graph"]');
+  await (
+    await (await header()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (
+    await browser.$('//*[@role="menuitem" and text()="Open graph"]')
+  ).click();
+  const graphView = await browser.$('section[aria-label="Graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
   const graphNode = await graphView.$(`button*=${evidence.reference}`);
   await graphNode.waitForDisplayed({ timeout: 10000 });
@@ -299,12 +305,12 @@ try {
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
   await (
-    await browser.$('//*[@role="menuitem" and text()="Move to trash"]')
+    await browser.$('//*[@role="menuitem" and text()="Move to Trash"]')
   ).click();
   await (
     await (
       await browser.$('nav[aria-label="Trash and settings"]')
-    ).$("button=Trash")
+    ).$('button[aria-label="Trash"]')
   ).click();
   await (await ticketRow(evidence.title)).click();
   await (

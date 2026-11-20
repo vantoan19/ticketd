@@ -18,9 +18,12 @@ const open = () =>
 
 let browser = await open();
 try {
+  // The empty workspace opens on the first-run guide.
   await (
-    await browser.$("button=Create your first ticket")
-  ).waitForDisplayed({ timeout: 15000 });
+    await browser.$("#first-run-title")
+  ).waitForDisplayed({
+    timeout: 15000,
+  });
 } finally {
   await browser.deleteSession();
 }
