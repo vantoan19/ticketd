@@ -209,7 +209,10 @@ try {
   ).click();
   const graphView = await browser.$('section[aria-label="Graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
-  const graphNode = await graphView.$(`button*=${evidence.reference}`);
+  // The node card; the reference also appears in the graph's ticket list.
+  const graphNode = await graphView.$(
+    `.react-flow__node button[aria-label^="${evidence.reference} "]`,
+  );
   await graphNode.waitForDisplayed({ timeout: 10000 });
   // A real pointer must reach the node: nothing may sit over it or disable it.
   assert(
