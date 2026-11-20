@@ -2,26 +2,42 @@
 
 ## Availability
 
-Public signed releases are not available yet. To run ticketd now, follow
-[development setup](development.md). Maintainer workflow artifacts are temporary
-inspection builds with seven-day retention, not stable download links. The
-instructions below describe those packaged artifacts when one has been supplied.
+Download ticketd from [GitHub Releases](https://github.com/vantoan19/ticketd/releases).
+Releases before 1.0 are **unsigned previews**: they are not code signed or
+notarized, so macOS and Windows warn before the first launch (see below). To
+build from source instead, follow [development setup](development.md).
 
-Each distribution download contains a desktop installer and the matching `ticketd`
-CLI. Select macOS 26 on Apple Silicon, Ubuntu 24.04 x86-64, or Windows 11
-x86-64. WSL interoperability and mobile distribution are outside this matrix.
-These are build artifacts, not signed releases; platform validation remains
-necessary before a public release.
+Each release has a desktop installer and the matching `ticketd` CLI for macOS 26
+on Apple Silicon, Ubuntu 24.04 x86-64, and Windows 11 x86-64, plus `SHA256SUMS`.
+Check a download with `shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS),
+`sha256sum -c SHA256SUMS --ignore-missing` (Linux), or by comparing
+`Get-FileHash <file>` with its line (Windows). WSL interoperability and mobile
+distribution are outside this matrix.
 
-- **macOS:** Open the DMG and drag ticketd to Applications. Copy `ticketd` to a
-  directory on your PATH, for example `~/.local/bin`, and ensure it is executable.
-- **Ubuntu:** Install the `.deb` with `sudo apt install ./ticketd_*.deb` from
-  the extracted download. Copy `ticketd` to `~/.local/bin` and add that directory
-  to PATH if necessary. The package manager installs desktop dependencies.
-- **Windows:** Run the MSI installer. Copy `ticketd.exe` to a user directory on
-  PATH (for example `%LOCALAPPDATA%\Programs\ticketd-cli`) and add that directory
-  to the user's PATH in Windows environment settings. Restart terminals and agent
-  harnesses so they inherit the updated PATH.
+- **macOS:** Open the `.dmg` and drag ticketd to Applications. Extract the
+  `ticketd-cli-*-macos-arm64.tar.gz` archive and move `ticketd` to a directory on
+  your PATH, for example `~/.local/bin`. Because the build is unsigned, remove the
+  download quarantine from both before the first launch:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/ticketd.app
+  xattr -d com.apple.quarantine ~/.local/bin/ticketd
+  ```
+
+  Alternatively, try to open the app once, then choose **Open Anyway** in System
+  Settings → Privacy & Security.
+
+- **Ubuntu:** Install the `.deb` with `sudo apt install ./ticketd_*.deb`. Extract
+  the `ticketd-cli-*-linux-x86_64.tar.gz` archive, move `ticketd` to
+  `~/.local/bin`, and add that directory to PATH if necessary. The package manager
+  installs desktop dependencies.
+- **Windows:** Run the `.msi` installer. SmartScreen warns about an unrecognized
+  app: choose **More info**, then **Run anyway**. If Smart App Control is on, it
+  blocks unsigned installers outright; build from source instead. Extract
+  `ticketd-cli-*-windows-x86_64.zip` and move `ticketd.exe` to a user directory
+  on PATH (for example `%LOCALAPPDATA%\Programs\ticketd-cli`), then add that
+  directory to the user's PATH in Windows environment settings. Restart terminals
+  and agent harnesses so they inherit the updated PATH.
 
 Run `ticketd --version` and `ticketd --help` in the same environment as the
 external harness. Supply the absolute path to the executable if the harness
@@ -99,10 +115,12 @@ organize it. Installing this skill does not change those choices.
 
 ## Signing and distribution
 
-The manual build workflow uploads unsigned artifacts for inspection and does not
-publish a release or configure credentials. macOS distribution outside the App
-Store requires a Developer ID Application certificate and Apple notarization
-credentials; unsigned downloads may be blocked by Gatekeeper. Windows code
+Releases are unsigned previews until signing is set up; see
+[release and distribution](releasing.md#publish-a-public-release). The manual
+Package workflow uploads unsigned artifacts for inspection and does not publish a
+release. macOS distribution outside the App Store requires a Developer ID
+Application certificate and Apple notarization credentials; unsigned downloads
+are blocked by Gatekeeper until the quarantine is removed as shown above. Windows code
 signing requires an appropriate certificate and signing configuration; unsigned
 installers can trigger SmartScreen or be blocked by Smart App Control. See the
 [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/) and
