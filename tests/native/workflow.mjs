@@ -187,7 +187,7 @@ try {
     ).length,
     0,
   );
-  await (await (await detail()).$("button=Post update")).click();
+  await (await (await detail()).$("button*=Post update")).click();
   await browser.waitUntil(
     () =>
       run("activity", "list", harness.reference).some(
