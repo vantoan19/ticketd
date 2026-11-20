@@ -1,18 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" color="#000000" role="img" aria-labelledby="title desc">
-  <title id="title">ticketd — Silver</title>
-  <desc id="desc">A softly shaded silver planet and flat white satellite on a charcoal app icon tile.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">ticketd — Settling</title>
+  <desc id="desc">A polished silver sphere with a soft trail fading behind it, on a near-black app icon tile.</desc>
   <defs>
-    <linearGradient id="silver" x1="170" y1="135" x2="340" y2="405" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset="0.52" stop-color="#E6E7E9"/>
-      <stop offset="1" stop-color="#AEB2B9"/>
+    <linearGradient id="tile" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2C2C2F"/>
+      <stop offset="0.5" stop-color="#101011"/>
+      <stop offset="1" stop-color="#030303"/>
     </linearGradient>
-    <mask id="orbit-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
-      <path fill="white" d="M0 0h512v512H0z"/>
-      <path d="M94 347C188 363 321 286 373 170" stroke="black" stroke-width="20" stroke-linecap="round"/>
-    </mask>
+    <linearGradient id="rim" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.38"/>
+      <stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.1"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="330" cy="150" r="620" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trail" x1="278" y1="0" x2="608" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C9CCD1" stop-opacity="0"/>
+      <stop offset="1" stop-color="#C9CCD1" stop-opacity="0.5"/>
+    </linearGradient>
+    <radialGradient id="sphere" cx="528" cy="446" r="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.45" stop-color="#E6E8EB"/>
+      <stop offset="1" stop-color="#8A8F97"/>
+    </radialGradient>
+    <linearGradient id="sphere-rim" x1="0" y1="356" x2="0" y2="668" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <!-- The macOS icon grid: an 824px tile on a 1024px canvas leaves room for the shadow. -->
+    <filter id="tile-shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="16"/>
+      <feOffset dy="14"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.32"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="sphere-shadow" x="340" y="300" width="480" height="480" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
+      <feOffset dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.6"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <rect width="512" height="512" rx="112" fill="#111214"/>
-  <circle cx="248" cy="264" r="140" fill="url(#silver)" mask="url(#orbit-cut)"/>
-  <circle cx="379" cy="123" r="24" fill="#FFFFFF"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)" filter="url(#tile-shadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+  <rect x="103" y="103" width="818" height="818" rx="183" stroke="url(#rim)" stroke-width="6"/>
+  <rect x="266" y="356" width="468" height="312" rx="156" fill="url(#trail)"/>
+  <circle cx="578" cy="512" r="156" fill="url(#sphere)" filter="url(#sphere-shadow)"/>
+  <circle cx="578" cy="512" r="153" stroke="url(#sphere-rim)" stroke-width="6"/>
 </svg>
