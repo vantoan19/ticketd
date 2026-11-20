@@ -57,10 +57,10 @@ The event standard:
 
 `./scripts/check` checks Markdown, whitespace, Rust formatting/Clippy/tests, and frontend formatting/lint/types/tests. Install dependencies with `npm ci`, build the frontend with `npm run build`, and use the pinned Rust toolchain before running it. See [development setup](../development.md) for platform prerequisites and a disposable workspace.
 
-CI runs the same check command and builds the frontend, desktop, and CLI on a fresh GitHub-hosted Ubuntu runner for every pull request. macOS and Windows run `cargo test` and build the desktop and CLI on pushes to `main`, nightly, and on pull requests labeled `platform-check`. All jobs use pinned toolchains and committed lockfiles.
+CI runs the same check command on fresh GitHub-hosted runners for every pull request and every `main` commit. `./scripts/check fast` (Markdown, versions, whitespace, formatting, lint and types) runs as its own job, with workflow linting, so those failures report in minutes. On Ubuntu, `./scripts/check rust` (Clippy and the Rust tests, then the frontend, desktop, and CLI build) and `./scripts/check ui` (the frontend tests) run as two jobs side by side. macOS and Windows run `cargo test` and build the desktop and CLI. The `CI result` job fails unless every one of those jobs succeeded; it is the one required check. All jobs use pinned toolchains and committed lockfiles.
 
 Keep self-hosted runners disconnected from this repository: a contribution can change its workflow's runner selection. PR checks use read-only permissions and no distribution credentials. Credential-bearing distribution builds run only by manual dispatch on `main`. Before changing repository visibility or CI permissions, follow the [repository CI settings](../releasing.md#repository-ci-settings).
 
 Review should assess interface simplicity, domain correctness, error paths, and whether tests protect observable behavior. CI checks mechanics; it does not replace design review. Use dependency updates scoped to the intended change and pin CI actions to commit SHAs.
 
-GitHub Issues holds work tracking. Repository documentation holds durable guidance. GitHub currently disallows rulesets on this private repository's plan, so passing CI is a workflow requirement rather than an enforced merge restriction.
+GitHub Issues holds work tracking. Repository documentation holds durable guidance. Keep `main` green: when a `main` run fails, fix or revert it before other work. Each run's summary lists how long every job queued and ran.
