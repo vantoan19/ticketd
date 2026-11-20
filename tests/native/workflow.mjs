@@ -91,8 +91,17 @@ const detail = () =>
 // and its text carries the status, or Ready/Blocked for a Todo ticket.
 const ticketRow = async (title) =>
   (await browser.$(".ticket-rows")).$(`button*=${title}`);
-const rowReports = (title, text) => async () =>
-  (await (await ticketRow(title)).getText()).includes(text);
+// Read in the page: a lookup error inside waitUntil would only show as a timeout.
+const rowReports = (title, text) => () =>
+  browser.execute(
+    (title, text) =>
+      [...document.querySelectorAll(".ticket-rows button")].some(
+        (row) =>
+          row.textContent.includes(title) && row.textContent.includes(text),
+      ),
+    title,
+    text,
+  );
 const header = () =>
   browser.$('section[aria-labelledby="detail-heading"] .detail-header');
 try {
