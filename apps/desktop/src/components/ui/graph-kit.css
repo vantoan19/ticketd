@@ -25,9 +25,10 @@
 .ui-graph-canvas .react-flow__attribution {
   display: none;
 }
-/* React Flow turns pointer events off on nodes without its own handlers. */
+/* React Flow turns pointer events off on nodes without its own handlers, as an
+   inline style, so only !important lets the cards' own buttons take clicks. */
 .ui-graph-canvas .react-flow__node {
-  pointer-events: auto;
+  pointer-events: auto !important;
 }
 /* Focusing a card or island dims what is not part of it to 35%. --dur-3 is the
    nearest token to the 200ms in the motion design. */
