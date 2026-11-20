@@ -293,9 +293,20 @@ test("a slow refresh does not erase pages loaded after it started", async () => 
   const { rerender } = render(<WorkspaceGraph {...props} revision={0} />);
   (await screen.findAllByRole("button", { name: "T-KQ1 · First" })).at(-1)!;
   rerender(<WorkspaceGraph {...props} revision={1} />);
+  // Answer the slow refresh the moment page two reaches the DOM, before React's
+  // passive effects run, which is the earliest a real response could land.
+  const answered = new Promise<void>((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (!screen.queryAllByRole("button", { name: "T-KQ2 · Second" }).length)
+        return;
+      observer.disconnect();
+      releaseHydrate(graphOf([first], "cursor"));
+      resolve();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-  await screen.findAllByRole("button", { name: "T-KQ2 · Second" });
-  releaseHydrate(graphOf([first], "cursor"));
+  await answered;
   await waitFor(() =>
     expect(client.workspaceGraph).toHaveBeenCalledWith(
       expect.objectContaining({

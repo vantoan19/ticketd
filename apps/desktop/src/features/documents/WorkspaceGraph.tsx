@@ -16,7 +16,7 @@ import {
 import { Reference } from "@/components/ui/reference";
 import { SearchInput } from "@/components/ui/search-input";
 import { Filter, Network, SearchX } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { GraphItemRow } from "./GraphItemRow";
@@ -207,9 +207,11 @@ export function WorkspaceGraph({
   }, [request, attempt, planId]);
   const currentGraph = useRef(graph);
   // Bumped whenever the shown pages change, so a slower refresh can tell its
-  // snapshot of them is stale and must not overwrite newer pages.
+  // snapshot of them is stale and must not overwrite newer pages. A layout effect,
+  // so the bump lands in the same commit that shows the pages: a passive effect
+  // runs later, and a refresh answered in between would erase them.
   const graphVersion = useRef(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     currentGraph.current = graph;
     graphVersion.current += 1;
   }, [graph]);
