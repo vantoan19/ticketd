@@ -178,6 +178,7 @@
 }
 .auto-starter {
   display: grid;
+  width: 100%;
   grid-template-columns: 16px minmax(0, 1fr) 16px;
   column-gap: 12px;
   align-items: center;
