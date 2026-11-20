@@ -1,16 +1,17 @@
 # Release and distribution
 
-Releases are maintainer-managed. This guide separates the existing artifact build
-from the requirements for a public release; it does not claim those requirements
-have already been met.
+Releases are maintainer-managed. This guide describes the versioning and release
+model, the existing artifact build, and the checks a public release needs; it does
+not claim those checks have already been passed.
 
 ## Current build workflow
 
 The manual [Package workflow](../.github/workflows/package.yml) builds the
 standalone CLI and desktop installer for macOS Apple Silicon, Ubuntu 24.04 x86-64,
 and Windows x86-64, and runs only on `main`. Its `linux-distribution` target limits
-the build to Linux, and `native-smoke` runs the Linux native desktop smoke test. The workflow uploads artifacts with seven-day retention. It does not
-publish a GitHub Release or configure signing/notarization.
+the build to Linux, and `native-smoke` runs the Linux native desktop smoke test.
+The workflow uploads artifacts with seven-day retention. It does not publish a
+GitHub Release or configure signing/notarization.
 
 Distribution CI requires a platform-specific Google desktop app registration;
 see [publisher configuration](install.md#publisher-and-developer-configuration).
@@ -46,57 +47,105 @@ is private on its current plan. Record those pending checks in the launch issue
 and apply them when public visibility makes them available. Keep the visibility
 change distinct from signed-release publication.
 
-## Prepare a release candidate
+## Versioning
 
-1. Choose a reviewed commit. Update the version together in `Cargo.toml`, the
-   root and desktop `package.json`, and `apps/desktop/src-tauri/tauri.conf.json`.
-   Refresh affected lockfile metadata without unrelated dependency upgrades.
-   Run `node scripts/check-versions.mjs`.
-2. Build the frontend, run `./scripts/check`, and verify desktop and CLI builds
-   on each advertised platform. Preserve the tested commit and artifact hashes
-   in the release evidence. A successful build alone is not installation verification.
-3. Exercise installation, startup, desktop/CLI sharing, backup and restore,
-   upgrade compatibility, and uninstall retention with synthetic data. Use a
-   separate OS user for release-desktop tests: the debug workspace override does
-   not apply to release desktop builds.
-4. If advertising Drive support, complete the configured-account and secure-store
+ticketd uses [Semantic Versioning](https://semver.org/) and stays on `0.x` until 1.0.
+The desktop app and the CLI always share one version; `node scripts/check-versions.mjs`
+keeps `Cargo.toml`, both `package.json` files and `tauri.conf.json` equal. Tags are
+`v<version>`, for example `v0.2.0`.
+
+Before 1.0:
+
+- **Minor** (0.**2**.0): a breaking CLI change (a removed or renamed command or flag,
+  or changed output that scripts or agents read), or a workspace format change that
+  older binaries cannot open.
+- **Patch** (0.1.**1**): everything else, including new features that break nothing.
+
+The workspace format has its own number, separate from the app version. A release
+that raises it is a minor release and says so in its notes.
+
+1.0 means the CLI output and the workspace format are stable enough to promise
+compatibility, distributions are signed, and the core features (Tickets, Documents,
+Plans, the CLI and Sync) have proven stable in real use.
+
+## Release model
+
+Build continuously, publish deliberately. There are no nightlies or update channels.
+
+1. Every green `main` commit builds the desktop and CLI packages for each platform as
+   workflow downloads kept for 14 days. They are for trying `main`, not releases.
+2. A release starts with a version-bump PR: the maintainer picks the version, the PR
+   changes the version files and drafts the release notes, and it merges once
+   `CI result` passes.
+3. The merged commit is built into a **draft** GitHub Release: the final-version
+   packages, SHA-256 checksums and build attestations. A draft is visible only to
+   maintainers, and its tag is created only when it is published.
+4. The maintainer tests the draft's own files (see the checklist below).
+5. **Publish** makes exactly those files public as Latest. Nothing is rebuilt.
+6. If testing fails, delete the draft, fix `main` and build the same version again.
+   Nothing was public, so no version number is spent. Record why in the release's
+   tracking issue.
+7. A problem found after publishing is fixed forward with a patch release. Never
+   replace the files of a published release; add a known-issue note to it instead.
+
+Release whenever `main` has user-visible changes, aiming for small releases every one
+to two weeks. A public beta (`v0.3.0-beta.1`, published as a prerelease) is optional,
+for a risky release such as a large workspace format change.
+
+Steps 1 to 3 are not automated yet ([#212](https://github.com/vantoan19/ticketd/issues/212)).
+Until they are, bump the versions by hand, run the manual Package workflow on the
+merged commit, and create the draft release from its downloads.
+
+## Test a draft release
+
+Test the draft's own files, not a local build:
+
+1. Install the desktop app and the CLI from the draft on each advertised platform.
+   Use a separate OS user for release-desktop tests: the debug workspace override
+   does not apply to release desktop builds.
+2. Check startup, a small desktop and CLI shared-workspace operation, backup and
+   restore, the upgrade from the previous release, and uninstall retention, with
+   synthetic data. A release that changes the workspace format also needs an upgrade
+   of a workspace made by the previous release.
+3. If advertising Drive support, complete the configured-account and secure-store
    checks in [Drive verification](testing-google-drive.md). Fixture tests do not
    establish live authorization or packaged-app behavior.
-5. Verify the ticketd icon in each packaged application and installer. Its source
+4. Verify the ticketd icon in each packaged application and installer. Its source
    is `apps/desktop/src-tauri/app-icon.svg`. To regenerate icons, run
    `npm run desktop -- icon src-tauri/app-icon.svg` from the repository root;
    retain the desktop outputs in `apps/desktop/src-tauri/icons/`.
-6. Verify the root license and all required third-party license texts accompany
+5. Verify the root license and all required third-party license texts accompany
    the distributed files. Use [the attribution index](../THIRD_PARTY_NOTICES.md)
    as a starting point, then review the actual dependency and asset contents of
    each platform artifact. The current workflow does not assemble a complete
    third-party notice bundle.
+6. Check that the checksums match the downloaded files.
 
 ## Publish a public release
 
-Before publishing, verify the MIT license and third-party notices, private
-reporting routes, public-PR runner safety, repository-history review, and
+Before the first public release, verify the MIT license and third-party notices,
+private reporting routes, public-PR runner safety, repository-history review, and
 repository access/protection settings. Enable GitHub private vulnerability
-reporting once the repository is public and verify the reporting form from
-outside the maintainer account. The email route in `SECURITY.md` remains available.
-These are publication prerequisites, not changes performed by the artifact workflow.
+reporting and verify the reporting form from outside the maintainer account. The
+email route in `SECURITY.md` remains available.
 
-Sign and notarize distributions where applicable, or explicitly identify unsigned
-preview builds and their platform limitations. Verify installation with the final
-artifacts on the target systems.
+Releases are **unsigned preview builds** until signing is set up; see
+[#534](https://github.com/vantoan19/ticketd/issues/534) for how comparable projects
+handle signing. Release notes and the install guide must say so and explain the
+platform warnings: on macOS, remove the quarantine attribute
+(`xattr -d com.apple.quarantine`) or use System Settings → Privacy & Security →
+Open Anyway; on Windows, SmartScreen's More info → Run anyway.
 
-Create a versioned GitHub Release attached to the tested commit, and attach durable
-downloads containing the matching desktop and CLI, installation instructions,
-license notices, and SHA-256 checksums. Release notes should state:
+A release contains the matching desktop and CLI, installation instructions, license
+notices, and SHA-256 checksums. Release notes are GitHub's generated notes, grouped
+by PR label, plus a short hand-written section that states:
 
-- User-visible changes and fixed problems.
 - Tested platforms and known limitations.
 - Signing status and required external-service setup.
 - Data-format or CLI compatibility changes, backup needs, and downgrade limitations.
 
-Verify download links and hashes after upload. Use the final tested artifacts;
-rebuilding after validation requires validating the replacement artifacts.
-Do not describe expiring workflow artifacts as stable downloads.
+Verify download links and hashes after publishing. Do not describe expiring workflow
+downloads as stable downloads.
 
 ## Compatibility and maintenance
 
