@@ -297,7 +297,9 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Ready");
-  await browser.waitUntil(rowReports(evidence.title, "Ready"), {
+  // A ready row drops its "Blocked by" line (the group heading counts it ready).
+  const stillBlocked = rowReports(evidence.title, "Blocked by");
+  await browser.waitUntil(async () => !(await stillBlocked()), {
     timeout: 10000,
     timeoutMsg: "External readiness change did not refresh",
   });
