@@ -92,16 +92,17 @@ const detail = () =>
 const ticketRow = async (title) =>
   (await browser.$(".ticket-rows")).$(`button*=${title}`);
 // Read in the page: a lookup error inside waitUntil would only show as a timeout.
-const rowReports = (title, text) => () =>
+// The row's text, or null when no row shows the title.
+const rowText = (title) =>
   browser.execute(
-    (title, text) =>
-      [...document.querySelectorAll(".ticket-rows button")].some(
-        (row) =>
-          row.textContent.includes(title) && row.textContent.includes(text),
-      ),
+    (title) =>
+      [...document.querySelectorAll(".ticket-rows button")].find((row) =>
+        row.textContent.includes(title),
+      )?.textContent ?? null,
     title,
-    text,
   );
+const rowReports = (title, text) => async () =>
+  (await rowText(title))?.includes(text) ?? false;
 const header = () =>
   browser.$('section[aria-labelledby="detail-heading"] .detail-header');
 try {
@@ -297,12 +298,18 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Ready");
-  // A ready row drops its "Blocked by" line (the group heading counts it ready).
-  const stillBlocked = rowReports(evidence.title, "Blocked by");
-  await browser.waitUntil(async () => !(await stillBlocked()), {
-    timeout: 10000,
-    timeoutMsg: "External readiness change did not refresh",
-  });
+  // A ready row drops its "Blocked by" line (the group heading counts it ready);
+  // the row must still be shown, so a vanished row does not count as ready.
+  await browser.waitUntil(
+    async () => {
+      const text = await rowText(evidence.title);
+      return text !== null && !text.includes("Blocked by");
+    },
+    {
+      timeout: 10000,
+      timeoutMsg: "External readiness change did not refresh",
+    },
+  );
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
