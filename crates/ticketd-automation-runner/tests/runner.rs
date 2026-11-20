@@ -586,8 +586,9 @@ async fn at_most_two_runs_execute_at_once_and_the_next_starts_when_one_ends() {
     f.tick().await;
     assert_eq!(statuses(), [Running, Running, Queued]);
 
-    // The first run ends (its harness fails to start): the third takes its slot
-    // without waiting for the next pass.
+    // One running run ends (its harness fails to start): the third takes its slot
+    // without waiting for the next pass. Both runs started in the same pass, so
+    // either may have been the first to open and so be the one that ends.
     f.fake.fail_next_open(Problem {
         kind: ProblemKind::Other,
         message: "failed".into(),
@@ -596,7 +597,15 @@ async fn at_most_two_runs_execute_at_once_and_the_next_starts_when_one_ends() {
     });
     first_open.send(()).unwrap();
     settle().await;
-    assert_eq!(statuses(), [NeedsAttention, Running, Running]);
+    let after = statuses();
+    assert_eq!(after[2], Running, "{after:?}");
+    assert!(
+        matches!(
+            after[..2],
+            [NeedsAttention, Running] | [Running, NeedsAttention]
+        ),
+        "{after:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -12,6 +12,7 @@ import {
 import { SETTINGS_SECTIONS } from "@/features/settings/settings-sections";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
 import { cliClient } from "@/lib/api/cli";
+import { diagnosticsClient } from "@/lib/api/diagnostics";
 import { notificationClient } from "@/lib/api/notifications";
 import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -59,6 +60,17 @@ vi.mock("@/lib/api/notifications", () => ({
 vi.mock("@/lib/api/client", () => ({
   client: { backupWorkspace: vi.fn(), exportWorkspace: vi.fn() },
 }));
+vi.mock("@/lib/api/diagnostics", async (original) => {
+  const actual = await original<typeof import("@/lib/api/diagnostics")>();
+  return {
+    ...actual,
+    diagnosticsClient: {
+      ...actual.diagnosticsClient,
+      logLevel: vi.fn(),
+      recentErrors: vi.fn(),
+    },
+  };
+});
 vi.mock("@/lib/api/sources", async (original) => ({
   ...(await original<typeof import("@/lib/api/sources")>()),
   sourcesClient: {
@@ -95,6 +107,12 @@ beforeEach(() => {
     suggested_directory: "~/.local/bin",
   });
   vi.mocked(agentSkillsClient.list).mockResolvedValue([]);
+  vi.mocked(diagnosticsClient.logLevel).mockResolvedValue({
+    level: "info",
+    debug: false,
+    env_override: null,
+  });
+  vi.mocked(diagnosticsClient.recentErrors).mockResolvedValue([]);
   vi.mocked(sourcesClient.list).mockResolvedValue([]);
   vi.mocked(workspaceClient.info).mockResolvedValue({
     path: "/w/workspace.sqlite3",

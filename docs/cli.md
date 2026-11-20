@@ -22,8 +22,8 @@ Agents parse command output, so its shape is the same in every command:
 - Status counts use the keys `todo`, `in_progress`, `in_review`, `done`,
   `canceled` and `duplicate` (`plan show` and `plan context` alike). Ticket
   `status` values keep their display spelling, such as `In progress`.
-- A write with no record to return prints `{"ok":true}`. This covers `evidence
-  delete`, `activity delete`, `document tag`, `document pin` and `export --file`.
+- A write with no record to return prints `{"ok":true}`. This covers
+  `evidence delete`, `activity delete`, `document tag`, `document pin` and `export --file`.
   A write that changes a record prints that record.
 - Reminders print `{"reference":...,"due_at":...}` from `reminder show`, `set` and
   `snooze`, with `due_at` null when there is none; `reminder dismiss` prints
@@ -31,8 +31,8 @@ Agents parse command output, so its shape is the same in every command:
   `restore-workspace` prints `{"restored":...,"safety_backup":...}`.
 - Keys appear in the order of the record's definition, so `document keep`,
   `document trash` and `document restore` print exactly what `document show` does.
-- `list --latest-update` and `search --latest-update` print `{"ticket": ...,
-  "latest_update": ...}` rows. The update, with its bounded brief, appears only
+- `list --latest-update` and `search --latest-update` print
+  `{"ticket": ..., "latest_update": ...}` rows. The update, with its bounded brief, appears only
   beside the ticket; the ticket inside the row has no `latest_update` of its own.
 
 ### Atomic batches
