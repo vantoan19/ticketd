@@ -138,7 +138,9 @@ try {
     () => run("show", harness.reference).title.endsWith(" (reviewed)"),
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
-  await (await (await detail()).$("button=Edit description")).click();
+  // Clicking the description's text opens its editor (its checklist is skipped:
+  // a checkbox click toggles the item instead).
+  await (await (await detail()).$('[aria-label="Read description"] p')).click();
   const editor = await (
     await detail()
   ).$('[role="textbox"][aria-label="Description rich text"]');
