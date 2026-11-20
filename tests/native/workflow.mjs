@@ -85,7 +85,7 @@ const browser = await remote({
 });
 const detail = () =>
   browser.$(
-    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
+    'section[aria-labelledby="detail-heading"] .detail-content:not([hidden])',
   );
 // A ticket row is a button in the list. Its status icon is named by the status,
 // and its text carries the status, or Ready/Blocked for a Todo ticket.
@@ -94,7 +94,7 @@ const ticketRow = async (title) =>
 const rowReports = (title, text) => async () =>
   (await (await ticketRow(title)).getText()).includes(text);
 const header = () =>
-  browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
+  browser.$('section[aria-labelledby="detail-heading"] .detail-header');
 try {
   const newTicket = await browser.$('button[aria-label="New ticket"]');
   await newTicket.waitForDisplayed({ timeout: 15000 });
@@ -194,25 +194,6 @@ try {
       ),
     { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
-  const search = await browser.$('input[aria-label="Search tickets"]');
-  await search.setValue("Exercise installed desktop");
-  await browser.waitUntil(
-    async () =>
-      (
-        await (
-          await browser.$(".ticket-list")
-        ).$$("button*=Record native workflow evidence")
-      ).length === 0,
-  );
-  // Clear with keys: clearValue sets the value without an input event, so the
-  // filter would stay applied and hide the other rows.
-  await search.click();
-  await browser.keys(["Control", "a"]);
-  await browser.keys(["Backspace"]);
-  await browser.waitUntil(async () => (await search.getValue()) === "", {
-    timeout: 5000,
-    timeoutMsg: "Search did not clear",
-  });
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
@@ -244,7 +225,7 @@ try {
       ).getValue()) === evidence.title,
   );
   console.log(
-    "Desktop review: keyboard title and Markdown edits, search, mouse graph navigation (native click on a node)",
+    "Desktop review: keyboard title and Markdown edits, mouse graph navigation (native click on a node)",
   );
   run(
     "change",

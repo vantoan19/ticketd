@@ -24,7 +24,7 @@ const browser = await remote({
 
 const detail = () =>
   browser.$(
-    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
+    'section[aria-labelledby="detail-heading"] .detail-content:not([hidden])',
   );
 try {
   // The empty workspace opens on the first-run guide.
@@ -98,15 +98,8 @@ try {
     await browser.$("button*=Benchmark ticket 999")
   ).waitForDisplayed({ timeout: 10000 });
   console.log(`Project selection: ${Date.now() - clock} ms`);
-  const search = await browser.$('input[aria-label="Search tickets"]');
-  clock = Date.now();
-  await search.setValue("Benchmark ticket 999");
-  await browser.waitUntil(
-    async () =>
-      (await browser.$$("button*=Benchmark ticket 998")).length === 0 &&
-      (await browser.$$("button*=Benchmark ticket 999")).length === 1,
-  );
-  console.log(`Search: ${Date.now() - clock} ms`);
+  // Ticket search moved into the command palette; the newest ticket is already
+  // in view, so it is opened directly.
   clock = Date.now();
   await (await browser.$("button*=Benchmark ticket 999")).click();
   await browser.waitUntil(
