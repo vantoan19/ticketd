@@ -187,7 +187,12 @@ try {
     ).length,
     0,
   );
-  await (await (await detail()).$("button*=Post update")).click();
+  // The composer's actions sit in the pane's floating bar, outside the content.
+  await (
+    await (
+      await browser.$('section[aria-labelledby="detail-heading"]')
+    ).$("button*=Post update")
+  ).click();
   await browser.waitUntil(
     () =>
       run("activity", "list", harness.reference).some(
