@@ -132,21 +132,17 @@ seven days under Google's OAuth policy.
 
 The publisher enables Google Drive API and Google Picker API in its Google Cloud
 project, configures consent with only `https://www.googleapis.com/auth/drive.file`,
-and creates **Desktop app** OAuth clients for the supported platforms. For an
-External Testing app, add the test users. Configure these repository secrets with
-the matching downloaded installed-app JSON:
+and creates one **Desktop app** OAuth client, which serves every platform. For an
+External Testing app, add the test users. Store the downloaded installed-app JSON
+as the `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` repository secret.
 
-- `TICKETD_GOOGLE_OAUTH_CLIENT_JSON_MACOS`
-- `TICKETD_GOOGLE_OAUTH_CLIENT_JSON_LINUX`
-- `TICKETD_GOOGLE_OAUTH_CLIENT_JSON_WINDOWS`
-
-Enable the APIs in the same project that owns these OAuth clients; creating a
+Enable the APIs in the same project that owns the OAuth client; creating a
 client alone does not enable Drive API access. If sign-in and folder selection
 succeed but ticketd reports that Google Drive API is disabled, the publisher must
 [enable it in Google Cloud](https://developers.google.com/workspace/guides/enable-apis),
 allow the change to take effect, then retry. End users do not perform this setup.
 
-The distribution workflow embeds the matching registration in both desktop and
+The distribution workflow embeds that registration in both desktop and
 CLI via the build-time `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` variable. Missing or
 invalid registration fails distribution before installers are published. Local
 builds can supply that same variable during compilation. Keep the JSON outside
