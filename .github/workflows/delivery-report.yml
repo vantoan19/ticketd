@@ -1,0 +1,31 @@
+name: Delivery report
+
+# Weekly DORA-style measures of how changes reach main; see scripts/delivery-report.mjs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Delivery report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+      - name: Write the last 30 days to the run summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/delivery-report.mjs --days 30
