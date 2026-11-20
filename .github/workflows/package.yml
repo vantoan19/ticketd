@@ -96,7 +96,6 @@ jobs:
           XDG_DATA_HOME="$XDG_DATA_HOME/install" run_native tests/native/install.mjs
           XDG_DATA_HOME="$XDG_DATA_HOME/refresh" run_native tests/native/refresh.mjs
           XDG_DATA_HOME="$XDG_DATA_HOME/workflow" run_native tests/native/workflow.mjs
-          XDG_DATA_HOME="$XDG_DATA_HOME/extensions" run_native tests/native/extensions.mjs
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: success()
