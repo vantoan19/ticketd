@@ -39,7 +39,8 @@ order, the Claude Chat bridge executable and the frontend: Tauri embeds
 executable as a sidecar, so a Cargo build of the desktop fails while either is
 missing. `npm run desktop -- dev` manages its own frontend development server
 and uses the bridge that `npm run build` produced; `npm run desktop -- build`
-rebuilds both first.
+rebuilds both first and stages the CLI from the same Cargo workspace for Tauri
+to bundle. Use `npm run desktop -- bundle` to package an existing Tauri build.
 
 Agents hosted in a Chat reach records through the `ticketd` CLI. The app looks
 for it on PATH, then beside its own executable, then in the usual install
