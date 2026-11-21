@@ -323,27 +323,77 @@ fn process_then_login_path() -> Vec<PathBuf> {
     ])
 }
 
+#[cfg(not(windows))]
+fn cached_terminal_path() -> Option<String> {
+    login_shell_variable("PATH").map(str::to_string)
+}
+
+#[cfg(not(windows))]
+fn read_terminal_path() -> Option<String> {
+    ask_login_shell()
+        .into_iter()
+        .find(|(name, _)| *name == "PATH")
+        .map(|(_, path)| path)
+}
+
+#[cfg(windows)]
+static TERMINAL_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+#[cfg(windows)]
+fn cached_terminal_path() -> Option<String> {
+    TERMINAL_PATH.lock().ok()?.clone()
+}
+
+#[cfg(windows)]
+fn read_terminal_path() -> Option<String> {
+    // Registry.GetValue expands REG_EXPAND_SZ entries. Read both scopes in the
+    // order Windows builds PATH for a fresh terminal and preserve non-ASCII paths.
+    let powershell = PathBuf::from(std::env::var_os("SystemRoot")?)
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let mut command = Command::new(powershell);
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        r"$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$machine = [Microsoft.Win32.Registry]::GetValue('HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', '')
+$user = [Microsoft.Win32.Registry]::GetValue('HKEY_CURRENT_USER\Environment', 'Path', '')
+[Console]::Write((@($machine, $user) -join ';'))",
+    ]);
+    let path = run_with_timeout(command, RUN_TIMEOUT)?;
+    if let Ok(mut latest) = TERMINAL_PATH.lock() {
+        *latest = Some(path.clone());
+    }
+    Some(path)
+}
+
+fn terminal_search_path(
+    process_path: &OsStr,
+    refresh_path: bool,
+    cached: impl FnOnce() -> Option<String>,
+    fresh: impl FnOnce() -> Option<String>,
+) -> Vec<PathBuf> {
+    let terminal_path = if refresh_path { fresh() } else { cached() };
+    path_directories(&[terminal_path.as_deref().map_or(process_path, OsStr::new)])
+}
+
 /// Settings reports what a new terminal resolves. An explicit recheck can
-/// see a PATH edit made after the app started. A terminal's login PATH has
-/// priority over the launch environment inherited by the app.
+/// see a PATH edit made after the app started. The terminal PATH replaces the
+/// launch PATH when it can be read.
 pub fn locate_for_terminals(
     app_executable: Option<&Path>,
     app_version: &str,
     app_workspace: Option<&Path>,
     refresh_path: bool,
 ) -> CliStatus {
-    let fresh;
-    let login_path = if refresh_path {
-        fresh = ask_login_shell();
-        fresh
-            .iter()
-            .find(|(name, _)| *name == "PATH")
-            .map(|(_, path)| path.as_str())
-    } else {
-        login_shell_variable("PATH")
-    };
     let process_path = std::env::var_os("PATH").unwrap_or_default();
-    let paths = path_directories(&[login_path.map_or(process_path.as_os_str(), OsStr::new)]);
+    let paths = terminal_search_path(
+        &process_path,
+        refresh_path,
+        cached_terminal_path,
+        read_terminal_path,
+    );
     detect(
         &paths,
         &fallback_directories(app_executable),
@@ -403,6 +453,29 @@ impl CliStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_explicit_path_recheck_uses_the_current_terminal_path() {
+        let launch_path = OsStr::new("launch-bin");
+        let cached = || Some("cached-bin".into());
+        let fresh = || Some("installed-bin".into());
+        assert_eq!(
+            terminal_search_path(launch_path, true, cached, fresh),
+            [PathBuf::from("installed-bin")]
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, false, cached, fresh),
+            [PathBuf::from("cached-bin")]
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, true, cached, || Some(String::new())),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, true, cached, || None),
+            [PathBuf::from("launch-bin")]
+        );
+    }
 
     #[test]
     fn the_folder_of_the_app_itself_is_searched_before_the_common_install_folders() {
