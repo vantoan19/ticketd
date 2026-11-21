@@ -10,6 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+
+const formatSource = new URL(
+  "../crates/ticketd-core/src/format.rs",
+  import.meta.url,
+);
 import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(new URL("./generate-latest.mjs", import.meta.url));
@@ -63,6 +68,11 @@ test("publishes the signature and versioned download URL for each updater target
   };
   assert.deepEqual(JSON.parse(readFileSync(manifest, "utf8")), {
     version: "0.2.0",
+    format_version: Number(
+      readFileSync(formatSource, "utf8").match(
+        /pub const FORMAT_VERSION: i64 = (\d+);/,
+      )?.[1],
+    ),
     pub_date: "2026-11-22T01:00:00Z",
     notes: "https://github.com/vantoan19/ticketd/releases/tag/v0.2.0",
     platforms: {

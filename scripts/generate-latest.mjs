@@ -2,6 +2,10 @@ import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const releaseBase = "https://github.com/vantoan19/ticketd/releases";
+const formatSource = new URL(
+  "../crates/ticketd-core/src/format.rs",
+  import.meta.url,
+);
 const targets = [
   [".app.tar.gz", ["darwin-aarch64"]],
   [".deb", ["linux-x86_64-deb", "linux-x86_64"]],
@@ -48,8 +52,14 @@ function generate(version, pubDate, directory) {
     for (const key of keys) platforms[key] = update;
   }
 
+  const format = readFileSync(formatSource, "utf8").match(
+    /^pub const FORMAT_VERSION: i64 = ([1-9]\d*);$/m,
+  );
+  if (!format) throw new Error("Missing workspace format version");
+
   const manifest = {
     version,
+    format_version: Number(format[1]),
     pub_date: pubDate,
     notes: `${releaseBase}/tag/${tag}`,
     platforms,
