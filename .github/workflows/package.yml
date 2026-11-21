@@ -41,8 +41,14 @@ jobs:
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: npm run build
-      - run: npm run desktop -- build --debug --no-bundle
-      - run: cargo build -p ticketd-cli --locked
+      - run: npm run desktop -- build --debug --bundles deb -- --locked
+      - name: Check the CLI in the Debian package
+        run: |
+          package_root=$(mktemp -d)
+          trap 'rm -rf "$package_root"' EXIT
+          dpkg-deb --extract target/debug/bundle/deb/*.deb "$package_root"
+          export TICKETD_TEST_WORKSPACE="$package_root/workspace.sqlite3"
+          test "$("$package_root/usr/bin/ticketd" --version)" = "$(target/debug/ticketd --version)"
       - run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Run real desktop refresh smoke test
         run: |
@@ -178,9 +184,10 @@ jobs:
           XDG_DATA_HOME="$(mktemp -d)"
           export XDG_DATA_HOME
           export TICKETD_SMOKE_CHECKOUT="$PWD"
-          export TICKETD_SMOKE_CLI="$PWD/target/release/ticketd"
+          export TICKETD_SMOKE_CLI=/usr/bin/ticketd
           export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
+          test "$("$TICKETD_SMOKE_CLI" --version)" = "$(target/release/ticketd --version)"
           # shellcheck disable=SC2016 # $driver expands in the inner sh.
           xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/install.mjs'
           # shellcheck disable=SC2016 # $driver expands in the inner sh.
@@ -188,7 +195,8 @@ jobs:
           # shellcheck disable=SC2016 # $driver expands in the inner sh.
           XDG_DATA_HOME="$XDG_DATA_HOME/workflow" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/workflow.mjs'
           sudo apt-get remove -y "$package"
-          "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
+          test ! -e "$TICKETD_SMOKE_CLI"
+          target/release/ticketd list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure() && runner.os == 'Linux'
         with:

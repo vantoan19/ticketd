@@ -4997,6 +4997,7 @@ name = "ticketd-desktop"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

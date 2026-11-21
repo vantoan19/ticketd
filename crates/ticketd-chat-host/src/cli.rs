@@ -134,6 +134,12 @@ fn run_cli(executable: &Path, args: &[&str]) -> Option<String> {
     run_with_timeout(command, RUN_TIMEOUT)
 }
 
+/// Reports the version of a ticketd executable without opening any workspace.
+pub fn version(executable: &Path) -> Option<String> {
+    run_cli(executable, &["--version"])
+        .and_then(|text| text.strip_prefix("ticketd ").map(str::to_string))
+}
+
 fn same_path(left: &Path, right: &Path) -> bool {
     let normal = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     normal(left) == normal(right)
@@ -177,9 +183,7 @@ pub fn detect(
     status.found = true;
     status.on_path = on_path;
     status.path = Some(executable.display().to_string());
-    // "ticketd 0.1.0" -> "0.1.0"
-    status.version = run_cli(&executable, &["--version"])
-        .and_then(|text| text.split_whitespace().last().map(str::to_string));
+    status.version = version(&executable);
     status.version_matches = status.version.as_deref().map(|found| found == app_version);
     // A different version may print a different shape, or open the workspace
     // when asked; only a matching executable is asked where its workspace is.
@@ -300,22 +304,52 @@ fn fallback_directories(app_executable: Option<&Path>) -> Vec<PathBuf> {
 }
 
 /// The process PATH, then the login shell's PATH, without repeats.
-fn path_directories() -> Vec<PathBuf> {
+fn path_directories(paths: &[&OsStr]) -> Vec<PathBuf> {
     let mut directories: Vec<PathBuf> = Vec::new();
-    let mut add = |paths: &OsStr| {
-        for directory in std::env::split_paths(paths) {
+    for path in paths {
+        for directory in std::env::split_paths(path) {
             if !directory.as_os_str().is_empty() && !directories.contains(&directory) {
                 directories.push(directory);
             }
         }
-    };
-    if let Some(path) = std::env::var_os("PATH") {
-        add(&path);
-    }
-    if let Some(path) = login_shell_variable("PATH") {
-        add(OsStr::new(path));
     }
     directories
+}
+
+fn process_then_login_path() -> Vec<PathBuf> {
+    path_directories(&[
+        &std::env::var_os("PATH").unwrap_or_default(),
+        OsStr::new(login_shell_variable("PATH").unwrap_or_default()),
+    ])
+}
+
+/// Settings reports what a new terminal resolves. An explicit recheck can
+/// see a PATH edit made after the app started. A terminal's login PATH has
+/// priority over the launch environment inherited by the app.
+pub fn locate_for_terminals(
+    app_executable: Option<&Path>,
+    app_version: &str,
+    app_workspace: Option<&Path>,
+    refresh_path: bool,
+) -> CliStatus {
+    let fresh;
+    let login_path = if refresh_path {
+        fresh = ask_login_shell();
+        fresh
+            .iter()
+            .find(|(name, _)| *name == "PATH")
+            .map(|(_, path)| path.as_str())
+    } else {
+        login_shell_variable("PATH")
+    };
+    let process_path = std::env::var_os("PATH").unwrap_or_default();
+    let paths = path_directories(&[login_path.map_or(process_path.as_os_str(), OsStr::new)]);
+    detect(
+        &paths,
+        &fallback_directories(app_executable),
+        app_version,
+        app_workspace,
+    )
 }
 
 /// Finds this user's `ticketd` and checks it against the app's version and workspace.
@@ -323,7 +357,7 @@ fn path_directories() -> Vec<PathBuf> {
 pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
     let app = std::env::current_exe().ok();
     detect(
-        &path_directories(),
+        &process_then_login_path(),
         &fallback_directories(app.as_deref()),
         app_version,
         app_workspace,
@@ -334,7 +368,7 @@ pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
 /// Blocking only the first time on Unix, where it asks the login shell for its PATH.
 pub fn executable() -> Option<PathBuf> {
     let app = std::env::current_exe().ok();
-    find_executable(&path_directories())
+    find_executable(&process_then_login_path())
         .or_else(|| find_executable(&fallback_directories(app.as_deref())))
 }
 
