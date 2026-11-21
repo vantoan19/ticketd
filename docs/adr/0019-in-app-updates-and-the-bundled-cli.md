@@ -9,24 +9,27 @@ updated with it. The CLI never contacts the network on its own.
 - **What is offered.** Only a published, non-prerelease GitHub Release. The updater
   reads a static `latest.json` attached to each release, through
   `releases/latest/download/latest.json`, which GitHub resolves to the newest
-  published non-prerelease. A draft, which is how every release is tested
+  published non-prerelease. The manifest includes the release's Workspace
+  format version. A draft, which is how every release is tested
   ([release model](../releasing.md#release-model)), or a `-beta` prerelease is never
   offered.
 - **Trust.** Each update file is signed with a minisign key that is separate from OS
   code signing; the updater refuses a file whose signature does not match the public
-  key built into the app. The maintainer generates the key with a password, keeps it
-  in a password manager, and stores it as a GitHub secret for the release workflow.
+  key built into the app or whose signed version differs from the manifest.
+  The maintainer generates the key with a password, keeps it in a password
+  manager, and stores it as a GitHub secret for the release workflow.
   Releases stay unsigned previews for the operating systems
   ([#212](https://github.com/vantoan19/ticketd/issues/212)).
 - **When it checks.** About 10 seconds after launch, then every 24 hours while the
   app is open, and on demand from **Check for updates** in Settings → About. Checks
-  are on by default, with a switch in Settings → About that turns off both the
-  checks and the downloads. A check is one anonymous HTTPS request to GitHub; it
-  sends nothing that identifies the person or the workspace.
+  are on by default. The switch in Settings → About disables scheduled checks
+  and cancels an in-flight check or download. **Check for updates** remains
+  available for a one-time check and download. A check is one anonymous HTTPS
+  request to GitHub. It sends nothing that identifies the person or the workspace.
 - **What it does.** A newer release is downloaded and verified in the background.
   The status line then shows "ticketd X is ready · Restart to update · What's new";
-  What's new opens the release page. ticketd never restarts on its own; an update
-  that is not applied takes effect at the next restart.
+  What's new opens the release page. Restart to update opens the confirmation
+  prompt. ticketd applies the update when the person confirms the restart.
 - **Restart.** Before restarting, the prompt names running work ("2 Chats are
   running; restarting stops them"). An Automation run that a restart interrupts is
   marked as needing attention at the next start, as any interrupted run already is.
@@ -87,8 +90,27 @@ everyone who installs the desktop.
 
 Tauri's updater verifies its own signature and does not check the operating
 system's code signature when replacing the app, so ad-hoc-signed macOS builds can
-update. Whether macOS quarantines the replaced bundle is not yet tested on a real
-release and is checked when this is built.
+update.
+
+## Offline verification
+
+On macOS 26.5 (arm64), a sandboxed debug build checked a loopback manifest,
+rejected tampered update bytes, downloaded and verified a 0.2.0 archive signed
+with a throwaway key, and installed it after confirmation. The replaced
+ad-hoc-signed bundle passed `codesign --verify --deep --strict`. It had no
+`com.apple.quarantine` attribute and relaunched through LaunchServices without
+a Gatekeeper prompt. The test used a local feed, so it covers the updater's
+replacement of an installed bundle. Opening a downloaded release installer is
+a separate Gatekeeper path.
+
+The HTTP log showed no requests after relaunch with automatic checks disabled
+and an update available. A manual check still worked. A manifest with a higher
+format version showed the restart warning. After restart the existing ticket
+was readable and a seeded Running Automation run was marked as Needs attention.
+The loopback endpoint override was present in the debug binary and absent
+from the release-profile binary.
+
+The MSI install and relaunch path still needs a native Windows run.
 
 ## Consequences
 
