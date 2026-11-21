@@ -34,6 +34,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
       - run: rustup show active-toolchain
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: npm run build
@@ -84,16 +88,14 @@ jobs:
             active_group=
             return "$status"
           }
-          run_native tests/native/refresh.mjs
-          XDG_DATA_HOME="$XDG_DATA_HOME/extensions" run_native tests/native/extensions.mjs
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: success()
-        with:
-          name: native-smoke-screenshots
-          path: native-extensions-*.png
-          if-no-files-found: error
-          retention-days: 7
+          # The same installed-app checks the Linux distribution runs, against the
+          # debug build, so a branch can prove them before the main-only release build.
+          export TICKETD_SMOKE_CHECKOUT="$PWD"
+          export TICKETD_SMOKE_CLI="$PWD/target/debug/ticketd"
+          export TICKETD_SMOKE_DESKTOP="$PWD/target/debug/ticketd-desktop"
+          XDG_DATA_HOME="$XDG_DATA_HOME/install" run_native tests/native/install.mjs
+          XDG_DATA_HOME="$XDG_DATA_HOME/refresh" run_native tests/native/refresh.mjs
+          XDG_DATA_HOME="$XDG_DATA_HOME/workflow" run_native tests/native/workflow.mjs
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()

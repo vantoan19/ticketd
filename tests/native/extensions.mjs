@@ -41,14 +41,14 @@ const connect = () =>
 let browser = await connect();
 const detail = () =>
   browser.$(
-    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
+    'section[aria-labelledby="detail-heading"] .detail-content:not([hidden])',
   );
 const header = () =>
-  browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
+  browser.$('section[aria-labelledby="detail-heading"] .detail-header');
 // Follow, the reminder, and relationships live in the property rail.
 const rail = () =>
   browser.$(
-    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden]) > aside[aria-label="Ticket properties"]',
+    'section[aria-labelledby="detail-heading"] .detail-content:not([hidden]) aside[aria-label="Ticket properties"]',
   );
 async function click(element) {
   await element.waitForDisplayed({ timeout: 15000 });

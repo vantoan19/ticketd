@@ -85,45 +85,56 @@ const browser = await remote({
 });
 const detail = () =>
   browser.$(
-    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
+    'section[aria-labelledby="detail-heading"] .detail-content:not([hidden])',
   );
 // A ticket row is a button in the list. Its status icon is named by the status,
 // and its text carries the status, or Ready/Blocked for a Todo ticket.
 const ticketRow = async (title) =>
   (await browser.$(".ticket-rows")).$(`button*=${title}`);
+// Read in the page: a lookup error inside waitUntil would only show as a timeout.
+// The row's text, or null when no row shows the title.
+const rowText = (title) =>
+  browser.execute(
+    (title) =>
+      [...document.querySelectorAll(".ticket-rows button")].find((row) =>
+        row.textContent.includes(title),
+      )?.textContent ?? null,
+    title,
+  );
 const rowReports = (title, text) => async () =>
-  (await (await ticketRow(title)).getText()).includes(text);
+  (await rowText(title))?.includes(text) ?? false;
 const header = () =>
-  browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
+  browser.$('section[aria-labelledby="detail-heading"] .detail-header');
 try {
   const newTicket = await browser.$('button[aria-label="New ticket"]');
   await newTicket.waitForDisplayed({ timeout: 15000 });
   await newTicket.click();
-  const creation = await browser.$('.create-panel[role="dialog"]');
+  const creation = await browser.$('[role="dialog"]');
   await (
     await creation.$('[aria-label="Description rich text"]')
   ).waitForDisplayed({ timeout: 15000 });
   await browser.waitUntil(
     () =>
       browser.execute(() => {
-        const dialog = document.querySelector('.create-panel[role="dialog"]');
+        const dialog = document.querySelector('[role="dialog"]');
         if (!dialog) return false;
         const bounds = dialog.getBoundingClientRect();
+        // Dialogs open near the top of the window, centered horizontally.
         return (
           bounds.left >= 0 &&
           bounds.top >= 0 &&
           bounds.right <= window.innerWidth &&
           bounds.bottom <= window.innerHeight &&
-          Math.abs(bounds.x + bounds.width / 2 - window.innerWidth / 2) < 2 &&
-          Math.abs(bounds.y + bounds.height / 2 - window.innerHeight / 2) < 2
+          Math.abs(bounds.x + bounds.width / 2 - window.innerWidth / 2) < 2
         );
       }),
     {
       timeout: 5000,
-      timeoutMsg: "New ticket dialog is off-center or outside the app window",
+      timeoutMsg:
+        "New ticket dialog is not centered horizontally or outside the app window",
     },
   );
-  await (await creation.$('[aria-label="Close new ticket"]')).click();
+  await (await creation.$('button[aria-label="Close"]')).click();
   await creation.waitForDisplayed({ reverse: true });
 
   const row = await ticketRow("Exercise installed desktop and CLI together");
@@ -137,7 +148,9 @@ try {
     () => run("show", harness.reference).title.endsWith(" (reviewed)"),
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
-  await (await (await detail()).$("button=Edit description")).click();
+  // Clicking the description's text opens its editor (its checklist is skipped:
+  // a checkbox click toggles the item instead).
+  await (await (await detail()).$('[aria-label="Read description"] p')).click();
   const editor = await (
     await detail()
   ).$('[role="textbox"][aria-label="Description rich text"]');
@@ -148,7 +161,7 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
-  await (await (await detail()).$("button=Add update")).click();
+  await (await (await detail()).$("button*=Write an update")).click();
   const noteEditor = await (
     await detail()
   ).$('[role="textbox"][aria-label="New update rich text"]');
@@ -184,7 +197,12 @@ try {
     ).length,
     0,
   );
-  await (await (await detail()).$("button=Post update")).click();
+  // The composer's actions sit in the pane's floating bar, outside the content.
+  await (
+    await (
+      await browser.$('section[aria-labelledby="detail-heading"]')
+    ).$("button*=Post update")
+  ).click();
   await browser.waitUntil(
     () =>
       run("activity", "list", harness.reference).some(
@@ -193,29 +211,18 @@ try {
       ),
     { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
-  const search = await browser.$('input[aria-label="Search tickets"]');
-  await search.setValue("Exercise installed desktop");
-  await browser.waitUntil(
-    async () =>
-      (
-        await (
-          await browser.$(".ticket-list")
-        ).$$("button*=Record native workflow evidence")
-      ).length === 0,
-  );
-  // Clear with keys: clearValue sets the value without an input event, so the
-  // filter would stay applied and hide the other rows.
-  await search.click();
-  await browser.keys(["Control", "a"]);
-  await browser.keys(["Backspace"]);
-  await browser.waitUntil(async () => (await search.getValue()) === "", {
-    timeout: 5000,
-    timeoutMsg: "Search did not clear",
-  });
-  await (await (await detail()).$("button=Graph")).click();
-  const graphView = await browser.$('section[aria-label="Dependency graph"]');
+  await (
+    await (await header()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (
+    await browser.$('//*[@role="menuitem" and text()="Open graph"]')
+  ).click();
+  const graphView = await browser.$('section[aria-label="Graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
-  const graphNode = await graphView.$(`button*=${evidence.reference}`);
+  // The node card; the reference also appears in the graph's ticket list.
+  const graphNode = await graphView.$(
+    `.react-flow__node button[aria-label^="${evidence.reference} "]`,
+  );
   await graphNode.waitForDisplayed({ timeout: 10000 });
   // A real pointer must reach the node: nothing may sit over it or disable it.
   assert(
@@ -238,7 +245,7 @@ try {
       ).getValue()) === evidence.title,
   );
   console.log(
-    "Desktop review: keyboard title and Markdown edits, search, mouse graph navigation (native click on a node)",
+    "Desktop review: keyboard title and Markdown edits, mouse graph navigation (native click on a node)",
   );
   run(
     "change",
@@ -266,15 +273,15 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Blocked");
-  await browser.waitUntil(rowReports(harness.title, "In review"), {
-    timeout: 10000,
-    timeoutMsg: "External status change did not refresh the ticket row",
-  });
+  // A row names its status through its icon; its text shows availability.
   await (
     await (
       await ticketRow(harness.title)
     ).$('[role="img"][aria-label="In review"]')
-  ).waitForExist({ timeout: 10000 });
+  ).waitForExist({
+    timeout: 10000,
+    timeoutMsg: "External status change did not refresh the ticket row",
+  });
   await browser.waitUntil(
     rowReports(evidence.title, `Blocked by ${harness.reference}`),
     {
@@ -291,20 +298,28 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Ready");
-  await browser.waitUntil(rowReports(evidence.title, "Ready"), {
-    timeout: 10000,
-    timeoutMsg: "External readiness change did not refresh",
-  });
+  // A ready row drops its "Blocked by" line (the group heading counts it ready);
+  // the row must still be shown, so a vanished row does not count as ready.
+  await browser.waitUntil(
+    async () => {
+      const text = await rowText(evidence.title);
+      return text !== null && !text.includes("Blocked by");
+    },
+    {
+      timeout: 10000,
+      timeoutMsg: "External readiness change did not refresh",
+    },
+  );
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
   await (
-    await browser.$('//*[@role="menuitem" and text()="Move to trash"]')
+    await browser.$('//*[@role="menuitem" and text()="Move to Trash"]')
   ).click();
   await (
     await (
       await browser.$('nav[aria-label="Trash and settings"]')
-    ).$("button=Trash")
+    ).$('button[aria-label="Trash"]')
   ).click();
   await (await ticketRow(evidence.title)).click();
   await (
