@@ -110,7 +110,18 @@ was readable and a seeded Running Automation run was marked as Needs attention.
 The loopback endpoint override was present in the debug binary and absent
 from the release-profile binary.
 
+On Linux, the [hosted native smoke run][linux-smoke] built the Debian package,
+checked its bundled CLI, and passed the desktop smoke tests. A separate
+x86_64 Debian container ran the signed loopback update from 0.1.0 to 0.2.0.
+With `pkexec` removed from the fixture, About offered the `.deb` release link
+without fetching an installer. With `pkexec` present, ticketd verified the
+download, installed it through `pkexec` after confirmation, and relaunched as
+0.2.0. The container ran as root, so interactive polkit approval remains
+unverified.
+
 The MSI install and relaunch path still needs a native Windows run.
+
+[linux-smoke]: https://github.com/vantoan19/ticketd/actions/runs/44945034690
 
 ## Consequences
 
