@@ -908,10 +908,8 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
         // With the window already gone there is nowhere to ask, so the exit goes ahead.
         RunEvent::ExitRequested {
             code: None, api, ..
-        } if app.get_webview_window("main").is_some() => {
-            if confirms_quit(app) {
-                api.prevent_exit();
-            }
+        } if app.get_webview_window("main").is_some() && confirms_quit(app) => {
+            api.prevent_exit();
         }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => show_window(app),
