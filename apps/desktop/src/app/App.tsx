@@ -48,6 +48,8 @@ import { launch } from "@/components/layout/launch";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { WindowBar } from "@/components/layout/WindowBar";
+import { UpdatesProvider } from "@/features/updates/UpdatesProvider";
+import { useUpdateNotice } from "@/features/updates/update-state";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import {
@@ -204,7 +206,7 @@ export function App() {
         <SyncStatusProvider>
           <ChatProvider>
             <InboxAttentionProvider>
-              <AppContent />
+              <UpdateShell />
             </InboxAttentionProvider>
           </ChatProvider>
           <ExitDialog />
@@ -214,7 +216,22 @@ export function App() {
   );
 }
 
+function UpdateShell() {
+  const recovery = useDraftRecovery();
+  return (
+    <UpdatesProvider
+      beforeInstall={async () => {
+        window.dispatchEvent(new Event("ticketd:window-closing"));
+        await recovery.flush();
+      }}
+    >
+      <AppContent />
+    </UpdatesProvider>
+  );
+}
+
 function AppContent() {
+  const updateNotice = useUpdateNotice();
   const workspaceReplaced = useReplaced();
   const pageZoom = usePageZoom();
   useEffect(keepWebviewInStep, []);
@@ -875,7 +892,10 @@ function AppContent() {
                         Skip to content
                       </a>
                       <WindowBar />
-                      <StatusLineRegion host={{ current: contentPanel }}>
+                      <StatusLineRegion
+                        host={{ current: contentPanel }}
+                        notice={updateNotice}
+                      >
                         <PageZoomStatus zoom={pageZoom} />
                         <NewPlanDialog
                           open={creatingPlan}

@@ -37,12 +37,16 @@ type Shown = StatusLineMessage & { id: number };
 export function StatusLineRegion({
   children,
   host,
+  notice,
 }: {
   children: ReactNode;
   /** The pane element, when it is not the region's parent (the region wraps it). */
   host?: React.RefObject<HTMLElement | null>;
+  /** A persistent announcement that returns after a transient outcome closes. */
+  notice?: StatusLineMessage | undefined;
 }) {
-  const [shown, setShown] = useState<Shown | null>(null);
+  const [outcome, setShown] = useState<Shown | null>(null);
+  const shown = outcome ?? (notice && { ...notice, id: 0 });
   const [inset, setInset] = useState(0);
   const counter = useRef(0);
   const anchor = useRef<HTMLSpanElement>(null);
@@ -174,11 +178,13 @@ function FloatingLine({
   const action: StatusLineAction | undefined = shown.undo
     ? { label: "Undo", run: shown.undo }
     : shown.action;
-  const lifetime = error
-    ? null
-    : shown.undo || action?.label === "Undo"
-      ? STATUS_LINE_TIMINGS.undo
-      : STATUS_LINE_TIMINGS.plain;
+  const persistent = id === 0;
+  const lifetime =
+    error || persistent
+      ? null
+      : shown.undo || action?.label === "Undo"
+        ? STATUS_LINE_TIMINGS.undo
+        : STATUS_LINE_TIMINGS.plain;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [running, setRunning] = useState(false);
@@ -239,12 +245,11 @@ function FloatingLine({
   // The line waits for the action on purpose: a failed Undo replaces it with
   // "Couldn't undo…" (and Retry), so closing it at the click would flash it away
   // and back. It fades in --dur-exit once the action has succeeded.
-  async function act() {
-    if (!action) return;
+  async function act(action: StatusLineAction) {
     setRunning(true);
     try {
       await action.run();
-      close();
+      if (!persistent) close();
     } catch (reason) {
       // Plain words (P8): "Couldn't undo. The workspace is read-only, so
       // nothing changed." Retry only when retrying can succeed.
@@ -309,9 +314,21 @@ function FloatingLine({
           variant="ghost"
           size="sm"
           disabled={running}
-          onClick={() => void act()}
+          onClick={() => void act(action)}
         >
           {action.label}
+        </Button>
+      )}
+      {shown.secondaryAction && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={running}
+          onClick={() => {
+            if (shown.secondaryAction) void act(shown.secondaryAction);
+          }}
+        >
+          {shown.secondaryAction.label}
         </Button>
       )}
       <IconButton label="Dismiss" onClick={close}>

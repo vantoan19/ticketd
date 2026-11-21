@@ -22,6 +22,7 @@ import {
   type SettingsPageId,
 } from "@/features/settings/settings-sections";
 import { useSettingsState } from "@/features/settings/use-settings-state";
+import { useUpdates } from "@/features/updates/update-state";
 import { useSources } from "@/features/settings/sources/use-sources";
 import "@/features/settings/settings.css";
 
@@ -47,6 +48,7 @@ function useSettingsNavItems() {
   const { entries } = useSources();
   const { needsSetup } = useSettingsState();
   const chat = useChatFeature();
+  const update = useUpdates()?.snapshot;
   const items: NavItem[] = [
     // Automations are part of Chat: its switch shows and hides both.
     ...SETTINGS_SECTIONS.filter(
@@ -57,6 +59,8 @@ function useSettingsNavItems() {
     ),
   ];
   const indicator = (id: SettingsPageId): NavIndicator | null => {
+    if (id === "about" && update?.status === "ready" && update.dismissed)
+      return { label: "Update ready", tone: "unread" };
     if (
       (id === "command-line" || id === "agent-skills" || id === "chat") &&
       needsSetup[id]

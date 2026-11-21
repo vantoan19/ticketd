@@ -9,6 +9,8 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { UpdatesProvider } from "@/features/updates/UpdatesProvider";
 import { workspaceClient } from "@/lib/api/workspace";
 import { APP_VERSION } from "@/lib/app-version";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
@@ -30,6 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  clearMocks();
   vi.clearAllMocks();
 });
 
@@ -50,6 +53,63 @@ test("the wordmark is the h1, with the version and what ticketd is", () => {
   expect(screen.getByText("Desktop app and command line")).toBeTruthy();
 });
 
+test("About offers an update check and an enabled-by-default automatic check switch", () => {
+  renderPage();
+  expect(screen.getByRole("heading", { name: "Updates" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Check for updates" }),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("switch", { name: "Check for updates automatically" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+});
+
+test("a verified update asks before stopping work and upgrading the workspace", async () => {
+  const install = vi.fn();
+  mockIPC(
+    (command) => {
+      if (command === "updates_state")
+        return {
+          revision: 1,
+          automatic: true,
+          dismissed: true,
+          status: "ready",
+          update: {
+            version: "0.2.0",
+            release_url:
+              "https://github.com/vantoan19/ticketd/releases/tag/v0.2.0",
+            upgrades_workspace: true,
+          },
+        };
+      if (command === "updates_restart_details") return { chats: 2, runs: 1 };
+      if (command === "updates_install") install();
+    },
+    { shouldMockEvents: true },
+  );
+  render(
+    <UpdatesProvider beforeInstall={async () => {}}>
+      <SettingsStateProvider active={false} onOpenPage={() => {}}>
+        <AboutPage />
+      </SettingsStateProvider>
+    </UpdatesProvider>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Restart to update" }),
+  );
+  const dialog = within(
+    screen.getByRole("dialog", { name: /Restart to update to ticketd 0.2.0/ }),
+  );
+  expect(
+    await dialog.findByText("2 Chats and 1 Automation run are going"),
+  ).toBeTruthy();
+  expect(dialog.getByText("This update upgrades your workspace")).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "Not now" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(install).not.toHaveBeenCalled();
+});
+
 test("three tiles state what ticketd promises", () => {
   renderPage();
   const tiles = within(
@@ -58,7 +118,7 @@ test("three tiles state what ticketd promises", () => {
   expect(tiles.map((tile) => tile.textContent)).toEqual([
     "No accountticketd has no account to sign up for.",
     "Works offlineEverything you do runs on this computer.",
-    "Stays on this computerNo analytics or crash uploads. Only integrations you turn on, such as Google Drive and GitHub, go online.",
+    "Stays on this computerNo analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive and GitHub, go online.",
   ]);
 });
 

@@ -320,6 +320,13 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "diagnostics",
   },
   {
+    title: "Check for updates automatically",
+    description:
+      "Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent.",
+    keywords: "version upgrade download install restart check",
+    section: "about",
+  },
+  {
     title: "Documentation",
     description: "Guides for the desktop app and the command line.",
     keywords: "about version help docs guides",
