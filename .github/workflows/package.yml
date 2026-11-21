@@ -148,7 +148,26 @@ jobs:
       - name: Build CLI
         run: cargo build --release --locked -p ticketd-cli
       - name: Build desktop installer
-        run: npm run desktop -- build --bundles ${{ matrix.bundle }} -- --locked
+        id: installer
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          INSTALLER_BUNDLE: ${{ matrix.bundle }}
+        run: |
+          bundle="$INSTALLER_BUNDLE"
+          config=()
+          if [[ -n "$TAURI_UPDATER_PUBLIC_KEY" && -n "$TAURI_SIGNING_PRIVATE_KEY" && -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]]; then
+            updater_config="$RUNNER_TEMP/ticketd-updater.json"
+            node -p 'JSON.stringify({bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey:process.env.TAURI_UPDATER_PUBLIC_KEY.trim()}}})' > "$updater_config"
+            config=(--config "$updater_config")
+            # The macOS updater archives the app bundle alongside the DMG installer.
+            if [[ "$bundle" == dmg ]]; then bundle=app,dmg; fi
+          else
+            echo "::warning::Skipping updater files. Configure TAURI_UPDATER_PUBLIC_KEY, TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD to enable updater signing."
+          fi
+          npm run desktop -- build --bundles "$bundle" "${config[@]}" -- --locked
+          if [[ ${#config[@]} -gt 0 ]]; then echo 'signed_updater=true' >> "$GITHUB_OUTPUT"; fi
       - name: Smoke-test installed Linux package
         if: runner.os == 'Linux'
         run: |
@@ -178,11 +197,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Assemble download
+        env:
+          SIGNED_UPDATER: ${{ steps.installer.outputs.signed_updater }}
         run: |
           mkdir -p distribution
           cp ${{ matrix.installer }} distribution/
           cp ${{ matrix.cli }} distribution/
           cp docs/install.md distribution/INSTALL.md
+          if [[ "$SIGNED_UPDATER" == true ]]; then
+            if [[ "$RUNNER_OS" == macOS ]]; then
+              cp target/release/bundle/macos/*.app.tar.gz{,.sig} distribution/
+            else
+              cp ${{ matrix.installer }}.sig distribution/
+            fi
+          fi
       - name: Smoke-test CLI installation and discovery
         run: node tests/native/cli-install.mjs ${{ matrix.cli }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
