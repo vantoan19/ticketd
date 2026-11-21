@@ -10,13 +10,41 @@ The manual [Package workflow](../.github/workflows/package.yml) builds the
 standalone CLI and desktop installer for macOS Apple Silicon, Ubuntu 24.04 x86-64,
 and Windows x86-64, and runs only on `main`. Its `linux-distribution` target limits
 the build to Linux, and `native-smoke` runs the Linux native desktop smoke test.
-The workflow uploads artifacts with seven-day retention. It does not publish a
-GitHub Release or configure signing/notarization.
+The workflow uploads artifacts with seven-day retention. GitHub Release creation
+and OS code signing are separate steps.
 
 Distribution CI requires a platform-specific Google desktop app registration;
 see [publisher configuration](install.md#publisher-and-developer-configuration).
 An independent local build can omit Google configuration and keep Drive disabled;
 see [development packaging](development.md#build-packages).
+
+### Updater signing
+
+Generate the Tauri updater key once and choose a strong password when prompted.
+
+```sh
+npm run desktop -- signer generate -w ~/.tauri/ticketd-updater.key
+```
+
+Back up the private key and its password in the maintainer's password manager.
+Set the GitHub Actions repository variable `TAURI_UPDATER_PUBLIC_KEY` to the
+contents of `ticketd-updater.key.pub`. Set `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets. The distribution build
+embeds the public key and signs the macOS app archive, Debian package and Windows
+MSI. If any of the three inputs is missing, it warns and builds installers alone.
+
+To assemble the updater manifest, stage the release assets under their final
+upload names in one directory, then run the manifest generator.
+
+```sh
+node scripts/generate-latest.mjs 0.2.0 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" release-assets
+```
+
+The script writes `latest.json` into that directory when all three updater files
+have signatures. It warns and skips the manifest for unsigned builds and fails if
+only some of the required files are signed. Attach the generated manifest and its
+signed assets to the draft together. The app's `releases/latest` endpoint resolves
+to a published release.
 
 ## Repository CI settings
 
