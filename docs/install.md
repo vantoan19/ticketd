@@ -77,7 +77,9 @@ By default, the desktop checks for updates about ten seconds after launch and
 every 24 hours while it is open. It downloads and verifies a newer stable release
 in the background. Choose **What's new** to open the release notes, or
 **Restart to update** and then **Restart now** to install it. You can return to
-**Settings → About** to restart after dismissing the status-line notice.
+**Settings → About** to restart after dismissing the status-line notice. On
+macOS and Windows, quitting with a verified update ready installs it for the
+next launch. On Linux, choose **Restart to update** to install it.
 
 The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
@@ -93,7 +95,8 @@ the package manually. If a download or signature check fails, About offers
 
 To stop scheduled checks, turn off **Check for updates automatically** in
 **Settings → About**. Turning it off also cancels any check or download in
-progress. Use **Check for updates** in About to check once.
+progress. Use **Check for updates** in About to check once. Builds without
+an updater public key skip checks and show this in About.
 
 The check makes an unauthenticated HTTPS request to GitHub for the latest release
 manifest. It sends standard request headers, including the updater's user agent,

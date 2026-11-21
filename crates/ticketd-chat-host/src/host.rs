@@ -699,6 +699,12 @@ impl ChatHost {
         self.stop_all(StopReason::Quit).await
     }
 
+    /// Accept new work again when an installer handoff fails to close the app.
+    #[cfg(windows)]
+    pub fn cancel_quit(&self) {
+        self.inner.quitting.store(false, Ordering::SeqCst);
+    }
+
     /// Before the workspace is replaced by a backup: refuses every request that would
     /// reach or start a supervisor, on every clone of this host, then stops every
     /// running Chat. Nothing runs until `finish_restore`.

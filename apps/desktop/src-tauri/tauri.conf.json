@@ -49,6 +49,9 @@
     "updater": {
       "pubkey": "",
       "requireSignedVersion": true,
+      "windows": {
+        "installerArgs": ["REBOOT=ReallySuppress"]
+      },
       "endpoints": [
         "https://github.com/vantoan19/ticketd/releases/latest/download/latest.json"
       ]

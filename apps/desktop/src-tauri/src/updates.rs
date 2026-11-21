@@ -25,6 +25,7 @@ pub struct UpdateInfo {
 #[derive(Clone, serde::Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum Phase {
+    Unavailable,
     Idle,
     Checking,
     UpToDate {
@@ -48,6 +49,25 @@ enum Phase {
 }
 
 impl Phase {
+    fn for_public_key(key: Option<&str>) -> Self {
+        if key.is_some_and(|key| !key.trim().is_empty()) {
+            Self::Idle
+        } else {
+            Self::Unavailable
+        }
+    }
+
+    fn may_check(&self, automatic: bool, manual: bool) -> bool {
+        !matches!(self, Self::Unavailable) && (automatic || manual)
+    }
+
+    /// Keep the verified release visible until another verified release replaces it.
+    fn report(&mut self, next: Self) {
+        if !matches!(self, Self::Ready { .. }) || matches!(next, Self::Ready { .. }) {
+            *self = next;
+        }
+    }
+
     fn notice(&self) -> Option<&UpdateInfo> {
         match self {
             Self::DownloadFailed { update, .. }
@@ -63,6 +83,7 @@ pub struct Snapshot {
     revision: u64,
     automatic: bool,
     dismissed: bool,
+    install_on_quit: bool,
     #[serde(flatten)]
     phase: Phase,
 }
@@ -101,17 +122,12 @@ impl Session {
             tracing::warn!(error_kind, error, "update check failed");
             self.check_error = Some(error_kind);
         }
-        let phase = if self.ready.is_some() {
-            self.snapshot.phase.clone()
-        } else {
-            Phase::CheckFailed
-        };
-        self.finish(app, phase);
+        self.finish(app, Phase::CheckFailed);
     }
 
     fn finish(&mut self, app: &AppHandle, phase: Phase) {
         self.check = None;
-        self.snapshot.phase = phase;
+        self.snapshot.phase.report(phase);
         self.publish(app);
     }
 }
@@ -132,6 +148,14 @@ impl Updates {
 }
 
 pub fn start(app: &AppHandle) {
+    let phase = Phase::for_public_key(
+        app.config()
+            .plugins
+            .0
+            .get("updater")
+            .and_then(|config| config["pubkey"].as_str()),
+    );
+    let available = !matches!(phase, Phase::Unavailable);
     let disabled_file = app
         .path()
         .app_config_dir()
@@ -154,9 +178,10 @@ pub fn start(app: &AppHandle) {
         session: Mutex::new(Session {
             snapshot: Snapshot {
                 revision: 0,
-                automatic,
+                automatic: available && automatic,
                 dismissed: false,
-                phase: Phase::Idle,
+                install_on_quit: should_install_on_quit(std::env::consts::OS, true),
+                phase,
             },
             dismissed: None,
             sequence: 0,
@@ -168,6 +193,9 @@ pub fn start(app: &AppHandle) {
         }),
     });
 
+    if !available {
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut timer =
@@ -189,7 +217,8 @@ pub fn updates_state(updates: State<'_, Updates>) -> Snapshot {
 pub fn updates_set_automatic(app: AppHandle, enabled: bool) -> Result<Snapshot, String> {
     let updates = app.state::<Updates>();
     let mut session = updates.lock();
-    if session.snapshot.automatic == enabled {
+    if matches!(session.snapshot.phase, Phase::Unavailable) || session.snapshot.automatic == enabled
+    {
         return Ok(session.snapshot.clone());
     }
     let path = updates
@@ -239,7 +268,13 @@ pub fn updates_check(app: AppHandle) {
 fn start_check(app: &AppHandle, manual: bool) {
     let updates = app.state::<Updates>();
     let mut session = updates.lock();
-    if session.installing || session.check.is_some() || (!manual && !session.snapshot.automatic) {
+    if session.installing
+        || session.check.is_some()
+        || !session
+            .snapshot
+            .phase
+            .may_check(session.snapshot.automatic, manual)
+    {
         return;
     }
     session.sequence += 1;
@@ -313,7 +348,6 @@ async fn check(app: AppHandle, sequence: u64) {
                     .unwrap_or_default()
                     .as_secs();
                 tracing::info!("update check found no newer release");
-                session.ready = None;
                 session.check_error = None;
                 session.download_error = None;
                 session.finish(&app, Phase::UpToDate { checked_at });
@@ -344,20 +378,22 @@ async fn check(app: AppHandle, sequence: u64) {
         };
         tracing::info!(version = %info.version, "update check found newer release");
         if session.ready.as_ref().is_some_and(|ready| {
-            ready.offer.version == offer.version && ready.offer.signature == offer.signature
+            !semver::Version::parse(&offer.version)
+                .ok()
+                .zip(semver::Version::parse(&ready.offer.version).ok())
+                .is_some_and(|(offered, current)| offered.cmp_precedence(&current).is_gt())
         }) {
-            session.finish(&app, Phase::Ready { update: info });
+            session.check = None;
             return;
         }
-        session.ready = None;
         if !can_install() {
             tracing::info!(version = %info.version, "update requires manual installation");
             session.finish(&app, Phase::ManualInstall { update: info });
             return;
         }
-        session.snapshot.phase = Phase::Downloading {
+        session.snapshot.phase.report(Phase::Downloading {
             update: info.clone(),
-        };
+        });
         session.publish(&app);
         (offer, info)
     };
@@ -473,20 +509,43 @@ pub async fn updates_restart_details(app: AppHandle, version: String) -> Result<
 #[tauri::command]
 pub async fn updates_install(app: AppHandle, version: String) -> Result<(), String> {
     let install_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || install(&install_app, &version))
-        .await
-        .map_err(|error| error.to_string())?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || install(&install_app, Some(&version)))
+            .await
+            .map_err(|error| error.to_string())?;
     result?;
     #[cfg(not(target_os = "windows"))]
     app.request_restart();
     Ok(())
 }
 
-fn install(app: &AppHandle, version: &str) -> Result<(), String> {
+fn should_install_on_quit(platform: &str, has_ready_update: bool) -> bool {
+    matches!(platform, "macos" | "windows") && has_ready_update
+}
+
+pub fn install_on_quit(app: &AppHandle) {
+    let Some(updates) = app.try_state::<Updates>() else {
+        return;
+    };
+    let has_ready_update = updates.lock().ready.is_some();
+    if should_install_on_quit(std::env::consts::OS, has_ready_update) {
+        // We are already exiting. The install logs any failure before shutdown continues.
+        let _ = install(app, None);
+    }
+}
+
+pub fn install_in_progress(app: &AppHandle) -> bool {
+    app.try_state::<Updates>()
+        .is_some_and(|updates| updates.lock().installing)
+}
+
+fn install(app: &AppHandle, requested_version: Option<&str>) -> Result<(), String> {
     let updates = app.state::<Updates>();
     let ready = {
         let mut session = updates.lock();
-        if !ready_for(&session, version) || session.installing {
+        if session.installing
+            || requested_version.is_some_and(|version| !ready_for(&session, version))
+        {
             return Err("This update is no longer ready. Check for updates again.".into());
         }
         let Some(ready) = session.ready.take() else {
@@ -500,13 +559,25 @@ fn install(app: &AppHandle, version: &str) -> Result<(), String> {
         ready
     };
 
+    let version = ready.offer.version.as_str();
     tracing::info!(version, "update install started");
-    match install_package(&ready) {
+    #[cfg(windows)]
+    let result = install_windows(app, &ready, requested_version.is_some());
+    #[cfg(not(windows))]
+    let result = install_package(&ready);
+    match result {
         Ok(()) => {
             tracing::info!(version, "update installed");
             Ok(())
         }
         Err(error) => {
+            let (error_kind, summary) = install_failure(&error);
+            tracing::warn!(
+                version,
+                error_kind,
+                error = summary,
+                "update install failed"
+            );
             let error = match error {
                 Error::PreviousAppNotRestored(path) => format!(
                     "The previous app was left at {}.",
@@ -514,13 +585,62 @@ fn install(app: &AppHandle, version: &str) -> Result<(), String> {
                 ),
                 other => other.to_string(),
             };
-            tracing::warn!(version, %error, "update install failed");
             let mut session = updates.lock();
             session.installing = false;
             session.ready = Some(ready);
             Err(error)
         }
     }
+}
+
+fn install_failure(error: &Error) -> (&'static str, &'static str) {
+    match error {
+        Error::PreviousAppNotRestored(_) => (
+            "previous_app_not_restored",
+            "could not restore the previous app",
+        ),
+        Error::InvalidUpdaterFormat | Error::BinaryNotFoundInArchive => {
+            ("invalid_package", "update package format is invalid")
+        }
+        Error::TempDirNotFound | Error::TempDirNotOnSameMountPoint => (
+            "temporary_directory",
+            "could not prepare a temporary directory",
+        ),
+        Error::AuthenticationFailed => (
+            "authentication",
+            "installer authentication failed or was cancelled",
+        ),
+        Error::DebInstallFailed => ("deb_install_failed", "dpkg could not install the update"),
+        Error::Io(_) => ("io", "the update installer encountered an I/O error"),
+        Error::Minisign(_)
+        | Error::Base64(_)
+        | Error::SignatureUtf8(_)
+        | Error::SignedVersionMismatch { .. }
+        | Error::MissingSignedVersion => download_failure(error),
+        _ => ("install_failed", "updater could not install the package"),
+    }
+}
+
+#[cfg(windows)]
+fn install_windows(
+    app: &AppHandle,
+    ready: &ReadyUpdate,
+    restart: bool,
+) -> tauri_plugin_updater::Result<()> {
+    // The plugin exits directly after handing off to MSI. Normal quit already
+    // drained the Chats. Restart now must do the same here.
+    if restart {
+        crate::chat_commands::shutdown(app);
+    }
+    let result = ready
+        .offer
+        .clone()
+        .restart_after_install(restart)
+        .install(&ready.bytes);
+    if restart && result.is_err() {
+        crate::chat_commands::cancel_shutdown(app);
+    }
+    result
 }
 
 #[cfg(target_os = "linux")]
@@ -557,7 +677,62 @@ fn install_package(ready: &ReadyUpdate) -> tauri_plugin_updater::Result<()> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn install_package(ready: &ReadyUpdate) -> tauri_plugin_updater::Result<()> {
     ready.offer.install(&ready.bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quitting_installs_only_an_already_verified_update_on_unattended_platforms() {
+        for platform in ["macos", "windows"] {
+            assert!(should_install_on_quit(platform, true));
+            assert!(!should_install_on_quit(platform, false));
+        }
+        assert!(!should_install_on_quit("linux", true));
+    }
+
+    #[test]
+    fn a_ready_version_remains_visible_until_the_replacement_is_verified() {
+        let update = |version: &str| UpdateInfo {
+            version: version.into(),
+            release_url: format!("{RELEASES}/tag/v{version}"),
+            upgrades_workspace: false,
+        };
+        let mut phase = Phase::Ready {
+            update: update("0.2.0"),
+        };
+        phase.report(Phase::Downloading {
+            update: update("0.3.0"),
+        });
+        assert_eq!(phase.notice().unwrap().version, "0.2.0");
+        phase.report(Phase::DownloadFailed {
+            update: update("0.3.0"),
+            error: "The update signature could not be verified.",
+            verification_failed: true,
+        });
+        assert!(matches!(&phase, Phase::Ready { update } if update.version == "0.2.0"));
+        phase.report(Phase::UpToDate { checked_at: 1 });
+        assert_eq!(phase.notice().unwrap().version, "0.2.0");
+        phase.report(Phase::Ready {
+            update: update("0.3.0"),
+        });
+        assert_eq!(phase.notice().unwrap().version, "0.3.0");
+    }
+
+    #[test]
+    fn builds_without_an_embedded_key_skip_scheduled_and_manual_checks() {
+        for key in [None, Some(""), Some("  ")] {
+            let phase = Phase::for_public_key(key);
+            assert!(!phase.may_check(true, false));
+            assert!(!phase.may_check(true, true));
+        }
+        let phase = Phase::for_public_key(Some("embedded public key"));
+        assert!(phase.may_check(true, false));
+        assert!(!phase.may_check(false, false));
+        assert!(phase.may_check(false, true));
+    }
 }

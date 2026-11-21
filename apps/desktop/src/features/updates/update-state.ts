@@ -9,6 +9,7 @@ export const initialUpdateState: UpdateSnapshot = {
   revision: -1,
   automatic: true,
   dismissed: false,
+  install_on_quit: false,
   status: "idle",
 };
 

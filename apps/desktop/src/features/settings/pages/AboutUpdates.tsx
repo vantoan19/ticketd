@@ -46,6 +46,9 @@ export function AboutUpdates() {
   let checking = false;
   let releaseLink: { label: string; url: string } | undefined;
   switch (state.status) {
+    case "unavailable":
+      description = "This build can’t update itself.";
+      break;
     case "checking":
       description = "Checking for updates…";
       checkLabel = "Checking…";
@@ -80,8 +83,9 @@ export function AboutUpdates() {
       break;
     case "ready":
       title = `ticketd ${state.update.version} is ready`;
-      description =
-        "Downloaded and checked. It installs when ticketd restarts.";
+      description = state.install_on_quit
+        ? "Downloaded and checked. It installs when ticketd restarts."
+        : "Downloaded and checked. It installs when you choose Restart to update.";
       releaseLink = { label: "What’s new", url: state.update.release_url };
       break;
   }
@@ -129,7 +133,8 @@ export function AboutUpdates() {
                   Restart to update
                 </Button>
               ) : (
-                state.status !== "manual_install" && (
+                state.status !== "manual_install" &&
+                state.status !== "unavailable" && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -145,29 +150,31 @@ export function AboutUpdates() {
             </>
           }
         />
-        <SettingsRow
-          title={
-            <label htmlFor={switchId}>Check for updates automatically</label>
-          }
-          description="Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent."
-          descriptionId={descriptionId}
-          trailing={
-            <Switch
-              id={switchId}
-              aria-describedby={descriptionId}
-              checked={state.automatic}
-              disabled={saving}
-              onCheckedChange={async (enabled) => {
-                if (!updates) return;
-                setSaving(true);
-                await act("save automatic update checks", () =>
-                  updates.setAutomatic(enabled),
-                );
-                setSaving(false);
-              }}
-            />
-          }
-        />
+        {state.status !== "unavailable" && (
+          <SettingsRow
+            title={
+              <label htmlFor={switchId}>Check for updates automatically</label>
+            }
+            description="Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent."
+            descriptionId={descriptionId}
+            trailing={
+              <Switch
+                id={switchId}
+                aria-describedby={descriptionId}
+                checked={state.automatic}
+                disabled={saving}
+                onCheckedChange={async (enabled) => {
+                  if (!updates) return;
+                  setSaving(true);
+                  await act("save automatic update checks", () =>
+                    updates.setAutomatic(enabled),
+                  );
+                  setSaving(false);
+                }}
+              />
+            }
+          />
+        )}
       </SettingsList>
       {failure && <FailureAlert size="compact" failure={failure} />}
     </SettingsSection>

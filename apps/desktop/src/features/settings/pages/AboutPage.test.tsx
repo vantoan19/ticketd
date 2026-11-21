@@ -75,6 +75,7 @@ test("a verified update asks before stopping work and upgrading the workspace", 
           revision: 1,
           automatic: true,
           dismissed: true,
+          install_on_quit: true,
           status: "ready",
           update: {
             version: "0.2.0",

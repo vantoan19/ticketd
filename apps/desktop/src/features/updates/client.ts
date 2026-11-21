@@ -17,8 +17,10 @@ const snapshot = lazySchema(() =>
       revision: z.number().int().nonnegative(),
       automatic: z.boolean(),
       dismissed: z.boolean(),
+      install_on_quit: z.boolean(),
     }),
     z.discriminatedUnion("status", [
+      z.object({ status: z.literal("unavailable") }),
       z.object({ status: z.literal("idle") }),
       z.object({ status: z.literal("checking") }),
       z.object({ status: z.literal("up_to_date"), checked_at: z.number() }),

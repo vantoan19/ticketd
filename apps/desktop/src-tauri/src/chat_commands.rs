@@ -839,6 +839,25 @@ fn show_tray(app: &AppHandle, overview: &Overview) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Stop app-owned execution before exit or a Windows installer handoff.
+/// Unconfirmed work is reconciled at the next start.
+pub fn shutdown(app: &AppHandle) {
+    if let Some(bridge) = app.try_state::<ChatBridge>() {
+        let chats = bridge.chats.clone();
+        tauri::async_runtime::block_on(async move {
+            let _ = tokio::time::timeout(QUIT_TIMEOUT, chats.quit()).await;
+        });
+    }
+}
+
+#[cfg(windows)]
+pub fn cancel_shutdown(app: &AppHandle) {
+    app.state::<ChatBridge>().chats.cancel_quit();
+    crate::wake::CHANGED.notify();
+    // The updater can hide the window just before the installer fails to launch.
+    show_window(app);
+}
+
 /// Handles the application events that decide whether Chats keep running.
 pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
     // On Linux the event loop delivers events before `setup` manages the bridge.
@@ -896,14 +915,6 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
         }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => show_window(app),
-        // Explicit Quit: stop app-owned execution before the process ends. What cannot
-        // be confirmed in time is recorded as lost contact when ticketd next starts.
-        RunEvent::Exit => {
-            let chats = bridge.chats.clone();
-            tauri::async_runtime::block_on(async move {
-                let _ = tokio::time::timeout(QUIT_TIMEOUT, chats.quit()).await;
-            });
-        }
         _ => {}
     }
 }

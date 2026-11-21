@@ -26,10 +26,13 @@ updated with it. The CLI never contacts the network on its own.
   and cancels an in-flight check or download. **Check for updates** remains
   available for a one-time check and download. A check is one anonymous HTTPS
   request to GitHub. It sends nothing that identifies the person or the workspace.
+  Builds without an updater public key skip checks.
 - **What it does.** A newer release is downloaded and verified in the background.
   The status line then shows "ticketd X is ready · Restart to update · What's new";
-  What's new opens the release page. Restart to update opens the confirmation
-  prompt. ticketd applies the update when the person confirms the restart.
+  What's new opens the release page. ticketd never restarts on its own. On macOS
+  and Windows, if the person quits with a verified update ready, the update
+  installs during quit and takes effect at the next restart. On Linux, choose
+  Restart to update to authorize installation through the system prompt.
 - **Restart.** Before restarting, the prompt names running work ("2 Chats are
   running; restarting stops them"). An Automation run that a restart interrupts is
   marked as needing attention at the next start, as any interrupted run already is.

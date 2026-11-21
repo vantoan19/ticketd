@@ -1674,6 +1674,9 @@ fn holds_exit(code: Option<i32>, window_open: bool) -> bool {
 /// Quits the way closing the window does, so every way out is guarded alike.
 fn request_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
+    if updates::install_in_progress(app) {
+        return;
+    }
     // Working Chats are asked about first; the answer comes back through here.
     if chat_commands::confirms_quit(app) {
         return;
@@ -2148,16 +2151,21 @@ pub fn run() -> Result<(), tauri::Error> {
             let logs = app
                 .try_state::<Logs>()
                 .and_then(|logs| logs.0.lock().ok()?.take());
-            chat_commands::on_run_event(app, &event);
+            chat_commands::shutdown(app);
+            updates::install_on_quit(app);
             drop(logs);
             return;
         }
-        if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
-            && holds_exit(*code, app.get_webview_window("main").is_some())
-        {
-            api.prevent_exit();
-            request_quit(app);
-            return;
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
+            if *code != Some(tauri::RESTART_EXIT_CODE) && updates::install_in_progress(app) {
+                api.prevent_exit();
+                return;
+            }
+            if holds_exit(*code, app.get_webview_window("main").is_some()) {
+                api.prevent_exit();
+                request_quit(app);
+                return;
+            }
         }
         chat_commands::on_run_event(app, &event);
     });

@@ -1086,6 +1086,13 @@ impl Chats {
         }
     }
 
+    #[cfg(windows)]
+    pub fn cancel_quit(&self) {
+        if let Some(host) = self.started_host() {
+            host.cancel_quit();
+        }
+    }
+
     /// Moves when any Chat may have changed; `None` until the host has started.
     pub fn changed(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
         self.started_host().map(|host| host.changed())
