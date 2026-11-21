@@ -146,7 +146,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Status",
     description:
-      "The ticketd executable that you, your scripts and your coding agents call.",
+      "Agents and terminals run ticketd by name to read and write the same workspace as this app.",
     keywords:
       "command-line tool path terminal install cli check again executable",
     section: "command-line",
