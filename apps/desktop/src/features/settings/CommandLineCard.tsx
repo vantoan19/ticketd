@@ -1,20 +1,34 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
-import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
+import { CircleCheck, ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { CommandBlock } from "@/components/ui/command-block";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PathText } from "@/components/ui/path-text";
 import type { StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { Step, Steps } from "@/components/ui/steps";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { workspaceClient } from "@/lib/api/workspace";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { cliClient, type CliStatus } from "@/lib/api/cli";
+import {
+  cliClient,
+  type CliInstallation,
+  type CliStatus,
+  type OlderCli,
+} from "@/lib/api/cli";
+import { homeRelative } from "@/lib/paths";
 import {
   SettingsList,
   SettingsListFooter,
@@ -124,9 +138,11 @@ function StatusTile() {
 function StatusRows({
   check,
   onGuideFailure,
+  installAction,
 }: {
   check: Check;
   onGuideFailure: (failure: Failure | null) => void;
+  installAction?: ReactNode;
 }) {
   if (check.phase === "checking")
     return (
@@ -161,6 +177,21 @@ function StatusRows({
       />
     );
   const { status } = check;
+  if (installAction)
+    return (
+      <SettingsRow
+        leading={<StatusTile />}
+        title={
+          status.bundled?.needs_repair
+            ? "The command-line tool’s link is broken"
+            : status.on_path
+              ? "Use the bundled command-line tool"
+              : "The command-line tool isn’t installed"
+        }
+        description="Install the copy inside this app. It updates with the app, so its version always matches."
+        trailing={installAction}
+      />
+    );
   if (!status.found)
     return (
       <>
@@ -286,12 +317,24 @@ export function CommandLineCard({
   onChecked?: () => void;
 }) {
   const { openPage } = useSettingsState();
+  const statusLine = useStatusLine();
   const [check, setCheck] = useState<Check>({ phase: "checking" });
   const [checking, setChecking] = useState(true);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
-  const load = () => {
-    void cliClient.check().then(
+  const [installing, setInstalling] = useState(false);
+  const [installation, setInstallation] = useState<CliInstallation | null>(
+    null,
+  );
+  const [installFailure, setInstallFailure] =
+    useState<FailureDescription | null>(null);
+  const [keptCopy, setKeptCopy] = useState<OlderCli | null>(null);
+  const [confirmRemoval, setConfirmRemoval] = useState<OlderCli | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removalFailure, setRemovalFailure] =
+    useState<FailureDescription | null>(null);
+  const load = (refreshPath = false) => {
+    void cliClient.check(refreshPath).then(
       (status) => {
         setCheck({ phase: "done", status });
         setChecking(false);
@@ -318,8 +361,55 @@ export function CommandLineCard({
   const run = () => {
     setChecking(true);
     setFailure(null);
-    load();
+    load(true);
   };
+  const install = async () => {
+    setInstalling(true);
+    setInstallFailure(null);
+    try {
+      const installed = await cliClient.install();
+      setInstallation(installed);
+      statusLine.show({
+        message:
+          installed.next_step === "restart_terminals"
+            ? "Added ticketd to your PATH"
+            : `Installed ticketd in ${homeRelative(installed.directory)}`,
+        icon: <CircleCheck />,
+      });
+      run();
+    } catch (reason) {
+      setInstallFailure(
+        describeFailure(reason, "install the command-line tool"),
+      );
+    } finally {
+      setInstalling(false);
+    }
+  };
+  const removeOlder = async (older: OlderCli) => {
+    setRemoving(true);
+    setRemovalFailure(null);
+    try {
+      await cliClient.removeOlder(older);
+      setConfirmRemoval(null);
+      run();
+    } catch (reason) {
+      setRemovalFailure(
+        describeFailure(reason, "remove the older command-line tool"),
+      );
+    } finally {
+      setRemoving(false);
+    }
+  };
+  const bundled = check.phase === "done" ? check.status.bundled : undefined;
+  const older = bundled?.older;
+  const showOlder =
+    older &&
+    (keptCopy?.path !== older.path || keptCopy.version !== older.version);
+  const offerInstallation =
+    bundled &&
+    bundled.platform !== "linux" &&
+    !bundled.installed &&
+    !installation;
   return (
     <>
       <SettingsSection
@@ -329,7 +419,7 @@ export function CommandLineCard({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={checking}
+            disabled={checking || installing || removing}
             onClick={run}
           >
             <RefreshCw aria-hidden="true" />
@@ -338,29 +428,48 @@ export function CommandLineCard({
         }
       >
         <div className="cli-status-slot" aria-busy={checking}>
-          <SettingsList className="cli-status-reserve" aria-hidden="true">
-            <StatusRows
-              check={{ phase: "checking" }}
-              onGuideFailure={() => {}}
-            />
-          </SettingsList>
+          {!bundled && (
+            <SettingsList className="cli-status-reserve" aria-hidden="true">
+              <StatusRows
+                check={{ phase: "checking" }}
+                onGuideFailure={() => {}}
+              />
+            </SettingsList>
+          )}
           <SettingsList className="cli-status-content" aria-live="polite">
             {check.phase === "checking" && (
               <span className="sr-only" role="status">
                 Checking for the command-line tool
               </span>
             )}
-            <StatusRows check={check} onGuideFailure={setGuideFailure} />
+            <StatusRows
+              check={check}
+              onGuideFailure={setGuideFailure}
+              installAction={
+                offerInstallation && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={installing || checking}
+                    onClick={() => void install()}
+                  >
+                    {installing ? "Installing…" : "Install command-line tool"}
+                  </Button>
+                )
+              }
+            />
           </SettingsList>
         </div>
         <div className="cli-check-feedback">
-          <div className="cli-check-feedback-reserve" aria-hidden="true">
-            <FailureAlert
-              size="compact"
-              failure={CHECK_FAILURE}
-              onRetry={() => {}}
-            />
-          </div>
+          {!bundled && (
+            <div className="cli-check-feedback-reserve" aria-hidden="true">
+              <FailureAlert
+                size="compact"
+                failure={CHECK_FAILURE}
+                onRetry={() => {}}
+              />
+            </div>
+          )}
           {failure && (
             <FailureAlert size="compact" failure={failure} onRetry={run} />
           )}
@@ -373,7 +482,88 @@ export function CommandLineCard({
             onRetry={guideFailure.retry}
           />
         )}
+        {installFailure && (
+          <FailureAlert
+            size="compact"
+            className="mt-3"
+            failure={installFailure}
+            onRetry={() => void install()}
+          />
+        )}
+        {check.phase === "done" && showOlder && (
+          <Alert tone="attention" role="status" className="mt-3">
+            <AlertTitle>An older ticketd comes first on your PATH</AlertTitle>
+            <AlertDescription>
+              ticketd {older.version} at{" "}
+              <PathText path={older.path} layout="inline" /> would still run
+              instead of this app’s {check.status.app_version}. Remove it so
+              agents get the matching version.
+            </AlertDescription>
+            <AlertActions>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={checking || installing}
+                onClick={() => {
+                  setRemovalFailure(null);
+                  setConfirmRemoval(older);
+                }}
+              >
+                Remove it
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setKeptCopy(older)}
+              >
+                Keep it
+              </Button>
+            </AlertActions>
+          </Alert>
+        )}
+        {bundled?.platform === "macos" &&
+          offerInstallation &&
+          !installation && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              On macOS, installing asks for your password once to add a link in{" "}
+              <code className={mono}>/usr/local/bin</code>. If you skip it,
+              ticketd uses <code className={mono}>~/.local/bin</code> instead.
+            </p>
+          )}
+        {installation?.next_step === "add_to_path" && (
+          <p className="mt-3 text-xs text-muted-foreground" role="status">
+            Add ~/.local/bin to your PATH, then open a new terminal.
+          </p>
+        )}
+        {installation?.next_step === "restart_terminals" && (
+          <p className="mt-3 text-xs text-muted-foreground" role="status">
+            Restart terminals and agents so they pick up the updated PATH.
+          </p>
+        )}
       </SettingsSection>
+      <DialogShell
+        open={confirmRemoval !== null}
+        onOpenChange={(open) => !open && setConfirmRemoval(null)}
+        title="Remove the older ticketd?"
+        description="This removes the executable or link at this path."
+        size="sm"
+        primaryLabel="Remove"
+        primaryVariant="destructive"
+        blockedReason={removing ? "Removing…" : null}
+        busy={removing}
+        error={
+          removalFailure && (
+            <FailureAlert size="compact" failure={removalFailure} />
+          )
+        }
+        onSubmit={() => confirmRemoval && void removeOlder(confirmRemoval)}
+      >
+        {confirmRemoval && (
+          <PathText path={confirmRemoval.path} layout="inline" />
+        )}
+      </DialogShell>
       <SettingsSection
         title="Quick reference for agents"
         caption="Copy a command, then replace the words in color with your own values."

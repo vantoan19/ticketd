@@ -1983,6 +1983,8 @@ pub fn run() -> Result<(), tauri::Error> {
             set_plan_purpose,
             set_plan,
             cli_status::check_cli,
+            cli_status::install_cli,
+            cli_status::remove_older_cli,
             agent_skills::agent_skills,
             agent_skills::install_agent_skill,
             list_projects,
