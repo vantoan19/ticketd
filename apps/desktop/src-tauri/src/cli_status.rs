@@ -153,7 +153,7 @@ pub async fn remove_older_cli(app: tauri::AppHandle, older: OlderCli) -> Result<
                         .into(),
                 );
             }
-            fs::remove_file(&older.path).map_err(|error| {
+            remove_cli(&older.path).map_err(|error| {
                 format!(
                     "Couldn't remove {}: {error}",
                     ticketd_diagnostics::display_path(&older.path)
@@ -163,6 +163,66 @@ pub async fn remove_older_cli(app: tauri::AppHandle, older: OlderCli) -> Result<
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Removes an older CLI. On macOS, one in a folder only an administrator can
+/// change (such as `/usr/local/bin`) is removed after the system's password prompt.
+fn remove_cli(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        #[cfg(target_os = "macos")]
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            if remove_as_admin(path)? {
+                Ok(())
+            } else {
+                Err(io::Error::other("the password prompt was cancelled"))
+            }
+        }
+        result => result,
+    }
+}
+
+/// Removes `$1` only if it is still the file identified as `$2` (device:inode)
+/// when it was checked, not one put in its place since.
+#[cfg(target_os = "macos")]
+const REMOVE_IF_SAME: &str = r#"[ "$(/usr/bin/stat -f %d:%i "$1")" = "$2" ] && /bin/rm -- "$1""#;
+
+#[cfg(target_os = "macos")]
+fn remove_as_admin(path: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::symlink_metadata(path)?;
+    let identity = format!("{}:{}", metadata.dev(), metadata.ino());
+    run_as_admin(REMOVE_IF_SAME, &[path.as_os_str(), identity.as_ref()])
+        .map_err(|error| io::Error::other(format!("the administrator removal failed: {error}")))
+}
+
+/// Runs `script` with `sh` after the system's administrator prompt. `Ok(false)`
+/// when the person cancels the prompt.
+#[cfg(target_os = "macos")]
+fn run_as_admin(script: &str, args: &[&std::ffi::OsStr]) -> io::Result<bool> {
+    const APPLESCRIPT: &str = r#"on run args
+    set commandLine to "/bin/sh -c " & quoted form of (item 1 of args) & " ticketd"
+    repeat with argument in items 2 thru -1 of args
+        set commandLine to commandLine & " " & quoted form of (contents of argument)
+    end repeat
+    try
+        do shell script commandLine with administrator privileges
+        return "done"
+    on error messageText number errorCode
+        if errorCode is -128 then return "declined"
+        error messageText number errorCode
+    end try
+end run"#;
+    let output = std::process::Command::new("/usr/bin/osascript")
+        .args(["-e", APPLESCRIPT, "--", script])
+        .args(args)
+        .output()?;
+    match (output.status.success(), output.stdout.as_slice()) {
+        (true, b"done\n") => Ok(true),
+        (true, b"declined\n") => Ok(false),
+        _ => Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        )),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -268,19 +328,6 @@ fn existing_cli(link: &Path) -> io::Error {
 
 #[cfg(target_os = "macos")]
 fn make_admin_link(bundled: &Path, link: &Path, previous: Option<&Path>) -> io::Result<bool> {
-    const SCRIPT: &str = r#"on run args
-    set commandLine to "/bin/sh -c " & quoted form of (item 1 of args) & " ticketd"
-    repeat with argument in items 2 thru 4 of args
-        set commandLine to commandLine & " " & quoted form of (contents of argument)
-    end repeat
-    try
-        do shell script commandLine with administrator privileges
-        return "linked"
-    on error messageText number errorCode
-        if errorCode is -128 then return "declined"
-        error messageText number errorCode
-    end try
-end run"#;
     const LINK: &str = r#"
         /bin/mkdir -p /usr/local/bin || exit
         if [ -n "$3" ]; then
@@ -289,20 +336,12 @@ end run"#;
         fi
         [ ! -e "$2" ] && [ ! -L "$2" ] && /bin/ln -sh "$1" "$2"
     "#;
-    let output = std::process::Command::new("/usr/bin/osascript")
-        .args(["-e", SCRIPT, "--", LINK])
-        .arg(bundled)
-        .arg(link)
-        .arg(previous.unwrap_or_else(|| Path::new("")))
-        .output()?;
-    match (output.status.success(), output.stdout.as_slice()) {
-        (true, b"linked\n") => Ok(true),
-        (true, b"declined\n") => Ok(false),
-        _ => Err(io::Error::other(format!(
-            "Could not create the system CLI link: {}",
-            String::from_utf8_lossy(&output.stderr).trim(),
-        ))),
-    }
+    let previous = previous.unwrap_or_else(|| Path::new(""));
+    run_as_admin(
+        LINK,
+        &[bundled.as_os_str(), link.as_os_str(), previous.as_os_str()],
+    )
+    .map_err(|error| io::Error::other(format!("Could not create the system CLI link: {error}")))
 }
 
 #[cfg(windows)]
@@ -348,6 +387,30 @@ fn install(_bundled: &Path) -> io::Result<CliInstallation> {
 #[cfg(all(target_os = "macos", test))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_admin_removal_only_removes_the_file_that_was_checked() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tempfile::tempdir().unwrap();
+        let older = root.path().join("ticketd");
+        fs::write(&older, "older").unwrap();
+        let metadata = fs::symlink_metadata(&older).unwrap();
+        let checked = format!("{}:{}", metadata.dev(), metadata.ino());
+        let remove = |identity: &str| {
+            std::process::Command::new("/bin/sh")
+                .args(["-c", REMOVE_IF_SAME, "ticketd"])
+                .arg(&older)
+                .arg(identity)
+                .status()
+                .unwrap()
+                .success()
+        };
+
+        assert!(!remove("0:0"));
+        assert!(older.exists());
+        assert!(remove(&checked));
+        assert!(!older.exists());
+    }
 
     #[test]
     fn declining_admin_links_in_user_bin_and_the_link_follows_an_app_update() {

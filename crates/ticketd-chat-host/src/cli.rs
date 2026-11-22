@@ -323,21 +323,33 @@ fn process_then_login_path() -> Vec<PathBuf> {
     ])
 }
 
+/// The last terminal PATH an explicit recheck read, so later checks see it too.
+static TERMINAL_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+fn remember_terminal_path(path: &str) {
+    if let Ok(mut latest) = TERMINAL_PATH.lock() {
+        *latest = Some(path.to_string());
+    }
+}
+
 #[cfg(not(windows))]
 fn cached_terminal_path() -> Option<String> {
-    login_shell_variable("PATH").map(str::to_string)
+    TERMINAL_PATH
+        .lock()
+        .ok()
+        .and_then(|latest| latest.clone())
+        .or_else(|| login_shell_variable("PATH").map(str::to_string))
 }
 
 #[cfg(not(windows))]
 fn read_terminal_path() -> Option<String> {
-    ask_login_shell()
+    let path = ask_login_shell()
         .into_iter()
         .find(|(name, _)| *name == "PATH")
-        .map(|(_, path)| path)
+        .map(|(_, path)| path)?;
+    remember_terminal_path(&path);
+    Some(path)
 }
-
-#[cfg(windows)]
-static TERMINAL_PATH: Mutex<Option<String>> = Mutex::new(None);
 
 #[cfg(windows)]
 fn cached_terminal_path() -> Option<String> {
@@ -362,9 +374,7 @@ $user = [Microsoft.Win32.Registry]::GetValue('HKEY_CURRENT_USER\Environment', 'P
 [Console]::Write((@($machine, $user) -join ';'))",
     ]);
     let path = run_with_timeout(command, RUN_TIMEOUT)?;
-    if let Ok(mut latest) = TERMINAL_PATH.lock() {
-        *latest = Some(path.clone());
-    }
+    remember_terminal_path(&path);
     Some(path)
 }
 
@@ -374,7 +384,12 @@ fn terminal_search_path(
     cached: impl FnOnce() -> Option<String>,
     fresh: impl FnOnce() -> Option<String>,
 ) -> Vec<PathBuf> {
-    let terminal_path = if refresh_path { fresh() } else { cached() };
+    // A failed refresh keeps the last PATH that was read successfully.
+    let terminal_path = if refresh_path {
+        fresh().or_else(cached)
+    } else {
+        cached()
+    };
     path_directories(&[terminal_path.as_deref().map_or(process_path, OsStr::new)])
 }
 
@@ -473,8 +488,19 @@ mod tests {
         );
         assert_eq!(
             terminal_search_path(launch_path, true, cached, || None),
+            [PathBuf::from("cached-bin")],
+            "a failed refresh keeps the last PATH that was read"
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, true, || None, || None),
             [PathBuf::from("launch-bin")]
         );
+    }
+
+    #[test]
+    fn a_refreshed_terminal_path_is_what_later_checks_use() {
+        remember_terminal_path("installed-bin");
+        assert_eq!(cached_terminal_path().as_deref(), Some("installed-bin"));
     }
 
     #[test]

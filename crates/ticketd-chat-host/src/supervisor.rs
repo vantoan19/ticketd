@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ticketd_core::{
     Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
@@ -201,8 +202,13 @@ struct TextBuffer {
     saved: usize,
 }
 
+/// Numbers supervisors in the order they start; see `Board::report`.
+static NEXT_SUPERVISOR: AtomicU64 = AtomicU64::new(1);
+
 pub(crate) struct Supervisor {
     chat_id: String,
+    /// This supervisor's number on the board.
+    number: u64,
     /// The Chat's span, for work spawned on its behalf (opening the Harness), so the Harness's
     /// stderr lines are correlated with the Chat and do not hold a Turn's span open.
     span: tracing::Span,
@@ -308,6 +314,7 @@ impl Supervisor {
         let supervisor = Self {
             span: span.clone(),
             chat_id: chat.id.clone(),
+            number: NEXT_SUPERVISOR.fetch_add(1, Ordering::Relaxed),
             open_workspace,
             adapter,
             context,
@@ -372,7 +379,7 @@ impl Supervisor {
                         self.shutting_down = true;
                         let unconfirmed = self.stop_runtime(why).await;
                         self.publish();
-                        self.board.report(&self.chat_id, None);
+                        self.board.report(&self.chat_id, self.number, None);
                         let _ = reply.send(unconfirmed);
                         return;
                     }
@@ -383,7 +390,7 @@ impl Supervisor {
                     None => {
                         self.shutting_down = true;
                         self.stop_runtime(StopReason::Quit).await;
-                        self.board.report(&self.chat_id, None);
+                        self.board.report(&self.chat_id, self.number, None);
                         return;
                     }
                 },
@@ -2276,7 +2283,8 @@ impl Supervisor {
     fn publish(&mut self) {
         // Reading the changes moves nothing live state is built from: built once.
         let live = self.live();
-        self.board.report(&self.chat_id, Some(live.clone()));
+        self.board
+            .report(&self.chat_id, self.number, Some(live.clone()));
         self.subscribers.retain(Publisher::open);
         if self.subscribers.is_empty() {
             return;
