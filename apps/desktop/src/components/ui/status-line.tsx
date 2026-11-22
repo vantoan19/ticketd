@@ -1,4 +1,5 @@
 import {
+  use,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -46,7 +47,23 @@ export function StatusLineRegion({
   notice?: StatusLineMessage | undefined;
 }) {
   const [outcome, setShown] = useState<Shown | null>(null);
-  const shown = outcome ?? (notice && { ...notice, id: 0 });
+  // Nested regions that are showing a line: their outcome replaces this
+  // region's notice, as this region's own outcome does.
+  const [claims, setClaims] = useState(0);
+  const shown =
+    outcome ?? (claims === 0 && notice ? { ...notice, id: 0 } : null);
+  const parent = use(StatusLineContext);
+  const showing = shown !== null;
+  useEffect(() => (showing ? parent?.claim() : undefined), [parent, showing]);
+  const claim = useCallback(() => {
+    setClaims((count) => count + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      setClaims((count) => count - 1);
+    };
+  }, []);
   const [inset, setInset] = useState(0);
   const counter = useRef(0);
   const anchor = useRef<HTMLSpanElement>(null);
@@ -62,7 +79,10 @@ export function StatusLineRegion({
       setShown((current) => (current?.id === id ? null : current)),
     [],
   );
-  const region = useMemo(() => ({ show, dismiss, setInset }), [show, dismiss]);
+  const region = useMemo(
+    () => ({ show, dismiss, setInset, claim }),
+    [show, dismiss, claim],
+  );
   return (
     <StatusLineContext value={region}>
       {children}

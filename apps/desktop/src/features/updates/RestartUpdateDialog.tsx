@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
@@ -42,6 +42,7 @@ export function RestartUpdateDialog({
     typeof describeFailure
   > | null>(null);
   const [installing, setInstalling] = useState(false);
+  const submitted = useRef(false);
   useEffect(() => {
     let active = true;
     void updateClient.restartDetails(update.version).then(
@@ -58,6 +59,10 @@ export function RestartUpdateDialog({
   }, [update.version]);
 
   const install = async () => {
+    // The Linux admin prompt can stay open; a second click must not start
+    // another install or reset the dialog while the first one runs.
+    if (submitted.current) return;
+    submitted.current = true;
     setInstalling(true);
     setFailure(null);
     try {
@@ -66,6 +71,7 @@ export function RestartUpdateDialog({
     } catch (reason) {
       setFailure(describeFailure(reason, "install the update"));
       setInstalling(false);
+      submitted.current = false;
     }
   };
 
@@ -83,11 +89,13 @@ export function RestartUpdateDialog({
       initialFocus="cancel"
       showClose={false}
       blockedReason={
-        work
-          ? null
-          : failure
-            ? "Close and try again."
-            : "Checking for running work…"
+        installing
+          ? "Installing the update…"
+          : work
+            ? null
+            : failure
+              ? "Close and try again."
+              : "Checking for running work…"
       }
       busy={installing}
       onSubmit={() => void install()}

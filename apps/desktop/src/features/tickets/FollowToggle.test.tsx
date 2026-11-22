@@ -102,6 +102,7 @@ test("a failed Follow on one Ticket does not hide or replace what another Ticket
     show: (message: StatusLineMessage) => void shown.push(message),
     dismiss: () => {},
     setInset: () => {},
+    claim: () => () => {},
   };
   const signal = fakeChangeSignal();
   const view = (reference: string) => (

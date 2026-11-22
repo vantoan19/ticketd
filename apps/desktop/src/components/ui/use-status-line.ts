@@ -39,6 +39,11 @@ export type StatusLine = {
 export type StatusLineRegionValue = StatusLine & {
   /** Space kept free at the bottom of the pane (the bulk bar), in px. */
   setInset: (px: number) => void;
+  /**
+   * A nested region showing a line hides this region's persistent notice
+   * until the returned release is called, so one line occupies the spot.
+   */
+  claim: () => () => void;
 };
 
 export const StatusLineContext = createContext<StatusLineRegionValue | null>(
