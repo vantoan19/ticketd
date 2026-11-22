@@ -36,10 +36,11 @@ updated with it. The CLI never contacts the network on its own.
 - **Restart.** Before restarting, the prompt names running work ("2 Chats are
   running; restarting stops them"). An Automation run that a restart interrupts is
   marked as needing attention at the next start, as any interrupted run already is.
-- **Workspace format.** A release that raises the workspace format (a minor release
-  under [versioning](../releasing.md#versioning)) says so in the prompt before
-  restarting: older ticketd versions, on other Sync devices or as a standalone CLI,
-  will refuse the workspace afterwards. The migration takes its backup as usual
+- **Workspace format.** An update whose workspace format is newer than the
+  installed app's says so in the prompt before restarting, including when an
+  earlier release it skips raised the format (a minor release under
+  [versioning](../releasing.md#versioning)): older ticketd versions, on other Sync
+  devices or as a standalone CLI, will refuse the workspace afterwards. The migration takes its backup as usual
   ([ADR 0014](0014-the-migration-ladder-defines-the-workspace-format.md)).
 - **Platforms.** macOS replaces the `.app` from the signed `.app.tar.gz`. Windows
   runs the signed MSI. Linux installs the signed `.deb` through the system's admin
