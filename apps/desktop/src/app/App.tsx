@@ -50,7 +50,7 @@ import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { UpdatesProvider } from "@/features/updates/UpdatesProvider";
 import { useUpdateNotice } from "@/features/updates/update-state";
-import { StatusLineRegion } from "@/components/ui/status-line";
+import { StatusLineRegion, StatusLineSpot } from "@/components/ui/status-line";
 import { NewPlanDialog } from "@/features/plans/NewPlanDialog";
 import {
   useCallback,
@@ -881,639 +881,660 @@ function AppContent() {
                     onOpenPage={setSettingsSection}
                   >
                     <SidebarProvider open={!sidebarCollapsed}>
-                      <a
-                        className="skip-link"
-                        href="#main-content"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          document.getElementById("main-content")?.focus();
-                        }}
-                      >
-                        Skip to content
-                      </a>
-                      <WindowBar />
-                      <StatusLineRegion
-                        host={{ current: contentPanel }}
-                        notice={updateNotice}
-                      >
-                        <PageZoomStatus zoom={pageZoom} />
-                        <NewPlanDialog
-                          open={creatingPlan}
-                          onOpenChange={setCreatingPlan}
-                          refresh={refresh}
-                          onCreated={(id) => scope("all", "all", id)}
-                        />
-                        {paletteMounted && (
-                          <CommandPalette
-                            pageZoom={pageZoom}
-                            inboxCommands={
-                              view === "inbox" && inboxSelection
-                                ? (() => {
-                                    const entry =
-                                      inboxSelection.kind === "entry"
-                                        ? inboxSelection.entry
-                                        : null;
-                                    const chat =
-                                      inboxSelection.kind === "approval"
-                                        ? inboxSelection.chat
-                                        : null;
-                                    const reference =
-                                      entry?.reference ??
-                                      chat?.tickets[0]?.reference ??
-                                      chat?.first_ticket;
-                                    const ticketReason =
-                                      editingBlockedReason(workspaceProblem) ??
-                                      (!reference
-                                        ? "This Chat has no linked Ticket."
-                                        : null);
-                                    const blocked =
-                                      editingBlockedReason(workspaceProblem);
-                                    const activeTicket = reference
-                                      ? inboxTicket
-                                      : undefined;
-                                    const ticketActionReason =
-                                      ticketReason ??
-                                      ticketUnavailable(
-                                        reference ? inboxRecord : undefined,
-                                      );
-                                    // A reminder is the person's own, so Trash does not block it.
-                                    const reminderActionReason =
-                                      ticketReason ??
-                                      ticketUnavailable(
-                                        reference ? inboxRecord : undefined,
-                                        { allowTrashed: true },
-                                      );
-                                    const isReview =
-                                      entry?.kind === "status" &&
-                                      entry.to_value === "In review";
-                                    const primaryReason = isReview
-                                      ? (ticketActionReason ??
-                                        (activeTicket?.status !== "In review"
-                                          ? "This review is already resolved."
-                                          : activeTicket.source?.ownership ===
-                                                "external" &&
-                                              (activeTicket.source
-                                                .status_locked ||
-                                                !activeTicket.source.status_choices.includes(
-                                                  "Done",
-                                                ))
-                                            ? "The source does not allow moving this Ticket to Done."
-                                            : null))
-                                      : entry?.kind === "reminder"
-                                        ? reminderActionReason
-                                        : blocked;
-                                    const primaryLabel = chat
-                                      ? "Review in Chat"
-                                      : entry?.kind === "reminder"
-                                        ? "Clear reminder"
-                                        : entry?.kind === "status" &&
-                                            entry.to_value === "In review"
-                                          ? "Move to Done"
-                                          : "Mark read";
-                                    return [
-                                      {
-                                        id: "inbox-primary" as const,
-                                        label: primaryLabel,
-                                        disabledReason: chat
-                                          ? null
-                                          : primaryReason,
-                                        run: () =>
-                                          requestInboxAction("primary"),
-                                      },
-                                      {
-                                        id: "inbox-reply" as const,
-                                        label: "Reply on this Ticket",
-                                        disabledReason: ticketActionReason,
-                                        run: () => requestInboxAction("reply"),
-                                      },
-                                      {
-                                        id: "inbox-remind" as const,
-                                        label:
-                                          entry?.kind === "reminder"
-                                            ? "Snooze reminder"
-                                            : "Remind me on this Ticket",
-                                        disabledReason: reminderActionReason,
-                                        run: () => requestInboxAction("remind"),
-                                      },
-                                      {
-                                        id: "inbox-read" as const,
-                                        label: "Toggle Inbox read state",
-                                        disabledReason: blocked,
-                                        run: () => requestInboxAction("read"),
-                                      },
-                                      {
-                                        id: "inbox-next" as const,
-                                        label: "Next Inbox entry",
-                                        disabledReason: null,
-                                        run: () => requestInboxAction("next"),
-                                      },
-                                      {
-                                        id: "inbox-previous" as const,
-                                        label: "Previous Inbox entry",
-                                        disabledReason: null,
-                                        run: () =>
-                                          requestInboxAction("previous"),
-                                      },
-                                    ];
-                                  })()
-                                : null
-                            }
-                            writeUpdate={
-                              view === "tickets" &&
-                              workspace.selected === paletteReference &&
-                              editingBlockedReason(workspaceProblem) === null
-                                ? openTicketUpdate
-                                : null
-                            }
-                            memoryTickets={workspace.tickets}
-                            readyCount={counts?.ready ?? null}
-                            automationCount={counts?.runs_needing_you ?? null}
-                            {...{
-                              attachmentCommands:
-                                view === "attachments" && graphOrigin === null
-                                  ? attachmentCommands
-                                  : null,
-                              documentCommands:
-                                view === "documents" && graphOrigin === null
-                                  ? documentCommands
-                                  : null,
-                            }}
-                            currentPlan={navigation.plan || null}
-                            workspaceGraphActive={
-                              graphOrigin === "__workspace__"
-                            }
-                            createDisabledReason={createDisabledReason}
-                            create={(kind) => {
-                              if (editingBlockedReason(workspaceProblem))
-                                return;
-                              if (kind === "ticket") {
-                                createTriggerRef.current =
-                                  paletteReturn.current instanceof
-                                  HTMLButtonElement
-                                    ? paletteReturn.current
-                                    : null;
-                                setCreateStatus(undefined);
-                                setCreating(true);
-                              } else if (kind === "plan") {
-                                setCreatingPlan(true);
-                              } else if (kind === "capture")
-                                openCapture(paletteReturn.current);
-                              else {
-                                setNewChatRequest((count) => count + 1);
-                                openView("chats");
-                              }
-                            }}
-                            initialTicket={
-                              paletteTicket ??
-                              workspace.tickets.find(
-                                (ticket) =>
-                                  ticket.reference === paletteReference,
-                              ) ??
-                              null
-                            }
-                            reference={paletteReference}
-                            initialScope={paletteScope}
-                            projects={projects}
-                            plans={plans}
-                            refresh={reportChange}
-                            open={paletteOpen}
-                            returnFocus={paletteReturn}
-                            resolveReturnFocus={resolvePaletteFocus}
-                            onOpenChange={setPaletteOpen}
-                            go={goTo}
-                            chatsEnabled={chat.enabled}
-                            workspaceNotice={
-                              deferredWorkspaceLabel
-                                ? {
-                                    label: "Review workspace notice",
-                                    run: showWorkspaceNotice,
-                                  }
-                                : null
-                            }
-                            ticket={(reference) => {
-                              setSelected(reference);
-                              setView("tickets");
-                            }}
-                          />
-                        )}
-                      </StatusLineRegion>
-                      <div
-                        ref={workspaceRoot}
-                        className={
-                          view === "settings"
-                            ? "workspace settings-open"
-                            : "workspace"
-                        }
-                      >
-                        {view === "settings" ? (
-                          <SettingsNav
-                            resolveReturnFocus={resolveSettingsFocus}
-                            selected={settingsSection}
-                            onSelect={setSettingsSection}
-                            origin={VIEW_NAMES[viewBeforeSettings]}
-                            onBack={() => {
-                              returnToSettingsEntry.current = true;
-                              setView(viewBeforeSettings);
-                            }}
-                          />
-                        ) : (
-                          <WorkspaceSidebar
-                            onOpenPalette={(origin) =>
-                              openPalette(null, origin)
-                            }
-                            createDisabledReason={createDisabledReason}
-                            counts={counts}
-                            hasTickets={
-                              workspace.tickets.length > 0 ||
-                              (counts?.total ?? 0) > 0
-                            }
-                            view={view}
-                            workspaceGraphOpen={graphOrigin === "__workspace__"}
-                            setView={openView}
-                            projects={projects}
-                            plans={plans}
-                            scope={(...args) => {
-                              // A sidebar view always shows its list, not an open graph.
-                              navigate({});
-                              scope(...args);
-                            }}
-                            navigation={navigation}
-                            onError={workspace.setError}
-                            setCreating={(value) => {
-                              if (value) setCreateStatus(undefined);
-                              setCreating(value);
-                            }}
-                            createTriggerRef={createTriggerRef}
-                          />
-                        )}
-                        <main
-                          id="main-content"
-                          tabIndex={-1}
-                          className="content-panel"
-                          ref={setContentPanel}
+                      <StatusLineSpot>
+                        <a
+                          className="skip-link"
+                          href="#main-content"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            document.getElementById("main-content")?.focus();
+                          }}
                         >
-                          <OverlayBoundary element={contentPanel}>
-                            <BandSlot open={bandReserved}>
-                              {workspaceBand}
-                            </BandSlot>
-                            {deferredWorkspaceLabel && (
-                              <span role="status" className="sr-only">
-                                {deferredWorkspaceLabel}
-                              </span>
-                            )}
-                            {/* Views without a pane of their own post here. */}
-                            <StatusLineRegion>
-                              <ShellSlotProvider
-                                notice={
-                                  deferredWorkspaceLabel ? (
-                                    <WorkspaceNotice
-                                      label={deferredWorkspaceLabel}
-                                    >
-                                      {workspaceBand}
-                                    </WorkspaceNotice>
-                                  ) : null
+                          Skip to content
+                        </a>
+                        <WindowBar />
+                        <StatusLineRegion
+                          host={{ current: contentPanel }}
+                          notice={updateNotice}
+                        >
+                          <PageZoomStatus zoom={pageZoom} />
+                          <NewPlanDialog
+                            open={creatingPlan}
+                            onOpenChange={setCreatingPlan}
+                            refresh={refresh}
+                            onCreated={(id) => scope("all", "all", id)}
+                          />
+                          {paletteMounted && (
+                            <CommandPalette
+                              pageZoom={pageZoom}
+                              inboxCommands={
+                                view === "inbox" && inboxSelection
+                                  ? (() => {
+                                      const entry =
+                                        inboxSelection.kind === "entry"
+                                          ? inboxSelection.entry
+                                          : null;
+                                      const chat =
+                                        inboxSelection.kind === "approval"
+                                          ? inboxSelection.chat
+                                          : null;
+                                      const reference =
+                                        entry?.reference ??
+                                        chat?.tickets[0]?.reference ??
+                                        chat?.first_ticket;
+                                      const ticketReason =
+                                        editingBlockedReason(
+                                          workspaceProblem,
+                                        ) ??
+                                        (!reference
+                                          ? "This Chat has no linked Ticket."
+                                          : null);
+                                      const blocked =
+                                        editingBlockedReason(workspaceProblem);
+                                      const activeTicket = reference
+                                        ? inboxTicket
+                                        : undefined;
+                                      const ticketActionReason =
+                                        ticketReason ??
+                                        ticketUnavailable(
+                                          reference ? inboxRecord : undefined,
+                                        );
+                                      // A reminder is the person's own, so Trash does not block it.
+                                      const reminderActionReason =
+                                        ticketReason ??
+                                        ticketUnavailable(
+                                          reference ? inboxRecord : undefined,
+                                          { allowTrashed: true },
+                                        );
+                                      const isReview =
+                                        entry?.kind === "status" &&
+                                        entry.to_value === "In review";
+                                      const primaryReason = isReview
+                                        ? (ticketActionReason ??
+                                          (activeTicket?.status !== "In review"
+                                            ? "This review is already resolved."
+                                            : activeTicket.source?.ownership ===
+                                                  "external" &&
+                                                (activeTicket.source
+                                                  .status_locked ||
+                                                  !activeTicket.source.status_choices.includes(
+                                                    "Done",
+                                                  ))
+                                              ? "The source does not allow moving this Ticket to Done."
+                                              : null))
+                                        : entry?.kind === "reminder"
+                                          ? reminderActionReason
+                                          : blocked;
+                                      const primaryLabel = chat
+                                        ? "Review in Chat"
+                                        : entry?.kind === "reminder"
+                                          ? "Clear reminder"
+                                          : entry?.kind === "status" &&
+                                              entry.to_value === "In review"
+                                            ? "Move to Done"
+                                            : "Mark read";
+                                      return [
+                                        {
+                                          id: "inbox-primary" as const,
+                                          label: primaryLabel,
+                                          disabledReason: chat
+                                            ? null
+                                            : primaryReason,
+                                          run: () =>
+                                            requestInboxAction("primary"),
+                                        },
+                                        {
+                                          id: "inbox-reply" as const,
+                                          label: "Reply on this Ticket",
+                                          disabledReason: ticketActionReason,
+                                          run: () =>
+                                            requestInboxAction("reply"),
+                                        },
+                                        {
+                                          id: "inbox-remind" as const,
+                                          label:
+                                            entry?.kind === "reminder"
+                                              ? "Snooze reminder"
+                                              : "Remind me on this Ticket",
+                                          disabledReason: reminderActionReason,
+                                          run: () =>
+                                            requestInboxAction("remind"),
+                                        },
+                                        {
+                                          id: "inbox-read" as const,
+                                          label: "Toggle Inbox read state",
+                                          disabledReason: blocked,
+                                          run: () => requestInboxAction("read"),
+                                        },
+                                        {
+                                          id: "inbox-next" as const,
+                                          label: "Next Inbox entry",
+                                          disabledReason: null,
+                                          run: () => requestInboxAction("next"),
+                                        },
+                                        {
+                                          id: "inbox-previous" as const,
+                                          label: "Previous Inbox entry",
+                                          disabledReason: null,
+                                          run: () =>
+                                            requestInboxAction("previous"),
+                                        },
+                                      ];
+                                    })()
+                                  : null
+                              }
+                              writeUpdate={
+                                view === "tickets" &&
+                                workspace.selected === paletteReference &&
+                                editingBlockedReason(workspaceProblem) === null
+                                  ? openTicketUpdate
+                                  : null
+                              }
+                              memoryTickets={workspace.tickets}
+                              readyCount={counts?.ready ?? null}
+                              automationCount={counts?.runs_needing_you ?? null}
+                              {...{
+                                attachmentCommands:
+                                  view === "attachments" && graphOrigin === null
+                                    ? attachmentCommands
+                                    : null,
+                                documentCommands:
+                                  view === "documents" && graphOrigin === null
+                                    ? documentCommands
+                                    : null,
+                              }}
+                              currentPlan={navigation.plan || null}
+                              workspaceGraphActive={
+                                graphOrigin === "__workspace__"
+                              }
+                              createDisabledReason={createDisabledReason}
+                              create={(kind) => {
+                                if (editingBlockedReason(workspaceProblem))
+                                  return;
+                                if (kind === "ticket") {
+                                  createTriggerRef.current =
+                                    paletteReturn.current instanceof
+                                    HTMLButtonElement
+                                      ? paletteReturn.current
+                                      : null;
+                                  setCreateStatus(undefined);
+                                  setCreating(true);
+                                } else if (kind === "plan") {
+                                  setCreatingPlan(true);
+                                } else if (kind === "capture")
+                                  openCapture(paletteReturn.current);
+                                else {
+                                  setNewChatRequest((count) => count + 1);
+                                  openView("chats");
                                 }
-                                nav={
-                                  isMobile &&
-                                  view !== "settings" && (
-                                    <NarrowNav
-                                      onOpenPalette={(origin) =>
-                                        openPalette(null, origin)
-                                      }
-                                      waitingChats={chat.overview.needs_you}
-                                      waitingRuns={
-                                        chat.enabled
-                                          ? (counts?.runs_needing_you ?? 0)
-                                          : 0
-                                      }
-                                      unreadInbox={counts?.unread_inbox ?? 0}
-                                    />
-                                  )
-                                }
-                                crumb={
-                                  (workspaceGraphOpen || localGraphOrigin) &&
-                                  graphOrigin === null && (
-                                    <ReturnCrumb
-                                      origin={
-                                        localGraphOrigin
-                                          ? "Graph"
-                                          : "Workspace graph"
-                                      }
-                                      label={
-                                        localGraphOrigin
-                                          ? "Back to graph"
-                                          : "Back to workspace graph"
-                                      }
-                                      onReturn={() =>
-                                        setGraphOrigin(
-                                          localGraphOrigin ?? "__workspace__",
-                                        )
-                                      }
-                                    />
-                                  )
-                                }
-                              >
-                                {error && (
-                                  // A local preference could not be saved: a failure
-                                  // on the status line, until dismissed or a later
-                                  // save works; a list load never clears it.
-                                  <PreferenceFailure
-                                    message={error}
-                                    onDismiss={() => workspace.setError("")}
-                                  />
-                                )}
-                                <CreateTicketDialog
-                                  key={`new-ticket:${recoveryGeneration}`}
-                                  open={creating}
-                                  onOpenChange={setCreating}
-                                  triggerRef={createTriggerRef}
-                                  navigation={navigation}
-                                  {...(createStatus && {
-                                    initialStatus: createStatus,
-                                  })}
-                                  projects={projects}
-                                  plans={plans}
-                                  create={createTicket}
-                                />
-                                <ViewRegion
-                                  page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : firstRunPending ? "pending" : ""}`}
-                                >
-                                  {view === "settings" &&
-                                    graphOrigin === null && (
-                                      <SettingsView
-                                        selected={settingsSection}
-                                        onSelect={setSettingsSection}
-                                        onOpenInbox={() => setView("inbox")}
-                                        onRestore={replaceWorkspace}
+                              }}
+                              initialTicket={
+                                paletteTicket ??
+                                workspace.tickets.find(
+                                  (ticket) =>
+                                    ticket.reference === paletteReference,
+                                ) ??
+                                null
+                              }
+                              reference={paletteReference}
+                              initialScope={paletteScope}
+                              projects={projects}
+                              plans={plans}
+                              refresh={reportChange}
+                              open={paletteOpen}
+                              returnFocus={paletteReturn}
+                              resolveReturnFocus={resolvePaletteFocus}
+                              onOpenChange={setPaletteOpen}
+                              go={goTo}
+                              chatsEnabled={chat.enabled}
+                              workspaceNotice={
+                                deferredWorkspaceLabel
+                                  ? {
+                                      label: "Review workspace notice",
+                                      run: showWorkspaceNotice,
+                                    }
+                                  : null
+                              }
+                              ticket={(reference) => {
+                                setSelected(reference);
+                                setView("tickets");
+                              }}
+                            />
+                          )}
+                        </StatusLineRegion>
+                        <div
+                          ref={workspaceRoot}
+                          className={
+                            view === "settings"
+                              ? "workspace settings-open"
+                              : "workspace"
+                          }
+                        >
+                          {view === "settings" ? (
+                            <SettingsNav
+                              resolveReturnFocus={resolveSettingsFocus}
+                              selected={settingsSection}
+                              onSelect={setSettingsSection}
+                              origin={VIEW_NAMES[viewBeforeSettings]}
+                              onBack={() => {
+                                returnToSettingsEntry.current = true;
+                                setView(viewBeforeSettings);
+                              }}
+                            />
+                          ) : (
+                            <WorkspaceSidebar
+                              onOpenPalette={(origin) =>
+                                openPalette(null, origin)
+                              }
+                              createDisabledReason={createDisabledReason}
+                              counts={counts}
+                              hasTickets={
+                                workspace.tickets.length > 0 ||
+                                (counts?.total ?? 0) > 0
+                              }
+                              view={view}
+                              workspaceGraphOpen={
+                                graphOrigin === "__workspace__"
+                              }
+                              setView={openView}
+                              projects={projects}
+                              plans={plans}
+                              scope={(...args) => {
+                                // A sidebar view always shows its list, not an open graph.
+                                navigate({});
+                                scope(...args);
+                              }}
+                              navigation={navigation}
+                              onError={workspace.setError}
+                              setCreating={(value) => {
+                                if (value) setCreateStatus(undefined);
+                                setCreating(value);
+                              }}
+                              createTriggerRef={createTriggerRef}
+                            />
+                          )}
+                          <main
+                            id="main-content"
+                            tabIndex={-1}
+                            className="content-panel"
+                            ref={setContentPanel}
+                          >
+                            <OverlayBoundary element={contentPanel}>
+                              <BandSlot open={bandReserved}>
+                                {workspaceBand}
+                              </BandSlot>
+                              {deferredWorkspaceLabel && (
+                                <span role="status" className="sr-only">
+                                  {deferredWorkspaceLabel}
+                                </span>
+                              )}
+                              {/* Views without a pane of their own post here. */}
+                              <StatusLineRegion>
+                                <ShellSlotProvider
+                                  notice={
+                                    deferredWorkspaceLabel ? (
+                                      <WorkspaceNotice
+                                        label={deferredWorkspaceLabel}
+                                      >
+                                        {workspaceBand}
+                                      </WorkspaceNotice>
+                                    ) : null
+                                  }
+                                  nav={
+                                    isMobile &&
+                                    view !== "settings" && (
+                                      <NarrowNav
+                                        onOpenPalette={(origin) =>
+                                          openPalette(null, origin)
+                                        }
+                                        waitingChats={chat.overview.needs_you}
+                                        waitingRuns={
+                                          chat.enabled
+                                            ? (counts?.runs_needing_you ?? 0)
+                                            : 0
+                                        }
+                                        unreadInbox={counts?.unread_inbox ?? 0}
                                       />
-                                    )}
-                                  {view === "attachments" &&
+                                    )
+                                  }
+                                  crumb={
+                                    (workspaceGraphOpen || localGraphOrigin) &&
                                     graphOrigin === null && (
-                                      <AttachmentLibrary
-                                        onCommandsChange={setAttachmentCommands}
-                                      />
-                                    )}
-                                  {projectsMounted && (
-                                    <div
-                                      className="management-host"
-                                      hidden={
-                                        view !== "projects" ||
-                                        graphOrigin !== null
-                                      }
-                                    >
-                                      <Projects
-                                        projects={projects}
-                                        loading={loading}
-                                        onChange={refresh}
-                                        onOpenTickets={(item) => {
-                                          navigate({});
-                                          scope("all", item.id);
-                                        }}
-                                        onShowUnassigned={() => {
-                                          navigate({});
-                                          scope("all", "unlinked");
-                                        }}
-                                      />
-                                    </div>
-                                  )}
-                                  {(view === "plans" ||
-                                    view === "archived-plans") &&
-                                    graphOrigin === null && (
-                                      <PlanList
-                                        plans={plans}
-                                        known={workspace.plansKnown}
-                                        failure={workspace.plansFailure}
-                                        retry={workspace.refreshPlans}
-                                        projects={projects}
-                                        onTicket={(reference) => {
-                                          setSelected(reference);
-                                          setView("tickets");
-                                        }}
-                                        archived={view === "archived-plans"}
-                                        onOpen={(id) => scope("all", "all", id)}
-                                        onArchivedChange={(archived) =>
-                                          setView(
-                                            archived
-                                              ? "archived-plans"
-                                              : "plans",
+                                      <ReturnCrumb
+                                        origin={
+                                          localGraphOrigin
+                                            ? "Graph"
+                                            : "Workspace graph"
+                                        }
+                                        label={
+                                          localGraphOrigin
+                                            ? "Back to graph"
+                                            : "Back to workspace graph"
+                                        }
+                                        onReturn={() =>
+                                          setGraphOrigin(
+                                            localGraphOrigin ?? "__workspace__",
                                           )
                                         }
-                                        refresh={refresh}
                                       />
-                                    )}
-                                  {documentsMounted && (
-                                    <div
-                                      className="context-view-wrapper"
-                                      hidden={
-                                        view !== "documents" ||
-                                        graphOrigin !== null
-                                      }
-                                    >
-                                      <Documents
-                                        onCommandsChange={setDocumentCommands}
-                                        key={`documents:${recoveryGeneration}`}
-                                        active={view === "documents"}
-                                        listRequest={documentListRequest}
-                                        target={documentTarget}
-                                        backLabel={
-                                          (documentReturn &&
-                                            documentReturnLabel) ||
-                                          "Back to Documents"
-                                        }
-                                        capture={capture}
-                                        onCapture={() => openCapture()}
-                                        currentTicket={
-                                          view === "tickets"
-                                            ? workspace.selected
-                                            : null
-                                        }
-                                        onOpenPlan={(id) => {
-                                          // Leaving through a link ends the return trip.
-                                          setDocumentReturn(null);
-                                          scope("all", "all", id);
-                                          setView("tickets");
-                                        }}
-                                        onOpenTicket={(reference) => {
-                                          setDocumentReturn(null);
-                                          setSelected(reference);
-                                          setView("tickets");
-                                        }}
-                                        onDocumentClose={() => {
-                                          if (documentReturn) {
-                                            setView(documentReturn);
-                                            setDocumentReturn(null);
+                                    )
+                                  }
+                                >
+                                  {error && (
+                                    // A local preference could not be saved: a failure
+                                    // on the status line, until dismissed or a later
+                                    // save works; a list load never clears it.
+                                    <PreferenceFailure
+                                      message={error}
+                                      onDismiss={() => workspace.setError("")}
+                                    />
+                                  )}
+                                  <CreateTicketDialog
+                                    key={`new-ticket:${recoveryGeneration}`}
+                                    open={creating}
+                                    onOpenChange={setCreating}
+                                    triggerRef={createTriggerRef}
+                                    navigation={navigation}
+                                    {...(createStatus && {
+                                      initialStatus: createStatus,
+                                    })}
+                                    projects={projects}
+                                    plans={plans}
+                                    create={createTicket}
+                                  />
+                                  <ViewRegion
+                                    page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : firstRunPending ? "pending" : ""}`}
+                                  >
+                                    {view === "settings" &&
+                                      graphOrigin === null && (
+                                        <SettingsView
+                                          selected={settingsSection}
+                                          onSelect={setSettingsSection}
+                                          onOpenInbox={() => setView("inbox")}
+                                          onRestore={replaceWorkspace}
+                                        />
+                                      )}
+                                    {view === "attachments" &&
+                                      graphOrigin === null && (
+                                        <AttachmentLibrary
+                                          onCommandsChange={
+                                            setAttachmentCommands
                                           }
-                                        }}
-                                        onCaptureClose={closeCapture}
-                                      />
-                                    </div>
-                                  )}
-                                  {workspaceGraphMounted && (
-                                    <div
-                                      className="context-view-wrapper"
-                                      hidden={graphOrigin !== "__workspace__"}
-                                    >
-                                      <WorkspaceGraph
-                                        projects={projects}
-                                        planId={workspaceGraphPlan}
-                                        active={graphOrigin === "__workspace__"}
-                                        revision={revision}
-                                        onBack={() => {
-                                          setGraphOrigin(null);
-                                          setWorkspaceGraphOpen(false);
-                                        }}
-                                        onFocus={(id) => {
-                                          // From the workspace: all connections.
-                                          setGraphDependencies(false);
-                                          setLocalGraphOrigin(id);
-                                          setGraphOrigin(id);
-                                        }}
-                                        onOpen={openGraphItem}
-                                      />
-                                    </div>
-                                  )}
-                                  {localGraphOrigin && (
-                                    <div
-                                      className="context-view-wrapper"
-                                      hidden={graphOrigin !== localGraphOrigin}
-                                    >
-                                      <ContextGraph
-                                        key={`${localGraphOrigin}:${graphDependencies}`}
-                                        active={
-                                          graphOrigin === localGraphOrigin
+                                        />
+                                      )}
+                                    {projectsMounted && (
+                                      <div
+                                        className="management-host"
+                                        hidden={
+                                          view !== "projects" ||
+                                          graphOrigin !== null
                                         }
-                                        origin={localGraphOrigin}
-                                        dependencies={graphDependencies}
-                                        revision={revision}
-                                        projects={projects}
-                                        plans={plans}
-                                        {...(workspaceGraphOpen && {
-                                          originLabel: "Workspace graph",
-                                        })}
-                                        onBack={(origin) => {
-                                          setLocalGraphOrigin(null);
-                                          if (workspaceGraphOpen)
-                                            setGraphOrigin("__workspace__");
-                                          else if (origin)
-                                            openGraphItem(origin);
-                                          else setGraphOrigin(null);
-                                        }}
-                                        onOpen={openGraphItem}
-                                        onOpenTicket={(reference) => {
-                                          keepGraph.current = true;
-                                          try {
-                                            setGraphOrigin(null);
+                                      >
+                                        <Projects
+                                          projects={projects}
+                                          loading={loading}
+                                          onChange={refresh}
+                                          onOpenTickets={(item) => {
+                                            navigate({});
+                                            scope("all", item.id);
+                                          }}
+                                          onShowUnassigned={() => {
+                                            navigate({});
+                                            scope("all", "unlinked");
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+                                    {(view === "plans" ||
+                                      view === "archived-plans") &&
+                                      graphOrigin === null && (
+                                        <PlanList
+                                          plans={plans}
+                                          known={workspace.plansKnown}
+                                          failure={workspace.plansFailure}
+                                          retry={workspace.refreshPlans}
+                                          projects={projects}
+                                          onTicket={(reference) => {
                                             setSelected(reference);
                                             setView("tickets");
-                                          } finally {
-                                            keepGraph.current = false;
+                                          }}
+                                          archived={view === "archived-plans"}
+                                          onOpen={(id) =>
+                                            scope("all", "all", id)
                                           }
-                                        }}
-                                      />
-                                    </div>
-                                  )}
-                                  {chat.enabled && chatsMounted && (
-                                    <div
-                                      className="context-view-wrapper"
-                                      hidden={
-                                        view !== "chats" || graphOrigin !== null
-                                      }
-                                    >
-                                      <ChatsView
-                                        newChatRequest={newChatRequest}
-                                      />
-                                    </div>
-                                  )}
-                                  {chat.enabled && view === "automations" && (
-                                    <div
-                                      className="context-view-wrapper"
-                                      hidden={graphOrigin !== null}
-                                    >
-                                      <AutomationsView
-                                        openRun={runTarget}
-                                        onRunOpened={() => setRunTarget(null)}
-                                      />
-                                    </div>
-                                  )}
-                                  <TicketCommandContext.Provider
-                                    value={(scope, reference) => {
-                                      paletteReturn.current =
-                                        document.activeElement instanceof
-                                        HTMLElement
-                                          ? document.activeElement
-                                          : null;
-                                      setPaletteReference(reference);
-                                      setPaletteScope(scope);
-                                      setPaletteOpen(true);
-                                    }}
-                                  >
-                                    {guideShown && (
-                                      <FirstRunGuide
-                                        disabledReason={createDisabledReason}
-                                        onCreate={(trigger) => {
-                                          createTriggerRef.current = trigger;
-                                          setCreateStatus(undefined);
-                                          setCreating(true);
-                                        }}
-                                      />
-                                    )}
-                                    <TicketListSync value={patchTicket}>
-                                      <InboxTriageProvider
-                                        active={view === "inbox"}
-                                        onSelectionChange={setInboxSelection}
+                                          onArchivedChange={(archived) =>
+                                            setView(
+                                              archived
+                                                ? "archived-plans"
+                                                : "plans",
+                                            )
+                                          }
+                                          refresh={refresh}
+                                        />
+                                      )}
+                                    {documentsMounted && (
+                                      <div
+                                        className="context-view-wrapper"
+                                        hidden={
+                                          view !== "documents" ||
+                                          graphOrigin !== null
+                                        }
                                       >
-                                        <TicketWorkspaceView
-                                          key={`tickets:${recoveryGeneration}`}
-                                          workspace={workspace}
-                                          bulk={bulk}
-                                          hidden={
-                                            ((firstRun || firstRunPending) &&
-                                              view === "tickets") ||
-                                            (view !== "tickets" &&
-                                              view !== "inbox") ||
-                                            graphOrigin !== null
+                                        <Documents
+                                          onCommandsChange={setDocumentCommands}
+                                          key={`documents:${recoveryGeneration}`}
+                                          active={view === "documents"}
+                                          listRequest={documentListRequest}
+                                          target={documentTarget}
+                                          backLabel={
+                                            (documentReturn &&
+                                              documentReturnLabel) ||
+                                            "Back to Documents"
                                           }
-                                          inboxTarget={inboxTarget}
-                                          // The Inbox is a triage split: entries open
-                                          // beside it, without leaving the view (S6).
-                                          {...(view === "inbox" && {
-                                            inbox: (
-                                              <Inbox
-                                                revision={revision}
-                                                selected={workspace.selected}
-                                                onBrowse={() =>
-                                                  setView("tickets")
-                                                }
-                                                select={(reference, noteId) => {
-                                                  setInboxTarget(
-                                                    noteId && reference
-                                                      ? {
-                                                          reference,
-                                                          id: noteId,
-                                                          key: Date.now(),
-                                                        }
-                                                      : null,
-                                                  );
-                                                  setSelected(reference);
-                                                }}
-                                              />
-                                            ),
+                                          capture={capture}
+                                          onCapture={() => openCapture()}
+                                          currentTicket={
+                                            view === "tickets"
+                                              ? workspace.selected
+                                              : null
+                                          }
+                                          onOpenPlan={(id) => {
+                                            // Leaving through a link ends the return trip.
+                                            setDocumentReturn(null);
+                                            scope("all", "all", id);
+                                            setView("tickets");
+                                          }}
+                                          onOpenTicket={(reference) => {
+                                            setDocumentReturn(null);
+                                            setSelected(reference);
+                                            setView("tickets");
+                                          }}
+                                          onDocumentClose={() => {
+                                            if (documentReturn) {
+                                              setView(documentReturn);
+                                              setDocumentReturn(null);
+                                            }
+                                          }}
+                                          onCaptureClose={closeCapture}
+                                        />
+                                      </div>
+                                    )}
+                                    {workspaceGraphMounted && (
+                                      <div
+                                        className="context-view-wrapper"
+                                        hidden={graphOrigin !== "__workspace__"}
+                                      >
+                                        <WorkspaceGraph
+                                          projects={projects}
+                                          planId={workspaceGraphPlan}
+                                          active={
+                                            graphOrigin === "__workspace__"
+                                          }
+                                          revision={revision}
+                                          onBack={() => {
+                                            setGraphOrigin(null);
+                                            setWorkspaceGraphOpen(false);
+                                          }}
+                                          onFocus={(id) => {
+                                            // From the workspace: all connections.
+                                            setGraphDependencies(false);
+                                            setLocalGraphOrigin(id);
+                                            setGraphOrigin(id);
+                                          }}
+                                          onOpen={openGraphItem}
+                                        />
+                                      </div>
+                                    )}
+                                    {localGraphOrigin && (
+                                      <div
+                                        className="context-view-wrapper"
+                                        hidden={
+                                          graphOrigin !== localGraphOrigin
+                                        }
+                                      >
+                                        <ContextGraph
+                                          key={`${localGraphOrigin}:${graphDependencies}`}
+                                          active={
+                                            graphOrigin === localGraphOrigin
+                                          }
+                                          origin={localGraphOrigin}
+                                          dependencies={graphDependencies}
+                                          revision={revision}
+                                          projects={projects}
+                                          plans={plans}
+                                          {...(workspaceGraphOpen && {
+                                            originLabel: "Workspace graph",
                                           })}
-                                          onCreate={(trigger, status) => {
+                                          onBack={(origin) => {
+                                            setLocalGraphOrigin(null);
+                                            if (workspaceGraphOpen)
+                                              setGraphOrigin("__workspace__");
+                                            else if (origin)
+                                              openGraphItem(origin);
+                                            else setGraphOrigin(null);
+                                          }}
+                                          onOpen={openGraphItem}
+                                          onOpenTicket={(reference) => {
+                                            keepGraph.current = true;
+                                            try {
+                                              setGraphOrigin(null);
+                                              setSelected(reference);
+                                              setView("tickets");
+                                            } finally {
+                                              keepGraph.current = false;
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+                                    {chat.enabled && chatsMounted && (
+                                      <div
+                                        className="context-view-wrapper"
+                                        hidden={
+                                          view !== "chats" ||
+                                          graphOrigin !== null
+                                        }
+                                      >
+                                        <ChatsView
+                                          newChatRequest={newChatRequest}
+                                        />
+                                      </div>
+                                    )}
+                                    {chat.enabled && view === "automations" && (
+                                      <div
+                                        className="context-view-wrapper"
+                                        hidden={graphOrigin !== null}
+                                      >
+                                        <AutomationsView
+                                          openRun={runTarget}
+                                          onRunOpened={() => setRunTarget(null)}
+                                        />
+                                      </div>
+                                    )}
+                                    <TicketCommandContext.Provider
+                                      value={(scope, reference) => {
+                                        paletteReturn.current =
+                                          document.activeElement instanceof
+                                          HTMLElement
+                                            ? document.activeElement
+                                            : null;
+                                        setPaletteReference(reference);
+                                        setPaletteScope(scope);
+                                        setPaletteOpen(true);
+                                      }}
+                                    >
+                                      {guideShown && (
+                                        <FirstRunGuide
+                                          disabledReason={createDisabledReason}
+                                          onCreate={(trigger) => {
                                             createTriggerRef.current = trigger;
-                                            setCreateStatus(status);
+                                            setCreateStatus(undefined);
                                             setCreating(true);
                                           }}
                                         />
-                                      </InboxTriageProvider>
-                                    </TicketListSync>
-                                  </TicketCommandContext.Provider>
-                                </ViewRegion>
-                              </ShellSlotProvider>
-                            </StatusLineRegion>
-                          </OverlayBoundary>
-                        </main>
-                      </div>
+                                      )}
+                                      <TicketListSync value={patchTicket}>
+                                        <InboxTriageProvider
+                                          active={view === "inbox"}
+                                          onSelectionChange={setInboxSelection}
+                                        >
+                                          <TicketWorkspaceView
+                                            key={`tickets:${recoveryGeneration}`}
+                                            workspace={workspace}
+                                            bulk={bulk}
+                                            hidden={
+                                              ((firstRun || firstRunPending) &&
+                                                view === "tickets") ||
+                                              (view !== "tickets" &&
+                                                view !== "inbox") ||
+                                              graphOrigin !== null
+                                            }
+                                            inboxTarget={inboxTarget}
+                                            // The Inbox is a triage split: entries open
+                                            // beside it, without leaving the view (S6).
+                                            {...(view === "inbox" && {
+                                              inbox: (
+                                                <Inbox
+                                                  revision={revision}
+                                                  selected={workspace.selected}
+                                                  onBrowse={() =>
+                                                    setView("tickets")
+                                                  }
+                                                  select={(
+                                                    reference,
+                                                    noteId,
+                                                  ) => {
+                                                    setInboxTarget(
+                                                      noteId && reference
+                                                        ? {
+                                                            reference,
+                                                            id: noteId,
+                                                            key: Date.now(),
+                                                          }
+                                                        : null,
+                                                    );
+                                                    setSelected(reference);
+                                                  }}
+                                                />
+                                              ),
+                                            })}
+                                            onCreate={(trigger, status) => {
+                                              createTriggerRef.current =
+                                                trigger;
+                                              setCreateStatus(status);
+                                              setCreating(true);
+                                            }}
+                                          />
+                                        </InboxTriageProvider>
+                                      </TicketListSync>
+                                    </TicketCommandContext.Provider>
+                                  </ViewRegion>
+                                </ShellSlotProvider>
+                              </StatusLineRegion>
+                            </OverlayBoundary>
+                          </main>
+                        </div>
+                      </StatusLineSpot>
                     </SidebarProvider>
                   </SettingsStateProvider>
                 </SourceActivityContext.Provider>

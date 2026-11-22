@@ -83,9 +83,10 @@ export function AboutUpdates() {
       break;
     case "ready":
       title = `ticketd ${state.update.version} is ready`;
-      description = state.install_on_quit
-        ? "Downloaded and checked. It installs when ticketd restarts."
-        : "Downloaded and checked. It installs when you choose Restart to update.";
+      description =
+        state.install_on_quit && !state.update.upgrades_workspace
+          ? "Downloaded and checked. It installs when ticketd restarts."
+          : "Downloaded and checked. It installs when you choose Restart to update.";
       releaseLink = { label: "What’s new", url: state.update.release_url };
       break;
   }

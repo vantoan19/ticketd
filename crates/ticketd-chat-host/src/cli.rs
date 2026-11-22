@@ -303,7 +303,7 @@ fn fallback_directories(app_executable: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The process PATH, then the login shell's PATH, without repeats.
+/// The directories of these PATH values, in order, without repeats.
 fn path_directories(paths: &[&OsStr]) -> Vec<PathBuf> {
     let mut directories: Vec<PathBuf> = Vec::new();
     for path in paths {
@@ -314,13 +314,6 @@ fn path_directories(paths: &[&OsStr]) -> Vec<PathBuf> {
         }
     }
     directories
-}
-
-fn process_then_login_path() -> Vec<PathBuf> {
-    path_directories(&[
-        &std::env::var_os("PATH").unwrap_or_default(),
-        OsStr::new(login_shell_variable("PATH").unwrap_or_default()),
-    ])
 }
 
 /// The last terminal PATH an explicit recheck read, so later checks see it too.
@@ -393,6 +386,19 @@ fn terminal_search_path(
     path_directories(&[terminal_path.as_deref().map_or(process_path, OsStr::new)])
 }
 
+/// The directories a new terminal searches: the terminal PATH (the last one read,
+/// or a fresh read when `refresh_path`), or the app's own PATH when it can't be read.
+/// Settings, a Chat's check and a Chat's dispatch all use it, so they agree.
+fn terminal_directories(refresh_path: bool) -> Vec<PathBuf> {
+    let process_path = std::env::var_os("PATH").unwrap_or_default();
+    terminal_search_path(
+        &process_path,
+        refresh_path,
+        cached_terminal_path,
+        read_terminal_path,
+    )
+}
+
 /// Settings reports what a new terminal resolves. An explicit recheck can
 /// see a PATH edit made after the app started. The terminal PATH replaces the
 /// launch PATH when it can be read.
@@ -402,15 +408,8 @@ pub fn locate_for_terminals(
     app_workspace: Option<&Path>,
     refresh_path: bool,
 ) -> CliStatus {
-    let process_path = std::env::var_os("PATH").unwrap_or_default();
-    let paths = terminal_search_path(
-        &process_path,
-        refresh_path,
-        cached_terminal_path,
-        read_terminal_path,
-    );
     detect(
-        &paths,
+        &terminal_directories(refresh_path),
         &fallback_directories(app_executable),
         app_version,
         app_workspace,
@@ -422,7 +421,7 @@ pub fn locate_for_terminals(
 pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
     let app = std::env::current_exe().ok();
     detect(
-        &process_then_login_path(),
+        &terminal_directories(false),
         &fallback_directories(app.as_deref()),
         app_version,
         app_workspace,
@@ -433,7 +432,7 @@ pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
 /// Blocking only the first time on Unix, where it asks the login shell for its PATH.
 pub fn executable() -> Option<PathBuf> {
     let app = std::env::current_exe().ok();
-    find_executable(&process_then_login_path())
+    find_executable(&terminal_directories(false))
         .or_else(|| find_executable(&fallback_directories(app.as_deref())))
 }
 

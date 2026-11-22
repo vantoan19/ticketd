@@ -180,7 +180,7 @@ pub fn start(app: &AppHandle) {
                 revision: 0,
                 automatic: available && automatic,
                 dismissed: false,
-                install_on_quit: should_install_on_quit(std::env::consts::OS, true),
+                install_on_quit: matches!(std::env::consts::OS, "macos" | "windows"),
                 phase,
             },
             dismissed: None,
@@ -519,16 +519,27 @@ pub async fn updates_install(app: AppHandle, version: String) -> Result<(), Stri
     Ok(())
 }
 
-fn should_install_on_quit(platform: &str, has_ready_update: bool) -> bool {
-    matches!(platform, "macos" | "windows") && has_ready_update
+/// Quitting installs a ready update only where that needs no prompt, and only
+/// when it keeps the workspace format: a format change is named in the restart
+/// prompt first (ADR 0019), so it installs only from Restart to update.
+fn should_install_on_quit(platform: &str, ready: Option<&UpdateInfo>) -> bool {
+    matches!(platform, "macos" | "windows")
+        && ready.is_some_and(|update| !update.upgrades_workspace)
 }
 
 pub fn install_on_quit(app: &AppHandle) {
     let Some(updates) = app.try_state::<Updates>() else {
         return;
     };
-    let has_ready_update = updates.lock().ready.is_some();
-    if should_install_on_quit(std::env::consts::OS, has_ready_update) {
+    let install_now = {
+        let session = updates.lock();
+        let ready = match &session.snapshot.phase {
+            Phase::Ready { update } if session.ready.is_some() => Some(update),
+            _ => None,
+        };
+        should_install_on_quit(std::env::consts::OS, ready)
+    };
+    if install_now {
         // We are already exiting. The install logs any failure before shutdown continues.
         let _ = install(app, None);
     }
@@ -688,11 +699,20 @@ mod tests {
 
     #[test]
     fn quitting_installs_only_an_already_verified_update_on_unattended_platforms() {
+        let update = |upgrades_workspace| UpdateInfo {
+            version: "0.2.0".into(),
+            release_url: String::new(),
+            upgrades_workspace,
+        };
         for platform in ["macos", "windows"] {
-            assert!(should_install_on_quit(platform, true));
-            assert!(!should_install_on_quit(platform, false));
+            assert!(should_install_on_quit(platform, Some(&update(false))));
+            assert!(!should_install_on_quit(platform, None));
+            assert!(
+                !should_install_on_quit(platform, Some(&update(true))),
+                "a format change installs only after the restart prompt names it"
+            );
         }
-        assert!(!should_install_on_quit("linux", true));
+        assert!(!should_install_on_quit("linux", Some(&update(false))));
     }
 
     #[test]

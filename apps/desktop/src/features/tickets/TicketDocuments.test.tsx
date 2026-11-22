@@ -279,7 +279,6 @@ test("Undo of a removal shows the Document again even when the re-read after the
     },
     dismiss: () => {},
     setInset: () => {},
-    claim: () => () => {},
   };
   render(<StatusLineContext value={line}>{files()}</StatusLineContext>);
   fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));
@@ -312,7 +311,6 @@ test("Undo of a removal shows the Document again and keeps it when the re-read a
     },
     dismiss: () => {},
     setInset: () => {},
-    claim: () => () => {},
   };
   render(<StatusLineContext value={line}>{files()}</StatusLineContext>);
   fireEvent.click(await screen.findByRole("button", { name: "Remove Linked" }));

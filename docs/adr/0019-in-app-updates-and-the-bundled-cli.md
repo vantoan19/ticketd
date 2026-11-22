@@ -40,7 +40,9 @@ updated with it. The CLI never contacts the network on its own.
   installed app's says so in the prompt before restarting, including when an
   earlier release it skips raised the format (a minor release under
   [versioning](../releasing.md#versioning)): older ticketd versions, on other Sync
-  devices or as a standalone CLI, will refuse the workspace afterwards. The migration takes its backup as usual
+  devices or as a standalone CLI, will refuse the workspace afterwards. Such an
+  update never installs during quit; it waits for Restart to update, so the
+  person always sees this notice first. The migration takes its backup as usual
   ([ADR 0014](0014-the-migration-ladder-defines-the-workspace-format.md)).
 - **Platforms.** macOS replaces the `.app` from the signed `.app.tar.gz`. Windows
   runs the signed MSI. Linux installs the signed `.deb` through the system's admin

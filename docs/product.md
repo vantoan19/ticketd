@@ -36,7 +36,7 @@ does not schedule agents or summarize, prioritize, or decompose tickets by itsel
 
 The desktop checks GitHub for newer stable releases and verifies downloads before
 offering to install them on a restart you confirm. On macOS and Windows, a verified
-update also installs when you quit ticketd. In **Settings → About**, you
+update also installs when you quit ticketd, unless it changes the workspace format. In **Settings → About**, you
 can turn off scheduled checks or check on demand. The CLI bundled with the
 desktop updates with it. Standalone CLI copies are updated by hand.
 See [in-app updates](install.md#in-app-updates).

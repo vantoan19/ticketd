@@ -84,7 +84,8 @@ next launch. On Linux, choose **Restart to update** to install it.
 The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
 If the release raises the Workspace format version, the prompt warns you before
-installing. ticketd makes a backup before migrating the Workspace. Update any
+installing, and quitting doesn't install it: choose **Restart to update** when
+you're ready. ticketd makes a backup before migrating the Workspace. Update any
 older copies that need to open the migrated Workspace, including other Sync
 devices and standalone CLI installations.
 

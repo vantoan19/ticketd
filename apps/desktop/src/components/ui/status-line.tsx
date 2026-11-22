@@ -1,4 +1,5 @@
 import {
+  createContext,
   use,
   useCallback,
   useEffect,
@@ -28,6 +29,35 @@ import "./patterns.css";
 
 type Shown = StatusLineMessage & { id: number };
 
+type Spot = { claims: number; claim: () => () => void };
+
+const StatusLineSpotContext = createContext<Spot | null>(null);
+
+function useSpot(): Spot {
+  const [claims, setClaims] = useState(0);
+  const claim = useCallback(() => {
+    setClaims((count) => count + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      setClaims((count) => count - 1);
+    };
+  }, []);
+  return useMemo(() => ({ claims, claim }), [claims, claim]);
+}
+
+/**
+ * Status-line regions whose lines land in the same place (sibling panes in
+ * one window) take turns: an outcome in any of them hides every region's
+ * persistent notice until it closes. A region with no spot above it is its
+ * own spot for the regions nested inside it.
+ */
+export function StatusLineSpot({ children }: { children: ReactNode }) {
+  const spot = useSpot();
+  return <StatusLineSpotContext value={spot}>{children}</StatusLineSpotContext>;
+}
+
 /**
  * The pane's status line: the one transient surface (DESIGN.md section 12).
  * Wrap a pane's content in a region; the line floats 8px above the bottom
@@ -47,23 +77,20 @@ export function StatusLineRegion({
   notice?: StatusLineMessage | undefined;
 }) {
   const [outcome, setShown] = useState<Shown | null>(null);
-  // Nested regions that are showing a line: their outcome replaces this
-  // region's notice, as this region's own outcome does.
-  const [claims, setClaims] = useState(0);
+  // Every region under one spot shares the bottom-centre position: while any
+  // of them shows an outcome, a persistent notice waits (DESIGN.md section 12,
+  // a transient outcome replaces the notice), then returns.
+  const above = use(StatusLineSpotContext);
+  const own = useSpot();
+  const spot = above ?? own;
+  const { claim } = spot;
+  const showingOutcome = outcome !== null;
+  useEffect(
+    () => (showingOutcome ? claim() : undefined),
+    [claim, showingOutcome],
+  );
   const shown =
-    outcome ?? (claims === 0 && notice ? { ...notice, id: 0 } : null);
-  const parent = use(StatusLineContext);
-  const showing = shown !== null;
-  useEffect(() => (showing ? parent?.claim() : undefined), [parent, showing]);
-  const claim = useCallback(() => {
-    setClaims((count) => count + 1);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      setClaims((count) => count - 1);
-    };
-  }, []);
+    outcome ?? (notice && spot.claims === 0 ? { ...notice, id: 0 } : null);
   const [inset, setInset] = useState(0);
   const counter = useRef(0);
   const anchor = useRef<HTMLSpanElement>(null);
@@ -79,13 +106,14 @@ export function StatusLineRegion({
       setShown((current) => (current?.id === id ? null : current)),
     [],
   );
-  const region = useMemo(
-    () => ({ show, dismiss, setInset, claim }),
-    [show, dismiss, claim],
-  );
+  const region = useMemo(() => ({ show, dismiss, setInset }), [show, dismiss]);
   return (
     <StatusLineContext value={region}>
-      {children}
+      {above ? (
+        children
+      ) : (
+        <StatusLineSpotContext value={own}>{children}</StatusLineSpotContext>
+      )}
       <span ref={anchor} hidden data-slot="status-line-anchor" />
       <Presence>
         {shown && (
