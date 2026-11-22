@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { StatusLineRegion } from "./status-line";
+import { StatusLineRegion, StatusLineSpot } from "./status-line";
 import { useStatusLine, type StatusLineMessage } from "./use-status-line";
 
 beforeEach(() => vi.useFakeTimers());
@@ -113,4 +113,59 @@ test("outside a region posting does nothing", () => {
   render(<Poster targetRef={postRef} />);
   act(() => post({ message: "Nowhere" }));
   expect(line()).toBeNull();
+});
+
+test("an outcome in a nested pane replaces the outer notice, which returns after it", () => {
+  render(
+    <StatusLineRegion notice={{ message: "ticketd 0.2.0 is ready" }}>
+      <StatusLineRegion>
+        <Poster targetRef={postRef} />
+      </StatusLineRegion>
+    </StatusLineRegion>,
+  );
+  const lines = () =>
+    [...document.querySelectorAll('[data-slot="status-line"]')].map(
+      (element) => element.textContent,
+    );
+  expect(lines()).toEqual([expect.stringContaining("0.2.0 is ready")]);
+
+  act(() => post({ message: "Moved T-1 to Trash" }));
+  act(() => vi.advanceTimersByTime(500));
+  expect(lines()).toEqual([expect.stringContaining("Moved T-1 to Trash")]);
+
+  act(() => vi.advanceTimersByTime(5_000));
+  expect(lines()).toEqual([expect.stringContaining("0.2.0 is ready")]);
+});
+
+test("an outcome in a sibling pane under one spot replaces the notice, which returns after it", () => {
+  render(
+    <StatusLineSpot>
+      <StatusLineRegion notice={{ message: "ticketd 0.2.0 is ready" }}>
+        <span />
+      </StatusLineRegion>
+      <StatusLineRegion>
+        <Poster targetRef={postRef} />
+      </StatusLineRegion>
+    </StatusLineSpot>,
+  );
+  const lines = () =>
+    [...document.querySelectorAll('[data-slot="status-line"]')].map(
+      (element) => element.textContent,
+    );
+  expect(lines()).toEqual([expect.stringContaining("0.2.0 is ready")]);
+
+  act(() => post({ message: "Couldn't save the preference", tone: "error" }));
+  act(() => vi.advanceTimersByTime(500));
+  expect(lines()).toEqual([
+    expect.stringContaining("Couldn't save the preference"),
+  ]);
+
+  act(() => {
+    const close = document.querySelector<HTMLButtonElement>(
+      '[data-slot="status-line"] button[aria-label="Dismiss"]',
+    );
+    close?.click();
+  });
+  act(() => vi.advanceTimersByTime(500));
+  expect(lines()).toEqual([expect.stringContaining("0.2.0 is ready")]);
 });

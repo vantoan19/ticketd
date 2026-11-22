@@ -7,37 +7,57 @@ Releases before 1.0 are **unsigned previews**: they are not code signed or
 notarized, so macOS and Windows warn before the first launch (see below). To
 build from source instead, follow [development setup](development.md).
 
-Each release has a desktop installer and the matching `ticketd` CLI for macOS 26
-on Apple Silicon, Ubuntu 24.04 x86-64, and Windows 11 x86-64, plus `SHA256SUMS`.
+Each release has a desktop installer with the matching `ticketd` CLI bundled
+for macOS 26 on Apple Silicon, Ubuntu 24.04 x86-64, and Windows 11 x86-64.
+Releases also provide standalone CLI archives and `SHA256SUMS`.
 Check a download with `shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS),
 `sha256sum -c SHA256SUMS --ignore-missing` (Linux), or by comparing
 `Get-FileHash <file>` with its line (Windows). WSL interoperability and mobile
 distribution are outside this matrix.
 
-- **macOS:** Open the `.dmg` and drag ticketd to Applications. Extract the
-  `ticketd-cli-*-macos-arm64.tar.gz` archive and move `ticketd` to a directory on
-  your PATH, for example `~/.local/bin`. Because the build is unsigned, remove the
-  download quarantine from both before the first launch:
+- **On macOS**, open the `.dmg` and drag ticketd to Applications. Remove the download
+  quarantine before the first launch.
 
   ```sh
   xattr -dr com.apple.quarantine /Applications/ticketd.app
-  xattr -d com.apple.quarantine ~/.local/bin/ticketd
   ```
 
   Alternatively, try to open the app once, then choose **Open Anyway** in System
   Settings → Privacy & Security.
 
-- **Ubuntu:** Install the `.deb` with `sudo apt install ./ticketd_*.deb`. Extract
-  the `ticketd-cli-*-linux-x86_64.tar.gz` archive, move `ticketd` to
-  `~/.local/bin`, and add that directory to PATH if necessary. The package manager
-  installs desktop dependencies.
-- **Windows:** Run the `.msi` installer. SmartScreen warns about an unrecognized
-  app: choose **More info**, then **Run anyway**. If Smart App Control is on, it
-  blocks unsigned installers outright; build from source instead. Extract
-  `ticketd-cli-*-windows-x86_64.zip` and move `ticketd.exe` to a user directory
-  on PATH (for example `%LOCALAPPDATA%\Programs\ticketd-cli`), then add that
-  directory to the user's PATH in Windows environment settings. Restart terminals
-  and agent harnesses so they inherit the updated PATH.
+- **On Ubuntu**, install the `.deb` with `sudo apt install ./ticketd_*.deb`. The
+  package manager installs desktop dependencies.
+- **On Windows**, run the `.msi` installer. When SmartScreen warns about an
+  unrecognized app, choose **More info**, then **Run anyway**. If Smart App
+  Control is on, it blocks unsigned installers outright. Follow
+  [development setup](development.md) to build from source.
+
+## Command-line tool
+
+The bundled CLI updates with the desktop. On macOS and Windows, open
+**Settings → Command line** and choose **Install command-line tool** to make
+`ticketd` available on your PATH.
+
+- **On macOS**, approve the administrator prompt to create a link in
+  `/usr/local/bin`. If you decline, ticketd creates the link in `~/.local/bin`.
+  Add that directory to PATH and open a new terminal. If you move the app, use
+  **Install command-line tool** again to repair the link.
+- **On Ubuntu**, the `.deb` already installs `ticketd` in `/usr/bin`.
+- **On Windows**, ticketd adds the app's folder to your user PATH. Restart terminals
+  and agent harnesses so they inherit the change.
+
+If an older standalone `ticketd` comes first on PATH, **Settings → Command line**
+shows its version and path. Choose **Remove it** and confirm to remove that file
+or link, or choose **Keep it**. Use **Check again** to confirm which copy is found.
+
+On machines without the desktop, download the standalone archive for your
+platform (`ticketd-cli-*-macos-arm64.tar.gz`, `ticketd-cli-*-linux-x86_64.tar.gz`,
+or `ticketd-cli-*-windows-x86_64.zip`). Extract the executable and move it to a
+directory on your PATH, such as `~/.local/bin` on macOS and Linux or
+`%LOCALAPPDATA%\Programs\ticketd-cli` on Windows. Add the directory to PATH if
+needed. On macOS, remove the quarantine attribute from the extracted executable
+with `xattr -d com.apple.quarantine ~/.local/bin/ticketd` (use its actual path).
+Update a standalone CLI by downloading the new archive and replacing the executable.
 
 Run `ticketd --version` and `ticketd --help` in the same environment as the
 external harness. Supply the absolute path to the executable if the harness
@@ -46,6 +66,44 @@ the same operating-system user and environment; launch both under that user.
 On Linux `XDG_DATA_HOME` changes the location, so set it consistently for both.
 Registered project paths belong to the native OS environment; see
 [CLI project context](cli.md#project-context) for registration commands.
+
+## In-app updates
+
+v0.1.0 predates in-app updates. If you installed it, download and install a newer
+desktop release from [GitHub Releases](https://github.com/vantoan19/ticketd/releases)
+once to get the updater and bundled CLI.
+
+By default, the desktop checks for updates about ten seconds after launch and
+every 24 hours while it is open. It downloads and verifies a newer stable release
+in the background. Choose **What's new** to open the release notes, or
+**Restart to update** and then **Restart now** to install it. You can return to
+**Settings → About** to restart after dismissing the status-line notice. On
+macOS and Windows, quitting with a verified update ready installs it for the
+next launch. On Linux, choose **Restart to update** to install it.
+
+The restart prompt shows any running Chats and Automation runs that will stop.
+Interrupted Automation runs are marked as needing attention when ticketd reopens.
+If the release raises the Workspace format version, the prompt warns you before
+installing, and quitting doesn't install it: choose **Restart to update** when
+you're ready. ticketd makes a backup before migrating the Workspace. Update any
+older copies that need to open the migrated Workspace, including other Sync
+devices and standalone CLI installations.
+
+On Ubuntu, the update uses the system administrator prompt. If `pkexec` or
+`dpkg` is unavailable, choose **Download .deb** to open the release and install
+the package manually. If a download or signature check fails, About offers
+**Try again** and a link to the release.
+
+To stop scheduled checks, turn off **Check for updates automatically** in
+**Settings → About**. Turning it off also cancels any check or download in
+progress. Use **Check for updates** in About to check once. Builds without
+an updater public key skip checks and show this in About.
+
+The check makes an unauthenticated HTTPS request to GitHub for the latest release
+manifest. It sends standard request headers, including the updater's user agent,
+without account credentials, the installed ticketd version or any Workspace data.
+GitHub receives usual connection information such as your IP address. Update
+checks run in the desktop app only.
 
 ## Upgrades and removal
 
@@ -57,9 +115,12 @@ Close both desktop and CLI processes before replacing binaries or restoring a ba
 See [workspace operations](../crates/ticketd-cli/skill-data/workspace.md) for backup
 and restore commands and [export documentation](export.md) for what they preserve.
 
-Uninstall the desktop through the OS or package manager and remove the copied
-CLI executable. The workspace is stored separately in the user's application-data
-directory and is retained. Keep a backup before uninstalling or upgrading.
+Uninstall the desktop through the OS or package manager. On macOS, remove the
+CLI link if you installed it. On Windows, remove the app folder's entry from your
+user PATH if you added it through Settings. On Ubuntu, removing the package also
+removes its CLI. Remove any standalone CLI executable separately. The workspace
+is stored separately in the user's application-data directory and is retained.
+Keep a backup before uninstalling or upgrading.
 
 ## Agent CLI skill
 

@@ -1,0 +1,11 @@
+{
+  "build": {
+    "beforeBuildCommand": "node scripts/stage-cli.mjs && npm run build:executable --workspace @ticketd/chat-bridge-claude && npm run build --workspace @ticketd/desktop"
+  },
+  "bundle": {
+    "externalBin": [
+      "../../chat-bridge-claude/dist/ticketd-chat-bridge-claude",
+      "../../../crates/ticketd-cli/dist/ticketd"
+    ]
+  }
+}

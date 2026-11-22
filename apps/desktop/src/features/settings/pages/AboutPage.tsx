@@ -19,6 +19,7 @@ import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { SettingsList } from "@/features/settings/layout/SettingsList";
+import { AboutUpdates } from "@/features/settings/pages/AboutUpdates";
 import "@/features/settings/pages/about-page.css";
 
 const REPOSITORY = "https://github.com/vantoan19/ticketd";
@@ -42,7 +43,7 @@ const PROMISES = [
     icon: HardDrive,
     title: "Stays on this computer",
     description:
-      "No analytics or crash uploads. Only integrations you turn on, such as Google Drive and GitHub, go online.",
+      "No analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive and GitHub, go online.",
   },
 ];
 
@@ -138,6 +139,8 @@ export function AboutPage() {
           ))}
         </ul>
       </section>
+
+      <AboutUpdates />
 
       <SettingsSection title="Help">
         <SettingsList>

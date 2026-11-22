@@ -134,6 +134,12 @@ fn run_cli(executable: &Path, args: &[&str]) -> Option<String> {
     run_with_timeout(command, RUN_TIMEOUT)
 }
 
+/// Reports the version of a ticketd executable without opening any workspace.
+pub fn version(executable: &Path) -> Option<String> {
+    run_cli(executable, &["--version"])
+        .and_then(|text| text.strip_prefix("ticketd ").map(str::to_string))
+}
+
 fn same_path(left: &Path, right: &Path) -> bool {
     let normal = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     normal(left) == normal(right)
@@ -177,9 +183,7 @@ pub fn detect(
     status.found = true;
     status.on_path = on_path;
     status.path = Some(executable.display().to_string());
-    // "ticketd 0.1.0" -> "0.1.0"
-    status.version = run_cli(&executable, &["--version"])
-        .and_then(|text| text.split_whitespace().last().map(str::to_string));
+    status.version = version(&executable);
     status.version_matches = status.version.as_deref().map(|found| found == app_version);
     // A different version may print a different shape, or open the workspace
     // when asked; only a matching executable is asked where its workspace is.
@@ -299,23 +303,117 @@ fn fallback_directories(app_executable: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The process PATH, then the login shell's PATH, without repeats.
-fn path_directories() -> Vec<PathBuf> {
+/// The directories of these PATH values, in order, without repeats.
+fn path_directories(paths: &[&OsStr]) -> Vec<PathBuf> {
     let mut directories: Vec<PathBuf> = Vec::new();
-    let mut add = |paths: &OsStr| {
-        for directory in std::env::split_paths(paths) {
+    for path in paths {
+        for directory in std::env::split_paths(path) {
             if !directory.as_os_str().is_empty() && !directories.contains(&directory) {
                 directories.push(directory);
             }
         }
-    };
-    if let Some(path) = std::env::var_os("PATH") {
-        add(&path);
-    }
-    if let Some(path) = login_shell_variable("PATH") {
-        add(OsStr::new(path));
     }
     directories
+}
+
+/// The last terminal PATH an explicit recheck read, so later checks see it too.
+static TERMINAL_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+fn remember_terminal_path(path: &str) {
+    if let Ok(mut latest) = TERMINAL_PATH.lock() {
+        *latest = Some(path.to_string());
+    }
+}
+
+#[cfg(not(windows))]
+fn cached_terminal_path() -> Option<String> {
+    TERMINAL_PATH
+        .lock()
+        .ok()
+        .and_then(|latest| latest.clone())
+        .or_else(|| login_shell_variable("PATH").map(str::to_string))
+}
+
+#[cfg(not(windows))]
+fn read_terminal_path() -> Option<String> {
+    let path = ask_login_shell()
+        .into_iter()
+        .find(|(name, _)| *name == "PATH")
+        .map(|(_, path)| path)?;
+    remember_terminal_path(&path);
+    Some(path)
+}
+
+#[cfg(windows)]
+fn cached_terminal_path() -> Option<String> {
+    TERMINAL_PATH.lock().ok()?.clone()
+}
+
+#[cfg(windows)]
+fn read_terminal_path() -> Option<String> {
+    // Registry.GetValue expands REG_EXPAND_SZ entries. Read both scopes in the
+    // order Windows builds PATH for a fresh terminal and preserve non-ASCII paths.
+    let powershell = PathBuf::from(std::env::var_os("SystemRoot")?)
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let mut command = Command::new(powershell);
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        r"$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$machine = [Microsoft.Win32.Registry]::GetValue('HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', '')
+$user = [Microsoft.Win32.Registry]::GetValue('HKEY_CURRENT_USER\Environment', 'Path', '')
+[Console]::Write((@($machine, $user) -join ';'))",
+    ]);
+    let path = run_with_timeout(command, RUN_TIMEOUT)?;
+    remember_terminal_path(&path);
+    Some(path)
+}
+
+fn terminal_search_path(
+    process_path: &OsStr,
+    refresh_path: bool,
+    cached: impl FnOnce() -> Option<String>,
+    fresh: impl FnOnce() -> Option<String>,
+) -> Vec<PathBuf> {
+    // A failed refresh keeps the last PATH that was read successfully.
+    let terminal_path = if refresh_path {
+        fresh().or_else(cached)
+    } else {
+        cached()
+    };
+    path_directories(&[terminal_path.as_deref().map_or(process_path, OsStr::new)])
+}
+
+/// The directories a new terminal searches: the terminal PATH (the last one read,
+/// or a fresh read when `refresh_path`), or the app's own PATH when it can't be read.
+/// Settings, a Chat's check and a Chat's dispatch all use it, so they agree.
+fn terminal_directories(refresh_path: bool) -> Vec<PathBuf> {
+    let process_path = std::env::var_os("PATH").unwrap_or_default();
+    terminal_search_path(
+        &process_path,
+        refresh_path,
+        cached_terminal_path,
+        read_terminal_path,
+    )
+}
+
+/// Settings reports what a new terminal resolves. An explicit recheck can
+/// see a PATH edit made after the app started. The terminal PATH replaces the
+/// launch PATH when it can be read.
+pub fn locate_for_terminals(
+    app_executable: Option<&Path>,
+    app_version: &str,
+    app_workspace: Option<&Path>,
+    refresh_path: bool,
+) -> CliStatus {
+    detect(
+        &terminal_directories(refresh_path),
+        &fallback_directories(app_executable),
+        app_version,
+        app_workspace,
+    )
 }
 
 /// Finds this user's `ticketd` and checks it against the app's version and workspace.
@@ -323,7 +421,7 @@ fn path_directories() -> Vec<PathBuf> {
 pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
     let app = std::env::current_exe().ok();
     detect(
-        &path_directories(),
+        &terminal_directories(false),
         &fallback_directories(app.as_deref()),
         app_version,
         app_workspace,
@@ -334,7 +432,7 @@ pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
 /// Blocking only the first time on Unix, where it asks the login shell for its PATH.
 pub fn executable() -> Option<PathBuf> {
     let app = std::env::current_exe().ok();
-    find_executable(&path_directories())
+    find_executable(&terminal_directories(false))
         .or_else(|| find_executable(&fallback_directories(app.as_deref())))
 }
 
@@ -369,6 +467,40 @@ impl CliStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_explicit_path_recheck_uses_the_current_terminal_path() {
+        let launch_path = OsStr::new("launch-bin");
+        let cached = || Some("cached-bin".into());
+        let fresh = || Some("installed-bin".into());
+        assert_eq!(
+            terminal_search_path(launch_path, true, cached, fresh),
+            [PathBuf::from("installed-bin")]
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, false, cached, fresh),
+            [PathBuf::from("cached-bin")]
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, true, cached, || Some(String::new())),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, true, cached, || None),
+            [PathBuf::from("cached-bin")],
+            "a failed refresh keeps the last PATH that was read"
+        );
+        assert_eq!(
+            terminal_search_path(launch_path, true, || None, || None),
+            [PathBuf::from("launch-bin")]
+        );
+    }
+
+    #[test]
+    fn a_refreshed_terminal_path_is_what_later_checks_use() {
+        remember_terminal_path("installed-bin");
+        assert_eq!(cached_terminal_path().as_deref(), Some("installed-bin"));
+    }
 
     #[test]
     fn the_folder_of_the_app_itself_is_searched_before_the_common_install_folders() {

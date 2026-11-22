@@ -17,6 +17,7 @@ mod folder_probe;
 mod runtime_trace;
 mod sync_commands;
 mod sync_scheduler;
+mod updates;
 mod wake;
 mod webview_report;
 mod workspace_session;
@@ -1673,6 +1674,9 @@ fn holds_exit(code: Option<i32>, window_open: bool) -> bool {
 /// Quits the way closing the window does, so every way out is guarded alike.
 fn request_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
+    if updates::install_in_progress(app) {
+        return;
+    }
     // Working Chats are asked about first; the answer comes back through here.
     if chat_commands::confirms_quit(app) {
         return;
@@ -1832,6 +1836,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, runner);
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
+            updates::start(app.handle());
             start_periodic_refresh(coordinator);
             start_reminder_timer(open_workspace);
             sync_commands::publish_status(app.handle().clone());
@@ -1858,6 +1863,7 @@ pub fn run() -> Result<(), tauri::Error> {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Registered for the Rust API only: no capability grants the page its commands.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1983,6 +1989,8 @@ pub fn run() -> Result<(), tauri::Error> {
             set_plan_purpose,
             set_plan,
             cli_status::check_cli,
+            cli_status::install_cli,
+            cli_status::remove_older_cli,
             agent_skills::agent_skills,
             agent_skills::install_agent_skill,
             list_projects,
@@ -2097,6 +2105,12 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::sync_status,
             diagnostics_commands::diagnostics_log_level,
             diagnostics_commands::diagnostics_set_debug,
+            updates::updates_state,
+            updates::updates_set_automatic,
+            updates::updates_check,
+            updates::updates_dismiss,
+            updates::updates_restart_details,
+            updates::updates_install,
             diagnostics_commands::diagnostics_open_logs_folder,
             diagnostics_commands::diagnostics_recent_errors,
             diagnostics_commands::diagnostics_export_file_name,
@@ -2137,14 +2151,21 @@ pub fn run() -> Result<(), tauri::Error> {
             let logs = app
                 .try_state::<Logs>()
                 .and_then(|logs| logs.0.lock().ok()?.take());
+            chat_commands::shutdown(app);
+            updates::install_on_quit(app);
             drop(logs);
-        }
-        if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
-            && holds_exit(*code, app.get_webview_window("main").is_some())
-        {
-            api.prevent_exit();
-            request_quit(app);
             return;
+        }
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
+            if *code != Some(tauri::RESTART_EXIT_CODE) && updates::install_in_progress(app) {
+                api.prevent_exit();
+                return;
+            }
+            if holds_exit(*code, app.get_webview_window("main").is_some()) {
+                api.prevent_exit();
+                request_quit(app);
+                return;
+            }
         }
         chat_commands::on_run_event(app, &event);
     });

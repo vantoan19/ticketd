@@ -146,7 +146,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Status",
     description:
-      "The ticketd executable that you, your scripts and your coding agents call.",
+      "Agents and terminals run ticketd by name to read and write the same workspace as this app.",
     keywords:
       "command-line tool path terminal install cli check again executable",
     section: "command-line",
@@ -318,6 +318,13 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
       "The last kinds of warning and error ticketd logged, from the files still kept.",
     keywords: "diagnostics crash failure warning unexpected quit",
     section: "diagnostics",
+  },
+  {
+    title: "Check for updates automatically",
+    description:
+      "Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent.",
+    keywords: "version upgrade download install restart check",
+    section: "about",
   },
   {
     title: "Documentation",

@@ -32,6 +32,15 @@ does not schedule agents or summarize, prioritize, or decompose tickets by itsel
   context queries, and consistent writes. ticketd never owns provider credentials or
   replaces a harness's sign-in.
 
+## Updates
+
+The desktop checks GitHub for newer stable releases and verifies downloads before
+offering to install them on a restart you confirm. On macOS and Windows, a verified
+update also installs when you quit ticketd, unless it changes the workspace format. In **Settings → About**, you
+can turn off scheduled checks or check on demand. The CLI bundled with the
+desktop updates with it. Standalone CLI copies are updated by hand.
+See [in-app updates](install.md#in-app-updates).
+
 ## Product model
 
 ### Workspace, projects, and Plans

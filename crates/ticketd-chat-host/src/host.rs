@@ -288,7 +288,8 @@ pub struct ChatHost {
 /// What every Chat's supervisor last reported, for readers that have no view attached:
 /// the Chats list, the counts, and the checks before Quit or turning Chat off.
 pub(crate) struct Board {
-    live: Mutex<HashMap<String, ChatLive>>,
+    /// Each entry with the supervisor that reported it (see `report`).
+    live: Mutex<HashMap<String, (u64, ChatLive)>>,
     changed: watch::Sender<u64>,
     /// One signal per Chat that something is waiting on (an Automation run's agent), so
     /// the wait wakes for its own Chat and not for every Chat's every step.
@@ -296,16 +297,34 @@ pub(crate) struct Board {
 }
 
 impl Board {
-    fn live(&self) -> MutexGuard<'_, HashMap<String, ChatLive>> {
+    fn live(&self) -> MutexGuard<'_, HashMap<String, (u64, ChatLive)>> {
         self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn snapshot(&self) -> HashMap<String, ChatLive> {
+        self.live()
+            .iter()
+            .map(|(chat_id, (_, live))| (chat_id.clone(), live.clone()))
+            .collect()
+    }
+
     /// Called by a supervisor after each step; `None` once it has stopped.
-    pub(crate) fn report(&self, chat_id: &str, live: Option<ChatLive>) {
-        match live {
-            Some(live) => self.live().insert(chat_id.to_owned(), live),
-            None => self.live().remove(chat_id),
-        };
+    /// `supervisor` increases with each supervisor started, so a late report from
+    /// one that was still stopping can't replace or clear its replacement's entry.
+    pub(crate) fn report(&self, chat_id: &str, supervisor: u64, live: Option<ChatLive>) {
+        {
+            let mut board = self.live();
+            let current = board.get(chat_id).map(|(owner, _)| *owner);
+            match live {
+                Some(live) if current.is_none_or(|owner| owner <= supervisor) => {
+                    board.insert(chat_id.to_owned(), (supervisor, live));
+                }
+                None if current == Some(supervisor) => {
+                    board.remove(chat_id);
+                }
+                _ => return,
+            }
+        }
         self.changed
             .send_modify(|count| *count = count.wrapping_add(1));
         self.notify(chat_id);
@@ -401,7 +420,7 @@ impl ChatHost {
     /// Live state of every Chat that has a supervisor. A Chat that is absent is idle
     /// with no harness process.
     pub fn live(&self) -> HashMap<String, ChatLive> {
-        self.inner.board.live().clone()
+        self.inner.board.snapshot()
     }
 
     /// Moves whenever any Chat's records or live state may have changed. It can move
@@ -697,6 +716,12 @@ impl ChatHost {
     pub async fn quit(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.quitting.store(true, Ordering::SeqCst);
         self.stop_all(StopReason::Quit).await
+    }
+
+    /// Accept new work again when an installer handoff fails to close the app.
+    #[cfg(windows)]
+    pub fn cancel_quit(&self) {
+        self.inner.quitting.store(false, Ordering::SeqCst);
     }
 
     /// Before the workspace is replaced by a backup: refuses every request that would
@@ -997,17 +1022,32 @@ mod tests {
         let board = board();
         let waiting = board.listen("agent");
 
-        board.report("other", Some(ChatLive::idle()));
+        board.report("other", 1, Some(ChatLive::idle()));
         assert!(!waiting.has_changed().unwrap_or(true));
 
-        board.report("agent", Some(ChatLive::idle()));
+        board.report("agent", 1, Some(ChatLive::idle()));
         assert!(waiting.has_changed().unwrap_or(false));
+    }
+
+    /// A supervisor still stopping after a quit timed out can report after its
+    /// replacement started; that late report leaves the replacement's state alone.
+    #[test]
+    fn a_late_report_from_an_older_supervisor_keeps_the_replacements_state() {
+        let board = board();
+        board.report("chat", 1, Some(ChatLive::idle()));
+        board.report("chat", 2, Some(ChatLive::idle()));
+        board.report("chat", 1, Some(ChatLive::idle()));
+        board.report("chat", 1, None);
+        assert_eq!(board.live().get("chat").map(|(owner, _)| *owner), Some(2));
+
+        board.report("chat", 2, None);
+        assert!(board.live().is_empty());
     }
 
     #[test]
     fn a_chat_nobody_waits_on_keeps_no_signal() {
         let board = board();
-        board.report("agent", None);
+        board.report("agent", 1, None);
         assert!(board.signals().is_empty());
 
         let _waiting = board.listen("agent");

@@ -6,17 +6,52 @@ not claim those checks have already been passed.
 
 ## Current build workflow
 
-The manual [Package workflow](../.github/workflows/package.yml) builds the
-standalone CLI and desktop installer for macOS Apple Silicon, Ubuntu 24.04 x86-64,
-and Windows x86-64, and runs only on `main`. Its `linux-distribution` target limits
-the build to Linux, and `native-smoke` runs the Linux native desktop smoke test.
-The workflow uploads artifacts with seven-day retention. It does not publish a
-GitHub Release or configure signing/notarization.
+The manual [Package workflow](../.github/workflows/package.yml) builds the CLI
+and bundles that executable in the desktop installer for macOS Apple Silicon,
+Ubuntu 24.04 x86-64, and Windows x86-64. Distribution builds run only on `main`.
+The `linux-distribution` target limits the build to Linux, and `native-smoke` runs
+the Linux native desktop smoke test. The workflow uploads artifacts with
+seven-day retention. GitHub Release creation and OS code signing are separate steps.
 
 Distribution CI requires a platform-specific Google desktop app registration;
 see [publisher configuration](install.md#publisher-and-developer-configuration).
 An independent local build can omit Google configuration and keep Drive disabled;
 see [development packaging](development.md#build-packages).
+
+### Updater signing
+
+Generate the Tauri updater key once and choose a strong password when prompted.
+
+```sh
+npm run desktop -- signer generate -w ~/.tauri/ticketd-updater.key
+```
+
+Keep a backup of the private key and its password together in the maintainer's
+password manager outside GitHub. Keep the private key out of Git. If the key or
+password is lost, affected installations need a manual reinstall. Those copies
+trust only the public key they shipped with.
+
+Set the GitHub Actions repository variable `TAURI_UPDATER_PUBLIC_KEY` to the
+contents of `ticketd-updater.key.pub`. Set `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets. The distribution build
+embeds the public key and signs the macOS app archive (`.app.tar.gz`), Debian
+package (`.deb`), and Windows installer (`.msi`). Updater signatures are separate
+from OS code signing. If an input is missing, the workflow warns and builds
+packages without updater signatures.
+
+To assemble the updater manifest, check out the commit that built the release.
+Stage the three updater files and their matching `.sig` files under their final
+upload names in one directory, then run the manifest generator.
+
+```sh
+node scripts/generate-latest.mjs 0.2.0 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" release-assets
+```
+
+The script writes `latest.json` with the release version, Workspace format
+version, and each platform's download URL and signature. It warns and skips the
+manifest when no updater signatures are staged and fails if only some of the
+required files are signed. Attach the manifest, the updater files, and their
+`.sig` files to the draft together.
 
 ## Repository CI settings
 
@@ -77,11 +112,16 @@ Build continuously, publish deliberately. There are no nightlies or update chann
 2. A release starts with a version-bump PR: the maintainer picks the version, the PR
    changes the version files and drafts the release notes, and it merges once
    `CI result` passes.
-3. The merged commit is built into a **draft** GitHub Release: the final-version
-   packages, SHA-256 checksums and build attestations. A draft is visible only to
-   maintainers, and its tag is created only when it is published.
+3. The merged commit is built into a **draft** GitHub Release with the desktop
+   installers, standalone CLI archives, SHA-256 checksums and build attestations.
+   Include the signed updater files, their signatures, and `latest.json` from
+   [updater signing](#updater-signing). A draft is visible only to maintainers,
+   and its tag is created only when it is published.
 4. The maintainer tests the draft's own files (see the checklist below).
-5. **Publish** makes exactly those files public as Latest. Nothing is rebuilt.
+5. **Publish** makes those same files public as Latest. Installed desktop copies
+   with the updater then find the newer release through
+   `releases/latest/download/latest.json`. Drafts and prereleases stay outside
+   this feed.
 6. If testing fails, delete the draft, fix `main` and build the same version again.
    Nothing was public, so no version number is spent. Record why in the release's
    tracking issue.
@@ -100,9 +140,11 @@ merged commit, and create the draft release from its downloads.
 
 Test the draft's own files, not a local build:
 
-1. Install the desktop app and the CLI from the draft on each advertised platform.
-   Use a separate OS user for release-desktop tests: the debug workspace override
-   does not apply to release desktop builds.
+1. Install the desktop app from the draft on each advertised platform. Verify
+   that its bundled CLI is available through **Settings → Command line** on macOS
+   and Windows and installed in `/usr/bin` by the Debian package. Check separately
+   that the standalone CLI archives run. Use a separate OS user for release-desktop
+   tests. The workspace override is available in debug builds only.
 2. Check startup, a small desktop and CLI shared-workspace operation, backup and
    restore, the upgrade from the previous release, and uninstall retention, with
    synthetic data. A release that changes the workspace format also needs an upgrade
@@ -137,15 +179,17 @@ platform warnings: on macOS, remove the quarantine attribute
 Open Anyway; on Windows, SmartScreen's More info → Run anyway.
 
 A release contains the matching desktop and CLI, installation instructions, license
-notices, and SHA-256 checksums. Release notes are GitHub's generated notes, grouped
-by PR label, plus a short hand-written section that states:
+notices, SHA-256 checksums, and the updater files described in the
+[release model](#release-model). Release notes are GitHub's generated notes, grouped
+by PR label, plus a short hand-written section covering the following.
 
 - Tested platforms and known limitations.
 - Signing status and required external-service setup.
 - Data-format or CLI compatibility changes, backup needs, and downgrade limitations.
 
-Verify download links and hashes after publishing. Do not describe expiring workflow
-downloads as stable downloads.
+After publishing, verify the download links and hashes. Once a previous release
+has the updater enabled, use it to confirm the new release appears in
+**Settings → About**. Point users to GitHub Releases for stable downloads.
 
 ## Compatibility and maintenance
 

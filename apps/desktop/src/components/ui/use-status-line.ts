@@ -22,6 +22,7 @@ export type StatusLineMessage = {
   tone?: "default" | "error";
   icon?: ReactNode;
   action?: StatusLineAction;
+  secondaryAction?: StatusLineAction;
   undo?: () => unknown;
   /** Moves keyboard focus to the action, for a failure the person must answer. */
   focusAction?: boolean;

@@ -241,3 +241,58 @@ test("the footer sends people to Agent skills", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Set up Agent skills" }));
   expect(openPage).toHaveBeenCalledWith("agent-skills");
 });
+
+test("installs the bundled CLI, refreshes the check, and explains the user-bin fallback", async () => {
+  const bundled = { platform: "macos", installed: false, older: null };
+  invoke
+    .mockResolvedValueOnce({ ...missing, bundled })
+    .mockResolvedValueOnce({
+      directory: "~/.local/bin",
+      next_step: "add_to_path",
+    })
+    .mockResolvedValueOnce({ ...base, on_path: false, bundled });
+  render(<CommandLineCard />);
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Install command-line tool" }),
+  );
+
+  expect(
+    await screen.findByText(/Add ~\/\.local\/bin to your PATH/),
+  ).toBeTruthy();
+  expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+    "check_cli",
+    "install_cli",
+    "check_cli",
+  ]);
+});
+
+test("removes an older PATH copy only after the user confirms its path", async () => {
+  const older = { path: base.path, version: "0.0.9" };
+  invoke
+    .mockResolvedValueOnce({
+      ...base,
+      version: older.version,
+      version_matches: false,
+      bundled: { platform: "macos", installed: false, older },
+    })
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({
+      ...base,
+      bundled: { platform: "macos", installed: true, older: null },
+    });
+  render(<CommandLineCard />);
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Remove it" }, { timeout: 1000 }),
+  );
+  const dialog = screen.getByRole("dialog", {
+    name: "Remove the older ticketd?",
+  });
+  expect(dialog.textContent).toContain(".local/bin/ticketd");
+  expect(invoke).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+  expect(await screen.findByText("Installed")).toBeTruthy();
+  expect(invoke).toHaveBeenNthCalledWith(2, "remove_older_cli", { older });
+});
