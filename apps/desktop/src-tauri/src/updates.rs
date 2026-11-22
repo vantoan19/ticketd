@@ -91,6 +91,8 @@ pub struct Snapshot {
 struct ReadyUpdate {
     offer: Update,
     bytes: Vec<u8>,
+    /// Whether installing it raises the workspace format (see `should_install_on_quit`).
+    upgrades_workspace: bool,
 }
 
 struct Session {
@@ -414,7 +416,11 @@ async fn check(app: AppHandle, sequence: u64) {
                 session.dismissed = None;
             }
             session.download_error = None;
-            session.ready = Some(ReadyUpdate { offer, bytes });
+            session.ready = Some(ReadyUpdate {
+                offer,
+                bytes,
+                upgrades_workspace: info.upgrades_workspace,
+            });
             Phase::Ready { update: info }
         }
         Err(error) => {
@@ -522,25 +528,14 @@ pub async fn updates_install(app: AppHandle, version: String) -> Result<(), Stri
 /// Quitting installs a ready update only where that needs no prompt, and only
 /// when it keeps the workspace format: a format change is named in the restart
 /// prompt first (ADR 0019), so it installs only from Restart to update.
-fn should_install_on_quit(platform: &str, ready: Option<&UpdateInfo>) -> bool {
-    matches!(platform, "macos" | "windows")
-        && ready.is_some_and(|update| !update.upgrades_workspace)
+fn should_install_on_quit(platform: &str, upgrades_workspace: Option<bool>) -> bool {
+    matches!(platform, "macos" | "windows") && upgrades_workspace == Some(false)
 }
 
 pub fn install_on_quit(app: &AppHandle) {
-    let Some(updates) = app.try_state::<Updates>() else {
-        return;
-    };
-    let install_now = {
-        let session = updates.lock();
-        let ready = match &session.snapshot.phase {
-            Phase::Ready { update } if session.ready.is_some() => Some(update),
-            _ => None,
-        };
-        should_install_on_quit(std::env::consts::OS, ready)
-    };
-    if install_now {
-        // We are already exiting. The install logs any failure before shutdown continues.
+    if app.try_state::<Updates>().is_some() {
+        // We are already exiting. `install` decides under the session lock and
+        // logs any failure before shutdown continues.
         let _ = install(app, None);
     }
 }
@@ -558,6 +553,16 @@ fn install(app: &AppHandle, requested_version: Option<&str>) -> Result<(), Strin
             || requested_version.is_some_and(|version| !ready_for(&session, version))
         {
             return Err("This update is no longer ready. Check for updates again.".into());
+        }
+        // On quit (no requested version), decide on the update taken here, so a
+        // download that finished since can't bypass the format notice.
+        if requested_version.is_none()
+            && !should_install_on_quit(
+                std::env::consts::OS,
+                session.ready.as_ref().map(|ready| ready.upgrades_workspace),
+            )
+        {
+            return Ok(());
         }
         let Some(ready) = session.ready.take() else {
             return Err("This update is no longer ready. Check for updates again.".into());
@@ -699,20 +704,15 @@ mod tests {
 
     #[test]
     fn quitting_installs_only_an_already_verified_update_on_unattended_platforms() {
-        let update = |upgrades_workspace| UpdateInfo {
-            version: "0.2.0".into(),
-            release_url: String::new(),
-            upgrades_workspace,
-        };
         for platform in ["macos", "windows"] {
-            assert!(should_install_on_quit(platform, Some(&update(false))));
+            assert!(should_install_on_quit(platform, Some(false)));
             assert!(!should_install_on_quit(platform, None));
             assert!(
-                !should_install_on_quit(platform, Some(&update(true))),
+                !should_install_on_quit(platform, Some(true)),
                 "a format change installs only after the restart prompt names it"
             );
         }
-        assert!(!should_install_on_quit("linux", Some(&update(false))));
+        assert!(!should_install_on_quit("linux", Some(false)));
     }
 
     #[test]
