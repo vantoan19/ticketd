@@ -201,22 +201,15 @@ desktop closed. [CLI workflows](cli.md) holds worked examples; `ticketd --help` 
 command-specific `--help` list every command and option, and `ticketd skills get`
 prints the guide that matches the executable.
 
-- Output is JSON on stdout and diagnostics go to stderr. A failure exits with status 1
-  and an actionable message on stderr.
+- Most data commands print JSON on stdout. Diagnostics go to stderr. Runtime
+  failures exit with status 1 and argument validation errors exit with status 2.
 - Agent mode never prompts. Multiline content comes from `--file`, `--body-file`,
   `--details-file`, or standard input (`-`) so it avoids shell quoting.
 - Agents use the CLI and core. They do not write SQL or treat Markdown exports as the
   system of record.
 
-```sh
-ticketd project create demo ~/code/demo
-ticketd create "Fix upload timeout" --project demo
-ticketd list --project demo --availability ready
-ticketd context T-KQ42 --relationships --activities
-ticketd change T-KQ42 --status "In progress" --agent agent-name
-ticketd activity add T-KQ42 --brief "Investigation complete" --details-file findings.md --agent agent-name
-ticketd add-dependency T-KQ42 T-KQ43   # T-KQ42 blocks T-KQ43
-```
+For a worked example using the returned project ID and ticket reference, see
+[Create a ticket and verify an update](cli.md#create-a-ticket-and-verify-an-update).
 
 ### Capabilities
 

@@ -1,6 +1,6 @@
 # Interface work
 
-`DESIGN.md` specifies how ticketd looks; its section 11 defines the design system. Every screen is built from two sources of truth:
+The [design system and shared components](../../DESIGN.md#11-design-system-and-shared-components) define how ticketd looks. For a screen change, start with its section, such as [ticket detail](../../DESIGN.md#7-ticket-detail) or [first run](../../DESIGN.md#16-first-run). Every screen is built from two sources of truth:
 
 - **Tokens:** the token blocks in `apps/desktop/src/styles.css`, covering colors, type, radii, and shadows in light and dark.
 - **Components:** `apps/desktop/src/components/ui`, shadcn/ui copies restyled with the tokens.

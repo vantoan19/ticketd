@@ -15,8 +15,9 @@ family, source, and availability. Use `--unlinked` for tickets with no project.
 Neither command infers a project from the working directory. Search is a literal
 substring over saved ticket titles, bodies, and authored Activities, with ASCII
 case-insensitive matching. An empty query applies only the filters, like `list`.
-Normal results exclude trash. A page holds at most 100 tickets whatever `--limit`
-asks for: advance `--offset` by the number returned and stop at an empty page.
+Normal results exclude trash. Use `--limit` from 1 to 100 (default 50). Values
+outside that range fail argument validation. For the next page, advance
+`--offset` by the number returned. Stop when a page is empty.
 
 `show` returns full ticket content, relationships, and source ownership metadata.
 `context` returns bounded, explicitly selected scopes; see `skills get context`.
