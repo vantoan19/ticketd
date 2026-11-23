@@ -787,6 +787,7 @@ impl Workspace {
     /// this desktop is still the one the device registry lists, and nothing is
     /// replaced on either side.
     pub fn sync_reconnect(&mut self, remote: &dyn RemoteStorage) -> Result<SyncStatus, Error> {
+        remote.check_usable()?;
         let state = state(&self.connection)?;
         let folder = remembered(&state, &remote.folders()?).ok_or_else(|| {
             Error::Sync(match state.provider {
@@ -973,6 +974,7 @@ impl Workspace {
     /// What this Workspace holds, and the Workspaces already in the storage,
     /// for choosing between uploading and downloading.
     pub fn sync_setup_options(&self, remote: &dyn RemoteStorage) -> Result<SetupOptions, Error> {
+        remote.check_usable()?;
         let connection = &self.connection;
         let local = SyncCounts {
             tickets: count(connection, "SELECT COUNT(*) FROM tickets")?,
@@ -1041,6 +1043,7 @@ impl Workspace {
         remote: &dyn RemoteStorage,
         name: &str,
     ) -> Result<SyncStatus, Error> {
+        remote.check_usable()?;
         if state(&self.connection)?.folder.is_some() {
             return Err(Error::Sync(
                 "this Workspace already syncs to a folder; disconnect it first".into(),
@@ -1078,6 +1081,7 @@ impl Workspace {
         remote: &dyn RemoteStorage,
         folder_id: &str,
     ) -> Result<(Workspace, PathBuf), Error> {
+        remote.check_usable()?;
         let folder = remote
             .folders()?
             .into_iter()
