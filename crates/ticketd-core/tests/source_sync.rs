@@ -470,7 +470,10 @@ fn refresh_keeps_a_manual_project_link_after_the_issue_transfers() {
             },
         )
         .unwrap();
-    assert_eq!(refreshed.updated, [ticket.reference.clone()]);
+    assert_eq!(
+        refreshed.updated.as_slice(),
+        std::slice::from_ref(&ticket.reference)
+    );
     assert_eq!(f.ticket(1).project_id.as_deref(), Some(manual.id.as_str()));
     assert_eq!(
         f.workspace.ticket_history(&ticket.reference).unwrap(),
