@@ -43,7 +43,7 @@ Browse [ready, unassigned issues](https://github.com/vantoan19/ticketd/issues?q=
 1. **Check the assignee, recent comments, and linked PRs.** An assignee is handling the issue. Coordinate with them before starting overlapping work.
 2. **Claim ready work publicly.** On an unassigned `ready` issue, the first clear “I’ll take this” counts immediately. You can begin even if GitHub won’t let you assign yourself. A maintainer assigns the claimant and replies to overlapping claims. The issue stays `ready` while assigned.
 3. **Link your PR as soon as you open it.** Post the draft PR link on the issue so the next contributor can see work in progress. On a `needs-decision` issue, say which investigation you are taking on so others know what is still open.
-4. **Update the issue if you pause or step away.** After two weeks without visible progress, a maintainer can check in. After another week without a reply, they can unassign the issue and link any useful branch, draft PR, or findings. Respect an agreed return date and exclude time spent waiting for maintainer feedback.
+4. **Update the issue if you pause or step away.** After two weeks without visible progress, a maintainer can check in. After another week without a reply, they can unassign the issue and post a release comment linking any useful branch, draft PR, or findings. That ends the previous claim. The first clear claim after the release counts. Respect an agreed return date and exclude time spent waiting for maintainer feedback.
 
 ## Where to start
 

@@ -5,7 +5,7 @@ Use `gh` for bugs, enhancements, ideas, and improvements in `vantoan19/ticketd`.
 Before the first issue write in a session, verify the target with `gh repo view --json nameWithOwner`. Use `--repo vantoan19/ticketd` when outside this checkout or when the default target is ambiguous.
 
 - Create with the matching [issue form](../../.github/ISSUE_TEMPLATE/). With `gh issue create --title "..." --body-file /path/to/body.md`, follow that form’s prompts. Apply the [intake labels](triage-labels.md#triage-an-issue) if you have permission.
-- Read: `gh issue view <number> --json number,title,body,labels,assignees,comments,blockedBy,closedByPullRequestsReferences`.
+- Read: `gh issue view <number> --json number,title,body,labels,assignees,comments,blockedBy,closedByPullRequestsReferences`. If your `gh` rejects a field, use `gh issue view <number> --comments` and check the issue’s GitHub sidebar for linked PRs and blockers.
 - List: `gh issue list --state open --json number,title,labels,assignees`.
 - Update: `gh issue edit <number> --body-file /path/to/body.md`.
 - Report a decision or verification result: `gh issue comment <number> --body-file /path/to/comment.md`.
