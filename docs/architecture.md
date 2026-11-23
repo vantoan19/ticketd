@@ -132,6 +132,27 @@ POSIX process groups. A wrapper process exiting does not prove all tools stopped
 Archive does not stop execution; trash does. Process pooling and a standalone
 always-running service are not selected for the initial design.
 
+### Harness registration and Step readers
+
+The plug-in design moves native tool decoding into Step readers in
+`ticketd-chat-host` ([ADR 0022](adr/0022-harnesses-plug-into-ticketds-chat-vocabulary.md)).
+The rollout introduces the readers first, followed by the core catalog, host
+registration list and descriptor-driven controls.
+
+In this design the core owns the data-only harness descriptors shared by the
+CLI and the Chat host. The host has one registration list that associates
+each descriptor with a lazy adapter factory and a Step reader. The desktop
+receives descriptors, capabilities, unattended reach and permission choices
+from the host. Descriptors declare what the harness can enforce when
+unattended and which permission choices it can offer. The host confirms
+actual availability through the adapter.
+
+The host's readers classify stored native tool evidence when the view is built.
+They use the shared shell classifier and return typed Step actions for both
+the transcript and approval cards. The desktop supplies the wording and
+shortens paths for display. Since the existing Chat records hold the tool
+evidence, saved Chats benefit from reader improvements without a format change.
+
 ### Persistence and delivery observations
 
 Chat storage uses structured records in the existing SQLite workspace for Chats
@@ -509,12 +530,14 @@ already translated into the view model (`chat_view.rs`); a view that falls behin
 or cannot be served receives one `resync` entry and reads a new snapshot. Each
 update's changes arrive as one array, and an item already sent unchanged is not
 sent again. Steps carry the last lines of their output; an opened row reads the
-whole of it with `chat_step_output`. The view
-model only shapes what the host and core decided: attention and notification
-rules, step classification and what blocks Send live in `ticketd-chat-host`
-(`attention`, `step_kind`, `conditions`), and record queries such as New Chat's
-suggestions and a folder's Project live in the core. List
-rows and counts follow the `chat-overview` event, which comes from the host and
+whole of it with `chat_step_output`. Attention and notification rules and what
+blocks Send live in `ticketd-chat-host` (`attention`, `conditions`). Record
+queries such as New Chat's suggestions and a folder's Project live in the core.
+The [plug-in design](#harness-registration-and-step-readers) puts Step
+classification in the host's readers, beside the shared shell classifier
+(`step_kind`).
+
+List rows and counts follow the `chat-overview` event, which comes from the host and
 not from the workspace poll. Each wake rebuilds only the rows of Chats written
 since the last one or whose live state moved. The Experimental switch is a per-computer
 preference kept by the interface; the backend starts with Chat off and is told
