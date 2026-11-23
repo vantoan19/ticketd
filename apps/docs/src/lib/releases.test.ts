@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { expect, it } from "vitest";
 import { platformDownloads, publishedReleases } from "./releases.server";
 import { links } from "../links";
@@ -46,4 +47,50 @@ it("keeps drafts, unpublished dates and external asset URLs out of a public rele
   expect(groups.macos.desktop).toEqual(asset.browser_download_url);
   expect(groups.windows.desktop).toBeNull();
   expect(groups.macos.cli).toBeNull();
+});
+
+it("keeps footnotes and their return links inside the release that owns them", () => {
+  const releases = publishedReleases(
+    ["main/example", "next"].map((tag) => ({
+      name: tag,
+      tag_name: tag,
+      draft: false,
+      prerelease: false,
+      published_at: "2026-01-01T00:00:00Z",
+      html_url: links.releases + "/tag/" + tag,
+      body: "First[^x] and again[^x]. [Guide](guide.md)\n\n[^x]: A footnote.",
+      assets: [],
+    })),
+  );
+  const page = new DOMParser().parseFromString(
+    releases.map((r) => "<article>" + r.notes + "</article>").join(""),
+    "text/html",
+  );
+  const ids = Array.from(page.querySelectorAll("[id]"), (el) => el.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  for (const [i, article] of Array.from(
+    page.querySelectorAll("article"),
+  ).entries()) {
+    const links = article.querySelectorAll<HTMLAnchorElement>(
+      "[data-footnote-ref], [data-footnote-backref]",
+    );
+    expect(links).toHaveLength(4);
+    for (const link of links) {
+      const target = link.getAttribute("href")!;
+      expect(target.startsWith("#")).toBe(true);
+      expect(article.contains(page.getElementById(target.slice(1)))).toBe(true);
+      if (link.hasAttribute("data-footnote-ref")) {
+        const label = page.getElementById(
+          link.getAttribute("aria-describedby")!,
+        );
+        expect(article.contains(label)).toBe(true);
+        expect(label?.textContent).toBe("Footnotes");
+      } else expect(link.getAttribute("aria-label")).toBeTruthy();
+    }
+    expect(
+      article
+        .querySelector("a:not([data-footnote-ref], [data-footnote-backref])")
+        ?.getAttribute("href"),
+    ).toBe(new URL("guide.md", releases[i]!.url).href);
+  }
 });

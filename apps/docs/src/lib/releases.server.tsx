@@ -62,15 +62,26 @@ function releaseAlerts() {
   };
 }
 
-function releaseNotes(body: string, base: string) {
+function releaseNotes(body: string, base: string, tag: string) {
+  // Releases share one changelog page and may reuse the same footnote names.
+  const prefix = "release-" + Buffer.from(tag).toString("base64url") + "-";
+  const footnoteLabel = prefix + "footnotes";
   return renderToStaticMarkup(
     <Markdown
       skipHtml
       remarkPlugins={[remarkGfm, releaseAlerts]}
+      remarkRehypeOptions={{ clobberPrefix: prefix }}
       components={{
         img: ({ alt }) => (alt ? <span>{alt}</span> : null),
         h1: ({ children }) => <h3>{children}</h3>,
-        h2: ({ children }) => <h3>{children}</h3>,
+        h2: ({ id, className, children }) => (
+          <h3
+            id={id === "footnote-label" ? footnoteLabel : id}
+            className={className}
+          >
+            {children}
+          </h3>
+        ),
         input: ({ checked }) => {
           const Mark = checked ? SquareCheck : Square;
           return (
@@ -101,11 +112,24 @@ function releaseNotes(body: string, base: string) {
             <table>{children}</table>
           </div>
         ),
-        a: ({ href, children }) => {
+        a: ({ href, node, children, ...attributes }) => {
           if (!href) return <>{children}</>;
           const url = URL.parse(href, base);
+          const footnote =
+            node?.properties.dataFootnoteRef !== undefined ||
+            node?.properties.dataFootnoteBackref !== undefined;
           return url?.protocol === "https:" ? (
-            <a href={url.href}>{children}</a>
+            <a
+              {...attributes}
+              href={footnote ? href : url.href}
+              aria-describedby={
+                attributes["aria-describedby"] === "footnote-label"
+                  ? footnoteLabel
+                  : attributes["aria-describedby"]
+              }
+            >
+              {children}
+            </a>
           ) : (
             <>{children}</>
           );
@@ -136,7 +160,9 @@ export function publishedReleases(data: unknown): Release[] {
           date: r.published_at,
           url: r.html_url,
           preview: r.prerelease,
-          notes: r.body?.trim() ? releaseNotes(r.body, r.html_url) : "",
+          notes: r.body?.trim()
+            ? releaseNotes(r.body, r.html_url, r.tag_name)
+            : "",
           assets: r.assets
             .filter(
               (a) =>

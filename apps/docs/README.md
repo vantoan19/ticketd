@@ -33,9 +33,9 @@ Open <http://127.0.0.1:5483/ticketd/>. The upload directory is `apps/docs/build/
 
 The Quality workflow checks the Pages layout on Linux and Windows. When Quality passes on `main`, the Website workflow requests a fresh build of that commit. Publishing, editing or withdrawing a GitHub Release also requests a refresh, as does the nightly Quality run. A maintainer can run Website manually on `main`.
 
-Deployments wait in the `github-pages` queue. The newest refresh number for the current commit owns publication, so a slow build cannot replace newer release information. If that build fails, fix the cause and rerun Website on `main`.
+Deployments wait in the `github-pages` queue. The newest refresh number for the current commit owns publication, so a slow build cannot replace newer release information. After withdrawing a release, check the Website run and the published Changelog. If the refresh failed, fix the cause and dispatch Website on current `main` to read the release feed again.
 
-If Quality fails on `main`, the last successful deployment stays live. Fix or revert the failing change through review. If the live site must come down immediately, disable the Website workflow, cancel any runs still deploying, and choose **Unpublish site** in the repository’s Pages settings. After the reviewed fix passes Quality on `main`, re-enable Website and run it on `main` to publish again. [GitHub’s unpublishing guide](https://docs.github.com/en/pages/getting-started-with-github-pages/unpublishing-a-github-pages-site)
+If Quality fails on `main`, the last successful deployment stays live. Fix or revert the failing change through review. To take the live site offline immediately, disable the Website workflow and cancel every queued or in-progress Website run, including refresh requests, builds and deployments. Wait until all runs have finished, then choose **Unpublish site** in the repository’s Pages settings. After the reviewed fix passes Quality on `main`, re-enable Website and run it on `main` to publish again. [GitHub’s unpublishing guide](https://docs.github.com/en/pages/getting-started-with-github-pages/unpublishing-a-github-pages-site)
 
 ## Drawing and demonstration
 
@@ -68,7 +68,7 @@ After every window and theme succeeds, the script replaces the WebPs in `screens
 
 ## Documentation and releases
 
-The Fumadocs pages and navigation live in `content/docs`. The glossary includes the canonical repository glossary. Search loads its local engine and the generated `/api/search` index when a reader types a query. Agents can read `/llms.txt`, `/llms-full.txt` or `/llms.mdx/docs/<page>/content.md`. The introduction’s Markdown is at `/llms.mdx/docs/content.md`. Each article also links to its Markdown representation in the HTML head.
+The Fumadocs pages and navigation live in `content/docs`. The glossary includes the canonical repository glossary. All resource paths are relative to the site’s base URL. Search loads its local engine and `api/search` when a reader types a query. Agents can read `llms.txt`, `llms-full.txt` or `llms.mdx/docs/<page>/content.md`. The introduction’s Markdown is at `llms.mdx/docs/content.md`. On GitHub Pages the Markdown index is `/ticketd/llms.txt`. Each article also links to its Markdown representation in the HTML head.
 
 At build time the site reads the repository’s public, unauthenticated GitHub Releases feed. Published release notes supply Changelog. Download buttons point to uploaded assets on those releases. With an empty feed the primary action opens the source repository. A feed error displays an availability message.
 

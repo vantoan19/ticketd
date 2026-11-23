@@ -199,6 +199,10 @@ a {
   outline: 2px solid var(--blue);
   outline-offset: 4px;
 }
+.foundations a:focus-visible,
+.site-footer a:focus-visible {
+  outline-color: var(--base-ink);
+}
 ::selection {
   background: var(--blue);
   color: var(--on-blue);
