@@ -392,7 +392,7 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
     f.refresh_at(T0);
-    let mut closed = issue(1, T2);
+    let mut closed = issue(1, "2026-02-01T00:20:00.500Z");
     closed.state = ExternalState::named(StateCategory::Completed, "Closed");
     f.publish(closed);
     f.refresh_at(T2);
@@ -405,7 +405,7 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     f.remote(|r| {
         let stale = r.issues.get_mut(&1).unwrap();
         stale.state = ExternalState::named(StateCategory::Open, "Open");
-        stale.updated_at = T1.into();
+        stale.updated_at = "2026-02-01T00:20:00Z".into();
         stale.title = "Stale title".into();
     });
     f.refresh_at(T3);

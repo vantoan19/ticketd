@@ -1906,7 +1906,14 @@ fn apply_issue(
             // An overlapping run can deliver an observation older than one already
             // applied (the slower of two refreshes). Confirmed source state never
             // moves backwards, and an old observation confirms nothing now.
-            if !updated_at.is_empty() && issue.updated_at.as_str() < updated_at.as_str() {
+            let older = match (
+                chrono::DateTime::parse_from_rfc3339(&issue.updated_at),
+                chrono::DateTime::parse_from_rfc3339(&updated_at),
+            ) {
+                (Ok(incoming), Ok(current)) => incoming < current,
+                _ => !updated_at.is_empty() && issue.updated_at < updated_at,
+            };
+            if older {
                 return Ok(());
             }
             let previous = state_category.as_deref().map(StateCategory::parse);
