@@ -1166,6 +1166,7 @@ pub fn download_attachment(host: tauri::State<'_, SyncHost>, id: String) -> Outc
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::sync::PoisonError;
     use ticketd_core::sync::{
         SyncNoticeKind,
         remote::{FakeRemote, RemoteOp},
@@ -1717,6 +1718,9 @@ mod tests {
 
     #[test]
     fn s3_history_lists_and_restores_the_objects_earlier_versions() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let mut desks = desks();
         let ticket = desks.there.create_ticket("One").unwrap();
         desks.remote.set_now("2026-03-01T09:00:00Z");
@@ -1759,6 +1763,9 @@ mod tests {
 
     #[test]
     fn s3_history_names_s3_when_it_could_not_be_asked() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let mut desks = desks();
         let ticket = desks.here.create_ticket("One").unwrap();
         let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
@@ -1865,6 +1872,9 @@ mod tests {
 
     #[test]
     fn an_s3_binding_syncs_through_its_bucket_and_goes_with_disconnect() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
         let fake = FakeRemote::new();
         let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
@@ -1903,6 +1913,9 @@ mod tests {
 
     #[test]
     fn an_s3_workspace_uploads_downloads_and_reconnects_after_disconnect() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
         let fake = FakeRemote::new();
         let s3 = S3Binding {

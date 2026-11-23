@@ -211,6 +211,11 @@ fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
 
 static KEPT: Mutex<Option<Arc<S3Storage>>> = Mutex::new(None);
 
+/// Tests that keep or drop the process-wide storage and credentials take this, so one
+/// test's reset cannot drop what a test running beside it is counting on.
+#[cfg(test)]
+pub(crate) static TEST_STATE: Mutex<()> = Mutex::new(());
+
 /// Drops the kept storage and the credentials kept for every profile. The next call builds
 /// the storage from the profile as it is now: its endpoint, its region and its account. Setup
 /// choices (connect, upload, download, reconnect) call this, since a person who comes back to
@@ -259,6 +264,9 @@ mod tests {
 
     #[test]
     fn a_storage_that_could_not_be_put_together_fails_that_call_and_tries_again() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let fake = FakeRemote::new();
         let attempts = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&attempts);
@@ -325,6 +333,9 @@ mod tests {
 
     #[test]
     fn the_buckets_own_check_is_what_the_core_gets() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let storage = S3Storage::with_build(binding(), |_| {
             Ok(Built {
                 storage: Arc::new(Unusable),
@@ -339,6 +350,9 @@ mod tests {
 
     #[test]
     fn a_folder_is_named_by_its_address_and_the_console_page_where_aws_has_one() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let fake = FakeRemote::new();
         let aws = built(&fake, "eu-west-1", None);
         assert_eq!(address(&binding(), "f1"), "s3://team-bucket/ticketd/f1/");
@@ -355,6 +369,9 @@ mod tests {
 
     #[test]
     fn a_reset_gives_the_next_call_a_storage_built_afresh_from_the_profile() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let binding = S3Binding {
             bucket: "reset-test-bucket".into(),
             ..binding()
@@ -368,6 +385,9 @@ mod tests {
 
     #[test]
     fn the_console_page_needs_the_storage_to_be_reachable() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let storage = S3Storage::with_build(binding(), |_| Err(RemoteError::Offline));
         assert_eq!(storage.console_url("f1"), None);
         assert_eq!(storage.address("f1"), "s3://team-bucket/ticketd/f1/");

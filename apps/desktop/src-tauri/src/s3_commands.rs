@@ -267,6 +267,7 @@ pub fn sync_connect_s3(bucket: String, prefix: String, profile: String) -> Outco
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::PoisonError;
 
     #[test]
     fn a_missing_or_old_cli_is_a_state_with_no_profiles() {
@@ -335,6 +336,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_recovery_signs_a_profile_in_only_when_it_has_a_sign_in_command() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let (directory, cli) = stand_in(false);
         // Static keys or a credential helper: nothing to sign in to, so nothing runs and the
         // recovery goes on to try again.
@@ -350,6 +354,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_recovery_signs_in_through_the_aws_program_the_binding_names() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         use std::os::unix::fs::PermissionsExt;
         // An `aws` outside the usual directories, which default discovery would not find.
         let (directory, _) = stand_in(true);
@@ -372,6 +379,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn kept_credentials_are_exported_again_after_they_are_all_forgotten() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         use std::os::unix::fs::PermissionsExt;
         // Static keys never expire, so only forgetting makes the next request export again.
         let directory = tempfile::tempdir().unwrap();
