@@ -321,8 +321,15 @@ fn an_exited_leader_is_unavailable_and_its_descendant_is_stopped() {
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
     let mut text = String::new();
-    stream.read_to_string(&mut text).unwrap();
-    assert_eq!(text, "ready");
+    match stream.read_to_string(&mut text) {
+        Ok(_) => assert_eq!(text, "ready"),
+        // Terminating the Job Object can reset an accepted Windows socket
+        // before its last buffered bytes reach the reader.
+        Err(error) if cfg!(windows) && error.kind() == std::io::ErrorKind::ConnectionReset => {
+            assert!("ready".starts_with(&text));
+        }
+        Err(error) => panic!("the descendant's socket did not close: {error}"),
+    }
 }
 
 #[test]

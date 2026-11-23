@@ -1494,27 +1494,32 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
         source.last_refreshed_at.as_deref(),
         Some("2026-02-02T00:00:00Z")
     );
-    let updated_before = reopened.show_ticket(&imported).unwrap().updated_at;
-    drop(reopened);
-    let path = f.dir.path().join("workspace.sqlite3");
+}
+
+#[test]
+fn a_format_27_import_gains_history_without_changing_its_update_time() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 27).unwrap();
     let legacy = rusqlite::Connection::open(&path).unwrap();
     legacy
-        .execute(
-            "DELETE FROM ticket_history WHERE kind = 'source_import'",
-            [],
+        .execute_batch(
+            "INSERT INTO tickets (id, title, status) VALUES ('legacy-ticket', 'Already imported', 'Todo');
+             INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at)
+             VALUES ('legacy-ticket', 'github', '1', 'o/r#1', 'o/r#1', 'https://github.com/o/r/issues/1',
+                     'imported', '2026-02-01T00:00:00Z');
+             INSERT INTO external_ownership (ticket_id, authority) VALUES ('legacy-ticket', 'external');
+             INSERT INTO source_sync (ticket_id, external_state, external_updated_at)
+             VALUES ('legacy-ticket', 'open', '2026-02-02T00:00:00Z');",
         )
         .unwrap();
-    legacy.execute_batch("ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes;").unwrap();
-    legacy.pragma_update(None, "user_version", 27).unwrap();
     drop(legacy);
     let migrated = Workspace::open(path).unwrap();
-    assert_eq!(
-        migrated.show_ticket(&imported).unwrap().updated_at,
-        updated_before
-    );
+    let imported = migrated.list_tickets().unwrap().remove(0);
+    assert_eq!(imported.updated_at.as_deref(), Some("2026-02-02T00:00:00Z"));
     assert_eq!(
         migrated
-            .ticket_history(&imported)
+            .ticket_history(&imported.reference)
             .unwrap()
             .iter()
             .filter(|entry| entry.kind == "source_import")
