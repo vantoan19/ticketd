@@ -13,6 +13,9 @@
 mod report;
 mod runtime;
 mod session;
+mod steps;
+
+pub use steps::read_claude_steps;
 #[cfg(test)]
 pub(crate) mod tests;
 

@@ -355,17 +355,7 @@ impl Session {
                         continue;
                     }
                     let changed = self.reports.file_tool(&turn, id, &title, &block["input"]);
-                    let detail = ProviderDetail::new("tool_use", &block["input"].to_string());
-                    self.tools
-                        .insert(id.to_owned(), (title.clone(), detail.clone()));
-                    events.push(EventKind::ToolUpdated {
-                        turn: turn.clone(),
-                        item: NativeItemId::new(id),
-                        title,
-                        status: ToolStatus::Running,
-                        output: None,
-                        detail: Some(detail),
-                    });
+                    self.observe_tool_input(&turn, id, &title, &block["input"], events);
                     events.extend(changed);
                 }
                 _ => events.push(unknown(
@@ -375,6 +365,48 @@ impl Session {
                 )),
             }
         }
+    }
+
+    /// A permission callback and assistant content can both carry this tool's input.
+    fn observe_tool_input(
+        &mut self,
+        turn: &NativeTurnId,
+        id: &str,
+        title: &str,
+        input: &Value,
+        events: &mut Vec<EventKind>,
+    ) {
+        let previous = self.tools.get(id);
+        let merged = previous
+            .and_then(|(_, detail)| {
+                serde_json::from_str::<Map<String, Value>>(detail.payload()).ok()
+            })
+            .map(|mut kept| {
+                if let Some(incoming) = input.as_object() {
+                    kept.extend(
+                        incoming
+                            .iter()
+                            .filter(|(_, value)| !value.is_null())
+                            .map(|(key, value)| (key.clone(), value.clone())),
+                    );
+                }
+                Value::Object(kept)
+            });
+        let detail = tool_detail(title, "tool_use", merged.as_ref().unwrap_or(input));
+        if previous.is_some_and(|(name, kept)| name == title && kept.payload() == detail.payload())
+        {
+            return;
+        }
+        self.tools
+            .insert(id.to_owned(), (title.to_owned(), detail.clone()));
+        events.push(EventKind::ToolUpdated {
+            turn: turn.clone(),
+            item: NativeItemId::new(id),
+            title: title.to_owned(),
+            status: ToolStatus::Running,
+            output: None,
+            detail: Some(detail),
+        });
     }
 
     fn tool_result(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -403,7 +435,7 @@ impl Session {
             text(event, "text").unwrap_or_default(),
             event["truncated"] == true,
         );
-        let detail = with_line_counts(detail, &event["outcome"]);
+        let detail = with_line_counts(title, detail, &event["outcome"]);
         // Claude Code answers the tool a Stop cuts off with an error result. That the
         // interrupt was written is reported; what it means for the tool is not decided
         // here (#387 3B3).
@@ -457,6 +489,15 @@ impl Session {
             "agent_id": event.get("agent_id"),
         });
         let turn = self.turn(events);
+        // Claude Code can ask before emitting assistant content for the tool.
+        if let (Some(id), Some(name), Some(input)) = (
+            text(event, "tool_use_id"),
+            text(event, "tool_name"),
+            event.get("input").filter(|input| input.is_object()),
+        ) && !PLAN_TOOLS.contains(&name)
+        {
+            self.observe_tool_input(&turn, id, name, input, events);
+        }
         self.requests.insert(
             request.clone(),
             LiveRequest {
@@ -747,7 +788,7 @@ pub(super) fn denials(event: &Value) -> Vec<String> {
 
 /// The tool's input with the lines its result said it added and removed, kept as
 /// `ticketd_lines` so the step row can show them; unchanged when it said none.
-fn with_line_counts(detail: &ProviderDetail, outcome: &Value) -> ProviderDetail {
+fn with_line_counts(title: &str, detail: &ProviderDetail, outcome: &Value) -> ProviderDetail {
     let count = |key: &str| outcome[key].as_u64();
     let (Some("file"), Some(added), Some(removed)) = (
         text(outcome, "kind"),
@@ -763,5 +804,50 @@ fn with_line_counts(detail: &ProviderDetail, outcome: &Value) -> ProviderDetail 
         "ticketd_lines".to_owned(),
         json!({ "added": added, "removed": removed }),
     );
-    ProviderDetail::new(detail.kind(), &Value::Object(input).to_string())
+    tool_detail(title, detail.kind(), &Value::Object(input))
+}
+
+/// Keep the fields a reader needs when an input includes a large body or diff.
+const TOOL_INPUT_BYTES: usize = 16 * 1024;
+// Commands stay whole within a separate budget. The encoded input can expand
+// again when sent in the subscriber's change feed.
+const COMMAND_INPUT_BYTES: usize = crate::SUBSCRIBER_BACKLOG_BYTES / 8;
+
+fn tool_detail(title: &str, kind: &str, input: &Value) -> ProviderDetail {
+    let raw = input.to_string();
+    if raw.len() <= TOOL_INPUT_BYTES {
+        let bytes = raw.len();
+        return ProviderDetail::from_compacted_tool_input(kind, raw, bytes);
+    }
+    let fields: &[&str] = match title {
+        "Bash" | "PowerShell" => &["command", "status", "exitCode", "durationMs"],
+        "Read" => &["file_path", "offset", "limit"],
+        "LS" => &["path"],
+        "Grep" | "Glob" => &["pattern", "path", "glob"],
+        "Edit" | "MultiEdit" | "NotebookEdit" | "Write" => {
+            &["ticketd_lines", "file_path", "notebook_path"]
+        }
+        "WebSearch" => &["query"],
+        "WebFetch" => &["url"],
+        _ => &[],
+    };
+    let mut compact = Map::new();
+    let mut bytes = 2;
+    for &field in fields {
+        let Some(value) = input.get(field) else {
+            continue;
+        };
+        // Field names are fixed ASCII. Count quotes, colon and separator as well.
+        let field_bytes = field.len() + 4 + value.to_string().len();
+        let budget = if field == "command" {
+            COMMAND_INPUT_BYTES
+        } else {
+            TOOL_INPUT_BYTES
+        };
+        if bytes + field_bytes <= budget {
+            compact.insert(field.to_owned(), value.clone());
+            bytes += field_bytes;
+        }
+    }
+    ProviderDetail::from_compacted_tool_input(kind, Value::Object(compact).to_string(), raw.len())
 }

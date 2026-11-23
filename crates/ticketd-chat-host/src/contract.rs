@@ -853,6 +853,20 @@ impl ProviderDetail {
         }
     }
 
+    /// A reader can compact a JSON payload to its own evidence budget before it
+    /// reaches storage. Cutting the serialized string here would break its shape.
+    pub(crate) fn from_compacted_tool_input(
+        kind: &str,
+        payload: String,
+        original_bytes: usize,
+    ) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            payload,
+            original_bytes,
+        }
+    }
+
     pub fn kind(&self) -> &str {
         &self.kind
     }

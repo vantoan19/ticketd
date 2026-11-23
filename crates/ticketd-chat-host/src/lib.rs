@@ -29,11 +29,12 @@ pub mod step_kind;
 mod subscription;
 mod supervisor;
 pub mod testing;
+mod tool_steps;
 mod turn_ending;
 mod unattended;
 mod wire;
 
-pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter};
+pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, read_claude_steps};
 pub use codex::CodexAdapter;
 pub use contract::*;
 pub use host::*;
@@ -42,5 +43,6 @@ pub use recording::prepare_harness_recording;
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };
+pub use tool_steps::*;
 pub use turn_ending::{StopReason, TurnEnding};
 pub use unattended::TurnEnd;

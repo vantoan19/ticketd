@@ -9,9 +9,12 @@ use ticketd_chat_host::attention::{self, Facts, Status};
 use ticketd_chat_host::conditions::ChatProblemKind;
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, InteractionKind, ProblemKind, StopState, TurnEnding,
+    ChatProblem, FileTargets, InteractionKind, ProblemKind, ReadAction, RunAction, SearchScope,
+    StepAction, StepOutcomeOverride, StopState, ToolEvidence, ToolStep, TurnEnding, WebAction,
+    read_claude_steps,
 };
 use ticketd_chat_host::{FileChangeKind, diffstat};
+use ticketd_core::harnesses::HarnessKey;
 use ticketd_core::{
     Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
@@ -986,10 +989,118 @@ fn page(url: &str) -> String {
     rest.trim_end_matches('/').to_owned()
 }
 
-/// Claude Code's own wording of a search that found nothing.
-const NOTHING_FOUND: [&str; 2] = ["No files found", "No matches found"];
-/// Claude Code's Write result when the file did not exist before (SDK 0.3.322).
-const WRITE_CREATED: &str = "File created successfully at:";
+fn word_tool_step(action: ToolStep, base: &Step, folder: &str, home: Option<&str>) -> Step {
+    let mut step = base.clone();
+    let path = |text: &str| shown_path(text, folder, home);
+    let paths = |paths: Vec<String>| paths.into_iter().map(|file| target(&path(&file))).collect();
+    let create = matches!(action.action, StepAction::Create { .. });
+    step.targets = match action.action {
+        StepAction::Read(ReadAction::Files(files)) => {
+            step.kind = "read";
+            files
+                .into_iter()
+                .map(|file| StepTarget {
+                    text: path(&file.path),
+                    lines: file.lines.map(|(first, last)| [first, last]),
+                    scope: None,
+                })
+                .collect()
+        }
+        StepAction::Read(ReadAction::List(files)) => {
+            step.kind = "read";
+            step.variant = Some("list");
+            paths(files)
+        }
+        StepAction::Search {
+            targets,
+            no_matches,
+        } => {
+            step.kind = "search";
+            step.no_matches = no_matches;
+            targets
+                .into_iter()
+                .map(|search| StepTarget {
+                    text: search.query,
+                    lines: None,
+                    scope: search.scope.map(|scope| match scope {
+                        SearchScope::Path(scope) => path(&scope),
+                        SearchScope::Pattern(scope) => scope,
+                    }),
+                })
+                .collect()
+        }
+        StepAction::Edit { targets, counts } | StepAction::Create { targets, counts } => {
+            step.kind = if create { "create" } else { "edit" };
+            step.added_lines = counts.added;
+            step.removed_lines = counts.removed;
+            match targets {
+                FileTargets::Paths(files) => paths(files),
+                FileTargets::Plan { .. } => {
+                    step.variant = Some("plan");
+                    Vec::new()
+                }
+            }
+        }
+        StepAction::Delete { paths: files } => {
+            step.kind = "delete";
+            paths(files)
+        }
+        StepAction::Run(run) => {
+            step.kind = "run";
+            match run {
+                RunAction::Command => Vec::new(),
+                RunAction::Script { interpreters } => {
+                    step.variant = Some("script");
+                    interpreters.iter().map(|program| target(program)).collect()
+                }
+            }
+        }
+        StepAction::Web(web) => {
+            step.kind = "web";
+            match web {
+                WebAction::Search { query } => vec![target(&query)],
+                WebAction::Fetch { url } => {
+                    step.variant = Some("fetch");
+                    vec![target(&page(&url))]
+                }
+            }
+        }
+        StepAction::Other { name } => {
+            let targets = vec![target(&name)];
+            step.target = name;
+            targets
+        }
+    };
+    if let Some(command) = action.command {
+        step.target = match &command.ticketd_calls {
+            Some(calls) => calls
+                .iter()
+                .map(|args| step_kind::ticketd_command(args))
+                .collect::<Vec<_>>()
+                .join("; "),
+            None => step_kind::shown_command(&command.display),
+        };
+        step.ticketd = command
+            .ticketd_calls
+            .as_deref()
+            .and_then(chat_ticketd::sentences);
+        step.command = Some(command.display);
+        step.folder = command
+            .working_directory
+            .map(|folder| path(&folder))
+            .filter(|folder| folder != ".");
+        step.exit_code = command.exit_code;
+        step.duration_ms = command.duration_ms;
+        step.timed_out = command.timed_out;
+    }
+    if let Some(outcome) = action.outcome {
+        step.state = match outcome {
+            StepOutcomeOverride::Completed => "done",
+            StepOutcomeOverride::Declined => "declined",
+        };
+    }
+    step
+}
 
 /// The step rows for one tool call: one, except for a Codex file change, which has
 /// one row per kind of change.
@@ -1036,23 +1147,41 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
             ..base
         }];
     }
-    let input = serde_json::from_str::<serde_json::Value>(&tool.input).ok();
-    let value = |name: &str| input.as_ref().and_then(|input| input.get(name));
-    let field = |name: &str| value(name).and_then(serde_json::Value::as_str);
-    let number = |name: &str| value(name).and_then(serde_json::Value::as_i64);
     let active = chat.active_turn.as_ref().map(|turn| &turn.id) == Some(&tool.turn_id);
     let state = match tool.state {
         ChatToolState::Running if active => "running",
         ChatToolState::Running => "not_finished",
         ChatToolState::Completed => "done",
-        // Codex declines were stored as failures before they were kept apart.
-        ChatToolState::Failed if field("status") == Some("declined") => "declined",
         ChatToolState::Failed => "failed",
         ChatToolState::Declined => "declined",
         ChatToolState::Unknown => "unknown",
     };
     let base = Step { state, ..base };
     let folder = chat.execution_folder.as_str();
+    if chat.harness == HarnessKey::ClaudeCode.as_str() {
+        return read_claude_steps(ToolEvidence {
+            name: &tool.name,
+            input: &tool.input,
+            output: tool.output.as_deref(),
+            state: tool.state,
+            working_directory: folder,
+        })
+        .into_iter()
+        .map(|action| word_tool_step(action, &base, folder, home))
+        .collect();
+    }
+
+    let input = serde_json::from_str::<serde_json::Value>(&tool.input).ok();
+    let value = |name: &str| input.as_ref().and_then(|input| input.get(name));
+    let field = |name: &str| value(name).and_then(serde_json::Value::as_str);
+    let number = |name: &str| value(name).and_then(serde_json::Value::as_i64);
+    // Codex declines were stored as failures before they were kept apart.
+    let state = if state == "failed" && field("status") == Some("declined") {
+        "declined"
+    } else {
+        state
+    };
+    let base = Step { state, ..base };
     let path = |text: &str| target(&shown_path(text, folder, home));
     let kind = |kind: &'static str, targets: Vec<StepTarget>| Step {
         kind,
@@ -1133,16 +1262,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
             ..base.clone()
         }
     };
-    let found_nothing = |step: Step| Step {
-        no_matches: step.state == "done"
-            && tool.output.as_deref().is_none_or(|output| {
-                let output = output.trim();
-                output.is_empty() || NOTHING_FOUND.iter().any(|said| output.starts_with(said))
-            }),
-        ..step
-    };
-    // Codex names a command step by its command and keeps its item as the input;
-    // Claude Code names its tool and passes the command or file in the input.
+    // Codex names a command step by its command and keeps its item as the input.
     let step = match (field("type"), tool.name.as_str()) {
         (Some("commandExecution"), _) => {
             command(field("command").unwrap_or(&tool.name), field("cwd"))
@@ -1165,96 +1285,9 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         (None, name) if let Some(paths) = name.strip_prefix("Edit ") => {
             kind("edit", paths.split(", ").map(path).collect())
         }
-        (None, "Bash" | "PowerShell") => match field("command") {
-            Some(text) => command(text, None),
-            None => base.clone(),
-        },
-        (None, "Read") => {
-            let lines = match (number("offset"), number("limit")) {
-                (offset, Some(limit)) if limit > 0 => {
-                    let from = offset.unwrap_or(1).max(1);
-                    u32::try_from(from)
-                        .ok()
-                        .zip(u32::try_from(from + limit - 1).ok())
-                        .map(|(from, to)| [from, to])
-                }
-                _ => None,
-            };
-            let file = field("file_path").map(|file| StepTarget {
-                lines,
-                ..path(file)
-            });
-            kind("read", file.into_iter().collect())
-        }
-        (None, "LS") => Step {
-            variant: Some(Variant::List.name()),
-            ..kind("read", field("path").map(path).into_iter().collect())
-        },
-        (None, "Grep" | "Glob") => {
-            let scope = field("path").map(|scope| shown_path(scope, folder, home));
-            let scope = scope.or(field("glob").map(str::to_owned));
-            let pattern = field("pattern").map(|pattern| StepTarget {
-                scope,
-                ..target(pattern)
-            });
-            found_nothing(kind("search", pattern.into_iter().collect()))
-        }
-        (None, "Edit" | "MultiEdit" | "NotebookEdit" | "Write") => {
-            let file = field("file_path").or(field("notebook_path"));
-            // Created only when Claude Code's result says so.
-            let created = tool.name == "Write"
-                && state == "done"
-                && tool
-                    .output
-                    .as_deref()
-                    .is_some_and(|output| output.starts_with(WRITE_CREATED));
-            let lines = |key: &str| {
-                value("ticketd_lines")
-                    .and_then(|lines| lines[key].as_u64())
-                    .and_then(|count| u32::try_from(count).ok())
-            };
-            let plan = harness == "Claude Code" && file.is_some_and(|file| plan_file(file, folder));
-            Step {
-                added_lines: lines("added"),
-                removed_lines: lines("removed"),
-                // Claude Code's plan lives in its own profile: "Wrote its plan".
-                variant: plan.then_some("plan"),
-                ..kind(
-                    if created { "create" } else { "edit" },
-                    if plan {
-                        Vec::new()
-                    } else {
-                        file.map(path).into_iter().collect()
-                    },
-                )
-            }
-        }
-        (None, "WebSearch") => kind("web", vec![target(field("query").unwrap_or_default())]),
-        (None, "WebFetch") => Step {
-            variant: Some(Variant::Fetch.name()),
-            ..kind("web", vec![target(&page(field("url").unwrap_or_default()))])
-        },
         (None, _) => base.clone(),
     };
     vec![step]
-}
-
-/// A plan Claude Code keeps in its own profile (`…/.claude/plans/name.md`), outside
-/// the Chat's folder: a step names it as "its plan", not by that path.
-fn plan_file(path: &str, folder: &str) -> bool {
-    let path = std::path::Path::new(path);
-    let outside = folder.is_empty() || !path.starts_with(folder);
-    let in_plans = path
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .is_some_and(|name| name == "plans");
-    let claude = path.components().any(|part| {
-        part.as_os_str()
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .contains("claude")
-    });
-    outside && in_plans && claude && path.extension().is_some_and(|ext| ext == "md")
 }
 
 /// A Codex file change: one row per kind of change, in the order each kind first
@@ -2003,6 +2036,19 @@ mod tests {
         rows.remove(0)
     }
 
+    fn claude_chat(active_turn: Option<&str>) -> Chat {
+        Chat {
+            harness: "claude-code".to_owned(),
+            ..chat(active_turn)
+        }
+    }
+
+    fn claude_step(tool: &ChatTool) -> Step {
+        let mut rows = steps(tool, "Claude Code", &claude_chat(None), Some("/Users/me"));
+        assert_eq!(rows.len(), 1, "one row");
+        rows.remove(0)
+    }
+
     fn codex_command(command: &str, status: &str, exit_code: i64) -> ChatTool {
         let input = json!({
             "type": "commandExecution",
@@ -2152,14 +2198,14 @@ mod tests {
         assert_eq!(counts, [("edit", None, None), ("create", Some(2), Some(0))]);
 
         // Claude Code says it in the tool's result, which the adapter keeps.
-        let edit = one(&tool(
+        let edit = claude_step(&tool(
             "Edit",
             r#"{"file_path":"/work/limiter/src/a.ts","ticketd_lines":{"added":48,"removed":6}}"#,
             ChatToolState::Completed,
             None,
         ));
         assert_eq!((edit.added_lines, edit.removed_lines), (Some(48), Some(6)));
-        let untold = one(&tool(
+        let untold = claude_step(&tool(
             "Edit",
             r#"{"file_path":"/work/limiter/src/a.ts"}"#,
             ChatToolState::Completed,
@@ -2172,10 +2218,10 @@ mod tests {
     fn claude_code_tools_read_as_their_kind() {
         let done = ChatToolState::Completed;
         let row = |name: &str, input: &str, output: Option<&str>| {
-            let step = one(&tool(name, input, done, output));
+            let step = claude_step(&tool(name, input, done, output));
             (step.kind, step.variant, texts(&step).join(", "))
         };
-        let ran = one(&tool(
+        let ran = claude_step(&tool(
             "PowerShell",
             r#"{"command":"ticketd --version"}"#,
             done,
@@ -2189,7 +2235,7 @@ mod tests {
             row("Bash", r#"{"command":"rm -f /Users/me/notes.txt"}"#, None),
             ("delete", None, "~/notes.txt".to_owned())
         );
-        let read = one(&tool(
+        let read = claude_step(&tool(
             "Read",
             r#"{"file_path":"/work/limiter/src/a.ts","offset":40,"limit":51}"#,
             done,
@@ -2197,7 +2243,7 @@ mod tests {
         ));
         assert_eq!((read.kind, texts(&read)), ("read", vec!["src/a.ts"]));
         assert_eq!(read.targets[0].lines, Some([40, 90]));
-        let grep = one(&tool(
+        let grep = claude_step(&tool(
             "Grep",
             r#"{"pattern":"RateLimiter","path":"/work/limiter/src"}"#,
             done,
@@ -2249,7 +2295,7 @@ mod tests {
         let bin = "/Users/me/ticketd/target/debug/ticketd";
         let script = format!("T={bin}\n$T change T-MP4 --status \"In progress\"");
         let input = json!({ "command": script }).to_string();
-        let step = one(&tool("Bash", &input, ChatToolState::Completed, None));
+        let step = claude_step(&tool("Bash", &input, ChatToolState::Completed, None));
         assert_eq!(step.kind, "run");
         assert_eq!(
             step.target,
@@ -2261,7 +2307,7 @@ mod tests {
 
         // An unknown call says its words, without the path.
         let input = json!({ "command": format!("{bin} skills install --harness codex") });
-        let other = one(&tool(
+        let other = claude_step(&tool(
             "Bash",
             &input.to_string(),
             ChatToolState::Completed,
@@ -2275,7 +2321,7 @@ mod tests {
             "T={bin}; $T skills get chat | head -80; echo ----; $T show T-MP3 2>&1 || $T --help"
         );
         let input = json!({ "command": compound });
-        let calls = one(&tool(
+        let calls = claude_step(&tool(
             "Bash",
             &input.to_string(),
             ChatToolState::Completed,
@@ -2290,7 +2336,7 @@ mod tests {
 
         // Anything else stays the command, with ticketd's path left out of it.
         let input = json!({ "command": format!("{bin} export | sh") });
-        let raw = one(&tool(
+        let raw = claude_step(&tool(
             "Bash",
             &input.to_string(),
             ChatToolState::Completed,
@@ -2339,16 +2385,14 @@ mod tests {
         assert_eq!(resolved_at.as_deref(), Some("2026-11-13T10:02:00Z"));
 
         let plan = json!({ "file_path": "/Users/me/.claude/plans/quiet-otter.md" });
-        let mut claude = chat(None);
-        claude.harness = "claude-code".to_owned();
-        let wrote = steps(
-            &tool("Write", &plan.to_string(), ChatToolState::Completed, None),
-            "Claude Code",
-            &claude,
-            Some("/Users/me"),
-        );
-        assert_eq!(wrote[0].variant, Some("plan"));
-        assert!(wrote[0].targets.is_empty());
+        let wrote = claude_step(&tool(
+            "Write",
+            &plan.to_string(),
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!(wrote.variant, Some("plan"));
+        assert!(wrote.targets.is_empty());
     }
 
     /// U4: the card shows what would run apart from why the harness asks.
@@ -2395,12 +2439,7 @@ mod tests {
                 Some("npm install @pagerduty/pdjs".to_owned())
             )
         );
-        let edit = one(&tool(
-            "Edit",
-            r#"{"file_path":"/work/limiter/src/a.ts"}"#,
-            ChatToolState::Running,
-            None,
-        ));
+        let edit = one(&tool("Edit src/a.ts", "", ChatToolState::Running, None));
         assert_eq!(
             title(&edit),
             (
@@ -2408,6 +2447,52 @@ mod tests {
                 Some("src/a.ts".to_owned())
             )
         );
+    }
+
+    #[test]
+    fn a_saved_claude_edit_uses_the_same_path_in_history_and_approval() {
+        use super::{Tracker, item};
+        use ticketd_core::ChatItem;
+
+        let chat = claude_chat(None);
+        let record = ChatItem::Tool(tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/auth/config.ts"}"#,
+            ChatToolState::Completed,
+            Some("The file was updated successfully."),
+        ));
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to change the configuration".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+        let live = ChatLive::idle();
+        let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker) else {
+            panic!("a step");
+        };
+        assert_eq!(steps[0].kind, "edit");
+        assert_eq!(texts(&steps[0]), ["src/auth/config.ts"]);
+        assert_eq!(
+            steps[0].output.as_deref(),
+            Some("The file was updated successfully.")
+        );
+        let Some(Item::Request { title, subject, .. }) =
+            item(&approval, &chat, &live, None, &tracker)
+        else {
+            panic!("an approval");
+        };
+        assert_eq!(title, "Claude Code asked to edit");
+        assert_eq!(subject.as_deref(), Some("src/auth/config.ts"));
     }
 
     /// #367: a turn's records read by whether it still runs, and a stop that did not
@@ -2668,7 +2753,7 @@ mod tests {
     fn a_step_carries_its_output_s_last_lines_and_says_how_much_there_is() {
         let lines: Vec<String> = (1..=30).map(|n| format!("line {n}")).collect();
         let output = format!("{}\n", lines.join("\n"));
-        let long = one(&tool("Bash", "ls", ChatToolState::Completed, Some(&output)));
+        let long = claude_step(&tool("Bash", "ls", ChatToolState::Completed, Some(&output)));
         let tail = format!("{}\n", lines[10..].join("\n"));
         assert_eq!(long.output.as_deref(), Some(tail.as_str()));
         assert_eq!(
@@ -2680,10 +2765,10 @@ mod tests {
         );
         // One long line is cut too, on a character boundary.
         let wide = "é".repeat(5000);
-        let cut = one(&tool("Bash", "ls", ChatToolState::Completed, Some(&wide)));
+        let cut = claude_step(&tool("Bash", "ls", ChatToolState::Completed, Some(&wide)));
         assert!(cut.output.as_deref().is_some_and(|tail| tail.len() <= 4096));
         // Output that fits is all there, with nothing more to read.
-        let short = one(&tool("Bash", "ls", ChatToolState::Completed, Some("ok\n")));
+        let short = claude_step(&tool("Bash", "ls", ChatToolState::Completed, Some("ok\n")));
         assert_eq!(
             (short.output.as_deref(), short.full_output),
             (Some("ok\n"), None)
@@ -2699,7 +2784,7 @@ mod tests {
             None,
         );
         running.started_at = Some("2026-11-10T10:00:05Z".to_owned());
-        let step = &steps(&running, "Codex", &chat(Some("turn")), None)[0];
+        let step = &steps(&running, "Claude Code", &claude_chat(Some("turn")), None)[0];
         assert_eq!(
             (step.state, step.started_at.as_deref()),
             ("running", Some("2026-11-10T10:00:05Z"))
