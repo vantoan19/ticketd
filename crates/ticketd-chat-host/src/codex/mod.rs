@@ -16,7 +16,6 @@
 mod discovery;
 mod mapping;
 mod report;
-mod rpc;
 mod runtime;
 #[cfg(test)]
 pub(crate) mod tests;

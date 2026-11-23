@@ -1,34 +1,32 @@
-//! One live `codex app-server` process bound to a runtime generation.
+//! Codex commands and observations for one `codex app-server` process.
 //!
-//! A single reader task applies every incoming frame in arrival order: replies wake
-//! their callers, notifications and harness requests become events. Commands only
-//! write; they never read the protocol stream themselves.
+//! The shared JSON-RPC connection applies incoming frames in order. Codex tracks the
+//! thread and turn and translates harness requests into interactions.
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tokio::io::BufReader;
-use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tokio::time::timeout;
 
 use crate::{
-    Capabilities, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, EventStream,
+    ADAPTER_CLOSE_TIMEOUT, Capabilities, CloseOutcome, DispatchOutcome, EventKind, EventStream,
     HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest,
     LoginState, NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
-    Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange,
-    SettingOutcome, Submission, SubmissionKind,
+    Refusal, RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome,
+    Submission, SubmissionKind,
 };
 
-pub(super) use crate::stdio::{ChildProcess, Io, Reader, Writer};
-use crate::stdio::{close_outcome, runtime_lost, write_bounded};
-use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
+use crate::json_rpc::{
+    self, CallOutcome, Connection, Incoming, MAX_FRAME_BYTES, Peer, Reply, Response, RpcError,
+    WriteFailure,
+};
+use crate::stdio::Io;
 
 use super::discovery;
 use super::mapping::{Call, Session, rejection_reason, unknown};
 use super::report::{self, Overrides};
-use super::rpc::{self, Frame, MAX_FRAME_BYTES, Pending, Reply, Resolved, RpcError, StderrTail};
 use super::ticket_tool::{self, TicketTool};
 
 #[derive(Debug, Clone)]
@@ -53,124 +51,111 @@ impl Default for Options {
     }
 }
 
-struct State {
-    /// Closed or lost. Set before the input pipe is dropped.
-    closed: bool,
-    next_id: u64,
-    pending: Pending<Call>,
+#[derive(Default)]
+struct CodexPeer {
     session: Session,
+    /// Set for a thread that can call the ticketd CLI as its own tool.
+    ticket_tool: Option<Arc<TicketTool>>,
 }
 
-struct Connection {
-    generation: RuntimeGeneration,
-    state: Mutex<State>,
-    stdin: AsyncMutex<Option<Writer>>,
-    child: AsyncMutex<Box<dyn ChildProcess>>,
-    stderr: StderrTail,
-    options: Options,
-    /// Set for an unattended session that has the ticketd CLI: answers its tool calls.
-    ticket_tool: OnceLock<TicketTool>,
-}
+impl Peer for CodexPeer {
+    type Call = Call;
 
-enum WriteFailure {
-    /// A check failed; nothing was written.
-    Refused(Refusal),
-    /// The write failed part-way or the pipe is broken; delivery is unknown.
-    Lost,
-}
-
-enum CallOutcome {
-    Refused(Refusal),
-    Reply(Value),
-    /// The harness answered with a JSON-RPC error: an explicit refusal.
-    Error(RpcError),
-    /// Written, no reply in time. A tombstone remains for a late reply.
-    TimedOut,
-    /// Written or possibly written, then the runtime went away.
-    Lost,
-}
-
-impl Connection {
-    fn start(io: Io, generation: RuntimeGeneration, options: Options) -> (Arc<Self>, EventStream) {
-        let connection = Arc::new(Self {
-            generation,
-            state: Mutex::new(State {
-                closed: false,
-                next_id: 1,
-                pending: Pending::new(),
-                session: Session::default(),
-            }),
-            stdin: AsyncMutex::new(Some(io.stdin)),
-            child: AsyncMutex::new(io.child),
-            stderr: StderrTail::default(),
-            options,
-            ticket_tool: OnceLock::new(),
-        });
-        if let Some(stderr) = io.stderr {
-            connection
-                .stderr
-                .clone()
-                .spawn_drain(stderr, crate::Harness::Codex);
-        }
-        let (sender, events) = mpsc::channel(EVENT_BUFFER);
-        tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));
-        (connection, events)
+    fn replied(&mut self, call: Call, reply: &Reply, late: bool) -> Vec<EventKind> {
+        self.session.reply(&call, reply, late)
     }
 
-    fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Runs `prepare` and writes the frame it returns with no await between the
-    /// checks and the write: the input pipe is held first, so nothing can close or
-    /// write in between.
-    async fn write_checked<T>(
-        &self,
-        prepare: impl FnOnce(&mut State) -> Result<(Value, T), Refusal>,
-    ) -> Result<T, WriteFailure> {
-        let mut stdin = self.stdin.lock().await;
-        let (frame, prepared) = {
-            let mut state = self.state();
-            if state.closed {
-                return Err(WriteFailure::Refused(Refusal::RuntimeClosed));
+    fn received(&mut self, incoming: Incoming) -> (Vec<EventKind>, Option<Response>) {
+        let events = match incoming {
+            Incoming::Request {
+                id,
+                method,
+                mut params,
+            } => {
+                if method == ticket_tool::CALL_METHOD
+                    && let Some(tool) = &self.ticket_tool
+                {
+                    let ours = self.session.thread() == params["threadId"].as_str();
+                    let called = params["tool"].as_str() == Some(ticket_tool::NAME)
+                        && params["namespace"].is_null();
+                    let response = if ours && called {
+                        let tool = Arc::clone(tool);
+                        let input = params.get_mut("arguments").map_or(Value::Null, Value::take);
+                        Response::Deferred(Box::pin(async move {
+                            json!({"id": id, "result": tool.run(&input).await})
+                        }))
+                    } else {
+                        Response::Immediate(json!({"id": id, "error": {
+                            "code": -32601,
+                            "message": "ticketd offers only its own `ticketd` tool on this thread",
+                        }}))
+                    };
+                    return (Vec::new(), Some(response));
+                }
+                let (events, response) = self.session.server_request(&id, &method, &params);
+                return (events, response.map(Response::Immediate));
             }
-            prepare(&mut state).map_err(WriteFailure::Refused)?
+            Incoming::Notification { method, params } => {
+                self.session.notification(&method, &params)
+            }
+            Incoming::UnknownReply { id } => {
+                vec![unknown("reply to an unknown request", &json!({"id": id}))]
+            }
+            Incoming::Malformed { bytes } => {
+                vec![unknown(
+                    "a line that is not JSON-RPC",
+                    &json!({"bytes": bytes}),
+                )]
+            }
+            Incoming::Oversized { bytes } => {
+                let payload = json!({"bytes": bytes, "limit": MAX_FRAME_BYTES});
+                vec![unknown("a frame over the size limit", &payload)]
+            }
         };
-        let bytes = rpc::encode(&frame);
-        match write_bounded(&mut stdin, &self.child, &bytes, WRITE_TIMEOUT).await {
-            Ok(()) => Ok(prepared),
-            Err(_) => Err(WriteFailure::Lost),
-        }
+        (events, None)
     }
 
-    /// Sends one request and waits a bounded time for its reply. `prepare` makes the
-    /// command's final checks and returns the request parameters.
+    fn disconnected(&mut self) {
+        self.session.clear_live();
+    }
+}
+
+struct AppServer {
+    generation: RuntimeGeneration,
+    rpc: Arc<Connection<CodexPeer>>,
+    options: Options,
+}
+
+impl AppServer {
+    fn start(io: Io, generation: RuntimeGeneration, options: Options) -> (Arc<Self>, EventStream) {
+        let (rpc, events) = Connection::start(
+            io,
+            CodexPeer::default(),
+            generation,
+            json_rpc::Options {
+                harness: crate::Harness::Codex,
+                include_version: false,
+                reply_timeout: options.rpc_timeout,
+            },
+        );
+        (
+            Arc::new(Self {
+                generation,
+                rpc,
+                options,
+            }),
+            events,
+        )
+    }
+
     async fn call(
         &self,
         method: &str,
         prepare: impl FnOnce(&mut Session) -> Result<(Value, Call), Refusal>,
     ) -> CallOutcome {
-        let written = self
-            .write_checked(|state| {
-                let (params, call) = prepare(&mut state.session)?;
-                let id = state.next_id;
-                state.next_id += 1;
-                let receiver = state.pending.register(id, call);
-                let frame = json!({"id": id, "method": method, "params": params});
-                Ok((frame, (id, receiver)))
-            })
-            .await;
-        let (id, mut receiver) = match written {
-            Ok(registered) => registered,
-            Err(WriteFailure::Refused(refusal)) => return CallOutcome::Refused(refusal),
-            Err(WriteFailure::Lost) => return CallOutcome::Lost,
-        };
-        match timeout(self.options.rpc_timeout, &mut receiver).await {
-            Ok(reply) => reply_outcome(reply.ok()),
-            // The reply may have raced the timeout; then the receiver holds it.
-            Err(_) if self.state().pending.abandon(id) => CallOutcome::TimedOut,
-            Err(_) => reply_outcome(receiver.try_recv().ok()),
-        }
+        self.rpc
+            .call(method, |peer| prepare(&mut peer.session))
+            .await
     }
 
     async fn request(&self, method: &str, params: Value) -> CallOutcome {
@@ -194,7 +179,8 @@ impl Connection {
         match self.request("initialize", params).await {
             CallOutcome::Reply(reply) => {
                 let platform = reply["platformOs"].as_str().map(str::to_owned);
-                self.write_checked(|_| Ok((json!({"method": "initialized"}), ())))
+                self.rpc
+                    .write(|_| Ok(json!({"method": "initialized"})))
                     .await
                     .map_err(|_| self.startup_problem("initialized", CallOutcome::Lost))?;
                 Ok(platform)
@@ -257,7 +243,7 @@ impl Connection {
             {
                 params["environments"] = json!([]);
             }
-            self.state().session.turn_overrides = Some(turn);
+            self.rpc.state().peer.session.turn_overrides = Some(turn);
             if request.ticketd_cli.is_some() {
                 // ticketd's own tool is how the agent reaches its tickets: Codex's
                 // shell may be off and its sandbox read-only.
@@ -277,12 +263,12 @@ impl Connection {
         if let Some(cli) = &request.ticketd_cli
             && (request.unattended.is_some() || request.taken_over)
         {
-            let _ = self.ticket_tool.set(TicketTool {
+            self.rpc.state().peer.ticket_tool = Some(Arc::new(TicketTool {
                 cli: cli.clone(),
                 working_directory: request.working_directory.clone(),
                 chat_id: request.chat_id.clone(),
                 run_id: request.unattended.as_ref().map(|run| run.run_id.clone()),
-            });
+            }));
         }
         let result = match self.call(method, |_| Ok((params, Call::OpenThread))).await {
             CallOutcome::Reply(result) => result,
@@ -328,11 +314,11 @@ impl Connection {
                     "Codex app-server did not answer {step} within {} seconds",
                     self.options.rpc_timeout.as_secs()
                 ),
-                Some(ProviderDetail::new("stderr", &self.stderr.snapshot())),
+                Some(ProviderDetail::new("stderr", &self.rpc.stderr())),
             ),
             CallOutcome::Lost | CallOutcome::Refused(_) | CallOutcome::Reply(_) => (
                 format!("Codex app-server stopped during {step}"),
-                Some(ProviderDetail::new("stderr", &self.stderr.snapshot())),
+                Some(ProviderDetail::new("stderr", &self.rpc.stderr())),
             ),
         };
         Problem {
@@ -344,139 +330,14 @@ impl Connection {
     }
 
     async fn close(&self) -> CloseOutcome {
-        {
-            let mut state = self.state();
-            state.closed = true;
-            state.pending.fail_all();
-            state.session.clear_live();
-        }
-        // Closing its input makes it end the session and exit.
-        close_outcome(
-            &self.stdin,
-            &self.child,
-            self.options.close_timeout,
-            "Codex app-server",
-            "tools it started may still be running",
-        )
-        .await
-    }
-
-    /// The protocol reader. Waiting to hand an event to the supervisor is the only
-    /// place it blocks other than reading.
-    async fn read(self: Arc<Self>, stdout: Reader, events: mpsc::Sender<RuntimeEvent>) {
-        let mut stdout = BufReader::new(stdout);
-        while let Ok(Some(frame)) = rpc::read_frame(&mut stdout, MAX_FRAME_BYTES).await {
-            let Some(frame) = self.answer_tool_call(frame) else {
-                continue;
-            };
-            let (kinds, reply) = self.apply(frame);
-            if let Some(reply) = reply {
-                // Written from its own task so a full input pipe cannot stall reading.
-                let connection = Arc::clone(&self);
-                tokio::spawn(async move {
-                    let _ = connection.write_checked(|_| Ok((reply, ()))).await;
-                });
-            }
-            for kind in kinds {
-                // A supervisor that dropped the stream still needs the pipe drained.
-                let _ = events.send(self.event(kind)).await;
-            }
-        }
-
-        let closing = {
-            let mut state = self.state();
-            let closing = state.closed;
-            state.closed = true;
-            state.pending.fail_all();
-            state.session.clear_live();
-            closing
-        };
-        if closing {
-            return;
-        }
-        let lost = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
-        let _ = events.send(self.event(lost)).await;
-    }
-
-    /// Answers a call of ticketd's own tool from its own task, so a slow command does
-    /// not stall the reader. Returns any other frame for `apply`.
-    fn answer_tool_call(self: &Arc<Self>, frame: Frame) -> Option<Frame> {
-        let Frame::Request { id, method, params } = &frame else {
-            return Some(frame);
-        };
-        if method != ticket_tool::CALL_METHOD || self.ticket_tool.get().is_none() {
-            return Some(frame);
-        }
-        let ours = self.state().session.thread() == params["threadId"].as_str();
-        let called =
-            params["tool"].as_str() == Some(ticket_tool::NAME) && params["namespace"].is_null();
-        let (id, input) = (id.clone(), params["arguments"].clone());
-        let connection = Arc::clone(self);
-        tokio::spawn(async move {
-            let reply = match (ours, called, connection.ticket_tool.get()) {
-                (true, true, Some(tool)) => json!({"id": id, "result": tool.run(&input).await}),
-                _ => json!({"id": id, "error": {
-                    "code": -32601,
-                    "message": "ticketd offers only its own `ticketd` tool on this thread",
-                }}),
-            };
-            let _ = connection.write_checked(|_| Ok((reply, ()))).await;
-        });
-        None
-    }
-
-    fn event(&self, kind: EventKind) -> RuntimeEvent {
-        RuntimeEvent {
-            generation: self.generation,
-            kind,
-        }
-    }
-
-    /// Applies one frame to the session. Returns the events it produced and, for a
-    /// harness request ticketd refuses, the reply to write.
-    fn apply(&self, frame: Frame) -> (Vec<EventKind>, Option<Value>) {
-        let mut state = self.state();
-        match frame {
-            Frame::Reply { id, reply } => {
-                let events = match state.pending.resolve(&id) {
-                    // A caller that was cancelled is no longer waiting either.
-                    Resolved::Waiting(call, sender) if !sender.is_closed() => {
-                        let events = state.session.reply(&call, &reply, false);
-                        let _ = sender.send(reply);
-                        events
-                    }
-                    Resolved::Waiting(call, _) | Resolved::Late(call) => {
-                        state.session.reply(&call, &reply, true)
-                    }
-                    Resolved::Unknown => {
-                        vec![unknown("reply to an unknown request", &json!({"id": id}))]
-                    }
-                };
-                (events, None)
-            }
-            Frame::Request { id, method, params } => {
-                state.session.server_request(&id, &method, &params)
-            }
-            Frame::Notification { method, params } => {
-                (state.session.notification(&method, &params), None)
-            }
-            Frame::Malformed { bytes } => {
-                let payload = json!({"bytes": bytes});
-                (vec![unknown("a line that is not JSON-RPC", &payload)], None)
-            }
-            Frame::Oversized { bytes } => {
-                let payload = json!({"bytes": bytes, "limit": MAX_FRAME_BYTES});
-                (vec![unknown("a frame over the size limit", &payload)], None)
-            }
-        }
-    }
-}
-
-fn reply_outcome(reply: Option<Reply>) -> CallOutcome {
-    match reply {
-        Some(Ok(result)) => CallOutcome::Reply(result),
-        Some(Err(error)) => CallOutcome::Error(error),
-        None => CallOutcome::Lost,
+        // Closing app-server's input makes it end the session and exit.
+        self.rpc
+            .close(
+                self.options.close_timeout,
+                "Codex app-server",
+                "tools it started may still be running",
+            )
+            .await
     }
 }
 
@@ -568,9 +429,9 @@ pub(super) async fn open_over(
     request: &OpenRequest,
     options: Options,
 ) -> Result<OpenedRuntime, Problem> {
-    let (connection, events) = Connection::start(io, request.generation, options);
+    let (connection, events) = AppServer::start(io, request.generation, options);
     {
-        let reports = &mut connection.state().session.reports;
+        let reports = &mut connection.rpc.state().peer.session.reports;
         // New Chat's picks go out with the first turn, as a later change would.
         reports.overrides = Overrides {
             model: request.settings.model.clone(),
@@ -630,7 +491,7 @@ pub(super) async fn open_over(
 /// Asks app-server which account it would use. Reads no credential and starts no
 /// thread; the process is closed afterwards.
 pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
-    let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
+    let (connection, _events) = AppServer::start(io, RuntimeGeneration(0), options);
     let read = async {
         match connection.initialize(false).await {
             Ok(_) => match connection
@@ -656,13 +517,13 @@ pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
 /// profiles. Starts no thread and sends nothing to a model; the process is closed
 /// afterwards. `Err` says why Codex did not list its models.
 pub(super) async fn probe_options(io: Io, options: Options) -> Result<HarnessOptions, String> {
-    let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
+    let (connection, _events) = AppServer::start(io, RuntimeGeneration(0), options);
     let listed = list_options(&connection).await;
     connection.close().await;
     listed
 }
 
-async fn list_options(connection: &Connection) -> Result<HarnessOptions, String> {
+async fn list_options(connection: &AppServer) -> Result<HarnessOptions, String> {
     connection
         .initialize(false)
         .await
@@ -674,7 +535,7 @@ async fn list_options(connection: &Connection) -> Result<HarnessOptions, String>
 }
 
 /// Every page of a `*/list` request, following `nextCursor`.
-async fn list_all(connection: &Connection, method: &str) -> Result<Vec<Value>, String> {
+async fn list_all(connection: &AppServer, method: &str) -> Result<Vec<Value>, String> {
     let mut all = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
@@ -714,7 +575,7 @@ pub(super) fn login_state(account: &Value) -> LoginState {
 }
 
 struct CodexRuntime {
-    connection: Arc<Connection>,
+    connection: Arc<AppServer>,
     /// Whether the effective capabilities include steering.
     steering: bool,
 }
@@ -739,10 +600,7 @@ impl Drop for CodexRuntime {
     /// A runtime dropped without `close` still lets go of the process: closing its
     /// input ends app-server, which ends the reader.
     fn drop(&mut self) {
-        self.connection.state().closed = true;
-        if let Ok(mut stdin) = self.connection.stdin.try_lock() {
-            *stdin = None;
-        }
+        self.connection.rpc.close_on_drop();
     }
 }
 
@@ -844,10 +702,8 @@ impl HarnessRuntime for CodexRuntime {
         }
         let written = self
             .connection
-            .write_checked(|state| {
-                let frame = state.session.answer(&response.request, &response.answer)?;
-                Ok((frame, ()))
-            })
+            .rpc
+            .write(|peer| peer.session.answer(&response.request, &response.answer))
             .await;
         match written {
             Ok(()) => RespondOutcome::Sent,
@@ -891,13 +747,14 @@ impl HarnessRuntime for CodexRuntime {
                 reason: "the session it was meant for has ended".to_owned(),
             };
         }
-        let mut state = self.connection.state();
-        if state.closed {
+        let mut state = self.connection.rpc.state();
+        if state.is_closed() {
             return SettingOutcome::Refused {
                 reason: "the session has ended".to_owned(),
             };
         }
         if state
+            .peer
             .session
             .reports
             .override_setting(change.setting, &change.value)

@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::{Value, json};
 
+use crate::json_rpc::{Reply, RpcError};
 use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
@@ -15,7 +16,6 @@ use crate::{
 };
 
 use super::report::{REOPEN_WITH, Reports};
-use super::rpc::{Reply, RpcError};
 
 /// Live tool output kept between a command's start and its authoritative completion.
 const MAX_LIVE_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
