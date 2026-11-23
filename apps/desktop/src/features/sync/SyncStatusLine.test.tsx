@@ -224,6 +224,55 @@ test("an expired sign-in offers Reconnect in the popover; the line stays one tar
   expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
 });
 
+test("an ended AWS session asks quietly on the line and signs in from the popover", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "authorization_expired",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS sign-in expiredSaved on this computer",
+  );
+  // Nothing opened by itself.
+  expect(screen.queryByRole("dialog")).toBeNull();
+  let finish: (status: SyncStatus) => void = () => {};
+  api.recover.mockReturnValue(
+    new Promise<SyncStatus>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("Sign in to AWS again");
+  expect(dialog.textContent).toContain("1 change uploads once you sign in.");
+  expect(
+    within(dialog).queryByRole("button", { name: "Reconnect" }),
+  ).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  expect(
+    (
+      within(dialog).getByRole("button", {
+        name: "Waiting for sign-in…",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+
+  // Signed in: sync ran again and what waited is uploaded.
+  finish(syncStatus({ provider: "s3" }));
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("button", { name: "Sign in" }),
+    ).toBeNull(),
+  );
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await waitFor(async () =>
+    expect((await line()).textContent).toBe("S3 synced1 min ago"),
+  );
+});
+
 test("the popover is reachable by keyboard and leads to Sync settings", async () => {
   await footer(syncStatus());
   const trigger = await line();

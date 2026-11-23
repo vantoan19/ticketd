@@ -785,6 +785,19 @@ fn credentials_that_stay_refused_become_unauthorized_after_one_new_fetch() {
     assert_eq!(bench.credentials.forgets(), 1);
 }
 
+#[test]
+fn refused_credentials_with_no_sign_in_are_a_failure_not_an_expiry() {
+    // A static key has no session to end: signing in cannot mend it, so sync must not ask.
+    let bench =
+        Bench::with_credentials(FakeCredentials::new(&["token-1", "token-2"]).without_sign_in());
+    let (remote, folder) = (bench.remote(), bench.folder());
+    bench.sim.accept_token("token-3");
+    let Err(RemoteError::Other(message)) = remote.list(&folder) else {
+        panic!("a refused static key is not Unauthorized");
+    };
+    assert!(message.contains("refused the access key"), "{message}");
+}
+
 struct SignedOut;
 impl CredentialSource for SignedOut {
     fn credentials(&self) -> Result<Credentials, AwsCliError> {

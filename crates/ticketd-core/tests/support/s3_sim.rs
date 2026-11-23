@@ -26,6 +26,7 @@ pub fn target() -> S3Target {
 pub struct FakeCredentials {
     tokens: Vec<String>,
     state: Mutex<(usize, usize, usize)>,
+    can_sign_in: bool,
 }
 
 impl FakeCredentials {
@@ -33,7 +34,14 @@ impl FakeCredentials {
         Self {
             tokens: tokens.iter().map(|t| (*t).to_owned()).collect(),
             state: Mutex::new((0, 0, 0)),
+            can_sign_in: true,
         }
+    }
+
+    /// Credentials of a profile with no sign-in command, such as static keys.
+    pub fn without_sign_in(mut self) -> Self {
+        self.can_sign_in = false;
+        self
     }
 
     /// How many times the credentials were asked for.
@@ -69,6 +77,10 @@ impl CredentialSource for FakeCredentials {
         let mut state = self.state.lock().unwrap();
         state.0 = (state.0 + 1).min(self.tokens.len() - 1);
         state.2 += 1;
+    }
+
+    fn can_sign_in(&self) -> bool {
+        self.can_sign_in
     }
 }
 

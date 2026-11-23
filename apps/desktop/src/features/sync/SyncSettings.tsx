@@ -641,7 +641,7 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
               )
             }
           >
-            {copy.action}
+            {busy && copy.working ? copy.working : copy.action}
           </Button>
         </AlertActions>
       </Alert>

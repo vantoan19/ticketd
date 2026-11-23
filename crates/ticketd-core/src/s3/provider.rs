@@ -15,6 +15,13 @@ pub trait CredentialSource: Send + Sync {
 
     /// Drops what is kept, because the service refused the credentials before their expiry.
     fn forget(&self);
+
+    /// Whether signing in again could mend credentials the service refuses. A profile with
+    /// static keys or a credential helper has no sign-in, so a refusal there is a failure to
+    /// read, not an ended session.
+    fn can_sign_in(&self) -> bool {
+        true
+    }
 }
 
 impl CredentialSource for ProfileCredentials {
@@ -24,6 +31,10 @@ impl CredentialSource for ProfileCredentials {
 
     fn forget(&self) {
         ProfileCredentials::forget(self);
+    }
+
+    fn can_sign_in(&self) -> bool {
+        ProfileCredentials::can_sign_in(self)
     }
 }
 

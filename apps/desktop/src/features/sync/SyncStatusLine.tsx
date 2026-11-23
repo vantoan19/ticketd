@@ -293,13 +293,15 @@ export function SyncStatusLine() {
                       disabled={busy}
                       onClick={recover}
                     >
-                      {corrective}
+                      {busy && recovery?.working
+                        ? recovery.working
+                        : corrective}
                     </Button>
                   )}
                 </>
               ) : corrective ? (
                 <Button size="sm" disabled={busy} onClick={recover}>
-                  {corrective}
+                  {busy && recovery?.working ? recovery.working : corrective}
                 </Button>
               ) : (
                 <Button
