@@ -7,7 +7,9 @@
 //! multipart upload of a large attachment.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // Test helpers fail the test.
 use std::io::Cursor;
+use std::sync::Mutex;
 
+use ticketd_core::s3::*;
 use ticketd_core::sync::remote::*;
 
 #[path = "support/s3_live.rs"]
@@ -43,6 +45,71 @@ fn get(remote: &dyn RemoteStorage, folder: &str, key: &RemoteKey, version: &str)
     remote.download(folder, key, version, &mut bytes).unwrap();
     bytes
 }
+
+/// Sends through the production transport, lets the test fail the requests it picks (the
+/// connection is gone) and remembers every request's method and URL.
+struct Flaky<'a> {
+    inner: &'a UreqS3Transport,
+    fail_when: Mutex<Option<String>>,
+    seen: Mutex<Vec<String>>,
+}
+
+impl<'a> Flaky<'a> {
+    fn over(inner: &'a UreqS3Transport) -> Self {
+        Self {
+            inner,
+            fail_when: Mutex::new(None),
+            seen: Mutex::new(vec![]),
+        }
+    }
+
+    /// Fails every request whose URL has `text` in it, until `None`.
+    fn fail(&self, text: Option<&str>) {
+        *self.fail_when.lock().unwrap() = text.map(str::to_owned);
+    }
+
+    /// How many requests of `method` had `text` in their URL.
+    fn count(&self, method: &str, text: &str) -> usize {
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|seen| seen.starts_with(method) && seen.contains(text))
+            .count()
+    }
+}
+
+impl S3Transport for Flaky<'_> {
+    fn send(&self, request: S3Request) -> Result<S3Response, S3TransportError> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push(format!("{} {}", request.method, request.url));
+        let down = self
+            .fail_when
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|text| request.url.contains(text.as_str()));
+        if down {
+            return Err(S3TransportError::Offline);
+        }
+        self.inner.send(request)
+    }
+}
+
+/// An Attachment one byte over the single-part limit, so it goes up in parts.
+fn big() -> Vec<u8> {
+    (0..=SINGLE_PART_LIMIT as u32)
+        .map(|n| (n.wrapping_mul(31) % 251) as u8)
+        .collect()
+}
+
+fn attachment() -> RemoteKey {
+    RemoteKey::new(RemoteKind::Attachment, uuid::Uuid::new_v4().to_string())
+}
+
+const PARTS: u64 = 5 * 1024 * 1024;
 
 fn folder(remote: &dyn RemoteStorage) -> String {
     let folder = uuid::Uuid::new_v4().to_string();
@@ -259,4 +326,91 @@ fn live_folders_are_found_by_their_marker_and_only_those() {
         .map(|f| f.id)
         .collect();
     assert_eq!(found, ids);
+}
+
+// ---- multipart uploads ------------------------------------------------------------------
+
+#[test]
+fn live_a_file_over_the_limit_uploads_in_parts_and_downloads_intact() {
+    let Some(live) = live() else { return };
+    let remote = live.remote().with_part_size(PARTS);
+    let (folder, key, bytes) = (folder(&remote), attachment(), big());
+    let file = put(&remote, &folder, &key, None, &bytes).unwrap();
+    assert_eq!(file.size, bytes.len() as u64);
+    assert!(get(&remote, &folder, &key, &file.version) == bytes);
+
+    let name = format!("{}{folder}/attachments/{}", live.prefix, key.id);
+    let head = live.head(&name);
+    // Made by a multipart upload (its ETag ends in the number of parts), with ticketd's hash.
+    assert!(
+        head.header("etag")
+            .unwrap()
+            .trim_end_matches('"')
+            .ends_with("-4")
+    );
+    assert!(head.header("x-amz-meta-ticketd-sha256").is_some());
+    assert_eq!(live.pending_uploads(&name), 0);
+    assert_eq!(remote.list(&folder).unwrap(), [file]);
+}
+
+#[test]
+fn live_an_upload_cut_short_resumes_with_only_the_missing_parts() {
+    let Some(live) = live() else { return };
+    let flaky = Flaky::over(&live.transport);
+    let remote = S3Remote::new(live.target(), &live.prefix, &live.credentials, &flaky)
+        .unwrap()
+        .with_part_size(PARTS);
+    let (folder, key, bytes) = (folder(&remote), attachment(), big());
+    let name = format!("{}{folder}/attachments/{}", live.prefix, key.id);
+
+    // The connection goes during part 3.
+    flaky.fail(Some("partNumber=3"));
+    assert_eq!(
+        put(&remote, &folder, &key, None, &bytes),
+        Err(RemoteError::Offline)
+    );
+    assert_eq!(live.pending_uploads(&name), 1);
+    assert_eq!(remote.list(&folder), Ok(vec![]));
+
+    // The app starts again with a new adapter and nothing kept from before.
+    flaky.fail(None);
+    let again = S3Remote::new(live.target(), &live.prefix, &live.credentials, &flaky)
+        .unwrap()
+        .with_part_size(PARTS);
+    let file = put(&again, &folder, &key, None, &bytes).unwrap();
+    for sent_once in ["partNumber=1&", "partNumber=2&", "partNumber=4&"] {
+        assert_eq!(flaky.count("PUT", sent_once), 1, "{sent_once}");
+    }
+    assert_eq!(
+        flaky.count("POST", "?uploads"),
+        1,
+        "the same upload was finished"
+    );
+    assert_eq!(live.pending_uploads(&name), 0);
+    assert!(get(&again, &folder, &key, &file.version) == bytes);
+}
+
+#[test]
+fn live_a_second_desktop_uploading_the_same_attachment_adds_no_version_and_leaves_no_upload() {
+    let Some(live) = live() else { return };
+    let a = live.remote().with_part_size(PARTS);
+    let b = live.remote().with_part_size(PARTS);
+    let (folder, key, bytes) = (folder(&a), attachment(), big());
+    let name = format!("{}{folder}/attachments/{}", live.prefix, key.id);
+    let first = put(&a, &folder, &key, None, &bytes).unwrap();
+
+    // The second one's completion is refused (`If-None-Match: *`), and it finds the same bytes.
+    assert_eq!(put(&b, &folder, &key, None, &bytes), Ok(first));
+    assert_eq!(b.revisions(&folder, &key).unwrap().len(), 1);
+    assert_eq!(live.pending_uploads(&name), 0, "its upload was aborted");
+
+    // Other bytes under the same key are a conflict, and leave nothing behind either.
+    let mut other = bytes.clone();
+    other[7] ^= 0xff;
+    assert!(matches!(
+        put(&b, &folder, &key, None, &other),
+        Err(RemoteError::PreconditionFailed { current: Some(_) })
+    ));
+    assert_eq!(live.pending_uploads(&name), 0);
+    assert_eq!(a.revisions(&folder, &key).unwrap().len(), 1);
 }

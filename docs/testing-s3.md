@@ -14,7 +14,7 @@ adapter and the S3 adapter. These tests run offline in the ordinary suite and in
 ## Live tests against MinIO
 
 The same contract suite, and tests of what the adapter assumes about a real server (conditional
-writes, delete markers and file identity, paging past a thousand versions, ranged reads, names
+writes, delete markers and file identity, paging past a thousand versions, ranged reads, multipart upload and resume, names
 and hashes in headers), run against a MinIO with Versioning on. They are opt-in: without
 `TICKETD_S3_TEST_ENDPOINT` they return at once, so nothing else changes.
 
@@ -45,7 +45,7 @@ break the check. Move the pin only after running the live tests against the new 
 
 ### What MinIO does not cover
 
-On this MinIO, every live test passes: Versioning, `If-None-Match`, `If-Match`, SHA-256
+On this MinIO, every live test passes: Versioning, `If-None-Match` (also on completing a multipart upload), `If-Match`, SHA-256
 checksums, delete markers and version listing behave as the adapter needs. What the live tests
 cannot reach stays on the simulator: throttling and server failures, expired and refused
 credentials, lost answers, and exact request shapes. AWS S3 itself (virtual-hosted addressing,

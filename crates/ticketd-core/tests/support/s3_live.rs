@@ -253,6 +253,14 @@ impl Live {
         });
     }
 
+    /// How many multipart uploads are begun and not yet completed or aborted under `prefix`.
+    pub fn pending_uploads(&self, prefix: &str) -> usize {
+        let response = self.expect(&S3Call::get("", &[("uploads", ""), ("prefix", prefix)]));
+        String::from_utf8_lossy(&response.body)
+            .matches("<UploadId>")
+            .count()
+    }
+
     /// The headers of the object's current version.
     pub fn head(&self, key: &str) -> S3Response {
         self.expect(&S3Call {
