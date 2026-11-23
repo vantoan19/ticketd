@@ -11,7 +11,11 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { writeClipboard } from "@/lib/clipboard";
 import { revealFailureDetails } from "@/test/failure-details";
 import { s3Api } from "@/lib/s3-api";
-import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
+import {
+  syncApi,
+  type SyncSetupOptions,
+  type SyncStatus,
+} from "@/lib/sync-api";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
@@ -244,14 +248,45 @@ test("another S3 service has no console, so its address is copied", async () => 
 });
 
 test("an ended AWS session is signed in again through the profile", async () => {
+  const waiting = {
+    kind: "ticket" as const,
+    id: "t1",
+    reference: "T-KQ1",
+    title: "A",
+  };
   api.status.mockResolvedValue(
-    connected({ recovery: "authorization_expired" }),
+    connected({
+      state: "needs_attention",
+      recovery: "authorization_expired",
+      pending_uploads: [waiting, waiting],
+    }),
   );
-  api.recover.mockResolvedValue(connected());
+  let finish: (status: SyncStatus) => void = () => {};
+  api.recover.mockReturnValue(
+    new Promise<SyncStatus>((resolve) => {
+      finish = resolve;
+    }),
+  );
   show();
-  expect(await screen.findByText("Sign in to AWS again")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  // A notice on the page, not a dialog.
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain("Sign in to AWS again");
+  expect(notice.textContent).toContain(
+    "Your work is saved on this computer. 2 changes upload once you sign in.",
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
+
+  fireEvent.click(within(notice).getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  // The sign-in waits for the browser; the button says so and cannot be pressed twice.
+  const waitingButton = await within(notice).findByRole("button", {
+    name: "Waiting for sign-in…",
+  });
+  expect((waitingButton as HTMLButtonElement).disabled).toBe(true);
+
+  finish(connected());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
 
 test("disconnecting from a bucket says what stays", async () => {

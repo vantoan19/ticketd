@@ -406,6 +406,14 @@ impl ProfileCredentials {
         *self.kept.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
+    /// Whether the profile has a sign-in command. When that cannot be told, assume it has,
+    /// since a failure to read the profile says nothing against its session.
+    pub fn can_sign_in(&self) -> bool {
+        self.cli
+            .sign_in_command(&self.profile)
+            .map_or(true, |command| command.is_some())
+    }
+
     fn is_fresh(&self, credentials: &Credentials) -> bool {
         credentials
             .expires_at

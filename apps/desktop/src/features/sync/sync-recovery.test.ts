@@ -23,7 +23,7 @@ test("no recovery message of an S3 binding says Drive, and each names the storag
   expect(recoveryCopy(s3("authorization_expired"))).toMatchObject({
     label: "AWS sign-in expired",
     title: "Sign in to AWS again",
-    action: "Reconnect",
+    action: "Sign in",
   });
   expect(recoveryCopy(s3("rate_limited"))?.title).toBe("S3 is busy");
   expect(recoveryCopy(s3("storage_full"))?.title).toBe("S3 is full");

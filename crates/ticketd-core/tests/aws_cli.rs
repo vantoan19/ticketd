@@ -549,6 +549,15 @@ fn a_static_key_profile_has_no_sign_in_command() {
 }
 
 #[test]
+fn only_a_profile_with_a_sign_in_command_can_sign_in_again() {
+    let credentials = |values: &[(&str, &str)]| {
+        ProfileCredentials::new(profile_values(values).cli(), "work").can_sign_in()
+    };
+    assert!(credentials(&[("sso_session", "corp")]));
+    assert!(!credentials(&[]));
+}
+
+#[test]
 fn running_the_sign_in_command_runs_the_program_with_those_arguments() {
     let aws = profile_values(&[("sso_session", "corp")]).once(
         "sso login --profile work",

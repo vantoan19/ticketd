@@ -98,10 +98,18 @@ impl<'a> S3Client<'a> {
                 return Ok(response);
             }
             let code = error_code(&response);
-            if !renewed && credentials_expired(response.status, code.as_deref()) {
-                renewed = true;
-                self.credentials.forget();
-                continue;
+            if credentials_expired(response.status, code.as_deref()) {
+                if !renewed {
+                    renewed = true;
+                    self.credentials.forget();
+                    continue;
+                }
+                if !self.credentials.can_sign_in() {
+                    // Not an ended session, which signing in would mend: the key is wrong.
+                    return Err(RemoteError::Other(
+                        "S3 refused the access key of this AWS profile. Check the profile's keys with the AWS CLI".into(),
+                    ));
+                }
             }
             let retry_after = match response.status {
                 503 | 429 => retry_after(&response),

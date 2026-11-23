@@ -178,6 +178,10 @@ impl CredentialSource for Shared {
     fn forget(&self) {
         self.0.forget();
     }
+
+    fn can_sign_in(&self) -> bool {
+        self.0.can_sign_in()
+    }
 }
 
 fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
