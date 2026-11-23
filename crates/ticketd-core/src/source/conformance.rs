@@ -139,11 +139,24 @@ pub(super) fn run(
     }
     let suspect = descriptor.schema.fields.iter().any(|field| {
         !matches!(field.kind, FieldKind::Secret)
-            && field.key.split(['_', '-']).any(|part| {
-                matches!(
-                    part.to_ascii_lowercase().as_str(),
-                    "password" | "token" | "secret" | "credential"
-                )
+            && [&field.key, &field.label].into_iter().any(|value| {
+                let spaced = value.to_ascii_lowercase().replace(['_', '-'], " ");
+                spaced.contains("api key")
+                    || spaced.contains("private key")
+                    || spaced.split_whitespace().any(|part| {
+                        matches!(
+                            part,
+                            "password"
+                                | "token"
+                                | "secret"
+                                | "credential"
+                                | "apikey"
+                                | "accesstoken"
+                                | "refreshtoken"
+                                | "clientsecret"
+                                | "privatekey"
+                        )
+                    })
             })
     });
     if suspect {

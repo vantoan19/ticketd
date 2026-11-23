@@ -76,6 +76,22 @@ impl Redactions {
         String::from_utf8_lossy(&self.bytes(input.as_bytes())).into_owned()
     }
 
+    pub(super) fn contains_secret(&self, value: &Value) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains_value(value)
+    }
+
+    pub(super) fn fields(&self, fields: &mut [super::FieldIssue]) {
+        for field in fields {
+            field.message = self.text(&field.message);
+            if let Some(key) = &mut field.field {
+                *key = self.text(key);
+            }
+        }
+    }
+
     pub(super) fn stream(&self) -> RedactedStream {
         RedactedStream {
             redactions: self.clone(),
@@ -85,6 +101,36 @@ impl Redactions {
 }
 
 impl Patterns {
+    fn contains_value(&self, value: &Value) -> bool {
+        match value {
+            Value::String(value) => self.contains(value),
+            Value::Array(values) => values.iter().any(|value| self.contains_value(value)),
+            Value::Object(values) => values
+                .iter()
+                .any(|(key, value)| self.contains(key) || self.contains_value(value)),
+            _ => false,
+        }
+    }
+
+    fn contains(&self, input: &str) -> bool {
+        let Some(matcher) = &self.matcher else {
+            return !self.values.is_empty();
+        };
+        let bytes = input.as_bytes();
+        matcher.find_iter(bytes).any(|matched| {
+            let word = |byte: Option<&u8>| byte.is_some_and(u8::is_ascii_alphanumeric);
+            // Avoid treating a one-character credential as a match inside an
+            // unrelated word, while still rejecting it as an echoed value.
+            matched.len() >= 6
+                || (!word(
+                    matched
+                        .start()
+                        .checked_sub(1)
+                        .and_then(|index| bytes.get(index)),
+                ) && !word(bytes.get(matched.end())))
+        })
+    }
+
     fn replace(&self, input: &[u8], release: usize) -> (Vec<u8>, usize) {
         let Some(matcher) = &self.matcher else {
             return if self.values.is_empty() || input.is_empty() {

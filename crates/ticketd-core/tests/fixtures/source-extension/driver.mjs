@@ -24,6 +24,13 @@ const schema = {
   fields: [
     { key: "mode", label: "Mode", type: "text", required: true },
     { key: "port", label: "Fixture port", type: "text" },
+    {
+      key: "fixture_key",
+      label: "Fixture key",
+      type: "secret",
+      show_if: "mode",
+      pattern: { regex: "^private-", message: "must start with private-" },
+    },
   ],
 };
 const description = {
@@ -90,7 +97,43 @@ async function dispatch({ id, method, params }, signal) {
   ) {
     return problem("protocol", "missing connection ID", "system");
   }
-  const { mode, port } = params.config;
+  const { mode, port, fixture_key: credential } = params.config;
+  if (
+    process.env.TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY ||
+    process.env.TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY_COMMAND ||
+    (typeof credential === "string" &&
+      Object.values(process.env).includes(credential))
+  ) {
+    return problem(
+      "protocol",
+      "credential reached the process environment",
+      "system",
+    );
+  }
+  if (typeof credential === "string") {
+    const middle = Math.floor(credential.length / 2);
+    process.stderr.write(`fragment ${credential.slice(0, middle)}`);
+    await pause(10);
+    process.stderr.write(
+      `${credential.slice(middle)}\nencoded ${Buffer.from(credential).toString("base64")}\n`,
+    );
+    if (mode === "secret_stdout") {
+      process.stdout.write(
+        `not RPC: ${credential} ${encodeURIComponent(credential)}\n`,
+      );
+      return null;
+    }
+    if (mode === "secret_error") {
+      return problem(
+        "unauthenticated",
+        `tracker refused ${credential}`,
+        "auth",
+      );
+    }
+    if (mode === "secret_result") {
+      return { result: { unexpected: credential } };
+    }
+  }
   if (mode === "broken") {
     process.stdout.write("not a protocol message\n");
     return null;

@@ -13,6 +13,7 @@
 mod conformance;
 mod contract;
 mod conversation;
+mod credentials;
 mod engine;
 mod extension;
 mod freshness;
@@ -42,6 +43,7 @@ pub use contract::{
     StateCategory, Surface,
 };
 pub use conversation::ConversationEntry;
+pub(crate) use credentials::migrate as migrate_source_secret_references;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use extension::{
     ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension, contract_schema,
@@ -85,6 +87,10 @@ pub struct SavedSource {
     /// The account the connection was validated as when the configuration was saved.
     pub account: String,
     pub saved_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_secret_fields: Vec<String>,
 }
 
 /// The result of saving: what was stored and the discovery preview it was
@@ -524,7 +530,7 @@ impl Workspace {
         self.saved_source(id)?.ok_or_else(|| unknown_connection(id))
     }
 
-    /// The ID an add operation will use unless another connection is added first.
+    /// Check the saved account and record a credential rejection as source health.
     pub fn test_source_connection(
         &self,
         engine: &Engine,
@@ -532,10 +538,51 @@ impl Workspace {
     ) -> Result<ConnectionInfo, Error> {
         let saved =
             configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
-        let engine = engine.for_connection(&saved.saved.provider, id, &saved.saved.config);
-        Ok(saved.check(&engine)?.connection)
+        let started = clock(&self.connection, None)?;
+        let engine = saved.bind(engine);
+        match saved.check(&engine) {
+            Ok(checked) => Ok(checked.connection),
+            Err(error) => {
+                if error.class() == ErrorClass::Auth
+                    && engine
+                        .descriptor(&saved.saved.provider)?
+                        .schema
+                        .fields
+                        .iter()
+                        .any(|field| matches!(field.kind, FieldKind::Secret))
+                {
+                    crate::write_scope::run(&self.connection, |transaction| {
+                        transaction.execute(
+                            "INSERT INTO source_connection_status (connection_id, last_attempt_at, error_code, error_message, failing_since)
+                             SELECT id, ?2, ?3, ?4, ?2 FROM source_connections WHERE id = ?1 AND revision = ?5
+                             ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4,
+                                failing_since = COALESCE(failing_since, ?2), partial_message = NULL
+                             WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
+                            params![id, started, error.code(), error.to_string(), saved.revision],
+                        )?;
+                        Ok(())
+                    })?;
+                }
+                Err(error.into())
+            }
+        }
     }
 
+    /// Bind setup requests to any credential references already saved on this
+    /// device. Add and conformance requests can operate without references.
+    pub fn source_draft_engine(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        id: &str,
+        raw: &ConfigValues,
+    ) -> Result<Engine, Error> {
+        check_credential_environment(&self.connection, engine, provider, id)?;
+        let references = credentials::references(&self.connection, id)?;
+        Ok(engine.for_connection_with_secret_refs(provider, id, raw, &references))
+    }
+
+    /// The ID an add operation will use unless another connection is added first.
     pub fn next_source_connection_id(&self, provider: &str) -> Result<String, Error> {
         next_connection_id(&self.connection, provider)
     }
@@ -558,6 +605,7 @@ impl Workspace {
 
     /// Removes one device-local connection and pauses its tickets until rediscovery.
     pub fn remove_source_connection(&mut self, id: &str) -> Result<(), Error> {
+        let mut credential_references = credentials::References::new();
         crate::write_scope::run(&self.connection, |transaction| {
             if configured_source(transaction, id)?.is_none() {
                 return Err(unknown_connection(id));
@@ -582,9 +630,14 @@ impl Workspace {
             }
             // Foreign keys discard only device-local bindings and run state.
             // Publication attempts themselves remain intact and keep blocking a second create.
+            credential_references = credentials::references(transaction, id)?;
             transaction.execute("DELETE FROM source_connections WHERE id = ?1", [id])?;
             Ok(())
-        })
+        })?;
+        for reference in credential_references.into_values() {
+            credentials::discard(reference);
+        }
+        Ok(())
     }
 
     /// Previews discovery against the workspace's stable external identities.
@@ -644,6 +697,56 @@ impl Workspace {
         self.write_source(engine, id, None, raw)
     }
 
+    /// Re-enter only credentials and keep discovery rules and account binding.
+    pub fn update_source_credentials(
+        &mut self,
+        engine: &Engine,
+        id: &str,
+        secrets: &ConfigValues,
+    ) -> Result<SavedSource, Error> {
+        let previous =
+            configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
+        let provider = &previous.saved.provider;
+        let schema = engine.descriptor(provider)?.schema;
+        for key in secrets.keys() {
+            if !schema
+                .field(key)
+                .is_some_and(|field| matches!(field.kind, FieldKind::Secret))
+            {
+                return Err(
+                    SourceError::InvalidConfiguration(vec![FieldIssue::for_field(
+                        key,
+                        "is not a credential setting",
+                    )])
+                    .into(),
+                );
+            }
+        }
+        let mut raw = previous.saved.config.clone();
+        raw.extend(secrets.clone());
+        let scoped = self.source_draft_engine(engine, provider, id, &raw)?;
+        let normalized = scoped.validate_configuration(provider, &raw)?;
+        let verified = scoped.check_connection(provider, &normalized)?;
+        previous.verify_account(&verified)?;
+        let (_, staged) = stage_credentials(&schema, id, normalized)?;
+        crate::write_scope::run(&self.connection, |transaction| {
+            let current =
+                configured_source(transaction, id)?.ok_or_else(|| unknown_connection(id))?;
+            if previous.revision != current.revision {
+                return Err(stale_source());
+            }
+            credentials::store_references(transaction, id, &staged.references)?;
+            transaction.execute(
+                "UPDATE source_connections SET revision = ?2 WHERE id = ?1",
+                params![id, uuid::Uuid::new_v4().to_string()],
+            )?;
+            clear_source_auth_error(transaction, id)?;
+            Ok(())
+        })?;
+        staged.committed(&previous.credentials);
+        self.source_connection(id)
+    }
+
     /// Saves the existing connection, or creates the first one for this provider.
     pub fn save_source(
         &mut self,
@@ -676,25 +779,27 @@ impl Workspace {
                     .provider
             }
         };
-        let engine = engine.for_connection(provider, id, raw);
+        let scoped = self.source_draft_engine(engine, provider, id, raw)?;
         if add.is_none()
             && let Some(previous) = &previous
         {
-            previous.verify_effective_site(&engine)?;
+            previous.verify_effective_site(&scoped)?;
         }
-        let config = engine.validate_configuration(provider, raw)?;
+        let config = scoped.validate_configuration(provider, raw)?;
         let (preview, derived, verified) =
-            self.preview_source_with_config(&engine, provider, &config)?;
+            self.preview_source_with_config(&scoped, provider, &config)?;
+        let (config, staged) = stage_credentials(&scoped.descriptor(provider)?.schema, id, config)?;
         let configuration = serde_json::to_string(&config)?;
         let derived_configuration = serde_json::to_string(&derived)?;
         let revision = uuid::Uuid::new_v4().to_string();
         let description = serde_json::to_string(&engine.description(provider)?)?;
         let account_key = verified.account_key();
-        crate::write_scope::run(&self.connection, |transaction| {
+        let outcome = crate::write_scope::run(&self.connection, |transaction| {
             if let Some((_, name)) = add {
                 if next_connection_id(transaction, provider)? != id {
                     return Err(connection_id_changed());
                 }
+                check_credential_environment(transaction, engine, provider, id)?;
                 let duplicate: bool = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM source_connections WHERE provider = ?1 AND site = ?2 AND account_key = ?3)",
                     params![provider, verified.site, account_key], |row| row.get(0),
@@ -718,10 +823,7 @@ impl Workspace {
                     .as_ref()
                     .is_none_or(|previous| previous.revision != current.revision)
                 {
-                    return Err(SourceError::InvalidConfiguration(vec![FieldIssue::for_form(
-                        "this connection changed while it was being checked; load it again",
-                    )])
-                    .into());
+                    return Err(stale_source());
                 }
                 current.verify_account(&verified)?;
                 if current.saved.config != config || !same_discovery(&current.derived, &derived) {
@@ -734,6 +836,8 @@ impl Workspace {
                     params![id, configuration, verified.account, CONTRACT_VERSION, derived_configuration, revision],
                 )?;
             }
+            credentials::store_references(transaction, id, &staged.references)?;
+            clear_source_auth_error(transaction, id)?;
             transaction.execute(
                 "INSERT INTO source_presentations (provider, description) VALUES (?1, ?2) ON CONFLICT(provider) DO UPDATE SET description = excluded.description",
                 params![provider, description],
@@ -742,8 +846,80 @@ impl Workspace {
                 .ok_or_else(|| unknown_connection(id))?
                 .saved;
             Ok(SaveOutcome { source, preview })
-        })
+        })?;
+        let empty = credentials::References::new();
+        staged.committed(previous.as_ref().map_or(&empty, |old| &old.credentials));
+        Ok(outcome)
     }
+}
+
+fn check_credential_environment(
+    connection: &Connection,
+    engine: &Engine,
+    provider: &str,
+    id: &str,
+) -> Result<(), Error> {
+    let schema = engine.descriptor(provider)?.schema;
+    let names = credentials::env_keys(&schema, id);
+    let mut query = connection.prepare_cached("SELECT id, provider FROM source_connections")?;
+    let mut rows = query.query([])?;
+    while let Some(row) = rows.next()? {
+        let existing_id: String = row.get(0)?;
+        let existing_provider: String = row.get(1)?;
+        if existing_id == id {
+            if existing_provider != provider {
+                return Err(unknown_connection(id));
+            }
+            continue;
+        }
+        let same_id = credentials::env_part(&existing_id) == credentials::env_part(id);
+        let overlap = engine
+            .descriptor(&existing_provider)
+            .is_ok_and(|descriptor| {
+                !names.is_disjoint(&credentials::env_keys(&descriptor.schema, &existing_id))
+            });
+        if same_id || overlap {
+            return Err(SourceError::InvalidConfiguration(vec![FieldIssue::for_form(
+                "this connection shares a credential environment variable with another connection",
+            )])
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn stage_credentials(
+    schema: &ConfigSchema,
+    id: &str,
+    mut config: ConfigValues,
+) -> Result<(ConfigValues, credentials::Staged), Error> {
+    let mut staged = credentials::Staged::default();
+    for field in &schema.fields {
+        if matches!(field.kind, FieldKind::Secret)
+            && let Some(value) = config.remove(&field.key)
+            && let Some(secret) = value.as_str()
+        {
+            staged.save(id, &field.key, secret)?;
+        }
+    }
+    Ok((config, staged))
+}
+
+fn clear_source_auth_error(connection: &Connection, id: &str) -> Result<(), Error> {
+    connection.execute(
+        "UPDATE source_connection_status
+         SET error_code = NULL, error_message = NULL, failing_since = NULL
+         WHERE connection_id = ?1 AND error_code IN ('unauthenticated', 'forbidden')",
+        [id],
+    )?;
+    Ok(())
+}
+
+fn stale_source() -> Error {
+    SourceError::InvalidConfiguration(vec![FieldIssue::for_form(
+        "this connection changed while it was being checked; load it again",
+    )])
+    .into()
 }
 
 fn connection_name(name: &str) -> Result<&str, Error> {
@@ -821,6 +997,7 @@ fn next_connection_id(connection: &Connection, provider: &str) -> Result<String,
                     | "remove"
                     | "status"
                     | "refresh"
+                    | "sign-in"
                     | "take-ownership"
                     | "publish"
                     | "resolve"
@@ -841,10 +1018,19 @@ struct ConfiguredSource {
     derived: DerivedConfiguration,
     revision: String,
     site: String,
+    credentials: credentials::References,
     account_key: String,
 }
 
 impl ConfiguredSource {
+    fn bind(&self, engine: &Engine) -> Engine {
+        engine.for_connection_with_secret_refs(
+            &self.saved.provider,
+            &self.saved.id,
+            &self.saved.config,
+            &self.credentials,
+        )
+    }
     fn verify_effective_site(&self, engine: &Engine) -> Result<(), SourceError> {
         if engine
             .effective_site(&self.saved.provider)?
@@ -887,7 +1073,9 @@ const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, accou
 fn configured_source(connection: &Connection, id: &str) -> Result<Option<ConfiguredSource>, Error> {
     let mut statement = connection.prepare_cached(CONFIGURED_SOURCE)?;
     let mut rows = statement.query([id])?;
-    rows.next()?.map(configured_row).transpose()
+    rows.next()?
+        .map(|row| configured_row(connection, row))
+        .transpose()
 }
 
 fn configured_sources(connection: &Connection) -> Result<Vec<ConfiguredSource>, Error> {
@@ -895,20 +1083,27 @@ fn configured_sources(connection: &Connection) -> Result<Vec<ConfiguredSource>, 
     let mut rows = statement.query([None::<&str>])?;
     let mut sources = Vec::new();
     while let Some(row) = rows.next()? {
-        sources.push(configured_row(row)?);
+        sources.push(configured_row(connection, row)?);
     }
     Ok(sources)
 }
 
-fn configured_row(row: &rusqlite::Row<'_>) -> Result<ConfiguredSource, Error> {
+fn configured_row(
+    connection: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> Result<ConfiguredSource, Error> {
     let config: String = row.get(3)?;
+    let id: String = row.get(0)?;
+    let credentials = credentials::references(connection, &id)?;
     let saved = SavedSource {
-        id: row.get(0)?,
+        id,
         name: row.get(1)?,
         provider: row.get(2)?,
         config: serde_json::from_str(&config)?,
         account: row.get(4)?,
         saved_at: row.get(5)?,
+        secret_fields: credentials.keys().cloned().collect(),
+        session_secret_fields: credentials::session_fields(&credentials),
     };
     let raw: Option<String> = row.get(6)?;
     let derived = match raw {
@@ -922,6 +1117,7 @@ fn configured_row(row: &rusqlite::Row<'_>) -> Result<ConfiguredSource, Error> {
         derived,
         revision: row.get(7)?,
         site: row.get(8)?,
+        credentials,
         account_key: row.get(9)?,
     })
 }
@@ -1021,6 +1217,9 @@ fn bind_ticket(connection: &Connection, ticket_id: &str, id: &str) -> Result<(),
 /// which could otherwise retain deleted credential references.
 pub(crate) fn forget_connections(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch("PRAGMA secure_delete = ON")?;
+    if crate::backup::table_exists(connection, "source_secret_references")? {
+        connection.execute_batch("DELETE FROM source_secret_references")?;
+    }
     if crate::backup::table_exists(connection, "source_connection_removals")? {
         connection.execute_batch(
             "DELETE FROM source_connection_removals;
@@ -1088,11 +1287,19 @@ pub(crate) fn retain_connections(
             [],
             |row| row.get::<_, bool>(0),
         )?;
+    let has_secret_references = crate::backup::table_exists(current, "source_secret_references")?
+        && current.query_row(
+            "SELECT EXISTS(SELECT 1 FROM source_secret_references)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
     if !has_connections && !has_removals {
         return Ok(());
     }
     if !crate::backup::table_exists(restored, "source_connections")?
         || (has_removals && !crate::backup::table_exists(restored, "source_connection_removals")?)
+        || (has_secret_references
+            && !crate::backup::table_exists(restored, "source_secret_references")?)
     {
         let version = restored.pragma_query_value(None, "user_version", |row| row.get(0))?;
         crate::format::migrate(restored, version)?;
@@ -1144,6 +1351,17 @@ pub(crate) fn retain_connections(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params_from_iter(values),
         )?;
+    }
+    if has_secret_references {
+        let mut statement = current
+            .prepare("SELECT connection_id, field, reference FROM source_secret_references")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            restored.execute(
+                "INSERT INTO source_secret_references (connection_id, field, reference) VALUES (?1, ?2, ?3)",
+                params![row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?],
+            )?;
+        }
     }
     let mut bindings = current.prepare(
         "SELECT p.attempt_id, p.connection_id, a.provider, a.destination, a.started_at, a.title, a.body

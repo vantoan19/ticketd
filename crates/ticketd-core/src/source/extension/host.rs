@@ -158,6 +158,7 @@ enum Message {
 struct Endpoint {
     serial: Mutex<()>,
     sender: mpsc::Sender<Message>,
+    redactions: Redactions,
 }
 
 impl Host {
@@ -207,6 +208,7 @@ impl Host {
         };
         let closing = runtime.closing.subscribe();
         let (sender, messages) = mpsc::channel(1);
+        let redactions = Redactions::default();
         let log = self
             .log_dir
             .lock()
@@ -215,12 +217,18 @@ impl Host {
             .zip(key.id.as_deref())
             .and_then(|(dir, id)| ExtensionLog::new(dir, id))
             .map(Arc::new);
-        let task = runtime
-            .handle
-            .spawn(session(key.clone(), self.limits, closing, messages, log));
+        let task = runtime.handle.spawn(session(
+            key.clone(),
+            self.limits,
+            closing,
+            messages,
+            redactions.clone(),
+            log,
+        ));
         let endpoint = Arc::new(Endpoint {
             serial: Mutex::new(()),
             sender,
+            redactions,
         });
         state.connections.insert(key, (endpoint.clone(), task));
         Ok(endpoint)
@@ -247,7 +255,7 @@ impl Host {
         id: Option<&str>,
         call: Call<'_>,
     ) -> Result<T, SourceError> {
-        self.call_controlled(definition, id, call, None)
+        self.call_controlled(definition, id, call, None, &[])
     }
 
     pub(super) fn call_controlled<T: DeserializeOwned>(
@@ -256,6 +264,7 @@ impl Host {
         id: Option<&str>,
         call: Call<'_>,
         refresh: Option<&RefreshControl>,
+        secrets: &[&str],
     ) -> Result<T, SourceError> {
         if let Some(refresh) = refresh {
             refresh.check()?;
@@ -269,6 +278,7 @@ impl Host {
         if let Some(refresh) = refresh {
             refresh.check()?;
         }
+        endpoint.redactions.register(secrets.iter().copied());
         let (reply, result) = blocking::sync_channel(1);
         endpoint
             .sender
@@ -280,8 +290,12 @@ impl Host {
             })
             .map_err(|_| SourceError::NotSent("the source extension session has stopped".into()))?;
         let value = result.recv().map_err(|_| disconnected())??;
-        serde_json::from_value(value)
-            .map_err(|error| SourceError::Protocol(format!("invalid result: {error}")))
+        serde_json::from_value(value).map_err(|error| {
+            SourceError::Protocol(format!(
+                "invalid result: {}",
+                endpoint.redactions.text(&error.to_string())
+            ))
+        })
     }
 
     fn encode(&self, call: Call<'_>) -> Result<EncodedRequest, SourceError> {
@@ -372,12 +386,10 @@ async fn session(
     limits: Limits,
     mut closing: watch::Receiver<bool>,
     mut messages: mpsc::Receiver<Message>,
+    redactions: Redactions,
     log: Option<Arc<ExtensionLog>>,
 ) {
-    let diagnostics = SessionDiagnostics {
-        redactions: Redactions::default(),
-        log,
-    };
+    let diagnostics = SessionDiagnostics { redactions, log };
     let mut active: Option<(Arc<Launch>, Process)> = None;
     let mut idle_at = Instant::now() + limits.idle;
     let mut poll = interval(EXIT_POLL);

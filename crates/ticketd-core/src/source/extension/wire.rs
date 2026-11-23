@@ -77,6 +77,28 @@ pub(super) struct IssueParams<'a> {
     pub reference: &'a ExternalRef,
 }
 
+impl<'a> Call<'a> {
+    pub(super) fn with_config<'b>(self, configuration: &'b ConfigValues) -> Call<'b>
+    where
+        'a: 'b,
+    {
+        let mut call: Call<'b> = self;
+        let connection = match &mut call {
+            Call::CheckConnection(connection)
+            | Call::Validate(connection)
+            | Call::Options { connection, .. }
+            | Call::Discover { connection, .. }
+            | Call::Publish { connection, .. }
+            | Call::Locate { connection, .. }
+            | Call::FindPublished { connection, .. } => connection,
+            Call::Fetch(issue) | Call::Conversation(issue) => &mut issue.connection,
+            Call::Describe { .. } => return call,
+        };
+        connection.config = configuration;
+        call
+    }
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub(super) struct Description {
     pub contract_versions: Vec<u32>,
@@ -192,13 +214,19 @@ pub(super) enum WireFailureCode {
 }
 
 impl RpcError {
-    pub(super) fn into_source_error(self) -> SourceError {
-        if let Some(failure) = self.data
+    pub(super) fn into_source_error(self, secrets: &super::redaction::Redactions) -> SourceError {
+        if let Some(mut failure) = self.data
             && self.code == -32000
         {
+            failure.message = secrets.text(&failure.message);
+            secrets.fields(&mut failure.fields);
             return failure.into_source_error();
         }
-        SourceError::Protocol(format!("JSON-RPC error {}: {}", self.code, self.message))
+        SourceError::Protocol(format!(
+            "JSON-RPC error {}: {}",
+            self.code,
+            secrets.text(&self.message)
+        ))
     }
 }
 

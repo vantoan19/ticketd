@@ -62,7 +62,7 @@ pub enum FieldKind {
     },
     /// An informational link. Its URL is metadata rather than a setting value.
     Link { url: String },
-    /// Reserved for settings backed by the operating system keychain.
+    /// An opaque credential sent only in connection requests.
     Secret,
 }
 
@@ -184,12 +184,20 @@ impl ConfigSchema {
     pub(crate) fn check_definition(&self) -> Result<(), Vec<FieldIssue>> {
         let mut issues = Vec::new();
         let mut keys = HashSet::new();
+        let mut secret_env_keys = HashSet::new();
         for field in &self.fields {
             if field.key.trim().is_empty() || !keys.insert(field.key.as_str()) {
                 issues.push(issue(&field.key, "has a blank or repeated setting key"));
             }
             if matches!(field.kind, FieldKind::Secret) {
-                issues.push(issue(&field.key, "secret settings are not supported yet"));
+                let key = super::credentials::env_part(&field.key);
+                if !secret_env_keys.insert(format!("{key}_COMMAND")) || !secret_env_keys.insert(key)
+                {
+                    issues.push(issue(
+                        &field.key,
+                        "shares a credential environment variable with another field",
+                    ));
+                }
             }
             let mut seen = HashSet::from([field.key.as_str()]);
             let mut current = field;
@@ -219,7 +227,7 @@ impl ConfigSchema {
         }
     }
 
-    fn is_active(&self, field: &SchemaField, raw: &ConfigValues) -> bool {
+    pub(super) fn is_active(&self, field: &SchemaField, raw: &ConfigValues) -> bool {
         let mut current = field;
         while let Some(dependency) = &current.show_if {
             if !raw.get(dependency).is_some_and(has_value) {
@@ -298,7 +306,7 @@ impl ConfigSchema {
                     .entry(key.trim().to_owned())
                     .or_default()
                     .push(value.to_owned()),
-                _ => issues.push(issue(assignment, "expected key=value")),
+                _ => issues.push(FieldIssue::for_form("expected a key=value assignment")),
             }
         }
         let mut values = ConfigValues::new();
@@ -315,7 +323,7 @@ impl ConfigSchema {
                 Some(FieldKind::Link { .. }) => {
                     issues.push(issue(&key, "is a link and does not take a value"));
                 }
-                Some(FieldKind::Text { .. }) if entries.len() > 1 => {
+                Some(FieldKind::Text { .. } | FieldKind::Secret) if entries.len() > 1 => {
                     issues.push(issue(&key, "was given more than once"));
                 }
                 _ => {
@@ -333,6 +341,20 @@ impl ConfigSchema {
 }
 
 impl SchemaField {
+    pub(super) fn check_secret_pattern(&self, value: &str) -> Result<(), super::SourceError> {
+        let Some(pattern) = &self.pattern else {
+            return Ok(());
+        };
+        let message = match Regex::new(&pattern.regex) {
+            Ok(regex) if regex.is_match(value) => return Ok(()),
+            Ok(_) => pattern.message.as_str(),
+            Err(_) => "has an invalid validation pattern in this source's schema",
+        };
+        Err(super::SourceError::InvalidConfiguration(vec![issue(
+            &self.key, message,
+        )]))
+    }
+
     fn normalize(&self, raw: Option<&Value>, issues: &mut Vec<FieldIssue>) -> Option<Value> {
         let raw = raw.filter(|value| !value.is_null())?;
         let pattern = match self
@@ -441,7 +463,24 @@ impl SchemaField {
                 }
                 Some(Value::Array(items.into_iter().map(Value::String).collect()))
             }
-            FieldKind::Link { .. } | FieldKind::Secret => None,
+            FieldKind::Secret => {
+                let Some(secret) = raw.as_str() else {
+                    issues.push(issue(&self.key, "must be a credential string"));
+                    return None;
+                };
+                if secret.trim().is_empty() {
+                    return None;
+                }
+                if secret.len() > super::credentials::VALUE_LIMIT {
+                    issues.push(issue(&self.key, "must be at most 64 KiB"));
+                } else if !matches_pattern(secret) {
+                    issues.push(issue(&self.key, pattern_message()));
+                } else {
+                    return Some(raw.clone());
+                }
+                None
+            }
+            FieldKind::Link { .. } => None,
         }
     }
 }
@@ -450,7 +489,7 @@ fn issue(field: &str, message: impl Into<String>) -> FieldIssue {
     FieldIssue::for_field(field, message)
 }
 
-fn has_value(value: &Value) -> bool {
+pub(super) fn has_value(value: &Value) -> bool {
     match value {
         Value::String(text) => !text.trim().is_empty(),
         Value::Array(items) => items

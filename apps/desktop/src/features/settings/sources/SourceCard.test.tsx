@@ -32,6 +32,7 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
     preview: vi.fn(),
     save: vi.fn(),
     add: vi.fn(),
+    signIn: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
     refresh: vi.fn(),
@@ -734,6 +735,74 @@ test("a saved source without a credential shows one row that says how to sign in
   expect(screen.queryByText(/GitHub is unavailable/)).toBeNull();
   expect(screen.queryByText("Connected as octo")).toBeNull();
   expect(screen.getByText("Saved for octo")).toBeTruthy();
+});
+
+test("Needs sign-in opens only active credential fields and saves a replacement", async () => {
+  const saved = {
+    id: "credential-example",
+    provider: "github",
+    config: { repositories: ["o/r"] },
+    account: "octo",
+    saved_at: "2026-02-01T00:00:00Z",
+    secret_fields: ["api_key"],
+  };
+  vi.mocked(sourcesClient.checkConnection).mockRejectedValue(
+    new SourceFailure("unauthenticated", "The tracker rejected the key"),
+  );
+  vi.mocked(sourcesClient.signIn).mockResolvedValue({
+    ...saved,
+    session_secret_fields: ["api_key"],
+  });
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        connector: {
+          ...entry.connector,
+          schema: {
+            fields: [
+              ...entry.connector.schema.fields,
+              {
+                key: "api_key",
+                label: "API key",
+                required: true,
+                type: "secret",
+              },
+              {
+                key: "conditional_key",
+                label: "Conditional credential",
+                required: false,
+                type: "secret",
+                show_if: "assignee",
+              },
+            ],
+          },
+        },
+        saved,
+      }}
+    />,
+  );
+  await screen.findByText("Needs sign-in");
+  fireEvent.click(screen.getByRole("button", { name: "Re-enter credentials" }));
+  const dialog = within(
+    screen.getByRole("dialog", { name: "Re-enter credentials" }),
+  );
+  const input = dialog.getByLabelText(/API key/);
+  expect(input.getAttribute("type")).toBe("password");
+  expect(input.getAttribute("value")).toBe("");
+  expect(
+    dialog.queryByLabelText(/Repositories|Conditional credential/),
+  ).toBeNull();
+  fireEvent.change(input, {
+    target: { value: "synthetic replacing credential" },
+  });
+  fireEvent.click(dialog.getByRole("button", { name: "Save credentials" }));
+  await screen.findByText(/credentials last until ticketd closes/);
+  expect(sourcesClient.signIn).toHaveBeenCalledWith("credential-example", {
+    api_key: "synthetic replacing credential",
+  });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByText("Needs sign-in")).toBeNull();
 });
 
 test("discovery uses the core's imported references and Discard restores saved rules", async () => {

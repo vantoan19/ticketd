@@ -1438,11 +1438,18 @@ async fn source_check_connection(
 ) -> Result<ticketd_core::source::ConnectionInfo, SourceFailure> {
     source_task(sources, move |registry| {
         let engine = registry.engine()?;
+        let workspace = open_workspace()?;
         let id = match connection {
             Some(id) => id,
-            None => open_workspace()?.next_source_connection_id(&provider)?,
+            None => workspace.next_source_connection_id(&provider)?,
         };
-        let scoped = engine.for_connection(&provider, &id, &config);
+        if workspace
+            .saved_source(&id)?
+            .is_some_and(|saved| saved.provider == provider && saved.config == config)
+        {
+            return Ok(workspace.test_source_connection(&engine, &id)?);
+        }
+        let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
         Ok(scoped.check_connection(&provider, &config)?)
     })
     .await
@@ -1458,11 +1465,12 @@ async fn source_options(
 ) -> Result<Vec<ticketd_core::source::ChoiceOption>, SourceFailure> {
     source_task(sources, move |registry| {
         let engine = registry.engine()?;
+        let workspace = open_workspace()?;
         let id = match connection {
             Some(id) => id,
-            None => open_workspace()?.next_source_connection_id(&provider)?,
+            None => workspace.next_source_connection_id(&provider)?,
         };
-        let scoped = engine.for_connection(&provider, &id, &config);
+        let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
         Ok(scoped.options(&provider, &field, &query, &config)?)
     })
     .await
@@ -1486,12 +1494,13 @@ async fn source_preview(
 ) -> Result<ticketd_core::source::DiscoveryPreview, SourceFailure> {
     source_task(sources, move |registry| {
         let engine = registry.engine()?;
+        let workspace = open_workspace()?;
         let id = match connection {
             Some(id) => id,
-            None => open_workspace()?.next_source_connection_id(&provider)?,
+            None => workspace.next_source_connection_id(&provider)?,
         };
-        let scoped = engine.for_connection(&provider, &id, &config);
-        Ok(open_workspace()?.preview_source(&scoped, &provider, &config)?)
+        let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
+        Ok(workspace.preview_source(&scoped, &provider, &config)?)
     })
     .await
 }
@@ -1531,6 +1540,21 @@ async fn add_source_connection(
     })
     .await
 }
+#[tauri::command]
+async fn update_source_credentials(
+    connection: String,
+    credentials: ticketd_core::source::ConfigValues,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<ticketd_core::source::SavedSource, SourceFailure> {
+    source_task(sources, move |registry| {
+        Ok(open_workspace()?.update_source_credentials(
+            &registry.engine()?,
+            &connection,
+            &credentials,
+        )?)
+    })
+    .await
+}
 #[tauri::command(async)]
 fn rename_source_connection(
     connection: String,
@@ -1539,9 +1563,15 @@ fn rename_source_connection(
     Ok(open_workspace()?.rename_source(&connection, &name)?)
 }
 
-#[tauri::command(async)]
-fn remove_source_connection(connection: String) -> Result<(), SourceFailure> {
-    Ok(open_workspace()?.remove_source_connection(&connection)?)
+#[tauri::command]
+async fn remove_source_connection(
+    connection: String,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<(), SourceFailure> {
+    source_task(sources, move |_| {
+        Ok(open_workspace()?.remove_source_connection(&connection)?)
+    })
+    .await
 }
 
 /// The one refresh coordinator of this process: the startup and periodic runs and
@@ -2227,6 +2257,7 @@ pub fn run() -> Result<(), tauri::Error> {
             source_preview,
             save_source,
             add_source_connection,
+            update_source_credentials,
             rename_source_connection,
             remove_source_connection,
             last_backup,

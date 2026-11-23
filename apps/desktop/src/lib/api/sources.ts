@@ -126,6 +126,8 @@ const savedSourceSchema = lazySchema(() =>
     config: configSchema,
     account: z.string(),
     saved_at: z.string(),
+    secret_fields: z.array(z.string()).optional(),
+    session_secret_fields: z.array(z.string()).optional(),
   }),
 );
 export type SavedSource = z.infer<typeof savedSourceSchema>;
@@ -519,6 +521,13 @@ export const sourcesClient = {
     return savedSourceSchema.parse(
       await structured(
         invoke("rename_source_connection", { connection, name }),
+      ),
+    );
+  },
+  async signIn(connection: string, credentials: SourceConfig) {
+    return savedSourceSchema.parse(
+      await structured(
+        invoke("update_source_credentials", { connection, credentials }),
       ),
     );
   },

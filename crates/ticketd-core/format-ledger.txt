@@ -1113,3 +1113,9 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + trigger workspace_change_source_connection_removals_DELETE
 + trigger workspace_change_source_connection_removals_INSERT
 + trigger workspace_change_source_connection_removals_UPDATE
+
+## 91
++ table source_secret_references
++ column source_secret_references.connection_id
++ column source_secret_references.field
++ column source_secret_references.reference

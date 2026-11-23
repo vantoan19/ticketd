@@ -32,6 +32,7 @@ const STDERR_LIMIT: usize = 16 * 1024;
 const EOF_GRACE: Duration = Duration::from_millis(150);
 #[cfg(unix)]
 const TERMINATE_GRACE: Duration = Duration::from_millis(150);
+const PASSWORD_COMMAND_LIMIT: Duration = Duration::from_secs(5);
 const REAP_LIMIT: Duration = Duration::from_secs(1);
 pub(super) const EXIT_POLL: Duration = Duration::from_millis(100);
 
@@ -193,9 +194,18 @@ impl Process {
                         refresh.report(progress);
                     }
                 }
-                Ok(Inbound::Reply(Response::Success(response))) => return Ok(Ok(response.result)),
+                Ok(Inbound::Reply(Response::Success(response))) => {
+                    if self.stdout.redactions.contains_secret(&response.result) {
+                        return Err(Fault::Protocol(
+                            "source extension returned a credential in its result".into(),
+                        ));
+                    }
+                    return Ok(Ok(response.result));
+                }
                 Ok(Inbound::Reply(Response::Failure(response))) => {
-                    return Ok(Err(response.error.into_source_error()));
+                    return Ok(Err(response
+                        .error
+                        .into_source_error(&self.stdout.redactions)));
                 }
                 Err(reason @ (Fault::Canceled | Fault::Timeout)) => {
                     if self.cancel_request(id, limits.grace, control.refresh).await {
@@ -371,6 +381,69 @@ impl Lines {
     }
 }
 
+pub(in crate::source) fn password_output(args: Vec<String>) -> Result<String, ()> {
+    // Keep the blocking connector interface callable regardless of whether its
+    // caller already runs on a Tokio runtime.
+    std::thread::Builder::new()
+        .name("source-password-command".into())
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| ())?
+                .block_on(run_password_command(&args))
+        })
+        .map_err(|_| ())?
+        .join()
+        .map_err(|_| ())?
+}
+
+async fn run_password_command(args: &[String]) -> Result<String, ()> {
+    let (program, arguments) = args.split_first().ok_or(())?;
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .stdout(Stdio::piped());
+    for (key, _) in std::env::vars_os() {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("TICKETD_")
+        {
+            command.env_remove(key);
+        }
+    }
+    let mut child = ManagedChild::spawn(&mut command).map_err(|_| ())?;
+    let stdout = child.stdout().ok_or(())?;
+    let mut bytes = Vec::new();
+    let result = timeout(PASSWORD_COMMAND_LIMIT, async {
+        let mut stdout = stdout.take((super::super::credentials::VALUE_LIMIT + 3) as u64);
+        stdout.read_to_end(&mut bytes).await.map_err(|_| ())?;
+        if bytes.len() > super::super::credentials::VALUE_LIMIT + 2 {
+            return Err(());
+        }
+        let mut polls = interval(Duration::from_millis(10));
+        loop {
+            polls.tick().await;
+            if let Some(success) = child.exit_success() {
+                return success.then_some(()).ok_or(());
+            }
+        }
+    })
+    .await;
+    child.shutdown().await;
+    result.map_err(|_| ())??;
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes).map_err(|_| ())
+}
+
 #[cfg(unix)]
 pub(super) struct ManagedChild {
     child: tokio::process::Child,
@@ -404,14 +477,20 @@ impl ManagedChild {
     }
 
     pub(super) fn exited(&mut self) -> bool {
+        self.exit_success().is_some()
+    }
+
+    fn exit_success(&mut self) -> Option<bool> {
         use rustix::process::{WaitId, WaitIdOptions, waitid};
-        self.group.is_some_and(|group| {
+        self.group.and_then(|group| {
             // Keep the child's PID reserved until the final signal to its group.
             waitid(
                 WaitId::Pid(group),
                 WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
             )
-            .is_ok_and(|status| status.is_some())
+            .ok()
+            .flatten()
+            .map(|status| status.exit_status() == Some(0))
         })
     }
 
@@ -477,10 +556,16 @@ impl ManagedChild {
     }
 
     pub(super) fn exited(&mut self) -> bool {
+        self.exit_success().is_some()
+    }
+
+    fn exit_success(&mut self) -> Option<bool> {
         self.0
             .inner_mut()
             .try_wait()
-            .is_ok_and(|status| status.is_some())
+            .ok()
+            .flatten()
+            .map(|status| status.success())
     }
 
     async fn shutdown(&mut self) {
