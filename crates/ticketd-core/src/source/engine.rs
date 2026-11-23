@@ -82,6 +82,7 @@ pub struct DiscoverySummary {
 #[derive(Clone, Default)]
 pub struct Engine {
     connectors: Vec<std::sync::Arc<dyn Connector>>,
+    refresh: Option<super::RefreshControl>,
 }
 
 impl Engine {
@@ -103,23 +104,37 @@ impl Engine {
         references: &super::credentials::References,
     ) -> Self {
         Self {
+            refresh: self.refresh.clone(),
             connectors: self
                 .connectors
                 .iter()
                 .map(|connector| {
-                    if connector.descriptor().provider == provider
-                        && let Some(bound) = connector.for_connection_with_secret_refs(
-                            id,
-                            config,
-                            references.clone(),
-                        )
-                    {
-                        return bound.into();
+                    if connector.descriptor().provider != provider {
+                        return connector.clone();
                     }
-                    connector.clone()
+                    let bound = connector
+                        .for_connection_with_secret_refs(id, config, references.clone())
+                        .map_or_else(|| connector.clone(), std::sync::Arc::from);
+                    self.refresh
+                        .as_ref()
+                        .and_then(|control| bound.for_refresh(control))
+                        .map_or(bound, std::sync::Arc::from)
                 })
                 .collect(),
         }
+    }
+
+    /// Scopes progress and cancellation to this refresh and its connection calls.
+    pub fn with_refresh_control(mut self, control: super::RefreshControl) -> Self {
+        self.refresh = Some(control);
+        self
+    }
+
+    pub(super) fn check_refresh_canceled(&self) -> Result<(), SourceError> {
+        if let Some(refresh) = &self.refresh {
+            refresh.check()?;
+        }
+        Ok(())
     }
 
     pub(super) fn effective_site(&self, provider: &str) -> Result<Option<String>, SourceError> {
@@ -139,6 +154,7 @@ impl Engine {
         // rather than through a check whose failure could only be ignored.
         Self {
             connectors: vec![std::sync::Arc::new(GithubConnector::ambient())],
+            refresh: None,
         }
     }
 
@@ -300,6 +316,7 @@ impl Engine {
         let mut seen = 0;
         let mut skipped = Vec::new();
         for _ in 0..MAX_PAGES {
+            self.check_refresh_canceled()?;
             let page = with_guidance(
                 connector,
                 connector.discover(DiscoveryRequest {

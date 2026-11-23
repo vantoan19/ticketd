@@ -18,7 +18,7 @@ use super::{
     CONTRACT_VERSION, Capability, ChoiceOption, ConfigValues, ConnectionCheck, Connector,
     ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalIssue, ExternalRef,
     FieldIssue, FieldKind, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
-    SourceDescription, SourceError, SourcePresentation, credentials,
+    RefreshControl, SourceDescription, SourceError, SourcePresentation, credentials,
 };
 use host::{Definition, Host};
 use registry::Launch;
@@ -40,6 +40,7 @@ struct ProcessConnector {
     connection_id: Option<String>,
     credentials: credentials::References,
     host: Arc<Host>,
+    refresh: Option<RefreshControl>,
 }
 
 impl ProcessConnector {
@@ -48,6 +49,9 @@ impl ProcessConnector {
         config: &'a ConfigValues,
         call: impl FnOnce(ConnectionParams<'a>) -> Call<'a>,
     ) -> Result<T, SourceError> {
+        if let Some(refresh) = &self.refresh {
+            refresh.check()?;
+        }
         let id = self.connection_id()?;
         let resolved = credentials::resolve(
             &self.description.descriptor.schema,
@@ -62,6 +66,7 @@ impl ProcessConnector {
                 connection_id: id,
                 config,
             }),
+            self.refresh.as_ref(),
         )
     }
 
@@ -85,11 +90,12 @@ impl ProcessConnector {
             .iter()
             .filter(|field| matches!(field.kind, FieldKind::Secret))
             .filter_map(|field| resolved.get(&field.key).and_then(serde_json::Value::as_str));
-        self.host.call_with_secrets(
+        self.host.call_controlled(
             &self.definition,
             Some(id),
-            &secrets.collect::<Vec<_>>(),
             call.with_config(resolved),
+            self.refresh.as_ref(),
+            &secrets.collect::<Vec<_>>(),
         )
     }
 }
@@ -170,6 +176,13 @@ impl Connector for ProcessConnector {
             }
         }
         Ok(config)
+    }
+
+    fn for_refresh(&self, control: &RefreshControl) -> Option<Box<dyn Connector>> {
+        Some(Box::new(Self {
+            refresh: Some(control.clone()),
+            ..self.clone()
+        }))
     }
 
     fn validate(&self, config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {

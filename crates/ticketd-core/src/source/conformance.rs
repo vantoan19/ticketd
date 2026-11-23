@@ -186,6 +186,28 @@ pub(super) fn run(
         report.skip("options", "the schema declares no dynamic selectors", false);
     }
 
+    let control = super::RefreshControl::cancellation_probe();
+    if let Some(cancellable) = connector.for_refresh(&control) {
+        let canceled = cancellable.discover(DiscoveryRequest {
+            config: &config,
+            cursor: None,
+            page_size: SAMPLE_SIZE,
+        });
+        match canceled {
+            Err(SourceError::RefreshCanceled) if control.acknowledged() => report.pass("cancellation"),
+            Err(SourceError::RefreshCanceled) => report.fail(
+                "cancellation",
+                "the extension did not acknowledge cancellation before the grace period expired",
+            ),
+            Ok(_) => report.skip(
+                "cancellation",
+                "the discover request returned before reporting progress, so cancellation could not be exercised",
+                options.strict,
+            ),
+            Err(error) => report.fail("cancellation", error),
+        }
+    }
+
     let paging = probe_pages(connector, &config);
     match paging {
         Ok(true) => report.pass("empty_continuation"),

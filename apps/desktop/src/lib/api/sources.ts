@@ -1,3 +1,4 @@
+import { Channel } from "@tauri-apps/api/core";
 import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 import { BridgeFailure, invoke, structured, toFailure } from "./bridge-failure";
@@ -204,6 +205,18 @@ const refreshReportSchema = lazySchema(() =>
 );
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
+const refreshEventSchema = lazySchema(() =>
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("started") }),
+    z.object({
+      kind: z.literal("progress"),
+      completed: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative().nullish(),
+    }),
+  ]),
+);
+type RefreshEvent = z.infer<typeof refreshEventSchema>;
+
 /** How a source is doing, as the core decides it. Clients only word it. */
 export const sourceHealthValues = [
   "waiting",
@@ -315,16 +328,32 @@ export const sourcesClient = {
    * `ticket`. Saved content stays in place when the source cannot be reached; the
    * report names what failed.
    */
-  async refresh(ticket?: string, connection?: string, retry = false) {
+  async refresh(
+    ticket?: string,
+    connection?: string,
+    retry = false,
+    control?: { id: string; update: (event: RefreshEvent) => void },
+  ) {
+    const updates = control ? new Channel<unknown>() : undefined;
+    if (control && updates) {
+      updates.onmessage = (value) =>
+        control.update(refreshEventSchema.parse(value));
+    }
     return refreshReportSchema.parse(
       await structured(
         invoke("refresh_sources", {
           ticket: ticket ?? null,
           ...(connection && { connection }),
           ...(retry && { retry }),
+          ...(control && { refreshId: control.id, updates }),
         }),
       ),
     );
+  },
+  async cancelRefresh(refreshId: string) {
+    return z
+      .boolean()
+      .parse(await structured(invoke("cancel_source_refresh", { refreshId })));
   },
   /** Persisted freshness of each source and whether a refresh is running. No network I/O. */
   async health() {

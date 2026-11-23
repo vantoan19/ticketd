@@ -106,6 +106,56 @@ include `fields`. A rate limit can include `retry_after_secs`. Use `not_sent`
 only when the tracker could not have acted. A lost reply or an ambiguous
 publication must stay unresolved.
 
+### Reporting progress and canceling requests
+
+While processing a request, send a JSON-RPC `progress` notification. Put the
+active request's numeric `id` in `params`, along with the nonnegative
+`completed` count and the optional `total` count. Counts describe the work
+inside that request. Omit `total` when you do not know it.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "progress",
+  "params": { "id": 7, "completed": 42, "total": 100 }
+}
+```
+
+An ordinary call has a 30-second inactivity timeout. Each matching progress
+notification restarts that timer, within five minutes of the original request.
+The startup handshake has a fixed five-second limit.
+
+When a call expires or the person cancels it, ticketd sends a `cancel`
+notification for a request it sent in full.
+
+```json
+{ "jsonrpc": "2.0", "method": "cancel", "params": { "id": 7 } }
+```
+
+Read stdin while your request is running. Stop the matching work, then reply
+once to the original `id` with JSON-RPC error `-32800`. The notification itself
+has no response. Stop sending progress for a request before its final reply.
+If the request already finished, its normal reply can cross the cancellation
+notification. ticketd discards that reply. If no terminal reply arrives within
+about two seconds, ticketd terminates the process tree. The next request starts
+a new process. Closing stdin still asks the extension to exit.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "error": { "code": -32800, "message": "Request canceled" }
+}
+```
+
+In Settings → Sources, use **Cancel sync** while a manually started sync runs.
+In a terminal, `ticketd source CONNECTION refresh` shows progress on stderr
+and uses Ctrl+C to stop the refresh. The CLI returns exit status 130 on cancellation.
+
+Conformance cancels a read-only `discover` call when it sees the first progress
+notification and checks for a cancellation response. Strict conformance requires
+a discovery fixture that reports progress long enough to exercise this path.
+
 Conformance is read-only unless you pass `--publish DESTINATION`, which creates
 one real issue and checks the recovery queries. Use a test destination. The
 report explains which checks need capabilities or data unavailable in the run.

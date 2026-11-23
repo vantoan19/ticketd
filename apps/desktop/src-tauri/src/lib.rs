@@ -28,7 +28,8 @@ use ticketd_core::{
     DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
     MetadataSelection, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts,
     Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
-    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult, source::ExtensionRegistry,
+    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
+    source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -1575,7 +1576,58 @@ async fn remove_source_connection(
 
 /// The one refresh coordinator of this process: the startup and periodic runs and
 /// every explicit refresh go through it, so they never overlap or retry in a tight loop.
-struct Refresher(std::sync::Arc<ticketd_core::source::RefreshCoordinator>);
+struct Refresher(
+    std::sync::Arc<ticketd_core::source::RefreshCoordinator>,
+    ActiveRefreshes,
+);
+
+type ActiveRefreshes = std::sync::Mutex<std::collections::HashMap<String, RefreshControl>>;
+
+struct RegisteredRefresh<'a> {
+    id: String,
+    active: &'a ActiveRefreshes,
+    control: RefreshControl,
+}
+
+impl<'a> RegisteredRefresh<'a> {
+    fn start(id: String, active: &'a ActiveRefreshes) -> Result<Self, SourceFailure> {
+        use std::collections::hash_map::Entry;
+        let mut running = active.lock().unwrap_or_else(|error| error.into_inner());
+        if uuid::Uuid::parse_str(&id).is_ok()
+            && let Entry::Vacant(entry) = running.entry(id.clone())
+        {
+            let control = RefreshControl::default();
+            entry.insert(control.clone());
+            return Ok(Self {
+                id,
+                active,
+                control,
+            });
+        }
+        Err(SourceFailure {
+            code: "failed",
+            message: "Invalid or already active source refresh ID".into(),
+            fields: Vec::new(),
+        })
+    }
+}
+
+impl Drop for RegisteredRefresh<'_> {
+    fn drop(&mut self) {
+        self.active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.id);
+        self.control.cancel();
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RefreshUpdate {
+    Started,
+    Progress(RefreshProgress),
+}
 
 /// Imports matching issues and refreshes every externally owned ticket (or just `ticket`).
 /// Provider calls finish before the workspace is written; per-ticket failures come back
@@ -1586,11 +1638,18 @@ async fn refresh_sources(
     ticket: Option<String>,
     connection: Option<String>,
     retry: Option<bool>,
+    refresh_id: Option<String>,
+    updates: Option<tauri::ipc::Channel<RefreshUpdate>>,
     refresher: tauri::State<'_, Refresher>,
     sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::RefreshReport, SourceFailure> {
-    let refresher = refresher.0.clone();
-    source_task(sources, move |registry| {
+    let registration = refresh_id
+        .map(|id| RegisteredRefresh::start(id, &refresher.1))
+        .transpose()?;
+    let coordinator = refresher.0.clone();
+    let control = registration.as_ref().map(|run| run.control.clone());
+    let progress = control.as_ref().map(RefreshControl::progress);
+    let operation = source_task(sources, move |registry| {
         if retry.unwrap_or(false) {
             let id = match (&connection, &ticket) {
                 (Some(id), _) => Some(id.clone()),
@@ -1601,14 +1660,49 @@ async fn refresh_sources(
                 registry.retry(&id);
             }
         }
-        Ok(refresher.refresh_connection_now(
-            &registry.engine()?,
+        let engine = registry.engine()?;
+        let engine = if let Some(control) = control {
+            engine.with_refresh_control(control)
+        } else {
+            engine
+        };
+        Ok(coordinator.refresh_connection_now(
+            &engine,
             &open_workspace,
             connection.as_deref(),
             ticket.as_deref(),
         )?)
-    })
-    .await
+    });
+    let (Some(updates), Some(mut progress)) = (updates, progress) else {
+        return operation.await;
+    };
+    let _ = updates.send(RefreshUpdate::Started);
+    tokio::pin!(operation);
+    loop {
+        tokio::select! {
+            biased;
+            Ok(()) = progress.changed() => {
+                let update = *progress.borrow_and_update();
+                if let Some(progress) = update {
+                    let _ = updates.send(RefreshUpdate::Progress(progress));
+                }
+            }
+            result = &mut operation => return result,
+        }
+    }
+}
+
+#[tauri::command]
+fn cancel_source_refresh(refresh_id: String, refresher: tauri::State<'_, Refresher>) -> bool {
+    let active = refresher
+        .1
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(control) = active.get(&refresh_id) {
+        control.cancel();
+        return true;
+    }
+    false
 }
 
 /// What publishing would send, and whether it is allowed. No network, no write.
@@ -1945,7 +2039,10 @@ pub fn run() -> Result<(), tauri::Error> {
             },
         )
         .manage(drive_commands::DrivePickerOperations::default())
-        .manage(Refresher(std::sync::Arc::clone(&coordinator)))
+        .manage(Refresher(
+            std::sync::Arc::clone(&coordinator),
+            ActiveRefreshes::default(),
+        ))
         .manage(sources.clone())
         .manage(sync_commands::SyncHost {
             scheduler: std::sync::Arc::clone(&sync),
@@ -2146,6 +2243,7 @@ pub fn run() -> Result<(), tauri::Error> {
             backup_workspace,
             list_sources,
             refresh_sources,
+            cancel_source_refresh,
             take_ownership,
             source_health,
             preview_publication,

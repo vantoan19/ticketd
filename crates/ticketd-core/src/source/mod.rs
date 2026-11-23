@@ -20,6 +20,7 @@ mod freshness;
 mod github;
 mod presentation;
 mod publication;
+mod refresh_control;
 mod schedule;
 mod schema;
 mod takeover;
@@ -58,6 +59,7 @@ pub use publication::{
     PublicationLocalData, PublicationPreview, PublicationReview, PublishOptions, PublishOutcome,
     PublishedIssue, Resolution, ResolutionAction, ResolveOptions,
 };
+pub use refresh_control::{RefreshControl, RefreshProgress};
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern, OptionSource,

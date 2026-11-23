@@ -43,6 +43,7 @@ export const failureCodes = [
   "rate_limited",
   "unavailable",
   "extension_crash_limit",
+  "refresh_canceled",
   "protocol",
   "unsupported",
   "invalid_configuration",
