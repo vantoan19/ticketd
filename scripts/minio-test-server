@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Usage: scripts/minio-test-server start|stop|env
+#   start  run the pinned MinIO in a container and wait until it answers
+#   stop   remove the container
+#   env    print the variables the live S3 tests read (see docs/testing-s3.md)
+# Needs Docker. The server listens on 127.0.0.1 only, with throwaway credentials.
+set -euo pipefail
+
+# MinIO's community repository is archived and its own images are gone from Docker Hub and
+# Quay, so the version is pinned on purpose, by digest: bitnamilegacy/minio 2025.7.23-debian-12-r5
+# (MinIO RELEASE.2025-07-23T15-54-02Z). Move it only after checking the live tests against the new one.
+IMAGE="docker.io/bitnamilegacy/minio@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20"
+NAME="${TICKETD_MINIO_NAME:-ticketd-minio-test}"
+PORT="${TICKETD_MINIO_PORT:-9000}"
+ACCESS_KEY="ticketd-test"
+SECRET_KEY="ticketd-test-secret"
+
+print_env() {
+  echo "export TICKETD_S3_TEST_ENDPOINT=http://127.0.0.1:$PORT"
+  echo "export TICKETD_S3_TEST_ACCESS_KEY=$ACCESS_KEY"
+  echo "export TICKETD_S3_TEST_SECRET_KEY=$SECRET_KEY"
+}
+
+case "${1:-}" in
+  start)
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    docker run -d --name "$NAME" -p "127.0.0.1:$PORT:9000" \
+      -e MINIO_ROOT_USER="$ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$SECRET_KEY" "$IMAGE" >/dev/null
+    # The image starts MinIO once to set itself up (and answers the health endpoint), stops it,
+    # and starts it again for good. Wait for that last start, then for the endpoint.
+    for _ in $(seq 1 90); do
+      if docker logs "$NAME" 2>&1 | grep -qF '** Starting MinIO **' &&
+        curl -fsS -o /dev/null "http://127.0.0.1:$PORT/minio/health/ready" 2>/dev/null; then
+        print_env
+        exit 0
+      fi
+      sleep 1
+    done
+    docker logs "$NAME" >&2 || true
+    echo "MinIO did not become ready in 90 seconds" >&2
+    exit 1
+    ;;
+  stop)
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    ;;
+  env)
+    print_env
+    ;;
+  *)
+    echo "usage: scripts/minio-test-server start|stop|env" >&2
+    exit 2
+    ;;
+esac
