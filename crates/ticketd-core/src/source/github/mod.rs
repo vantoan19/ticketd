@@ -555,6 +555,7 @@ impl Connector for GithubConnector {
                 account_id: Some(account.to_ascii_lowercase()),
                 site: self.site(),
                 tracker_time: None,
+                publication_requires_tracker_time: false,
             },
             derived: Self::derived_configuration(config),
         })
@@ -1061,6 +1062,22 @@ fn site_of(url: &str) -> String {
         String::new()
     } else {
         host
+    }
+}
+
+/// Historical GitHub IDs are numbers, so known different hosts cannot share one.
+pub(crate) fn legacy_issue_origin_matches(provider: &str, stored: &str, incoming: &str) -> bool {
+    if provider != PROVIDER || stored == incoming {
+        return true;
+    }
+    let site = |text: &str| {
+        let url = url::Url::parse(text).ok()?;
+        (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
+    };
+    match (site(stored), site(incoming)) {
+        (Some(stored), Some(incoming)) => stored == incoming,
+        (Some(_), None) => false,
+        (None, _) => true,
     }
 }
 

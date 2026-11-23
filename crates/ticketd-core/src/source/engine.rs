@@ -93,6 +93,7 @@ impl Engine {
             id,
             config,
             &super::credentials::References::new(),
+            None,
         )
     }
 
@@ -102,6 +103,7 @@ impl Engine {
         id: &str,
         config: &ConfigValues,
         references: &super::credentials::References,
+        permitted_env: Option<&HashSet<String>>,
     ) -> Self {
         Self {
             refresh: self.refresh.clone(),
@@ -113,7 +115,12 @@ impl Engine {
                         return connector.clone();
                     }
                     let bound = connector
-                        .for_connection_with_secret_refs(id, config, references.clone())
+                        .for_connection_with_secret_refs(
+                            id,
+                            config,
+                            references.clone(),
+                            permitted_env.cloned(),
+                        )
                         .map_or_else(|| connector.clone(), std::sync::Arc::from);
                     self.refresh
                         .as_ref()
@@ -148,6 +155,10 @@ impl Engine {
     pub fn with_refresh_control(mut self, control: super::RefreshControl) -> Self {
         self.refresh = Some(control);
         self
+    }
+
+    pub(super) fn refresh_control(&self) -> Option<&super::RefreshControl> {
+        self.refresh.as_ref()
     }
 
     pub(super) fn check_refresh_canceled(&self) -> Result<(), SourceError> {
@@ -508,10 +519,24 @@ impl Engine {
         raw: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
+        self.publish_before(provider, raw, request, None)
+    }
+
+    pub(super) fn publish_before(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        request: &PublishRequest,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
         let publication = publication(connector)?;
         let config = connector.configuration_for_request(raw)?;
-        let issue = with_guidance(connector, publication.publish(&config, request))?;
+        let result = match deadline {
+            Some(deadline) => publication.publish_before(&config, request, deadline),
+            None => publication.publish(&config, request),
+        };
+        let issue = with_guidance(connector, result)?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
                 "the created issue named a different provider".into(),

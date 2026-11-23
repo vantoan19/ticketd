@@ -42,6 +42,7 @@ impl Extension for Tracker {
                 account_id: Some("fixture-user".into()),
                 site: "fixture-site".into(),
                 tracker_time: None,
+                publication_requires_tracker_time: false,
             },
             derived: Default::default(),
         })
@@ -70,7 +71,7 @@ impl Extension for Tracker {
         _config: &ConfigValues,
         _reference: &ExternalRef,
     ) -> Result<ExternalIssue, ExtensionError> {
-        Err(ExtensionError::unsupported("fetch"))
+        Err(ExtensionError::unsupported("fetch").with_detail("fixture_fetch_missing"))
     }
 }
 
@@ -133,6 +134,20 @@ fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
     assert_eq!(
         receive(&mut output)["result"]["connection"]["account_id"],
         "fixture-user"
+    );
+    send(
+        &mut input,
+        "fetch",
+        Some(4),
+        json!({"connection_id":"fixture-2","config":{},"reference":{
+            "identity":{"provider":"fixture","id":"issue-1"},"locator":"F-1","partition":"F"
+        }}),
+    );
+    let failure = receive(&mut output);
+    assert_eq!(failure["error"]["data"]["detail"], "fixture_fetch_missing");
+    assert_eq!(
+        failure["error"]["data"]["message"],
+        "this source does not support fetch"
     );
     input.shutdown(std::net::Shutdown::Write).unwrap();
     session.join().unwrap().unwrap();

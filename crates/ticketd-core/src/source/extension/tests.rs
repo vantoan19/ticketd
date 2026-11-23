@@ -29,7 +29,8 @@ fn fixture_connector(host: Arc<Host>, connection: &str) -> ProcessConnector {
         },
         connection_id: Some(connection.into()),
         credentials: Default::default(),
-        workflow_config: None,
+        permitted_env: None,
+        workflow_credentials: None,
         host,
         refresh: None,
     }

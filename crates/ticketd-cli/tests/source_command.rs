@@ -99,11 +99,67 @@ fn migrates_the_site_of_a_legacy_enterprise_connection() {
     assert!(String::from_utf8_lossy(&refused.stderr).contains("differs from the site saved"));
 }
 
+#[test]
+fn the_same_legacy_issue_id_from_another_site_never_reclaims_a_ticket() {
+    let cli = Cli::new();
+    let add = ["source", "add", "github", "--set", "repositories=o/r"];
+    cli.run(&add);
+    let original = cli.run(&["source", "github", "refresh"]);
+    let reference = original["imported"][0].as_str().unwrap();
+    let before = cli.run(&["show", reference]);
+    cli.run(&["source", "github", "remove"]);
+
+    let replacement = Cli {
+        api: serve_site("https://other-enterprise.invalid", 1),
+        dir: cli.dir,
+    };
+    let source = replacement.run(&add);
+    assert_eq!(source["source"]["id"], "github-2");
+    replacement.run(&["source", "github-2", "refresh"]);
+    let after = replacement.run(&["show", reference]);
+    assert_eq!(after["source"]["url"], before["source"]["url"]);
+    assert_eq!(after["source"]["unavailable"]["code"], "connection_removed");
+
+    // Give the cached ticket a link time after the attempt, as if a refresh
+    // imported it mid-publication. Matching numeric IDs alone cannot adopt it.
+    let workspace = replacement.dir.path().join("workspace.sqlite3");
+    rusqlite::Connection::open(workspace)
+        .unwrap()
+        .execute(
+            "UPDATE external_identities SET linked_at = '2999-01-01T00:00:00Z'",
+            [],
+        )
+        .unwrap();
+    let local_reference = local_ticket(&replacement);
+    let output = replacement.command(
+        &[
+            "source",
+            "publish",
+            &local_reference,
+            "--connection",
+            "github-2",
+        ],
+        Some(TOKEN),
+    );
+    assert!(!output.status.success());
+    let failure = String::from_utf8_lossy(&output.stderr);
+    assert!(failure.contains("may already exist"), "{failure}");
+    let after_publish = replacement.run(&["show", reference]);
+    assert_eq!(after_publish["source"]["url"], before["source"]["url"]);
+    assert_eq!(after_publish["trashed"], false);
+    let pending = replacement.run(&["show", &local_reference]);
+    assert_eq!(pending["publication"]["state"], "unresolved");
+}
+
 const TOKEN: &str = "ghp_cli_test_secret";
 const SECOND_TOKEN: &str = "ghp_second_cli_test_secret";
 
 /// Serves canned GitHub responses until the test process exits.
 fn serve() -> String {
+    serve_site("https://github.example", 50)
+}
+
+fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
@@ -143,7 +199,7 @@ fn serve() -> String {
             } else if request.starts_with("POST ") && path == "/repos/o/r/issues" {
                 (
                     "201 Created",
-                    json!({"id": 50, "number": 7, "title": "Escalate me", "body": "Why it matters", "state": "open",
+                    json!({"id": published_id, "number": 7, "title": "Escalate me", "body": "Why it matters", "state": "open",
                            "html_url": "https://github.example/o/r/issues/7", "assignees": [], "labels": [],
                            "created_at": "", "updated_at": ""}),
                 )
@@ -222,7 +278,9 @@ fn serve() -> String {
             } else {
                 ("404 Not Found", json!({"message": "Not Found"}))
             };
-            let body = body.to_string();
+            let body = body
+                .to_string()
+                .replace("https://github.example", issue_origin);
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()

@@ -42,6 +42,25 @@ fn links_and_syncs_the_typescript_tracker() {
         "still a development folder",
     )
     .unwrap();
+    let no_reason = command(&[
+        "source",
+        "conformance",
+        "example-tracker",
+        "--set",
+        "board=Demo",
+        "--strict",
+        "--past-end-cursor",
+        "fixture-end",
+    ]);
+    assert!(!no_reason.status.success());
+    let no_reason: Value = serde_json::from_slice(&no_reason.stdout).unwrap();
+    assert!(
+        no_reason["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["name"] == "typed_closure" && check["outcome"] == "failed")
+    );
     let report = run(&[
         "source",
         "conformance",
@@ -49,12 +68,17 @@ fn links_and_syncs_the_typescript_tracker() {
         "--set",
         "board=Demo",
         "--strict",
+        "--past-end-cursor",
+        "fixture-end",
+        "--skip-check",
+        "typed_closure=the example fixture has no typed closure cases",
     ]);
     assert_eq!(report["passed"], true, "{report}");
     let checks = report["checks"].as_array().unwrap();
     for name in [
         "cancellation",
         "empty_continuation",
+        "past_end_cursor",
         "stable_identity",
         "conversation",
     ] {
@@ -65,6 +89,10 @@ fn links_and_syncs_the_typescript_tracker() {
             "{name}: {report}"
         );
     }
+
+    assert!(checks.iter().any(|check| check["name"] == "typed_closure"
+        && check["outcome"] == "skipped"
+        && check["reason"] == "the example fixture has no typed closure cases"));
 
     let added = run(&["source", "add", "example-tracker", "--set", "board=Demo"]);
     assert_eq!(added["preview"]["matched"], 2);
@@ -239,6 +267,10 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
                 "--set",
                 "board=Demo",
                 "--strict",
+                "--past-end-cursor",
+                "fixture-end",
+                "--skip-check",
+                "typed_closure=the example fixture has no typed closure cases",
             ])
             .output()
             .unwrap()
@@ -417,6 +449,64 @@ fn a_publication_uses_the_same_credential_as_its_account_check() {
 }
 
 #[test]
+fn a_retired_connection_cannot_leak_its_override_to_a_new_provider() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("workspace.sqlite3");
+    let registry = directory.path().join("extensions");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ticketd-core/tests/fixtures/source-extension");
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .env("TICKETD_TEST_WORKSPACE", &workspace)
+            .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
+            .env("TICKETD_SOURCE_DEV_TRACKER_FIXTURE_KEY", "private-retired")
+            .env_remove("TICKETD_SOURCE_DEV_TRACKER_2_FIXTURE_KEY")
+            .env_remove("TICKETD_SOURCE_DEV_TRACKER_2_FIXTURE_KEY_COMMAND")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let link = |provider: &str| {
+        let folder = directory.path().join(provider);
+        std::fs::create_dir(&folder).unwrap();
+        for file in ["driver.mjs", "ticketd-source.json"] {
+            let text = std::fs::read_to_string(fixture.join(file)).unwrap();
+            std::fs::write(
+                folder.join(file),
+                text.replace("\"scripted\"", &format!("\"{provider}\"")),
+            )
+            .unwrap();
+        }
+        run(&["source", "extension", "link", folder.to_str().unwrap()]);
+    };
+    link("dev--tracker");
+    let first = run(&["source", "add", "dev--tracker", "--set", "mode=valid"]);
+    assert_eq!(first["source"]["id"], "dev-tracker");
+    run(&["source", "dev-tracker", "remove"]);
+
+    let backup = directory.path().join("portable.sqlite3");
+    run(&["backup", backup.to_str().unwrap()]);
+    ticketd_core::Workspace::restore(&workspace, &backup).unwrap();
+
+    link("dev-tracker");
+    // This fixture rejects the request if a credential reaches a result.
+    let next = run(&[
+        "source",
+        "add",
+        "dev-tracker",
+        "--set",
+        "mode=secret_result",
+    ]);
+    assert_eq!(next["source"]["id"], "dev-tracker-2");
+}
+
+#[test]
 fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = directory.path().join("workspace.sqlite3");
@@ -429,6 +519,7 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
             .env("TICKETD_TEST_WORKSPACE", &workspace)
             .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
             .env("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY", secret)
+            .env("TICKETD_LOG", "ticketd_core::source::extension::wire=debug")
             // The direct override takes precedence over a failed password command.
             .env(
                 "TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY_COMMAND",
@@ -461,6 +552,33 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
         assert!(!stderr.contains(secret));
         assert!(!stderr.contains("private-qz85%2Fto%25ken"));
     }
+    for (mode, expected) in [
+        ("safe_detail", Some("error_detail=fixture_response_missing")),
+        ("private_detail", None),
+        ("credential_detail", None),
+    ] {
+        let output = command(&[
+            "source",
+            "add",
+            "scripted",
+            "--set",
+            &format!("mode={mode}"),
+        ]);
+        assert!(!output.status.success());
+        let logs = String::from_utf8_lossy(&output.stderr);
+        if let Some(detail) = expected {
+            assert!(logs.contains(detail), "{mode}: {logs}");
+        }
+        assert!(!logs.contains(secret));
+        assert!(!logs.contains("someone@example.invalid"));
+        assert!(
+            logs.lines()
+                .any(|line| line.starts_with("error:")
+                    && line.contains("could not read the tracker"))
+        );
+        assert!(!logs.lines().any(|line| line.starts_with("error:") && line.contains("fixture_response_missing")));
+    }
+
     let logs = directory.path().join("logs/sources");
     let captured = std::fs::read_dir(&logs)
         .unwrap()

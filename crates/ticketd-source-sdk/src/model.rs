@@ -46,6 +46,9 @@ pub struct ConnectionInfo {
     /// RFC 3339 time reported by the tracker during this authenticated check, when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracker_time: Option<String>,
+    /// Whether this source needs tracker time evidence before ticketd can safely publish.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub publication_requires_tracker_time: bool,
 }
 
 impl ConnectionInfo {

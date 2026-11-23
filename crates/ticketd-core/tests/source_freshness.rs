@@ -764,6 +764,52 @@ fn a_manual_refresh_overlapping_a_running_one_waits_instead_of_interleaving() {
 }
 
 #[test]
+fn a_queued_manual_refresh_can_be_canceled_before_the_running_one_finishes() {
+    use std::{sync::mpsc, time::Duration};
+    let coordinator = Arc::new(coordinator(&ManualClock::default()));
+    let (running_tx, running_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let background = {
+        let coordinator = coordinator.clone();
+        thread::spawn(move || {
+            coordinator.run_now(|| {
+                running_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(RefreshReport::default())
+            })
+        })
+    };
+    running_rx.recv().unwrap();
+    let control = ticketd_core::source::RefreshControl::default();
+    let engine = Engine::new().with_refresh_control(control.clone());
+    let (result_tx, result_rx) = mpsc::channel();
+    let foreground = {
+        let coordinator = coordinator.clone();
+        thread::spawn(move || {
+            let result = coordinator.refresh_now(
+                &engine,
+                &|| -> Result<Workspace, ticketd_core::Error> {
+                    panic!("a canceled queued refresh must not open its Workspace");
+                },
+                None,
+            );
+            result_tx.send(result).unwrap();
+        })
+    };
+    control.cancel();
+    let result = result_rx.recv_timeout(Duration::from_secs(2));
+    release_tx.send(()).unwrap();
+    background.join().unwrap().unwrap();
+    foreground.join().unwrap();
+    assert!(matches!(
+        result.unwrap(),
+        Err(ticketd_core::Error::Source(
+            ticketd_core::source::SourceError::RefreshCanceled
+        ))
+    ));
+}
+
+#[test]
 fn a_manual_refresh_failure_still_backs_off_and_a_success_reschedules() {
     let f = Fixture::new();
     f.publish(issue(1, T0));

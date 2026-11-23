@@ -24,6 +24,7 @@ use tokio::{
 };
 
 use super::{
+    super::contract::check_publication_deadline,
     CONTRACT_VERSION, Launch, RefreshControl, SourceError,
     logs::ExtensionLog,
     process::{CallBudget, CallControl, EXIT_POLL, Fault, LINE_LIMIT, Process},
@@ -255,7 +256,7 @@ impl Host {
         id: Option<&str>,
         call: Call<'_>,
     ) -> Result<T, SourceError> {
-        self.call_controlled(definition, id, call, None, &[])
+        self.call_controlled(definition, id, call, None, &[], None)
     }
 
     pub(super) fn call_controlled<T: DeserializeOwned>(
@@ -265,11 +266,12 @@ impl Host {
         call: Call<'_>,
         refresh: Option<&RefreshControl>,
         secrets: &[&str],
+        deadline: Option<std::time::Instant>,
     ) -> Result<T, SourceError> {
         if let Some(refresh) = refresh {
             refresh.check()?;
         }
-        let request = self.encode(call)?;
+        let request = self.encode(call, deadline)?;
         let endpoint = self.endpoint(definition, id)?;
         let _serial = endpoint
             .serial
@@ -278,6 +280,7 @@ impl Host {
         if let Some(refresh) = refresh {
             refresh.check()?;
         }
+        check_publication_deadline(deadline)?;
         endpoint.redactions.register(secrets.iter().copied());
         let (reply, result) = blocking::sync_channel(1);
         endpoint
@@ -298,7 +301,11 @@ impl Host {
         })
     }
 
-    fn encode(&self, call: Call<'_>) -> Result<EncodedRequest, SourceError> {
+    fn encode(
+        &self,
+        call: Call<'_>,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<EncodedRequest, SourceError> {
         let id = (self.next.fetch_add(1, Ordering::Relaxed) % ((1 << 53) - 1)) + 1;
         let request = Request {
             jsonrpc: JsonRpc::V2,
@@ -310,7 +317,11 @@ impl Host {
             SourceError::NotSent(format!("could not encode source request: {error}"))
         })?;
         frame.0.push(b'\n');
-        Ok(EncodedRequest { id, frame: frame.0 })
+        Ok(EncodedRequest {
+            id,
+            frame: frame.0,
+            deadline,
+        })
     }
 
     pub(super) fn retry(&self, connection_id: &str) {
@@ -363,6 +374,7 @@ impl Drop for Host {
 struct EncodedRequest {
     id: u64,
     frame: Vec<u8>,
+    deadline: Option<std::time::Instant>,
 }
 
 struct CappedFrame(Vec<u8>);
@@ -426,6 +438,8 @@ async fn session(
                     let mut control = CallControl {
                         refresh: refresh.as_ref(),
                         closing: &mut closing,
+                        deadline: request.deadline.map(Instant::from_std),
+                        source_id: key.id.as_deref(),
                     };
                     let result = serve(
                         &mut active,
@@ -528,6 +542,9 @@ async fn serve(
     control: &mut CallControl<'_>,
     diagnostics: &SessionDiagnostics,
 ) -> Result<Result<Value, SourceError>, Fault> {
+    if let Err(error) = check_publication_deadline(request.deadline) {
+        return Ok(Err(error));
+    }
     if active.is_none() {
         let process = match definition.launch.command().and_then(|command| {
             definition
@@ -572,6 +589,9 @@ async fn serve(
                 }
             }
         }
+    }
+    if let Err(error) = check_publication_deadline(request.deadline) {
+        return Ok(Err(error));
     }
     match active.as_mut() {
         Some((_, process)) => {

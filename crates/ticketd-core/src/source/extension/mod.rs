@@ -39,7 +39,8 @@ struct ProcessConnector {
     description: SourceDescription,
     connection_id: Option<String>,
     credentials: credentials::References,
-    workflow_config: Option<Arc<ConfigValues>>,
+    permitted_env: Option<std::collections::HashSet<String>>,
+    workflow_credentials: Option<Arc<ConfigValues>>,
     host: Arc<Host>,
     refresh: Option<RefreshControl>,
 }
@@ -49,6 +50,15 @@ impl ProcessConnector {
         &'a self,
         config: &'a ConfigValues,
         call: impl FnOnce(ConnectionParams<'a>) -> Call<'a>,
+    ) -> Result<T, SourceError> {
+        self.request_before(config, call, None)
+    }
+
+    fn request_before<'a, T: DeserializeOwned>(
+        &'a self,
+        config: &'a ConfigValues,
+        call: impl FnOnce(ConnectionParams<'a>) -> Call<'a>,
+        deadline: Option<std::time::Instant>,
     ) -> Result<T, SourceError> {
         if let Some(refresh) = &self.refresh {
             refresh.check()?;
@@ -64,32 +74,41 @@ impl ProcessConnector {
         let resolved = if matches!(call, Call::Options { .. }) {
             resolved
         } else {
-            Cow::Owned(
-                self.description
-                    .descriptor
-                    .schema
-                    .validate(&resolved)
-                    .map_err(SourceError::InvalidConfiguration)?,
-            )
+            self.description
+                .descriptor
+                .schema
+                .validate(&resolved)
+                .map_err(SourceError::InvalidConfiguration)?
         };
-        self.call(id, &resolved, call)
+        self.call(id, &resolved, call, deadline)
     }
 
-    fn resolve_credentials<'a>(
-        &'a self,
+    fn resolve_credentials(
+        &self,
         id: &str,
         raw: &ConfigValues,
-    ) -> Result<Cow<'a, ConfigValues>, SourceError> {
-        if let Some(config) = &self.workflow_config {
-            return Ok(Cow::Borrowed(config));
+    ) -> Result<ConfigValues, SourceError> {
+        if let Some(credentials) = &self.workflow_credentials {
+            let mut resolved = raw.clone();
+            for field in &self.description.descriptor.schema.fields {
+                if matches!(field.kind, FieldKind::Secret) {
+                    resolved.remove(&field.key);
+                }
+            }
+            resolved.extend(
+                credentials
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+            return Ok(resolved);
         }
         credentials::resolve(
             &self.description.descriptor.schema,
             id,
             &self.credentials,
+            self.permitted_env.as_ref(),
             raw,
         )
-        .map(Cow::Owned)
     }
 
     fn connection_id(&self) -> Result<&str, SourceError> {
@@ -103,6 +122,7 @@ impl ProcessConnector {
         id: &str,
         resolved: &ConfigValues,
         call: Call<'_>,
+        deadline: Option<std::time::Instant>,
     ) -> Result<T, SourceError> {
         let secrets = self
             .description
@@ -118,6 +138,7 @@ impl ProcessConnector {
             call.with_config(resolved),
             self.refresh.as_ref(),
             &secrets.collect::<Vec<_>>(),
+            deadline,
         )
     }
 }
@@ -136,7 +157,7 @@ impl Connector for ProcessConnector {
     }
 
     fn for_connection(&self, id: &str, config: &ConfigValues) -> Option<Box<dyn Connector>> {
-        self.for_connection_with_secret_refs(id, config, Default::default())
+        self.for_connection_with_secret_refs(id, config, Default::default(), None)
     }
 
     fn for_connection_with_secret_refs(
@@ -144,11 +165,13 @@ impl Connector for ProcessConnector {
         id: &str,
         _config: &ConfigValues,
         credentials: credentials::References,
+        permitted_env: Option<std::collections::HashSet<String>>,
     ) -> Option<Box<dyn Connector>> {
         Some(Box::new(Self {
             connection_id: Some(id.to_owned()),
             credentials,
-            workflow_config: None,
+            permitted_env,
+            workflow_credentials: None,
             ..self.clone()
         }))
     }
@@ -167,6 +190,7 @@ impl Connector for ProcessConnector {
         }));
         for field in &schema.fields {
             if !matches!(field.kind, FieldKind::Secret)
+                && schema.is_active(field, &resolved)
                 && resolved
                     .get(&field.key)
                     .is_some_and(|value| redactions.contains_secret(value))
@@ -189,6 +213,7 @@ impl Connector for ProcessConnector {
                 connection_id: id.into(),
                 config: Cow::Borrowed(&config),
             }),
+            None,
         )?;
         if !issues.is_empty() {
             return Err(SourceError::InvalidConfiguration(issues));
@@ -209,12 +234,18 @@ impl Connector for ProcessConnector {
         &self,
         config: &ConfigValues,
     ) -> Result<Option<Box<dyn Connector>>, SourceError> {
-        if self.workflow_config.is_some() {
+        if self.workflow_credentials.is_some() {
             return Ok(None);
         }
-        let resolved = self.resolve_credentials(self.connection_id()?, config)?;
+        let mut resolved = self.resolve_credentials(self.connection_id()?, config)?;
+        let schema = &self.description.descriptor.schema;
+        resolved.retain(|key, _| {
+            schema
+                .field(key)
+                .is_some_and(|field| matches!(field.kind, FieldKind::Secret))
+        });
         Ok(Some(Box::new(Self {
-            workflow_config: Some(Arc::new(resolved.into_owned())),
+            workflow_credentials: Some(Arc::new(resolved)),
             ..self.clone()
         })))
     }
@@ -300,6 +331,22 @@ impl Publication for ProcessConnector {
             connection,
             request: Cow::Borrowed(request),
         })
+    }
+
+    fn publish_before(
+        &self,
+        config: &ConfigValues,
+        request: &PublishRequest,
+        deadline: std::time::Instant,
+    ) -> Result<ExternalIssue, SourceError> {
+        self.request_before(
+            config,
+            |connection| Call::Publish {
+                connection,
+                request: Cow::Borrowed(request),
+            },
+            Some(deadline),
+        )
     }
 
     fn locate(

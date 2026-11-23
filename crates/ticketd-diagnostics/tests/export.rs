@@ -239,6 +239,7 @@ fn a_line_is_rebuilt_from_allowed_fields_and_ids_are_kept() {
             "ticket_ref": "TK-7", "chat_id": "chat-9f2", "automation_run_id": "run-1",
             "source_id": "src-3", "request_id": "req-5", "error_kind": "offline", "repeat_count": 3, "count": 3, "state": "x", "attempt": 2, "duration_ms": 5,
             "title": "Quarterly plan", "error": "could not reach the drive",
+            "error_detail": "extension_private_detail",
             "nested": {"title": "Quarterly plan"}, "list": ["Quarterly plan"],
             "spans": [{"name": "sync_pass", "source_id": "src-3", "title": "Quarterly plan"}],
             "span": {"name": "sync_pass", "source_id": "src-3", "title": "Quarterly plan"},

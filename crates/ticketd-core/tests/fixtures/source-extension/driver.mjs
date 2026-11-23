@@ -70,11 +70,11 @@ const closure = {
   3: issue("3", "Issue state probe", "unknown", "Closed"),
   4: issue("4", "Issue state probe", "unknown", "Completed"),
 };
-const problem = (kind, message, classification) => ({
+const problem = (kind, message, classification, detail) => ({
   error: {
     code: -32000,
     message,
-    data: { code: kind, class: classification, message },
+    data: { code: kind, class: classification, message, detail },
   },
 });
 let reads = 0;
@@ -128,6 +128,30 @@ async function dispatch({ id, method, params }, signal) {
         "unauthenticated",
         `tracker refused ${credential}`,
         "auth",
+      );
+    }
+    if (mode === "safe_detail") {
+      return problem(
+        "protocol",
+        "could not read the tracker",
+        "system",
+        "fixture_response_missing",
+      );
+    }
+    if (mode === "private_detail") {
+      return problem(
+        "protocol",
+        "could not read the tracker",
+        "system",
+        "Private ticket for someone@example.invalid",
+      );
+    }
+    if (mode === "credential_detail") {
+      return problem(
+        "protocol",
+        "could not read the tracker",
+        "system",
+        credential,
       );
     }
     if (mode === "secret_result") {

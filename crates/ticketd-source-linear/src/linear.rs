@@ -113,6 +113,7 @@ impl Extension for Linear {
                 account_id: Some(connection.viewer.id.to_string()),
                 site: connection.organization.id.to_string(),
                 tracker_time,
+                publication_requires_tracker_time: true,
             },
             derived: DerivedConfiguration {
                 partitions: destinations.clone(),

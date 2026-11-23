@@ -333,6 +333,7 @@ pub trait Connector: Send + Sync {
         id: &str,
         config: &ConfigValues,
         _references: std::collections::BTreeMap<String, uuid::Uuid>,
+        _permitted_env: Option<std::collections::HashSet<String>>,
     ) -> Option<Box<dyn Connector>> {
         self.for_connection(id, config)
     }
@@ -448,6 +449,18 @@ pub trait Publication: Send + Sync {
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError>;
 
+    /// Refuse dispatch once the workflow's durable send window has closed.
+    #[doc(hidden)]
+    fn publish_before(
+        &self,
+        config: &ConfigValues,
+        request: &PublishRequest,
+        deadline: std::time::Instant,
+    ) -> Result<ExternalIssue, SourceError> {
+        check_publication_deadline(Some(deadline))?;
+        self.publish(config, request)
+    }
+
     /// Reads one issue the person named (`text`: a number, a reference or a
     /// link), which must belong to `destination`. Used to attach an issue to an
     /// uncertain publication, so it must refuse an issue elsewhere. Only called
@@ -466,4 +479,15 @@ pub trait Publication: Send + Sync {
         config: &ConfigValues,
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, SourceError>;
+}
+
+pub(super) fn check_publication_deadline(
+    deadline: Option<std::time::Instant>,
+) -> Result<(), SourceError> {
+    if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+        return Err(SourceError::NotSent(
+            "the publication's time to send expired".into(),
+        ));
+    }
+    Ok(())
 }

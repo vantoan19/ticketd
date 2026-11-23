@@ -151,12 +151,21 @@ pub(super) fn resolve(
     schema: &ConfigSchema,
     id: &str,
     references: &References,
+    permitted_env: Option<&HashSet<String>>,
     raw: &ConfigValues,
 ) -> Result<ConfigValues, SourceError> {
     let mut result = raw.clone();
     let mut checked = HashSet::new();
     for field in &schema.fields {
-        resolve_field(schema, id, references, field, &mut result, &mut checked)?;
+        resolve_field(
+            schema,
+            id,
+            references,
+            permitted_env,
+            field,
+            &mut result,
+            &mut checked,
+        )?;
     }
     Ok(result)
 }
@@ -165,6 +174,7 @@ fn resolve_field(
     schema: &ConfigSchema,
     id: &str,
     references: &References,
+    permitted_env: Option<&HashSet<String>>,
     field: &SchemaField,
     values: &mut ConfigValues,
     checked: &mut HashSet<String>,
@@ -173,7 +183,15 @@ fn resolve_field(
         return Ok(());
     }
     if let Some(parent) = field.show_if.as_deref().and_then(|key| schema.field(key)) {
-        resolve_field(schema, id, references, parent, values, checked)?;
+        resolve_field(
+            schema,
+            id,
+            references,
+            permitted_env,
+            parent,
+            values,
+            checked,
+        )?;
     }
     if !schema.is_active(field, values) {
         values.remove(&field.key);
@@ -188,7 +206,12 @@ fn resolve_field(
         Some(other) if !other.is_string() => {
             return Err(invalid(&field.key, "must be a credential string"));
         }
-        _ => load(id, &field.key, references.get(&field.key).copied())?,
+        _ => load(
+            id,
+            &field.key,
+            references.get(&field.key).copied(),
+            permitted_env,
+        )?,
     };
     let Some(candidate) = candidate else {
         return if field.required {
@@ -210,15 +233,27 @@ fn resolve_field(
     Ok(())
 }
 
-fn load(id: &str, field: &str, reference: Option<Uuid>) -> Result<Option<String>, SourceError> {
+fn load(
+    id: &str,
+    field: &str,
+    reference: Option<Uuid>,
+    permitted_env: Option<&HashSet<String>>,
+) -> Result<Option<String>, SourceError> {
+    let read_override = |name: &str| {
+        if permitted_env.is_none_or(|permitted| permitted.contains(name)) {
+            env::var_os(name)
+        } else {
+            None
+        }
+    };
     let name = env_key(id, field);
-    if let Some(value) = env::var_os(&name) {
+    if let Some(value) = read_override(&name) {
         return value
             .into_string()
             .map(Some)
             .map_err(|_| invalid(field, "environment override must be valid UTF-8"));
     }
-    if let Some(command) = env::var_os(format!("{name}_COMMAND")) {
+    if let Some(command) = read_override(&format!("{name}_COMMAND")) {
         let command: Vec<String> = command.to_str().and_then(|value| serde_json::from_str(value).ok())
             .filter(|args: &Vec<String>| args.first().is_some_and(|executable| !executable.is_empty()))
             .ok_or_else(|| invalid(field, "password command must be a JSON array containing an executable and its arguments"))?;

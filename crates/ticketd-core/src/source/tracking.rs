@@ -1506,6 +1506,19 @@ fn issue_can_refresh(
     let Some(id) = ticket_for_identity(connection, identity)? else {
         return Ok(!replaced_config);
     };
+    let (url, partition): (String, Option<String>) = connection.query_row(
+        "SELECT url, partition FROM external_identities WHERE ticket_id = ?1",
+        [&id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if !super::legacy_issue_origin_matches(&identity.provider, &url, &issue.url) {
+        tracing::warn!(
+            source_id = source_id.unwrap_or_default(),
+            error_kind = "identity_conflict",
+            "source issue identity belongs to a different site"
+        );
+        return Ok(false);
+    }
     if super::connection_removed_at(connection, &id)?.is_some() {
         if replaced_config
             || !discovery.contains_key(&(identity.provider.clone(), identity.id.clone()))
@@ -1521,11 +1534,6 @@ fn issue_can_refresh(
                     && source.derived.partitions.contains(&reference.partition)
             }));
     }
-    let partition: Option<String> = connection.query_row(
-        "SELECT partition FROM external_identities WHERE ticket_id = ?1",
-        [&id],
-        |row| row.get(0),
-    )?;
     Ok(super::selected_connection(
         connection,
         &id,

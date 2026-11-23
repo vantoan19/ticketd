@@ -891,7 +891,10 @@ When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its
 no API URL. The upgrade uses the configured endpoint first, then a distinct
 known issue host if there is one.
 
-External identity remains provider plus opaque ID. A device refreshes a ticket
+External identity remains provider plus opaque ID. Historical GitHub issue IDs
+are numeric. If two GitHub sites return the same ID with different issue hosts,
+ticketd refuses to overwrite, rebind or adopt the first issue. The two issues
+cannot coexist under that legacy ID. A device refreshes a ticket
 through its local discovery connection, or the first saved connection that
 covers the issue's part. Tickets with no covering connection keep their cached
 source content. Connection settings, discovery affinity and refresh scheduling

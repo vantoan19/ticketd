@@ -32,7 +32,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub use conformance::{
-    ConformanceCheck, ConformanceOptions, ConformanceOutcome, ConformanceReport,
+    ClosureProbes, ConformanceCheck, ConformanceOptions, ConformanceOutcome, ConformanceReport,
 };
 pub use contract::{
     CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector, ConnectorDescriptor,
@@ -49,6 +49,7 @@ pub use extension::{
     ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension, contract_schema,
 };
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
+pub(crate) use github::legacy_issue_origin_matches;
 pub use presentation::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,
     SourcePresentation, SummaryPart, TargetPresentation,
@@ -201,8 +202,7 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
          CREATE INDEX source_connection_tickets_by_connection ON source_connection_tickets(connection_id);
          CREATE TABLE publication_connections (
              attempt_id TEXT PRIMARY KEY REFERENCES publication_attempts(id) ON DELETE CASCADE,
-             connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-             tracker_started_at TEXT
+             connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE
          );",
     )?;
     let mut old = connection.prepare(
@@ -265,6 +265,37 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
         "source_connection_tickets",
     ] {
         crate::change_token::track(connection, table)?;
+    }
+    Ok(())
+}
+
+/// Format 92: retain verified dates and keep retired environment names device-local.
+pub(crate) fn migrate_recovery_safety(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "ALTER TABLE publication_connections ADD COLUMN tracker_started_at TEXT;
+         CREATE TABLE source_connection_id_reservations (
+             id TEXT PRIMARY KEY,
+             env_id TEXT NOT NULL UNIQUE
+         );
+         CREATE TABLE source_credential_env_reservations (
+             name TEXT PRIMARY KEY,
+             connection_id TEXT NOT NULL REFERENCES source_connection_id_reservations(id)
+         );
+         CREATE INDEX source_credential_env_by_connection
+             ON source_credential_env_reservations(connection_id);",
+    )?;
+    let mut statement =
+        connection.prepare("SELECT id, provider FROM source_connections ORDER BY rowid")?;
+    let sources = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (id, provider) in sources {
+        let names = cached_description(connection, &provider)?
+            .map(|description| credentials::env_keys(&description.descriptor.schema, &id))
+            .unwrap_or_default();
+        reserve_credential_environment(connection, &id, &names)?;
     }
     Ok(())
 }
@@ -615,7 +646,7 @@ impl Workspace {
             check_credential_environment(connection, engine, provider, id)?;
             credentials::references(connection, id)
         })?;
-        Ok(engine.for_connection_with_secret_refs(provider, id, raw, &references))
+        Ok(engine.for_connection_with_secret_refs(provider, id, raw, &references, None))
     }
 
     /// The ID an add operation will use unless another connection is added first.
@@ -774,6 +805,8 @@ impl Workspace {
             if previous.revision != current.revision {
                 return Err(stale_source());
             }
+            let names = check_credential_environment(transaction, engine, provider, id)?;
+            reserve_credential_environment(transaction, id, &names)?;
             credentials::store_references(transaction, id, &staged.references)?;
             transaction.execute(
                 "UPDATE source_connections SET revision = ?2 WHERE id = ?1",
@@ -835,11 +868,11 @@ impl Workspace {
         let description = serde_json::to_string(&engine.description(provider)?)?;
         let account_key = verified.account_key();
         let outcome = crate::write_scope::run(&self.connection, |transaction| {
+            let names = check_credential_environment(transaction, engine, provider, id)?;
             if let Some((_, name)) = add {
                 if next_connection_id(transaction, provider)? != id {
                     return Err(connection_id_changed());
                 }
-                check_credential_environment(transaction, engine, provider, id)?;
                 let duplicate: bool = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM source_connections WHERE provider = ?1 AND site = ?2 AND account_key = ?3)",
                     params![provider, verified.site, account_key], |row| row.get(0),
@@ -876,6 +909,7 @@ impl Workspace {
                     params![id, configuration, verified.account, CONTRACT_VERSION, derived_configuration, revision],
                 )?;
             }
+            reserve_credential_environment(transaction, id, &names)?;
             credentials::store_references(transaction, id, &staged.references)?;
             clear_source_auth_error(transaction, id)?;
             transaction.execute(
@@ -898,32 +932,67 @@ fn check_credential_environment(
     engine: &Engine,
     provider: &str,
     id: &str,
+) -> Result<std::collections::HashSet<String>, Error> {
+    let names = credentials::env_keys(&engine.descriptor(provider)?.schema, id);
+    let owner: Option<String> = connection
+        .query_row(
+            "SELECT provider FROM source_connections WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if owner.as_ref().is_some_and(|owner| owner != provider) {
+        return Err(unknown_connection(id));
+    }
+    let collision: bool = connection.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM source_connection_id_reservations
+             WHERE env_id = ?1 AND (id <> ?2 OR ?3)
+         )",
+        params![credentials::env_part(id), id, owner.is_none()],
+        |row| row.get(0),
+    )?;
+    if collision {
+        return Err(credential_environment_collision());
+    }
+    let mut lookup = connection.prepare_cached(
+        "SELECT EXISTS(
+             SELECT 1 FROM source_credential_env_reservations WHERE name = ?1 AND connection_id <> ?2
+         )",
+    )?;
+    for name in &names {
+        if lookup.query_row(params![name, id], |row| row.get::<_, bool>(0))? {
+            return Err(credential_environment_collision());
+        }
+    }
+    Ok(names)
+}
+
+fn credential_environment_collision() -> Error {
+    SourceError::InvalidConfiguration(vec![FieldIssue::for_form(
+        "this connection shares a credential environment variable with another or retired connection",
+    )])
+    .into()
+}
+
+fn reserve_credential_environment(
+    connection: &Connection,
+    id: &str,
+    names: &std::collections::HashSet<String>,
 ) -> Result<(), Error> {
-    let schema = engine.descriptor(provider)?.schema;
-    let names = credentials::env_keys(&schema, id);
-    let mut query = connection.prepare_cached("SELECT id, provider FROM source_connections")?;
-    let mut rows = query.query([])?;
-    while let Some(row) = rows.next()? {
-        let existing_id: String = row.get(0)?;
-        let existing_provider: String = row.get(1)?;
-        if existing_id == id {
-            if existing_provider != provider {
-                return Err(unknown_connection(id));
-            }
-            continue;
-        }
-        let same_id = credentials::env_part(&existing_id) == credentials::env_part(id);
-        let overlap = engine
-            .descriptor(&existing_provider)
-            .is_ok_and(|descriptor| {
-                !names.is_disjoint(&credentials::env_keys(&descriptor.schema, &existing_id))
-            });
-        if same_id || overlap {
-            return Err(SourceError::InvalidConfiguration(vec![FieldIssue::for_form(
-                "this connection shares a credential environment variable with another connection",
-            )])
-            .into());
-        }
+    connection.execute(
+        "INSERT INTO source_connection_id_reservations (id, env_id) VALUES (?1, ?2)
+         ON CONFLICT(id) DO NOTHING",
+        params![id, credentials::env_part(id)],
+    )?;
+    let mut insert = connection.prepare_cached(
+        "INSERT INTO source_credential_env_reservations (name, connection_id) VALUES (?1, ?2)
+         ON CONFLICT(name) DO NOTHING",
+    )?;
+    for name in names {
+        // Existing conflicts can only come from older formats built before names
+        // were reserved. The first recorded owner keeps the override.
+        insert.execute(params![name, id])?;
     }
     Ok(())
 }
@@ -1012,7 +1081,12 @@ fn next_connection_id(connection: &Connection, provider: &str) -> Result<String,
     } else {
         format!("source-{slug}").trim_end_matches('-').to_owned()
     };
-    let mut statement = connection.prepare("SELECT id FROM source_connections")?;
+    let sql = if crate::backup::table_exists(connection, "source_connection_id_reservations")? {
+        "SELECT id FROM source_connection_id_reservations UNION SELECT id FROM source_connections"
+    } else {
+        "SELECT id FROM source_connections"
+    };
+    let mut statement = connection.prepare_cached(sql)?;
     let used = statement
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<std::collections::HashSet<_>, _>>()?;
@@ -1059,6 +1133,7 @@ struct ConfiguredSource {
     revision: String,
     site: String,
     credentials: credentials::References,
+    permitted_env: std::collections::HashSet<String>,
     account_key: String,
 }
 
@@ -1069,6 +1144,7 @@ impl ConfiguredSource {
             &self.saved.id,
             &self.saved.config,
             &self.credentials,
+            Some(&self.permitted_env),
         )
     }
     fn verify_effective_site(&self, engine: &Engine) -> Result<(), SourceError> {
@@ -1137,6 +1213,12 @@ fn configured_row(
     let config: String = row.get(3)?;
     let id: String = row.get(0)?;
     let credentials = credentials::references(connection, &id)?;
+    let mut names = connection.prepare_cached(
+        "SELECT name FROM source_credential_env_reservations WHERE connection_id = ?1",
+    )?;
+    let permitted_env = names
+        .query_map([&id], |row| row.get::<_, String>(0))?
+        .collect::<Result<_, _>>()?;
     let saved = SavedSource {
         id,
         name: row.get(1)?,
@@ -1160,6 +1242,7 @@ fn configured_row(
         revision: row.get(7)?,
         site: row.get(8)?,
         credentials,
+        permitted_env,
         account_key: row.get(9)?,
     })
 }
@@ -1268,6 +1351,12 @@ pub(crate) fn forget_connections(connection: &Connection) -> Result<(), Error> {
              DELETE FROM source_presentations;",
         )?;
     }
+    if crate::backup::table_exists(connection, "source_connection_id_reservations")? {
+        connection.execute_batch(
+            "DELETE FROM source_credential_env_reservations;
+             DELETE FROM source_connection_id_reservations;",
+        )?;
+    }
     if crate::backup::table_exists(connection, "source_connections")? {
         connection.execute_batch(
             "DELETE FROM publication_connections;
@@ -1302,14 +1391,15 @@ pub(crate) fn retain_connections(
     restored: &mut Connection,
     current: &Connection,
 ) -> Result<(), Error> {
-    if !crate::backup::table_exists(current, "source_connections")? {
-        if !crate::backup::table_exists(current, "source_configurations")?
-            || !current.query_row(
+    if !crate::backup::table_exists(current, "source_connection_id_reservations")? {
+        let has_connections = crate::backup::table_exists(current, "source_connections")?;
+        let has_legacy_connections = crate::backup::table_exists(current, "source_configurations")?
+            && current.query_row(
                 "SELECT EXISTS(SELECT 1 FROM source_configurations)",
                 [],
                 |row| row.get::<_, bool>(0),
-            )?
-        {
+            )?;
+        if !has_connections && !has_legacy_connections {
             return Ok(());
         }
         let mut upgraded = Connection::open_in_memory()?;
@@ -1335,16 +1425,40 @@ pub(crate) fn retain_connections(
             [],
             |row| row.get::<_, bool>(0),
         )?;
-    if !has_connections && !has_removals {
+    let has_reservations: bool = current.query_row(
+        "SELECT EXISTS(SELECT 1 FROM source_connection_id_reservations)",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_connections && !has_removals && !has_reservations {
         return Ok(());
     }
-    if !crate::backup::table_exists(restored, "source_connections")?
+    if !crate::backup::table_exists(restored, "source_connection_id_reservations")?
         || (has_removals && !crate::backup::table_exists(restored, "source_connection_removals")?)
         || (has_secret_references
             && !crate::backup::table_exists(restored, "source_secret_references")?)
     {
         let version = restored.pragma_query_value(None, "user_version", |row| row.get(0))?;
         crate::format::migrate(restored, version)?;
+    }
+    for (select, insert) in [
+        (
+            "SELECT id, env_id FROM source_connection_id_reservations",
+            "INSERT INTO source_connection_id_reservations (id, env_id) VALUES (?1, ?2)",
+        ),
+        (
+            "SELECT name, connection_id FROM source_credential_env_reservations",
+            "INSERT INTO source_credential_env_reservations (name, connection_id) VALUES (?1, ?2)",
+        ),
+    ] {
+        let mut statement = current.prepare(select)?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            restored.execute(
+                insert,
+                params![row.get::<_, String>(0)?, row.get::<_, String>(1)?],
+            )?;
+        }
     }
     if has_removals {
         let mut statement = current.prepare(

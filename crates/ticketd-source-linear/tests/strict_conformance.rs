@@ -198,6 +198,13 @@ fn recover_lost_publication(registry: &ExtensionRegistry, root: &Path, config: &
         .unwrap();
     assert_eq!(review.candidates.len(), 1, "{review:?}");
     assert_eq!(review.candidates[0].identity.id, LOST);
+    assert_eq!(review.attempt.destination, TEAM_TWO);
+    assert_eq!(
+        review.attempt.destination_label.as_deref(),
+        Some("Second Team (SECOND)")
+    );
+    assert!(review.known[0].contains("Second Team (SECOND)"));
+    assert!(!review.known[0].contains(TEAM_TWO));
     assert!(
         review
             .actions
@@ -271,6 +278,28 @@ fn recover_lost_publication(registry: &ExtensionRegistry, root: &Path, config: &
         .unwrap();
     assert_eq!(result.ticket.reference, reference);
     assert_eq!(result.attempt.issue.unwrap().identity.id, LOST);
+
+    let ticket = workspace.create_ticket("Untrusted tracker time").unwrap();
+    let error = workspace
+        .publish_ticket(
+            &engine,
+            &ticket.reference,
+            &PublishOptions {
+                provider: "linear".into(),
+                destination: Some(TEAM_TWO.into()),
+                now: Some(DEVICE_AHEAD.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Publication(PublicationError::Failed { .. })
+    ));
+    assert!(
+        error.to_string().contains("did not confirm its clock"),
+        "{error}"
+    );
 }
 
 fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues, publish: Option<&str>) {
@@ -281,6 +310,19 @@ fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues, publi
             &ConformanceOptions {
                 strict: true,
                 publish: publish.map(str::to_owned),
+                past_end_cursor: Some("fixture-end".into()),
+                skip_reasons: [
+                    (
+                        "typed_closure".into(),
+                        "this fixture does not model all typed states".into(),
+                    ),
+                    (
+                        "publication_failure_outcomes".into(),
+                        "the lost-mutation fixture runs separately".into(),
+                    ),
+                ]
+                .into(),
+                ..ConformanceOptions::default()
             },
         )
         .unwrap();
@@ -366,8 +408,14 @@ fn serve(stream: TcpStream, created: &mut Option<Value>, lost: &mut Option<Value
     let variables = &request["variables"];
     let after = variables["after"].as_str();
     let fields = match request["operationName"].as_str().unwrap() {
-        "LinearConnection" => json!({"viewer": {"id": USER, "displayName": "Fixture User"},
-                   "organization": {"id": SITE}}),
+        "LinearConnection" => {
+            let fields = json!({"viewer": {"id": USER, "displayName": "Fixture User"},
+                   "organization": {"id": SITE}});
+            if lost.is_some() {
+                return respond_with_clock(stream, fields, None);
+            }
+            fields
+        }
         "LinearConfiguredTeams" => {
             assert_eq!(variables["teams"], json!([TEAM, TEAM_TWO]));
             json!({"teams": page(teams(), None)})
@@ -405,6 +453,7 @@ fn serve(stream: TcpStream, created: &mut Option<Value>, lost: &mut Option<Value
                         .into_iter().chain(lost.iter().cloned()).collect(),
                     None,
                 ),
+                Some("fixture-end") => page(vec![], None),
                 Some("more-issues") => page(vec![issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")], None),
                 _ => unreachable!(),
             }})
@@ -528,8 +577,13 @@ fn serve(stream: TcpStream, created: &mut Option<Value>, lost: &mut Option<Value
     respond(stream, fields)
 }
 
-fn respond(mut stream: TcpStream, fields: Value) -> bool {
+fn respond(stream: TcpStream, fields: Value) -> bool {
+    respond_with_clock(stream, fields, Some("Fri, 03 Jan 2025 09:20:00 GMT"))
+}
+
+fn respond_with_clock(mut stream: TcpStream, fields: Value, clock: Option<&str>) -> bool {
     let data = json!({"data": fields}).to_string();
-    write!(stream, "HTTP/1.1 200 OK\r\nDate: Fri, 03 Jan 2025 09:20:00 GMT\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{data}", data.len()).unwrap();
+    let date = clock.map_or_else(String::new, |date| format!("Date: {date}\r\n"));
+    write!(stream, "HTTP/1.1 200 OK\r\n{date}Content-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{data}", data.len()).unwrap();
     true
 }

@@ -146,6 +146,10 @@
             "null"
           ]
         },
+        "publication_requires_tracker_time": {
+          "description": "Whether this source needs tracker time evidence before ticketd can safely publish.",
+          "type": "boolean"
+        },
         "site": {
           "description": "Canonical site identity. Empty when the provider has only one site.",
           "type": "string",
@@ -1792,7 +1796,7 @@
           "$ref": "#/$defs/WireFailureCode"
         },
         "detail": {
-          "description": "Reserved for diagnostics. The host does not expose extension-supplied detail.",
+          "description": "A fixed diagnostic code for local logs. Use up to 80 lower-case ASCII\nletters, digits, underscores or hyphens. Never include tracker data or credentials.",
           "type": [
             "string",
             "null"
