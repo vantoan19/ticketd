@@ -127,7 +127,11 @@ fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues) {
             },
         )
         .unwrap();
-    assert!(report.passed, "{report:?}");
+    assert!(
+        report.passed,
+        "filtered={}: {report:?}",
+        config.contains_key("assignee")
+    );
     for check in [
         "version_refusal",
         "options",
@@ -214,13 +218,12 @@ fn serve(mut stream: TcpStream) -> bool {
         }
         "LinearDiscover" => {
             let mut filter = json!({"team": {"id": {"in": [TEAM, TEAM_TWO]}}});
-            if variables["filter"]["assignee"].is_null() {
-                if after.is_none() {
-                    // Keep fixture work in flight while the host cancels after progress.
-                    thread::sleep(Duration::from_millis(100));
-                }
-            } else {
+            if !variables["filter"]["assignee"].is_null() {
                 filter["assignee"] = json!({"id": {"eq": USER}});
+            }
+            if after.is_none() {
+                // Keep fixture work in flight while the host cancels after progress.
+                thread::sleep(Duration::from_millis(150));
             }
             assert_eq!(variables["filter"], filter);
             json!({"issues": match after {
