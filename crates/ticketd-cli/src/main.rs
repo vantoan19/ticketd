@@ -2507,7 +2507,7 @@ fn run_source_connection(
         SourceConnectionCommand::Refresh { ticket } => {
             let report = source_refresh::controlled(connection, |control| {
                 workspace.refresh_connection(
-                    &engine.with_refresh_control(control),
+                    &engine.clone().with_refresh_control(control),
                     connection,
                     &RefreshOptions { ticket, now: None },
                 )
