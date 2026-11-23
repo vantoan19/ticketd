@@ -58,12 +58,11 @@ impl GithubConnector {
     }
 
     fn ambient_for(id: Option<&str>, account: Option<&str>) -> Self {
-        let custom = std::env::var(API_URL_VARIABLE)
-            .ok()
-            .map(|url| url.trim().trim_end_matches('/').to_owned())
-            .filter(|url| !url.is_empty());
+        let custom = configured_api_url();
         // github.com tokens are for github.com: another host gets its own.
-        let custom_host = custom.as_deref().map(host_of);
+        let custom_host = custom
+            .as_deref()
+            .map(|url| host_of(url).to_ascii_lowercase());
         let mut connector = Self::new(
             custom.unwrap_or_else(|| DEFAULT_API_URL.to_owned()),
             Box::new(UreqTransport::new()),
@@ -87,15 +86,7 @@ impl GithubConnector {
     }
 
     fn site(&self) -> String {
-        let host = host_of(&self.api_url).to_ascii_lowercase();
-        if matches!(
-            host.as_str(),
-            "api.github.com" | "github.com" | "localhost" | "127.0.0.1" | "[::1]"
-        ) {
-            String::new()
-        } else {
-            host
-        }
+        site_of(&self.api_url)
     }
 
     fn schema() -> ConfigSchema {
@@ -1051,6 +1042,40 @@ pub(super) fn legacy_reference_partition(provider: &str, locator: &str) -> Optio
             .map_or(locator, |(part, _)| part)
             .to_lowercase()
     })
+}
+
+fn configured_api_url() -> Option<String> {
+    std::env::var(API_URL_VARIABLE)
+        .ok()
+        .map(|url| url.trim().trim_end_matches('/').to_owned())
+        .filter(|url| !url.is_empty())
+}
+
+fn site_of(url: &str) -> String {
+    let host = host_of(url).to_ascii_lowercase();
+    if matches!(
+        host.as_str(),
+        "api.github.com" | "github.com" | "localhost" | "127.0.0.1" | "[::1]"
+    ) {
+        String::new()
+    } else {
+        host
+    }
+}
+
+pub(super) fn legacy_site(issue_urls: &[String]) -> String {
+    let mut sites = issue_urls.iter().filter_map(|text| {
+        let url = url::Url::parse(text).ok()?;
+        (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
+    });
+    if let Some(site) = sites.next()
+        && sites.all(|observed| observed == site)
+    {
+        return site;
+    }
+    // The old configuration did not save the API endpoint. In the absence of
+    // a single observed site, use the endpoint the application is configured for.
+    configured_api_url().map_or_else(String::new, |api| site_of(&api))
 }
 
 pub(super) fn legacy_derived_configuration(

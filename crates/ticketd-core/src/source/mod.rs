@@ -214,15 +214,27 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
     for provider in providers {
         let id = next_connection_id(connection, &provider)?;
         let name = provider_display_name(connection, &provider)?;
+        let site = if provider == "github" {
+            let mut query = connection.prepare(
+                "SELECT DISTINCT url FROM external_identities WHERE provider = ?1
+                 UNION SELECT DISTINCT url FROM publication_attempts WHERE provider = ?1 AND url IS NOT NULL",
+            )?;
+            let urls = query
+                .query_map([&provider], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            github::legacy_site(&urls)
+        } else {
+            String::new()
+        };
         connection.execute(
             "INSERT INTO source_connections
                 (id, name, provider, site, configuration, account, account_key,
                  contract_version, saved_at, derived_configuration, revision, derived_checked_at)
-             SELECT ?2, ?3, provider, '', configuration, account,
+             SELECT ?2, ?3, provider, ?4, configuration, account,
                  CASE WHEN provider = 'github' THEN lower(account) ELSE account END,
                  contract_version, saved_at, derived_configuration, revision, derived_checked_at
              FROM source_configurations WHERE provider = ?1",
-            params![provider, id, name],
+            params![provider, id, name, site],
         )?;
         connection.execute(
             "INSERT INTO source_connection_status

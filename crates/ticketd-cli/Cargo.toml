@@ -30,6 +30,6 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 ticketd-chat-host.workspace = true
 # The CLI's tests assert literal Ticket references, so they build the fixed device code in.
-ticketd-core = { workspace = true, features = ["test-device-code"] }
+ticketd-core = { workspace = true, features = ["test-device-code", "test-schema"] }
 tempfile = "3"
 rusqlite = { version = "0.37", features = ["bundled"] }

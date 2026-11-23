@@ -12,6 +12,85 @@ use std::{
 
 use serde_json::{Value, json};
 
+#[test]
+fn migrates_the_site_of_a_legacy_enterprise_connection() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("workspace.sqlite3");
+    let registry = directory.path().join("extensions");
+    ticketd_core::create_workspace_at_format_version(&workspace, 88).unwrap();
+    rusqlite::Connection::open(&workspace)
+        .unwrap()
+        .execute(
+            "INSERT INTO source_configurations
+               (provider, configuration, account, contract_version, saved_at, revision)
+             VALUES ('github', ?1, 'first-account', 1, '2026-01-01T00:00:00Z', 'old-revision')",
+            [json!({"repositories": ["work/fixtures"]}).to_string()],
+        )
+        .unwrap();
+    // A local proxy sees the requested Enterprise host and never opens a
+    // connection to it. The test can distinguish a site refusal from a call.
+    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    proxy.set_nonblocking(true).unwrap();
+    let call = |api: &str, args: &[&str]| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .env("TICKETD_TEST_WORKSPACE", &workspace)
+            .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
+            .env("TICKETD_GITHUB_API_URL", api)
+            .env("TICKETD_SOURCE_GITHUB_TOKEN", TOKEN)
+            .env("HTTPS_PROXY", &proxy_url)
+            .env("https_proxy", &proxy_url)
+            .env("ALL_PROXY", &proxy_url)
+            .env("all_proxy", &proxy_url)
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut intercepted = None;
+        while child.try_wait().unwrap().is_none() {
+            if let Ok((stream, _)) = proxy.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                    .unwrap();
+                let mut request = String::new();
+                BufReader::new(&stream).read_line(&mut request).unwrap();
+                intercepted = Some(request);
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        (child.wait_with_output().unwrap(), intercepted)
+    };
+    let (saved, _) = call("https://Git.Corporate.Invalid/api/v3", &["source", "list"]);
+    assert!(saved.status.success(), "{:?}", saved.stderr);
+    let saved: Value = serde_json::from_slice(&saved.stdout).unwrap();
+    assert_eq!(saved[0]["saved"]["id"], "github");
+    assert_eq!(saved[0]["saved"]["account"], "first-account");
+    let (_, intercepted) = call(
+        "https://git.corporate.invalid/api/v3",
+        &["source", "github", "test"],
+    );
+    assert_eq!(
+        intercepted.as_deref(),
+        Some("CONNECT git.corporate.invalid:443 HTTP/1.1\r\n")
+    );
+    let (refused, intercepted) = call(
+        "https://replacement.invalid/api/v3",
+        &["source", "github", "test"],
+    );
+    assert!(!refused.status.success());
+    assert!(intercepted.is_none());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("differs from the site saved"));
+}
+
 const TOKEN: &str = "ghp_cli_test_secret";
 const SECOND_TOKEN: &str = "ghp_second_cli_test_secret";
 
