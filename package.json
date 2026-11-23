@@ -7,7 +7,8 @@
   "type": "module",
   "workspaces": [
     "apps/desktop",
-    "apps/chat-bridge-claude"
+    "apps/chat-bridge-claude",
+    "apps/docs"
   ],
   "engines": {
     "node": ">=22.23.4"
@@ -23,7 +24,9 @@
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces",
-    "check": "./scripts/check"
+    "check": "./scripts/check",
+    "docs": "npm run dev --workspace @ticketd/docs --",
+    "build:docs": "npm run build --workspace @ticketd/docs"
   },
   "devDependencies": {
     "@eslint/js": "^10",

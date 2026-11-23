@@ -1,6 +1,12 @@
 {
   "globs": ["**/*.md"],
-  "ignores": ["**/node_modules/**", "target/**", "**/dist/**"],
+  "ignores": [
+    "**/node_modules/**",
+    "target/**",
+    "**/dist/**",
+    "apps/docs/build/**",
+    ".local/**",
+  ],
   "config": {
     "MD013": false,
     "MD041": false,

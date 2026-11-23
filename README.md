@@ -9,6 +9,8 @@ sync your workspace across desktops through your own Google Drive.
 
 ## Get started
 
+[Try the interactive demo and browse the documentation](https://vantoan19.github.io/ticketd/).
+
 [Download the latest unsigned preview](https://github.com/vantoan19/ticketd/releases/latest).
 Desktop installers include the matching CLI for macOS 26 on Apple Silicon,
 Ubuntu 24.04 x86-64, and Windows 11 x86-64. macOS and Windows may warn on first
