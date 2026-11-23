@@ -276,11 +276,11 @@ impl ManagedChild {
     async fn shutdown(&mut self) {
         use rustix::process::Signal;
         sleep(EOF_GRACE).await;
-        if let Some(group) = self.group.take() {
-            if signal(group, Signal::TERM) {
-                sleep(TERMINATE_GRACE).await;
-                signal(group, Signal::KILL);
-            }
+        if let Some(group) = self.group.take()
+            && signal(group, Signal::TERM)
+        {
+            sleep(TERMINATE_GRACE).await;
+            signal(group, Signal::KILL);
         }
         let _ = timeout(REAP_LIMIT, self.child.wait()).await;
     }
