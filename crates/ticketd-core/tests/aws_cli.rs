@@ -226,7 +226,10 @@ fn the_identity_is_the_caller_arn() {
 fn an_identity_asked_of_a_profile_that_never_signed_in_needs_sign_in() {
     let aws = StandIn::new().once(
         IDENTITY,
-        fails(255, "\nError loading SSO Token: Token for work does not exist"),
+        fails(
+            255,
+            "\nError loading SSO Token: Token for work does not exist",
+        ),
     );
     let error = aws.cli().identity("work").unwrap_err();
     assert!(error.needs_sign_in(), "{error:?}");

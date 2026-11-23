@@ -34,7 +34,9 @@ pub enum CliState {
     /// No `aws` program in the usual places.
     Missing,
     /// Older than ticketd needs; `found` is what its `--version` printed.
-    TooOld { found: String },
+    TooOld {
+        found: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
