@@ -16,12 +16,12 @@ it("keeps the handoff, authored update, review and completion in order", () => {
   for (const stage of sequence) {
     const tickets = demoTickets(stage);
     expect(tickets.map((t) => t.reference)).toEqual([
-      "T-LG9",
-      "T-LG10",
-      "T-LG11",
+      "T-RL9",
+      "T-RL10",
+      "T-RL11",
       featureRef,
       dependentRef,
-      "T-LG14",
+      "T-RL14",
     ]);
     expect(tickets.find((t) => t.reference === featureRef)).toMatchObject({
       status: stages[stage].status,
@@ -69,7 +69,7 @@ it("stops autoplay when someone explores, and restores the guided view on play",
 it("returns to the same board column after inspecting a ticket or its Plan spec", () => {
   const board = demoReducer(initialDemo, { type: "plan-view", view: "board" });
   const working = demoReducer(board, { type: "column", status: "In progress" });
-  const ticket = demoReducer(working, { type: "ticket", reference: "T-LG14" });
+  const ticket = demoReducer(working, { type: "ticket", reference: "T-RL14" });
   const back = demoReducer(ticket, { type: "back" });
   const spec = demoReducer(back, { type: "pane", pane: "spec" });
   expect(demoReducer(spec, { type: "pane", pane: "plan" })).toMatchObject({
