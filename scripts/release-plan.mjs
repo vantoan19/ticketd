@@ -9,6 +9,7 @@
 //
 // The workflow never deletes a release: the delete API cannot be limited to drafts, so a draft
 // published between a check and a delete would be lost. An existing draft is deleted by hand.
+import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -21,7 +22,31 @@ import {
   parseVersion,
 } from "./release-version.mjs";
 
-export function planDraft({ mode, sha, version, releases, onMain, green }) {
+// The commit a tag points at, following annotated tags, or null when the tag does not exist.
+// `read(path)` returns the parsed repository API response for `path`, or null for a 404.
+export function resolveTag(tag, read) {
+  let object = read(`git/ref/tags/${tag}`)?.object;
+  if (!object) return null;
+  for (let depth = 0; object.type === "tag"; depth++) {
+    if (depth === 10) throw new Error(`Tag ${tag} nests too many tag objects.`);
+    object = read(`git/tags/${object.sha}`)?.object;
+    if (!object) throw new Error(`Tag ${tag} points at a missing tag object.`);
+  }
+  if (object.type !== "commit") {
+    throw new Error(`Tag ${tag} points at a ${object.type}, not a commit.`);
+  }
+  return object.sha;
+}
+
+export function planDraft({
+  mode,
+  sha,
+  version,
+  releases,
+  tagCommit = null,
+  onMain,
+  green,
+}) {
   if (mode !== "auto" && mode !== "manual")
     throw new Error(`Unknown mode ${mode}`);
   parseVersion(version);
@@ -49,6 +74,13 @@ export function planDraft({ mode, sha, version, releases, onMain, green }) {
       `${version} is not newer than the latest published release, v${latest}.`,
     );
   }
+  // GitHub ignores a draft's target when its tag already exists, so the files built from `sha`
+  // would be published at another commit.
+  if (tagCommit !== null && tagCommit !== sha) {
+    return decline(
+      `The tag ${tag} already exists at ${tagCommit}, not at ${sha}. Delete the tag or release another version.`,
+    );
+  }
   const existing = releases.find(
     (release) => release.draft && release.tag_name === tag,
   );
@@ -63,6 +95,18 @@ export function planDraft({ mode, sha, version, releases, onMain, green }) {
     version,
     prerelease: isPrerelease(version),
     reason: `Creating the draft ${tag} from ${sha}.`,
+  };
+}
+
+// A repository API GET, or null when GitHub answers 404.
+function readApi(repository) {
+  return (path) => {
+    const result = spawnSync("gh", ["api", `repos/${repository}/${path}`], {
+      encoding: "utf8",
+    });
+    if (result.status === 0) return JSON.parse(result.stdout);
+    if (/HTTP 404/.test(result.stderr)) return null;
+    throw new Error(`gh api ${path} failed: ${result.stderr.trim()}`);
   };
 }
 
@@ -132,11 +176,14 @@ function main() {
       ) > 0;
   }
 
+  const version = override || appVersionAt(repository, sha);
+  parseVersion(version);
   const plan = planDraft({
     mode,
     sha,
-    version: override || appVersionAt(repository, sha),
+    version,
     releases: listReleases(repository),
+    tagCommit: resolveTag(`v${version}`, readApi(repository)),
     onMain,
     green,
   });

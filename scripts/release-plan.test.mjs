@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planDraft } from "./release-plan.mjs";
+import { planDraft, resolveTag } from "./release-plan.mjs";
 
 const sha = "a".repeat(40);
 const other = "b".repeat(40);
@@ -10,8 +10,8 @@ const published = {
   draft: false,
   target_commitish: "main",
 };
-const auto = (version, releases) =>
-  planDraft({ mode: "auto", sha, version, releases });
+const auto = (version, releases, checks = {}) =>
+  planDraft({ mode: "auto", sha, version, releases, ...checks });
 const manual = (version, releases, checks = {}) =>
   planDraft({
     mode: "manual",
@@ -84,4 +84,29 @@ test("a manual run refuses a commit that is not a green main commit", () => {
     () => manual("0.1.1", [published], { green: false }),
     /Quality has not passed/,
   );
+});
+
+test("resolves a tag to its commit through annotated tag objects", () => {
+  const api = {
+    "git/ref/tags/v0.1.1": { object: { type: "tag", sha: "t1" } },
+    "git/tags/t1": { object: { type: "tag", sha: "t2" } },
+    "git/tags/t2": { object: { type: "commit", sha } },
+    "git/ref/tags/v0.1.2": { object: { type: "commit", sha: other } },
+    "git/ref/tags/v0.1.3": { object: { type: "tree", sha: other } },
+  };
+  const read = (path) => api[path] ?? null;
+  assert.equal(resolveTag("v0.1.1", read), sha);
+  assert.equal(resolveTag("v0.1.2", read), other);
+  assert.equal(resolveTag("v0.1.9", read), null);
+  assert.throws(() => resolveTag("v0.1.3", read), /not a commit/);
+});
+
+test("refuses a version whose tag already points at another commit", () => {
+  assert.throws(
+    () => manual("0.1.1", [published], { tagCommit: other }),
+    /already exists at b{40}, not at a{40}/,
+  );
+  assert.equal(auto("0.1.1", [published], { tagCommit: other }).draft, false);
+  assert.equal(manual("0.1.1", [published], { tagCommit: sha }).draft, true);
+  assert.equal(manual("0.1.1", [published], { tagCommit: null }).draft, true);
 });
