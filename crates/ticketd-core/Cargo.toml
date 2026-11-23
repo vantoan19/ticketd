@@ -31,7 +31,6 @@ pulldown-cmark = "0.13"
 ureq = "3"
 url = "2"
 regex = "1"
-aho-corasick = "1"
 base64 = "0.23"
 saphyr = { version = "0.3", default-features = false }
 

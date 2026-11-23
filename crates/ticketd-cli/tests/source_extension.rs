@@ -351,3 +351,81 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
     assert!(!captured.contains(secret));
     assert!(!captured.contains("cHJpdmF0ZS1xejg1L3RvJWtlbg=="));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_unavailable_linux_keyring_reports_session_only_and_does_not_persist_a_key() {
+    use std::{io::Write, process::Stdio};
+
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("workspace.sqlite3");
+    let registry = directory.path().join("extensions");
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ticket-source-example-ts");
+    let env_key = "TICKETD_SOURCE_EXAMPLE_TRACKER_API_KEY";
+    let secret = "synthetic-ephemeral-credential";
+    let command = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ticketd"));
+        command
+            .env("TICKETD_TEST_WORKSPACE", &workspace)
+            .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
+            .env_remove(env_key)
+            .env_remove("TICKETD_SOURCE_EXAMPLE_TRACKER_API_KEY_COMMAND")
+            .env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                format!(
+                    "unix:path={}",
+                    directory.path().join("no-session.sock").display()
+                ),
+            );
+        command
+    };
+    assert!(
+        command()
+            .args(["source", "extension", "link", example.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        command()
+            .env(env_key, "synthetic-initial")
+            .args(["source", "add", "example-tracker", "--set", "board=Sign-in"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let refresh = ["source", "example-tracker", "refresh"];
+    let denied = command().args(refresh).output().unwrap();
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("sign-in --config-file -"));
+    let mut sign_in = command()
+        .args(["source", "example-tracker", "sign-in", "--config-file", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let credentials = serde_json::json!({"api_key": secret}).to_string();
+    sign_in
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(credentials.as_bytes())
+        .unwrap();
+    let updated = sign_in.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&updated.stderr);
+    assert!(updated.status.success(), "{stderr}");
+    assert!(stderr.contains("credentials last until this invocation exits"));
+    let saved: Value = serde_json::from_slice(&updated.stdout).unwrap();
+    assert_eq!(
+        saved["session_secret_fields"],
+        serde_json::json!(["api_key"])
+    );
+    assert_eq!(saved["config"], serde_json::json!({"board": "Sign-in"}));
+    assert!(!String::from_utf8_lossy(&updated.stdout).contains(secret));
+    assert!(!String::from_utf8_lossy(&std::fs::read(workspace).unwrap()).contains(secret));
+    let expired = command().args(refresh).output().unwrap();
+    assert!(!expired.status.success());
+    assert!(String::from_utf8_lossy(&expired.stdout).contains("unauthenticated"));
+}

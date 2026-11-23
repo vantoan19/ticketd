@@ -314,9 +314,14 @@ mod vault {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         #[cfg(target_os = "macos")]
-        let _no_prompt =
-            security_framework::os::macos::keychain::SecKeychain::disable_user_interaction()
-                .map_err(|_| VaultError::Unavailable)?;
+        let _no_prompt = {
+            use security_framework::os::macos::keychain::SecKeychain;
+            SecKeychain::user_interaction_allowed()
+                .map_err(|_| VaultError::Unavailable)?
+                .then(SecKeychain::disable_user_interaction)
+                .transpose()
+                .map_err(|_| VaultError::Unavailable)?
+        };
         let entry = keyring::Entry::new(SERVICE, &reference.to_string()).map_err(map_error)?;
         operation(&entry).map_err(map_error)
     }

@@ -1442,6 +1442,12 @@ async fn source_check_connection(
             Some(id) => id,
             None => workspace.next_source_connection_id(&provider)?,
         };
+        if workspace
+            .saved_source(&id)?
+            .is_some_and(|saved| saved.provider == provider && saved.config == config)
+        {
+            return Ok(workspace.test_source_connection(&engine, &id)?);
+        }
         let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
         Ok(scoped.check_connection(&provider, &config)?)
     })

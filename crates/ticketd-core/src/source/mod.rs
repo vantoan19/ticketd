@@ -536,8 +536,34 @@ impl Workspace {
     ) -> Result<ConnectionInfo, Error> {
         let saved =
             configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
+        let started = clock(&self.connection, None)?;
         let engine = saved.bind(engine);
-        Ok(saved.check(&engine)?.connection)
+        match saved.check(&engine) {
+            Ok(checked) => Ok(checked.connection),
+            Err(error) => {
+                if error.class() == ErrorClass::Auth
+                    && engine
+                        .descriptor(&saved.saved.provider)?
+                        .schema
+                        .fields
+                        .iter()
+                        .any(|field| matches!(field.kind, FieldKind::Secret))
+                {
+                    crate::write_scope::run(&self.connection, |transaction| {
+                        transaction.execute(
+                            "INSERT INTO source_connection_status (connection_id, last_attempt_at, error_code, error_message, failing_since)
+                             SELECT id, ?2, ?3, ?4, ?2 FROM source_connections WHERE id = ?1 AND revision = ?5
+                             ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4,
+                                failing_since = COALESCE(failing_since, ?2), partial_message = NULL
+                             WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
+                            params![id, started, error.code(), error.to_string(), saved.revision],
+                        )?;
+                        Ok(())
+                    })?;
+                }
+                Err(error.into())
+            }
+        }
     }
 
     /// Bind setup requests to any credential references already saved on this
@@ -765,7 +791,7 @@ impl Workspace {
         let revision = uuid::Uuid::new_v4().to_string();
         let description = serde_json::to_string(&engine.description(provider)?)?;
         let account_key = verified.account_key();
-        crate::write_scope::run(&self.connection, |transaction| {
+        let outcome = crate::write_scope::run(&self.connection, |transaction| {
             if let Some((_, name)) = add {
                 if next_connection_id(transaction, provider)? != id {
                     return Err(connection_id_changed());
@@ -817,11 +843,10 @@ impl Workspace {
                 .ok_or_else(|| unknown_connection(id))?
                 .saved;
             Ok(SaveOutcome { source, preview })
-        }).map(|outcome| {
-            let empty = credentials::References::new();
-            staged.committed(previous.as_ref().map_or(&empty, |old| &old.credentials));
-            outcome
-        })
+        })?;
+        let empty = credentials::References::new();
+        staged.committed(previous.as_ref().map_or(&empty, |old| &old.credentials));
+        Ok(outcome)
     }
 }
 

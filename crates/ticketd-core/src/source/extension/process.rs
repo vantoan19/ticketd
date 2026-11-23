@@ -150,7 +150,9 @@ impl Process {
             Ok(Response::Success(response)) if response.id == id => {
                 let _ = response.jsonrpc;
                 if stdout.redactions.contains_secret(&response.result) {
-                    return Err(Fault::Protocol("source extension returned a credential in its result".into()));
+                    return Err(Fault::Protocol(
+                        "source extension returned a credential in its result".into(),
+                    ));
                 }
                 Ok(Ok(response.result))
             }

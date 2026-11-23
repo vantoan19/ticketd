@@ -124,6 +124,28 @@ impl Connector for ProcessConnector {
         let id = self.connection_id()?;
         let schema = &self.description.descriptor.schema;
         let resolved = credentials::resolve(schema, id, &self.credentials, raw)?;
+        let redactions = redaction::Redactions::default();
+        redactions.register(schema.fields.iter().filter_map(|field| {
+            if matches!(field.kind, FieldKind::Secret) {
+                resolved.get(&field.key).and_then(serde_json::Value::as_str)
+            } else {
+                None
+            }
+        }));
+        for field in &schema.fields {
+            if !matches!(field.kind, FieldKind::Secret)
+                && resolved
+                    .get(&field.key)
+                    .is_some_and(|value| redactions.contains_secret(value))
+            {
+                return Err(SourceError::InvalidConfiguration(vec![
+                    FieldIssue::for_field(
+                        &field.key,
+                        "contains a credential; enter it in its credential field",
+                    ),
+                ]));
+            }
+        }
         let mut config = schema
             .validate(&resolved)
             .map_err(SourceError::InvalidConfiguration)?;
