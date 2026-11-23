@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import {
   act,
   cleanup,
@@ -25,6 +26,7 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
   sourcesClient: {
     list: vi.fn(),
     checkConnection: vi.fn(),
+    configurationSummary: vi.fn(),
     options: vi.fn(),
     preview: vi.fn(),
     save: vi.fn(),
@@ -33,10 +35,7 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
 
 const entry: SourceEntry = {
   connector: {
-    provider: "github",
-    name: "GitHub",
-    contract_version: 1,
-    capabilities: ["discover", "fetch"],
+    ...githubSource.connector,
     schema: {
       fields: [
         {
@@ -71,6 +70,7 @@ const preview: DiscoveryPreview = {
   issues: [
     {
       display: "o/r#1",
+      label: "r#1",
       url: "https://github.example/o/r/issues/1",
       title: "First issue",
       assignees: [],
@@ -84,6 +84,7 @@ const preview: DiscoveryPreview = {
 
 beforeEach(() => {
   vi.mocked(sourcesClient.options).mockResolvedValue([]);
+  vi.mocked(sourcesClient.configurationSummary).mockResolvedValue([]);
   vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
     account: "octo",
   });
@@ -744,37 +745,35 @@ test("the save actions live in the save bar, not in the Discovery section", () =
   }
 });
 
-test("GitHub reads the draft back as one sentence", async () => {
+test("the connector's readback follows draft changes and preserves emphasis", async () => {
+  vi.mocked(sourcesClient.configurationSummary)
+    .mockResolvedValueOnce([{ text: "No repositories yet.", emphasis: false }])
+    .mockResolvedValueOnce([
+      { text: "Imports open issues from ", emphasis: false },
+      { text: "o/r", emphasis: true },
+      { text: ".", emphasis: false },
+    ])
+    .mockResolvedValueOnce([
+      { text: "Imports open issues from o/r with bug.", emphasis: false },
+    ]);
   render(<SourceCard entry={withLabels} />);
-  const readback = () => screen.getByTestId("source-readback").textContent;
-  expect(readback()).toBe(
-    "Imports open issues from no repository yet, assigned to anyone.",
-  );
+  expect(await screen.findByText("No repositories yet.")).toBeTruthy();
   await addRepository("o/r");
-  expect(readback()).toBe("Imports open issues from o/r, assigned to anyone.");
+  const summary = await screen.findByTestId("source-readback");
+  expect(summary.textContent).toBe("Imports open issues from o/r.");
+  expect(within(summary).getByText("o/r").tagName).toBe("STRONG");
+  expect(sourcesClient.configurationSummary).toHaveBeenLastCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+  );
   await addLabel("bug");
-  expect(readback()).toBe(
-    "Imports open issues from o/r that have the label bug, assigned to anyone.",
+  expect(
+    await screen.findByText("Imports open issues from o/r with bug."),
+  ).toBeTruthy();
+  expect(sourcesClient.configurationSummary).toHaveBeenLastCalledWith(
+    "github",
+    { repositories: ["o/r"], labels: ["bug"] },
   );
-  await addLabel("urgent");
-  fireEvent.change(screen.getByLabelText(/Assignee/), {
-    target: { value: "octo" },
-  });
-  expect(readback()).toBe(
-    "Imports open issues from o/r that have the labels bug and urgent, assigned to octo.",
-  );
-});
-
-test("another source shows no readback sentence", () => {
-  render(
-    <SourceCard
-      entry={{
-        ...entry,
-        connector: { ...entry.connector, provider: "gitlab", name: "GitLab" },
-      }}
-    />,
-  );
-  expect(screen.queryByTestId("source-readback")).toBeNull();
 });
 
 test("the Sync section shows the refresh command with a copy button", () => {

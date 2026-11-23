@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { beaconSource, githubSource } from "@/test/source-fixtures";
 import { EditorUnderTest } from "@/features/automations/testing";
 import type {
   Automation,
@@ -34,6 +35,8 @@ const PROJECTS = ["web-app", "api"].map((name) => ({
 beforeEach(() => {
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "list_projects") return PROJECTS;
+    if (command === "list_sources")
+      return [githubSource, { ...beaconSource, saved: null }];
     throw new Error(`unexpected command ${command}`);
   });
 });
@@ -315,6 +318,21 @@ test("a condition is removed from its row", async () => {
     { kind: "tag", tag: "bug", has: true },
   ]);
   expect(triggerCard(steps).textContent).toContain("Only in api, with bug");
+});
+
+test("an Automation offers registered sources before connection setup", async () => {
+  const { panel } = await openPanel({
+    ...TAGGED,
+    conditions: [{ kind: "source", any_of: [] }],
+  });
+  await choose(
+    within(panel).getByRole("button", { name: "Source is" }),
+    "Beacon Tracker",
+  );
+  expect(saved?.conditions).toEqual([{ kind: "source", any_of: ["beacon"] }]);
+  expect(
+    within(panel).getByRole("button", { name: "Source is: Beacon Tracker" }),
+  ).toBeTruthy();
 });
 
 test("a source condition names more than one source", async () => {

@@ -226,7 +226,9 @@ export function ReviewBody({
                   >
                     Not this one
                   </Button>
-                  <SourceLink url={candidate.url}>Open on GitHub</SourceLink>
+                  <SourceLink url={candidate.url}>
+                    Open on {review.provider_name}
+                  </SourceLink>
                 </div>
               </article>
             ))}

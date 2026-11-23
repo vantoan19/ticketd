@@ -18,7 +18,11 @@ export function useSourcesConfigured(): boolean {
  * was saved, so changing it in Settings makes the answer change. A connector
  * that is not set up offers nothing to publish to.
  */
-export function usePublishTarget(): { provider: string; saved: string } | null {
+export function usePublishTarget(): {
+  provider: string;
+  saved: string;
+  name: string;
+} | null {
   const { entries } = useSources();
   const entry = entries.find(
     (item) =>
@@ -27,6 +31,7 @@ export function usePublishTarget(): { provider: string; saved: string } | null {
   return entry
     ? {
         provider: entry.connector.provider,
+        name: entry.connector.name,
         saved: entry.saved?.saved_at ?? "",
       }
     : null;
@@ -90,13 +95,13 @@ export function publicationReason(preview: PublicationPreview): string {
     case "status":
       return "Only Todo, In progress and In review tickets can be published.";
     case "source_not_connected":
-      return "Connect GitHub in Settings to publish.";
+      return `Connect ${preview.provider_name} in Settings to publish.`;
     case "trashed":
       return "Restore this ticket from the trash to publish it.";
     case "externally_owned":
-      return "This ticket already belongs to GitHub.";
+      return preview.eligibility.message;
     case "provenance_retained":
-      return "This ticket keeps its previous GitHub identity and cannot be published again.";
+      return preview.eligibility.message;
     case "attempt_open":
       return "Settle the previous publication outcome before publishing again.";
     case "unsupported":

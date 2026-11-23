@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
+import { SourceActivityContext } from "./source-activity";
 import {
   cleanup,
   fireEvent,
@@ -41,6 +43,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   provider: "github",
   provider_name: "GitHub",
   place: "acme/api",
+  place_label: "acme / api",
   number: "#98",
   status_choices: ["Todo", "In progress", "In review"],
   id: "42",
@@ -472,6 +475,7 @@ test("a closed state line uses the core's closure time and names its canonical i
       state: { state: "closed", reason: "duplicate" },
       status_locked: true,
       closed_at: closedAt,
+      duplicate_number: "#99",
       duplicate_target: {
         kind: "external",
         identity: { provider: "github", id: "99" },
@@ -552,12 +556,23 @@ test("a row shows the owner's pill and a local row shows none", () => {
 test("the source filter offers All, GitHub and Local with counts and reports the choice", () => {
   const onChange = vi.fn();
   render(
-    <SourceFilter
-      value="all"
-      onChange={onChange}
-      counts={{ all: 11, local: 4, providers: { github: 7 } }}
-      providers={["github"]}
-    />,
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [],
+        entries: [githubSource],
+        intervalSecs: null,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourceFilter
+        value="all"
+        onChange={onChange}
+        counts={{ all: 11, local: 4, providers: { github: 7 } }}
+        providers={["github"]}
+      />
+    </SourceActivityContext.Provider>,
   );
   const group = screen.getByRole("radiogroup", { name: "Ticket source" });
   expect(

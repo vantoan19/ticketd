@@ -1,4 +1,5 @@
 import type { DuplicateTarget, Ticket, TicketSource } from "@/lib/api/client";
+import type { SourceEntry } from "@/lib/api/sources";
 import { ticketStatuses } from "@/lib/statuses";
 
 /** External choices come from the core; retained provenance does not imply ownership. */
@@ -6,17 +7,16 @@ export function ticketStatusChoices(ticket: Ticket): readonly string[] {
   return externalSource(ticket)?.status_choices ?? ticketStatuses;
 }
 
-export function providerName(provider: string): string {
-  return provider === "github" ? "GitHub" : provider;
-}
-
 /**
  * Who a change is attributed to. A change that came from a source is recorded
  * under the provider's id; it reads as the source, never as an editing agent.
  */
-export function attribution(agent: string): string {
-  const name = providerName(agent);
-  return name === agent ? agent : `Changed on ${name}`;
+export function attribution(
+  agent: string,
+  sources: readonly SourceEntry[],
+): string {
+  const source = sources.find(({ connector }) => connector.provider === agent);
+  return source ? `Changed on ${source.connector.name}` : agent;
 }
 
 /** The source of a ticket the provider currently owns; null for local tickets. */
@@ -26,7 +26,7 @@ export function externalSource(ticket: Ticket): TicketSource | null {
 
 /** Where the issue lives, such as "owner / repo #98", from the parts the core names. */
 export function sourceLocation(source: TicketSource): string {
-  return `${source.place.replace("/", " / ")} ${source.number}`.trim();
+  return `${source.place_label ?? source.place} ${source.number}`.trim();
 }
 
 /** The state line's words, and the tone of its dot, if it has one. */

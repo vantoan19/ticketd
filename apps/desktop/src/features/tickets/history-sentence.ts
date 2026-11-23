@@ -4,6 +4,7 @@ type Lookups = {
   /** Resolve a Project or Plan id to its name; unknown ids fall through. */
   project: (id: string) => string | undefined;
   plan: (id: string) => string | undefined;
+  source?: (id: string) => string;
 };
 
 const quote = (value: string) => `“${value}”`;
@@ -105,7 +106,7 @@ export function describeChange(
         ? "Confirmed that nothing was created by the earlier publication attempt"
         : "Publication attempt updated";
     case "ownership":
-      return `Took ownership from ${from === "github" ? "GitHub" : from}; the ticket is now local`;
+      return `Took ownership from ${lookups.source?.(from) ?? from}; the ticket is now local`;
     case "source":
       return from === "attached"
         ? `Linked to ${to} after an uncertain publication`

@@ -111,6 +111,12 @@ pub struct TicketSource {
     pub provider_name: String,
     /// Where the issue lives, such as "owner/repo" (empty when the locator has no place).
     pub place: String,
+    /// Formatted place label for the state line.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub place_label: String,
+    /// A duplicate's short number when its target is in the same place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_number: Option<String>,
     /// The provider's short number for the issue, such as "#98" (empty when it has none).
     pub number: String,
     /// The provider's stable id for the issue (never a display value).
@@ -422,7 +428,7 @@ pub(crate) fn guard_change(
     {
         return Err(Error::ExternalContent {
             reference,
-            provider: super::provider_display_name(&provider),
+            provider: super::provider_display_name(connection, &provider)?,
         });
     }
     // Open: Todo, In progress and In review are local. Closed for an unrecognized
@@ -432,7 +438,7 @@ pub(crate) fn guard_change(
     if status != ticket.status && !allowed {
         return Err(Error::ExternalStatus {
             reference,
-            provider: super::provider_display_name(&provider),
+            provider: super::provider_display_name(connection, &provider)?,
             open,
             closure_unrecognized,
         });
@@ -455,7 +461,7 @@ pub(crate) fn guard_duplicate(
             closure_unrecognized,
         } => Err(Error::ExternalStatus {
             reference: reference.to_owned(),
-            provider: super::provider_display_name(&provider),
+            provider: super::provider_display_name(connection, &provider)?,
             open,
             closure_unrecognized,
         }),
@@ -564,12 +570,32 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         row.failing_since.as_deref(),
         row.attempted.as_deref(),
     );
-    let (provider_name, place, number) =
-        super::display_parts(&row.provider, &row.locator, &row.display);
+    let description = super::cached_description(connection, &row.provider)?;
+    let (provider_name, place, number, place_label) = super::display_parts(
+        description.as_deref(),
+        &row.provider,
+        &row.locator,
+        &row.display,
+    );
+    let duplicate_number = match &duplicate_target {
+        Some(DuplicateTarget::External {
+            identity,
+            locator,
+            display,
+            ..
+        }) if identity.provider == row.provider && !place.is_empty() => {
+            let (_, target_place, target_number, _) =
+                super::display_parts(description.as_deref(), &row.provider, locator, display);
+            (place == target_place && !target_number.is_empty()).then_some(target_number)
+        }
+        _ => None,
+    };
     ticket.source = Some(TicketSource {
         provider_name,
         place,
+        place_label,
         number,
+        duplicate_number,
         provider: row.provider,
         id: row.id,
         locator: row.locator,

@@ -1030,3 +1030,8 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 ## 85
 + column source_sync.external_author
 + column source_sync.external_created_at
+
+## 86
++ table source_presentations
++ column source_presentations.description
++ column source_presentations.provider

@@ -17,6 +17,7 @@ export function SettingsPage({
   group,
   label,
   icon: Icon,
+  iconContent,
   title = label,
   lede,
   endSlot,
@@ -33,6 +34,7 @@ export function SettingsPage({
   /** Breadcrumb page name, in the foreground color. */
   label: string;
   icon: LucideIcon;
+  iconContent?: ReactNode;
   /** The `h1`; the label unless the page names itself differently. */
   title?: ReactNode;
   /** One sentence under the title, at most 560px wide. */
@@ -101,11 +103,7 @@ export function SettingsPage({
             className="settings-page-header"
             data-wordmark={wordmark || undefined}
           >
-            {!wordmark && (
-              <IconTile>
-                <Icon />
-              </IconTile>
-            )}
+            {!wordmark && <IconTile>{iconContent ?? <Icon />}</IconTile>}
             <div className="settings-page-heading">
               <div className="settings-page-title-line">
                 <h1 ref={heading} tabIndex={-1}>

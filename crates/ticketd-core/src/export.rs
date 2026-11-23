@@ -221,6 +221,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "request_outcomes",
         "bookkeeping that makes a retried write return its first result",
     ),
+    (
+        "source_presentations",
+        "device-local copies of installed ticket source descriptions",
+    ),
     ("sync_attachments", "device-local Workspace sync state"),
     ("sync_capture", "device-local Workspace sync state"),
     ("sync_conflicts", "device-local Workspace sync state"),

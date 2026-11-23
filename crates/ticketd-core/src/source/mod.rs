@@ -15,11 +15,14 @@ mod conversation;
 mod engine;
 mod freshness;
 mod github;
+mod presentation;
 mod publication;
 mod schedule;
 mod schema;
 mod takeover;
 mod tracking;
+
+use std::borrow::Cow;
 
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -34,6 +37,10 @@ pub use contract::{
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
+pub use presentation::{
+    FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,
+    SourcePresentation, SummaryPart, TargetPresentation,
+};
 pub use publication::{
     ActionKind, AttemptState, CandidateReason, ContentDifference, Eligibility, IneligibleReason,
     PublicationAttachmentLink, PublicationAttempt, PublicationCandidate, PublicationError,
@@ -119,36 +126,64 @@ pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(
     publication::migrate(connection)
 }
 
-/// How a provider and one of its issues are named for people: the provider's
-/// display name, where the issue lives and its short number. The locator is the
-/// connector's own, so the splitting belongs with the connector's module.
-pub(crate) fn display_parts(
+/// Format version 86: device-local presentation cached from registered sources.
+pub(crate) fn migrate_presentations(connection: &rusqlite::Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "CREATE TABLE source_presentations (provider TEXT PRIMARY KEY, description TEXT NOT NULL);",
+    )?;
+    Ok(())
+}
+
+/// Describes a provider from the device-local cache, or its built-in
+/// registration when the cache has never been filled.
+pub(crate) fn cached_description(
+    connection: &rusqlite::Connection,
     provider: &str,
-    locator: &str,
-    display: &str,
-) -> (String, String, String) {
-    match provider {
-        github::PROVIDER => {
-            let (place, number) = locator
-                .rsplit_once('#')
-                .map_or((locator, ""), |(place, number)| (place, number));
-            (
-                github::DISPLAY_NAME.to_owned(),
-                place.to_owned(),
-                if number.is_empty() {
-                    String::new()
-                } else {
-                    format!("#{number}")
-                },
-            )
-        }
-        other => (other.to_owned(), String::new(), display.to_owned()),
+) -> Result<Option<Cow<'static, SourceDescription>>, Error> {
+    let raw: Option<String> = connection
+        .prepare_cached("SELECT description FROM source_presentations WHERE provider = ?1")?
+        .query_row([provider], |row| row.get(0))
+        .optional()?;
+    match raw {
+        Some(raw) => Ok(Some(Cow::Owned(serde_json::from_str(&raw)?))),
+        None => Ok(Engine::builtin_description(provider).map(Cow::Borrowed)),
     }
 }
 
+pub(crate) fn display_parts(
+    description: Option<&SourceDescription>,
+    provider: &str,
+    locator: &str,
+    display: &str,
+) -> (String, String, String, String) {
+    let Some(description) = description else {
+        return (
+            provider.to_owned(),
+            String::new(),
+            display.to_owned(),
+            String::new(),
+        );
+    };
+    let naming = &description.presentation.issue_name;
+    let (place, number) = naming.parts(locator, display);
+    let place_label = naming.place_label(&place);
+    (
+        description.descriptor.name.clone(),
+        place,
+        number,
+        place_label,
+    )
+}
+
 /// What a person calls a provider: its display name where it has one.
-pub(crate) fn provider_display_name(provider: &str) -> String {
-    display_parts(provider, "", "").0
+pub(crate) fn provider_display_name(
+    connection: &rusqlite::Connection,
+    provider: &str,
+) -> Result<String, Error> {
+    Ok(cached_description(connection, provider)?.map_or_else(
+        || provider.to_owned(),
+        |description| description.descriptor.name.clone(),
+    ))
 }
 
 /// The effective "now" of a write: the caller's RFC 3339 time when given, else the
@@ -265,6 +300,7 @@ impl Workspace {
         let config = engine.validate(provider, raw)?;
         let preview = self.preview_source(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
+        let description = serde_json::to_string(&engine.description(provider)?)?;
         crate::write_scope::run(&self.connection, |transaction| {
             let previous: Option<String> = transaction
                 .query_row(
@@ -283,6 +319,10 @@ impl Workspace {
             "INSERT INTO source_configurations (provider, configuration, account, contract_version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(provider) DO UPDATE SET configuration = excluded.configuration, account = excluded.account, contract_version = excluded.contract_version, saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
             params![provider, configuration, preview.account, CONTRACT_VERSION],
         )?;
+            transaction.execute(
+                "INSERT INTO source_presentations (provider, description) VALUES (?1, ?2) ON CONFLICT(provider) DO UPDATE SET description = excluded.description",
+                params![provider, description],
+            )?;
             let row = transaction.query_row(
             "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
             [provider],

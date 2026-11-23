@@ -1390,10 +1390,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
     let missing = engine
         .check_connection("github", &config(json!({})))
         .unwrap_err();
-    assert!(
-        matches!(missing, SourceError::Unauthenticated(_)),
-        "{missing}"
-    );
+    assert!(matches!(missing, SourceError::SignIn { .. }), "{missing}");
     assert_eq!(
         missing.to_string(),
         "no GitHub credential found. Run `gh auth login` to sign in."
@@ -1479,5 +1476,40 @@ fn github_destinations_are_compared_without_regard_to_case() {
         engine
             .destination_allowed("github", "any/repo", &[])
             .unwrap()
+    );
+}
+
+#[test]
+fn github_describes_how_to_present_its_configuration() {
+    let (_, engine) = setup(None);
+    let description = engine.description("github").unwrap();
+    assert_eq!(description.descriptor.name, "GitHub");
+    assert_eq!(description.presentation.hosts, vec![host_of(API)]);
+    assert!(
+        description
+            .presentation
+            .icon_svg
+            .as_deref()
+            .unwrap()
+            .starts_with("<svg")
+    );
+    assert_eq!(
+        description
+            .presentation
+            .sign_in
+            .desktop_instruction
+            .as_deref(),
+        Some("Run “gh auth login” in a terminal, then choose Check connection.")
+    );
+    let summary = engine.configuration_summary(
+        "github",
+        &config(json!({"repositories": ["example/api"], "labels": ["bug", "help"], "assignee": "someone"})),
+    ).unwrap();
+    assert_eq!(
+        summary
+            .iter()
+            .map(|part| part.text.as_str())
+            .collect::<String>(),
+        "Imports open issues from example/api that have the labels bug and help, assigned to someone."
     );
 }

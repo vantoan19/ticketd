@@ -5,21 +5,19 @@ import {
   type AutomationCondition,
   type AutomationSchedule,
 } from "@/features/automations/client";
-import { providerName } from "@/features/tickets/ticket-source";
+import { providerName, type SourceEntry } from "@/lib/api/sources";
 import type { Project } from "@/lib/api/client";
 
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 export const OR = new Intl.ListFormat("en", { type: "disjunction" });
 
-/** The source of a ticket no external tracker owns, as a condition stores it. */
-const LOCAL_SOURCE = "local";
-/** The sources a condition can name. */
-// ponytail: GitHub is the only connector; list the configured providers when
-// there is a second one.
-export const CONDITION_SOURCES = ["github", LOCAL_SOURCE];
+export const LOCAL_SOURCE = "local";
 
-export function sourceName(source: string): string {
-  return source === LOCAL_SOURCE ? "Local" : providerName(source);
+export function sourceName(
+  source: string,
+  sources: readonly SourceEntry[],
+): string {
+  return source === LOCAL_SOURCE ? "Local" : providerName(source, sources);
 }
 
 export function projectName(id: string, projects: Project[]): string {
@@ -87,6 +85,7 @@ export function scheduleText(
 export function conditionsLine(
   conditions: AutomationCondition[],
   projects: Project[],
+  sources: readonly SourceEntry[] = [],
 ): string | undefined {
   const parts = conditions.flatMap((condition) => {
     if (condition.kind === "tag")
@@ -103,7 +102,7 @@ export function conditionsLine(
         condition.any_of.map((source) =>
           source === LOCAL_SOURCE
             ? "local tickets"
-            : `from ${providerName(source)}`,
+            : `from ${providerName(source, sources)}`,
         ),
       ),
     ];

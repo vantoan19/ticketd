@@ -11,7 +11,7 @@
   gap: 8px;
   min-width: 0;
 }
-.source-field[data-field="repositories"] {
+.source-field[data-target] {
   flex-basis: 100%;
 }
 .source-field > label {

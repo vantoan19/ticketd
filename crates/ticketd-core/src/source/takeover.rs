@@ -54,7 +54,7 @@ impl Workspace {
                 if !unavailable {
                     return Err(Error::SourceAvailable {
                         reference: reference.to_owned(),
-                        provider: super::provider_display_name(&provider),
+                        provider: super::provider_display_name(transaction, &provider)?,
                     });
                 }
                 transaction.execute(

@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { StatusDot } from "@/components/ui/status-dot";
 import { client, type Ticket } from "@/lib/api/client";
 import {
+  providerName,
   sourcesClient,
   toSourceFailure,
   type PublicationPreview,
@@ -33,7 +34,7 @@ import { AttemptReview, ReviewBody } from "./ResolvePublication";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { useSourceActivity } from "./source-activity";
 import { formatDateTime } from "@/lib/format";
-import { providerName } from "./ticket-source";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import "./publication.css";
@@ -98,7 +99,11 @@ export function LocalPublication({
   if (preview.eligibility.reason === "source_not_connected")
     return (
       <small className="rail-note">
-        <Button variant="link" size="inline" onClick={activity.openSettings}>
+        <Button
+          variant="link"
+          size="inline"
+          onClick={() => activity.openSettings(preview.provider)}
+        >
           Connect {preview.provider_name}
         </Button>{" "}
         to publish it.
@@ -115,6 +120,7 @@ export function PublicationNotice({
   ticket: Ticket;
   refresh: () => Promise<void>;
 }) {
+  const { entries } = useSources();
   const [publishing, setPublishing] = useState<string | null>(null);
   const attempt = ticket.publication;
   if (publishing)
@@ -138,7 +144,7 @@ export function PublicationNotice({
     >
       <AlertTitle level={3}>Publish outcome unknown</AlertTitle>
       <AlertDescription>
-        {providerName(attempt.provider)} may have created an issue in{" "}
+        {providerName(attempt.provider, entries)} may have created an issue in{" "}
         <span className="source-number">{attempt.destination}</span> when you
         published <span className="source-number">{attempt.reference}</span> at{" "}
         {formatDateTime(attempt.started_at)}. This ticket stays Local until the
@@ -198,6 +204,7 @@ export function PublishDialog({
   onOpenChange: (open: boolean) => void;
   refresh: () => Promise<void>;
 }) {
+  const { entries } = useSources();
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [destination, setDestination] = useState<string | undefined>();
   const [error, setError] = useState<FailureDescription | null>(null);
@@ -317,7 +324,12 @@ export function PublishDialog({
     await checkSavedState();
   }
 
-  const name = preview?.provider_name ?? providerName(provider);
+  const connector = entries.find(
+    (entry) => entry.connector.provider === provider,
+  )?.connector;
+  const name = preview?.provider_name ?? connector?.name ?? provider;
+  const target = connector?.presentation?.target;
+  const destinationPrompt = target?.choose ?? "Choose a destination";
   const blocked = phase.kind === "blocked";
   const recovering = phase.kind === "unresolved" || phase.kind === "confirmed";
   return (
@@ -359,7 +371,7 @@ export function PublishDialog({
                     ? "Preparing preview…"
                     : chosen
                       ? null
-                      : "Choose a repository."
+                      : `${destinationPrompt}.`
       }
       footerNote={
         recovering
@@ -467,7 +479,7 @@ export function PublishDialog({
         <div className="publication-preview">
           <div className="publication-field">
             <span className="publication-label" id="publication-destination">
-              Repository
+              {target?.label ?? "Destination"}
             </span>
             {preview.destinations.length > 0 ? (
               <Select
@@ -484,7 +496,7 @@ export function PublishDialog({
                   readOnly={preview.destinations.length === 1}
                   aria-labelledby="publication-destination"
                 >
-                  <SelectValue placeholder="Choose a repository" />
+                  <SelectValue placeholder={destinationPrompt} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -534,7 +546,7 @@ export function PublishDialog({
                 {preview.local
                   ? `${preview.local.activities} ${preview.local.activities === 1 ? "activity" : "activities"}, `
                   : "Notes, "}
-                Plan, tags and relationships — never sent to GitHub
+                Plan, tags and relationships — never sent to {name}
               </li>
               {(preview.local?.subtickets.length
                 ? preview.local.subtickets

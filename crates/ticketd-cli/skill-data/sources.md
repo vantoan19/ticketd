@@ -3,7 +3,7 @@
 `show T-KQ1` includes source ownership, freshness, and publication state. Bounded
 `context` does not include all those fields. An external identity can remain as
 provenance after a ticket becomes locally owned; identity alone does not establish
-current authority. `list --source github` or `--source local` filters ownership.
+current authority. `list --source PROVIDER` or `--source local` filters ownership.
 
 While externally owned, a ticket's authoritative title/body and closure are
 managed in its external tracker. Open external tickets allow local Todo,
@@ -15,12 +15,12 @@ proof that the ticket is now local. Core errors explain which changes are allowe
 
 ```sh
 ticketd source list
-ticketd source show github
+ticketd source show PROVIDER
 ticketd source status
 ticketd context T-KQ1 --conversation
 ```
 
-`source list` returns available connectors, configuration schemas, and saved
+`source list` returns available connectors, descriptions, configuration schemas, and saved
 settings. Use `source options` for supported field values, `source test` to check
 the connection, and `source preview` to inspect discovery results before saving
 configuration. See each command's help for `--set` and `--config-file`.
@@ -39,11 +39,11 @@ ticket, not a workaround for an ordinary edit rejection.
 When publication is requested, first inspect its exact payload and destination:
 
 ```sh
-ticketd source publish T-KQ1 --destination owner/repository --preview
+ticketd source publish T-KQ1 --provider PROVIDER --destination DESTINATION --preview
 ```
 
-A saved source publishes only to the repositories it lists: any other
-`--destination` is refused in the preview and the publish, before anything is sent.
+A saved source publishes to its allowed destinations. The preview checks your
+choice before anything is sent. Omit `--provider` when only one source can publish.
 
 Use the returned fingerprint with `--expect FINGERPRINT` when executing the
 publication. It creates an external issue and transfers authority while preserving

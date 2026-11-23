@@ -22,10 +22,8 @@ export type SourceActivity = {
   entries: SourceEntry[] | null;
   /** How often sources refresh by themselves, in seconds; `null` when unknown. */
   intervalSecs: number | null;
-  /** Opens the Sources settings, where a source's connection and rules live. */
-  openSettings: () => void;
-  /** Opens one source's own settings page, such as GitHub's. */
-  openSourceSettings?: (provider: string) => void;
+  /** Opens the settings page for the provider’s connection and rules. */
+  openSettings: (provider: string) => void;
   /** Refreshes every source now, as the Retry and Refresh actions do. */
   refreshAll: () => Promise<void>;
 };

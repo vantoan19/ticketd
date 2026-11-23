@@ -5,7 +5,9 @@ import {
   sourceLine,
   useSourceActivity,
 } from "@/features/tickets/source-activity";
-import { ago, providerName } from "@/features/tickets/ticket-source";
+import { ago } from "@/features/tickets/ticket-source";
+import { providerName } from "@/lib/api/sources";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { useNow } from "@/lib/use-now";
 import { SyncStatusLine } from "@/features/sync/SyncStatusLine";
 import { useSyncStatus } from "@/features/sync/sync-status";
@@ -14,14 +16,9 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 export function SourceStatusFooter() {
   const now = useNow();
-  const {
-    refreshing,
-    sources,
-    refreshAll,
-    openSettings,
-    openSourceSettings,
-    intervalSecs,
-  } = useSourceActivity();
+  const { entries } = useSources();
+  const { refreshing, sources, refreshAll, openSettings, intervalSecs } =
+    useSourceActivity();
   // Only the folded rail hides the two lines, so only it repeats them.
   const { sidebarCollapsed } = usePreferences();
   const isMobile = useIsMobile();
@@ -42,7 +39,7 @@ export function SourceStatusFooter() {
     >
       {synced && <SyncStatusLine />}
       {sources.map((status) => {
-        const name = providerName(status.provider);
+        const name = providerName(status.provider, entries);
         const state = sourceLine(status, refreshing);
         const synced = status.last_refreshed_at
           ? ago(status.last_refreshed_at, now)
@@ -83,11 +80,7 @@ export function SourceStatusFooter() {
               <button
                 type="button"
                 className="sidebar-source-line"
-                onClick={() =>
-                  openSourceSettings
-                    ? openSourceSettings(status.provider)
-                    : openSettings()
-                }
+                onClick={() => openSettings(status.provider)}
                 aria-describedby={detailId}
               >
                 <span className="sidebar-source-label">

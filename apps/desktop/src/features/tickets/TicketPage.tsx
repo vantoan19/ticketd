@@ -166,10 +166,7 @@ export function TicketPage({
     source.duplicate_target?.kind === "external"
       ? source.duplicate_target
       : null;
-  const originalLabel =
-    original && source && original.display.startsWith(`${source.place}#`)
-      ? original.display.slice(source.place.length)
-      : original?.display;
+  const originalLabel = source?.duplicate_number ?? original?.display;
   // The header owns the normal updated time. Only source or exceptional
   // context needs a line between the property strip and the description.
   const stateLine =

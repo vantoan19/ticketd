@@ -6,11 +6,12 @@
 //! on [`crate::Workspace`] fetch through the engine first and then apply the
 //! result in a short transaction.
 
-use std::{collections::HashSet, ops::ControlFlow};
+use std::{collections::HashSet, ops::ControlFlow, sync::OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 use super::{
+    SourceDescription, SummaryPart,
     contract::{
         CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
         DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
@@ -36,6 +37,9 @@ const OPTION_LIMIT: usize = 50;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewIssue {
     pub display: String,
+    /// Short name for the preview table, with the place omitted only as
+    /// directed by the connector.
+    pub label: String,
     pub url: String,
     pub title: String,
     /// Existing ticket with this external identity, including retained provenance.
@@ -119,6 +123,35 @@ impl Engine {
         self.connectors.iter().map(|c| c.descriptor()).collect()
     }
 
+    pub fn descriptions(&self) -> Vec<SourceDescription> {
+        self.connectors
+            .iter()
+            .map(|connector| describe(connector.as_ref()))
+            .collect()
+    }
+
+    pub fn description(&self, provider: &str) -> Result<SourceDescription, SourceError> {
+        self.connector(provider).map(describe)
+    }
+
+    /// Metadata available for old workspaces and issues synced from another
+    /// device before there was any cached presentation data.
+    pub(crate) fn builtin_description(provider: &str) -> Option<&'static SourceDescription> {
+        static DESCRIPTIONS: OnceLock<Vec<SourceDescription>> = OnceLock::new();
+        DESCRIPTIONS
+            .get_or_init(|| Self::builtin().descriptions())
+            .iter()
+            .find(|description| description.descriptor.provider == provider)
+    }
+
+    pub fn configuration_summary(
+        &self,
+        provider: &str,
+        config: &ConfigValues,
+    ) -> Result<Vec<SummaryPart>, SourceError> {
+        Ok(self.connector(provider)?.configuration_summary(config))
+    }
+
     pub fn descriptor(&self, provider: &str) -> Result<ConnectorDescriptor, SourceError> {
         self.connector(provider).map(|c| c.descriptor())
     }
@@ -144,7 +177,7 @@ impl Engine {
     ) -> Result<ConnectionInfo, SourceError> {
         let connector = self.connector(provider)?;
         // Connection setup is allowed before the discovery rules are complete.
-        connector.check_connection(raw)
+        with_guidance(connector, connector.check_connection(raw))
     }
 
     /// Dynamic options for a selector, narrowed by what the person typed.
@@ -172,7 +205,7 @@ impl Engine {
                 ]));
             }
         }
-        let mut options = connector.options(field, query.trim(), raw)?;
+        let mut options = with_guidance(connector, connector.options(field, query.trim(), raw))?;
         options.truncate(OPTION_LIMIT);
         Ok(options)
     }
@@ -198,11 +231,14 @@ impl Engine {
         let mut seen = 0;
         let mut skipped = Vec::new();
         for _ in 0..MAX_PAGES {
-            let page = connector.discover(DiscoveryRequest {
-                config: &config,
-                cursor: cursor.as_deref(),
-                page_size: PAGE_SIZE,
-            })?;
+            let page = with_guidance(
+                connector,
+                connector.discover(DiscoveryRequest {
+                    config: &config,
+                    cursor: cursor.as_deref(),
+                    page_size: PAGE_SIZE,
+                }),
+            )?;
             skipped.extend(page.skipped);
             for issue in page.issues {
                 if issue.reference.identity.provider != descriptor.provider {
@@ -261,6 +297,7 @@ impl Engine {
     ) -> Result<DiscoveryPreview, SourceError> {
         let config = self.validate(provider, raw)?;
         let account = self.check_connection(provider, &config)?.account;
+        let issue_name = self.description(provider)?.presentation.issue_name;
         let mut issues = Vec::new();
         let mut matched = 0;
         let mut already_here = 0;
@@ -271,6 +308,7 @@ impl Engine {
             if issues.len() < PREVIEW_LIST_LIMIT {
                 issues.push(PreviewIssue {
                     ticket,
+                    label: issue_name.preview_label(&issue.reference.locator, &issue.display),
                     display: issue.display,
                     url: issue.url,
                     title: issue.title,
@@ -333,7 +371,7 @@ impl Engine {
             return Err(SourceError::Unsupported("fetching"));
         }
         let config = self.validate(provider, raw)?;
-        let issue = connector.fetch(&config, reference)?;
+        let issue = with_guidance(connector, connector.fetch(&config, reference))?;
         if issue.reference.identity != reference.identity {
             return Err(SourceError::Protocol(
                 "the source returned a different issue than requested".into(),
@@ -396,7 +434,7 @@ impl Engine {
             return Err(SourceError::Unsupported("publishing"));
         }
         let config = self.validate(provider, raw)?;
-        let issue = connector.publish(&config, request)?;
+        let issue = with_guidance(connector, connector.publish(&config, request))?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
                 "the created issue named a different provider".into(),
@@ -424,7 +462,7 @@ impl Engine {
             return Err(SourceError::Unsupported("publishing"));
         }
         let config = self.validate(provider, raw)?;
-        let issue = connector.locate(&config, destination, text)?;
+        let issue = with_guidance(connector, connector.locate(&config, destination, text))?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
                 "the issue named a different provider".into(),
@@ -445,7 +483,7 @@ impl Engine {
             return Err(SourceError::Unsupported("publishing"));
         }
         let config = self.validate(provider, raw)?;
-        let found = connector.find_published(&config, search)?;
+        let found = with_guidance(connector, connector.find_published(&config, search))?;
         if found
             .matches
             .iter()
@@ -478,7 +516,8 @@ impl Engine {
             return Ok(None);
         }
         let config = self.validate(provider, raw)?;
-        let mut conversation = connector.conversation(&config, reference)?;
+        let mut conversation =
+            with_guidance(connector, connector.conversation(&config, reference))?;
         let mut comments = HashSet::new();
         conversation
             .comments
@@ -540,4 +579,18 @@ impl Engine {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
     }
+}
+
+fn describe(connector: &dyn Connector) -> SourceDescription {
+    SourceDescription {
+        descriptor: connector.descriptor(),
+        presentation: connector.presentation(),
+    }
+}
+
+fn with_guidance<T>(
+    connector: &dyn Connector,
+    result: Result<T, SourceError>,
+) -> Result<T, SourceError> {
+    result.map_err(|error| error.with_sign_in(|| connector.presentation().sign_in))
 }

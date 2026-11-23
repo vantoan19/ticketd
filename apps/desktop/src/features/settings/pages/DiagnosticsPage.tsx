@@ -285,7 +285,7 @@ function ReportSection() {
               })}
             />
           )}
-          Files attached to a public GitHub issue can be read by anyone.
+          Files attached to a public issue can be read by anyone.
         </SettingsListFooter>
       </SettingsList>
     </SettingsSection>

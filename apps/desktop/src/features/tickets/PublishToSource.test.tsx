@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import {
   act,
   cleanup,
@@ -100,6 +101,7 @@ const eligible = {
 /** GitHub as the core reports it: connected, and able to create issues. */
 const githubEntry = {
   connector: {
+    ...githubSource.connector,
     provider: "github",
     name: "GitHub",
     contract_version: 1,

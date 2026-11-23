@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::schema::{ChoiceOption, ConfigSchema, ConfigValues, FieldIssue};
+use super::{SignInGuidance, SourcePresentation, SummaryPart};
 
 /// The contract version this build of ticketd speaks. The engine refuses to
 /// register a connector that declares a different one.
@@ -269,6 +270,11 @@ pub enum Surface {
 pub enum SourceError {
     #[error("{0}")]
     Unauthenticated(String),
+    #[error("{message}")]
+    SignIn {
+        message: String,
+        guidance: Box<SignInGuidance>,
+    },
     #[error("{0}")]
     Forbidden(String),
     #[error("{0}")]
@@ -413,7 +419,7 @@ impl FailureCode {
 impl SourceError {
     pub(crate) fn failure_code(&self) -> FailureCode {
         match self {
-            Self::Unauthenticated(_) => FailureCode::Unauthenticated,
+            Self::Unauthenticated(_) | Self::SignIn { .. } => FailureCode::Unauthenticated,
             Self::Forbidden(_) => FailureCode::Forbidden,
             Self::NotFound(_) => FailureCode::NotFound,
             Self::RateLimited { .. } => FailureCode::RateLimited,
@@ -442,6 +448,7 @@ impl SourceError {
     pub fn ruled_out_creation(&self) -> bool {
         match self {
             Self::Unauthenticated(_)
+            | Self::SignIn { .. }
             | Self::Forbidden(_)
             | Self::NotFound(_)
             | Self::RateLimited { .. }
@@ -455,23 +462,24 @@ impl SourceError {
         }
     }
 
-    /// The sentence that finishes a credential failure for the place it is read.
-    /// The error itself says what went wrong and names `gh auth login`, which
-    /// works anywhere; this adds the way to retry that only that surface has.
-    pub fn sign_in_hint(surface: Surface) -> &'static str {
-        match surface {
-            Surface::Terminal => {
-                "From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead."
-            }
-            Surface::Desktop => "Then choose Check connection in Settings.",
+    /// Adds connector guidance at the engine boundary so all callers can format
+    /// a credential error for their own surface.
+    pub(crate) fn with_sign_in(self, guidance: impl FnOnce() -> SignInGuidance) -> Self {
+        match self {
+            Self::Unauthenticated(message) => Self::SignIn {
+                message,
+                guidance: Box::new(guidance()),
+            },
+            other => other,
         }
     }
 
-    /// The message with the guidance that fits `surface`. Only credential
-    /// failures differ from [`Display`](std::fmt::Display).
+    /// The message with the guidance that fits `surface`.
     pub fn message_for(&self, surface: Surface) -> String {
         match self {
-            Self::Unauthenticated(_) => format!("{self} {}", Self::sign_in_hint(surface)),
+            Self::SignIn { guidance, .. } => guidance
+                .hint(surface)
+                .map_or_else(|| self.to_string(), |hint| format!("{self} {hint}")),
             other => other.to_string(),
         }
     }
@@ -506,6 +514,17 @@ fn describe_issues(issues: &[FieldIssue]) -> String {
 /// network; the engine never calls one while holding a database transaction.
 pub trait Connector: Send + Sync {
     fn descriptor(&self) -> ConnectorDescriptor;
+
+    /// How ticketd presents this provider and its settings.
+    fn presentation(&self) -> SourcePresentation {
+        SourcePresentation::default()
+    }
+
+    /// Read the rules aloud in one line. The values can still be a draft, so
+    /// this operation does not validate, contact the provider, or save anything.
+    fn configuration_summary(&self, _config: &ConfigValues) -> Vec<SummaryPart> {
+        Vec::new()
+    }
 
     /// Verifies credentials and permissions and names the acting account.
     fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionInfo, SourceError>;

@@ -61,6 +61,7 @@ export function bridgeDefault(
     case "sync_notices":
     case "attachment_availability":
     case "list_trash":
+    case "source_configuration_summary":
     case "list_sources": // no built-in connector unless a test supplies one
       return [];
     case "count_tickets":

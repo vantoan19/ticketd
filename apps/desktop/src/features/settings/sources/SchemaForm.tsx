@@ -10,7 +10,11 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import type { ChoiceOption, SchemaField } from "@/lib/api/sources";
+import type {
+  ChoiceOption,
+  FieldPresentation,
+  SchemaField,
+} from "@/lib/api/sources";
 import type { Draft } from "@/features/settings/sources/config-values";
 
 const SUGGESTION_DELAY_MS = 250;
@@ -100,6 +104,8 @@ function describedBy(
 
 function MultiSelectField({
   field,
+  presentation,
+  target,
   value,
   errors,
   disabled,
@@ -107,6 +113,8 @@ function MultiSelectField({
   onChange,
 }: {
   field: MultiSelect;
+  presentation: FieldPresentation | undefined;
+  target: boolean;
   value: string[];
   errors: string[];
   disabled: boolean;
@@ -234,6 +242,7 @@ function MultiSelectField({
       ref={container}
       className="source-field"
       data-field={field.key}
+      data-target={target || undefined}
       onKeyDown={(event) => {
         // Escape closes only the foremost surface: this list, not the page.
         if (event.key === "Escape" && open) {
@@ -279,13 +288,11 @@ function MultiSelectField({
               value={query}
               disabled={disabled || full}
               placeholder={
-                field.key === "repositories"
-                  ? value.length > 0
-                    ? "Add another repository"
-                    : "e.g. acme/billing-api"
-                  : field.key === "labels"
-                    ? "e.g. bug, payments"
-                    : "Search or type, then press Enter"
+                (value.length > 0
+                  ? presentation?.additional_placeholder
+                  : undefined) ??
+                presentation?.placeholder ??
+                "Search or type, then press Enter"
               }
               aria-describedby={describedBy(id, field, messages)}
               aria-invalid={messages.length > 0 || undefined}
@@ -388,6 +395,8 @@ function MultiSelectField({
  */
 export function SchemaForm({
   fields,
+  presentation,
+  targetField,
   draft,
   errors,
   disabled,
@@ -395,6 +404,8 @@ export function SchemaForm({
   onChange,
 }: {
   fields: SchemaField[];
+  presentation?: Record<string, FieldPresentation> | undefined;
+  targetField?: string | undefined;
   draft: Draft;
   errors: Record<string, string[]>;
   disabled: boolean;
@@ -411,6 +422,8 @@ export function SchemaForm({
             <MultiSelectField
               key={field.key}
               field={field}
+              presentation={presentation?.[field.key]}
+              target={targetField === field.key}
               value={Array.isArray(value) ? value : []}
               errors={fieldErrors}
               disabled={disabled}
@@ -423,6 +436,8 @@ export function SchemaForm({
           <TextField
             key={field.key}
             field={field}
+            presentation={presentation?.[field.key]}
+            target={targetField === field.key}
             value={
               typeof draft[field.key] === "string"
                 ? (draft[field.key] as string)
@@ -440,12 +455,16 @@ export function SchemaForm({
 
 function TextField({
   field,
+  presentation,
+  target,
   value,
   errors,
   disabled,
   onChange,
 }: {
   field: Extract<SchemaField, { type: "text" }>;
+  presentation: FieldPresentation | undefined;
+  target: boolean;
   value: string;
   errors: string[];
   disabled: boolean;
@@ -453,7 +472,11 @@ function TextField({
 }) {
   const id = useId();
   return (
-    <div className="source-field" data-field={field.key}>
+    <div
+      className="source-field"
+      data-field={field.key}
+      data-target={target || undefined}
+    >
       <Label htmlFor={id}>
         {field.label}
         {!field.required && <span className="source-required">Optional</span>}
@@ -463,11 +486,7 @@ function TextField({
         value={value}
         disabled={disabled}
         placeholder={
-          field.key === "assignee"
-            ? "e.g. octocat"
-            : field.placeholder
-              ? `e.g. ${field.placeholder}`
-              : undefined
+          presentation?.placeholder ?? field.placeholder ?? undefined
         }
         aria-describedby={describedBy(
           id,

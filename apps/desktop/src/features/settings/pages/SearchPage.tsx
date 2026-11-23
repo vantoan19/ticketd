@@ -1,3 +1,4 @@
+import { SourceIcon } from "../sources/SourceIcon";
 import { emptyCopy } from "@/lib/empty-copy";
 import { Fragment, useEffect, useId, useMemo, useRef } from "react";
 import { ChevronRight, Search, SearchX, type LucideIcon } from "lucide-react";
@@ -32,6 +33,7 @@ interface PageInfo {
   label: string;
   group: string;
   icon: LucideIcon;
+  iconSvg?: string | null | undefined;
 }
 
 const plural = (count: number, one: string, many: string) =>
@@ -65,9 +67,19 @@ export function SearchPage() {
     );
     const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
     for (const { connector } of sources) {
-      const section = sourceSection(connector.provider, connector.name);
+      const section = sourceSection(
+        connector.provider,
+        connector.name,
+        connector.presentation?.icon_svg,
+      );
       pages.set(section.id, section);
-      entries.push(...sourceEntries(connector.provider, connector.name));
+      entries.push(
+        ...sourceEntries(
+          connector.provider,
+          connector.name,
+          connector.schema.fields.map(({ label }) => label),
+        ),
+      );
     }
     return { pages, entries };
   }, [sources]);
@@ -150,7 +162,11 @@ export function SearchPage() {
               aria-labelledby={headingId}
             >
               <div className="settings-search-group-label">
-                <Icon size={16} aria-hidden="true" />
+                {page.iconSvg ? (
+                  <SourceIcon svg={page.iconSvg} size={16} />
+                ) : (
+                  <Icon size={16} aria-hidden="true" />
+                )}
                 <h2 id={headingId}>{page.label}</h2>
                 <span>
                   {page.group} · {plural(rows.length, "setting", "settings")}

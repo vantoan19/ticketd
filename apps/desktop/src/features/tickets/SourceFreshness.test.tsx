@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import {
   cleanup,
   fireEvent,
@@ -59,7 +60,7 @@ function withActivity(activity: Partial<SourceActivity>, children: ReactNode) {
       value={{
         refreshing: false,
         sources: [],
-        entries: null,
+        entries: [githubSource],
         intervalSecs: null,
         openSettings: () => {},
         refreshAll: async () => {},

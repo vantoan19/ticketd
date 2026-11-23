@@ -109,11 +109,13 @@ export function SourceRail({
             <small className="rail-note">
               {owner.discovery_matches === false ? (
                 "No longer matches discovery. It keeps syncing while you have access."
-              ) : (
+              ) : owner.place ? (
                 <>
                   Found by discovery in{" "}
                   <span className="source-number">{owner.place}</span>.
                 </>
+              ) : (
+                "Found by discovery."
               )}
             </small>
           )}
@@ -132,7 +134,7 @@ export function SourceRail({
               <RailRow
                 icon={<Settings2 aria-hidden="true" />}
                 muted
-                onClick={activity.openSettings}
+                onClick={() => activity.openSettings(owner.provider)}
               >
                 Discovery settings
               </RailRow>
@@ -149,7 +151,11 @@ export function SourceRail({
                 <RefreshCw data-icon="inline-start" />
                 Refresh
               </Button>
-              <Button variant="ghost" size="sm" onClick={activity.openSettings}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => activity.openSettings(owner.provider)}
+              >
                 Discovery settings
               </Button>
             </div>

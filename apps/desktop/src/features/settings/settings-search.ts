@@ -355,7 +355,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
 ];
 
 /** The rows every source page has, for a source the build offers. */
-export function sourceEntries(provider: string, name: string): SettingsEntry[] {
+export function sourceEntries(
+  provider: string,
+  name: string,
+  fields: string[] = [],
+): SettingsEntry[] {
   const section: SettingsPageId = `source-${provider}`;
   return [
     {
@@ -367,7 +371,7 @@ export function sourceEntries(provider: string, name: string): SettingsEntry[] {
     {
       title: "Discovery",
       description: `Matching issues are imported as tickets on the next sync. Nothing is changed in ${name}.`,
-      keywords: `${name} rules repositories labels assignee import issues preview save ${provider}`,
+      keywords: `${name} rules ${fields.join(" ")} import issues preview save ${provider}`,
       section,
     },
     {

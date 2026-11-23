@@ -276,17 +276,10 @@ pub(crate) fn rows(connection: &Connection, rows: &mut [TicketRow]) -> Result<()
         |row| {
             let (provider, locator, display): (String, String, String) =
                 (row.get(1)?, row.get(2)?, row.get(3)?);
-            let (provider_name, place, number) =
-                crate::source::display_parts(&provider, &locator, &display);
-            Ok(SourcePill {
-                provider,
-                provider_name,
-                place,
-                number,
-                display,
-            })
+            Ok((provider, locator, display))
         },
     )?;
+    let mut descriptions = HashMap::new();
     for row in rows.iter_mut() {
         let id = row.id.as_str();
         row.tags = all(&mut tags, id);
@@ -298,7 +291,25 @@ pub(crate) fn rows(connection: &Connection, rows: &mut [TicketRow]) -> Result<()
         row.parent = first(&mut parents, id);
         row.duplicate_of = first(&mut duplicate_of, id).map(|(_, reference)| reference);
         row.latest_update = first(&mut latest, id);
-        row.source = first(&mut pills, id);
+        row.source = if let Some((provider, locator, display)) = first(&mut pills, id) {
+            let description = match descriptions.entry(provider.clone()) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(crate::source::cached_description(connection, &provider)?)
+                }
+            };
+            let (provider_name, place, number, _) =
+                crate::source::display_parts(description.as_deref(), &provider, &locator, &display);
+            Some(SourcePill {
+                provider,
+                provider_name,
+                place,
+                number,
+                display,
+            })
+        } else {
+            None
+        };
     }
     Ok(())
 }

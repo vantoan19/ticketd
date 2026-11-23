@@ -211,7 +211,11 @@ test("the rail never offers Take ownership (the unavailable notice does), and lo
 });
 
 test("history words the takeover", () => {
-  expect(describeChange("ownership", "github", "local")).toBe(
-    "Took ownership from GitHub; the ticket is now local",
-  );
+  expect(
+    describeChange("ownership", "github", "local", {
+      project: () => undefined,
+      plan: () => undefined,
+      source: () => "GitHub",
+    }),
+  ).toBe("Took ownership from GitHub; the ticket is now local");
 });

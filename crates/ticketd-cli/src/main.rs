@@ -711,7 +711,7 @@ enum Command {
     Workspace,
     /// Show a ticket by its reference
     Show { reference: String },
-    /// Connect and configure ticket sources such as GitHub
+    /// Connect and configure ticket sources
     Source {
         #[command(subcommand)]
         command: SourceCommand,
@@ -722,7 +722,7 @@ enum Command {
 /// key or separate values with commas to fill a list) and an optional JSON file.
 #[derive(Args, Default)]
 struct SourceSettings {
-    /// A source setting, for example repositories=owner/name or assignee=octocat
+    /// A key and value from this provider’s schema. See `ticketd source list`
     #[arg(long = "set", value_name = "KEY=VALUE")]
     set: Vec<String>,
     /// A JSON object of settings from a file or - for stdin; --set values win
@@ -738,7 +738,7 @@ enum SourceCommand {
     Show { provider: String },
     /// Verify credentials and permissions and name the account in use
     Test { provider: String },
-    /// Suggest values for a setting that offers them (such as repositories)
+    /// Suggest values for a setting that offers them
     Options {
         provider: String,
         field: String,
@@ -779,11 +779,11 @@ enum SourceCommand {
     Publish {
         /// The local ticket to publish, for example T-KQ12
         ticket: String,
-        #[arg(long, default_value = "github")]
-        provider: String,
-        /// Where to create the issue, for example owner/name; optional when only
-        /// one repository is configured. Must be one of the saved source's
-        /// repositories (case-insensitive); anything else is refused
+        /// The source provider. Can be omitted when only one can publish
+        #[arg(long)]
+        provider: Option<String>,
+        /// Where to create the issue. Must be one of the source’s saved
+        /// destinations. Can be omitted when there is only one
         #[arg(long)]
         destination: Option<String>,
         /// Print the title, description, destination and eligibility; create nothing
@@ -802,14 +802,14 @@ enum SourceCommand {
     Resolve {
         /// The ticket with the unresolved publication, for example T-KQ12
         ticket: String,
-        /// The issue that was created: a number, owner/name#number or a link in the
-        /// destination. GitHub verifies it before it is attached
+        /// The issue that was created, identified by the source’s reference
+        /// or link. The source verifies it before it is attached
         #[arg(long, conflicts_with = "not_created")]
         issue: Option<String>,
         /// Attach the issue the attempt already recorded, when it recorded one
         #[arg(long, conflicts_with = "not_created")]
         attach: bool,
-        /// Confirm nothing was created. Accepted only when GitHub's recent issues in the
+        /// Confirm nothing was created. Accepted only when the source’s recent issues in the
         /// destination are read completely and none matches; otherwise it stays unresolved
         #[arg(long)]
         not_created: bool,
@@ -851,7 +851,7 @@ struct FindArgs {
     /// Include the named parent ticket and its subtickets
     #[arg(long)]
     family: Option<String>,
-    /// Only tickets owned by a source (for example github) or only local ones (local)
+    /// Only tickets owned by a given provider, or only local ones (local)
     #[arg(long)]
     source: Option<String>,
     /// Return at most this many results (1-100)
@@ -1274,7 +1274,7 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
         "activities" => "Include activities",
         "evidence" => "Include evidence",
         "backlinks" => "Include incoming references",
-        "provider" => "The source provider, for example github",
+        "provider" => "A provider id from `ticketd source list`",
         "field" => "The setting to suggest values for",
         "search" => "Only items whose title or text contains this",
         "relationship" => "Only this kind of relationship",
@@ -2086,8 +2086,9 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         Command::Source {
             command: SourceCommand::Refresh { ticket },
         } => {
+            let engine = ticketd_core::source::Engine::builtin();
             let report = workspace.refresh_sources(
-                &ticketd_core::source::Engine::builtin(),
+                &engine,
                 &ticketd_core::source::RefreshOptions { ticket, now: None },
             )?;
             // The report is always printed; a failed refresh also fails the command so
@@ -2100,7 +2101,9 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     failure.code,
                     failure.message,
                     if failure.code == "unauthenticated" {
-                        format!(" {}", token_hint())
+                        engine.description(&failure.provider).ok().and_then(|description|
+                            description.presentation.sign_in.terminal_hint
+                        ).map_or_else(String::new, |hint| format!(" {hint}"))
                     } else {
                         String::new()
                     }
@@ -2121,6 +2124,10 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 },
         } => {
             let engine = ticketd_core::source::Engine::builtin();
+            let provider = match provider {
+                Some(provider) => provider,
+                None => workspace.default_publication_provider(&engine)?,
+            };
             if preview {
                 serde_json::to_string(&workspace.preview_publication(
                     &engine,
@@ -2154,9 +2161,13 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                         ticketd_core::source::PublicationError::Ineligible {
                             reason: ticketd_core::source::IneligibleReason::SourceNotConnected,
                             ..
-                        } => format!(
-                            "{error}; from the command line, run `ticketd source save {provider} --set repositories=owner/name`"
-                        ),
+                        } => {
+                            let target = engine.description(&provider)?.presentation.target;
+                            let example = target.map_or_else(String::new, |target| {
+                                format!(" --set {}={}", target.field, target.example)
+                            });
+                            format!("{error}; from the command line, run `ticketd source save {provider}{example}`")
+                        }
                         ticketd_core::source::PublicationError::Unresolved { .. } => format!(
                             "{error}. Do not publish {ticket} again by hand; run `ticketd source resolve {ticket}` to review the open attempt and settle it"
                         ),
@@ -2289,10 +2300,10 @@ fn source_command(
     Ok(match command {
         SourceCommand::List => {
             let mut sources = Vec::new();
-            for descriptor in engine.connectors() {
-                let saved = workspace.saved_source(&descriptor.provider)?;
+            for description in engine.descriptions() {
+                let saved = workspace.saved_source(&description.descriptor.provider)?;
                 sources.push(output::SourceListing {
-                    connector: descriptor,
+                    connector: description,
                     saved,
                 });
             }
@@ -2340,11 +2351,6 @@ fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
     Err("refresh and publish are handled before source configuration commands".into())
 }
 
-/// The command line's own way to sign in; the desktop app has its own guidance.
-fn token_hint() -> &'static str {
-    ticketd_core::source::SourceError::sign_in_hint(ticketd_core::source::Surface::Terminal)
-}
-
 fn main() {
     ticketd_diagnostics::init_cli();
     let origin = Origin::from_environment();
@@ -2362,19 +2368,16 @@ fn main() {
                 .map_or("other", |error| error.kind().code()),
             "command failed"
         );
-        use ticketd_core::source::SourceError;
-        let unauthenticated = match error.downcast_ref::<ticketd_core::Error>() {
-            Some(ticketd_core::Error::Source(SourceError::Unauthenticated(_))) => true,
-            _ => matches!(
-                error.downcast_ref::<SourceError>(),
-                Some(SourceError::Unauthenticated(_))
-            ),
+        use ticketd_core::source::{SourceError, Surface};
+        let source = match error.downcast_ref::<ticketd_core::Error>() {
+            Some(ticketd_core::Error::Source(source)) => Some(source),
+            _ => error.downcast_ref::<SourceError>(),
         };
-        if unauthenticated {
-            eprintln!("error: {error} {}", token_hint());
-        } else {
-            eprintln!("error: {error}");
-        }
+        let message = source.map_or_else(
+            || error.to_string(),
+            |source| source.message_for(Surface::Terminal),
+        );
+        eprintln!("error: {message}");
         std::process::exit(1);
     }
 }

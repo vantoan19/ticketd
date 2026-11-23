@@ -58,6 +58,44 @@ const schemaFieldSchema = lazySchema(() =>
 );
 export type SchemaField = z.infer<typeof schemaFieldSchema>;
 
+const fieldPresentationSchema = lazySchema(() =>
+  z.object({
+    placeholder: z.string().nullish(),
+    additional_placeholder: z.string().nullish(),
+  }),
+);
+export type FieldPresentation = z.infer<typeof fieldPresentationSchema>;
+
+const presentationSchema = lazySchema(() =>
+  z.object({
+    icon_svg: z.string().nullish(),
+    sign_in: z.object({
+      terminal_hint: z.string().nullish(),
+      desktop_hint: z.string().nullish(),
+      desktop_instruction: z.string().nullish(),
+    }),
+    fields: z.record(z.string(), fieldPresentationSchema),
+    target: z
+      .object({
+        field: z.string(),
+        label: z.string(),
+        example: z.string(),
+        choose: z.string(),
+        add: z.string(),
+      })
+      .nullish(),
+    discovery_note: z.string().nullish(),
+    pull_request_link: z
+      .object({ host: z.string(), segment: z.string() })
+      .nullish(),
+    hosts: z.array(z.string()),
+  }),
+);
+const summaryPartSchema = lazySchema(() =>
+  z.object({ text: z.string(), emphasis: z.boolean() }),
+);
+export type SummaryPart = z.infer<typeof summaryPartSchema>;
+
 const connectorSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
@@ -65,6 +103,7 @@ const connectorSchema = lazySchema(() =>
     contract_version: z.number(),
     capabilities: z.array(z.string()),
     schema: z.object({ fields: z.array(schemaFieldSchema) }),
+    presentation: presentationSchema.optional(),
   }),
 );
 export type Connector = z.infer<typeof connectorSchema>;
@@ -91,6 +130,16 @@ const sourceEntrySchema = lazySchema(() =>
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;
 
+export function providerName(
+  provider: string,
+  entries: readonly SourceEntry[],
+): string {
+  return (
+    entries.find(({ connector }) => connector.provider === provider)?.connector
+      .name ?? provider
+  );
+}
+
 const previewSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
@@ -98,6 +147,7 @@ const previewSchema = lazySchema(() =>
     issues: z.array(
       z.object({
         display: z.string(),
+        label: z.string().optional(),
         url: z.string(),
         title: z.string(),
         ticket: z.string().nullish(),
@@ -302,7 +352,7 @@ export const sourcesClient = {
   },
   /**
    * What is known and unknown about an unresolved publication and the safe next
-   * actions. With `search`, GitHub is asked for issues that may be the one created.
+   * actions. With `search`, the source is asked for issues that may be the one created.
    */
   async reviewPublication(reference: string, search: boolean) {
     return publicationReviewSchema.parse(
@@ -340,6 +390,15 @@ export const sourcesClient = {
     return connectionSchema.parse(
       await structured(invoke("source_check_connection", { provider, config })),
     );
+  },
+  async configurationSummary(provider: string, config: SourceConfig) {
+    return z
+      .array(summaryPartSchema)
+      .parse(
+        await structured(
+          invoke("source_configuration_summary", { provider, config }),
+        ),
+      );
   },
   async options(
     provider: string,

@@ -1,3 +1,4 @@
+import { useSources } from "@/features/settings/sources/use-sources";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { StatusLineContext } from "@/components/ui/use-status-line";
 import { useStickyGroupHeadings } from "@/components/ui/use-sticky-group-headings";
@@ -464,6 +465,7 @@ function InboxContent({
   /** The ticket open beside the Inbox. */
   selected?: string | null;
 }) {
+  const { entries: sourceEntries } = useSources();
   const attention = useInboxAttention()!;
   const triage = useInboxTriage();
   const [held, setHeld] = useState<Attention | null>(null);
@@ -1005,7 +1007,7 @@ function InboxContent({
                           : {progressBrief(e.to_value)}
                         </>
                       ) : (
-                        summarize(e)
+                        summarize(e, sourceEntries)
                       )
                     }
                     icon={

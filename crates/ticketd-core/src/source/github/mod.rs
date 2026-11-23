@@ -13,6 +13,8 @@ use transport::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport}
 use serde_json::Value;
 
 use super::{
+    FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourcePresentation, SummaryPart,
+    TargetPresentation,
     contract::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
@@ -25,9 +27,9 @@ use super::{
     },
 };
 
-pub(crate) const PROVIDER: &str = "github";
+const PROVIDER: &str = "github";
 /// What people call this provider.
-pub(crate) const DISPLAY_NAME: &str = "GitHub";
+const DISPLAY_NAME: &str = "GitHub";
 const DEFAULT_API_URL: &str = "https://api.github.com";
 /// Overrides the API address, for GitHub Enterprise or a test server.
 pub(crate) const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
@@ -362,6 +364,98 @@ impl Connector for GithubConnector {
             ],
             schema: Self::schema(),
         }
+    }
+
+    fn presentation(&self) -> SourcePresentation {
+        SourcePresentation {
+            icon_svg: Some(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/></svg>"#.into()),
+            issue_name: IssueName {
+                separator: "#".into(),
+                separator_in_number: true,
+                place_separator: Some("/".into()),
+            },
+            sign_in: SignInGuidance {
+                terminal_hint: Some("From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.".into()),
+                desktop_hint: Some("Then choose Check connection in Settings.".into()),
+                desktop_instruction: Some("Run “gh auth login” in a terminal, then choose Check connection.".into()),
+            },
+            fields: [
+                ("repositories".into(), FieldPresentation {
+                    placeholder: Some("e.g. acme/billing-api".into()),
+                    additional_placeholder: Some("Add another repository".into()),
+                }),
+                ("assignee".into(), FieldPresentation {
+                    placeholder: Some("e.g. octocat".into()),
+                    additional_placeholder: None,
+                }),
+                ("labels".into(), FieldPresentation {
+                    placeholder: Some("e.g. bug, payments".into()),
+                    additional_placeholder: None,
+                }),
+            ].into(),
+            target: Some(TargetPresentation {
+                field: "repositories".into(),
+                label: "Repository".into(),
+                example: "owner/name".into(),
+                choose: "Choose a repository".into(),
+                add: "Add a repository".into(),
+            }),
+            discovery_note: Some("Pull requests are not included.".into()),
+            pull_request_link: Some(PullRequestLink {
+                host: "github.com".into(),
+                segment: "pull".into(),
+            }),
+            hosts: vec![host_of(&self.api_url)],
+        }
+    }
+
+    fn configuration_summary(&self, config: &ConfigValues) -> Vec<SummaryPart> {
+        let repositories = Self::repositories(config);
+        let labels = strings(config.get("labels"));
+        let assignee = config
+            .get("assignee")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let plain = |text: &str| SummaryPart {
+            text: text.into(),
+            emphasis: false,
+        };
+        let emphasis = |text: String| SummaryPart {
+            text,
+            emphasis: true,
+        };
+        let mut summary = vec![
+            plain("Imports open issues from "),
+            emphasis(if repositories.is_empty() {
+                "no repository yet".into()
+            } else {
+                repositories.join(", ")
+            }),
+        ];
+        if let Some((last, rest)) = labels.split_last() {
+            summary.push(plain(if rest.is_empty() {
+                " that have the label "
+            } else {
+                " that have the labels "
+            }));
+            summary.push(emphasis(if rest.is_empty() {
+                last.clone()
+            } else {
+                format!("{} and {last}", rest.join(", "))
+            }));
+        }
+        summary.push(plain(", assigned to "));
+        summary.push(emphasis(
+            if assignee.is_empty() {
+                "anyone"
+            } else {
+                assignee
+            }
+            .into(),
+        ));
+        summary.push(plain("."));
+        summary
     }
 
     fn check_connection(&self, _config: &ConfigValues) -> Result<ConnectionInfo, SourceError> {

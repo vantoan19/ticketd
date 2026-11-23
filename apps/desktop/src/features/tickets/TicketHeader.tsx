@@ -224,7 +224,7 @@ export function TicketHeader({
               <SourceLink url={owner.url} className="header-source-link">
                 <span className="sr-only">Open on {owner.provider_name}: </span>
                 <span className="header-source-place">
-                  {owner.place.replace("/", " / ")}
+                  {owner.place_label ?? owner.place}
                 </span>{" "}
                 <span className="source-number">{owner.number}</span>
               </SourceLink>
@@ -348,7 +348,7 @@ export function TicketHeader({
                               reason: publicationReason(preview),
                             })}
                         >
-                          Publish to {preview?.provider_name ?? "GitHub"}…
+                          Publish to {preview?.provider_name ?? target?.name}…
                         </DropdownMenuItem>
                       )}
                       {!ticket.trashed && (

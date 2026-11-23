@@ -1369,7 +1369,7 @@ impl From<ticketd_core::source::SourceError> for SourceFailure {
 
 #[derive(serde::Serialize)]
 struct SourceEntry {
-    connector: ticketd_core::source::ConnectorDescriptor,
+    connector: ticketd_core::source::SourceDescription,
     saved: Option<ticketd_core::source::SavedSource>,
 }
 
@@ -1380,10 +1380,10 @@ fn list_sources() -> Result<Vec<SourceEntry>, SourceFailure> {
     let workspace = open_workspace()?;
     let engine = ticketd_core::source::Engine::builtin();
     engine
-        .connectors()
+        .descriptions()
         .into_iter()
         .map(|connector| {
-            let saved = workspace.saved_source(&connector.provider)?;
+            let saved = workspace.saved_source(&connector.descriptor.provider)?;
             Ok(SourceEntry { connector, saved })
         })
         .collect()
@@ -1403,6 +1403,13 @@ fn source_options(
     config: ticketd_core::source::ConfigValues,
 ) -> Result<Vec<ticketd_core::source::ChoiceOption>, SourceFailure> {
     Ok(ticketd_core::source::Engine::builtin().options(&provider, &field, &query, &config)?)
+}
+#[tauri::command(async)]
+fn source_configuration_summary(
+    provider: String,
+    config: ticketd_core::source::ConfigValues,
+) -> Result<Vec<ticketd_core::source::SummaryPart>, SourceFailure> {
+    Ok(ticketd_core::source::Engine::builtin().configuration_summary(&provider, &config)?)
 }
 #[tauri::command(async)]
 fn source_preview(
@@ -1460,7 +1467,7 @@ fn preview_publication(
     )?)
 }
 
-/// Publishes a local ticket once. The attempt is saved before GitHub is called and
+/// Publishes a local ticket once. The attempt is saved before the provider is called and
 /// no database handle is held while waiting; an unknown outcome comes back as a
 /// `publication_unresolved` failure and stays on the ticket.
 #[tauri::command(async)]
@@ -1970,6 +1977,7 @@ pub fn run() -> Result<(), tauri::Error> {
             count_by_source,
             source_check_connection,
             source_options,
+            source_configuration_summary,
             source_preview,
             save_source,
             last_backup,

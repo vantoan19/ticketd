@@ -46,6 +46,8 @@ const ticketSourceSchema = lazySchema(() =>
     provider_name: z.string(),
     /** Where the issue lives, such as "owner/repo". */
     place: z.string(),
+    place_label: z.string().optional(),
+    duplicate_number: z.string().optional(),
     /** The provider's short number for the issue, such as "#98". */
     number: z.string(),
     id: z.string(),

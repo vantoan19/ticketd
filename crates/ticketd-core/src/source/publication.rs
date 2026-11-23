@@ -769,16 +769,17 @@ fn eligibility(
             format!("{reference} is in the trash; restore it to publish it"),
         ));
     }
-    let owned: Option<(String, String, String)> = connection
+    let owned: Option<(String, String, String, String)> = connection
         .query_row(
-            "SELECT o.authority, i.origin, i.display FROM external_identities i \
+            "SELECT o.authority, i.origin, i.display, i.provider FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.ticket_id = ?1",
             [&ticket.id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()?;
     match owned {
-        Some((authority, origin, display)) if authority == "external" => {
+        Some((authority, origin, display, provider)) if authority == "external" => {
+            let provider_name = super::provider_display_name(connection, &provider)?;
             let message = if origin == "imported" {
                 format!(
                     "{reference} was imported from {display} on {provider_name}; only local tickets are published"
@@ -790,7 +791,8 @@ fn eligibility(
             };
             return Ok(ineligible(IneligibleReason::ExternallyOwned, message));
         }
-        Some((_, _, display)) => {
+        Some((_, _, display, provider)) => {
+            let provider_name = super::provider_display_name(connection, &provider)?;
             return Ok(ineligible(
                 IneligibleReason::ProvenanceRetained,
                 format!(
@@ -929,6 +931,36 @@ impl Workspace {
             config: saved.config,
             destinations,
         }))
+    }
+
+    /// Selects an implicit publication provider when the choice is unambiguous.
+    pub fn default_publication_provider(&self, engine: &Engine) -> Result<String, Error> {
+        let publishing: Vec<_> = engine
+            .connectors()
+            .into_iter()
+            .filter(|connector| connector.capabilities.contains(&super::Capability::Publish))
+            .map(|connector| connector.provider)
+            .collect();
+        if let [provider] = publishing.as_slice() {
+            return Ok(provider.clone());
+        }
+        let saved = self.saved_sources()?;
+        let connected: Vec<_> = publishing
+            .iter()
+            .filter(|provider| saved.iter().any(|source| &source.provider == *provider))
+            .collect();
+        match connected.as_slice() {
+            [provider] => Ok((*provider).clone()),
+            _ if publishing.is_empty() => Err(SourceError::Unsupported("publishing").into()),
+            _ => Err(SourceError::InvalidConfiguration(vec![super::FieldIssue {
+                field: "provider".into(),
+                message: format!(
+                    "must be selected with --provider; choose one of: {}",
+                    publishing.join(", ")
+                ),
+            }])
+            .into()),
+        }
     }
 
     /// What publishing `reference` would send and whether it is allowed. Makes no
@@ -1593,7 +1625,7 @@ impl Workspace {
                     field: "source".into(),
                     message: format!(
                         "connect {} again before resolving this publication",
-                        super::provider_display_name(&attempt.provider)
+                        super::provider_display_name(&self.connection, &attempt.provider)?
                     ),
                 },
             ])));

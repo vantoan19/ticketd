@@ -1,4 +1,11 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { AlignLeft, CircleDot, Link, RefreshCw, UserRound } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
@@ -9,6 +16,7 @@ import {
 } from "@/lib/api/describe-failure";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
+import { SourceIcon } from "./SourceIcon";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
@@ -38,8 +46,8 @@ import {
   type DiscoveryPreview,
   type SavedSource,
   type SourceEntry,
-  type SourceConfig,
   type SourceFailure,
+  type SummaryPart,
 } from "@/lib/api/sources";
 
 type Busy = "previewing" | "saving" | null;
@@ -73,9 +81,10 @@ const SIGNED_OUT: readonly string[] = [
  * sign-in, not "connecting again", and the way to it is named.
  */
 function signInStep(connector: SourceEntry["connector"]) {
-  return connector.provider === "github"
-    ? "Run “gh auth login” in a terminal, then choose Check connection."
-    : `Sign in to ${connector.name} on this computer, then choose Check connection.`;
+  return (
+    connector.presentation?.sign_in.desktop_instruction ??
+    `Sign in to ${connector.name} on this computer, then choose Check connection.`
+  );
 }
 
 function fieldErrors(failure: SourceFailure | null) {
@@ -87,10 +96,12 @@ function fieldErrors(failure: SourceFailure | null) {
 
 function PreviewPanel({
   preview,
+  discoveryNote,
   refresh,
   busy,
 }: {
   preview: DiscoveryPreview;
+  discoveryNote: string | null | undefined;
   refresh: () => void;
   busy: boolean;
 }) {
@@ -114,8 +125,8 @@ function PreviewPanel({
             )}
             {preview.matched === 0
               ? "No open issues match these rules. You can still save them."
-              : `Checked as ${preview.account}; nothing has been imported.`}{" "}
-            Pull requests are not included.
+              : `Checked as ${preview.account}; nothing has been imported.`}
+            {discoveryNote && ` ${discoveryNote}`}
             {preview.issues.length < preview.matched &&
               ` Showing the first ${preview.issues.length}.`}
           </p>
@@ -139,7 +150,7 @@ function PreviewPanel({
                 <tr key={issue.display}>
                   <td>
                     <SourceLink url={issue.url} className="source-preview-ref">
-                      {issue.display.split("/").at(-1)}
+                      {issue.label ?? issue.display}
                     </SourceLink>
                   </td>
                   <td>{issue.title}</td>
@@ -165,47 +176,17 @@ function PreviewPanel({
   );
 }
 
-/** "a, b and c": the last item joined by "and". */
-function joinNames(items: string[]) {
-  return items.length < 2
-    ? items.join("")
-    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-}
-
-/**
- * The GitHub draft in one sentence, so the rules can be read at a glance.
- * Clauses that do not apply are left out.
- */
-function Readback({ config }: { config: SourceConfig }) {
-  const list = (key: string) => {
-    const value = config[key];
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string")
-      : [];
-  };
-  const repositories = list("repositories");
-  const labels = list("labels");
-  const assignee =
-    typeof config.assignee === "string" ? config.assignee.trim() : "";
+function Readback({ parts }: { parts: SummaryPart[] }) {
   return (
     <SettingsListFooter>
       <span className="source-readback" data-testid="source-readback">
         <AlignLeft size={16} aria-hidden="true" />
         <span>
-          Imports open issues from{" "}
-          <strong>
-            {repositories.length > 0
-              ? repositories.join(", ")
-              : "no repository yet"}
-          </strong>
-          {labels.length > 0 && (
-            <>
-              {" "}
-              that have the {labels.length === 1 ? "label" : "labels"}{" "}
-              <strong>{joinNames(labels)}</strong>
-            </>
-          )}
-          , assigned to <strong>{assignee || "anyone"}</strong>.
+          {parts.map(({ text, emphasis }, index) => (
+            <Fragment key={index}>
+              {emphasis ? <strong>{text}</strong> : text}
+            </Fragment>
+          ))}
         </span>
       </span>
     </SettingsListFooter>
@@ -227,6 +208,7 @@ export function SourceCard({
 }) {
   const now = useNow();
   const { connector } = entry;
+  const { presentation, provider } = connector;
   const schedule = useSourceActivity();
   const health = schedule.sources.find(
     (item) => item.provider === connector.provider,
@@ -256,6 +238,25 @@ export function SourceCard({
 
   const config = useMemo(() => configFromDraft(fields, draft), [fields, draft]);
   const key = configKey(config);
+  const [readback, setReadback] = useState<{
+    key: string;
+    parts: SummaryPart[];
+  } | null>(null);
+  useEffect(() => {
+    if (hidden) return;
+    let current = true;
+    void sourcesClient.configurationSummary(provider, config).then(
+      (parts) => {
+        if (current) setReadback({ key, parts });
+      },
+      () => {
+        if (current) setReadback(null);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [config, hidden, key, provider]);
   const dirty =
     saved === null
       ? Object.keys(config).length > 0
@@ -263,10 +264,12 @@ export function SourceCard({
   const preview = previewed?.key === key ? previewed.preview : null;
   const stale = previewed !== null && previewed.key !== key;
   const working = busy !== null;
-  const repositories = config.repositories;
-  const hasTarget = fields.some((field) => field.key === "repositories")
-    ? Array.isArray(repositories) && repositories.length > 0
-    : Object.keys(config).length > 0;
+  const targetField = presentation?.target;
+  const target = targetField ? config[targetField.field] : undefined;
+  const hasTarget =
+    !targetField ||
+    ((Array.isArray(target) || typeof target === "string") &&
+      target.length > 0);
   const canPreview = !working && hasTarget;
   const canSave = preview !== null && !working && (dirty || saved === null);
 
@@ -389,7 +392,7 @@ export function SourceCard({
         ? "Unsaved changes. Preview the matching issues before saving."
         : status === "saved"
           ? "These rules are saved. Matching issues are kept up to date automatically."
-          : "Not configured. Add a repository, then preview the matching issues.";
+          : `Not configured. ${targetField?.add ?? "Enter discovery rules"}, then preview the matching issues.`;
   // A failure that is not about one field is said where the next step is: the
   // save bar. Field problems stay under their fields (set SR-05).
   const barFailure =
@@ -493,6 +496,7 @@ export function SourceCard({
       group="Connections"
       label={connector.name}
       icon={CircleDot}
+      iconContent={<SourceIcon svg={presentation?.icon_svg} />}
       lede={`Bring matching ${connector.name} issues into this workspace. Their title, description, state and comments sync inward; ${connector.name} stays the place to edit them.`}
       endSlot={
         <StatusLabel tone={short.tone} size="caption">
@@ -589,6 +593,8 @@ export function SourceCard({
           <SettingsRow variant="stacked">
             <SchemaForm
               fields={fields}
+              presentation={presentation?.fields}
+              targetField={targetField?.field}
               draft={draft}
               errors={fieldErrors(failure)}
               disabled={working}
@@ -603,10 +609,13 @@ export function SourceCard({
               </p>
             )}
           </SettingsRow>
-          {connector.provider === "github" && <Readback config={config} />}
+          {readback?.key === key && readback.parts.length > 0 && (
+            <Readback parts={readback.parts} />
+          )}
           {preview && (
             <PreviewPanel
               preview={preview}
+              discoveryNote={presentation?.discovery_note}
               refresh={() => void previewMatches()}
               busy={working}
             />

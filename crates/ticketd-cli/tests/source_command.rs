@@ -187,6 +187,21 @@ fn list_describes_the_github_connector_and_its_schema() {
     let github = &listed[0];
     assert_eq!(github["connector"]["provider"], "github");
     assert_eq!(github["connector"]["contract_version"], 1);
+    let presentation = &github["connector"]["presentation"];
+    assert!(
+        presentation["icon_svg"]
+            .as_str()
+            .unwrap()
+            .starts_with("<svg")
+    );
+    assert_eq!(presentation["target"]["field"], "repositories");
+    assert_eq!(presentation["target"]["example"], "owner/name");
+    assert!(
+        presentation["sign_in"]["terminal_hint"]
+            .as_str()
+            .unwrap()
+            .contains("TICKETD_GITHUB_TOKEN")
+    );
     assert_eq!(github["saved"], Value::Null);
     let fields: Vec<_> = github["connector"]["schema"]["fields"]
         .as_array()

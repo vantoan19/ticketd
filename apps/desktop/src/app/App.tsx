@@ -865,11 +865,7 @@ function AppContent() {
                     sources: sourceHealth.sources,
                     entries: sourceEntries,
                     intervalSecs: sourceHealth.interval_secs ?? null,
-                    openSettings: () => {
-                      openView("settings");
-                      setSettingsSection("source-github");
-                    },
-                    openSourceSettings: (provider) => {
+                    openSettings: (provider) => {
                       openView("settings");
                       setSettingsSection(`source-${provider}`);
                     },

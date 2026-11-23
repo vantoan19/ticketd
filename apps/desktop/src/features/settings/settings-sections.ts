@@ -120,12 +120,17 @@ export const SEARCH_PAGE: SettingsPageMeta = {
 };
 
 /** The nav entry for an available source, listed under Connections. */
-export function sourceSection(provider: string, name: string) {
+export function sourceSection(
+  provider: string,
+  name: string,
+  iconSvg?: string | null,
+) {
   return {
     id: `source-${provider}` as const,
     label: name,
     group: "Connections" as const,
     icon: CircleDot as LucideIcon,
+    iconSvg,
   };
 }
 

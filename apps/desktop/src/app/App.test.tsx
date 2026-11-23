@@ -1,3 +1,4 @@
+import { beaconIcon, beaconSource, githubSource } from "@/test/source-fixtures";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
 import {
@@ -13060,6 +13061,45 @@ const reviewSourceEntry = {
     saved_at: "2026-02-01T00:00:00Z",
   },
 };
+
+test("Settings renders the registered providers' display data as text and an isolated icon", async () => {
+  await renderReviewApp({
+    list_sources: [githubSource, beaconSource],
+    source_check_connection: () => {
+      throw { code: "unauthenticated", message: "Signed out", fields: [] };
+    },
+    source_configuration_summary: [
+      { text: "Imports issues for ", emphasis: false },
+      { text: "PLATFORM", emphasis: true },
+      { text: ".", emphasis: false },
+    ],
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByRole("button", { name: "GitHub" });
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Beacon Tracker/ }),
+  );
+  const heading = await screen.findByRole("heading", {
+    name: "Beacon Tracker",
+  });
+  expect(
+    await screen.findByText("Open Beacon Console and sign in."),
+  ).toBeTruthy();
+  expect(screen.getByText("Use a Beacon team key.")).toBeTruthy();
+  expect(screen.getByPlaceholderText("e.g. PLATFORM")).toHaveProperty(
+    "value",
+    "PLATFORM",
+  );
+  expect((await screen.findByTestId("source-readback")).textContent).toBe(
+    "Imports issues for PLATFORM.",
+  );
+  const icon = heading.closest("header")?.querySelector("svg");
+  expect(icon?.querySelector("image")?.getAttribute("href")).toBe(
+    `data:image/svg+xml,${encodeURIComponent(beaconIcon)}`,
+  );
+  expect(icon?.querySelector("script")).toBeNull();
+});
 
 test("a known ticket keeps its saved wrapped title and body while a fresh detail read is pending", async () => {
   const ticket = bulkTicket(1, {
