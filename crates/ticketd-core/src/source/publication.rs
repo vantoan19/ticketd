@@ -2066,6 +2066,18 @@ impl Workspace {
                 source,
             })
         };
+        let too_soon = || {
+            unverified(SourceError::Unavailable(format!(
+                "the issues in {} would be read too soon to be conclusive, because a just-created issue may not be listed yet; look again after {}",
+                attempt.display_destination(),
+                ready_text(&attempt.lease_expires_at)
+            )))
+        };
+        // A listing that starts before the delay ends may return afterward.
+        // That read still cannot prove that the provider listed every new issue.
+        if !search_settled(&attempt.lease_expires_at, &clock(&self.connection, now)?) {
+            return Err(too_soon());
+        }
         let search = search_for(&self.connection, attempt, &source.account_key)?;
         let found = engine
             .find_published(&attempt.provider, &source.saved.config, &search)
@@ -2085,14 +2097,8 @@ impl Workspace {
         }
         crate::write_scope::run(&self.connection, |transaction| {
             let now = clock(transaction, now)?;
-            // The listing lags a creation by a few seconds, so a read this soon after
-            // the create call could last have landed may miss the issue it made.
             if !search_settled(&attempt.lease_expires_at, &now) {
-                return Err(unverified(SourceError::Unavailable(format!(
-                    "the issues in {} were read too soon to be conclusive, because a just-created issue may not be listed yet; look again after {}",
-                    attempt.display_destination(),
-                    ready_text(&attempt.lease_expires_at)
-                ))));
+                return Err(too_soon());
             }
             let changed = transaction.execute(
             "UPDATE publication_attempts SET status = 'failed', updated_at = ?2, failure_code = ?3, failure_message = ?4 \
