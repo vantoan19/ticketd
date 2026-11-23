@@ -117,12 +117,19 @@ export function tauriBuildConfig(version, updaterPublicKey) {
   return config;
 }
 
-const packageFiles = [
-  "package.json",
-  "apps/desktop/package.json",
-  "apps/chat-bridge-claude/package.json",
-  "apps/desktop/src-tauri/tauri.conf.json",
-];
+// The files whose top-level "version" is the release version: the root package, every npm
+// workspace (a new workspace joins automatically), and the desktop's Tauri configuration.
+// check-versions.mjs checks the same list.
+export function versionFiles(root) {
+  const { workspaces = [] } = JSON.parse(
+    readFileSync(join(root, "package.json"), "utf8"),
+  );
+  return [
+    "package.json",
+    ...workspaces.map((workspace) => `${workspace}/package.json`),
+    "apps/desktop/src-tauri/tauri.conf.json",
+  ];
+}
 
 // Replaces the top-level "version" field without reformatting the rest of the file.
 function setJsonVersion(text, file, version) {
@@ -181,7 +188,7 @@ export function setVersion(root, version) {
   }
   write("Cargo.lock", lock);
 
-  for (const file of packageFiles)
+  for (const file of versionFiles(root))
     write(file, setJsonVersion(read(file), file, version));
 
   const npmLock = JSON.parse(read("package-lock.json"));

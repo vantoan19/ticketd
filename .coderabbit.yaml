@@ -55,7 +55,8 @@ reviews:
         use pull_request_target. All jobs run on GitHub-hosted runners; flag any self-hosted runner.
         Distribution credentials belong only in jobs that build reviewed main commits: the
         manual main-branch Package workflow, and the Release workflow after Quality passes on a
-        push to main. The updater signing key reaches only a Release build that will be drafted.
+        push to main. Package builds may receive the updater signing key; among Release builds,
+        only one that will be drafted does.
     - path: "docs/adr/**"
       instructions: >-
         ADRs record decisions. Flag an edit that changes what an accepted decision means instead

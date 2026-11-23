@@ -10,6 +10,7 @@ import {
   parseVersion,
   setVersion,
   tauriBuildConfig,
+  versionFiles,
 } from "./release-version.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -99,11 +100,8 @@ function copyVersionFiles(t) {
   for (const file of [
     "Cargo.toml",
     "Cargo.lock",
-    "package.json",
     "package-lock.json",
-    "apps/desktop/package.json",
-    "apps/chat-bridge-claude/package.json",
-    "apps/desktop/src-tauri/tauri.conf.json",
+    ...versionFiles(root),
     ...members,
   ]) {
     mkdirSync(dirname(join(copy, file)), { recursive: true });
@@ -123,14 +121,15 @@ test("sets the version in every version file and only the workspace's own lockfi
   const { copy, members } = copyVersionFiles(t);
   setVersion(copy, "0.1.1-dryrun.1");
 
+  const workspaces = JSON.parse(
+    readFileSync(join(root, "package.json"), "utf8"),
+  ).workspaces;
   const changes = {
     "Cargo.toml": 1,
     "Cargo.lock": members,
-    "package.json": 1,
-    "package-lock.json": 4,
-    "apps/desktop/package.json": 1,
-    "apps/chat-bridge-claude/package.json": 1,
-    "apps/desktop/src-tauri/tauri.conf.json": 1,
+    // The lockfile's own version, its root package and each workspace's package.
+    "package-lock.json": 2 + workspaces.length,
+    ...Object.fromEntries(versionFiles(root).map((file) => [file, 1])),
   };
   for (const [file, count] of Object.entries(changes)) {
     const after = readFileSync(join(copy, file), "utf8");
