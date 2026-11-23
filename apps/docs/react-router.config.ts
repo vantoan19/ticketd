@@ -1,8 +1,7 @@
 import type { Config } from "@react-router/dev/config";
-import { copyFile, glob, readdir, rename, rmdir } from "node:fs/promises";
+import { copyFile, glob } from "node:fs/promises";
 import { join } from "node:path";
 import { createGetUrl, getSlugs } from "fumadocs-core/source";
-import { siteBase } from "./site-base.ts";
 
 const getUrl = createGetUrl("/docs");
 
@@ -10,7 +9,6 @@ const getUrl = createGetUrl("/docs");
 // written at build time, so any static web server can host the output.
 export default {
   appDirectory: "src",
-  basename: siteBase,
   ssr: false,
   routeDiscovery: { mode: "initial" },
   async prerender({ getStaticPaths }) {
@@ -26,14 +24,6 @@ export default {
   },
   async buildEnd({ reactRouterConfig }) {
     const root = join(reactRouterConfig.buildDirectory, "client");
-    if (siteBase !== "/") {
-      // React Router prerenders into the URL path. Pages mounts the uploaded
-      // artifact there already, alongside the assets emitted by Vite.
-      const routes = join(root, siteBase);
-      for (const name of await readdir(routes))
-        await rename(join(routes, name), join(root, name));
-      await rmdir(routes);
-    }
     await copyFile(join(root, "404/index.html"), join(root, "404.html"));
   },
 } satisfies Config;
