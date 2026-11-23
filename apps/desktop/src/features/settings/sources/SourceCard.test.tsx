@@ -8,10 +8,14 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { ConnectProjectSource } from "@/features/projects/ConnectProjectSource";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { SettingsView } from "@/features/settings/SettingsView";
+import { workspaceClient } from "@/lib/api/workspace";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 import {
   SourceFailure,
@@ -20,11 +24,18 @@ import {
   type SourceEntry,
 } from "@/lib/api/sources";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+Element.prototype.scrollIntoView ??= () => {};
+
 vi.mock("@/lib/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/sources")>()),
   sourcesClient: {
     list: vi.fn(),
     checkConnection: vi.fn(),
+    repositoryRoutes: vi.fn(),
+    previewConnectSource: vi.fn(),
+    connectSource: vi.fn(),
     options: vi.fn(),
     preview: vi.fn(),
     save: vi.fn(),
@@ -65,6 +76,197 @@ const entry: SourceEntry = {
   saved: null,
 };
 
+const savedRepositories: SourceEntry = {
+  ...entry,
+  saved: {
+    provider: "github",
+    config: { repositories: ["o/r", "other/repo"] },
+    account: "octo",
+    saved_at: "2026-01-01T00:00:00Z",
+  },
+};
+
+const repositoryRoutes = [
+  {
+    repository: "o/r",
+    project_remote: "github.example/o/r",
+    project: { id: "p1", name: "Desktop" },
+  },
+  {
+    repository: "other/repo",
+    project_remote: "github.example/other/repo",
+    project: null,
+  },
+];
+
+test("the project column shows saved repository routes while editing discovery", async () => {
+  vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
+  render(<SourceCard entry={savedRepositories} />);
+
+  const table = await screen.findByRole("table", {
+    name: "Saved repository routes",
+  });
+  expect(
+    within(table).getByRole("columnheader", { name: "Project" }),
+  ).toBeTruthy();
+  expect(
+    within(table).getByRole("row", { name: /o\/r.*Desktop/ }),
+  ).toBeTruthy();
+  const unlinked = within(table).getByRole("row", {
+    name: /other\/repo.*No project/,
+  });
+  expect(
+    within(unlinked).getByRole("button", { name: /Link to project/ }),
+  ).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove o/r" }));
+  await addRepository("draft/new");
+  expect(within(table).getByText("o/r")).toBeTruthy();
+  expect(within(table).queryByText("draft/new")).toBeNull();
+});
+
+function SourceCardWithProjectReview() {
+  const [projectId, setProjectId] = useState<string | null>(null);
+  return (
+    <>
+      <SourceCard entry={savedRepositories} onProjectLinked={setProjectId} />
+      {projectId && (
+        <ConnectProjectSource
+          projectId={projectId}
+          onClose={() => setProjectId(null)}
+          onSetup={() => {}}
+          onConnected={() => {}}
+        />
+      )}
+    </>
+  );
+}
+
+test("linking offers unclaimed projects and then reviews only backfill", async () => {
+  const linked = {
+    id: "p2",
+    name: "Backend",
+    path: "/checkout",
+    paths: ["/checkout"],
+    remote: "github.example/other/repo",
+  };
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "list_projects")
+      return [
+        { ...linked, remote: null },
+        { ...linked, id: "p1", name: "Already claimed" },
+      ];
+    if (command === "link_source_repository_project") {
+      vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue([
+        repositoryRoutes[0]!,
+        {
+          ...repositoryRoutes[1]!,
+          project: { id: linked.id, name: linked.name },
+        },
+      ]);
+      return linked;
+    }
+    throw new Error(`Unexpected command ${command}`);
+  });
+  vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
+  vi.mocked(sourcesClient.previewConnectSource).mockResolvedValue({
+    provider: "github",
+    project_id: linked.id,
+    repository: "other/repo",
+    project_remote: linked.remote,
+    source: "already_listed",
+    tickets: ["T-KQ142"],
+    fingerprint: "reviewed",
+  });
+  vi.mocked(sourcesClient.connectSource).mockResolvedValue({
+    repository_added: false,
+    linked_tickets: ["T-KQ142"],
+  });
+  render(<SourceCardWithProjectReview />);
+
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Link to project for other/repo",
+    }),
+  );
+  const picker = await screen.findByRole("combobox", { name: "Project" });
+  fireEvent.keyDown(picker, { key: "Enter" });
+  const backend = await screen.findByRole("option", { name: "Backend" });
+  expect(screen.queryByRole("option", { name: "Already claimed" })).toBeNull();
+  fireEvent.click(backend);
+  fireEvent.click(screen.getByRole("button", { name: "Link project" }));
+
+  const review = await screen.findByRole("dialog", {
+    name: "Connect project to GitHub",
+  });
+  expect(
+    await within(review).findByText("Link 1 existing ticket"),
+  ).toBeTruthy();
+  expect(within(review).queryByText(/Import issues/)).toBeNull();
+  fireEvent.click(within(review).getByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByRole("row", { name: /other\/repo.*Backend/ }),
+  ).toBeTruthy();
+  expect(sourcesClient.connectSource).toHaveBeenCalledWith(
+    "github",
+    "p2",
+    "reviewed",
+  );
+});
+
+test("create project chooses a checkout and uses the saved repository as the Project remote", async () => {
+  const created = {
+    id: "p3",
+    name: "Web Checkout",
+    path: "/work/Web checkout",
+    paths: ["/work/Web checkout"],
+    remote: "github.example/other/repo",
+  };
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue(created.path);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "list_projects") return [];
+    if (command === "create_project") return created;
+    throw new Error(`Unexpected command ${command}`);
+  });
+  vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
+  vi.mocked(sourcesClient.previewConnectSource).mockResolvedValue({
+    provider: "github",
+    project_id: created.id,
+    repository: "other/repo",
+    project_remote: created.remote,
+    source: "already_listed",
+    tickets: [],
+    fingerprint: "reviewed",
+  });
+  render(<SourceCardWithProjectReview />);
+
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Link to project for other/repo",
+    }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create project…" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "New project" });
+  expect(within(dialog).getByLabelText("Project remote")).toHaveProperty(
+    "value",
+    created.remote,
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Choose…" }));
+  await within(dialog).findByDisplayValue(created.name);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Create project" }),
+  );
+
+  expect(await screen.findByText("No existing tickets to link.")).toBeTruthy();
+  expect(invoke).toHaveBeenCalledWith("create_project", {
+    name: created.name,
+    path: created.path,
+    remote: created.remote,
+  });
+});
+
 const preview: DiscoveryPreview = {
   provider: "github",
   account: "octo",
@@ -84,6 +286,7 @@ const preview: DiscoveryPreview = {
 
 beforeEach(() => {
   vi.mocked(sourcesClient.options).mockResolvedValue([]);
+  vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue([]);
   vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
     account: "octo",
   });
@@ -91,6 +294,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.mocked(invoke).mockReset();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -131,7 +336,7 @@ async function addLabel(name: string) {
 }
 
 async function addRepository(name: string) {
-  const input = screen.getByLabelText(/Repositories/);
+  const input = screen.getByRole("textbox", { name: /^Repositories/ });
   fireEvent.change(input, { target: { value: name } });
   fireEvent.keyDown(input, { key: "Enter" });
   await screen.findByRole("button", { name: `Remove ${name}` });

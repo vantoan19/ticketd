@@ -309,6 +309,25 @@ fn ensure_path_free(connection: &Connection, path: &str, project_id: &str) -> Re
     }
 }
 
+pub(crate) fn link_remote_if_unset(
+    tx: &crate::write_scope::WriteScope<'_>,
+    id: &str,
+    remote: &str,
+) -> Result<Project, Error> {
+    let mut project = find(tx, id)?;
+    if project.remote.is_some() {
+        return Err(Error::ProjectAlreadyHasRemote(project.name));
+    }
+    let remote = validate_remote(remote)?;
+    ensure_remote_free(tx, &remote, id)?;
+    tx.execute(
+        "UPDATE projects SET remote = ?1 WHERE id = ?2",
+        params![remote, id],
+    )?;
+    project.remote = Some(remote);
+    Ok(project)
+}
+
 fn ensure_remote_free(
     connection: &Connection,
     remote: &str,

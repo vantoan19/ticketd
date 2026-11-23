@@ -4,11 +4,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::{
-    Engine, SavedSource, SourceError, persist_source, provider_display_name, saved_source,
+    Engine, REPOSITORIES, SavedSource, SourceError, persist_source, provider_display_name,
+    saved_source,
 };
 use crate::{Error, Workspace, projects, read_scope, ticket_change, write_scope};
-
-const REPOSITORIES: &str = "repositories";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

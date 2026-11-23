@@ -48,6 +48,7 @@ export function SettingsView({
   onSelect,
   projectSourceSetup,
   onProjectSourceSaved,
+  onProjectLinked,
   selected: chosen = "appearance",
 }: {
   selected?: SettingsPageId;
@@ -58,6 +59,7 @@ export function SettingsView({
   onOpenInbox: () => void;
   projectSourceSetup?: ProjectSourceSetup;
   onProjectSourceSaved?: () => void;
+  onProjectLinked?: (projectId: string) => void;
 }) {
   // The parent mounts this only while Settings is open, so every page reads
   // fresh data on each visit. A restore or a download replaces the workspace
@@ -118,6 +120,7 @@ export function SettingsView({
           key={`${restores}:${entry.connector.provider}`}
           entry={entry}
           active={selected === `source-${entry.connector.provider}`}
+          {...(onProjectLinked && { onProjectLinked })}
           {...(projectSourceSetup?.provider === entry.connector.provider && {
             initialRepository: projectSourceSetup.repository,
             ...(onProjectSourceSaved && { onSaved: onProjectSourceSaved }),

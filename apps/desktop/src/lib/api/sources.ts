@@ -91,6 +91,15 @@ const sourceEntrySchema = lazySchema(() =>
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;
 
+const sourceRepositoryRouteSchema = lazySchema(() =>
+  z.object({
+    repository: z.string(),
+    project_remote: z.string().nullable(),
+    project: z.object({ id: z.string(), name: z.string() }).nullable(),
+  }),
+);
+export type SourceRepositoryRoute = z.infer<typeof sourceRepositoryRouteSchema>;
+
 const previewSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
@@ -363,6 +372,11 @@ export const sourcesClient = {
     return z
       .array(sourceEntrySchema)
       .parse(await structured(invoke("list_sources")));
+  },
+  async repositoryRoutes(provider: string) {
+    return z
+      .array(sourceRepositoryRouteSchema)
+      .parse(await invoke("source_repository_routes", { provider }));
   },
   async checkConnection(provider: string, config: SourceConfig) {
     return connectionSchema.parse(

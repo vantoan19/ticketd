@@ -745,6 +745,19 @@ export const client = {
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
   },
+  async linkSourceRepositoryProject(
+    provider: string,
+    repository: string,
+    projectId: string,
+  ) {
+    return projectSchema.parse(
+      await invoke("link_source_repository_project", {
+        provider,
+        repository,
+        projectId,
+      }),
+    );
+  },
   async detectProjectRemote(path: string) {
     return projectRemoteDetectionSchema.parse(
       await invoke("detect_project_remote", { path }),
