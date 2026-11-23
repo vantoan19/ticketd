@@ -1,0 +1,81 @@
+---
+title: Quickstart
+description: Make a Plan, hand one ticket to an AI agent and see the next ticket become ready.
+---
+
+Open the desktop app beside a terminal with the [CLI on PATH](/docs/install). Both should run as the same OS user. The commands print JSON. Keep the IDs and references returned by your own workspace.
+
+<Steps>
+<Step>
+
+## Write down what success looks like
+
+Create a [Document](/docs/concepts/context) with the requirements, then make the Plan.
+
+```sh
+ticketd document create --title "Login hardening spec" --body "Limit repeated failed sign-ins and show when another attempt is allowed."
+ticketd plan create "Login hardening"
+```
+
+Use the `id` from each result in place of `DOCUMENT_ID` and `PLAN_ID`.
+
+```sh
+ticketd plan purpose PLAN_ID "Make repeated sign-in attempts safe."
+ticketd plan spec PLAN_ID DOCUMENT_ID
+```
+
+</Step>
+<Step>
+
+## Create work a person can review
+
+```sh
+ticketd create "Rate-limit failed logins" --plan PLAN_ID
+ticketd create "Alert on repeated failures" --plan PLAN_ID
+```
+
+Use the `reference` from each result in the remaining commands. In the site’s demonstration they are `T-LG12` and `T-LG13`. Your device issues its own references.
+
+```sh
+ticketd add-dependency T-LG12 T-LG13
+ticketd list --availability ready --plan PLAN_ID
+```
+
+The first ticket blocks the second. In the Plan’s **Flow** view, the limiter can start now and alerting waits for it.
+
+</Step>
+<Step>
+
+## Hand the first ticket to an AI agent
+
+In the desktop app, follow the limiter ticket to see its updates in your Inbox. An agent can read context, take the work into progress and post evidence through the CLI.
+
+```sh
+ticketd context T-LG12 --plan --relationships
+ticketd change T-LG12 --status "In progress" --agent coding-agent
+ticketd evidence add T-LG12 --kind branch --name "Limiter branch" --value auth/login-limiter --agent coding-agent
+```
+
+When the work is ready, the agent reports the result and asks for review.
+
+```sh
+ticketd activity add T-LG12 --brief "The limiter passes the boundary tests. Ready for review." --agent coding-agent
+ticketd change T-LG12 --status "In review" --agent coding-agent
+```
+
+</Step>
+<Step>
+
+## Review the work and release the next ticket
+
+Open **Inbox → Needs you**. Read the update, open the ticket and check the evidence. When you accept the work, move the ticket to **Done** in the desktop app or use the CLI.
+
+```sh
+ticketd change T-LG12 --status Done
+ticketd list --availability ready --plan PLAN_ID
+```
+
+The alerting ticket is now Ready. The [agent guide](/docs/agents/connect) explains how to give your harness the same commands.
+
+</Step>
+</Steps>

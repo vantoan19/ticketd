@@ -1,0 +1,393 @@
+.hero {
+  overflow: clip;
+}
+.hero-lead {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  align-items: center;
+  gap: 6%;
+  padding-top: clamp(28px, 3.2vw, 54px);
+  padding-bottom: clamp(28px, 2.5vw, 42px);
+}
+.hero h1,
+.journey h2,
+.destination h2 {
+  font-weight: 500;
+  letter-spacing: -0.064em;
+  line-height: 1.02;
+  margin: 0;
+  text-wrap: balance;
+}
+.hero h1 {
+  font-size: clamp(42px, 4.6vw, 75px);
+}
+.hero-intro {
+  max-width: 420px;
+  justify-self: end;
+}
+.hero-intro p {
+  font-size: clamp(15px, 1.2vw, 19px);
+  line-height: 1.5;
+  letter-spacing: -0.016em;
+  margin: 0 0 15px;
+}
+.hero-installation {
+  position: relative;
+  isolation: isolate;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+.monitor {
+  position: relative;
+  z-index: 1;
+  width: clamp(675px, 57%, 915px);
+  margin: 0 auto;
+  background: var(--face-left);
+  border: 1.4px solid var(--drawing-ink);
+  border-radius: 7px 7px 2px 2px;
+  padding: 0 7px;
+  box-shadow:
+    4px -4px 0 -1.4px var(--face-top),
+    4px -4px 0 0 var(--drawing-ink),
+    5px 3px 0 -1px var(--face-right),
+    5px 3px 0 0 var(--drawing-ink);
+}
+.monitor::after {
+  content: "";
+  position: absolute;
+  left: -1.5%;
+  right: -1.5%;
+  bottom: -6px;
+  height: 5px;
+  border: 1px solid var(--drawing-ink);
+  background: var(--face-left);
+}
+.monitor-toolbar,
+.demo-label,
+.demo-steps,
+.demo-step,
+.playback,
+.monitor-caption {
+  display: flex;
+  align-items: center;
+}
+.monitor-toolbar {
+  gap: 7px;
+  min-height: 42px;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+.demo-label,
+.caption-stage {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+.demo-label {
+  gap: 5px;
+  padding-left: 4px;
+}
+.demo-label i {
+  width: 5px;
+  height: 5px;
+  background: var(--blue);
+  border-radius: 50%;
+}
+.static-guide + .playback {
+  visibility: hidden;
+}
+.demo-steps {
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 3px;
+}
+.demo-step {
+  min-height: 30px;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.1;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.demo-step:hover,
+.playback:hover {
+  background: var(--paper);
+}
+.demo-step:is([aria-pressed="true"], [aria-current="step"]) {
+  background: var(--ink);
+  color: var(--paper);
+}
+.step-no {
+  min-width: 1.2lh;
+  min-height: 1.2lh;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--keyline);
+  border-radius: 50%;
+  font: 10px/1 var(--mono);
+}
+.demo-step:is([aria-pressed="true"], [aria-current="step"]) .step-no {
+  border-color: transparent;
+  color: var(--on-blue);
+  background: var(--blue);
+}
+.playback {
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  border: 1px solid var(--keyline);
+  border-radius: 4px;
+}
+.playback:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.monitor-caption {
+  gap: 10px;
+  padding: 7px 3px;
+  min-height: 32px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.caption-stage {
+  color: var(--ink-soft);
+}
+.world-wide,
+.world-tablet,
+.world-pocket {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+.hero-installation .world-wide {
+  /* The paper monitor meets the twin posts above the active loading bay. */
+  margin-top: -18.75%;
+  --display-stand: 1;
+  position: relative;
+  z-index: 0;
+}
+.world-tablet,
+.world-pocket {
+  display: none;
+}
+.map-label text {
+  font: 500 10px var(--mono);
+}
+
+.hero-platforms {
+  display: block;
+  margin-top: 9px;
+  color: var(--ink-soft);
+  font: 11px/1.4 var(--mono);
+}
+.hero-installation .desktop-display {
+  height: clamp(325px, 23.2vw, 352px);
+}
+@media (700px < width <= 1100px) {
+  .monitor {
+    width: clamp(625px, 75%, 820px);
+  }
+  .hero-installation .world-wide,
+  .destination-model .world-wide,
+  .destination-model .world-pocket {
+    display: none;
+  }
+  .hero-installation .world-tablet,
+  .destination-model .world-tablet {
+    display: block;
+    margin-top: -3.9%;
+  }
+  .hero-lead {
+    grid-template-columns: 1.18fr 1fr;
+    gap: 4%;
+    padding-block: 30px 37px;
+  }
+  .hero h1 {
+    font-size: clamp(36px, 4.8vw, 54px);
+  }
+  .hero-intro p {
+    font-size: 15px;
+  }
+  .hero-intro .action-row {
+    gap: 6px 13px;
+  }
+}
+@media (700px < width <= 900px) {
+  .hero-lead {
+    gap: 3%;
+    padding-block: 27px 32px;
+  }
+  .hero h1 {
+    font-size: clamp(33px, 4.53vw, 43px);
+  }
+  .hero-intro .action-primary {
+    padding-inline: 12px;
+  }
+  .hero-intro .action-secondary,
+  .hero-intro .action-primary {
+    gap: 6px;
+    font-size: 13px;
+  }
+}
+@media (max-width: 700px) {
+  .hero-lead {
+    display: block;
+    padding-block: 24px;
+  }
+  .hero h1 {
+    font-size: clamp(30px, 9.15vw, 53px);
+    letter-spacing: -0.055em;
+    line-height: 1.04;
+    text-wrap: initial;
+  }
+  .hero-intro {
+    max-width: 480px;
+    justify-self: start;
+    margin-top: 14px;
+  }
+  .hero-intro p {
+    font-size: 15px;
+    line-height: 1.46;
+    margin-bottom: 11px;
+  }
+  .hero .action-primary {
+    min-height: 40px;
+  }
+  .hero-platforms {
+    margin-top: 6px;
+    font-size: 10.5px;
+  }
+  .monitor {
+    width: calc(100% - 2 * var(--gutter));
+    max-width: 540px;
+    padding-inline: 5px;
+  }
+  .monitor-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px;
+    min-height: 65px;
+    padding: 5px 0;
+  }
+  .demo-label {
+    font-size: 10px;
+  }
+  .playback {
+    grid-row: 1;
+    grid-column: 2;
+    min-height: 24px;
+    width: 26px;
+    min-width: 24px;
+  }
+  .demo-steps {
+    grid-row: 2;
+    grid-column: 1/-1;
+    justify-content: space-between;
+  }
+  .demo-step {
+    gap: 4px;
+    padding: 5px;
+    font-size: 11px;
+    min-height: 30px;
+  }
+  .step-no {
+    width: 14px;
+    height: 14px;
+    font-size: 9px;
+  }
+  .hero-installation .desktop-display {
+    height: 229px;
+    /* The line box also follows a reader’s minimum font size. */
+    min-height: 11.6lh;
+  }
+  .monitor-caption {
+    min-height: 42px;
+    align-items: flex-start;
+    padding: 5px 3px;
+    font-size: 11.5px;
+  }
+  .caption-stage {
+    padding-top: 1px;
+  }
+  .world-wide {
+    display: none;
+  }
+  .world-pocket {
+    display: block;
+    width: min(100%, 530px);
+    margin: 0 auto;
+  }
+  .hero-installation .world-pocket {
+    margin-top: -6px;
+  }
+}
+@media (max-width: 1100px) and (max-height: 520px) and (orientation: landscape) {
+  .hero-lead {
+    padding-block: 14px 18px;
+  }
+  .hero h1 {
+    font-size: clamp(28px, 4.1vw, 39px);
+    text-wrap: balance;
+  }
+  .hero-intro {
+    margin-top: 8px;
+  }
+  .hero-intro p {
+    font-size: 14px;
+    line-height: 1.38;
+    margin-bottom: 7px;
+  }
+  .hero-intro .action-row {
+    gap: 4px 10px;
+  }
+  .hero .action-primary,
+  .hero .action-secondary {
+    min-height: 36px;
+    font-size: 13px;
+  }
+  .hero .action-primary {
+    padding-inline: 11px;
+  }
+  .hero-platforms {
+    margin-top: 4px;
+  }
+  @media (min-width: 520px) {
+    .hero-lead {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(270px, 1fr);
+      gap: 4%;
+    }
+    .hero-intro {
+      margin-top: 0;
+      justify-self: stretch;
+    }
+  }
+  @media (min-width: 560px) {
+    .monitor-toolbar {
+      display: flex;
+      min-height: 38px;
+      padding-block: 2px;
+    }
+    .demo-steps {
+      flex-wrap: nowrap;
+    }
+  }
+}
+@media (max-width: 375px) {
+  .demo-step {
+    padding-inline: 3px;
+    gap: 3px;
+  }
+  .step-no {
+    display: none;
+  }
+  .hero-intro .action-row {
+    gap: 8px 14px;
+  }
+}

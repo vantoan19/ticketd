@@ -1,0 +1,81 @@
+---
+title: Connect an agent
+description: Any agent that can run a shell command can use ticketd. Make the CLI available, set the project context, and tell the agent how to work.
+---
+
+ticketd does not replace your agent tools. Keep your editor, terminal or agent
+app; the agent takes part by running `ticketd`.
+
+## 1. Make the CLI available
+
+The agent needs `ticketd` on its `PATH`, in the same environment and as the same
+operating-system user as the desktop app. Check from inside the agent's shell:
+
+```sh
+ticketd --version
+ticketd workspace
+```
+
+`ticketd workspace` prints the workspace path, so you can confirm the agent and
+the app are looking at the same one. If the harness cannot find the executable,
+give it the absolute path. See [Install](/docs/install).
+
+## 2. Set the project context [#project-context]
+
+A project is a repository with a stable identity. Register each checkout, and
+tickets created from inside it are linked to that project automatically,
+including from nested directories.
+
+```sh
+ticketd project create web-app /path/to/web-app
+ticketd project register PROJECT_ID /path/to/another/checkout
+```
+
+- `--project PROJECT_ID` overrides the inferred project.
+- If a directory matches more than one project, the command fails.
+- From an unregistered directory, the new ticket is unlinked. The app shows this
+  as "No project".
+
+## 3. Give the agent the CLI guide
+
+From **Settings → Agent skills**, install the discovery skill for your harness. You can also install it from a terminal:
+
+```sh
+ticketd skills install --harness claude-code,codex
+```
+
+Restart or reload the harness if needed. For a project-local installation, pass its skill directory, such as `.claude/skills/ticketd`. Other harnesses can read the bundled guide directly:
+
+```sh
+ticketd skills get
+```
+
+Tell your agent which ticket to pick up and when you want a review. Give it the full reference from the workspace, such as `T-LG12`. The guide teaches the commands. You choose how they fit your project.
+
+## Work with an agent inside ticketd
+
+In **Settings → Chat**, turn on **Show Chat**. This experimental feature uses the Claude Code or Codex installation and sign-in on your computer. Open **Chats → New Chat**, choose the harness and a folder to work in, and link the ticket or Document the agent needs. The agent can write its update and evidence back to the ticket through the same CLI.
+
+To get a notification when a ticket is ready for review, open **Automations → New Automation**. Choose **Status changed**, set the destination status to **In review**, and add a **Notify me** step that opens the ticket. Save and switch on the Automation on the computer that should run it. You can inspect its runs there.
+
+## What the agent can rely on
+
+- **Workspace commands return JSON.** The skill-reading commands and help also produce readable text.
+- **Failures are loud.** An error goes to stderr with a nonzero exit code, and
+  no JSON is printed on stdout.
+- **Context is bounded.** `ticketd context` caps lists and long text, so a busy
+  ticket cannot flood the conversation. See
+  [Bounded context](/docs/agents/bounded-context).
+- **Retries are safe** when a request ID is supplied. See
+  [Reporting progress](/docs/agents/reporting#safe-retries).
+
+## Next
+
+<Cards>
+  <Card title="Bounded context" href="/docs/agents/bounded-context">
+    What an agent reads before it starts.
+  </Card>
+  <Card title="Reporting progress" href="/docs/agents/reporting">
+    Updates, evidence and safe retries.
+  </Card>
+</Cards>
