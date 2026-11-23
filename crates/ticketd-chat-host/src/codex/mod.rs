@@ -17,6 +17,7 @@ mod discovery;
 mod mapping;
 mod report;
 mod runtime;
+pub(crate) mod steps;
 #[cfg(test)]
 pub(crate) mod tests;
 mod ticket_tool;

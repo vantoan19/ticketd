@@ -40,6 +40,7 @@ pub enum StepAction {
     },
     Delete {
         paths: Vec<String>,
+        counts: LineCounts,
     },
     Run(RunAction),
     Web(WebAction),
@@ -130,6 +131,24 @@ impl From<StepAction> for ToolStep {
     }
 }
 
+/// Interpret saved evidence without opening the harness.
+pub fn read_tool_steps(harness: &str, evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
+    use ticketd_core::harnesses::HarnessKey;
+
+    if harness == HarnessKey::ClaudeCode.as_str() {
+        crate::claude::read_claude_steps(evidence)
+    } else if harness == HarnessKey::Codex.as_str() {
+        crate::codex::steps::read_codex_steps(evidence)
+    } else {
+        vec![
+            StepAction::Other {
+                name: evidence.name.to_owned(),
+            }
+            .into(),
+        ]
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct CommandFacts<'a> {
     pub working_directory: Option<&'a str>,
@@ -212,6 +231,7 @@ pub(crate) fn shell_step(
                     .into_iter()
                     .map(|target| target.text)
                     .collect(),
+                counts: LineCounts::default(),
             },
             Kind::Run if shell.variant == Some(Variant::Script) => {
                 StepAction::Run(RunAction::Script {

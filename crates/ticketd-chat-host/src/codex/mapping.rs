@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::report::{REOPEN_WITH, Reports};
+use super::steps::tool_detail;
 
 /// Live tool output kept between a command's start and its authoritative completion.
 const MAX_LIVE_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
@@ -86,6 +87,7 @@ enum RequestKind {
 struct ToolProgress {
     title: String,
     output: String,
+    input: Option<ProviderDetail>,
 }
 
 #[derive(Debug, Default)]
@@ -610,12 +612,14 @@ impl Session {
         if let Some(fields) = rest.as_object_mut() {
             fields.remove("aggregatedOutput");
         }
+        let detail = tool_detail(kind, &rest);
         if completed {
             self.tools.remove(id);
         } else {
             let progress = ToolProgress {
                 title: title.clone(),
                 output: String::new(),
+                input: (kind == "commandExecution").then(|| detail.clone()),
             };
             self.tools.insert(id.to_owned(), progress);
         }
@@ -625,7 +629,7 @@ impl Session {
             title,
             status,
             output,
-            detail: Some(detail(kind, &rest)),
+            detail: Some(detail),
         }
     }
 
@@ -633,6 +637,7 @@ impl Session {
         let progress = self.tools.entry(item.0.clone()).or_insert(ToolProgress {
             title: "Command".to_owned(),
             output: String::new(),
+            input: None,
         });
         progress.output.push_str(delta);
         let mut excess = progress
@@ -651,7 +656,7 @@ impl Session {
             title: progress.title.clone(),
             status: ToolStatus::Running,
             output: Some(progress.output.clone()),
-            detail: None,
+            detail: progress.input.clone(),
         }
     }
 

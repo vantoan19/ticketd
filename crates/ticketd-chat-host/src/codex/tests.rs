@@ -36,6 +36,111 @@ macro_rules! fixture {
     };
 }
 
+#[test]
+fn a_recorded_command_keeps_its_input_while_output_streams() {
+    let mut session = Session::default();
+    let mut inputs = std::collections::HashMap::new();
+    let mut streamed = 0;
+    for line in fixture!("recorded-steps").lines() {
+        let frame: Value = serde_json::from_str(line).expect("recorded frame");
+        let Some(method) = frame["server"]["method"].as_str() else {
+            continue;
+        };
+        let params = &frame["server"]["params"];
+        if !matches!(method, "item/started" | "item/commandExecution/outputDelta") {
+            continue;
+        }
+        for event in session.notification(method, params) {
+            let EventKind::ToolUpdated { item, detail, .. } = event else {
+                continue;
+            };
+            let input = detail.expect("running tool keeps its native input");
+            if method == "item/started" {
+                inputs.insert(item.0, input);
+            } else {
+                assert_eq!(&input, &inputs[&item.0]);
+                streamed += 1;
+            }
+        }
+    }
+    assert_eq!(streamed, 2);
+}
+
+#[test]
+fn recorded_steps_keep_actions_and_counts_after_mapping() {
+    use crate::{
+        FileTargets, LineCounts, StepAction, StepOutcomeOverride, ToolEvidence, read_tool_steps,
+    };
+    use ticketd_core::ChatToolState;
+
+    let mut session = Session::default();
+    let mut steps = Vec::new();
+    for line in fixture!("recorded-steps").lines() {
+        let frame: Value = serde_json::from_str(line).expect("recorded frame");
+        let Some(method @ ("item/started" | "item/completed")) = frame["server"]["method"].as_str()
+        else {
+            continue;
+        };
+        for event in session.notification(method, &frame["server"]["params"]) {
+            let EventKind::ToolUpdated {
+                detail: Some(detail),
+                title,
+                output,
+                status,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            let state = match status {
+                crate::ToolStatus::Running => continue,
+                crate::ToolStatus::Succeeded => ChatToolState::Completed,
+                crate::ToolStatus::Failed | crate::ToolStatus::Declined => ChatToolState::Failed,
+                other => panic!("unexpected recorded status {other:?}"),
+            };
+            let _: Value = serde_json::from_str(detail.payload()).expect("valid stored JSON");
+            steps.extend(read_tool_steps(
+                "codex",
+                ToolEvidence {
+                    name: &title,
+                    input: detail.payload(),
+                    output: output.as_deref(),
+                    state,
+                    working_directory: "/fixture/work",
+                },
+            ));
+        }
+    }
+    assert_eq!(steps.len(), 6);
+    assert!(matches!(steps[0].action, StepAction::Read(_)));
+    assert!(matches!(
+        steps[1].action,
+        StepAction::Search {
+            no_matches: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        steps[2].action,
+        StepAction::Edit {
+            counts: LineCounts {
+                added: Some(1),
+                removed: Some(1)
+            },
+            ..
+        }
+    ));
+    assert!(matches!(
+        &steps[3].action,
+        StepAction::Create {
+            targets: FileTargets::Paths(paths),
+            counts: LineCounts { added: Some(220), removed: Some(0) },
+        } if paths == &["/fixture/work/large.txt"]
+    ));
+    assert!(steps[4].command.is_some());
+    assert_eq!(steps[5].outcome, Some(StepOutcomeOverride::Declined));
+}
+
 fn options() -> Options {
     Options {
         client_version: "0.0.0-test".to_owned(),
