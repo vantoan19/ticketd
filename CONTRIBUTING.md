@@ -13,16 +13,28 @@ changes are welcome. You do not need an AI assistant or any private tools to con
 
 Search [existing issues](https://github.com/vantoan19/ticketd/issues) first. If someone has already reported the same need, add your example there. Use the [issue chooser](https://github.com/vantoan19/ticketd/issues/new/choose) for new reports and proposals.
 
-| What brings you here?                                                                      | What to do                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An unmet need                                                                              | Choose **Share an idea**. Describe what you are trying to do and when the need arises. A solution is optional.                                                                |
-| Friction in an existing workflow                                                           | Choose **Suggest an improvement**. Describe today's steps, the difficulty, and the outcome you want.                                                                          |
-| Something fails                                                                            | Choose **Bug report**. Give the version, reproduction steps, and expected and observed behavior. Report vulnerabilities privately through the [security policy](SECURITY.md). |
-| A usage question                                                                           | Open an issue and ask your question. A maintainer can apply the `question` label.                                                                                             |
-| A small correction with a verifiable answer                                                | Open a PR directly. A broken install command or a fix that restores behavior specified in a test qualifies. Check for an existing claim or PR first.                          |
-| A change to product behavior, a public contract, dependencies, migrations, or architecture | Discuss it in an issue and get maintainer agreement on the outcome and constraints before implementing it.                                                                    |
+GitHub Issues accepts four kinds of public report:
 
-Maintainers triage ideas and improvements in the issue where they arrive. You can contribute examples, design alternatives, or a prototype when a maintainer invites exploration. If the investigation is substantial, give it a linked issue with a deliverable of its own. An invitation to explore leaves the implementation decision open. [Triage labels and outcomes](docs/agents/triage-labels.md)
+| What brings you here?            | What to do                                                                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Something fails                  | Choose **Bug report**. Give the steps, what you expected, and what happened. Report vulnerabilities privately through the [security policy](SECURITY.md). |
+| A new capability                 | Choose **Request an enhancement**. Say who would use it, when, and what they should be able to do.                                                        |
+| An unmet need                    | Choose **Share an idea**. Describe what you are trying to do and when the need arises. A solution is optional.                                            |
+| Friction in an existing workflow | Choose **Suggest an improvement**. Describe today's steps, the difficulty, and the outcome you want.                                                      |
+
+For usage questions, start with the [user guides](README.md#documentation). Small corrections with a verifiable answer, such as a broken install command, can go straight to PR. Check for an existing claim or PR first. If a change affects product direction, a public contract, dependencies, migrations, or architecture, agree on its outcome and constraints with a maintainer on the relevant bug or proposal before implementing it.
+
+### Write an issue people can understand
+
+Describe **one problem or desired outcome per issue**. Give it a short, specific title. Use plain language someone can understand without knowing the code. Start with who is affected, what happens today, and why it matters. For a bug, include the shortest reproduction. Include technical detail when it helps someone reproduce the problem or judge success.
+
+For example, **“Older dates are cut off in the ticket list”** tells the reader where to look. A useful description is: “Open the ticket list with a ticket from last year. The year is clipped, so I can’t tell when the ticket was updated. I should be able to read the date in the list.”
+
+### Plan implementation in your local ticketd workspace
+
+Keep the public issue focused on the outcome, decisions, and evidence a reviewer needs. Organize implementation steps, investigations, and subtickets in your **own local ticketd workspace**. For the clipped date, checking the formatter, trying a layout, and testing older dates are local tasks under the same public bug. Put the GitHub issue URL in your local ticket for reference. [Getting started with ticketd](docs/first-ticket.md)
+
+Never publish that breakdown as separate GitHub issues, GitHub sub-issues, or a task list pasted into the public description. Contributors can still share a finding or prototype on the original issue when a maintainer invites exploration. Bring back the conclusion or the decision you need. An invitation to explore leaves the implementation decision open. [Triage labels and outcomes](docs/agents/triage-labels.md)
 
 ### Find and claim an issue
 

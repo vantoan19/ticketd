@@ -4,7 +4,7 @@ This document describes what ticketd does today, for contributors.
 [GLOSSARY.md](../GLOSSARY.md) defines the terms used here, [architecture](architecture.md)
 describes how the behavior is built (a Tauri desktop and a Rust CLI over one shared
 core and local SQLite, with no daemon), and the ADRs in `docs/adr` record the
-decisions behind it. Plans, bugs, and progress are tracked in GitHub Issues, not here.
+decisions behind it. The [contribution guide](../CONTRIBUTING.md#choose-a-starting-point) explains how to report bugs and propose changes.
 
 ## Purpose
 

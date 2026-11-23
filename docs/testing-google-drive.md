@@ -117,7 +117,7 @@ can cause account lockouts. Do not bypass those instructions for test isolation.
 
 ## Hardening gate
 
-Track the acceptance matrix, findings and execution evidence in GitHub Issues.
+Track the acceptance matrix and individual test runs locally in ticketd. Summarize the verification result on the relevant public bug, proposal, or PR.
 For each confirmed bug: reproduce it, add a regression that fails first, apply
 the fix, then rerun the original scenario and affected suites. Rerun live tests
 against the rebuilt artifacts after code changes; record the binary hash and

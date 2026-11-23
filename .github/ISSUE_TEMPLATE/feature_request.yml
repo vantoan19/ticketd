@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Search existing issues first. Add your experience to an existing proposal when it covers the same workflow.
+        Give your issue a short title and describe one outcome in everyday language.
         [How proposals are triaged](https://github.com/vantoan19/ticketd/blob/main/docs/agents/triage-labels.md#triage-an-issue).
   - type: textarea
     id: workflow
