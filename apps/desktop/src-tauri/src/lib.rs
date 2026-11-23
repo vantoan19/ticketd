@@ -1635,21 +1635,24 @@ enum RefreshUpdate {
 /// refresh waits for a running one instead of overlapping it.
 #[tauri::command]
 async fn refresh_sources(
+    webview: tauri::Webview,
     ticket: Option<String>,
     connection: Option<String>,
     retry: Option<bool>,
     refresh_id: Option<String>,
-    updates: Option<tauri::ipc::Channel<RefreshUpdate>>,
+    updates: Option<tauri::ipc::JavaScriptChannelId>,
     refresher: tauri::State<'_, Refresher>,
-    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::RefreshReport, SourceFailure> {
+    use tauri::Manager;
+
+    let updates = updates.map(|channel| channel.channel_on(webview.clone()));
     let registration = refresh_id
         .map(|id| RegisteredRefresh::start(id, &refresher.1))
         .transpose()?;
     let coordinator = refresher.0.clone();
     let control = registration.as_ref().map(|run| run.control.clone());
     let progress = control.as_ref().map(RefreshControl::progress);
-    let operation = source_task(sources, move |registry| {
+    let operation = source_task(webview.state(), move |registry| {
         if retry.unwrap_or(false) {
             let id = match (&connection, &ticket) {
                 (Some(id), _) => Some(id.clone()),
@@ -2022,6 +2025,7 @@ pub fn run() -> Result<(), tauri::Error> {
     let sources = std::sync::Arc::new(ExtensionRegistry::device().map_err(|error| {
         tauri::Error::Setup((Box::new(error) as Box<dyn std::error::Error>).into())
     })?);
+    let refresh_registry = sources.clone();
     let app = tauri::Builder::default()
         // Must be the first plugin. One process owns Chat execution: starting ticketd
         // again shows the running app's window instead of starting a second host.
@@ -2119,7 +2123,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             updates::start(app.handle());
-            start_periodic_refresh(coordinator, sources);
+            start_periodic_refresh(coordinator, refresh_registry);
             start_reminder_timer(open_workspace);
             sync_commands::publish_status(app.handle().clone());
             sync.start(started, sync_commands::at_launch);

@@ -831,7 +831,7 @@ fn executable_file(path: &Path) -> Option<PathBuf> {
     {
         return None;
     }
-    let metadata = fs::metadata(&path).ok()?;
+    let metadata = fs::metadata(path).ok()?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
