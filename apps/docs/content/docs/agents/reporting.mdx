@@ -18,15 +18,15 @@ Keep the brief readable on its own. Posting an update does not change the
 ticket's status or readiness; change the status separately.
 
 ```sh
-ticketd activity add T-LG12 --agent coding-agent \
+ticketd activity add T-RL12 --agent coding-agent \
   --brief "The limiter passes the boundary tests. Ready for review."
 ```
 
 Read a longer brief from a file, or from stdin with `-`:
 
 ```sh
-ticketd activity add T-LG12 --file update.md --agent coding-agent
-printf '%s\n' 'Investigating the failure' | ticketd activity add T-LG12 --file - --agent coding-agent
+ticketd activity add T-RL12 --file update.md --agent coding-agent
+printf '%s\n' 'Investigating the failure' | ticketd activity add T-RL12 --file - --agent coding-agent
 ```
 
 <Callout title="The brief is Markdown">
@@ -39,9 +39,9 @@ Evidence points at the work: a branch, a worktree, a commit, a pull request, or 
 verification result.
 
 ```sh
-ticketd evidence add T-LG12 --kind branch --name branch \
-  --value feat/login-rate-limit --agent coding-agent
-ticketd evidence add T-LG12 --kind verification --name checks \
+ticketd evidence add T-RL12 --kind branch --name branch \
+  --value feat/api-rate-limit --agent coding-agent
+ticketd evidence add T-RL12 --kind verification --name checks \
   --value './scripts/check passed' --agent coding-agent
 ```
 
@@ -52,7 +52,7 @@ A request ID makes the retry safe: repeating the same ID with the same input
 returns the first result instead of writing again.
 
 ```sh
-ticketd activity add T-LG12 --agent coding-agent \
+ticketd activity add T-RL12 --agent coding-agent \
   --brief "Investigating the failure" --request-id checkpoint-1
 ```
 
@@ -63,7 +63,7 @@ ticketd activity add T-LG12 --agent coding-agent \
 ```json title="report.json"
 {
   "operation": "ticket_change",
-  "reference": "T-LG12",
+  "reference": "T-RL12",
   "change": {
     "status": "In progress",
     "activities": ["Investigating the failure"],
@@ -82,9 +82,9 @@ identical request to retry, and a new ID for a new checkpoint.
 ## Reading the latest report
 
 ```sh
-ticketd context T-LG12 --latest-update
+ticketd context T-RL12 --latest-update
 ticketd list --latest-update
 ```
 
 Briefs returned this way are limited to 1024 characters and carry a `truncated`
-flag. Fetch the complete brief with `ticketd activity show T-LG12 ACTIVITY_ID`.
+flag. Fetch the complete brief with `ticketd activity show T-RL12 ACTIVITY_ID`.
