@@ -6,6 +6,7 @@ import {
   extractNotes,
   formatVersion,
   handWrittenNotes,
+  retargetNotes,
   versionBumpBody,
   versionBumpLink,
 } from "./release-notes.mjs";
@@ -60,4 +61,26 @@ test("the fallback link opens the version-bump PR prefilled", () => {
   assert.equal(link.searchParams.get("title"), "Release 0.2.0");
   assert.equal(link.searchParams.get("labels"), "release");
   assert.equal(link.searchParams.get("body"), "Body & notes");
+});
+
+test("an override keeps the authored notes and rewrites the parts that name the version", () => {
+  const authored = handWrittenNotes("0.2.0", 86)
+    .replace(
+      "<!-- One or two sentences on what this release is for. -->",
+      "Faster sync.",
+    )
+    .replace(
+      '<!-- CLI changes that scripts or agents read, or "No CLI changes." -->',
+      "No CLI changes.",
+    );
+
+  const notes = retargetNotes(authored, "0.2.1-dryrun.1");
+  assert.match(notes, /^Faster sync\.\n\n> \[!NOTE\]\n> \*\*Prerelease\.\*\*/);
+  assert.match(notes, /- No CLI changes\./);
+  assert.match(notes, /`ticketd_0\.2\.1-dryrun\.1_x64_en-US\.msi`/);
+  assert.match(notes, /blob\/v0\.2\.1-dryrun\.1\/docs\/install\.md/);
+  assert.doesNotMatch(notes, /0\.2\.0/);
+
+  // Retargeting to the same version changes nothing.
+  assert.equal(retargetNotes(authored, "0.2.0"), authored);
 });
