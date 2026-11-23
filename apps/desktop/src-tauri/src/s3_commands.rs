@@ -159,6 +159,28 @@ pub fn s3_buckets(profile: String) -> Outcome<Option<Vec<String>>> {
     cli()?.buckets(&profile).map_err(|error| failed(&error))
 }
 
+/// Where the connected Workspace's folder is, for a person to open in another tool.
+#[derive(Debug, Serialize)]
+pub struct FolderLinks {
+    /// `s3://bucket/prefix/folder/`, which every S3 service has.
+    address: String,
+    /// Whether the folder has a page in the AWS console (`sync_open_folder` opens it).
+    console: bool,
+}
+
+#[tauri::command(async)]
+pub fn s3_folder_links() -> Outcome<FolderLinks> {
+    let status = open_workspace()?.sync_status()?;
+    let (Some(s3), Some(folder)) = (status.s3, status.folder) else {
+        return rejected("Sync with S3 is not connected");
+    };
+    let storage = crate::s3_storage::storage(&s3);
+    Ok(FolderLinks {
+        address: storage.address(&folder.id),
+        console: storage.console_url(&folder.id).is_some(),
+    })
+}
+
 fn check_profile(profile: &str) -> Outcome<()> {
     if profile.trim().is_empty() || profile.chars().count() > 128 || profile.contains('\n') {
         return rejected("choose an AWS CLI profile");

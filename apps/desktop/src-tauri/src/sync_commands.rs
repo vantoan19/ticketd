@@ -18,15 +18,18 @@ use ticketd_core::{
         PickerSession, PlatformCredentialStore,
     },
     sync::{
-        AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, SetupOptions, SyncChoice,
-        SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncRecovery, SyncResolution,
-        SyncSettings, SyncStatus,
+        AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, S3Binding, SetupOptions,
+        SyncChoice, SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncProvider, SyncRecovery,
+        SyncResolution, SyncSettings, SyncStatus,
         remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
     },
 };
 
 use super::{BridgeFailure, open_workspace, workspace_session};
-use crate::sync_scheduler::{Binding, EXIT_LIMIT, Scheduler};
+use crate::{
+    s3_storage,
+    sync_scheduler::{Binding, EXIT_LIMIT, Scheduler},
+};
 
 /// The one scheduler of this process and the instant its time counts from.
 pub struct SyncHost {
@@ -64,25 +67,43 @@ fn drive(connection_id: &str) -> Arc<DriveRemote<'static>> {
 /// interval applies to the next thing that runs.
 fn binding_of(
     workspace: &Workspace,
-    remote: impl FnOnce(&str) -> Arc<dyn RemoteStorage>,
+    remote: impl FnOnce(&Storage) -> Arc<dyn RemoteStorage>,
 ) -> Result<Option<Binding>, Error> {
     // One small read: the scheduler asks each time it wakes.
     let Some(bound) = workspace.sync_binding()? else {
         return Ok(None);
     };
-    let Some(connection) = bound.connection_id else {
-        return Ok(None);
+    // A Drive binding names its sign-in; an S3 one, its bucket and profile.
+    let storage = match (bound.provider, bound.connection_id, bound.s3) {
+        (SyncProvider::GoogleDrive, Some(connection), _) => Storage::Drive(connection),
+        (SyncProvider::S3, _, Some(s3)) => Storage::S3(s3),
+        _ => return Ok(None),
     };
     Ok(Some(Binding {
         folder: bound.folder_id,
         device: bound.device_name,
         poll: Duration::from_secs(bound.poll_secs),
-        remote: remote(&connection),
+        remote: remote(&storage),
     }))
 }
 
+/// What a Workspace's sync reaches, as the core stores it.
+pub enum Storage {
+    Drive(String),
+    S3(S3Binding),
+}
+
+impl Storage {
+    fn remote(&self) -> Arc<dyn RemoteStorage> {
+        match self {
+            Self::Drive(connection) => drive(connection),
+            Self::S3(binding) => s3_storage::storage(binding),
+        }
+    }
+}
+
 pub fn binding(workspace: &Workspace) -> Result<Option<Binding>, Error> {
-    binding_of(workspace, |connection| drive(connection))
+    binding_of(workspace, Storage::remote)
 }
 
 /// The name macOS shows for this computer. Its apps get no host name in their
@@ -880,11 +901,15 @@ fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
     ))
 }
 
-/// The storage of the signed-in account, before or after a folder is chosen.
-fn signed_in_drive(workspace: &Workspace) -> Outcome<Arc<DriveRemote<'static>>> {
-    match workspace.sync_status()?.connection_id {
-        Some(connection) => Ok(drive(&connection)),
-        None => rejected("Sign in to Google Drive first"),
+/// The storage this Workspace is connected to, before or after a folder is chosen: the
+/// signed-in Drive account, or the S3 bucket.
+fn signed_in(workspace: &Workspace) -> Outcome<Arc<dyn RemoteStorage>> {
+    let status = workspace.sync_status()?;
+    match (status.provider, status.connection_id, status.s3) {
+        (SyncProvider::GoogleDrive, Some(connection), _) => Ok(drive(&connection)),
+        (SyncProvider::GoogleDrive, None, _) => rejected("Sign in to Google Drive first"),
+        (SyncProvider::S3, _, Some(s3)) => Ok(s3_storage::storage(&s3)),
+        (SyncProvider::S3, _, None) => rejected("Connect S3 first"),
     }
 }
 
@@ -966,7 +991,7 @@ pub fn sync_connect(app: tauri::AppHandle) -> Outcome<SyncStatus> {
 #[tauri::command(async)]
 pub fn sync_setup_options() -> Outcome<SetupOptions> {
     let workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
+    let remote = signed_in(&workspace)?;
     Ok(workspace.sync_setup_options(remote.as_ref())?)
 }
 
@@ -974,7 +999,7 @@ pub fn sync_setup_options() -> Outcome<SetupOptions> {
 #[tauri::command(async)]
 pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
+    let remote = signed_in(&workspace)?;
     woken(Ok(workspace.sync_upload_workspace(
         remote.as_ref(),
         "ticketd Workspace",
@@ -986,7 +1011,7 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
 #[tauri::command(async)]
 pub fn sync_reconnect() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
+    let remote = signed_in(&workspace)?;
     woken(Ok(workspace.sync_reconnect(remote.as_ref())?))
 }
 
@@ -1007,7 +1032,7 @@ pub fn sync_download_workspace(
     folder_id: String,
 ) -> Outcome<Downloaded> {
     check_folder_id(&folder_id)?;
-    let remote = signed_in_drive(&*open_workspace()?)?;
+    let remote = signed_in(&*open_workspace()?)?;
     let no_run = host.scheduler.hold();
     let (status, safety_backup) = workspace_session()?.exclusive(|path| {
         let (replaced, safety_backup) =
@@ -1035,9 +1060,16 @@ pub fn sync_recover(
     app: tauri::AppHandle,
     host: tauri::State<'_, SyncHost>,
 ) -> Outcome<SyncStatus> {
-    if open_workspace()?.sync_status()?.recovery == Some(SyncRecovery::AuthorizationExpired) {
-        let (connection, account) = sign_in(&app)?;
-        open_workspace()?.sync_connect(&connection, &account)?;
+    let status = open_workspace()?.sync_status()?;
+    if status.recovery == Some(SyncRecovery::AuthorizationExpired) {
+        match status.s3 {
+            // The profile's own sign-in; what it signs in as stays what the binding says.
+            Some(s3) => crate::s3_commands::s3_sign_in(s3.profile)?,
+            None => {
+                let (connection, account) = sign_in(&app)?;
+                open_workspace()?.sync_connect(&connection, &account)?;
+            }
+        }
     }
     match host.scheduler.recover(host.started.elapsed())? {
         Some(status) => Ok(status),
@@ -1052,20 +1084,30 @@ pub fn sync_disconnect() -> Outcome<SyncStatus> {
 
 #[tauri::command(async)]
 pub fn sync_open_folder(app: tauri::AppHandle) -> Outcome<()> {
-    let workspace = open_workspace()?;
-    let Some(folder) = workspace.sync_status()?.folder else {
+    let status = open_workspace()?.sync_status()?;
+    let Some(folder) = status.folder else {
         return rejected("Sync is not connected");
     };
-    let url = signed_in_drive(&workspace)?
-        .folder_url(&folder.id)
-        .map_err(|error| {
-            failed(format!(
-                "Could not find the folder in Google Drive: {error}"
-            ))
-        })?;
+    let (url, place) = match (status.provider, status.connection_id, status.s3) {
+        (SyncProvider::S3, _, Some(s3)) => {
+            let Some(url) = s3_storage::storage(&s3).console_url(&folder.id) else {
+                return rejected("This bucket has no page in the AWS console");
+            };
+            (url, "the AWS console")
+        }
+        (SyncProvider::GoogleDrive, Some(connection), _) => {
+            let url = drive(&connection).folder_url(&folder.id).map_err(|error| {
+                failed(format!(
+                    "Could not find the folder in Google Drive: {error}"
+                ))
+            })?;
+            (url, "Google Drive")
+        }
+        _ => return rejected("Sign in to Google Drive first"),
+    };
     app.opener()
         .open_url(url, None::<&str>)
-        .map_err(|_| failed("Could not open the folder in Google Drive"))
+        .map_err(|_| failed(format!("Could not open the folder in {place}")))
 }
 
 #[tauri::command(async)]
@@ -1781,6 +1823,87 @@ mod tests {
 
         here.sync_disconnect().unwrap();
         assert!(bound(&here).is_none());
+    }
+
+    #[test]
+    fn an_s3_binding_syncs_through_its_bucket_and_goes_with_disconnect() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
+        let s3 = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: None,
+        };
+        let reached = |workspace: &Workspace| {
+            let fake = fake.clone();
+            let mut named = None;
+            let bound = binding_of(workspace, |storage| {
+                named = Some(match storage {
+                    Storage::S3(binding) => binding.clone(),
+                    Storage::Drive(_) => panic!("an S3 Workspace reached Drive"),
+                });
+                Arc::new(fake)
+            })
+            .unwrap();
+            (bound, named)
+        };
+        // Connected to a bucket, but no folder chosen: nothing to sync with yet.
+        here.sync_connect_s3(&s3, "arn:aws:iam::1:user/mina")
+            .unwrap();
+        assert!(reached(&here).0.is_none());
+
+        let status = here.sync_upload_workspace(&fake, "Test").unwrap();
+        let (bound, named) = reached(&here);
+        assert_eq!(bound.unwrap().folder, status.folder.unwrap().id);
+        assert_eq!(named, Some(s3));
+
+        here.sync_disconnect().unwrap();
+        assert!(reached(&here).0.is_none());
+    }
+
+    #[test]
+    fn an_s3_workspace_uploads_downloads_and_reconnects_after_disconnect() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let s3 = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: None,
+        };
+        let desk = |file: &str, identity: &str| {
+            let mut workspace = Workspace::open(directory.path().join(file)).unwrap();
+            workspace.sync_connect_s3(&s3, identity).unwrap();
+            workspace
+        };
+        let mut there = desk("there.sqlite3", "arn:aws:iam::1:user/a");
+        let ticket = there.create_ticket("Fix login").unwrap();
+        there.sync_upload_workspace(&fake, "Test").unwrap();
+        there.sync_now(&fake).unwrap();
+
+        // Another desktop, signed in as someone else, takes the Workspace.
+        let here = desk("here.sqlite3", "arn:aws:iam::1:user/b");
+        let folder = here.sync_setup_options(&fake).unwrap().existing[0]
+            .folder_id
+            .clone();
+        let (mut here, _) = here.sync_download_workspace(&fake, &folder).unwrap();
+        here.sync_now(&fake).unwrap();
+        assert_eq!(here.sync_status().unwrap().provider, SyncProvider::S3);
+        assert!(
+            here.export_sync_record(SyncKind::Ticket, &ticket.id)
+                .is_ok()
+        );
+
+        // Disconnected, then connected to the same bucket again: back to the same folder.
+        here.sync_disconnect().unwrap();
+        here.sync_connect_s3(&s3, "arn:aws:iam::1:user/b").unwrap();
+        let options = here.sync_setup_options(&fake).unwrap();
+        assert_eq!(options.reconnect.unwrap().id, folder);
+        let status = here.sync_reconnect(&fake).unwrap();
+        assert_eq!(status.folder.unwrap().id, folder);
+        assert!(here.sync_binding().unwrap().unwrap().s3.is_some());
     }
 
     #[test]
