@@ -44,10 +44,16 @@ import { attachments } from "@/lib/api/attachments";
 import { useNow } from "@/lib/use-now";
 import { SyncFailure as Failure } from "./SyncFailure";
 import { useCommand } from "./use-sync-command";
+import { storageName } from "./storage-name";
+import { S3Place } from "./S3Place";
 import { recoveryCopy } from "./sync-recovery";
 import { useSyncStatus } from "./sync-status";
 import "@/features/settings/settings.css";
 import "./sync.css";
+
+/** Where the Workspace's files are, as this page speaks of it. */
+const placeOf = (provider: SyncStatus["provider"]) =>
+  provider === "s3" ? "the bucket" : "Drive";
 
 const plural = (count: number, one: string) =>
   `${count} ${one}${count === 1 ? "" : "s"}`;
@@ -80,7 +86,7 @@ const TRACK = ["Connect", "Choose a workspace", "First sync", "In sync"];
  * once done, the current one in primary. No status colour: the words say
  * where setup is (set ST-31).
  */
-function Track({ status }: { status: SyncStatus | null }) {
+export function Track({ status }: { status: SyncStatus | null }) {
   const at = !status
     ? -1
     : status.connection === "not_connected"
@@ -169,7 +175,8 @@ const plainPath = (path: string) =>
 function Replaced({ safetyBackup }: { safetyBackup: string }) {
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const { status } = useSyncStatus();
-  // The confirmation counted every file in Drive; one that turned out
+  const place = placeOf(status?.provider ?? "google_drive");
+  // The confirmation counted every file in the storage; one that turned out
   // unreadable did not arrive. The replaced Workspace started with no notices,
   // so its unread ones of that kind are this download's.
   const [skipped, setSkipped] = useState(0);
@@ -208,8 +215,8 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
           {skipped > 0 && (
             <span>
               {skipped === 1
-                ? "1 file in Drive could not be read and was skipped."
-                : `${skipped} files in Drive could not be read and were skipped.`}{" "}
+                ? `1 file in ${place} could not be read and was skipped.`
+                : `${skipped} files in ${place} could not be read and were skipped.`}{" "}
               See Inbox.
             </span>
           )}
@@ -340,6 +347,7 @@ function Choose({
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
     null,
   );
+  const provider = status.provider;
   const [choice, setChoice] = useState(UPLOAD);
   const [confirming, setConfirming] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -362,16 +370,20 @@ function Choose({
           setChoice(first.folder_id);
       })
       .catch((reason: unknown) => {
-        if (current) setReadFailure(describeFailure(reason, "read your Drive"));
+        if (current)
+          setReadFailure(describeFailure(reason, `read ${placeOf(provider)}`));
       });
     return () => {
       current = false;
     };
-  }, []);
+  }, [provider]);
   const download = options?.existing.find(
     (workspace) => workspace.folder_id === choice,
   );
   const account = status.account ?? "this account";
+  const s3 = status.provider === "s3";
+  const place = placeOf(status.provider);
+  const storage = storageName(status.provider);
   return (
     <SettingsSection
       title="This Workspace"
@@ -379,7 +391,7 @@ function Choose({
     >
       {!options && !readFailure && (
         <p role="status" className="settings-hint">
-          Looking for Workspaces in your Drive…
+          Looking for Workspaces in {s3 ? "the bucket" : "your Drive"}…
         </p>
       )}
       {options && (
@@ -393,7 +405,7 @@ function Choose({
             <ChoiceTile
               value={RECONNECT}
               title={<>Reconnect to “{options.reconnect.name}”</>}
-              description="Changes made here and in Drive are merged, and nothing is replaced"
+              description={`Changes made here and in ${place} are merged, and nothing is replaced`}
             />
           )}
           {/* Upload would land in the folder Reconnect names, minus the merge. */}
@@ -401,7 +413,7 @@ function Choose({
             <ChoiceTile
               value={UPLOAD}
               title="Upload this Workspace"
-              description={`${plural(options.local.tickets, "ticket")} and ${plural(options.local.documents, "Document")} go to a new folder in your Drive`}
+              description={`${plural(options.local.tickets, "ticket")} and ${plural(options.local.documents, "Document")} go to a new folder in ${s3 ? "the bucket" : "your Drive"}`}
             />
           )}
           {options.existing.map((workspace) => {
@@ -433,7 +445,7 @@ function Choose({
                   disabled={busy}
                   onClick={() => setSwitching(true)}
                 >
-                  Use another account…
+                  {s3 ? "Use another bucket…" : "Use another account…"}
                 </Button>
                 <Button
                   size="sm"
@@ -458,7 +470,9 @@ function Choose({
               </>
             }
           >
-            Files in Drive are not encrypted.
+            {s3
+              ? "ticketd does not encrypt the files it puts in the bucket."
+              : "Files in Drive are not encrypted."}
           </SettingsListFooter>
         </SettingsList>
       </div>
@@ -471,20 +485,24 @@ function Choose({
       <DialogShell
         open={switching}
         onOpenChange={setSwitching}
-        title="Use another Google account?"
-        description={`ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`}
-        primaryLabel="Use another account"
+        title={s3 ? "Use another bucket?" : "Use another Google account?"}
+        description={
+          s3
+            ? "ticketd disconnects from this bucket so you can choose another bucket or profile. Nothing in the bucket or on this computer is deleted."
+            : `ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`
+        }
+        primaryLabel={s3 ? "Use another bucket" : "Use another account"}
         blockedReason={null}
         size="sm"
         onSubmit={() => {
           setSwitching(false);
-          void run(syncApi.disconnect, "disconnect from Google Drive");
+          void run(syncApi.disconnect, `disconnect from ${storage.full}`);
         }}
       >
         <dl className="sync-summary">
           <dt>On this computer</dt>
           <dd>This Workspace stays as it is</dd>
-          <dt>In Google Drive</dt>
+          <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
           <dd>Your files stay, for your other desktops</dd>
         </dl>
       </DialogShell>
@@ -496,7 +514,7 @@ function Choose({
           open={confirming}
           onOpenChange={setConfirming}
           title="Replace this Workspace?"
-          description={`Downloads “${download.folder_name}” from Drive.`}
+          description={`Downloads “${download.folder_name}” from ${place}.`}
           primaryLabel="Replace Workspace"
           primaryVariant="destructive"
           footerNote="A safety backup is saved first."
@@ -519,12 +537,12 @@ function Choose({
               This replaces everything in this Workspace on this computer
             </AlertTitle>
             <AlertDescription>
-              The Workspace from Drive takes its place. What is here now is kept
-              only in the safety backup.
+              The Workspace from {place} takes its place. What is here now is
+              kept only in the safety backup.
             </AlertDescription>
           </Alert>
           <dl className="sync-summary">
-            <dt>From Drive</dt>
+            <dt>From {place}</dt>
             <dd>{contents(download.counts)}</dd>
             <dt>Replaced here</dt>
             <dd>{contents(options.local)}</dd>
@@ -624,6 +642,15 @@ function Connected({ status }: { status: SyncStatus }) {
     null,
   );
   const folder = status.folder?.name;
+  if (status.provider === "s3")
+    return (
+      <>
+        {status.recovery && <RecoveryNotice status={status} />}
+        <S3Place status={status} />
+        <DesktopSettings />
+        <Disconnect status={status} />
+      </>
+    );
   return (
     <>
       {status.recovery && <RecoveryNotice status={status} />}
@@ -664,12 +691,14 @@ function Connected({ status }: { status: SyncStatus }) {
         <Failure>{openFailure}</Failure>
       </div>
       <DesktopSettings />
-      <Disconnect folder={folder} />
+      <Disconnect status={status} />
     </>
   );
 }
 
-function Disconnect({ folder }: { folder: string | undefined }) {
+function Disconnect({ status }: { status: SyncStatus }) {
+  const folder = status.folder?.name;
+  const s3 = status.provider === "s3";
   const { busy, failure, run } = useCommand();
   const [disconnecting, setDisconnecting] = useState(false);
   return (
@@ -677,7 +706,7 @@ function Disconnect({ folder }: { folder: string | undefined }) {
       <SettingsList>
         <SettingsRow
           title="Disconnect this desktop"
-          description="Stops syncing here. Your files stay in Drive and on this computer."
+          description={`Stops syncing here. Your files stay ${s3 ? "in the bucket" : "in Drive"} and on this computer.`}
           trailing={
             <Button
               variant="outline"
@@ -701,13 +730,16 @@ function Disconnect({ folder }: { folder: string | undefined }) {
         size="sm"
         onSubmit={() => {
           setDisconnecting(false);
-          void run(syncApi.disconnect, "disconnect from Google Drive");
+          void run(
+            syncApi.disconnect,
+            `disconnect from ${storageName(status.provider).full}`,
+          );
         }}
       >
         <dl className="sync-summary">
           <dt>On this computer</dt>
           <dd>This Workspace stays as it is</dd>
-          <dt>In Google Drive</dt>
+          <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
           <dd>
             {folder ? `“${folder}” stays` : "Your files stay"}, for your other
             desktops
