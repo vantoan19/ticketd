@@ -73,7 +73,8 @@ impl ExtensionLog {
 
 fn append_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
-    options.create(true).append(true);
+    // On Windows an append-only handle cannot be locked with LockFileEx.
+    options.create(true).read(true).append(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
