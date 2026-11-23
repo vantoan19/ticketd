@@ -33,7 +33,7 @@ test("a remembered pick the harness no longer offers falls back to its own setti
     offeredPick(claude, {
       model: "opus-4",
       effort: "max",
-      permission: "bypassPermissions",
+      permission: "dontAsk",
     }),
   ).toEqual({ model: null, effort: "max", permission: null });
   // Max is the default model's; nothing is offered when the harness listed nothing.

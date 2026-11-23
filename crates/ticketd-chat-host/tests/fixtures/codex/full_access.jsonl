@@ -1,0 +1,17 @@
+{"note":"Hand-built from the codex-cli 0.171.0 JSON schema (codex app-server generate-json-schema --experimental: ThreadStartResponse, TurnStartParams approvalPolicy and sandboxPolicy). Not captured from a live session; every value is synthetic. A new Chat started in Full access: the thread opens with the person's own settings, the first turn asks for Full access, and the turn after leaving it gives the thread its own approval policy and sandbox back."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.171.0 (Mac OS 26.5.0; arm64)","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"macos"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"thread/start","params":{"cwd":"/work/chat-1"}}}
+{"server":{"id":2,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.171.0","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false},"activePermissionProfile":{"id":":workspace","extends":null},"cwd":"/work/chat-1","instructionSources":[]}}}
+{"mark":"opened"}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Go","text_elements":[]}],"approvalPolicy":"never","sandboxPolicy":{"type":"dangerFullAccess"}}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"completed","items":[],"error":null}}}}
+{"mark":"the first turn ran in Full access"}
+{"client":{"id":4,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-2","input":[{"type":"text","text":"Go on","text_elements":[]}],"approvalPolicy":"never","sandboxPolicy":{"type":"dangerFullAccess"}}}}
+{"server":{"id":4,"result":{"turn":{"id":"turn_2","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_2","status":"completed","items":[],"error":null}}}}
+{"mark":"the second turn too"}
+{"client":{"id":5,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-3","input":[{"type":"text","text":"Careful now","text_elements":[]}],"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}}}
+{"server":{"id":5,"result":{"turn":{"id":"turn_3","status":"inProgress","items":[],"error":null}}}}
