@@ -718,17 +718,23 @@ impl Workspace {
         connection_id: &str,
         account: &str,
     ) -> Result<SyncStatus, Error> {
-        let state = state(&self.connection)?;
-        if state.folder.is_some() && state.provider != SyncProvider::GoogleDrive {
-            return Err(Error::Sync(format!(
-                "this Workspace syncs with {}; disconnect it before connecting to Google Drive",
-                state.provider.name()
-            )));
-        }
-        self.connection.execute(
-            "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, connection = ?1, account = ?2",
-            [connection_id, account],
-        )?;
+        // Read, checked and written under one write lock, as `sync_connect_s3` does: another
+        // connection to this Workspace file could bind an S3 folder in between otherwise, and
+        // this update would keep that folder while clearing the S3 settings.
+        crate::write_scope::run(&self.connection, |scope| {
+            let state = state(scope)?;
+            if state.folder.is_some() && state.provider != SyncProvider::GoogleDrive {
+                return Err(Error::Sync(format!(
+                    "this Workspace syncs with {}; disconnect it before connecting to Google Drive",
+                    state.provider.name()
+                )));
+            }
+            scope.execute(
+                "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, connection = ?1, account = ?2",
+                [connection_id, account],
+            )?;
+            Ok(())
+        })?;
         touch(&self.connection)?;
         self.sync_status()
     }
