@@ -6,7 +6,14 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Check, ChevronDown, Clock, LoaderCircle, Shield } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Clock,
+  LoaderCircle,
+  Shield,
+  ShieldOff,
+} from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -596,7 +603,8 @@ function OptionLine({ option }: { option: Option }) {
 /**
  * The small Permissions trigger beside the picker. It always names the mode
  * that applies ("Ask before edits"), never a bare "Default" (STATIC-13). Full
- * access is never offered. Below a 460px composer only its shield shows.
+ * access, where the harness never asks, trades the shield for a struck one, so
+ * it reads at a glance. Below a 460px composer only the shield shows.
  */
 function PermissionPicker({
   setting,
@@ -620,9 +628,13 @@ function PermissionPicker({
   const shown =
     value ?? setting.options.find((option) => option.is_default)?.id ?? null;
   const label = shown ? labelOf(setting, shown) : "Permissions";
+  const fullAccess =
+    setting.options.find((option) => option.id === shown)?.permission ===
+    "full_access";
+  const Mark = fullAccess ? ShieldOff : Shield;
   const face = (
     <>
-      <Shield aria-hidden />
+      <Mark aria-hidden />
       <span className="chat-control-label chat-permission-label">{label}</span>
     </>
   );

@@ -179,8 +179,7 @@ pub struct Unattended {
 }
 
 /// Settings a new session opens with, as chosen in New Chat. `None` leaves the
-/// harness's own setting. Values are option ids the harness listed; full access is
-/// never among them.
+/// harness's own setting. Values are option ids the harness listed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartSettings {
     pub model: Option<String>,
@@ -585,17 +584,13 @@ pub struct Setting {
 }
 
 impl Setting {
-    /// Why `value` cannot be chosen, or `None` when it can. Full access is never a
-    /// choice through ticketd, whatever the harness allows.
+    /// Why `value` cannot be chosen, or `None` when it can.
     pub fn refusal(&self, value: &str) -> Option<String> {
         if let Some(reason) = &self.unchangeable {
             return Some(reason.clone());
         }
         match self.options.iter().find(|option| option.id == value) {
             None => Some(format!("{value} is not one of the choices it offers")),
-            Some(option) if option.permission == Some(PermissionKind::FullAccess) => {
-                Some("ticketd never turns on full access".to_owned())
-            }
             Some(option) if !option.allowed => {
                 Some(format!("{} is not allowed by its settings", option.label))
             }
@@ -641,7 +636,8 @@ pub enum PermissionKind {
     ReadOnly,
     Ask,
     AcceptEdits,
-    /// Bypasses approvals. Never offered as a choice through ticketd.
+    /// Runs every tool without asking, outside any sandbox. The person's choice for
+    /// their own Chat; an Automation's agent never runs with it (`Unattended`).
     FullAccess,
 }
 
@@ -894,6 +890,29 @@ pub trait HarnessAdapter: Send + Sync {
     /// sending anything to a model. `Err` says why it could not tell.
     async fn options(&self) -> Result<HarnessOptions, String> {
         Err("this harness does not report its options before a session".to_owned())
+    }
+
+    /// The permission a session opened for a person's Chat would start with, shown
+    /// while none runs: `picked`, the person's choice for that session, else what the
+    /// Chat's record (`OpenRequest::recorded_settings`) says it runs with when opened
+    /// again. It is what opening does, so a Chat in Full access says so before its
+    /// next message. `None` when the harness's own configuration would decide.
+    fn permission_before_session(
+        &self,
+        recorded: Option<&str>,
+        picked: Option<&str>,
+    ) -> Option<Setting> {
+        let _ = (recorded, picked);
+        None
+    }
+
+    /// The Chat's record (`recorded`) with `value` as the permission a session opened
+    /// for it again starts with, saved as soon as the person's change is accepted: a
+    /// restart before the next message must not bring back a mode they left. `None`
+    /// when there is no record to change.
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        let _ = (recorded, value);
+        None
     }
 }
 
