@@ -107,9 +107,10 @@ impl Error {
                 RemoteError::RateLimited { .. } | RemoteError::Other(_) => FailureKind::Failed,
             },
             Self::UploadLimit { .. } => FailureKind::TooLarge,
-            Self::TicketChanged(_) | Self::DocumentChanged(_) | Self::RequestConflict(_) => {
-                FailureKind::Conflict
-            }
+            Self::TicketChanged(_)
+            | Self::DocumentChanged(_)
+            | Self::RequestConflict(_)
+            | Self::ConnectSourceChanged => FailureKind::Conflict,
             Self::NotFound(_)
             | Self::DocumentNotFound(_)
             | Self::ChatNotFound(_)
@@ -154,6 +155,9 @@ impl Error {
             | Self::EmptyProject
             | Self::InvalidProjectRemote
             | Self::ProjectRemoteTaken { .. }
+            | Self::ProjectRemoteRequired(_)
+            | Self::ProjectSourceHostMismatch { .. }
+            | Self::ProjectSourceNotConnected { .. }
             | Self::DuplicateDependencies
             | Self::DuplicateNeedsCanonical
             | Self::DuplicateCanonicalUnresolved(_)

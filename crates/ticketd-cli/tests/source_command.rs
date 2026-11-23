@@ -198,6 +198,67 @@ fn list_describes_the_github_connector_and_its_schema() {
 }
 
 #[test]
+fn project_connect_source_translates_the_offline_preview_and_confirmation() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let refresh = cli.run(&["source", "refresh"]);
+    let ticket = refresh["imported"][0].as_str().unwrap();
+    let created = cli.command(
+        &[
+            "project",
+            "create",
+            "Tracked repository",
+            cli.dir.path().to_str().unwrap(),
+            "--remote",
+            "127.0.0.1/o/r",
+        ],
+        None,
+    );
+    assert!(created.status.success());
+    let project: Value = serde_json::from_slice(&created.stdout).unwrap();
+    let id = project["id"].as_str().unwrap();
+    let hint = String::from_utf8(created.stderr).unwrap();
+    assert!(hint.contains(&format!("ticketd project connect-source {id} --preview")));
+
+    let preview = cli.command(&["project", "connect-source", id, "--preview"], None);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(preview["project_id"], id);
+    assert_eq!(preview["project_remote"], "127.0.0.1/o/r");
+    assert_eq!(preview["provider"], "github");
+    assert_eq!(preview["repository"], "o/r");
+    assert_eq!(preview["source"], "already_listed");
+    assert_eq!(preview["tickets"], json!([ticket]));
+    assert_eq!(cli.run(&["show", ticket])["project_id"], Value::Null);
+    let invalid = cli.fail(
+        &["project", "connect-source", id, "--expect", "wrong"],
+        None,
+    );
+    assert!(invalid.contains("Preview again"), "{invalid}");
+
+    let fingerprint = preview["fingerprint"].as_str().unwrap();
+    let confirmed = cli.command(
+        &["project", "connect-source", id, "--expect", fingerprint],
+        None,
+    );
+    assert!(
+        confirmed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&confirmed.stderr)
+    );
+    let confirmed: Value = serde_json::from_slice(&confirmed.stdout).unwrap();
+    assert_eq!(
+        confirmed,
+        json!({"repository_added": false, "linked_tickets": [ticket]})
+    );
+    assert_eq!(cli.run(&["show", ticket])["project_id"], id);
+}
+
+#[test]
 fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it() {
     let cli = Cli::new();
     assert_eq!(cli.run(&["source", "test", "github"])["account"], "octo");

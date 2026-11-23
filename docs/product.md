@@ -430,6 +430,15 @@ Refresh preserves the current link even when an issue moves to another repositor
 Changing or clearing a Project remote affects future imports.
 [ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
 
+After setting a Project remote, you can review and confirm a connection to GitHub.
+It adds the repository to discovery when needed and links the existing non-trashed,
+unlinked tickets whose source still owns them and reports the same repository.
+Backfill includes tickets outside the current discovery filters and records an
+ordinary project membership change for each ticket. If the repository is already
+listed, backfill works offline. If the source needs setup, the preview identifies
+the repository to add. Confirming applies the reviewed changes together. If the
+effect changes before confirmation, review the updated preview.
+
 ### Workspace sync
 
 A person using ticketd on several desktops gets the same Workspace content and

@@ -849,7 +849,7 @@ The code lives in `ticketd_core::source`, from the inside out:
   (environment token or `gh auth token`), which is never stored, exported,
   backed up, logged, or sent to any host other than the API.
 - **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
-  `conversation.rs`, `freshness.rs`, and `mod.rs` for saved configuration):
+  `conversation.rs`, `freshness.rs`, `connect_source.rs`, and `mod.rs` for saved configuration):
   methods on `Workspace` that call the engine first and then write in one short
   transaction, so no network I/O happens while the database is locked.
   `save_source` validates and previews before it saves.
@@ -881,6 +881,19 @@ host, using `github.com` for `api.github.com` and the configured host for Enterp
 Format version 87 populates the repository for legacy GitHub identities whose
 stored issue URL agrees with their locator. Workspace sync uses the same derivation
 when an incoming ticket gains or changes its external location.
+
+`Workspace::preview_connect_source` reads one local snapshot of the Project
+remote, the saved source, and the exact set of eligible ticket identities. It
+matches stored repositories on the source's host independently of discovery
+filters and fingerprints the effect. `Workspace::connect_source` checks this
+fingerprint before contacting the provider, then rechecks under the write lock.
+When adding a repository, it shares the validation and persistence path of
+`save_source`. Provider validation and discovery preview finish before the lock.
+The transaction saves the new rules, invalidates discovery membership, and applies
+the reviewed project links using the ordinary history path. If the rules already
+list the repository, the transaction only applies the links and can run offline.
+A separate bounded match count for the new repository keeps the saved assignee
+and label filters and has no effect on the fingerprint or the confirmation.
 
 The source conversation (an external ticket's comments and timeline events) is
 a read-only mirror in `source_conversation`, keyed by ticket and the source's

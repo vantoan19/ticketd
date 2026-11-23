@@ -15,12 +15,12 @@ use ticketd_core::{
     TicketPatch, Workspace,
     source::{
         CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
-        ConnectionInfo, Connector, ConnectorDescriptor, Conversation, ConversationEntry,
-        DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
-        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FailureScope, FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport,
-        SchemaField, SkippedPartition, SourceError, SourceFilter, SourceHealth, TargetProblem,
-        ValueFormat,
+        ConnectSourceAction, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
+        ConversationEntry, DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine,
+        ExternalComment, ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue,
+        ExternalRef, ExternalState, FailureScope, FieldKind, OptionSource, Ownership,
+        RefreshOptions, RefreshReport, SchemaField, SkippedPartition, SourceError, SourceFilter,
+        SourceHealth, TargetProblem, ValueFormat,
     },
 };
 
@@ -35,6 +35,7 @@ struct Remote {
     pause_next_discovery: Option<DiscoveryPause>,
     page_size: usize,
     outage: Option<String>,
+    connection_calls: usize,
     discover_calls: usize,
     fetch_calls: Vec<u64>,
     conversations: BTreeMap<u64, Conversation>,
@@ -90,6 +91,16 @@ impl Connector for Fake {
                         },
                     },
                     SchemaField {
+                        key: "assignee".into(),
+                        label: "Assignee".into(),
+                        help: None,
+                        required: false,
+                        kind: FieldKind::Text {
+                            placeholder: None,
+                            format: Some(ValueFormat::Handle),
+                        },
+                    },
+                    SchemaField {
                         key: "labels".into(),
                         label: "Labels".into(),
                         help: None,
@@ -108,6 +119,7 @@ impl Connector for Fake {
     }
 
     fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
+        self.0.lock().unwrap().connection_calls += 1;
         Ok(ConnectionInfo {
             account: "octo".into(),
         })
@@ -135,10 +147,18 @@ impl Connector for Fake {
             .and_then(|repository| remote.matching_by_repository.get(repository))
             .unwrap_or(&remote.matching);
         let wanted = labels_of(request.config);
+        let assignee = request
+            .config
+            .get("assignee")
+            .and_then(|value| value.as_str());
         let listed: Vec<ExternalIssue> = matching
             .iter()
             .filter_map(|id| remote.issues.get(id))
             .filter(|issue| issue.state == ExternalState::Open)
+            .filter(|issue| {
+                assignee
+                    .is_none_or(|assignee| issue.assignees.iter().any(|person| person == assignee))
+            })
             .filter(|issue| wanted.iter().all(|label| issue.labels.contains(label)))
             .filter(|issue| {
                 !remote
@@ -187,6 +207,10 @@ impl Connector for Fake {
             .iter()
             .map(|repository| repository.as_str().unwrap().to_owned())
             .collect()
+    }
+
+    fn repository_for_destination(&self, destination: &str) -> Option<String> {
+        Some(format!("example.test/{destination}"))
     }
 
     fn discovery_scope(&self, config: &ConfigValues) -> String {
@@ -371,6 +395,317 @@ fn retitle(title: &str) -> TicketPatch {
         title: Some(title.into()),
         ..TicketPatch::default()
     }
+}
+
+#[test]
+fn connecting_an_already_listed_repository_links_only_eligible_tickets_offline() {
+    let mut f = Fixture::new();
+    for (id, host) in [
+        (1, "example.test"),
+        (2, "example.test"),
+        (3, "example.test"),
+        (4, "other.test"),
+        (5, "example.test"),
+    ] {
+        f.publish(reported_issue(host, "o/r", id, "Imported issue"), true);
+    }
+    assert_eq!(f.refresh().imported.len(), 5);
+    let other_checkout = tempfile::tempdir().unwrap();
+    let other = f
+        .workspace
+        .create_project("Other", other_checkout.path().to_str().unwrap())
+        .unwrap();
+    f.workspace
+        .change_ticket(
+            "T-KQ2",
+            TicketPatch {
+                project_id: Some(Some(other.id.clone())),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    f.workspace.set_trashed("T-KQ3", true, None).unwrap();
+    f.set_state(1, closed(ClosureReason::Completed));
+    f.refresh();
+    f.remote(|remote| remote.outage = Some("offline".into()));
+    f.refresh();
+    f.workspace.take_ownership("T-KQ5", None).unwrap();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Matching",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/O/R"),
+        )
+        .unwrap();
+    let network_calls = {
+        let remote = f.fake.0.lock().unwrap();
+        (remote.connection_calls, remote.discover_calls)
+    };
+    let saved = f.workspace.saved_source("fake").unwrap();
+
+    let preview = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(preview.source, ConnectSourceAction::AlreadyListed);
+    assert_eq!(preview.tickets, ["T-KQ1"]);
+    assert_eq!(f.ticket(1).project_id, None);
+    let outcome = f
+        .workspace
+        .connect_source(&f.engine, "fake", &project.id, &preview.fingerprint)
+        .unwrap();
+    assert!(!outcome.repository_added);
+    assert_eq!(outcome.linked_tickets, ["T-KQ1"]);
+    assert_eq!(f.ticket(1).project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(f.ticket(1).status, Status::Done);
+    assert!(
+        f.workspace
+            .ticket_history("T-KQ1")
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry.kind == "project"
+                    && entry.from_value.is_empty()
+                    && entry.to_value == project.id
+            })
+    );
+    assert_eq!(f.ticket(2).project_id, Some(other.id));
+    for number in [3, 4, 5] {
+        assert_eq!(f.ticket(number).project_id, None);
+    }
+    assert_eq!(f.workspace.saved_source("fake").unwrap(), saved);
+    let remote = f.fake.0.lock().unwrap();
+    assert_eq!(
+        (remote.connection_calls, remote.discover_calls),
+        network_calls
+    );
+}
+
+#[test]
+fn live_connection_count_uses_only_the_target_repository_and_keeps_the_filters() {
+    let mut f = Fixture::new();
+    let mut matching = reported_issue("example.test", "o/target", 1, "Matches both filters");
+    matching.labels = vec!["selected".into()];
+    matching.assignees = vec!["octo".into()];
+    let mut wrong_label = matching.clone();
+    wrong_label.reference.identity.id = "2".into();
+    wrong_label.labels.clear();
+    let mut wrong_assignee = matching.clone();
+    wrong_assignee.reference.identity.id = "3".into();
+    wrong_assignee.assignees.clear();
+    for issue in [matching, wrong_label, wrong_assignee] {
+        f.publish(issue, false);
+    }
+    f.remote(|remote| {
+        remote.matching_by_repository.insert("o/r".into(), vec![]);
+        remote
+            .matching_by_repository
+            .insert("o/target".into(), vec![1, 2, 3]);
+    });
+    let config = json!({"repositories": ["o/r"], "labels": ["selected"], "assignee": "octo"});
+    f.workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Target",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/target"),
+        )
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(preview.source, ConnectSourceAction::AddRepository);
+    let count = f
+        .workspace
+        .connect_source_match_count(&f.engine, "fake", &project.id, &preview.fingerprint)
+        .unwrap()
+        .unwrap();
+    assert_eq!(count.matched, 1);
+    assert!(count.complete);
+    assert_eq!(
+        f.workspace
+            .preview_connect_source(&f.engine, "fake", &project.id)
+            .unwrap(),
+        preview
+    );
+    assert!(f.workspace.list_tickets().unwrap().is_empty());
+}
+
+#[test]
+fn connecting_rechecks_the_exact_ticket_set_after_remote_validation() {
+    let mut f = Fixture::new();
+    for id in [1, 2] {
+        f.publish(
+            reported_issue("example.test", "o/r", id, "Imported issue"),
+            true,
+        );
+    }
+    assert_eq!(f.refresh().imported, ["T-KQ1", "T-KQ2"]);
+    let alternate = tempfile::tempdir().unwrap();
+    let other = f
+        .workspace
+        .create_project("Other", alternate.path().to_str().unwrap())
+        .unwrap();
+    f.workspace
+        .change_ticket(
+            "T-KQ2",
+            TicketPatch {
+                project_id: Some(Some(other.id)),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    let mut other_issue = reported_issue("example.test", "o/other", 3, "Kept in discovery");
+    other_issue.labels = vec!["selected".into()];
+    f.publish(other_issue, false);
+    f.remote(|remote| {
+        remote
+            .matching_by_repository
+            .insert("o/other".into(), vec![3]);
+    });
+    let config = json!({"repositories": ["o/other"], "labels": ["selected"]});
+    let saved = f
+        .workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap()
+        .source;
+    assert_eq!(f.refresh().imported, ["T-KQ3"]);
+    assert_eq!(f.ticket(3).source.unwrap().discovery_matches, Some(true));
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Matching",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/r"),
+        )
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(preview.source, ConnectSourceAction::AddRepository);
+    assert_eq!(preview.tickets, ["T-KQ1"]);
+
+    let (entered_tx, entered_rx) = mpsc::sync_channel(0);
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    f.remote(|remote| {
+        remote.pause_next_discovery = Some(DiscoveryPause {
+            entered: entered_tx,
+            release: release.clone(),
+        });
+    });
+    let id = project.id.clone();
+    let expected = preview.fingerprint.clone();
+    let path = f.path();
+    let fake = f.fake.clone();
+    let connecting = std::thread::spawn(move || {
+        let mut engine = Engine::new();
+        engine.register(Box::new(fake)).unwrap();
+        let mut workspace = Workspace::open(path).unwrap();
+        workspace.connect_source(&engine, "fake", &id, &expected)
+    });
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    let trash = f.workspace.set_trashed("T-KQ1", true, None);
+    let unlink = f.workspace.change_ticket(
+        "T-KQ2",
+        TicketPatch {
+            project_id: Some(None),
+            ..TicketPatch::default()
+        },
+    );
+    {
+        let (released, changed) = &*release;
+        *released.lock().unwrap() = true;
+        changed.notify_all();
+    }
+    trash.unwrap();
+    unlink.unwrap();
+    assert!(matches!(
+        connecting.join().unwrap(),
+        Err(Error::ConnectSourceChanged)
+    ));
+    assert_eq!(f.workspace.saved_source("fake").unwrap(), Some(saved));
+    assert_eq!(f.ticket(2).project_id, None);
+    assert_eq!(f.ticket(3).source.unwrap().discovery_matches, Some(true));
+
+    let calls = f.fake.0.lock().unwrap().connection_calls;
+    assert!(matches!(
+        f.workspace
+            .connect_source(&f.engine, "fake", &project.id, &preview.fingerprint),
+        Err(Error::ConnectSourceChanged)
+    ));
+    assert_eq!(f.fake.0.lock().unwrap().connection_calls, calls);
+    let updated = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(updated.tickets, ["T-KQ2"]);
+    let applied = f
+        .workspace
+        .connect_source(&f.engine, "fake", &project.id, &updated.fingerprint)
+        .unwrap();
+    assert!(applied.repository_added);
+    assert_eq!(applied.linked_tickets, ["T-KQ2"]);
+    assert_eq!(f.ticket(2).project_id, Some(project.id));
+    assert_eq!(f.ticket(3).source.unwrap().discovery_matches, None);
+    let config = f.workspace.saved_source("fake").unwrap().unwrap().config;
+    assert_eq!(config["repositories"], json!(["o/other", "o/r"]));
+    assert_eq!(config["labels"], json!(["selected"]));
+}
+
+#[test]
+fn connecting_without_a_saved_source_previews_setup_and_requires_a_compatible_remote() {
+    let dir = tempfile::tempdir().unwrap();
+    let checkout = dir.path().to_str().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let mut engine = Engine::new();
+    let fake = Fake::default();
+    engine.register(Box::new(fake.clone())).unwrap();
+    let project = workspace.create_project("Project", checkout).unwrap();
+    assert!(matches!(
+        workspace.preview_connect_source(&engine, "fake", &project.id),
+        Err(Error::ProjectRemoteRequired(_))
+    ));
+    workspace
+        .edit_project_with_remote(
+            &project.id,
+            "Project",
+            checkout,
+            ProjectRemoteChange::Set("other.test/o/r"),
+        )
+        .unwrap();
+    assert!(matches!(
+        workspace.preview_connect_source(&engine, "fake", &project.id),
+        Err(Error::ProjectSourceHostMismatch { .. })
+    ));
+    workspace
+        .edit_project_with_remote(
+            &project.id,
+            "Project",
+            checkout,
+            ProjectRemoteChange::Set("example.test/o/r"),
+        )
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(preview.source, ConnectSourceAction::NotConnected);
+    assert_eq!(preview.repository, "o/r");
+    assert_eq!(preview.project_remote, "example.test/o/r");
+    assert!(preview.tickets.is_empty());
+    assert!(matches!(
+        workspace.connect_source(&engine, "fake", &project.id, &preview.fingerprint),
+        Err(Error::ProjectSourceNotConnected { .. })
+    ));
+    assert_eq!(workspace.saved_source("fake").unwrap(), None);
+    assert_eq!(fake.0.lock().unwrap().connection_calls, 0);
 }
 
 #[test]

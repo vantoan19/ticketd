@@ -986,6 +986,17 @@ enum ProjectCommand {
     },
     /// Show a project
     Show { id: String },
+    /// Add the Project remote to GitHub discovery and link its existing unlinked tickets
+    ConnectSource {
+        /// The project's ID
+        project: String,
+        /// Show the local effect and fingerprint without contacting GitHub
+        #[arg(long)]
+        preview: bool,
+        /// Apply the effect from the reviewed preview
+        #[arg(long, required_unless_present = "preview", conflicts_with = "preview")]
+        expect: Option<String>,
+    },
     /// List projects
     List,
     /// Register another checkout path for a project
@@ -1689,11 +1700,18 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     }
                     ticketd_core::detect_project_remote(std::path::Path::new(path.trim())).suggested
                 });
-                serde_json::to_string(&workspace.create_project_with_remote(
+                let project = workspace.create_project_with_remote(
                     &name,
                     &path,
                     remote.as_deref(),
-                )?)?
+                )?;
+                if project.remote.is_some() {
+                    eprintln!(
+                        "hint: Preview connecting this project with `ticketd project connect-source {} --preview`.",
+                        project.id
+                    );
+                }
+                serde_json::to_string(&project)?
             }
             ProjectCommand::Edit {
                 id,
@@ -1710,6 +1728,23 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 serde_json::to_string(&workspace.edit_project_with_remote(&id, &name, &path, remote)?)?
             }
             ProjectCommand::Show { id } => serde_json::to_string(&workspace.show_project(&id)?)?,
+            ProjectCommand::ConnectSource {
+                project,
+                preview,
+                expect,
+            } => {
+                let engine = ticketd_core::source::Engine::builtin();
+                if preview {
+                    serde_json::to_string(&workspace.preview_connect_source(
+                        &engine, "github", &project,
+                    )?)?
+                } else {
+                    let fingerprint = expect.as_deref().ok_or("supply --expect FINGERPRINT or --preview")?;
+                    serde_json::to_string(&workspace.connect_source(
+                        &engine, "github", &project, fingerprint,
+                    )?)?
+                }
+            }
             ProjectCommand::Register { id, path } => {
                 let registration = workspace.register_checkout_with_warning(&id, &path)?;
                 if let Some(warning) = registration.warning {
