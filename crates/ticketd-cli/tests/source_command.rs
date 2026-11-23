@@ -218,7 +218,7 @@ fn list_describes_the_github_connector_and_its_schema() {
     let listed = cli.run(&["source", "list"]);
     let github = &listed[0];
     assert_eq!(github["connector"]["provider"], "github");
-    assert_eq!(github["connector"]["contract_version"], 1);
+    assert_eq!(github["connector"]["contract_version"], 2);
     let presentation = &github["connector"]["presentation"];
     assert!(
         presentation["icon_svg"]
