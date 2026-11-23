@@ -29,6 +29,7 @@ fn fixture_connector(host: Arc<Host>, connection: &str) -> ProcessConnector {
         },
         connection_id: Some(connection.into()),
         host,
+        refresh: None,
     }
 }
 
@@ -128,6 +129,103 @@ fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
     assert!(large.to_string().contains("line exceeds"));
     let checked = connector.check_connection(&configuration("noisy")).unwrap();
     assert_eq!(checked.connection.account, "octo");
+}
+
+#[test]
+fn progress_keeps_a_slow_discovery_call_alive() {
+    let host = Arc::new(Host::with_limits(Limits {
+        request: Duration::from_millis(350),
+        ..Limits::default()
+    }));
+    let connector = fixture_connector(host, "first");
+    let page = connector
+        .discover(DiscoveryRequest {
+            config: &configuration("slow_progress"),
+            cursor: None,
+            page_size: 10,
+        })
+        .unwrap();
+    assert_eq!(page.issues.len(), 1);
+}
+
+#[test]
+fn progress_cannot_extend_discovery_past_its_hard_limit() {
+    let host = Arc::new(Host::with_limits(Limits {
+        request: Duration::from_millis(350),
+        hard: Duration::from_millis(650),
+        grace: Duration::from_millis(400),
+        ..Limits::default()
+    }));
+    let connector = fixture_connector(host, "first");
+    let process = |connector: &dyn Connector| {
+        connector
+            .check_connection(&configuration("session"))
+            .unwrap()
+            .connection
+            .account
+    };
+    let before = process(&connector);
+    let started = Instant::now();
+    let error = connector
+        .discover(DiscoveryRequest {
+            config: &configuration("cooperative"),
+            cursor: None,
+            page_size: 10,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("timed out"), "{error}");
+    assert!((Duration::from_millis(600)..Duration::from_secs(3)).contains(&started.elapsed()));
+    assert_eq!(process(&connector), before);
+}
+
+#[tokio::test]
+async fn a_canceled_discovery_keeps_a_cooperating_process() {
+    let (before, after) = cancel_discovery("cooperative").await;
+    assert_eq!(before, after);
+}
+
+#[tokio::test]
+async fn a_canceled_discovery_restarts_a_process_that_ignores_cancel() {
+    let (before, after) = cancel_discovery("ignore_cancel").await;
+    assert_ne!(before, after);
+}
+
+async fn cancel_discovery(mode: &'static str) -> (String, String) {
+    let host = Arc::new(Host::with_limits(Limits {
+        grace: Duration::from_millis(350),
+        ..Limits::default()
+    }));
+    let connector = fixture_connector(host, "first");
+    let process = || {
+        connector
+            .check_connection(&configuration("session"))
+            .unwrap()
+            .connection
+            .account
+    };
+    let before = process();
+    let control = RefreshControl::default();
+    let mut progress = control.progress();
+    let controlled = connector.for_refresh(&control).unwrap();
+    let operation = tokio::task::spawn_blocking(move || {
+        controlled.discover(DiscoveryRequest {
+            config: &configuration(mode),
+            cursor: None,
+            page_size: 10,
+        })
+    });
+    tokio::time::timeout(Duration::from_secs(3), progress.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    control.cancel();
+    let error = tokio::time::timeout(Duration::from_secs(4), operation)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(error, SourceError::RefreshCanceled), "{error}");
+    (before, process())
 }
 
 #[test]

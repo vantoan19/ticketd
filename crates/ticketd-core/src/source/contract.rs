@@ -373,6 +373,8 @@ pub enum SourceError {
     Unavailable(String),
     #[error("the source extension crashed five times in three minutes. Retry to restart it")]
     ExtensionCrashLimit,
+    #[error("source refresh canceled")]
+    RefreshCanceled,
     /// The request never left this machine (no DNS answer, connection refused),
     /// so the provider certainly did not act on it. Reads as unavailable
     /// everywhere else, but a failed `publish` with it proves nothing was created.
@@ -409,6 +411,7 @@ pub(crate) enum FailureCode {
     RateLimited,
     Unavailable,
     ExtensionCrashLimit,
+    RefreshCanceled,
     Rejected,
     Protocol,
     Unsupported,
@@ -419,13 +422,14 @@ pub(crate) enum FailureCode {
 }
 
 impl FailureCode {
-    pub(crate) const ALL: [Self; 13] = [
+    pub(crate) const ALL: [Self; 14] = [
         Self::Unauthenticated,
         Self::Forbidden,
         Self::NotFound,
         Self::RateLimited,
         Self::Unavailable,
         Self::ExtensionCrashLimit,
+        Self::RefreshCanceled,
         Self::Rejected,
         Self::Protocol,
         Self::Unsupported,
@@ -443,6 +447,7 @@ impl FailureCode {
             Self::RateLimited => "rate_limited",
             Self::Unavailable => "unavailable",
             Self::ExtensionCrashLimit => "extension_crash_limit",
+            Self::RefreshCanceled => "refresh_canceled",
             Self::Rejected => "rejected",
             Self::Protocol => "protocol",
             Self::Unsupported => "unsupported",
@@ -461,9 +466,10 @@ impl FailureCode {
             | Self::InvalidConfiguration
             | Self::UnknownProvider
             | Self::NotConfigured => ErrorClass::Config,
-            Self::RateLimited | Self::Unavailable | Self::ExtensionCrashLimit => {
-                ErrorClass::Transient
-            }
+            Self::RateLimited
+            | Self::Unavailable
+            | Self::ExtensionCrashLimit
+            | Self::RefreshCanceled => ErrorClass::Transient,
             Self::Protocol | Self::Unsupported | Self::IncompatibleContract => ErrorClass::System,
         }
     }
@@ -485,7 +491,8 @@ impl FailureCode {
             | Self::NotFound
             | Self::Protocol
             | Self::NotConfigured => true,
-            Self::RateLimited
+            Self::RefreshCanceled
+            | Self::RateLimited
             | Self::Rejected
             | Self::Unsupported
             | Self::InvalidConfiguration
@@ -504,7 +511,8 @@ impl FailureCode {
             | Self::ExtensionCrashLimit
             | Self::RateLimited
             | Self::Unauthenticated => true,
-            Self::Forbidden
+            Self::RefreshCanceled
+            | Self::Forbidden
             | Self::NotFound
             | Self::Rejected
             | Self::Protocol
@@ -526,6 +534,7 @@ impl SourceError {
             Self::RateLimited { .. } => FailureCode::RateLimited,
             Self::Unavailable(_) | Self::NotSent(_) => FailureCode::Unavailable,
             Self::ExtensionCrashLimit => FailureCode::ExtensionCrashLimit,
+            Self::RefreshCanceled => FailureCode::RefreshCanceled,
             Self::Rejected(_) => FailureCode::Rejected,
             Self::Protocol(_) => FailureCode::Protocol,
             Self::Unsupported(_) => FailureCode::Unsupported,
@@ -578,7 +587,7 @@ impl SourceError {
             | Self::InvalidConfiguration(_)
             | Self::UnknownProvider(_)
             | Self::IncompatibleContract { .. } => true,
-            Self::Unavailable(_) | Self::Protocol(_) => false,
+            Self::Unavailable(_) | Self::Protocol(_) | Self::RefreshCanceled => false,
         }
     }
 
@@ -640,6 +649,11 @@ pub trait Connector: Send + Sync {
 
     /// Supplies connection-specific credentials where the connector supports them.
     fn for_connection(&self, _id: &str, _config: &ConfigValues) -> Option<Box<dyn Connector>> {
+        None
+    }
+
+    /// Attaches controls to a connection-scoped connector that supports them.
+    fn for_refresh(&self, _control: &super::RefreshControl) -> Option<Box<dyn Connector>> {
         None
     }
 

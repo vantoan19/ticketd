@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { setTimeout as pause } from "node:timers/promises";
 
 const provider = "example-tracker";
 const versions = [2];
@@ -79,7 +80,12 @@ class TrackerError extends Error {
   }
 }
 
-function dispatch(method: unknown, params: RecordValue): unknown {
+async function dispatch(
+  method: unknown,
+  params: RecordValue,
+  signal: AbortSignal,
+  progress: (completed: number, total: number) => void,
+): Promise<unknown> {
   if (method === "describe") {
     const offered = params.contract_versions;
     const accepted = Array.isArray(offered) && offered.includes(2);
@@ -133,11 +139,15 @@ function dispatch(method: unknown, params: RecordValue): unknown {
       ["last", [[2], null]],
     ]);
     const [numbers, next_cursor] = pages.get(params.cursor) ?? [[], null];
-    return {
-      issues: numbers.map((number) => issue(board, number)),
-      next_cursor,
-      skipped: [],
-    };
+    progress(0, numbers.length);
+    // Stand in for an abortable tracker read while the stdin loop handles cancel.
+    await pause(30, undefined, { signal });
+    const issues = numbers.map((number, index) => {
+      signal.throwIfAborted();
+      progress(index + 1, numbers.length);
+      return issue(board, number);
+    });
+    return { issues, next_cursor, skipped: [] };
   }
 
   const reference = object(params.reference);
@@ -168,29 +178,67 @@ function dispatch(method: unknown, params: RecordValue): unknown {
   throw new Error("Unknown method");
 }
 
+function send(message: RecordValue) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
+}
+
+async function serve(
+  id: number,
+  method: unknown,
+  params: RecordValue,
+  signal: AbortSignal,
+) {
+  let reply: RecordValue;
+  try {
+    const result = await dispatch(
+      method,
+      params,
+      signal,
+      (completed, total) => {
+        send({ method: "progress", params: { id, completed, total } });
+      },
+    );
+    signal.throwIfAborted();
+    reply = { result };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "The tracker failed.";
+    reply = signal.aborted
+      ? { error: { code: -32800, message: "Request canceled" } }
+      : error instanceof TrackerError
+        ? {
+            error: {
+              code: -32000,
+              message,
+              data: {
+                class: "config",
+                code: error.code,
+                message,
+              },
+            },
+          }
+        : { error: { code: -32603, message } };
+  }
+  send({ id, ...reply });
+}
+
+const running = new Map<number, AbortController>();
 for await (const line of createInterface({
   input: process.stdin,
   crlfDelay: Infinity,
 })) {
   const request = object(JSON.parse(line));
   const { id, method } = request;
-  if (request.jsonrpc !== "2.0" || typeof id !== "number") continue;
-  let reply: RecordValue;
-  try {
-    reply = { result: dispatch(method, object(request.params)) };
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "The tracker failed.";
-    reply =
-      error instanceof TrackerError
-        ? {
-            error: {
-              code: -32000,
-              message,
-              data: { class: "config", code: error.code, message },
-            },
-          }
-        : { error: { code: -32603, message } };
+  const params = object(request.params);
+  if (request.jsonrpc !== "2.0") continue;
+  if (method === "cancel" && typeof params.id === "number") {
+    running.get(params.id)?.abort();
+  } else if (typeof id === "number") {
+    const controller = new AbortController();
+    running.set(id, controller);
+    void serve(id, method, params, controller.signal).finally(() => {
+      running.delete(id);
+    });
   }
-  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, ...reply }) + "\n");
 }
+for (const controller of running.values()) controller.abort();

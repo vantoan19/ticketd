@@ -23,7 +23,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::{Engine, RefreshOptions, RefreshReport};
+use super::{Engine, RefreshOptions, RefreshReport, SourceError};
 use crate::{Error, Workspace};
 
 /// A source of "now" in whole seconds since the Unix epoch.
@@ -338,6 +338,9 @@ impl RefreshCoordinator {
     }
 
     fn feed_connections(&self, due: &[String], result: &Result<RefreshReport, Error>) {
+        if matches!(result, Err(Error::Source(SourceError::RefreshCanceled))) {
+            return;
+        }
         let now = self.clock.now_secs();
         let mut state = self.lock();
         for id in due {

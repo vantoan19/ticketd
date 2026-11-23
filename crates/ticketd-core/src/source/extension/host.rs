@@ -23,8 +23,8 @@ use tokio::{
 };
 
 use super::{
-    CONTRACT_VERSION, Launch, SourceError,
-    process::{EXIT_POLL, Fault, LINE_LIMIT, Process, unexpected},
+    CONTRACT_VERSION, Launch, RefreshControl, SourceError,
+    process::{CallBudget, CallControl, EXIT_POLL, Fault, LINE_LIMIT, Process, unexpected},
     wire::{Call, Description, JsonRpc, Request},
 };
 
@@ -36,6 +36,8 @@ const CRASH_WINDOW: Duration = Duration::from_secs(3 * 60);
 pub(super) struct Limits {
     pub handshake: Duration,
     pub request: Duration,
+    pub hard: Duration,
+    pub grace: Duration,
     pub idle: Duration,
 }
 
@@ -44,7 +46,27 @@ impl Default for Limits {
         Self {
             handshake: Duration::from_secs(5),
             request: Duration::from_secs(30),
+            hard: Duration::from_secs(5 * 60),
+            grace: Duration::from_secs(2),
             idle: Duration::from_secs(5 * 60),
+        }
+    }
+}
+
+impl Limits {
+    fn budget(self, handshake: bool) -> CallBudget {
+        if handshake {
+            CallBudget {
+                soft: self.handshake,
+                hard: self.handshake,
+                grace: self.grace,
+            }
+        } else {
+            CallBudget {
+                soft: self.request,
+                hard: self.hard,
+                grace: self.grace,
+            }
         }
     }
 }
@@ -71,14 +93,14 @@ struct ConnectionKey {
 
 struct Runtime {
     handle: Handle,
-    closing: watch::Sender<()>,
+    closing: watch::Sender<bool>,
     sessions: oneshot::Sender<Vec<JoinHandle<()>>>,
     thread: thread::JoinHandle<()>,
 }
 
 impl Runtime {
     fn start() -> io::Result<Self> {
-        let (closing, _) = watch::channel(());
+        let (closing, _) = watch::channel(false);
         let (sessions, finished) = oneshot::channel::<Vec<JoinHandle<()>>>();
         let (ready, started) = blocking::sync_channel(1);
         let thread = thread::Builder::new()
@@ -123,6 +145,7 @@ enum Message {
     Call {
         definition: Definition,
         request: EncodedRequest,
+        refresh: Option<RefreshControl>,
         reply: blocking::SyncSender<Result<Value, SourceError>>,
     },
     Retry(blocking::SyncSender<()>),
@@ -203,18 +226,35 @@ impl Host {
         id: Option<&str>,
         call: Call<'_>,
     ) -> Result<T, SourceError> {
+        self.call_controlled(definition, id, call, None)
+    }
+
+    pub(super) fn call_controlled<T: DeserializeOwned>(
+        &self,
+        definition: &Definition,
+        id: Option<&str>,
+        call: Call<'_>,
+        refresh: Option<&RefreshControl>,
+    ) -> Result<T, SourceError> {
+        if let Some(refresh) = refresh {
+            refresh.check()?;
+        }
         let request = self.encode(call)?;
         let endpoint = self.endpoint(definition, id)?;
         let _serial = endpoint
             .serial
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        if let Some(refresh) = refresh {
+            refresh.check()?;
+        }
         let (reply, result) = blocking::sync_channel(1);
         endpoint
             .sender
             .try_send(Message::Call {
                 definition: definition.clone(),
                 request,
+                refresh: refresh.cloned(),
                 reply,
             })
             .map_err(|_| SourceError::NotSent("the source extension session has stopped".into()))?;
@@ -272,7 +312,7 @@ impl Host {
             (state.runtime.take(), sessions)
         };
         if let Some(runtime) = runtime {
-            runtime.closing.send_replace(());
+            runtime.closing.send_replace(true);
             let _ = runtime.sessions.send(sessions);
             let _ = runtime.thread.join();
         }
@@ -309,7 +349,7 @@ impl Write for CappedFrame {
 async fn session(
     key: ConnectionKey,
     limits: Limits,
-    mut closing: watch::Receiver<()>,
+    mut closing: watch::Receiver<bool>,
     mut messages: mpsc::Receiver<Message>,
 ) {
     let mut active: Option<(Arc<Launch>, Process)> = None;
@@ -321,13 +361,13 @@ async fn session(
     loop {
         tokio::select! {
             biased;
-            _ = closing.changed() => break,
+            _ = wait_for_close(&mut closing) => break,
             message = messages.recv() => match message {
                 Some(Message::Retry(reply)) => {
                     crashes.clear();
                     let _ = reply.send(());
                 }
-                Some(Message::Call { definition, request, reply }) => {
+                Some(Message::Call { definition, request, refresh, reply }) => {
                     if crashes.len() >= CRASH_LIMIT {
                         let _ = reply.send(Err(SourceError::ExtensionCrashLimit));
                         continue;
@@ -339,12 +379,18 @@ async fn session(
                     if active.as_ref().is_some_and(|(launch, _)| launch != &definition.launch) {
                         stop(&mut active).await;
                     }
-                    let operation = serve(&mut active, &definition, key.id.is_some(), &request, limits);
-                    let result = tokio::select! {
-                        biased;
-                        _ = closing.changed() => break,
-                        result = operation => result,
+                    let mut control = CallControl {
+                        refresh: refresh.as_ref(),
+                        closing: &mut closing,
                     };
+                    let result = serve(
+                        &mut active,
+                        &definition,
+                        key.id.is_some(),
+                        &request,
+                        limits,
+                        &mut control,
+                    ).await;
                     let result = match result {
                         Ok(result) => result,
                         Err(fault) => {
@@ -380,6 +426,10 @@ async fn session(
     stop(&mut active).await;
 }
 
+async fn wait_for_close(closing: &mut watch::Receiver<bool>) {
+    let _ = closing.wait_for(|closed| *closed).await;
+}
+
 async fn idle_stdout(active: &mut Option<(Arc<Launch>, Process)>) -> Fault {
     let Some((_, process)) = active.as_mut() else {
         return std::future::pending().await;
@@ -413,6 +463,7 @@ async fn serve(
     connection: bool,
     request: &EncodedRequest,
     limits: Limits,
+    control: &mut CallControl<'_>,
 ) -> Result<Result<Value, SourceError>, Fault> {
     if active.is_none() {
         let process = match definition.launch.command().and_then(Process::spawn) {
@@ -431,7 +482,9 @@ async fn serve(
                 serde_json::to_vec(&hello).map_err(|error| Fault::Protocol(error.to_string()))?;
             frame.push(b'\n');
             if let Some((_, process)) = active.as_mut() {
-                let response = process.exchange(hello.id, &frame, limits.handshake).await?;
+                let response = process
+                    .exchange(hello.id, &frame, limits.budget(true), control)
+                    .await?;
                 let checked = response.and_then(|value| {
                     let description = parse_handshake(&definition.launch, value)?;
                     if definition.cached.as_deref() != Some(&description) {
@@ -450,12 +503,14 @@ async fn serve(
     }
     match active.as_mut() {
         Some((_, process)) => {
-            let deadline = if connection {
-                limits.request
-            } else {
-                limits.handshake
-            };
-            process.exchange(request.id, &request.frame, deadline).await
+            process
+                .exchange(
+                    request.id,
+                    &request.frame,
+                    limits.budget(!connection),
+                    control,
+                )
+                .await
         }
         None => Err(Fault::Crash),
     }

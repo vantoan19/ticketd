@@ -12,12 +12,16 @@ use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, ChildStdout, Command},
+    sync::watch,
     task::JoinHandle,
-    time::{interval, sleep, timeout},
+    time::{Instant, Interval, interval, sleep, sleep_until, timeout},
 };
 
-use super::super::SourceError;
-use super::wire::Response;
+use super::super::{RefreshControl, RefreshProgress, SourceError};
+use super::wire::{
+    CancelMethod, CancelNotification, CancelParams, JsonRpc, ProgressNotification,
+    REQUEST_CANCELED, Response,
+};
 
 pub(super) const LINE_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 16 * 1024;
@@ -31,6 +35,7 @@ pub(super) enum Fault {
     Crash,
     Protocol(String),
     Timeout,
+    Canceled,
 }
 
 impl From<Fault> for SourceError {
@@ -39,8 +44,41 @@ impl From<Fault> for SourceError {
             Fault::Crash => Self::Unavailable("the source extension process exited".into()),
             Fault::Protocol(message) => Self::Protocol(message),
             Fault::Timeout => Self::Unavailable("the source extension request timed out".into()),
+            Fault::Canceled => Self::RefreshCanceled,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CallBudget {
+    pub soft: Duration,
+    pub hard: Duration,
+    pub grace: Duration,
+}
+
+pub(super) struct CallControl<'a> {
+    pub refresh: Option<&'a RefreshControl>,
+    pub closing: &'a mut watch::Receiver<bool>,
+}
+
+impl CallControl<'_> {
+    async fn canceled(&mut self) {
+        tokio::select! {
+            _ = self.closing.wait_for(|closed| *closed) => (),
+            _ = async {
+                if let Some(refresh) = self.refresh {
+                    refresh.canceled().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => (),
+        }
+    }
+}
+
+enum Inbound {
+    Progress(RefreshProgress),
+    Reply(Response<Value>),
 }
 
 pub(super) struct Process {
@@ -89,46 +127,137 @@ impl Process {
         })
     }
 
-    /// One deadline covers a blocked write and the complete response. Observe a
-    /// dead leader even if its descendants inherited stdin or stdout.
+    /// Both deadlines cover writing the request and reading its response.
     pub(super) async fn exchange(
         &mut self,
         id: u64,
         frame: &[u8],
-        limit: Duration,
+        limits: CallBudget,
+        control: &mut CallControl<'_>,
     ) -> Result<Result<Value, SourceError>, Fault> {
-        let stdin = self.stdin.as_mut().ok_or(Fault::Crash)?;
-        let stdout = &mut self.stdout;
-        let child = &mut self.child;
+        let started = Instant::now();
+        let hard = started + limits.hard;
+        let mut deadline = hard.min(started + limits.soft);
         let mut polls = interval(EXIT_POLL);
-        let result = timeout(limit, async {
-            tokio::select! {
+        let stdin = self.stdin.as_mut().ok_or(Fault::Crash)?;
+        tokio::select! {
+            biased;
+            // A canceled write may have left a partial JSON frame. In that
+            // case the host closes the process rather than appending another.
+            _ = control.canceled() => return Err(Fault::Canceled),
+            _ = sleep_until(deadline) => return Err(Fault::Timeout),
+            written = stdin.write_all(frame) => written.map_err(|_| Fault::Crash)?,
+            _ = watch_for_exit(&mut self.child, &mut polls) => return Err(Fault::Crash),
+        };
+        loop {
+            let inbound = tokio::select! {
                 biased;
-                received = async {
-                    stdin.write_all(frame).await.map_err(|_| Fault::Crash)?;
-                    stdout.read().await
-                } => received,
-                () = async {
-                    loop {
-                        polls.tick().await;
-                        if child.exited() { return; }
+                _ = control.canceled() => Err(Fault::Canceled),
+                _ = sleep_until(deadline) => Err(Fault::Timeout),
+                received = self.receive(id, &mut polls) => received,
+            };
+            match inbound {
+                Ok(Inbound::Progress(progress)) => {
+                    deadline = hard.min(Instant::now() + limits.soft);
+                    if let Some(refresh) = control.refresh {
+                        refresh.report(progress);
                     }
-                } => Err(Fault::Crash),
+                }
+                Ok(Inbound::Reply(Response::Success(response))) => return Ok(Ok(response.result)),
+                Ok(Inbound::Reply(Response::Failure(response))) => {
+                    return Ok(Err(response.error.into_source_error()));
+                }
+                Err(reason @ (Fault::Canceled | Fault::Timeout)) => {
+                    if self.cancel_request(id, limits.grace, control.refresh).await {
+                        return Ok(Err(reason.into()));
+                    }
+                    return Err(reason);
+                }
+                Err(fault) => return Err(fault),
             }
-        })
-        .await
-        .map_err(|_| Fault::Timeout)??;
+        }
+    }
 
-        match serde_json::from_slice::<Response<Value>>(&result) {
-            Ok(Response::Success(response)) if response.id == id => {
-                let _ = response.jsonrpc;
-                Ok(Ok(response.result))
+    async fn receive(&mut self, id: u64, polls: &mut Interval) -> Result<Inbound, Fault> {
+        let line = tokio::select! {
+            biased;
+            line = self.stdout.read() => line?,
+            _ = watch_for_exit(&mut self.child, polls) => return Err(Fault::Crash),
+        };
+        if let Ok(progress) = serde_json::from_slice::<ProgressNotification>(&line)
+            && progress.params.id == id
+            && progress
+                .params
+                .total
+                .is_none_or(|total| progress.params.completed <= total)
+        {
+            let _ = (progress.jsonrpc, progress.method);
+            return Ok(Inbound::Progress(RefreshProgress {
+                completed: progress.params.completed,
+                total: progress.params.total,
+            }));
+        }
+        match serde_json::from_slice::<Response<Value>>(&line) {
+            Ok(Response::Success(reply)) if reply.id == id => {
+                let _ = reply.jsonrpc;
+                Ok(Inbound::Reply(Response::Success(reply)))
             }
-            Ok(Response::Failure(response)) if response.id == id => {
-                let _ = response.jsonrpc;
-                Ok(Err(response.error.into_source_error()))
+            Ok(Response::Failure(reply)) if reply.id == id => {
+                let _ = reply.jsonrpc;
+                Ok(Inbound::Reply(Response::Failure(reply)))
             }
-            _ => Err(unexpected(&result)),
+            _ => Err(unexpected(&line)),
+        }
+    }
+
+    /// A terminal response means the process is ready for its next call. A
+    /// matching success can cross the cancel on the pipe but is still discarded.
+    async fn cancel_request(
+        &mut self,
+        id: u64,
+        grace: Duration,
+        control: Option<&RefreshControl>,
+    ) -> bool {
+        let Some(stdin) = self.stdin.as_mut() else {
+            return false;
+        };
+        let Ok(mut frame) = serde_json::to_vec(&CancelNotification {
+            jsonrpc: JsonRpc::V2,
+            method: CancelMethod::Cancel,
+            params: CancelParams { id },
+        }) else {
+            return false;
+        };
+        frame.push(b'\n');
+        let deadline = Instant::now() + grace;
+        let mut polls = interval(EXIT_POLL);
+        let written = tokio::select! {
+            biased;
+            _ = sleep_until(deadline) => return false,
+            written = stdin.write_all(&frame) => written,
+        };
+        if written.is_err() {
+            return false;
+        }
+        loop {
+            let received = tokio::select! {
+                biased;
+                _ = sleep_until(deadline) => return false,
+                received = self.receive(id, &mut polls) => received,
+            };
+            match received {
+                Ok(Inbound::Progress(_)) => continue,
+                Ok(Inbound::Reply(response)) => {
+                    if let Response::Failure(response) = response
+                        && response.error.code == REQUEST_CANCELED
+                        && let Some(control) = control
+                    {
+                        control.acknowledge();
+                    }
+                    return true;
+                }
+                Err(_) => return false,
+            }
         }
     }
 
@@ -151,6 +280,15 @@ impl Process {
             .unwrap_or_else(|error| error.into_inner())
             .len();
         tracing::debug!(captured_stderr_bytes = captured, "source extension stopped");
+    }
+}
+
+async fn watch_for_exit(child: &mut ManagedChild, polls: &mut Interval) {
+    loop {
+        polls.tick().await;
+        if child.exited() {
+            return;
+        }
     }
 }
 

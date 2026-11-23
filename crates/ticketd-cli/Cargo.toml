@@ -23,6 +23,7 @@ clap.workspace = true
 serde = { version = "1", features = ["derive"] }
 # raw_value lets the CLI drop one key from a record without reordering the rest.
 serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", features = ["macros", "rt", "signal", "sync"] }
 tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
 

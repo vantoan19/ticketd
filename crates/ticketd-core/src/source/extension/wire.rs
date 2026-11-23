@@ -86,6 +86,51 @@ pub(super) struct Description {
     pub description: Option<SourceDescription>,
 }
 
+pub(super) const REQUEST_CANCELED: i32 = -32800;
+
+/// Stop the request identified by params.id and send its terminal error response.
+#[derive(Serialize, JsonSchema)]
+pub(super) struct CancelNotification {
+    pub jsonrpc: JsonRpc,
+    pub method: CancelMethod,
+    pub params: CancelParams,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum CancelMethod {
+    Cancel,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(super) struct CancelParams {
+    pub id: u64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProgressNotification {
+    pub jsonrpc: JsonRpc,
+    pub method: ProgressMethod,
+    pub params: ProgressParams,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ProgressMethod {
+    Progress,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct ProgressParams {
+    /// ID of the active request, carried in params because this is a notification.
+    pub id: u64,
+    /// Number of items processed in this request so far.
+    pub completed: u32,
+    /// Total number of items when known.
+    pub total: Option<u32>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub(super) enum Response<T> {
@@ -111,6 +156,7 @@ pub(super) struct Failure {
 
 #[derive(Deserialize, JsonSchema)]
 pub(super) struct RpcError {
+    /// Use -32800 for a request stopped by a matching cancel notification.
     pub code: i32,
     pub message: String,
     /// Domain errors use code -32000 and carry the source failure in data.
@@ -206,6 +252,8 @@ enum ResultValue {
 enum Contract2 {
     Host(Request<'static>),
     Extension(Response<ResultValue>),
+    Progress(ProgressNotification),
+    Cancel(CancelNotification),
 }
 
 pub(super) fn schema() -> schemars::Schema {

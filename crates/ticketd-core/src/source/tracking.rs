@@ -947,6 +947,7 @@ impl Workspace {
         options: &RefreshOptions,
         selected: Option<&[String]>,
     ) -> Result<RefreshReport, Error> {
+        engine.check_refresh_canceled()?;
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = tracked(&self.connection, options.ticket.as_deref())?;
         let sources = super::configured_sources(&self.connection)?;
@@ -1021,6 +1022,7 @@ impl Workspace {
             report.failures.extend(batch.failures);
         };
         for pair in jobs.chunks(2) {
+            engine.check_refresh_canceled()?;
             let batches = if let [first, second] = pair {
                 std::thread::scope(|scope| {
                     let first_worker = scope.spawn(|| gather(first));
@@ -1050,6 +1052,7 @@ impl Workspace {
                     .collect::<Result<Vec<_>, Error>>()?
             };
             for (source, mut batch) in batches {
+                engine.check_refresh_canceled()?;
                 if batch.read_conversations {
                     // The earlier connection may have imported a shared issue
                     // already. Do not read its conversation a second time.
@@ -1079,6 +1082,7 @@ impl Workspace {
                         &mut batch,
                     )?;
                 }
+                engine.check_refresh_canceled()?;
                 merge(self.apply_refresh(batch, &started, &tracked, Some(&source.saved.id))?);
             }
         }
@@ -1089,6 +1093,7 @@ impl Workspace {
                 .map(|ticket| ticket.provider.as_str())
                 .collect();
             for provider in missing {
+                engine.check_refresh_canceled()?;
                 let batch = gather_connection(engine, options, &tracked, &sources, provider, None)?;
                 merge(self.apply_refresh(batch, &started, &tracked, None)?);
             }
@@ -1105,6 +1110,7 @@ fn gather_connection(
     provider: &str,
     configured: Option<&super::ConfiguredSource>,
 ) -> Result<Gathered, Error> {
+    engine.check_refresh_canceled()?;
     let engine = configured
         .map(|source| engine.for_connection(provider, &source.saved.id, &source.saved.config));
     let source_id = configured.map(|source| source.saved.id.as_str());
@@ -1162,6 +1168,9 @@ fn gather_connection(
             derived,
         }
     });
+    if let Some(engine) = engine {
+        engine.check_refresh_canceled()?;
+    }
     if let (None, Some(config), Some(derived), Some(engine)) = (
         &options.ticket,
         config,
@@ -1212,6 +1221,7 @@ fn gather_connection(
             gathered.issues.push(issue);
             ControlFlow::Continue(())
         });
+        engine.check_refresh_canceled()?;
         match result {
             Ok(summary) => {
                 if summary.complete && summary.skipped.is_empty() {
@@ -1299,6 +1309,7 @@ fn gather_connection(
             locator: ticket.locator.clone(),
             partition: ticket.partition.clone(),
         };
+        engine.check_refresh_canceled()?;
         // Count an issue once whether it was discovered or fetched, and
         // include attempted reads that returned a ticket-level failure.
         seen.insert(ticket.external_id.clone());
@@ -1352,6 +1363,7 @@ fn gather_conversations(
 ) -> Result<(), Error> {
     let due: Vec<ExternalIssue> = gathered.issues.clone();
     for issue in due {
+        engine.check_refresh_canceled()?;
         let identity = &issue.reference.identity;
         if !conversation::needs_reading(
             connection,

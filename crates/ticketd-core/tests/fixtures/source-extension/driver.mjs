@@ -72,7 +72,7 @@ const problem = (kind, message, classification) => ({
 });
 let reads = 0;
 
-async function dispatch({ method, params }) {
+async function dispatch({ id, method, params }, signal) {
   if (method === "describe") {
     const accepts = params.contract_versions.includes(2);
     return {
@@ -142,6 +142,19 @@ async function dispatch({ method, params }) {
     case "options":
       return { result: [] };
     case "discover": {
+      if (["slow_progress", "cooperative", "ignore_cancel"].includes(mode)) {
+        const repeats = mode === "slow_progress" ? 6 : 100;
+        for (let completed = 1; completed <= repeats; completed += 1) {
+          await pause(90, undefined, { signal });
+          process.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "progress",
+              params: { id, completed, total: repeats },
+            }) + "\n",
+          );
+        }
+      }
       const pages = new Map([
         [null, [[first], "1"]],
         ["1", [[], "2"]],
@@ -209,18 +222,46 @@ async function dispatch({ method, params }) {
   }
 }
 
-const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-for await (const line of lines) {
-  const request = JSON.parse(line);
-  const message = await dispatch(request);
+const pending = new Map();
+async function handle(request, signal) {
+  let message;
+  try {
+    message = await dispatch(request, signal);
+  } catch (error) {
+    if (!signal?.aborted) throw error;
+    message = { error: { code: -32800, message: "Request canceled" } };
+  }
   if (message) {
     const response =
       JSON.stringify({ jsonrpc: "2.0", id: request.id, ...message }) + "\n";
     await new Promise((resolve) => process.stdout.write(response, resolve));
   }
-  if (request.params.config?.mode === "stop_reading") {
+}
+
+const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+for await (const line of lines) {
+  const request = JSON.parse(line);
+  if (request.method === "cancel") {
+    pending.get(request.params.id)?.abort();
+    continue;
+  }
+  const mode = request.params.config?.mode;
+  if (
+    request.method === "discover" &&
+    ["cooperative", "ignore_cancel"].includes(mode)
+  ) {
+    const controller = new AbortController();
+    if (mode === "cooperative") pending.set(request.id, controller);
+    void handle(request, controller.signal).finally(() =>
+      pending.delete(request.id),
+    );
+    continue;
+  }
+  await handle(request);
+  if (mode === "stop_reading") {
     lines.close();
     process.stdin.pause();
     await pause(6_000);
   }
 }
+for (const controller of pending.values()) controller.abort();

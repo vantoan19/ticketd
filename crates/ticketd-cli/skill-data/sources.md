@@ -64,3 +64,6 @@ documented `--attach`, `--issue`, or `--not-created` action only when the observ
 outcome supports it. Inspect `source resolve --help`; `--accept-different` attaches
 different external content and has different consequences. An unknown outcome is
 not evidence that creation failed, and changing retry identity could duplicate work.
+
+An interactive refresh reports extension progress on stderr. Press Ctrl+C to
+cancel it. A canceled refresh exits 130.
