@@ -184,6 +184,14 @@ export const syncApi = {
    */
   connect: () => status(invoke("sync_connect")),
 
+  /**
+   * `sync_connect_s3`: records S3 as this Workspace's storage, signed in through
+   * the AWS CLI `profile`. The prefix is written as the person likes; the host
+   * keeps it with one trailing slash. Choosing a Workspace follows.
+   */
+  connectS3: (change: { bucket: string; prefix: string; profile: string }) =>
+    status(invoke("sync_connect_s3", change)),
+
   /** `sync_setup_options`: what the setup choices would do, while `choosing`. */
   async setupOptions(): Promise<SyncSetupOptions> {
     return setupOptionsSchema.parse(await invoke("sync_setup_options"));

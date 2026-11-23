@@ -10,6 +10,7 @@ import {
   Keyboard,
   MessageCircle,
   Paperclip,
+  RefreshCw,
   ScrollText,
   Search,
   Terminal,
@@ -36,6 +37,12 @@ export const SETTINGS_SECTIONS = [
   },
   { id: "attention", label: "Attention", group: "Preferences", icon: Bell },
   { id: "location", label: "Location", group: "Workspace", icon: Database },
+  {
+    id: "workspace-sync",
+    label: "Workspace sync",
+    group: "Workspace",
+    icon: RefreshCw,
+  },
   {
     id: "attachments",
     label: "Attachments",

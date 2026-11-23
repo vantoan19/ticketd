@@ -147,6 +147,22 @@ test("Google Drive opens as its own page in the shell", () => {
   expect(screen.queryByRole("region", { name: "Appearance" })).toBeNull();
 });
 
+test("Workspace sync opens as its own page, apart from Google Drive", () => {
+  render(
+    <SettingsView
+      selected="workspace-sync"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Workspace sync" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("heading", { level: 1, name: "Google Drive" }),
+  ).toBeNull();
+});
+
 test("the Location page shows the path, counts, size, and format version", async () => {
   render(
     <SettingsView
