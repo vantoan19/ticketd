@@ -166,29 +166,22 @@ fn richer_schema_validates_active_fields_and_never_saves_link_values() {
 }
 
 #[test]
-fn a_declared_secret_is_refused_even_without_a_value() {
+fn a_required_credential_is_checked_by_the_registered_source_schema() {
     let schema: ticketd_core::source::ConfigSchema = serde_json::from_value(json!({
-        "fields": [{"type": "secret", "key": "api_key", "label": "API key"}]
+        "fields": [{"type": "secret", "key": "api_key", "label": "API key", "required": true}]
     }))
     .unwrap();
-    let errors = schema.validate(&ConfigValues::new()).unwrap_err();
-    assert_eq!(errors[0].field.as_deref(), Some("api_key"));
-    assert!(
-        errors[0]
-            .message
-            .contains("secret settings are not supported yet")
-    );
-
     let fake = FakeSource::default();
     fake.0.lock().unwrap().extra_fields = schema.fields;
     let mut engine = Engine::new();
-    let error = engine.register(Box::new(fake)).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("api_key secret settings are not supported yet")
-    );
-    assert!(engine.connectors().is_empty());
+    engine.register(Box::new(fake)).unwrap();
+    let mut config = values(json!({"repositories": ["o/r"]}));
+    let error = engine.validate("fake", &config).unwrap_err();
+    assert!(error.to_string().contains("api_key is required"));
+
+    config.insert("api_key".into(), json!("  synthetic credential  "));
+    let validated = engine.validate("fake", &config).unwrap();
+    assert_eq!(validated["api_key"], "  synthetic credential  ");
 }
 
 #[test]
