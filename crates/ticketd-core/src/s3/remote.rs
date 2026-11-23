@@ -6,6 +6,7 @@
 //! the past ones. Writes are conditional on the object (`If-None-Match: *` to create,
 //! `If-Match` on the ETag to update), so S3 itself refuses a write over another device's.
 //! Sync never deletes: a delete marker only appears when a person deletes in the bucket.
+//! Files over [`SINGLE_PART_LIMIT`] upload in parts (see `parts`).
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, SeekFrom, Write};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -21,6 +22,8 @@ use crate::sync::remote::{
     RemoteCapabilities, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
     RemoteKind, RemoteRevision, RemoteStorage, invalid_identifier, valid_identifier,
 };
+
+mod parts;
 
 /// A write up to this size is one PutObject. Larger Attachments upload in parts.
 pub const SINGLE_PART_LIMIT: u64 = 16 * 1024 * 1024;
@@ -166,6 +169,8 @@ struct Fetched {
 pub struct S3Remote<'a> {
     client: S3Client<'a>,
     prefix: String,
+    /// The size of each part but the last of an upload in parts.
+    part_size: u64,
     /// Folders whose marker was seen, so a write does not look for it every time. `list`
     /// looks afresh, so a folder removed from the bucket is noticed.
     known: Mutex<HashSet<String>>,
@@ -196,6 +201,7 @@ impl<'a> S3Remote<'a> {
         Ok(Self {
             client: S3Client::new(target, credentials, transport),
             prefix,
+            part_size: parts::PART_SIZE,
             known: Mutex::new(HashSet::new()),
         })
     }
@@ -203,6 +209,13 @@ impl<'a> S3Remote<'a> {
     /// Replace the wait between retries, so tests control time.
     pub fn with_pause(mut self, pause: impl Fn(Duration) + Send + Sync + 'a) -> Self {
         self.client = self.client.with_pause(pause);
+        self
+    }
+
+    /// The size of each part of an upload in parts, at least the 5 MiB S3 requires. A file too
+    /// big for 10,000 parts of this size gets bigger ones. Tests use it to keep fixtures small.
+    pub fn with_part_size(mut self, size: u64) -> Self {
+        self.part_size = size.max(parts::MIN_PART);
         self
     }
 
@@ -643,10 +656,16 @@ impl RemoteStorage for S3Remote<'_> {
         content: &mut dyn RemoteContent,
     ) -> Result<RemoteFile, RemoteError> {
         check(folder, Some(key))?;
+        let unreadable = |_| RemoteError::Other("cannot read the content to upload".into());
+        let size = content.seek(SeekFrom::End(0)).map_err(unreadable)?;
+        content.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+        if size > SINGLE_PART_LIMIT {
+            return self.write_in_parts(folder, key, name, expected, content, size);
+        }
         let body = read_all(content)?;
         if body.len() as u64 > SINGLE_PART_LIMIT {
             return Err(RemoteError::Other(
-                "files over 16 MiB are not uploaded to S3 yet".into(),
+                "the file changed while it was being read".into(),
             ));
         }
         let digest = Sha256::digest(&body);
@@ -664,18 +683,7 @@ impl RemoteStorage for S3Remote<'_> {
                 // The bytes are already there, such as from a write whose answer was lost.
                 return Ok(stored.file.clone());
             }
-            let condition = match (&stored, expected) {
-                (None, None) => ("if-none-match", "*".to_owned()),
-                (None, Some(_)) => return Err(RemoteError::PreconditionFailed { current: None }),
-                (Some(stored), Some(version)) if stored.file.version == version => {
-                    ("if-match", stored.etag.clone())
-                }
-                (Some(stored), _) => {
-                    return Err(RemoteError::PreconditionFailed {
-                        current: Some(Box::new(stored.file.clone())),
-                    });
-                }
-            };
+            let condition = condition_for(&stored, expected)?;
             let headers = [
                 ("content-type", content_type(key.kind).to_owned()),
                 (
@@ -757,6 +765,24 @@ impl RemoteStorage for S3Remote<'_> {
         }
         revisions.reverse();
         Ok(revisions)
+    }
+}
+
+/// The header that makes a write refuse to replace what it did not read: `If-None-Match: *` to
+/// create, `If-Match` on the ETag to update the version the caller has.
+fn condition_for(
+    stored: &Option<Stored>,
+    expected: Option<&str>,
+) -> Result<(&'static str, String), RemoteError> {
+    match (stored, expected) {
+        (None, None) => Ok(("if-none-match", "*".to_owned())),
+        (None, Some(_)) => Err(RemoteError::PreconditionFailed { current: None }),
+        (Some(stored), Some(version)) if stored.file.version == version => {
+            Ok(("if-match", stored.etag.clone()))
+        }
+        (Some(stored), _) => Err(RemoteError::PreconditionFailed {
+            current: Some(Box::new(stored.file.clone())),
+        }),
     }
 }
 
