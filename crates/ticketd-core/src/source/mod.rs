@@ -528,7 +528,7 @@ impl Workspace {
         self.saved_source(id)?.ok_or_else(|| unknown_connection(id))
     }
 
-    /// The ID an add operation will use unless another connection is added first.
+    /// Check the saved account and record a credential rejection as source health.
     pub fn test_source_connection(
         &self,
         engine: &Engine,
@@ -580,6 +580,7 @@ impl Workspace {
         Ok(engine.for_connection_with_secret_refs(provider, id, raw, &references))
     }
 
+    /// The ID an add operation will use unless another connection is added first.
     pub fn next_source_connection_id(&self, provider: &str) -> Result<String, Error> {
         next_connection_id(&self.connection, provider)
     }

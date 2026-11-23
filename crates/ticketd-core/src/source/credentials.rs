@@ -382,10 +382,12 @@ mod vault {
                         "org.freedesktop.DBus.Error.ServiceUnknown"
                             | "org.freedesktop.DBus.Error.NameHasNoOwner"
                             | "org.freedesktop.DBus.Error.NoServer"
+                            | "org.freedesktop.DBus.Error.AccessDenied"
                             | "org.freedesktop.DBus.Error.Disconnected"
                             | "org.freedesktop.DBus.Error.Spawn.ExecFailed"
                             | "org.freedesktop.DBus.Error.FileNotFound"
                             | "org.freedesktop.DBus.Error.NotSupported"
+                            | "org.freedesktop.Secret.Error.IsLocked"
                     )
                 ) =>
             {

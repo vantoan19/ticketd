@@ -8,6 +8,7 @@ use ticketd_core::source::{Clock, Engine, RefreshCoordinator, RefreshOptions, Re
 use ticketd_core::{self, Status, SyncKind, SyncRecord, TicketPatch, Workspace};
 
 const LOCAL_NAME: &str = "connection-backup-sentinel-5d53837c";
+const CREDENTIAL_REF: &str = "a7b37ef9-2b34-4567-b879-3eb4acff93d3";
 
 #[test]
 fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
@@ -92,16 +93,35 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
 #[allow(clippy::unwrap_used)] // A broken fixture should fail this test immediately.
 fn assert_portable_boundary(path: &Path, folder: &Path) {
     let backup = folder.join("portable.sqlite3");
+    // An opaque reference from an OS user vault. No real keychain item is needed
+    // to prove the portable boundaries and same-device restore behavior.
+    Connection::open(path)
+        .unwrap()
+        .execute(
+            "INSERT INTO source_secret_references (connection_id, field, reference) VALUES ('github', 'test_credential', ?1)",
+            [CREDENTIAL_REF],
+        )
+        .unwrap();
     let mut workspace = Workspace::open(path).unwrap();
     workspace.rename_source("github", LOCAL_NAME).unwrap();
-    assert!(!workspace.export().unwrap().to_string().contains(LOCAL_NAME));
+    let export = workspace.export().unwrap().to_string();
+    assert!(!export.contains(LOCAL_NAME));
+    assert!(!export.contains(CREDENTIAL_REF));
+    let issue = workspace.show_ticket("T-QZ1").unwrap();
+    let synced = workspace
+        .export_sync_record(SyncKind::Ticket, &issue.id)
+        .unwrap()
+        .to_markdown();
+    assert!(!synced.contains(CREDENTIAL_REF));
     workspace.backup(&backup).unwrap();
-    assert!(
-        !std::fs::read(&backup)
-            .unwrap()
-            .windows(LOCAL_NAME.len())
-            .any(|part| part == LOCAL_NAME.as_bytes())
-    );
+    let bytes = std::fs::read(&backup).unwrap();
+    for sentinel in [LOCAL_NAME, CREDENTIAL_REF] {
+        assert!(
+            !bytes
+                .windows(sentinel.len())
+                .any(|part| part == sentinel.as_bytes())
+        );
+    }
     let raw = Connection::open(&backup).unwrap();
     let connected: u32 = raw
         .query_row("SELECT COUNT(*) FROM source_connections", [], |row| {
@@ -150,6 +170,10 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
     Workspace::restore(path, &backup).unwrap();
     let same = Workspace::open(path).unwrap();
     assert_eq!(same.source_connection("github").unwrap().name, LOCAL_NAME);
+    assert_eq!(
+        same.source_connection("github").unwrap().secret_fields,
+        ["test_credential"]
+    );
     assert_eq!(
         same.publication_attempts("T-QZ2").unwrap()[0].id,
         "pending-attempt"
