@@ -2,17 +2,16 @@
 //! controllable fake connector. The failure scenarios are the point: every one
 //! of them must leave the ticket local, and every one that might have created an
 //! issue must block another create.
-// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
-// share; those unwrap so a broken setup fails the test loudly.
-// Only the fake connector's `publish` panics (to simulate a crash) and the error
-// matchers panic on the wrong error; those carry their own allow below.
+// Fixture helpers unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
 #[path = "support/old_workspace.rs"]
 mod old_workspace;
 
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
 use std::{
-    collections::BTreeMap,
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -20,294 +19,18 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Error, Status, Ticket, TicketPatch, Workspace,
+    self, Error, Status, Ticket, TicketPatch, Workspace,
     source::{
-        ActionKind, AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema,
-        ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
-        DiscoveryRequest, Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FieldIssue, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
-        PublicationCandidates, PublicationError, PublicationSearch, PublishOptions, PublishRequest,
-        RefreshOptions, Resolution, ResolveOptions, SchemaField, SourceError, ValueFormat,
+        ActionKind, AttemptState, ConfigValues, Eligibility, Engine, ExternalIssue, ExternalState,
+        IneligibleReason, Origin, Ownership, PublicationError, PublishOptions, PublishRequest,
+        RefreshOptions, Resolution, ResolveOptions,
     },
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    /// Create the issue and return it.
-    Create,
-    /// The provider refuses before creating anything.
-    Refuse,
-    /// The request never left this machine (no DNS answer, connection refused).
-    NotSent,
-    /// The issue is created but the answer is lost (timeout).
-    LoseResponse,
-    /// The process dies during the call, after the issue exists.
-    Crash,
-}
-
-type Hook = Arc<dyn Fn() + Send + Sync>;
-
-struct Remote {
-    mode: Mode,
-    created: Vec<PublishRequest>,
-    issues: BTreeMap<u64, ExternalIssue>,
-    /// Runs inside `publish`, after the remote issue exists, before it answers.
-    hook: Option<Hook>,
-    /// Lookups (locate, find_published) fail as if the provider were unreachable.
-    lookup_down: bool,
-    /// Whether a search reads the whole window.
-    search_complete: bool,
-    /// Runs inside a lookup, after its answer is computed, before it returns.
-    lookup_hook: Option<Hook>,
-    /// Issues the connected account created in the window whose text does not
-    /// match the attempt; searches list them without counting them as matches.
-    recent: Vec<ExternalIssue>,
-}
-
-#[derive(Clone)]
-struct Fake(Arc<Mutex<Remote>>);
-
-impl Fake {
-    fn new() -> Self {
-        Self(Arc::new(Mutex::new(Remote {
-            mode: Mode::Create,
-            created: Vec::new(),
-            issues: BTreeMap::new(),
-            hook: None,
-            lookup_down: false,
-            search_complete: true,
-            lookup_hook: None,
-            recent: Vec::new(),
-        })))
-    }
-}
-
-fn now_rfc3339() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    chrono::DateTime::from_timestamp(seconds as i64, 0)
-        .unwrap()
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-}
-
-impl Fake {
-    fn answer<T>(
-        &self,
-        compute: impl FnOnce(&Remote) -> Result<T, SourceError>,
-    ) -> Result<T, SourceError> {
-        let (result, hook) = {
-            let remote = self.0.lock().unwrap();
-            if remote.lookup_down {
-                return Err(SourceError::Unavailable("provider unreachable".into()));
-            }
-            (compute(&remote), remote.lookup_hook.clone())
-        };
-        if let Some(hook) = hook {
-            hook();
-        }
-        result
-    }
-}
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch, Capability::Publish],
-            schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: false,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 0,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
-                    },
-                }],
-            },
-        }
-    }
-
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        Ok(ConnectionInfo {
-            account: "octo".into(),
-        })
-    }
-
-    fn options(
-        &self,
-        _: &str,
-        _: &str,
-        _: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(Vec::new())
-    }
-
-    fn discover(&self, _: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let remote = self.0.lock().unwrap();
-        Ok(DiscoveryPage {
-            issues: remote.issues.values().cloned().collect(),
-            next_cursor: None,
-            skipped: Vec::new(),
-        })
-    }
-
-    fn fetch(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let remote = self.0.lock().unwrap();
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote
-            .issues
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| SourceError::NotFound("gone".into()))
-    }
-
-    fn locate(
-        &self,
-        _: &ConfigValues,
-        destination: &str,
-        text: &str,
-    ) -> Result<ExternalIssue, SourceError> {
-        self.answer(|remote| {
-            let (repository, number) = text.rsplit_once('#').unwrap_or((destination, text));
-            if repository != destination {
-                return Err(SourceError::InvalidConfiguration(vec![FieldIssue {
-                    field: "issue".into(),
-                    message: format!("is not in {destination}"),
-                }]));
-            }
-            let id: u64 = number
-                .parse()
-                .map_err(|_| SourceError::NotFound("not an issue".into()))?;
-            remote
-                .issues
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| SourceError::NotFound("no such issue".into()))
-        })
-    }
-
-    fn find_published(
-        &self,
-        _: &ConfigValues,
-        search: &PublicationSearch,
-    ) -> Result<PublicationCandidates, SourceError> {
-        self.answer(|remote| {
-            Ok(PublicationCandidates {
-                matches: remote
-                    .issues
-                    .values()
-                    .filter(|issue| {
-                        issue.title == search.request.title || issue.body == search.request.body
-                    })
-                    .cloned()
-                    .collect(),
-                recent: remote.recent.clone(),
-                complete: remote.search_complete,
-            })
-        })
-    }
-
-    // Like GitHub, a destination must look like `owner/name`.
-    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
-        match destination.split_once('/') {
-            Some((owner, name)) if !owner.is_empty() && !name.is_empty() => Ok(()),
-            _ => Err(SourceError::InvalidConfiguration(vec![FieldIssue {
-                field: "destination".into(),
-                message: "must be a repository in the form owner/name".into(),
-            }])),
-        }
-    }
-
-    // Like GitHub, owner and repository names ignore case.
-    fn same_destination(&self, a: &str, b: &str) -> bool {
-        a.eq_ignore_ascii_case(b)
-    }
-
-    fn destinations(&self, config: &ConfigValues) -> Vec<String> {
-        config
-            .get("repositories")
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .map(|v| v.as_str().unwrap().to_owned())
-            .collect()
-    }
-
-    // Mode::Crash panics here on purpose: it simulates the process dying mid-call.
-    #[allow(clippy::panic)]
-    fn publish(
-        &self,
-        _: &ConfigValues,
-        request: &PublishRequest,
-    ) -> Result<ExternalIssue, SourceError> {
-        let (mode, hook) = {
-            let mut remote = self.0.lock().unwrap();
-            if remote.mode == Mode::NotSent {
-                return Err(SourceError::NotSent("could not reach the provider".into()));
-            }
-            if remote.mode == Mode::Refuse {
-                return Err(SourceError::Forbidden(
-                    "no permission to create issues".into(),
-                ));
-            }
-            remote.created.push(request.clone());
-            let id = 100 + remote.created.len() as u64;
-            let issue = ExternalIssue {
-                reference: ExternalRef {
-                    identity: ExternalIdentity {
-                        provider: "fake".into(),
-                        id: id.to_string(),
-                    },
-                    locator: format!("{}#{id}", request.destination),
-                },
-                display: format!("{}#{id}", request.destination),
-                url: format!("https://example.test/{}/issues/{id}", request.destination),
-                title: request.title.clone(),
-                body: request.body.clone(),
-                state: ExternalState::Open,
-                assignees: vec![],
-                labels: vec![],
-                created_at: now_rfc3339(),
-                updated_at: now_rfc3339(),
-                author: None,
-                duplicate_of: None,
-                duplicate_of_url: None,
-                duplicate_withdrawn: false,
-            };
-            remote.issues.insert(id, issue);
-            (remote.mode, remote.hook.clone())
-        };
-        if let Some(hook) = hook {
-            hook();
-        }
-        match mode {
-            Mode::LoseResponse => Err(SourceError::Unavailable(
-                "GitHub is unavailable (status 502); retry later".into(),
-            )),
-            Mode::Crash => panic!("process died during the create call"),
-            _ => {
-                let remote = self.0.lock().unwrap();
-                Ok(remote.issues.values().last().unwrap().clone())
-            }
-        }
-    }
-}
+use fake_source::{FakeSource, PublishMode as Mode};
 
 struct Fixture {
-    fake: Fake,
+    fake: FakeSource,
     engine: Arc<Engine>,
     workspace: Workspace,
     dir: tempfile::TempDir,
@@ -319,7 +42,8 @@ fn values(value: serde_json::Value) -> ConfigValues {
 
 impl Fixture {
     fn new() -> Self {
-        let fake = Fake::new();
+        let fake = FakeSource::default();
+        fake.0.lock().unwrap().repositories_optional = true;
         let mut engine = Engine::new();
         engine.register(Box::new(fake.clone())).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -340,7 +64,7 @@ impl Fixture {
     }
 
     fn mode(&self, mode: Mode) {
-        self.fake.0.lock().unwrap().mode = mode;
+        self.fake.0.lock().unwrap().publish_mode = mode;
     }
 
     fn created(&self) -> usize {
@@ -348,7 +72,7 @@ impl Fixture {
     }
 
     fn hook(&self, hook: impl Fn() + Send + Sync + 'static) {
-        self.fake.0.lock().unwrap().hook = Some(Arc::new(hook));
+        self.fake.0.lock().unwrap().after_publish = Some(Arc::new(hook));
     }
 
     fn publish(&mut self, reference: &str) -> Result<ticketd_core::source::PublishOutcome, Error> {
@@ -597,6 +321,7 @@ fn publication_and_refresh_preserve_local_context_while_replacing_only_derived_f
         issue.reference.locator = "o/r#102".into();
         issue.display = "o/r#102".into();
         remote.issues.insert(102, issue);
+        remote.matching.push(102);
     }
     let report = f
         .workspace
@@ -1596,7 +1321,7 @@ fn not_created_needs_a_complete_empty_search_and_then_allows_another_attempt() {
     f.fake.0.lock().unwrap().issues.clear();
 
     // An incomplete read proves nothing.
-    f.fake.0.lock().unwrap().search_complete = false;
+    f.fake.0.lock().unwrap().search_incomplete = true;
     assert!(matches!(
         publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err()),
         PublicationError::Unverified { .. }
@@ -1610,7 +1335,7 @@ fn not_created_needs_a_complete_empty_search_and_then_allows_another_attempt() {
         }
     ));
 
-    f.fake.0.lock().unwrap().search_complete = true;
+    f.fake.0.lock().unwrap().search_incomplete = false;
     let outcome = f.resolve(&ticket.reference, &not_created()).unwrap();
     assert_eq!(outcome.attempt.state, AttemptState::Failed);
     assert_eq!(outcome.attempt.failure.unwrap().code, "ruled_out");
@@ -1849,7 +1574,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
     {
         let mut remote = f.fake.0.lock().unwrap();
         remote.lookup_down = false;
-        remote.search_complete = false;
+        remote.search_incomplete = true;
     }
     let review = f
         .workspace
@@ -1862,7 +1587,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
             .any(|a| a.kind == ActionKind::NotCreated && a.available)
     );
     // With a complete empty search it is.
-    f.fake.0.lock().unwrap().search_complete = true;
+    f.fake.0.lock().unwrap().search_incomplete = false;
     let review = f
         .workspace
         .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
@@ -1883,9 +1608,7 @@ fn a_resolver_that_loses_a_race_to_the_same_attach_reports_a_replay() {
     let engine = f.engine.clone();
     let reference = ticket.reference.clone();
     // Another resolver attaches while this one is still verifying.
-    let fake = f.fake.clone();
-    f.fake.0.lock().unwrap().lookup_hook = Some(Arc::new(move || {
-        fake.0.lock().unwrap().lookup_hook = None;
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(move || {
         let mut other = Workspace::open(&path).unwrap();
         other
             .resolve_publication(&engine, &reference, &attach(Some("101")))
@@ -1914,8 +1637,7 @@ fn a_not_created_verdict_that_loses_to_an_attach_does_not_discard_the_issue() {
     let engine = f.engine.clone();
     let reference = ticket.reference.clone();
     let fake = f.fake.clone();
-    f.fake.0.lock().unwrap().lookup_hook = Some(Arc::new(move || {
-        fake.0.lock().unwrap().lookup_hook = None;
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(move || {
         fake.0.lock().unwrap().issues.insert(101, hidden.clone());
         let mut other = Workspace::open(&path).unwrap();
         other
@@ -2087,7 +1809,7 @@ fn other_recent_issues_are_listed_but_do_not_block_not_created() {
     let ticket = f.lost_response("Never landed");
     let other = unrelated_issue(&f, 18, "Another ticket", "Another body");
     f.fake.0.lock().unwrap().issues.clear();
-    f.fake.0.lock().unwrap().recent = vec![other];
+    f.fake.0.lock().unwrap().issues.insert(18, other);
 
     let review = f
         .workspace
@@ -2180,8 +1902,12 @@ fn an_imported_ticket_says_only_local_tickets_are_published() {
     // Discovery imports an issue nobody here published.
     let mut stranger = unrelated_issue(&f, 30, "Someone else's", "Their text");
     stranger.created_at = "2030-01-01T00:00:00Z".into();
-    f.fake.0.lock().unwrap().issues.insert(30, stranger);
-    f.fake.0.lock().unwrap().issues.remove(&101);
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.issues.insert(30, stranger);
+        remote.matching.push(30);
+        remote.issues.remove(&101);
+    }
     f.workspace
         .refresh_sources(&f.engine, &RefreshOptions::default())
         .unwrap();
