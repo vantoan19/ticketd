@@ -80,7 +80,7 @@ jobs:
     # Clippy has its own job, so it never waits for the tests and the tests never wait for it.
     name: Clippy
     needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    if: false # throwaway negative test: a planned job is skipped
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -106,7 +106,7 @@ jobs:
     # desktop and CLI (and checks the Pages URLs on Windows), so the extra work is not all in one shard.
     name: Rust tests (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.shards }})
     needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    if: false # throwaway negative test: a planned job is skipped
     strategy:
       fail-fast: false
       matrix:
@@ -161,7 +161,7 @@ jobs:
     # The frontend tests need no Rust build, so they run beside the Rust jobs, in three shards.
     name: Frontend tests (${{ matrix.shard }}/3)
     needs: plan
-    if: needs.plan.outputs.frontend == 'true'
+    if: false # throwaway negative test: a planned job is skipped
     strategy:
       fail-fast: false
       matrix:
