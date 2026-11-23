@@ -89,6 +89,7 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     assert_portable_boundary(&path, folder.path());
 }
 
+#[allow(clippy::unwrap_used)] // A broken fixture should fail this test immediately.
 fn assert_portable_boundary(path: &Path, folder: &Path) {
     let backup = folder.join("portable.sqlite3");
     let mut workspace = Workspace::open(path).unwrap();
