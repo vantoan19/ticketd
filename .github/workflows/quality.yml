@@ -107,6 +107,39 @@ jobs:
       - run: npm ci
       - run: ./scripts/check ui
 
+  s3:
+    # The S3 adapter against a real S3-compatible server, a pinned MinIO with Versioning on.
+    # The simulator tests run in the Rust jobs; these check what the simulator assumes.
+    name: S3 storage (MinIO)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Start MinIO
+        run: |
+          scripts/minio-test-server start
+          scripts/minio-test-server env | sed 's/^export //' >> "$GITHUB_ENV"
+      # Live tests are named live_*, in these two test files, and skip without an endpoint.
+      # TICKETD_S3_TEST_REQUIRED makes a missing endpoint a failure instead of a silent skip.
+      - name: Test the S3 adapter on MinIO
+        env:
+          TICKETD_S3_TEST_REQUIRED: "1"
+        run: cargo test -p ticketd-core --locked --no-fail-fast --test remote_contract --test s3_live -- live_
+      - name: MinIO log
+        if: failure()
+        run: docker logs ticketd-minio-test
+
   platform:
     # Rust tests and builds on the other two release platforms, for every PR and main commit.
     name: Platform checks (${{ matrix.os }})
@@ -148,7 +181,7 @@ jobs:
     # so a failed, canceled or skipped job can never look like a pass.
     name: CI result
     if: always()
-    needs: [fast, quality, ui, platform]
+    needs: [fast, quality, ui, s3, platform]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

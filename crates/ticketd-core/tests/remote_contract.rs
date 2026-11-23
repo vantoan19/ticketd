@@ -13,6 +13,8 @@ use drive_sim::{DriveSim, Vault};
 #[path = "support/s3_sim.rs"]
 mod s3_sim;
 use s3_sim::{FakeCredentials, S3Sim};
+#[path = "support/s3_live.rs"]
+mod s3_live;
 
 /// What a storage calls a file it was given the readable name `name` for. Drive and the fake
 /// keep it; S3's listings cannot return it, so S3 names a file after its key.
@@ -299,6 +301,19 @@ fn the_s3_adapter_meets_the_contract() {
     let credentials = FakeCredentials::default();
     let a = S3Remote::new(s3_sim::target(), "ticketd/", &credentials, &sim).unwrap();
     let b = S3Remote::new(s3_sim::target(), "ticketd/", &credentials, &sim).unwrap();
+    let conditional = RemoteCapabilities {
+        conditional_writes: true,
+        keeps_revisions: true,
+    };
+    contract(&a, &b, conditional, from_key);
+}
+
+/// The same contract on a real S3-compatible server, when one is configured (opt-in; see
+/// `support/s3_live.rs`). What the simulator assumes about S3 is tested here against S3.
+#[test]
+fn live_the_s3_adapter_meets_the_contract() {
+    let Some(live) = s3_live::live() else { return };
+    let (a, b) = (live.remote(), live.remote());
     let conditional = RemoteCapabilities {
         conditional_writes: true,
         keeps_revisions: true,
