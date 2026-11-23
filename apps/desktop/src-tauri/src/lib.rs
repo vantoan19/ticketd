@@ -2297,6 +2297,7 @@ pub fn run() -> Result<(), tauri::Error> {
     {
         use tauri::Manager;
         let log_dir = app.path().app_log_dir().unwrap_or_default();
+        sources.set_log_dir(&log_dir);
         app.manage(Logs(std::sync::Mutex::new(Some(
             ticketd_diagnostics::init_desktop(log_dir),
         ))));

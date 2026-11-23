@@ -16,8 +16,8 @@ spans and never install a subscriber. Only the two binaries do, through the
   readable lines to stderr. If the folder cannot be used, logging falls back to
   stderr and the app keeps running.
 - **CLI.** `init_cli()` installs readable lines on stderr, at `warn` by default.
-  `TICKETD_LOG` takes any `tracing` filter. The CLI never writes a log file, and its
-  JSON on stdout is never touched.
+  `TICKETD_LOG` takes any `tracing` filter. The CLI writes its own diagnostics to
+  stderr and keeps stdout dedicated to command results.
 - **Filter.** The desktop default is `warn,ticketd=info`: our crates at `info`,
   everything else (HTTP clients, which could log URLs carrying Drive file IDs or
   OAuth codes) at `warn`. `ticketd` matches targets by prefix, so it covers every
@@ -44,6 +44,11 @@ spans and never install a subscriber. Only the two binaries do, through the
 - **Local only.** Logs never leave the machine. Sharing them is a user action: the
   Diagnostics export (a redacted `.zip`, built from an allowlist of fields) is the
   safe way to attach them to a GitHub issue.
+- **Source extension stderr.** The CLI and desktop keep stderr in two local
+  files of up to 256 KiB per connection. The source host redacts known secret
+  values before writing bytes. The Diagnostics export includes recent files
+  under `logs/sources/`, with the same known-value redaction applied to the
+  rest of the export.
 - **Recent errors and the export read the files.** `recent_errors()` groups the
   warnings and errors of the last 7 days of files (by the date in the file name) by
   target and error kind, so it covers earlier runs and any line written by other code
