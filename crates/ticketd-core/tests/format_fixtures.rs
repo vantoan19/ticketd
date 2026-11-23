@@ -62,3 +62,87 @@ fn a_backup_saved_by_older_code_validates_restores_and_migrates_to_the_current_v
         assert_eq!(migrated, FORMAT_VERSION, "v{version} migrates to current");
     }
 }
+
+#[test]
+fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 86).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    for (index, (provider, locator, url, _)) in LEGACY_ISSUES.iter().enumerate() {
+        let id = format!("legacy-{index}");
+        let reference = format!("T-KQ{}", index + 1);
+        connection.execute("INSERT INTO tickets (id, reference, title, status) VALUES (?1, ?2, 'Legacy issue', 'Todo')", rusqlite::params![id, reference]).unwrap();
+        connection.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin) VALUES (?1, ?2, ?1, ?3, ?3, ?4, 'imported')", rusqlite::params![id, provider, locator, url]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO external_ownership (ticket_id, authority) VALUES (?1, 'external')",
+                [&id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO source_sync (ticket_id, external_state) VALUES (?1, 'open')",
+                [&id],
+            )
+            .unwrap();
+    }
+    drop(connection);
+
+    let workspace = Workspace::open(&path).unwrap();
+    let exported = workspace.export().unwrap();
+    let identities = exported["external_identities"].as_array().unwrap();
+    assert_eq!(identities.len(), LEGACY_ISSUES.len());
+    for (identity, (_, locator, url, expected)) in identities.iter().zip(LEGACY_ISSUES) {
+        assert_eq!(identity["locator"], locator);
+        assert_eq!(identity["url"], url);
+        assert_eq!(identity["repository"], serde_json::json!(expected), "{url}");
+    }
+    assert!(
+        workspace
+            .list_tickets()
+            .unwrap()
+            .iter()
+            .all(|ticket| ticket.project_id.is_none())
+    );
+}
+
+const LEGACY_ISSUES: [(&str, &str, &str, Option<&str>); 7] = [
+    (
+        "github",
+        "Owner/Site#42",
+        "https://GitHub.com/owner/Site/issues/42",
+        Some("github.com/owner/Site"),
+    ),
+    (
+        "github",
+        "acme/site#42",
+        "https://Git.Example.test:8443/acme/site/issues/42",
+        Some("git.example.test/acme/site"),
+    ),
+    (
+        "github",
+        "acme/site#42",
+        "https://github.com/other/site/issues/42",
+        None,
+    ),
+    (
+        "github",
+        "acme/site#42",
+        "https://github.com/acme/site/issues/43",
+        None,
+    ),
+    ("github", "acme/site#42", "", None),
+    (
+        "github",
+        "acme/site#42",
+        "https://github.com/other/../acme/site/issues/42",
+        None,
+    ),
+    (
+        "different",
+        "acme/site#42",
+        "https://github.com/acme/site/issues/42",
+        None,
+    ),
+];

@@ -416,6 +416,17 @@ and run through a shared extension interface.
 - CLI: the `source` command group (`save`, `refresh`, `take-ownership`,
   `publish --preview`, `resolve`, and more).
 
+#### Project remote routing
+
+A newly imported GitHub issue is linked to the project whose Project remote
+matches its repository, including the host. If no project claims the repository,
+the ticket arrives in No project. When import links a project, it records an
+ordinary project membership change in the ticket's history. Project links remain
+locally editable.
+Refresh preserves the current link even when an issue moves to another repository.
+Changing or clearing a Project remote affects future imports.
+[ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
+
 ### Workspace sync
 
 A person using ticketd on several desktops gets the same Workspace content and

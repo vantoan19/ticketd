@@ -213,7 +213,7 @@ impl GithubConnector {
             let value: Value = serde_json::from_slice(&response.body).map_err(|_| {
                 SourceError::Protocol("GitHub created the issue but the answer is not JSON".into())
             })?;
-            return translate_issue(&value, repository)?
+            return translate_issue(self, &value, repository)?
                 .ok_or_else(|| SourceError::Protocol("GitHub's answer was not an issue".into()));
         }
         let subject = format!("creating an issue in {repository}");
@@ -523,7 +523,7 @@ impl Connector for GithubConnector {
             .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
         let mut issues = Vec::new();
         for item in items {
-            if let Some(issue) = translate_issue(item, repository)? {
+            if let Some(issue) = translate_issue(self, item, repository)? {
                 issues.push(issue);
             }
         }
@@ -629,7 +629,7 @@ impl Connector for GithubConnector {
             encode_path(destination)
         );
         let (value, _) = self.json(&url, &format!("issue {destination}#{number}"))?;
-        let issue = translate_issue(&value, destination)?.ok_or_else(|| {
+        let issue = translate_issue(self, &value, destination)?.ok_or_else(|| {
             SourceError::NotFound(format!(
                 "{destination}#{number} is a pull request, not an issue"
             ))
@@ -681,7 +681,7 @@ impl Connector for GithubConnector {
                 .as_array()
                 .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
             for item in items {
-                let Some(issue) = translate_issue(item, destination)? else {
+                let Some(issue) = translate_issue(self, item, destination)? else {
                     continue;
                 };
                 // Newest first: the first issue older than the window ends the read.
@@ -730,7 +730,7 @@ impl Connector for GithubConnector {
             encode_path(repository)
         );
         let (value, _) = self.json(&url, &format!("issue {}", reference.locator))?;
-        let mut issue = translate_issue(&value, repository)?.ok_or_else(|| {
+        let mut issue = translate_issue(self, &value, repository)?.ok_or_else(|| {
             SourceError::NotFound(format!(
                 "{} is a pull request, not an issue",
                 reference.locator
@@ -928,6 +928,37 @@ fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
                 && number.chars().all(|c| c.is_ascii_digit())
         })
         .ok_or_else(|| SourceError::Protocol("the issue locator is not valid".into()))
+}
+
+/// Recover a legacy issue's host only when the saved web URL corroborates its locator.
+pub(super) fn repository_from_issue_url(locator: &str, issue_url: &str) -> Option<String> {
+    let (repository, number) = split_locator(locator).ok()?;
+    if number.parse::<u64>().ok()? == 0
+        || issue_url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '\\')
+    {
+        return None;
+    }
+    let url = url::Url::parse(issue_url).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    // Check the literal path because the URL parser collapses dot segments.
+    let (authority, path) = issue_url.split_once("://")?.1.split_once('/')?;
+    let (url_repository, url_number) = path.rsplit_once("/issues/")?;
+    if authority.is_empty()
+        || authority.contains('@')
+        || !url_repository.eq_ignore_ascii_case(repository)
+        || url_number != number
+    {
+        return None;
+    }
+    crate::project_remote::normalize_project_remote(&format!(
+        "{}/{url_repository}",
+        url.host_str()?
+    ))
 }
 
 fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
@@ -1151,6 +1182,7 @@ fn next_link(header: &str) -> Option<String> {
 /// Translates one item of GitHub's issues list. Pull requests, which that
 /// endpoint also returns, are not tickets and yield `None`.
 fn translate_issue(
+    connector: &GithubConnector,
     item: &Value,
     requested_repository: &str,
 ) -> Result<Option<ExternalIssue>, SourceError> {
@@ -1189,6 +1221,7 @@ fn translate_issue(
         },
         display,
         url: text("html_url").unwrap_or_default().to_owned(),
+        repository: connector.repository_for_destination(repository),
         title: title.to_owned(),
         body: text("body").unwrap_or_default().to_owned(),
         state,

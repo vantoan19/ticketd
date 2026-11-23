@@ -104,6 +104,20 @@ pub(crate) fn migrate_issue_opening(connection: &rusqlite::Connection) -> Result
     tracking::migrate_issue_opening(connection)
 }
 
+pub(crate) use tracking::migrate_issue_repository;
+
+/// Derive a repository from existing external identity without a connector or network access.
+pub(crate) fn repository_from_saved_issue(
+    provider: &str,
+    locator: &str,
+    url: &str,
+) -> Option<String> {
+    match provider {
+        github::PROVIDER => github::repository_from_issue_url(locator, url),
+        _ => None,
+    }
+}
+
 /// Format version 82: the parts of each source that have been read.
 pub(crate) fn migrate_read_partitions(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate_read_partitions(connection)

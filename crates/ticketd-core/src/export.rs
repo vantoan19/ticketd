@@ -82,7 +82,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "external_identities",
-        "ticket_id, provider, external_id, locator, display, url, origin, linked_at",
+        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, repository",
     ),
     ("external_ownership", "ticket_id, authority, changed_at"),
     (

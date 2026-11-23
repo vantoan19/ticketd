@@ -833,9 +833,11 @@ The code lives in `ticketd_core::source`, from the inside out:
 - **Contract** (`contract.rs`): the `Connector` trait and its provider-neutral
   types (`ExternalIssue`, `ExternalIdentity`, `ExternalState`, `ClosureReason`,
   `SourceError`). `CONTRACT_VERSION` identifies the contract; the engine refuses
-  a connector that declares another version. Changing a signature or the meaning
-  of a type bumps the version. Adding an optional capability does not. Publication
-  is an optional capability with a default "unsupported" implementation.
+  a connector that declares another version. Changing an existing signature or
+  the meaning of a type bumps the version. Contract 1 includes the additive,
+  optional `ExternalIssue.repository` field and an offline method to map a
+  destination to the same repository identity. Publication is an optional
+  capability with a default "unsupported" implementation.
 - **Schema** (`schema.rs`): fields, selectors, dynamic options, and validation,
   shared by every client. Desktop forms and CLI `--set key=value` flags both build
   raw values that `ConfigSchema::validate` checks and normalizes.
@@ -856,18 +858,29 @@ Saved source configuration is workspace data (`source_configurations`), is
 included in export and backups, and is separate from any imported ticket.
 
 An imported ticket stores three things apart, each keyed by the ticket:
-`external_identities` (provenance: which external issue it is or was, never
-deleted), `external_ownership` (authority: `external` means synchronized and
-read-only, `local` means ticketd owns it), and `source_sync` (the last observed
-external state, who opened the issue and when, and freshness). Imported title and description live in the
-ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
-with no transaction open and then applies the result in one short write that
-re-reads each ticket's ownership; the core rejects title, description and
+`external_identities` (provenance: which external issue it is or was, including its
+last reported repository), `external_ownership` (authority: `external` means
+synchronized and read-only, `local` means ticketd owns it), and `source_sync`
+(the last observed external state, who opened the issue and when, and freshness).
+Imported title and description live in the ordinary ticket columns.
+`Workspace::refresh_sources` gathers through the engine with no transaction
+open and then applies the result in one short write that re-reads each ticket's
+ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets. The same write re-reads
 the saved configuration. If it changed during the network work, successful reads
 of existing tickets can still apply, while discovery imports, membership, failures
 and source-run health from the replaced rules are discarded. Saving changed rules
 invalidates match membership until the next complete discovery walk.
+
+When a connector reports a repository, the import write matches its normalized
+`host/owner/name` against the Project remote. It saves the matching project link
+and a project membership history entry in the same transaction as the new ticket.
+Refresh of an existing ticket updates its external repository when reported and
+preserves its local project membership. GitHub derives the web host from the API
+host, using `github.com` for `api.github.com` and the configured host for Enterprise.
+Format version 87 populates the repository for legacy GitHub identities whose
+stored issue URL agrees with their locator. Workspace sync uses the same derivation
+when an incoming ticket gains or changes its external location.
 
 The source conversation (an external ticket's comments and timeline events) is
 a read-only mirror in `source_conversation`, keyed by ticket and the source's

@@ -112,6 +112,10 @@ pub struct ExternalIssue {
     /// Human-readable name such as `owner/name#12`. Display only.
     pub display: String,
     pub url: String,
+    /// The issue's normalized `host/owner/name`. Additive to contract 1;
+    /// connectors that cannot tell leave it `None`.
+    #[serde(default)]
+    pub repository: Option<String>,
     pub title: String,
     pub body: String,
     pub state: ExternalState,

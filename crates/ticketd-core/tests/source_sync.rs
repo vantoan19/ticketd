@@ -11,7 +11,8 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    ContextOptions, Error, Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    ContextOptions, Error, ProjectRemoteChange, Status, Ticket, TicketChange, TicketFilter,
+    TicketPatch, Workspace,
     source::{
         CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
         ConnectionInfo, Connector, ConnectorDescriptor, Conversation, ConversationEntry,
@@ -249,6 +250,13 @@ fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
     issue
 }
 
+fn reported_issue(host: &str, repository: &str, id: u64, title: &str) -> ExternalIssue {
+    let mut issue = issue_in(repository, id, title);
+    issue.url = format!("https://{host}/{repository}/issues/{id}");
+    issue.repository = Some(format!("{host}/{repository}"));
+    issue
+}
+
 fn issue(id: u64, title: &str) -> ExternalIssue {
     ExternalIssue {
         reference: ExternalRef {
@@ -268,6 +276,7 @@ fn issue(id: u64, title: &str) -> ExternalIssue {
         created_at: "2026-01-01T00:00:00Z".into(),
         updated_at: "2026-01-01T00:00:00Z".into(),
         author: Some("alice".into()),
+        repository: None,
         duplicate_of: None,
         duplicate_of_url: None,
         duplicate_withdrawn: false,
@@ -362,6 +371,172 @@ fn retitle(title: &str) -> TicketPatch {
         title: Some(title.into()),
         ..TicketPatch::default()
     }
+}
+
+#[test]
+fn new_imports_route_to_the_project_claiming_the_whole_repository_identity() {
+    let mut f = Fixture::new();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Matching",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/O/R"),
+        )
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/r", 1, "Matching repository"),
+        true,
+    );
+    f.publish(
+        reported_issue("other.test", "o/r", 2, "Same name on another host"),
+        true,
+    );
+    f.publish(issue(3, "Repository unknown"), true);
+
+    assert_eq!(f.refresh().imported.len(), 3);
+    let ticket = f.ticket(1);
+    assert_eq!(ticket.project_id.as_deref(), Some(project.id.as_str()));
+    let history = f.workspace.ticket_history(&ticket.reference).unwrap();
+    let project_change = history
+        .iter()
+        .find(|entry| entry.kind == "project")
+        .unwrap();
+    assert_eq!(project_change.from_value, "");
+    assert_eq!(project_change.to_value, project.id);
+    assert_eq!(f.ticket(2).project_id, None);
+    assert_eq!(f.ticket(3).project_id, None);
+    let exported = f.workspace.export().unwrap();
+    let identity = exported["external_identities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|identity| identity["ticket_id"] == ticket.id)
+        .unwrap();
+    assert_eq!(identity["repository"], "example.test/o/r");
+}
+
+#[test]
+fn refresh_keeps_a_manual_project_link_after_the_issue_transfers() {
+    let mut f = Fixture::new();
+    let original = f
+        .workspace
+        .create_project_with_remote(
+            "Original project",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/r"),
+        )
+        .unwrap();
+    let target_checkout = f.dir.path().join("target");
+    let manual_checkout = f.dir.path().join("manual");
+    std::fs::create_dir(&target_checkout).unwrap();
+    std::fs::create_dir(&manual_checkout).unwrap();
+    f.workspace
+        .create_project_with_remote(
+            "Transfer target",
+            target_checkout.to_str().unwrap(),
+            Some("example.test/o/moved"),
+        )
+        .unwrap();
+    let manual = f
+        .workspace
+        .create_project("My project", manual_checkout.to_str().unwrap())
+        .unwrap();
+    f.publish(reported_issue("example.test", "o/r", 1, "An issue"), true);
+    f.refresh();
+    let ticket = f.ticket(1);
+    assert_eq!(ticket.project_id.as_deref(), Some(original.id.as_str()));
+    f.workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                project_id: Some(Some(manual.id.clone())),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    let history = f.workspace.ticket_history(&ticket.reference).unwrap();
+    let mut transferred = reported_issue("example.test", "o/moved", 1, "An issue");
+    transferred.updated_at = "2026-01-03T00:00:00Z".into();
+    f.publish(transferred, false);
+
+    let refreshed = f
+        .workspace
+        .refresh_sources(
+            &f.engine,
+            &RefreshOptions {
+                ticket: Some(ticket.reference.clone()),
+                ..RefreshOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(refreshed.updated, [ticket.reference.clone()]);
+    assert_eq!(f.ticket(1).project_id.as_deref(), Some(manual.id.as_str()));
+    assert_eq!(
+        f.workspace.ticket_history(&ticket.reference).unwrap(),
+        history
+    );
+    assert_eq!(
+        f.workspace.export().unwrap()["external_identities"][0]["repository"],
+        "example.test/o/moved"
+    );
+}
+
+#[test]
+fn changing_and_clearing_project_remotes_only_affects_future_imports() {
+    let mut f = Fixture::new();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Project",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/r"),
+        )
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/r", 1, "Original repository"),
+        true,
+    );
+    f.refresh();
+    let ticket = f.ticket(1);
+    assert_eq!(ticket.project_id.as_deref(), Some(project.id.as_str()));
+    let history = f.workspace.ticket_history(&ticket.reference).unwrap();
+
+    f.workspace
+        .edit_project_with_remote(
+            &project.id,
+            &project.name,
+            &project.path,
+            ProjectRemoteChange::Set("example.test/o/next"),
+        )
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/next", 2, "New repository"),
+        true,
+    );
+    f.refresh();
+    assert_eq!(f.ticket(2).project_id.as_deref(), Some(project.id.as_str()));
+
+    f.workspace
+        .edit_project_with_remote(
+            &project.id,
+            &project.name,
+            &project.path,
+            ProjectRemoteChange::Clear,
+        )
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/next", 3, "Repository no longer claimed"),
+        true,
+    );
+    f.refresh();
+    assert_eq!(f.ticket(3).project_id, None);
+    assert_eq!(f.ticket(1).project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(f.ticket(2).project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(
+        f.workspace.ticket_history(&ticket.reference).unwrap(),
+        history
+    );
 }
 
 #[test]
