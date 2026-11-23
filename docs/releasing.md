@@ -112,8 +112,9 @@ At public launch, configure and verify these settings:
   gate, not a substitute for runner isolation or code review.
 - Protect `main` with pull requests and the required `CI result` check from
   GitHub Actions; require the branch to be up to date. Keep force pushes and
-  branch deletion disabled. `CI result` covers the Linux, macOS and Windows jobs,
-  so no other check needs to be required.
+  branch deletion disabled. `CI result` covers every job and test shard on Linux,
+  macOS and Windows, so no other check needs to be required, and a change to the
+  number of shards never changes the protection rule.
 - Verify a harmless PR from an outside fork: approval is required, Linux runs
   on a GitHub-hosted runner, distribution is skipped, and the required check
   reports against the PR before merge.

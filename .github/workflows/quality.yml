@@ -52,12 +52,11 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
 
-  quality:
-    # PR code runs on a fresh GitHub-hosted VM. Clippy, Rust tests and the desktop build.
-    name: Quality checks (Linux)
+  clippy:
+    # Clippy has its own job, so it never waits for the tests and the tests never wait for it.
+    name: Clippy
     runs-on: ubuntu-24.04
-    # About 20 minutes without a warm cache: Clippy, test build, then 13 minutes of tests.
-    timeout-minutes: 45
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
@@ -69,44 +68,29 @@ jobs:
         with:
           rust: true
           desktop: true
-          cache: quality
+          cache: clippy
       # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
       - run: npm run build
-      - run: ./scripts/check rust
-      - name: Build desktop and CLI
-        run: cargo build --workspace --locked
+      - run: ./scripts/check clippy
 
-  ui:
-    # The frontend tests need no Rust build, so they run beside the Rust job.
-    name: Frontend tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-      - run: ./scripts/check ui
-      - name: Build and check the GitHub Pages site
-        env:
-          DOCS_PROJECT_PAGES: "1"
-        run: |
-          npm run build:docs
-          node apps/docs/check-pages.mjs
-
-  platform:
-    # Rust tests and builds on the other two release platforms, for every PR and main commit.
-    name: Platform checks (${{ matrix.os }})
+  rust:
+    # The Rust tests on all three release platforms, split into shards that run side by side.
+    # Every shard compiles its own tests and runs its share of them; the shards of one OS share
+    # one build cache. Shard 1 of each OS also runs the doc-tests and the desktop and CLI build.
+    name: Rust tests (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.shards }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - { name: Linux, os: ubuntu-24.04, shard: 1, shards: 1 }
+          - { name: macOS, os: macos-latest, shard: 1, shards: 2 }
+          - { name: macOS, os: macos-latest, shard: 2, shards: 2 }
+          - { name: Windows, os: windows-latest, shard: 1, shards: 3 }
+          - { name: Windows, os: windows-latest, shard: 2, shards: 3 }
+          - { name: Windows, os: windows-latest, shard: 3, shards: 3 }
     runs-on: ${{ matrix.os }}
-    # Windows runs the Rust tests for more than 30 minutes.
-    timeout-minutes: 60
+    # A shard takes under 20 minutes with a warm cache; a cold cache on a PR adds the compile.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -117,27 +101,65 @@ jobs:
       - uses: ./.github/actions/prepare
         with:
           rust: true
-          cache: platform
+          desktop: ${{ runner.os == 'Linux' }}
+          nextest: true
+          cache: test
+      # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
       - run: npm run build
       - name: Check nested Pages URLs on Windows
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.shard == 1
         env:
           DOCS_PROJECT_PAGES: "1"
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs
-      # Report every failing test binary, not only the first, so one run shows them all.
       - name: Test Rust workspace
-        run: cargo test --workspace --locked --no-fail-fast
+        run: ./scripts/check rust --partition ${{ matrix.shard }}/${{ matrix.shards }}
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: junit-${{ matrix.name }}-${{ matrix.shard }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+      # This replaces target/debug/ticketd, which the tests built with a fixed device code.
       - name: Build desktop and CLI
+        if: matrix.shard == 1
         run: cargo build --workspace --locked
+
+  ui:
+    # The frontend tests need no Rust build, so they run beside the Rust jobs, in three shards.
+    name: Frontend tests (${{ matrix.shard }}/3)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+      - run: ./scripts/check ui --partition ${{ matrix.shard }}/3
+      - name: Build and check the GitHub Pages site
+        if: matrix.shard == 1
+        env:
+          DOCS_PROJECT_PAGES: "1"
+        run: |
+          npm run build:docs
+          node apps/docs/check-pages.mjs
 
   result:
     # The one required check. It always reports, and fails unless every job above succeeded,
     # so a failed, canceled or skipped job can never look like a pass.
     name: CI result
     if: always()
-    needs: [fast, quality, ui, platform]
+    needs: [fast, clippy, rust, ui]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

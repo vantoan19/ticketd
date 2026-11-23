@@ -1,22 +1,60 @@
 #!/usr/bin/env bash
-# Usage: scripts/check [fast|slow|rust|ui]
-#   fast  checks that compile nothing: Markdown, versions, whitespace, formatting, lint, types
-#   rust  Clippy and the Rust tests
-#   ui    the frontend tests
-#   slow  rust, then ui
-# With no argument it runs everything. CI runs fast, rust and ui as separate jobs so the
+# Usage: scripts/check [fast|clippy|rust|ui|slow] [--partition k/n]
+#   fast    checks that compile nothing: Markdown, versions, whitespace, formatting, lint, types
+#   clippy  Clippy
+#   rust    the Rust tests
+#   ui      the frontend tests
+#   slow    clippy, rust, then ui
+# With no argument it runs everything. CI runs fast, clippy, rust and ui as separate jobs so the
 # fast result arrives first and the slow parts run side by side.
+#
+# --partition k/n runs shard k of n (1-based) of rust or ui, so CI can split a suite across
+# runners. Rust needs cargo-nextest for it (`cargo install cargo-nextest --locked`): the shard is
+# nextest's `--partition hash:k/n`, and doc-tests, which nextest cannot run, run in shard 1.
+# Without nextest, `rust` still runs every test with `cargo test`. The ui shard is vitest's
+# `--shard k/n` in each workspace. In CI (CI is set) nextest uses the `ci` profile of
+# .config/nextest.toml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-mode="${1:-all}"
-case "$mode" in
-  all | fast | slow | rust | ui) ;;
-  *)
-    echo "usage: scripts/check [fast|slow|rust|ui]" >&2
-    exit 2
-    ;;
-esac
+usage() {
+  echo "usage: scripts/check [fast|clippy|rust|ui|slow] [--partition k/n]" >&2
+  exit 2
+}
+
+mode=all
+mode_set=false
+partition=""
+while (($#)); do
+  case "$1" in
+    --partition)
+      (($# >= 2)) || usage
+      partition="$2"
+      shift 2
+      ;;
+    --partition=*)
+      partition="${1#--partition=}"
+      shift
+      ;;
+    all | fast | slow | clippy | rust | ui)
+      [[ "$mode_set" == false ]] || usage
+      mode="$1"
+      mode_set=true
+      shift
+      ;;
+    *) usage ;;
+  esac
+done
+
+shard="" # k of k/n
+shards="" # n of k/n
+if [[ -n "$partition" ]]; then
+  [[ "$mode" == rust || "$mode" == ui ]] || usage
+  [[ "$partition" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || usage
+  shard="${BASH_REMATCH[1]}"
+  shards="${BASH_REMATCH[2]}"
+  ((shard <= shards)) || usage
+fi
 runs() { [[ "$mode" == all || " $* " == *" $mode "* ]]; }
 
 if runs fast; then
@@ -34,11 +72,36 @@ if runs fast; then
   fi
 fi
 
-if runs slow rust && [[ -f Cargo.toml ]]; then
+if runs slow clippy && [[ -f Cargo.toml ]]; then
   cargo clippy --workspace --all-targets --locked -- \
     -D warnings -D unsafe_code \
     -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
-  cargo test --workspace --locked
 fi
 
-if runs slow ui && [[ -f package.json ]]; then npm test; fi
+if runs slow rust && [[ -f Cargo.toml ]]; then
+  if cargo nextest --version > /dev/null 2>&1; then
+    args=(--workspace --locked)
+    if [[ -n "${CI:-}" ]]; then args+=(--profile ci); fi
+    if [[ -n "$partition" ]]; then args+=(--partition "hash:$shard/$shards"); fi
+    cargo nextest run "${args[@]}"
+    # nextest does not run doc-tests. Run them once, in the first shard.
+    if [[ -z "$partition" || "$shard" == 1 ]]; then cargo test --doc --workspace --locked; fi
+  else
+    echo "cargo-nextest is not installed, so the tests run one binary after another with cargo test. Install it for a faster run: cargo install cargo-nextest --locked" >&2
+    if [[ -n "$partition" ]]; then
+      echo "--partition needs cargo-nextest." >&2
+      exit 1
+    fi
+    # Report every failing test binary, not only the first.
+    cargo test --workspace --locked --no-fail-fast
+  fi
+fi
+
+if runs slow ui && [[ -f package.json ]]; then
+  if [[ -n "$partition" ]]; then
+    # A shard of a small workspace can be empty, which is not a failure.
+    npm run test --workspaces -- --shard "$shard/$shards" --passWithNoTests
+  else
+    npm test
+  fi
+fi
