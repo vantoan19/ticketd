@@ -204,29 +204,33 @@ impl Session {
 
     fn session_info(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         self.identify(text(event, "session_id"), events);
+        let mut reopen_with = json!({"permission_mode": event.get("permission_mode")});
+        // Claude Code resumes no effort either: the one in effect is kept to reopen with.
+        if let Some(effort) = text(event, "effort").or_else(|| self.reports.effort()) {
+            reopen_with["effort"] = json!(effort);
+        }
         let settings = json!({
             "claude_code_version": event.get("claude_code_version"),
             "cwd": event.get("cwd"),
             "model": event.get("model"),
             "permission_mode": event.get("permission_mode"),
-            REOPEN_WITH: {"permission_mode": event.get("permission_mode")},
+            REOPEN_WITH: reopen_with,
         });
         events.extend(self.report_settings(settings));
         events.extend(self.reports.session_info(event));
     }
 
-    /// A model or permission mode Claude Code applied mid-session, kept with the
-    /// settings in effect so a resumed session opens with it.
+    /// A model, effort or permission mode Claude Code applied mid-session, kept with
+    /// the settings in effect so a resumed session opens with it.
     pub fn setting_applied(&mut self, setting: SettingKey, value: &str) -> Option<EventKind> {
-        let field = match setting {
-            SettingKey::Model => "model",
-            SettingKey::Permission => "permission_mode",
-            SettingKey::Effort => return None,
-        };
         let mut settings = self.reported_settings.clone()?;
-        settings[field] = json!(value);
-        if setting == SettingKey::Permission {
-            settings[REOPEN_WITH][field] = json!(value);
+        match setting {
+            SettingKey::Model => settings["model"] = json!(value),
+            SettingKey::Permission => {
+                settings["permission_mode"] = json!(value);
+                settings[REOPEN_WITH]["permission_mode"] = json!(value);
+            }
+            SettingKey::Effort => settings[REOPEN_WITH]["effort"] = json!(value),
         }
         self.report_settings(settings)
     }

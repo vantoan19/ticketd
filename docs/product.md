@@ -546,7 +546,9 @@ collect OAuth tokens, proxy model requests, or change billing.
   owned by any. It keeps the harness it was created with and needs an execution folder
   (an existing one or a persistent managed one). Ticket detail lists a ticket's Chats.
   Before sending, the person picks the harness and, from what it reports, its model,
-  effort, and permission mode; full access is never offered.
+  effort, and permission mode. Full access, where the harness edits and runs
+  commands without asking, is one of those modes for Claude Code and Codex; it is
+  never given to an Automation's agent.
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or
   Failed; a finished turn is not evidence that the task succeeded. Sending during a

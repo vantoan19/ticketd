@@ -14,7 +14,7 @@ use crate::{
     SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
 };
 
-use super::report::Reports;
+use super::report::{REOPEN_WITH, Reports};
 use super::rpc::{Reply, RpcError};
 
 /// Live tool output kept between a command's start and its authoritative completion.
@@ -115,6 +115,8 @@ pub(super) struct Session {
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
+    /// The settings last recorded with the Chat (`NoticeKind::EffectiveSettings`).
+    recorded: Option<Value>,
     pub(super) reports: Reports,
 }
 
@@ -171,7 +173,10 @@ impl Session {
                 if text(result, &["turn", "status"]) == Some("inProgress") {
                     self.turn_is_active(turn);
                 }
-                self.acknowledged(submission, turn, late)
+                let mut events = self.acknowledged(submission, turn, late);
+                // The turn carried the person's choice: the Chat now runs with it.
+                events.extend(self.record_choice());
+                events
             }
             (Call::Steer(submission), Ok(result)) => match text(result, &["turnId"]) {
                 Some(turn) => self.acknowledged(submission, turn, late),
@@ -197,7 +202,8 @@ impl Session {
         let model = text(result, &["model"]).unwrap_or("unknown");
         let approval = brief(result.get("approvalPolicy"));
         let sandbox = brief(result.get("sandbox"));
-        let settings = json!({
+        let reported = self.reports.thread_opened(result);
+        let mut settings = json!({
             "cliVersion": result.pointer("/thread/cliVersion"),
             "model": result.get("model"),
             "modelProvider": result.get("modelProvider"),
@@ -207,12 +213,18 @@ impl Session {
             "sandbox": result.get("sandbox"),
             "cwd": result.get("cwd"),
             "instructionSources": result.get("instructionSources"),
+            // Kept with the Chat, so a later session can leave Full access for them.
+            "own": self.reports.own,
         });
+        if let Some(choice) = self.reports.permission_choice() {
+            settings[REOPEN_WITH] = json!({"permission": choice});
+        }
+        self.recorded = Some(settings.clone());
         vec![
             EventKind::SessionIdentified {
                 native_session: NativeSessionId::new(thread),
             },
-            self.reports.thread_opened(result),
+            reported,
             EventKind::Notice {
                 turn: None,
                 kind: NoticeKind::EffectiveSettings,
@@ -220,6 +232,24 @@ impl Session {
                 detail: Some(detail("thread/settings", &settings)),
             },
         ]
+    }
+
+    /// Records the person's permission choice with the Chat when it differs from the
+    /// recorded one, so the Chat shows it, and a session opened for it again applies
+    /// it, after a restart too.
+    fn record_choice(&mut self) -> Option<EventKind> {
+        let choice = self.reports.permission_choice()?;
+        let recorded = self.recorded.as_mut()?;
+        if recorded[REOPEN_WITH]["permission"].as_str() == Some(choice.as_str()) {
+            return None;
+        }
+        recorded[REOPEN_WITH] = json!({"permission": choice});
+        Some(EventKind::Notice {
+            turn: None,
+            kind: NoticeKind::EffectiveSettings,
+            message: format!("Permissions: {choice}"),
+            detail: Some(detail("thread/settings", recorded)),
+        })
     }
 
     fn acknowledged(

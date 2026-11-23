@@ -1869,7 +1869,7 @@ fn setting_changes(f: &Fixture) -> Vec<SettingChange> {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_is_never_sent() {
+async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("Start").await;
     f.emit(EventKind::SettingsState(settings("ask"))).await;
@@ -1899,10 +1899,8 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
         .unwrap();
     settle().await;
 
-    assert!(matches!(
-        full,
-        SettingChangeState::Done(SettingOutcome::Refused { .. })
-    ));
+    // Full access is held like any other choice.
+    assert_eq!(full, SettingChangeState::Held);
     assert!(matches!(
         unknown,
         SettingChangeState::Done(SettingOutcome::Refused { .. })
@@ -1913,9 +1911,12 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
 
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
 
-    let sent = setting_changes(&f);
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].value, "gpt-b");
+    let mut sent: Vec<String> = setting_changes(&f)
+        .into_iter()
+        .map(|change| change.value)
+        .collect();
+    sent.sort();
+    assert_eq!(sent, ["full", "gpt-b"]);
     let live = f.live().await;
     let settings = live.settings.unwrap();
     assert_eq!(
@@ -1924,6 +1925,362 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
     );
     assert!(settings.changes.iter().any(|change| change.value == "gpt-b"
         && change.state == SettingChangeState::Done(SettingOutcome::Applied)));
+}
+
+/// T-QZ66: with no session running, a Chat shows the permission its next session opens
+/// with, as its record says, and a change then goes to that session, resumed too.
+#[tokio::test(start_paused = true)]
+async fn an_idle_chat_shows_its_next_permission_and_a_pick_goes_to_the_resumed_session() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: String::new(),
+        detail: Some(ProviderDetail::new("settings", r#"{"permission":"full"}"#)),
+    })
+    .await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.fake.lose_process().await;
+    settle().await;
+
+    let idle = f
+        .live()
+        .await
+        .settings
+        .expect("shown with no session running");
+    assert_eq!(
+        idle.reported.permission.and_then(|p| p.current).as_deref(),
+        Some("full")
+    );
+    assert!(idle.reported.model.is_none(), "models wait for a session");
+
+    let picked = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(picked, SettingChangeState::Held);
+    let shown = f
+        .live()
+        .await
+        .settings
+        .unwrap()
+        .reported
+        .permission
+        .unwrap();
+    assert_eq!(shown.current.as_deref(), Some("ask"));
+    // Saved at once: a restart before the next message keeps it.
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+    let model = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Model, "gpt-b")
+        .await
+        .unwrap();
+    assert!(matches!(
+        model,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+    let reopened = f.fake.opens()[1].clone();
+    assert_eq!(
+        reopened.session,
+        SessionStart::Resume(NativeSessionId::new("native-1"))
+    );
+    assert_eq!(reopened.settings.permission.as_deref(), Some("ask"));
+    assert_eq!(
+        reopened.recorded_settings.as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+}
+
+fn recorded(permission: &str) -> EventKind {
+    EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: String::new(),
+        detail: Some(ProviderDetail::new(
+            "settings",
+            &format!(r#"{{"permission":"{permission}"}}"#),
+        )),
+    }
+}
+
+/// A permission change the live session accepts is saved with the Chat at once, not at
+/// its next turn: quitting before another message must not bring Full access back.
+#[tokio::test(start_paused = true)]
+async fn an_accepted_permission_change_is_recorded_at_once() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let changed = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    settle().await;
+
+    assert_eq!(changed, SettingChangeState::Sent);
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+}
+
+fn written_kinds(f: &Fixture) -> Vec<&'static str> {
+    f.fake
+        .written()
+        .iter()
+        .filter_map(|written| match written {
+            Written::Submit(_) => Some("submit"),
+            Written::Setting(_) => Some("setting"),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A permission change held during a turn reaches the harness before the queued message
+/// after it: that message runs on the mode the person last chose, never the one they left.
+#[tokio::test(start_paused = true)]
+async fn a_queued_message_waits_for_a_permission_change_on_its_way() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(held, SettingChangeState::Held);
+    f.queue("second").await;
+
+    let answer = f.fake.hold_next_setting();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    settle().await;
+    assert_eq!(
+        written_kinds(&f),
+        ["submit", "setting"],
+        "the message waits"
+    );
+
+    answer.send(SettingOutcome::Applied).unwrap();
+    settle().await;
+    assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
+}
+
+/// A permission change the harness did not confirm pauses the queue: nothing runs until
+/// the person, told why in the dock, resumes it.
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_permission_change_pauses_the_queue() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.queue("second").await;
+
+    drop(f.fake.hold_next_setting());
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    settle().await;
+
+    assert_eq!(written_kinds(&f), ["submit", "setting"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.queued(), ["second"]);
+}
+
+/// A harness lost while a permission change is on its way stops the queue, and its next
+/// session opens with that change: nothing runs on the mode the person left.
+#[tokio::test(start_paused = true)]
+async fn a_harness_lost_with_a_permission_change_on_its_way_pauses_and_keeps_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    let changed = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(changed, SettingChangeState::Sent);
+    f.fake.lose_process().await;
+    settle().await;
+    drop(answer);
+    settle().await;
+
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert!(
+        chat.queue_paused,
+        "a loss with a change in flight is not quiet"
+    );
+    assert_eq!(
+        chat.effective_settings.as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+    let live = f.live().await;
+    assert!(matches!(
+        live.problem,
+        Some(ChatProblem::RuntimeLost { .. })
+    ));
+    assert_eq!(
+        live.settings
+            .and_then(|settings| settings.reported.permission)
+            .and_then(|permission| permission.current)
+            .as_deref(),
+        Some("ask")
+    );
+}
+
+/// A pick made while no session runs is refused when it cannot be saved: the idle Chat
+/// keeps showing the mode it would reopen in, never one only memory holds.
+#[tokio::test(start_paused = true)]
+async fn an_idle_pick_that_cannot_be_saved_is_refused() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.fake.lose_process().await;
+    settle().await;
+
+    f.storage_up.store(false, Ordering::SeqCst);
+    let picked = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.storage_up.store(true, Ordering::SeqCst);
+
+    assert!(matches!(
+        picked,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    let shown = f
+        .live()
+        .await
+        .settings
+        .unwrap()
+        .reported
+        .permission
+        .unwrap();
+    assert_eq!(shown.current.as_deref(), Some("full"));
+}
+
+/// A runtime closed for an explicit resume while a permission change waits for its turn
+/// to end: the replacement session opens with that change, saved with the Chat.
+#[tokio::test(start_paused = true)]
+async fn a_resume_opens_with_a_permission_change_the_closed_runtime_never_answered() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(held, SettingChangeState::Held);
+
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+
+    let reopened = f.fake.opens()[1].clone();
+    assert_eq!(reopened.settings.permission.as_deref(), Some("ask"));
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+}
+
+/// A request refused while an earlier change is still on its way leaves that change
+/// tracked: nothing is dispatched until the harness answers it.
+#[tokio::test(start_paused = true)]
+async fn a_refused_request_keeps_a_change_on_its_way_holding_dispatch() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    let sent = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(sent, SettingChangeState::Sent);
+    let refused = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "nope")
+        .await
+        .unwrap();
+    assert!(matches!(
+        refused,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    f.send("second").await;
+    assert_eq!(
+        written_kinds(&f),
+        ["submit", "setting"],
+        "the message waits"
+    );
+
+    answer.send(SettingOutcome::Applied).unwrap();
+    settle().await;
+    assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
+}
+
+/// A record that could not be saved is not shown: the idle Chat keeps showing what its
+/// next session will open with, the saved record.
+#[tokio::test(start_paused = true)]
+async fn an_unsaved_record_is_not_shown_on_the_idle_chat() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    f.storage_up.store(false, Ordering::SeqCst);
+    f.emit(recorded("ask")).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    f.storage_up.store(true, Ordering::SeqCst);
+
+    let shown = f
+        .live()
+        .await
+        .settings
+        .expect("idle once the harness is stopped");
+    assert_eq!(
+        shown.reported.permission.and_then(|p| p.current).as_deref(),
+        Some("full")
+    );
 }
 
 /// How a turn ended is stored as a typed fact, one per reason ticketd has to stop a
