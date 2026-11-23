@@ -380,7 +380,13 @@ impl<W: Write + Send + 'static> Session<W> {
     }
 
     fn cancel(&self, id: Option<u64>) {
-        if let Ok(active) = self.active.lock()
+        let active = if id.is_none() {
+            // EOF must end the process even when the host stopped draining stdout.
+            self.active.try_lock().ok()
+        } else {
+            self.active.lock().ok()
+        };
+        if let Some(active) = active
             && let Some(active) = &*active
             && id.is_none_or(|id| id == active.id)
         {

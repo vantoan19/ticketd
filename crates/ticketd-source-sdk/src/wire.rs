@@ -153,6 +153,7 @@ pub struct ProgressParams {
     /// Number of items processed in this request so far.
     pub completed: u32,
     /// Total number of items when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u32>,
 }
 
