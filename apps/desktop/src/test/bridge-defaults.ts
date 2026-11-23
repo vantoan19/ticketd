@@ -57,6 +57,7 @@ export function bridgeDefault(
     case "safety_backups":
     case "search_tags":
     case "source_conversation":
+    case "source_repository_routes":
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
     case "attachment_availability":
