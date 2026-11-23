@@ -2154,6 +2154,40 @@ async fn a_harness_lost_with_a_permission_change_on_its_way_pauses_and_keeps_it(
     );
 }
 
+/// A pick made while no session runs is refused when it cannot be saved: the idle Chat
+/// keeps showing the mode it would reopen in, never one only memory holds.
+#[tokio::test(start_paused = true)]
+async fn an_idle_pick_that_cannot_be_saved_is_refused() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.fake.lose_process().await;
+    settle().await;
+
+    f.storage_up.store(false, Ordering::SeqCst);
+    let picked = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.storage_up.store(true, Ordering::SeqCst);
+
+    assert!(matches!(
+        picked,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    let shown = f
+        .live()
+        .await
+        .settings
+        .unwrap()
+        .reported
+        .permission
+        .unwrap();
+    assert_eq!(shown.current.as_deref(), Some("full"));
+}
+
 /// A record that could not be saved is not shown: the idle Chat keeps showing what its
 /// next session will open with, the saved record.
 #[tokio::test(start_paused = true)]

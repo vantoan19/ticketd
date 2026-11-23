@@ -631,10 +631,11 @@ impl Supervisor {
             return SettingChangeState::Done(SettingOutcome::Refused { reason });
         }
         match setting {
-            SettingKey::Permission => {
-                self.record_permission(&value);
-                self.start_settings.permission = Some(value);
+            // Taken only once saved: the shown mode must be the one the Chat reopens in.
+            SettingKey::Permission if !self.record_permission(&value) => {
+                return refused("the change could not be saved");
             }
+            SettingKey::Permission => self.start_settings.permission = Some(value),
             // Only the permission is shown before a session.
             SettingKey::Model | SettingKey::Effort => return refused("no session is running"),
         }
@@ -644,19 +645,21 @@ impl Supervisor {
     /// Saves `value` with the Chat as the permission its next session opens with, as
     /// soon as the change is accepted, so a restart before the next message cannot bring
     /// back a mode the person left. The record views read changes only once it is saved.
-    fn record_permission(&mut self, value: &str) {
+    /// `false` when saving failed; a Chat with no record yet has nothing to save.
+    fn record_permission(&mut self, value: &str) -> bool {
         let Some(updated) = self.adapter.as_ref().and_then(|adapter| {
             adapter.record_permission(self.recorded_settings.as_deref(), value)
         }) else {
-            return;
+            return true;
         };
         let chat = self.chat_id.clone();
-        if self
+        let saved = self
             .write(|core| core.set_chat_effective_settings(&chat, &updated))
-            .is_ok()
-        {
+            .is_ok();
+        if saved {
             self.recorded_settings = Some(updated);
         }
+        saved
     }
 
     /// The settings shown while no session runs or opens: the permission its next
@@ -1243,7 +1246,8 @@ impl Supervisor {
         }
         self.runtime_gone(&TurnEnding::ContactLost(Some(detail.clone())));
         if let Some(value) = unanswered {
-            self.record_permission(&value);
+            // Kept for the next session whether or not it could be saved.
+            let _saved = self.record_permission(&value);
             self.start_settings.permission = Some(value);
         }
         if !quiet {
@@ -1546,7 +1550,11 @@ impl Supervisor {
                 change.state = SettingChangeState::Done(outcome.clone());
                 if setting == SettingKey::Permission {
                     if outcome == SettingOutcome::Applied {
-                        self.record_permission(&value);
+                        // The harness already runs it: unsaved, this process still opens
+                        // the next session with it.
+                        if !self.record_permission(&value) {
+                            self.start_settings.permission = Some(value);
+                        }
                     } else {
                         // Nothing runs on a mode the person left: the queue waits for
                         // them, and the dock says why the change did not take.
