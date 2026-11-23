@@ -9,7 +9,6 @@
 //! Files over [`SINGLE_PART_LIMIT`] upload in parts (see `parts`).
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, SeekFrom, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -209,8 +208,17 @@ pub struct S3Remote<'a> {
     /// Folders whose marker was seen, so a write does not look for it every time. `list`
     /// looks afresh, so a folder removed from the bucket is noticed.
     known: Mutex<HashSet<String>>,
-    /// Set once the bucket passed [`S3Remote::check_bucket`].
-    checked: AtomicBool,
+    /// Whether the bucket passed [`S3Remote::check_bucket`].
+    checked: Mutex<Checked>,
+}
+
+/// The bucket check's pass, and how often it was cleared since this `S3Remote` began. A check
+/// publishes its pass only if none was cleared while it ran: the bucket it probed may be
+/// another bucket by then (Versioning suspended).
+#[derive(Default)]
+struct Checked {
+    passed: bool,
+    cleared: u64,
 }
 
 impl S3Remote<'static> {
@@ -252,7 +260,7 @@ impl<'a> S3Remote<'a> {
             prefix,
             part_size: parts::PART_SIZE,
             known: Mutex::new(HashSet::new()),
-            checked: AtomicBool::new(false),
+            checked: Mutex::new(Checked::default()),
         }
     }
 
@@ -283,11 +291,18 @@ impl<'a> S3Remote<'a> {
     /// small object under the prefix and leaves it. After it passes once, this `S3Remote`
     /// does not check again.
     pub fn check_bucket(&self) -> Result<(), BucketCheckError> {
-        if self.checked.load(Ordering::Acquire) {
-            return Ok(());
-        }
+        let cleared = {
+            let checked = lock(&self.checked);
+            if checked.passed {
+                return Ok(());
+            }
+            checked.cleared
+        };
         bucket_check::run(&self.client, &self.prefix)?;
-        self.checked.store(true, Ordering::Release);
+        let mut checked = lock(&self.checked);
+        if checked.cleared == cleared {
+            checked.passed = true;
+        }
         Ok(())
     }
 
@@ -298,7 +313,10 @@ impl<'a> S3Remote<'a> {
     fn committed_version(&self, response: &S3Response) -> Result<String, RemoteError> {
         match response.header("x-amz-version-id") {
             Some("null") => {
-                self.checked.store(false, Ordering::Release);
+                let mut checked = lock(&self.checked);
+                checked.passed = false;
+                checked.cleared += 1;
+                drop(checked);
                 Err(RemoteError::Other(
                     "S3 stored the file in the bucket's null version, which the next write replaces; Versioning is suspended, so turn it on again".into(),
                 ))

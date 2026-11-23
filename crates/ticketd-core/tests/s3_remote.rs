@@ -620,6 +620,59 @@ fn a_write_to_a_bucket_whose_versioning_was_suspended_is_refused_and_the_check_r
     }
 }
 
+/// A transport that holds the first listing of versions until the test lets it go.
+struct Held<'a> {
+    sim: &'a S3Sim,
+    reached: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl S3Transport for Held<'_> {
+    fn send(&self, request: S3Request) -> Result<S3Response, S3TransportError> {
+        let held = request.method == "GET" && request.url.contains("versions");
+        let reached = if held {
+            self.reached.lock().unwrap().take()
+        } else {
+            None
+        };
+        if let Some(reached) = reached {
+            reached.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+        }
+        self.sim.send(request)
+    }
+}
+
+#[test]
+fn a_check_that_began_before_a_null_version_write_does_not_keep_its_pass() {
+    // The check passed Versioning, then Versioning was suspended and a write found the `null`
+    // version, which clears the pass. The check, still running, must not store it again.
+    let bench = Bench::new();
+    let folder = bench.folder();
+    let (reached, arrived) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let held = Held {
+        sim: &bench.sim,
+        reached: Mutex::new(Some(reached)),
+        release: Mutex::new(released),
+    };
+    let remote = S3Remote::new(target(), "ticketd/", &bench.credentials, &held)
+        .unwrap()
+        .with_pause(|_| {});
+    std::thread::scope(|scope| {
+        let checking = scope.spawn(|| remote.check_bucket());
+        arrived.recv().unwrap();
+        bench.sim.versioning(s3_sim::Versioning::Suspended);
+        assert!(put(&remote, &folder, &ticket(), None, b"one").is_err());
+        release.send(()).unwrap();
+        checking.join().unwrap().unwrap();
+    });
+    assert_eq!(
+        remote.check_bucket(),
+        Err(BucketCheckError::VersioningOff { suspended: true })
+    );
+}
+
 #[test]
 fn a_null_version_that_was_there_before_versioning_is_still_read() {
     let bench = Bench::new();
