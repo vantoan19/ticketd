@@ -56,7 +56,13 @@ A one-time outward transfer of a locally owned ticket to an external tracker, af
 The system that currently owns a ticket's authoritative record: ticketd or an external tracker.
 
 **Ticket source extension**:
-A connector to an external ticket source, run by ticketd through a shared extension interface.
+A separate program that connects ticketd to an external ticket source through a versioned contract.
+
+**Source connection**:
+A named, device-local configuration for an account and site at a ticket source, with its own settings and credentials.
+
+**Conformance suite**:
+The shared checks that verify whether a connector follows the ticket source contract.
 
 **External ticket identity**:
 The identity of a ticket's corresponding record in an external tracker, retained as provenance even when ticketd takes ownership. Its presence alone does not imply external ownership or active synchronization.
