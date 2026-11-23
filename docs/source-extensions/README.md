@@ -94,7 +94,11 @@ active request's numeric `id` in `params`, along with the nonnegative
 inside that request. Omit `total` when you do not know it.
 
 ```json
-{"jsonrpc":"2.0","method":"progress","params":{"id":7,"completed":42,"total":100}}
+{
+  "jsonrpc": "2.0",
+  "method": "progress",
+  "params": { "id": 7, "completed": 42, "total": 100 }
+}
 ```
 
 An ordinary call has a 30-second inactivity timeout. Each matching progress
@@ -105,7 +109,7 @@ When a call expires or the person cancels it, ticketd sends a `cancel`
 notification for a request it sent in full.
 
 ```json
-{"jsonrpc":"2.0","method":"cancel","params":{"id":7}}
+{ "jsonrpc": "2.0", "method": "cancel", "params": { "id": 7 } }
 ```
 
 Read stdin while your request is running. Stop the matching work, then reply
@@ -117,7 +121,11 @@ about two seconds, ticketd terminates the process tree. The next request starts
 a new process. Closing stdin still asks the extension to exit.
 
 ```json
-{"jsonrpc":"2.0","id":7,"error":{"code":-32800,"message":"Request canceled"}}
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "error": { "code": -32800, "message": "Request canceled" }
+}
 ```
 
 In Settings → Sources, use **Cancel sync** while a manually started sync runs.
