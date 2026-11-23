@@ -223,7 +223,7 @@ async function serve(
               code: -32000,
               message,
               data: {
-                class: "config",
+                class: error.code === "unauthenticated" ? "auth" : "config",
                 code: error.code,
                 message,
               },

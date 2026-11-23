@@ -66,7 +66,6 @@ impl ProcessConnector {
                 connection_id: id,
                 config,
             }),
-            self.refresh.as_ref(),
         )
     }
 
