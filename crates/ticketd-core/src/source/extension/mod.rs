@@ -18,7 +18,7 @@ use super::{
     CONTRACT_VERSION, Capability, ChoiceOption, ConfigValues, ConnectionCheck, Connector,
     ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalIssue, ExternalRef,
     FieldIssue, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
-    SourceDescription, SourceError, SourcePresentation,
+    RefreshControl, SourceDescription, SourceError, SourcePresentation,
 };
 use host::{Definition, Host};
 use registry::Launch;
@@ -38,6 +38,7 @@ struct ProcessConnector {
     description: SourceDescription,
     connection_id: Option<String>,
     host: Arc<Host>,
+    refresh: Option<RefreshControl>,
 }
 
 impl ProcessConnector {
@@ -49,13 +50,14 @@ impl ProcessConnector {
         let id = self.connection_id.as_deref().ok_or_else(|| {
             SourceError::Protocol("a source extension operation requires a connection ID".into())
         })?;
-        self.host.call(
+        self.host.call_controlled(
             &self.definition,
             Some(id),
             call(ConnectionParams {
                 connection_id: id,
                 config,
             }),
+            self.refresh.as_ref(),
         )
     }
 }
@@ -72,6 +74,13 @@ impl Connector for ProcessConnector {
     fn for_connection(&self, id: &str, _config: &ConfigValues) -> Option<Box<dyn Connector>> {
         Some(Box::new(Self {
             connection_id: Some(id.to_owned()),
+            ..self.clone()
+        }))
+    }
+
+    fn for_refresh(&self, control: &RefreshControl) -> Option<Box<dyn Connector>> {
+        Some(Box::new(Self {
+            refresh: Some(control.clone()),
             ..self.clone()
         }))
     }

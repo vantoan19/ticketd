@@ -24,9 +24,9 @@ use tokio::{
 };
 
 use super::{
-    CONTRACT_VERSION, Launch, SourceError,
+    CONTRACT_VERSION, Launch, RefreshControl, SourceError,
     logs::ExtensionLog,
-    process::{EXIT_POLL, Fault, LINE_LIMIT, Process},
+    process::{CallBudget, CallControl, EXIT_POLL, Fault, LINE_LIMIT, Process},
     redaction::Redactions,
     wire::{Call, Description, JsonRpc, Request},
 };
@@ -39,6 +39,8 @@ const CRASH_WINDOW: Duration = Duration::from_secs(3 * 60);
 pub(super) struct Limits {
     pub handshake: Duration,
     pub request: Duration,
+    pub hard: Duration,
+    pub grace: Duration,
     pub idle: Duration,
 }
 
@@ -47,7 +49,27 @@ impl Default for Limits {
         Self {
             handshake: Duration::from_secs(5),
             request: Duration::from_secs(30),
+            hard: Duration::from_secs(5 * 60),
+            grace: Duration::from_secs(2),
             idle: Duration::from_secs(5 * 60),
+        }
+    }
+}
+
+impl Limits {
+    fn budget(self, handshake: bool) -> CallBudget {
+        if handshake {
+            CallBudget {
+                soft: self.handshake,
+                hard: self.handshake,
+                grace: self.grace,
+            }
+        } else {
+            CallBudget {
+                soft: self.request,
+                hard: self.hard,
+                grace: self.grace,
+            }
         }
     }
 }
@@ -75,14 +97,14 @@ struct ConnectionKey {
 
 struct Runtime {
     handle: Handle,
-    closing: watch::Sender<()>,
+    closing: watch::Sender<bool>,
     sessions: oneshot::Sender<Vec<JoinHandle<()>>>,
     thread: thread::JoinHandle<()>,
 }
 
 impl Runtime {
     fn start() -> io::Result<Self> {
-        let (closing, _) = watch::channel(());
+        let (closing, _) = watch::channel(false);
         let (sessions, finished) = oneshot::channel::<Vec<JoinHandle<()>>>();
         let (ready, started) = blocking::sync_channel(1);
         let thread = thread::Builder::new()
@@ -127,6 +149,7 @@ enum Message {
     Call {
         definition: Definition,
         request: EncodedRequest,
+        refresh: Option<RefreshControl>,
         reply: blocking::SyncSender<Result<Value, SourceError>>,
     },
     Retry(blocking::SyncSender<()>),
@@ -224,18 +247,35 @@ impl Host {
         id: Option<&str>,
         call: Call<'_>,
     ) -> Result<T, SourceError> {
+        self.call_controlled(definition, id, call, None)
+    }
+
+    pub(super) fn call_controlled<T: DeserializeOwned>(
+        &self,
+        definition: &Definition,
+        id: Option<&str>,
+        call: Call<'_>,
+        refresh: Option<&RefreshControl>,
+    ) -> Result<T, SourceError> {
+        if let Some(refresh) = refresh {
+            refresh.check()?;
+        }
         let request = self.encode(call)?;
         let endpoint = self.endpoint(definition, id)?;
         let _serial = endpoint
             .serial
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        if let Some(refresh) = refresh {
+            refresh.check()?;
+        }
         let (reply, result) = blocking::sync_channel(1);
         endpoint
             .sender
             .try_send(Message::Call {
                 definition: definition.clone(),
                 request,
+                refresh: refresh.cloned(),
                 reply,
             })
             .map_err(|_| SourceError::NotSent("the source extension session has stopped".into()))?;
@@ -293,7 +333,7 @@ impl Host {
             (state.runtime.take(), sessions)
         };
         if let Some(runtime) = runtime {
-            runtime.closing.send_replace(());
+            runtime.closing.send_replace(true);
             let _ = runtime.sessions.send(sessions);
             let _ = runtime.thread.join();
         }
@@ -330,11 +370,14 @@ impl Write for CappedFrame {
 async fn session(
     key: ConnectionKey,
     limits: Limits,
-    mut closing: watch::Receiver<()>,
+    mut closing: watch::Receiver<bool>,
     mut messages: mpsc::Receiver<Message>,
     log: Option<Arc<ExtensionLog>>,
 ) {
-    let redactions = Redactions::default();
+    let diagnostics = SessionDiagnostics {
+        redactions: Redactions::default(),
+        log,
+    };
     let mut active: Option<(Arc<Launch>, Process)> = None;
     let mut idle_at = Instant::now() + limits.idle;
     let mut poll = interval(EXIT_POLL);
@@ -344,13 +387,13 @@ async fn session(
     loop {
         tokio::select! {
             biased;
-            _ = closing.changed() => break,
+            _ = wait_for_close(&mut closing) => break,
             message = messages.recv() => match message {
                 Some(Message::Retry(reply)) => {
                     crashes.clear();
                     let _ = reply.send(());
                 }
-                Some(Message::Call { definition, request, reply }) => {
+                Some(Message::Call { definition, request, refresh, reply }) => {
                     if active.as_ref().is_some_and(|(launch, _)| launch != &definition.launch) {
                         stop(&mut active).await;
                     }
@@ -368,12 +411,19 @@ async fn session(
                         let _ = reply.send(Err(fault.into()));
                         continue;
                     }
-                    let operation = serve(&mut active, &definition, key.id.is_some(), &request, limits, &redactions, log.clone());
-                    let result = tokio::select! {
-                        biased;
-                        _ = closing.changed() => break,
-                        result = operation => result,
+                    let mut control = CallControl {
+                        refresh: refresh.as_ref(),
+                        closing: &mut closing,
                     };
+                    let result = serve(
+                        &mut active,
+                        &definition,
+                        key.id.is_some(),
+                        &request,
+                        limits,
+                        &mut control,
+                        &diagnostics,
+                    ).await;
                     let result = match result {
                         Ok(result) => result,
                         Err(fault) => {
@@ -407,6 +457,10 @@ async fn session(
         }
     }
     stop(&mut active).await;
+}
+
+async fn wait_for_close(closing: &mut watch::Receiver<bool>) {
+    let _ = closing.wait_for(|closed| *closed).await;
 }
 
 async fn verify_launch(launch: &Arc<Launch>) -> Result<(), SourceError> {
@@ -448,19 +502,30 @@ async fn stop(active: &mut Option<(Arc<Launch>, Process)>) {
     }
 }
 
+struct SessionDiagnostics {
+    redactions: Redactions,
+    log: Option<Arc<ExtensionLog>>,
+}
+
 async fn serve(
     active: &mut Option<(Arc<Launch>, Process)>,
     definition: &Definition,
     connection: bool,
     request: &EncodedRequest,
     limits: Limits,
-    redactions: &Redactions,
-    log: Option<Arc<ExtensionLog>>,
+    control: &mut CallControl<'_>,
+    diagnostics: &SessionDiagnostics,
 ) -> Result<Result<Value, SourceError>, Fault> {
     if active.is_none() {
         let process = match definition.launch.command().and_then(|command| {
-            definition.launch.redact_environment(&command, redactions);
-            Process::spawn(command, redactions.clone(), log)
+            definition
+                .launch
+                .redact_environment(&command, &diagnostics.redactions);
+            Process::spawn(
+                command,
+                diagnostics.redactions.clone(),
+                diagnostics.log.clone(),
+            )
         }) {
             Ok(process) => process,
             Err(error) => return Ok(Err(error)),
@@ -477,7 +542,9 @@ async fn serve(
                 serde_json::to_vec(&hello).map_err(|error| Fault::Protocol(error.to_string()))?;
             frame.push(b'\n');
             if let Some((_, process)) = active.as_mut() {
-                let response = process.exchange(hello.id, &frame, limits.handshake).await?;
+                let response = process
+                    .exchange(hello.id, &frame, limits.budget(true), control)
+                    .await?;
                 let checked = response.and_then(|value| {
                     let description = parse_handshake(&definition.launch, value)?;
                     if definition.cached.as_deref() != Some(&description) {
@@ -496,12 +563,14 @@ async fn serve(
     }
     match active.as_mut() {
         Some((_, process)) => {
-            let deadline = if connection {
-                limits.request
-            } else {
-                limits.handshake
-            };
-            process.exchange(request.id, &request.frame, deadline).await
+            process
+                .exchange(
+                    request.id,
+                    &request.frame,
+                    limits.budget(!connection),
+                    control,
+                )
+                .await
         }
         None => Err(Fault::Crash),
     }

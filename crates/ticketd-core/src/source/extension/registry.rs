@@ -667,6 +667,7 @@ impl ExtensionRegistry {
             description,
             connection_id: None,
             host: self.host.clone(),
+            refresh: None,
         }))
     }
 }

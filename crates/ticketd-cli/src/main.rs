@@ -9,6 +9,7 @@ use ticketd_core::{
 
 mod output;
 mod skills;
+mod source_refresh;
 
 use output::{bare, ok};
 use ticketd_core::source::ExtensionRegistry;
@@ -2504,11 +2505,13 @@ fn run_source_connection(
                 .find(|status| status.connection_id.as_deref() == Some(connection)),
         )?,
         SourceConnectionCommand::Refresh { ticket } => {
-            let report = workspace.refresh_connection(
-                &engine,
-                connection,
-                &RefreshOptions { ticket, now: None },
-            )?;
+            let report = source_refresh::controlled(connection, |control| {
+                workspace.refresh_connection(
+                    &engine.clone().with_refresh_control(control),
+                    connection,
+                    &RefreshOptions { ticket, now: None },
+                )
+            })??;
             // Give scripts the report even when a failure also exits nonzero.
             writeln!(output, "{}", serde_json::to_string(&report)?)?;
             if let Some(failure) = report.failures.first() {
@@ -2607,7 +2610,12 @@ fn main() {
             |source| source.message_for(Surface::Terminal),
         );
         eprintln!("error: {message}");
-        std::process::exit(1);
+        let exit_code = if matches!(source, Some(SourceError::RefreshCanceled)) {
+            130
+        } else {
+            1
+        };
+        std::process::exit(exit_code);
     }
 }
 

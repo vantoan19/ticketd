@@ -380,18 +380,54 @@ export function SourceCard({
     checked.current = true;
     firstCheck();
   }, [hidden]);
-  const [syncingNow, setSyncingNow] = useState(false);
-  async function refreshConnection(id: string) {
-    setSyncingNow(true);
+  const [activeSync, setActiveSync] = useState<{
+    id: string;
+    ready: boolean;
+    stopping: boolean;
+    progress: string;
+  } | null>(null);
+  const [syncCanceled, setSyncCanceled] = useState(false);
+  async function refreshConnection(connection: string) {
+    const id = crypto.randomUUID();
+    setSyncCanceled(false);
+    setActiveSync({ id, ready: false, stopping: false, progress: "" });
     try {
-      const report = await (retry
-        ? sourcesClient.refresh(undefined, id, true)
-        : sourcesClient.refresh(undefined, id));
+      const report = await sourcesClient.refresh(undefined, connection, retry, {
+        id,
+        update(event) {
+          setActiveSync((sync) => {
+            if (sync?.id !== id) return sync;
+            if (event.kind === "started") return { ...sync, ready: true };
+            const progress =
+              event.total == null
+                ? String(event.completed)
+                : `${event.completed} of ${event.total}`;
+            return { ...sync, progress };
+          });
+        },
+      });
       if (report.failures.length > 0) throw report.failures[0];
     } catch (reason) {
-      setNotice(describeFailure(reason, "sync this connection").sentence);
+      if (toSourceFailure(reason).code === "refresh_canceled") {
+        setSyncCanceled(true);
+      } else {
+        setNotice(describeFailure(reason, "sync this connection").sentence);
+      }
     } finally {
-      setSyncingNow(false);
+      setActiveSync(null);
+    }
+  }
+  async function cancelSync() {
+    if (!activeSync) return;
+    const { id } = activeSync;
+    setActiveSync({ ...activeSync, stopping: true });
+    try {
+      await sourcesClient.cancelRefresh(id);
+    } catch (reason) {
+      setNotice(describeFailure(reason, "cancel this sync").sentence);
+      setActiveSync((sync) =>
+        sync?.id === id ? { ...sync, stopping: false } : sync,
+      );
     }
   }
   const previewMatches = () =>
@@ -735,30 +771,45 @@ export function SourceCard({
       <SettingsSection
         title="Sync"
         actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={schedule.refreshing || syncingNow || saved === null}
-            onClick={() =>
-              void (connectionId
-                ? refreshConnection(connectionId)
-                : schedule.refreshAll())
-            }
-          >
-            <RefreshCw aria-hidden="true" />
-            {retry ? "Retry" : "Sync now"}
-          </Button>
+          activeSync ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!activeSync.ready || activeSync.stopping}
+              onClick={() => void cancelSync()}
+            >
+              Cancel sync
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={schedule.refreshing || saved === null}
+              onClick={() =>
+                void (connectionId
+                  ? refreshConnection(connectionId)
+                  : schedule.refreshAll())
+              }
+            >
+              <RefreshCw aria-hidden="true" />
+              {retry ? "Retry" : "Sync now"}
+            </Button>
+          )
         }
       >
         <SettingsList>
           <SettingsRow
             title={
               <span role="status">
-                {schedule.refreshing || syncingNow
-                  ? `Syncing ${connector.name}…`
-                  : lastRefreshed
-                    ? `${syncing ? "Synced" : "Last synced"} ${ago(lastRefreshed, now) ?? formatDateTime(lastRefreshed)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}`
-                    : "Not synced yet"}
+                {activeSync?.stopping
+                  ? "Canceling sync…"
+                  : schedule.refreshing || activeSync
+                    ? `Syncing ${connector.name}…${activeSync?.progress ? ` · ${activeSync.progress}` : ""}`
+                    : syncCanceled
+                      ? "Sync canceled"
+                      : lastRefreshed
+                        ? `${syncing ? "Synced" : "Last synced"} ${ago(lastRefreshed, now) ?? formatDateTime(lastRefreshed)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}`
+                        : "Not synced yet"}
               </span>
             }
             description={`Runs when ticketd opens${

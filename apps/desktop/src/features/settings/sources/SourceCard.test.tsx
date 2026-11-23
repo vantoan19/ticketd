@@ -34,6 +34,8 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
     add: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
+    refresh: vi.fn(),
+    cancelRefresh: vi.fn(),
   },
 }));
 
@@ -908,6 +910,48 @@ test("the Sync section shows the saved connection's refresh command with a copy 
     within(sync).getByRole("button", { name: "Copy sync command" }),
   ).toBeTruthy();
   expect(within(sync).getByRole("button", { name: "Sync now" })).toBeTruthy();
+});
+
+test("Sync now reports progress and cancels its own refresh", async () => {
+  let rejectRefresh: (error: SourceFailure) => void = () => {};
+  vi.mocked(sourcesClient.refresh).mockImplementation(
+    (_ticket, _connection, _retry, control) =>
+      new Promise((_resolve, reject) => {
+        rejectRefresh = reject;
+        control?.update({ kind: "started" });
+        control?.update({ kind: "progress", completed: 12, total: 30 });
+      }),
+  );
+  vi.mocked(sourcesClient.cancelRefresh).mockResolvedValue(true);
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        connector: { ...entry.connector, provider: "example", name: "Example" },
+        saved: {
+          id: "example-2",
+          provider: "example",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      }}
+    />,
+  );
+  const sync = within(screen.getByRole("region", { name: "Sync" }));
+  fireEvent.click(sync.getByRole("button", { name: "Sync now" }));
+  expect(await sync.findByText(/12 of 30/)).toBeTruthy();
+  fireEvent.click(sync.getByRole("button", { name: "Cancel sync" }));
+  const [, id, , control] = vi.mocked(sourcesClient.refresh).mock.calls[0]!;
+  expect(id).toBe("example-2");
+  expect(sourcesClient.cancelRefresh).toHaveBeenCalledWith(control?.id);
+  await act(async () => {
+    rejectRefresh(
+      new SourceFailure("refresh_canceled", "source refresh canceled"),
+    );
+  });
+  expect(sync.getByText("Sync canceled")).toBeTruthy();
+  expect(sync.getByRole("button", { name: "Sync now" })).toBeTruthy();
 });
 
 test("a failed preview is said in the save bar, beside its actions, with no summary in the form", async () => {
