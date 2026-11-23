@@ -751,26 +751,31 @@ impl Workspace {
         S3Target::new(&s3.bucket, "us-east-1", None)
             .map_err(|error| Error::Sync(error.to_string()))?;
         checked_prefix(&s3.prefix).map_err(|error| Error::Sync(error.to_string()))?;
-        let state = state(&self.connection)?;
-        if state.folder.is_some() {
-            if state.provider != SyncProvider::S3 {
-                return Err(Error::Sync(format!(
-                    "this Workspace syncs with {}; disconnect it before connecting to S3",
-                    state.provider.name()
-                )));
+        // The binding is read, checked and written under one write lock: another connection
+        // to this Workspace file could bind a folder in between otherwise.
+        crate::write_scope::run(&self.connection, |scope| {
+            let state = state(scope)?;
+            if state.folder.is_some() {
+                if state.provider != SyncProvider::S3 {
+                    return Err(Error::Sync(format!(
+                        "this Workspace syncs with {}; disconnect it before connecting to S3",
+                        state.provider.name()
+                    )));
+                }
+                if state.s3_bucket.as_deref() != Some(s3.bucket.as_str())
+                    || state.s3_prefix.as_deref() != Some(s3.prefix.as_str())
+                {
+                    return Err(Error::Sync(
+                        "this Workspace syncs with another S3 bucket or prefix; disconnect it before connecting to this one".into(),
+                    ));
+                }
             }
-            if state.s3_bucket.as_deref() != Some(s3.bucket.as_str())
-                || state.s3_prefix.as_deref() != Some(s3.prefix.as_str())
-            {
-                return Err(Error::Sync(
-                    "this Workspace syncs with another S3 bucket or prefix; disconnect it before connecting to this one".into(),
-                ));
-            }
-        }
-        self.connection.execute(
-            "UPDATE sync_state SET provider = 's3', connection = NULL, s3_bucket = ?1, s3_prefix = ?2, aws_profile = ?3, aws_cli_path = ?4, account = ?5",
-            params![s3.bucket, s3.prefix, s3.profile, s3.aws_cli_path, identity],
-        )?;
+            scope.execute(
+                "UPDATE sync_state SET provider = 's3', connection = NULL, s3_bucket = ?1, s3_prefix = ?2, aws_profile = ?3, aws_cli_path = ?4, account = ?5",
+                params![s3.bucket, s3.prefix, s3.profile, s3.aws_cli_path, identity],
+            )?;
+            Ok(())
+        })?;
         touch(&self.connection)?;
         self.sync_status()
     }

@@ -211,6 +211,15 @@ fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
 
 static KEPT: Mutex<Option<Arc<S3Storage>>> = Mutex::new(None);
 
+/// Drops the kept storage and the credentials kept for every profile. The next call builds
+/// the storage from the profile as it is now: its endpoint, its region and its account. Setup
+/// choices (connect, upload, download, reconnect) call this, since a person who comes back to
+/// them may have changed the profile.
+pub fn reset() {
+    *KEPT.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    s3_commands::forget_all_credentials();
+}
+
 /// The storage of an S3 binding. One value is kept, so what it learned (the region, a
 /// folder's marker) lasts between runs; a changed binding gets a new one.
 pub fn storage(binding: &S3Binding) -> Arc<S3Storage> {
@@ -342,6 +351,19 @@ mod tests {
         assert_eq!(console_url(&other.target, &binding(), "f1"), None);
         let china = built(&fake, "cn-north-1", None);
         assert_eq!(console_url(&china.target, &binding(), "f1"), None);
+    }
+
+    #[test]
+    fn a_reset_gives_the_next_call_a_storage_built_afresh_from_the_profile() {
+        let binding = S3Binding {
+            bucket: "reset-test-bucket".into(),
+            ..binding()
+        };
+        let first = storage(&binding);
+        assert!(Arc::ptr_eq(&first, &storage(&binding)));
+        // The profile's endpoint or account may have changed since it was built.
+        reset();
+        assert!(!Arc::ptr_eq(&first, &storage(&binding)));
     }
 
     #[test]

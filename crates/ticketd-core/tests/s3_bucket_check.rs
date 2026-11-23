@@ -390,10 +390,21 @@ fn upload_download_and_reconnect_refuse_to_start_without_a_passing_check() {
     let remote = bench.remote();
     let mut desk = new_desk();
 
+    // Each refusal leaves this Workspace unbound; it is the one that received the call.
+    let unbound = |desk: &Desk| {
+        assert!(desk.workspace.sync_binding().unwrap().is_none());
+        assert_eq!(desk.workspace.sync_status().unwrap().folder, None);
+    };
     let message = refused(desk.workspace.sync_upload_workspace(&remote, "Home"));
     assert!(message.contains("Versioning"), "{message}");
+    unbound(&desk);
     assert!(refused(desk.workspace.sync_reconnect(&remote)).contains("Versioning"));
+    unbound(&desk);
     assert!(refused(desk.workspace.sync_setup_options(&remote)).contains("Versioning"));
+    unbound(&desk);
+
+    // A download takes the Workspace by value, so it is opened again from its file.
+    let path = desk._directory.path().join("workspace.sqlite3");
     assert!(
         refused(
             desk.workspace
@@ -401,14 +412,18 @@ fn upload_download_and_reconnect_refuse_to_start_without_a_passing_check() {
         )
         .contains("Versioning")
     );
+    let desk = Desk {
+        _directory: desk._directory,
+        workspace: Workspace::open(&path).unwrap(),
+    };
+    unbound(&desk);
 
     // The bucket holds nothing, and no folder was chosen.
     assert!(bench.sim.keys().is_empty());
-    let mut desk = new_desk();
-    assert!(desk.workspace.sync_binding().unwrap().is_none());
+    let mut desk = desk;
     let message = refused(desk.workspace.sync_upload_workspace(&remote, "Home"));
     assert!(message.contains("Versioning"), "{message}");
-    assert!(desk.workspace.sync_binding().unwrap().is_none());
+    unbound(&desk);
 }
 
 #[test]
