@@ -1,18 +1,22 @@
 ## Problem
 
-<!-- What failed or was difficult? Link an issue if one exists. -->
+<!-- What was difficult or incorrect? Link the issue if one exists.
+Use Fixes #123 if merging meets its acceptance criteria. For partial work,
+use Refs #123 and record what remains on the issue. -->
 
 ## Change
 
-<!-- Explain the resulting behavior and why this change solves the problem. -->
+<!-- Describe the observable outcome. If the change affects product behavior
+or architecture, link the agreed decision and its updated documentation. -->
 
 ## Verification
 
-<!-- List focused checks, commands, observed results, and platforms tested.
-State any checks you could not run and why. Attach before/after screenshots
-for visible changes, using synthetic data. -->
+<!-- Record what you tried, on which platforms, and what you observed.
+Include before/after evidence for a fix or visible change. Name any required
+verification still outstanding. Use synthetic data for review media. -->
 
 ## Compatibility and risk
 
-<!-- If relevant: saved data, migrations, CLI output, external services,
-platform differences, and recovery. Write "None identified" if not applicable. -->
+<!-- What could go wrong, and what evidence covers it? If independent review
+is required, name the risk and obtain qualified approval on this PR.
+https://github.com/vantoan19/ticketd/blob/main/CONTRIBUTING.md#decide-whether-to-merge -->

@@ -1,30 +1,29 @@
-name: Feature request
-description: Describe a problem ticketd could help solve
+name: Suggest an improvement
+description: Describe friction in an existing ticketd workflow and a better outcome.
 labels: [enhancement, needs-triage]
 body:
   - type: markdown
     attributes:
-      value: Search existing requests first. Discuss substantial changes before implementing them.
+      value: |
+        Search existing issues first. Add your experience to an existing proposal when it covers the same workflow.
+        Give your issue a short title and describe one outcome in everyday language.
+        [How proposals are triaged](https://github.com/vantoan19/ticketd/blob/main/docs/agents/triage-labels.md#triage-an-issue).
   - type: textarea
-    id: problem
+    id: workflow
     attributes:
-      label: What are you trying to do?
-      description: Describe the workflow and who would benefit.
+      label: How do you do this in ticketd today?
+      description: Walk us through the steps and where they become difficult.
     validations:
       required: true
   - type: textarea
-    id: proposal
+    id: outcome
     attributes:
-      label: Suggested behavior
-      description: Explain what the user would experience. A design or implementation is optional.
+      label: What would a better outcome look like?
+      description: Describe the difference you would notice.
     validations:
       required: true
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Alternatives or workarounds
   - type: textarea
     id: context
     attributes:
-      label: Additional context
-      description: Include relevant platform, CLI, accessibility, or data compatibility needs.
+      label: Examples, workarounds, or possible approaches
+      description: Include relevant platform, accessibility, or compatibility needs if useful.

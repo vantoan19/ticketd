@@ -9,4 +9,4 @@ This repository uses one domain context:
 
 Proceed if an ADR directory or document does not exist. Create ADRs lazily for consequential decisions with genuine trade-offs; do not add placeholder decisions or directories.
 
-Keep definitions in the glossary and behavior in the product description. Record implementation tasks, investigation progress, and delivery tracking in GitHub Issues. Update domain definitions as terms are resolved.
+Keep definitions in the glossary and behavior in the product description. Organize implementation tasks and investigation notes locally in ticketd. Summarize decisions on the relevant public issue. Update domain definitions as terms are resolved.
