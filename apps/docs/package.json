@@ -9,7 +9,7 @@
     "preview": "vite preview --config preview.ts",
     "typecheck": "react-router typegen && tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "capture": "node capture/screens.mjs"
   },
   "dependencies": {

@@ -11,6 +11,9 @@ inputs:
   desktop:
     description: Install the Linux system packages the Tauri desktop crate compiles against.
     default: "false"
+  nextest:
+    description: Install the pinned cargo-nextest, which scripts/check rust uses to run the tests in shards.
+    default: "false"
   cache:
     description: >-
       Name of the Rust build this job shares with other jobs (clippy, test, build). Jobs and
@@ -92,6 +95,14 @@ runs:
         shared-key: ${{ inputs.cache }}
         # Only main writes the cache. PRs read it and never fill the shared storage.
         save-if: ${{ github.ref == 'refs/heads/main' }}
+    # install-action checks the download against the SHA-256 in its own manifest, which is part of
+    # the pinned commit, so a changed release asset fails the job. Bump the action and the version
+    # together.
+    - name: Install cargo-nextest
+      if: inputs.nextest == 'true'
+      uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+      with:
+        tool: cargo-nextest@0.9.151
 
     # The hosted mirrors sometimes stall one connection for minutes. A short timeout with no
     # retries makes apt move on to the next mirror in /etc/apt/apt-mirrors.txt (as uv does),
