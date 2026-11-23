@@ -303,8 +303,8 @@ second",
 fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it() {
     let cli = Cli::new();
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    assert_eq!(cli.run(&["source", "test", "github"])["account"], "octo");
-    let stderr = cli.fail(&["source", "test", "github"], Some("wrong-token"));
+    assert_eq!(cli.run(&["source", "github", "test"])["account"], "octo");
+    let stderr = cli.fail(&["source", "github", "test"], Some("wrong-token"));
     let user_message = stderr
         .lines()
         .find(|line| line.starts_with("error:"))
@@ -320,7 +320,7 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
         "{stderr}"
     );
     assert!(!stderr.contains("wrong-token"));
-    let stderr = cli.fail(&["source", "test", "github"], None);
+    let stderr = cli.fail(&["source", "github", "test"], None);
     assert!(stderr.contains("gh auth login"), "{stderr}");
     // The cause and the script hint are separate sentences, and a terminal is
     // never sent to a desktop Settings button.
@@ -418,14 +418,14 @@ fn add_validates_previews_persists_and_imports_nothing() {
     ]);
     assert_eq!(saved["source"]["account"], "octo");
     assert_eq!(saved["preview"]["matched"], 1);
-    let shown = cli.run(&["source", "show", "github"]);
+    let shown = cli.run(&["source", "github", "show"]);
     assert_eq!(
         shown["config"],
         json!({"repositories": ["o/r"], "assignee": "octo"})
     );
     assert_eq!(cli.run(&["list"]), json!([]));
     // Without settings, preview reuses the saved configuration.
-    assert_eq!(cli.run(&["source", "preview", "github"])["matched"], 1);
+    assert_eq!(cli.run(&["source", "github", "preview"])["matched"], 1);
     let listed = cli.run(&["source", "list"]);
     assert_eq!(listed[0]["saved"]["config"]["repositories"], json!(["o/r"]));
 }
@@ -457,7 +457,7 @@ fn invalid_settings_and_provider_failures_do_not_save() {
     );
     assert!(stderr.contains("rejected the credential"), "{stderr}");
     assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
-    let stderr = cli.fail(&["source", "show", "nowhere"], Some(TOKEN));
+    let stderr = cli.fail(&["source", "nowhere", "show"], Some(TOKEN));
     assert!(
         stderr.contains("no saved source connection named nowhere"),
         "{stderr}"
@@ -481,8 +481,8 @@ fn a_json_settings_file_and_option_suggestions_work_from_the_command_line() {
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
     let options = cli.run(&[
         "source",
-        "options",
         "github",
+        "options",
         "repositories",
         "--query",
         "BET",
@@ -494,7 +494,7 @@ fn a_json_settings_file_and_option_suggestions_work_from_the_command_line() {
 fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop() {
     let cli = Cli::new();
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    let report = cli.run(&["source", "refresh", "github"]);
+    let report = cli.run(&["source", "github", "refresh"]);
     assert_eq!(report["imported"], json!(["T-KQ1"]));
     assert_eq!(report["failures"], json!([]));
     let shown = cli.run(&["show", "T-KQ1"]);
@@ -545,14 +545,14 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let stderr = cli.fail(&["list", "--source", "githb"], None);
     assert!(stderr.contains("unknown source 'githb'"), "{stderr}");
     // Refreshing the single ticket observes that the issue closed.
-    let report = cli.run(&["source", "refresh", "github", "--ticket", "T-KQ1"]);
+    let report = cli.run(&["source", "github", "refresh", "--ticket", "T-KQ1"]);
     assert_eq!(report["updated"], json!(["T-KQ1"]));
     let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["status", "github"], "Done");
     assert_eq!(shown["title"], "Real issue, renamed");
     // A failed refresh reports and fails, and leaves the saved content alone.
     let output = cli.command(
-        &["source", "refresh", "github", "--ticket", "T-KQ1"],
+        &["source", "github", "refresh", "--ticket", "T-KQ1"],
         Some("wrong"),
     );
     assert_eq!(output.status.code(), Some(1));
@@ -569,7 +569,7 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
 fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_its_content() {
     let cli = Cli::new();
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    cli.run(&["source", "refresh", "github"]);
+    cli.run(&["source", "github", "refresh"]);
     let agent = ["--agent", "codex"];
 
     let stderr = cli.fail(
@@ -847,17 +847,17 @@ fn resolve_not_created_needs_evidence_and_then_allows_publishing_again() {
 fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
     let cli = Cli::new();
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    cli.run(&["source", "refresh", "github"]);
-    let status = cli.run(&["source", "status", "github"]);
+    cli.run(&["source", "github", "refresh"]);
+    let status = cli.run(&["source", "github", "status"]);
     assert_eq!(status["provider"], "github");
     assert_eq!(status["error"], Value::Null);
     assert!(status["last_refreshed_at"].is_string());
     assert_eq!(status["unavailable_tickets"], 0);
 
     // A refresh that cannot read the source fails, keeps the ticket, and says so.
-    let output = cli.command(&["source", "refresh", "github"], Some("wrong"));
+    let output = cli.command(&["source", "github", "refresh"], Some("wrong"));
     assert_eq!(output.status.code(), Some(1));
-    let status = cli.run(&["source", "status", "github"]);
+    let status = cli.run(&["source", "github", "status"]);
     assert_eq!(status["error"]["code"], "unauthenticated");
     assert!(status["failing_since"].is_string());
     assert_eq!(status["unavailable_tickets"], 1);
@@ -874,11 +874,11 @@ fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
 fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it() {
     let cli = Cli::new();
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    cli.run(&["source", "refresh", "github"]);
+    cli.run(&["source", "github", "refresh"]);
     // Reachable tickets are not taken over.
     let stderr = cli.fail(&["source", "take-ownership", "T-KQ1"], None);
     assert!(stderr.contains("can still be read"), "{stderr}");
-    cli.command(&["source", "refresh", "github"], Some("wrong"));
+    cli.command(&["source", "github", "refresh"], Some("wrong"));
     let taken = cli.run(&["source", "take-ownership", "T-KQ1", "--agent", "tester"]);
     assert_eq!(taken["reference"], "T-KQ1");
     assert_eq!(taken["title"], "Real issue");
@@ -895,10 +895,10 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
     );
     cli.run(&["change", "T-KQ1", "--title", "Mine"]);
     // A later refresh with working access neither resumes nor re-imports it.
-    let report = cli.run(&["source", "refresh", "github"]);
+    let report = cli.run(&["source", "github", "refresh"]);
     assert_eq!(report["imported"], json!([]));
     assert_eq!(cli.run(&["show", "T-KQ1"])["title"], "Mine");
-    let stderr = cli.fail(&["source", "refresh", "github", "--ticket", "T-KQ1"], None);
+    let stderr = cli.fail(&["source", "github", "refresh", "--ticket", "T-KQ1"], None);
     assert!(
         stderr.contains("not owned by an external source"),
         "{stderr}"
@@ -945,14 +945,14 @@ fn two_connections_refresh_once_per_issue_and_publish_requires_a_choice() {
     assert_eq!(second["source"]["id"], "github-2");
     assert_eq!(second["source"]["account"], "other");
     assert_eq!(
-        cli.run(&["source", "refresh", "github"])["imported"]
+        cli.run(&["source", "github", "refresh"])["imported"]
             .as_array()
             .unwrap()
             .len(),
         1
     );
     assert_eq!(
-        run_second(&["source", "refresh", "github-2"])["imported"]
+        run_second(&["source", "github-2", "refresh"])["imported"]
             .as_array()
             .unwrap()
             .len(),
@@ -960,10 +960,10 @@ fn two_connections_refresh_once_per_issue_and_publish_requires_a_choice() {
     );
     assert_eq!(cli.run(&["list"]).as_array().unwrap().len(), 2);
     assert_eq!(
-        cli.run(&["source", "rename", "github-2", "Work"])["name"],
+        cli.run(&["source", "github-2", "rename", "Work"])["name"],
         "Work"
     );
-    assert_eq!(cli.run(&["source", "show", "github-2"])["id"], "github-2");
+    assert_eq!(cli.run(&["source", "github-2", "show"])["id"], "github-2");
     let local = local_ticket(&cli);
     let error = cli.fail(&["source", "publish", &local, "--preview"], Some(TOKEN));
     assert!(error.contains("select --connection"), "{error}");
@@ -979,9 +979,34 @@ fn two_connections_refresh_once_per_issue_and_publish_requires_a_choice() {
     ]);
     assert_eq!(preview["destination"], "o/beta");
     assert_eq!(preview["eligibility"]["kind"], "eligible");
-    let error = cli.command(&["source", "refresh", "github-2"], Some(TOKEN));
+    let error = cli.command(&["source", "github-2", "refresh"], Some(TOKEN));
     assert_eq!(error.status.code(), Some(1));
     let failure: Value = serde_json::from_slice(&error.stdout).unwrap();
     assert_eq!(failure["failures"][0]["code"], "unauthenticated");
-    assert_eq!(cli.run(&["source", "status", "github"])["health"], "synced");
+    assert_eq!(cli.run(&["source", "github", "status"])["health"], "synced");
+}
+
+#[test]
+fn connection_help_and_edits_use_the_connection_first() {
+    let cli = Cli::new();
+    let help = cli.command(&["source", "github", "--help"], None);
+    assert!(help.status.success());
+    let text = String::from_utf8(help.stdout).unwrap();
+    assert!(
+        text.contains("ticketd source github") && text.contains("edit"),
+        "{text}"
+    );
+    assert!(!cli.dir.path().join("workspace.sqlite3").exists());
+    assert!(
+        !cli.command(&["source", "save", "github"], None)
+            .status
+            .success()
+    );
+
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    let saved = cli.run(&["source", "github", "edit", "--set", "assignee=octo"]);
+    assert_eq!(
+        saved["source"]["config"],
+        json!({"repositories":["o/r"], "assignee":"octo"})
+    );
 }

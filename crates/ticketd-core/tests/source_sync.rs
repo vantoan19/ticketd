@@ -2171,8 +2171,11 @@ fn before_the_repositories_read_were_kept_one_with_imported_tickets_counts_as_re
         .save_source(&f.engine, "fake", widened.as_object().unwrap())
         .unwrap();
     let db = rusqlite::Connection::open(f.path()).unwrap();
-    db.execute("UPDATE source_status SET read_partitions = NULL", [])
-        .unwrap();
+    db.execute(
+        "UPDATE source_connection_status SET read_partitions = NULL",
+        [],
+    )
+    .unwrap();
     drop(db);
     f.publish(issue(2, "Arrived where tickets were imported"), true);
     f.publish(issue_in("o/more", 3, "Backlog"), true);

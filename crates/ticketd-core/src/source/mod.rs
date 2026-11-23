@@ -181,7 +181,7 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
              read_partitions TEXT
          );
          CREATE TABLE source_connection_tickets (
-             ticket_id TEXT PRIMARY KEY REFERENCES external_identities(ticket_id) ON DELETE CASCADE,
+             ticket_id TEXT PRIMARY KEY REFERENCES external_identities(ticket_id) ON UPDATE CASCADE ON DELETE CASCADE,
              connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE
          );
          CREATE INDEX source_connection_tickets_by_connection ON source_connection_tickets(connection_id);
@@ -690,7 +690,7 @@ fn next_connection_id(connection: &Connection, provider: &str) -> Result<String,
                     | "options"
                     | "preview"
                     | "save"
-                    | "configure"
+                    | "edit"
                     | "rename"
                     | "remove"
                     | "status"

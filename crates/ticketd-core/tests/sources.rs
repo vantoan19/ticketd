@@ -475,7 +475,7 @@ fn saving_again_replaces_the_configuration_and_unknown_sources_are_rejected() {
 }
 
 #[test]
-fn saved_configuration_is_exported_and_survives_backup_and_restore() {
+fn saved_configuration_stays_on_the_device_across_restore() {
     let (_, engine) = setup();
     let (dir, mut workspace) = workspace();
     let path = dir.path().join("workspace.sqlite3");
@@ -484,7 +484,8 @@ fn saved_configuration_is_exported_and_survives_backup_and_restore() {
         .save_source(&engine, "fake", &values(json!({"repositories": ["o/a"]})))
         .unwrap();
     let exported = workspace.export().unwrap();
-    assert_eq!(exported["source_configurations"][0]["provider"], "fake");
+    assert!(exported.get("source_connections").is_none());
+    assert!(exported.get("source_configurations").is_none());
     workspace.backup(&backup).unwrap();
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();

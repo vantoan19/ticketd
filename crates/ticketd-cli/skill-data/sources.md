@@ -17,20 +17,20 @@ proof that the ticket is now local. Core errors explain which changes are allowe
 ticketd source list
 ticketd source add PROVIDER --set KEY=VALUE --preview
 ticketd source add PROVIDER --name "Work" --set KEY=VALUE
-ticketd source show CONNECTION
-ticketd source status CONNECTION
-ticketd source refresh CONNECTION --ticket T-KQ1
+ticketd source CONNECTION show
+ticketd source CONNECTION status
+ticketd source CONNECTION refresh --ticket T-KQ1
 ticketd context T-KQ1 --conversation
 ```
 
 `source list` returns connection IDs, providers, and the providers' settings schemas.
-Use a saved connection ID for `source show`, `test`, `options`, `configure`, `rename`,
-`preview`, `status` and `refresh`. `source add` takes a provider ID. Use
+Put the connection ID before its operation. See `source CONNECTION --help`
+for `show`, `test`, `options`, `edit`, `rename`, `preview`, `status` and `refresh`. `source add` takes a provider ID. Use
 `source add --preview` to check a new connection before adding it. See each command's
 help for `--set` and `--config-file`.
 
-`source add` and `source configure` validate and store settings without importing.
-`source refresh CONNECTION` discovers matching issues and updates tickets routed to
+`source add` and `source CONNECTION edit` validate and store settings without importing.
+`source CONNECTION refresh` discovers matching issues and updates tickets routed to
 that connection. Refresh can return a JSON report with failures and a nonzero exit
 code. `source take-ownership T-KQ1` explicitly changes authority for an unavailable
 ticket. Connections and their credentials stay on the local device.

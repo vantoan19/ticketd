@@ -712,6 +712,9 @@ enum Command {
     /// Show a ticket by its reference
     Show { reference: String },
     /// Connect and configure ticket sources
+    #[command(
+        after_help = "Use 'ticketd source CONNECTION --help' to see operations on an existing connection."
+    )]
     Source {
         #[command(subcommand)]
         command: SourceCommand,
@@ -734,25 +737,6 @@ struct SourceSettings {
 enum SourceCommand {
     /// List connections with their provider and settings schema
     List,
-    /// Show a connection's saved settings
-    Show { connection: String },
-    /// Verify the account used for this connection
-    Test { connection: String },
-    /// Suggest values for a setting that offers them
-    Options {
-        connection: String,
-        field: String,
-        #[arg(long, default_value = "")]
-        query: String,
-        #[command(flatten)]
-        settings: SourceSettings,
-    },
-    /// Preview the issues discovery would match
-    Preview {
-        connection: String,
-        #[command(flatten)]
-        settings: SourceSettings,
-    },
     /// Validate settings and add a connection for this provider
     Add {
         provider: String,
@@ -763,23 +747,6 @@ enum SourceCommand {
         preview: bool,
         #[command(flatten)]
         settings: SourceSettings,
-    },
-    /// Validate and update a connection's settings
-    Configure {
-        connection: String,
-        #[command(flatten)]
-        settings: SourceSettings,
-    },
-    /// Change a connection's display name
-    Rename { connection: String, name: String },
-    /// Show this connection's last refresh and current failures
-    Status { connection: String },
-    /// Import matching issues and refresh tickets assigned to this connection
-    Refresh {
-        connection: String,
-        /// Refresh only this externally owned ticket, for example T-KQ12
-        #[arg(long)]
-        ticket: Option<String>,
     },
     /// Make an unavailable externally owned ticket local: keeps its content and work, stops synchronizing it
     TakeOwnership {
@@ -836,6 +803,55 @@ enum SourceCommand {
         accept_different: bool,
         #[arg(long)]
         agent: Option<String>,
+    },
+    /// Operate on a saved connection by its ID
+    #[command(external_subcommand)]
+    Connection(Vec<std::ffi::OsString>),
+}
+
+#[derive(Parser)]
+struct SourceConnectionArgs {
+    #[command(subcommand)]
+    command: SourceConnectionCommand,
+}
+
+#[derive(Subcommand)]
+enum SourceConnectionCommand {
+    /// Show the connection's saved settings
+    Show,
+    /// Verify the account used for this connection
+    Test,
+    /// Suggest values for a setting that offers them
+    Options {
+        /// A field key from the provider's settings schema
+        field: String,
+        #[arg(long, default_value = "")]
+        query: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Preview the issues discovery would match
+    Preview {
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Validate and update the connection's settings
+    Edit {
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Change the connection's display name
+    Rename {
+        /// The new display name
+        name: String,
+    },
+    /// Show the connection's last refresh and current failures
+    Status,
+    /// Import matching issues and refresh tickets assigned to this connection
+    Refresh {
+        /// Refresh only this externally owned ticket, for example T-KQ12
+        #[arg(long)]
+        ticket: Option<String>,
     },
 }
 
@@ -1349,6 +1365,19 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         CliCommand::Skills { command } => return skills::run(command, output),
         CliCommand::Workspace(command) => command,
     };
+    let connection_command = match &command {
+        Command::Source {
+            command: SourceCommand::Connection(args),
+        } => {
+            let (id, args) = args.split_first().ok_or("provide a source connection ID")?;
+            let id = id.to_str().ok_or("the source connection ID must be text")?;
+            let name = std::ffi::OsString::from(format!("ticketd source {id}"));
+            let operation =
+                SourceConnectionArgs::parse_from(std::iter::once(name).chain(args.iter().cloned()));
+            Some((id.to_owned(), operation.command))
+        }
+        _ => None,
+    };
     if let Command::RestoreWorkspace { path, target } = &command {
         let destination = target
             .as_ref()
@@ -1404,6 +1433,9 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
     // Run inside an Automation run: what this command writes cannot trigger Automations.
     if origin.automation_run_id.is_some() {
         workspace.act_for_automation()?;
+    }
+    if let Some((id, operation)) = connection_command {
+        return run_source_connection(&mut workspace, &id, operation, output);
     }
     let text = match command {
         Command::Attachment { command } => attachment_command(&mut workspace, command)?,
@@ -2098,36 +2130,6 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
         Command::Source {
-            command: SourceCommand::Refresh { connection, ticket },
-        } => {
-            let engine = ticketd_core::source::Engine::builtin();
-            let report = workspace.refresh_connection(
-                &engine,
-                &connection,
-                &ticketd_core::source::RefreshOptions { ticket, now: None },
-            )?;
-            // The report is always printed; a failed refresh also fails the command so
-            // scripts and agents notice that the saved content is not current.
-            writeln!(output, "{}", serde_json::to_string(&report)?)?;
-            if let Some(failure) = report.failures.first() {
-                return Err(format!(
-                    "refresh failed for {} ({}): {}{}",
-                    failure.reference.as_deref().unwrap_or(&failure.provider),
-                    failure.code,
-                    failure.message,
-                    if failure.code == "unauthenticated" {
-                        engine.description(&failure.provider).ok().and_then(|description|
-                            description.presentation.sign_in.terminal_hint
-                        ).map_or_else(String::new, |hint| format!(" {hint}"))
-                    } else {
-                        String::new()
-                    }
-                )
-                .into());
-            }
-            return Ok(());
-        }
-        Command::Source {
             command:
                 SourceCommand::Publish {
                     ticket,
@@ -2254,51 +2256,8 @@ fn source_command(
     workspace: &mut Workspace,
     command: SourceCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    use ticketd_core::source::{ConfigValues, Engine, SourceError};
+    use ticketd_core::source::{ConfigValues, Engine};
     let engine = Engine::builtin();
-    // Settings given on the command line, or else the saved configuration.
-    let resolve = |provider: &str,
-                   saved: ConfigValues,
-                   settings: SourceSettings|
-     -> Result<ConfigValues, Box<dyn std::error::Error>> {
-        let given = !settings.set.is_empty() || settings.config_file.is_some();
-        if !given {
-            return Ok(saved);
-        }
-        let schema = engine.descriptor(provider)?.schema;
-        // Name the file in every failure, so a script knows which option caused it.
-        let file = settings.config_file.clone().unwrap_or_default();
-        let name = if file == "-" { "standard input" } else { &file };
-        let text = match read_content(None, settings.config_file) {
-            Ok(text) => text,
-            Err(error) => {
-                return Err(format!("could not read the --config-file {name}: {error}").into());
-            }
-        };
-        let mut values = match text {
-            Some(text) => match serde_json::from_str(&text) {
-                Ok(serde_json::Value::Object(values)) => values,
-                Ok(_) => {
-                    return Err(format!(
-                        "the --config-file {name} must hold a JSON object of settings"
-                    )
-                    .into());
-                }
-                Err(error) => {
-                    return Err(
-                        format!("the --config-file {name} is not valid JSON: {error}").into(),
-                    );
-                }
-            },
-            None => ConfigValues::new(),
-        };
-        values.extend(
-            schema
-                .values_from_assignments(&settings.set)
-                .map_err(SourceError::InvalidConfiguration)?,
-        );
-        Ok(values)
-    };
     Ok(match command {
         SourceCommand::List => {
             let saved = workspace.saved_sources()?;
@@ -2322,39 +2281,13 @@ fn source_command(
             }
             serde_json::to_string(&sources)?
         }
-        SourceCommand::Show { connection } => {
-            serde_json::to_string(&workspace.source_connection(&connection)?)?
-        }
-        SourceCommand::Test { connection } => {
-            serde_json::to_string(&workspace.test_source_connection(&engine, &connection)?)?
-        }
-        SourceCommand::Options {
-            connection,
-            field,
-            query,
-            settings,
-        } => {
-            let saved = workspace.source_connection(&connection)?;
-            let values = resolve(&saved.provider, saved.config, settings)?;
-            let scoped = engine.for_connection(&saved.provider, &saved.id, &values);
-            serde_json::to_string(&scoped.options(&saved.provider, &field, &query, &values)?)?
-        }
-        SourceCommand::Preview {
-            connection,
-            settings,
-        } => {
-            let saved = workspace.source_connection(&connection)?;
-            let values = resolve(&saved.provider, saved.config, settings)?;
-            let scoped = engine.for_connection(&saved.provider, &saved.id, &values);
-            serde_json::to_string(&workspace.preview_source(&scoped, &saved.provider, &values)?)?
-        }
         SourceCommand::Add {
             provider,
             name,
             preview,
             settings,
         } => {
-            let values = resolve(&provider, ConfigValues::new(), settings)?;
+            let values = source_settings(&engine, &provider, ConfigValues::new(), settings)?;
             let id = workspace.next_source_connection_id(&provider)?;
             if preview {
                 let scoped = engine.for_connection(&provider, &id, &values);
@@ -2369,41 +2302,137 @@ fn source_command(
                 )?)?
             }
         }
-        SourceCommand::Configure {
-            connection,
-            settings,
-        } => {
-            let saved = workspace.source_connection(&connection)?;
-            let values = resolve(&saved.provider, saved.config, settings)?;
-            serde_json::to_string(&workspace.update_source_connection(
-                &engine,
-                &connection,
-                &values,
-            )?)?
-        }
-        SourceCommand::Rename { connection, name } => {
-            serde_json::to_string(&workspace.rename_source(&connection, &name)?)?
-        }
-        SourceCommand::Status { connection } => {
-            workspace.source_connection(&connection)?;
-            serde_json::to_string(
-                &workspace
-                    .source_statuses()?
-                    .into_iter()
-                    .find(|status| status.connection_id.as_deref() == Some(&connection)),
-            )?
-        }
         SourceCommand::TakeOwnership { reference, agent } => {
             serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
         }
-        SourceCommand::Refresh { .. }
+        SourceCommand::Connection(_)
         | SourceCommand::Publish { .. }
-        | SourceCommand::Resolve { .. } => unreachable_refresh()?,
+        | SourceCommand::Resolve { .. } => {
+            return Err(
+                "this source operation must be handled before opening source settings".into(),
+            );
+        }
     })
 }
 
-fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
-    Err("refresh and publish are handled before source configuration commands".into())
+fn run_source_connection(
+    workspace: &mut Workspace,
+    connection: &str,
+    operation: SourceConnectionCommand,
+    output: &mut impl Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use ticketd_core::source::{Engine, RefreshOptions};
+    let engine = Engine::builtin();
+    let saved = workspace.source_connection(connection)?;
+    let text = match operation {
+        SourceConnectionCommand::Show => serde_json::to_string(&saved)?,
+        SourceConnectionCommand::Test => {
+            serde_json::to_string(&workspace.test_source_connection(&engine, connection)?)?
+        }
+        SourceConnectionCommand::Options {
+            field,
+            query,
+            settings,
+        } => {
+            let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
+            let scoped = engine.for_connection(&saved.provider, connection, &values);
+            serde_json::to_string(&scoped.options(&saved.provider, &field, &query, &values)?)?
+        }
+        SourceConnectionCommand::Preview { settings } => {
+            let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
+            let scoped = engine.for_connection(&saved.provider, connection, &values);
+            serde_json::to_string(&workspace.preview_source(&scoped, &saved.provider, &values)?)?
+        }
+        SourceConnectionCommand::Edit { settings } => {
+            let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
+            serde_json::to_string(
+                &workspace.update_source_connection(&engine, connection, &values)?,
+            )?
+        }
+        SourceConnectionCommand::Rename { name } => {
+            serde_json::to_string(&workspace.rename_source(connection, &name)?)?
+        }
+        SourceConnectionCommand::Status => serde_json::to_string(
+            &workspace
+                .source_statuses()?
+                .into_iter()
+                .find(|status| status.connection_id.as_deref() == Some(connection)),
+        )?,
+        SourceConnectionCommand::Refresh { ticket } => {
+            let report = workspace.refresh_connection(
+                &engine,
+                connection,
+                &RefreshOptions { ticket, now: None },
+            )?;
+            // Give scripts the report even when a failure also exits nonzero.
+            writeln!(output, "{}", serde_json::to_string(&report)?)?;
+            if let Some(failure) = report.failures.first() {
+                let guidance = (failure.code == "unauthenticated")
+                    .then(|| {
+                        engine
+                            .description(&saved.provider)
+                            .ok()
+                            .and_then(|description| description.presentation.sign_in.terminal_hint)
+                    })
+                    .flatten()
+                    .map_or_else(String::new, |hint| format!(" {hint}"));
+                return Err(format!(
+                    "refresh failed for {} ({}): {}{}",
+                    failure.reference.as_deref().unwrap_or(connection),
+                    failure.code,
+                    failure.message,
+                    guidance,
+                )
+                .into());
+            }
+            return Ok(());
+        }
+    };
+    writeln!(output, "{text}")?;
+    Ok(())
+}
+
+fn source_settings(
+    engine: &ticketd_core::source::Engine,
+    provider: &str,
+    saved: ticketd_core::source::ConfigValues,
+    settings: SourceSettings,
+) -> Result<ticketd_core::source::ConfigValues, Box<dyn std::error::Error>> {
+    use ticketd_core::source::SourceError;
+    if settings.set.is_empty() && settings.config_file.is_none() {
+        return Ok(saved);
+    }
+    let name = match settings.config_file.as_deref() {
+        Some("-") => "standard input",
+        Some(name) => name,
+        None => "",
+    }
+    .to_owned();
+    let mut values = match read_content(None, settings.config_file)
+        .map_err(|error| format!("could not read the --config-file {name}: {error}"))?
+    {
+        Some(text) => match serde_json::from_str(&text) {
+            Ok(serde_json::Value::Object(values)) => values,
+            Ok(_) => {
+                return Err(format!(
+                    "the --config-file {name} must hold a JSON object of settings"
+                )
+                .into());
+            }
+            Err(error) => {
+                return Err(format!("the --config-file {name} is not valid JSON: {error}").into());
+            }
+        },
+        None => saved,
+    };
+    values.extend(
+        engine
+            .descriptor(provider)?
+            .schema
+            .values_from_assignments(&settings.set)
+            .map_err(SourceError::InvalidConfiguration)?,
+    );
+    Ok(values)
 }
 
 fn main() {

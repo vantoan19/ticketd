@@ -399,7 +399,7 @@ and run through a shared extension interface.
 - Discovery rules (selected repositories, optional assignee and label filters) can be
   previewed before saving, and matching issues are imported automatically. Refresh runs
   at desktop startup, periodically while the desktop is open, and on demand
-  (`ticketd source refresh CONNECTION`). When connections overlap, one ticket is
+  (`ticketd source CONNECTION refresh`). When connections overlap, one ticket is
   imported and refreshed through one connection. Synchronized content remains
   readable without a local connection.
 - A synchronized ticket is **externally owned**: its title, description, and status

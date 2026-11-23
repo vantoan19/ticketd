@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
+import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
@@ -30,6 +31,8 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
     options: vi.fn(),
     preview: vi.fn(),
     save: vi.fn(),
+    add: vi.fn(),
+    rename: vi.fn(),
   },
 }));
 
@@ -910,4 +913,46 @@ test("a failed preview is said in the save bar, beside its actions, with no summ
     ),
   ).toBeNull();
   expect(panelStatus()).toBe("Unsaved changes");
+});
+
+test("Sources adds a named connection and renames it without changing its ID", async () => {
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    { ...entry, next_id: "github-2" },
+  ]);
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  const created = {
+    id: "github-2",
+    name: "Work",
+    provider: "github",
+    account: "octo",
+    config: { repositories: ["o/r"] },
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  vi.mocked(sourcesClient.add).mockResolvedValue({ source: created, preview });
+  vi.mocked(sourcesClient.rename).mockResolvedValue({
+    ...created,
+    name: "Work issues",
+  });
+  render(<SourcesPage onOpen={vi.fn()} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add GitHub connection" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: "Work" },
+  });
+  await addRepository("o/r");
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByRole("region", { name: "Preview" });
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  expect(sourcesClient.add).toHaveBeenCalledWith("github", "github-2", "Work", {
+    repositories: ["o/r"],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Rename Work" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: "Work issues" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  await screen.findByText("Work issues");
+  expect(sourcesClient.rename).toHaveBeenCalledWith("github-2", "Work issues");
+  expect(screen.getByText(/github-2/)).toBeTruthy();
 });

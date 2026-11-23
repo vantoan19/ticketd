@@ -422,7 +422,7 @@ export function PublishDialog({
             }}
           >
             <SelectTrigger
-              className="publication-repository"
+              className="w-full"
               aria-labelledby="publication-connection"
             >
               <SelectValue />
@@ -531,7 +531,8 @@ export function PublishDialog({
                 disabled={publishing || preview.destinations.length === 1}
               >
                 <SelectTrigger
-                  className="publication-repository"
+                  className="w-full"
+                  data-publication-destination=""
                   readOnly={preview.destinations.length === 1}
                   aria-labelledby="publication-destination"
                 >
