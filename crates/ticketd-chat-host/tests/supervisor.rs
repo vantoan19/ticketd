@@ -2046,6 +2046,69 @@ async fn an_accepted_permission_change_is_recorded_at_once() {
     );
 }
 
+fn written_kinds(f: &Fixture) -> Vec<&'static str> {
+    f.fake
+        .written()
+        .iter()
+        .filter_map(|written| match written {
+            Written::Submit(_) => Some("submit"),
+            Written::Setting(_) => Some("setting"),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A permission change held during a turn reaches the harness before the queued message
+/// after it: that message runs on the mode the person last chose, never the one they left.
+#[tokio::test(start_paused = true)]
+async fn a_queued_message_waits_for_a_permission_change_on_its_way() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(held, SettingChangeState::Held);
+    f.queue("second").await;
+
+    let answer = f.fake.hold_next_setting();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    settle().await;
+    assert_eq!(
+        written_kinds(&f),
+        ["submit", "setting"],
+        "the message waits"
+    );
+
+    answer.send(SettingOutcome::Applied).unwrap();
+    settle().await;
+    assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
+}
+
+/// A permission change the harness did not confirm pauses the queue: nothing runs until
+/// the person, told why in the dock, resumes it.
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_permission_change_pauses_the_queue() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.queue("second").await;
+
+    drop(f.fake.hold_next_setting());
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    settle().await;
+
+    assert_eq!(written_kinds(&f), ["submit", "setting"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.queued(), ["second"]);
+}
+
 /// A record that could not be saved is not shown: the idle Chat keeps showing what its
 /// next session will open with, the saved record.
 #[tokio::test(start_paused = true)]

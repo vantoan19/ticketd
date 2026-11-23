@@ -485,12 +485,29 @@ impl Supervisor {
     }
 
     fn pause(&mut self, problem: ChatProblem) {
+        self.hold_queue();
+        self.problem = Some(problem);
+    }
+
+    /// Pauses the queue and drops what was to go ahead of it: input stays queued
+    /// until the person resumes or sends it.
+    fn hold_queue(&mut self) {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
         self.direct_from_queue.clear();
         self.resend = None;
-        self.problem = Some(problem);
+    }
+
+    /// A setting change is on its way to the harness. Nothing is dispatched until it
+    /// is answered, so the next turn runs on the settings the person last chose.
+    fn setting_on_its_way(&self) -> bool {
+        self.runtime.as_ref().is_some_and(|runtime| {
+            runtime
+                .setting_changes
+                .iter()
+                .any(|change| change.state == SettingChangeState::Sent)
+        })
     }
 
     // ------------------------------------------------------------------
@@ -1233,6 +1250,7 @@ impl Supervisor {
             || self.opening.is_some()
             || self.refreshing.is_some()
             || self.unconfirmed_start.is_some()
+            || self.setting_on_its_way()
         {
             return;
         }
@@ -1497,15 +1515,22 @@ impl Supervisor {
                     reported.current = Some(value.clone());
                 }
                 // A later change of the same setting replaced this one.
-                if let Some(change) = runtime.setting_changes.iter_mut().find(|change| {
+                let Some(change) = runtime.setting_changes.iter_mut().find(|change| {
                     change.setting == setting
                         && change.value == value
                         && change.state == SettingChangeState::Sent
-                }) {
-                    change.state = SettingChangeState::Done(outcome.clone());
-                }
-                if outcome == SettingOutcome::Applied && setting == SettingKey::Permission {
-                    self.record_permission(&value);
+                }) else {
+                    return;
+                };
+                change.state = SettingChangeState::Done(outcome.clone());
+                if setting == SettingKey::Permission {
+                    if outcome == SettingOutcome::Applied {
+                        self.record_permission(&value);
+                    } else {
+                        // Nothing runs on a mode the person left: the queue waits for
+                        // them, and the dock says why the change did not take.
+                        self.hold_queue();
+                    }
                 }
             }
         }

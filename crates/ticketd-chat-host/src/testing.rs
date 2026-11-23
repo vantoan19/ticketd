@@ -57,6 +57,7 @@ struct State {
     open_failures: VecDeque<Problem>,
     open_holds: VecDeque<oneshot::Receiver<()>>,
     respond_holds: VecDeque<oneshot::Receiver<()>>,
+    setting_replies: VecDeque<oneshot::Receiver<SettingOutcome>>,
     submit_replies: VecDeque<ScriptedReply>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
@@ -119,6 +120,7 @@ impl FakeAdapter {
                 open_failures: VecDeque::new(),
                 open_holds: VecDeque::new(),
                 respond_holds: VecDeque::new(),
+                setting_replies: VecDeque::new(),
                 submit_replies: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
@@ -208,6 +210,14 @@ impl FakeAdapter {
     pub fn hold_next_respond(&self) -> oneshot::Sender<()> {
         let (sender, receiver) = oneshot::channel();
         self.state().respond_holds.push_back(receiver);
+        sender
+    }
+
+    /// The next setting change is written, then waits for the outcome sent on the
+    /// returned sender. Dropping the sender leaves it unconfirmed.
+    pub fn hold_next_setting(&self) -> oneshot::Sender<SettingOutcome> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().setting_replies.push_back(receiver);
         sender
     }
 
@@ -509,14 +519,20 @@ impl HarnessRuntime for FakeRuntime {
 
     /// The fake harness accepts every setting change that reaches it.
     async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
-        let mut state = self.fake.state();
-        if state.live_for(self.generation, change.generation).is_err() {
-            return SettingOutcome::Refused {
-                reason: "the session has ended".to_owned(),
-            };
+        let reply = {
+            let mut state = self.fake.state();
+            if state.live_for(self.generation, change.generation).is_err() {
+                return SettingOutcome::Refused {
+                    reason: "the session has ended".to_owned(),
+                };
+            }
+            state.written.push(Written::Setting(change));
+            state.setting_replies.pop_front()
+        };
+        match reply {
+            Some(reply) => reply.await.unwrap_or(SettingOutcome::Unconfirmed),
+            None => SettingOutcome::Applied,
         }
-        state.written.push(Written::Setting(change));
-        SettingOutcome::Applied
     }
 
     /// Closing a runtime that is no longer live reports the scripted outcome too.
