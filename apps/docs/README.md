@@ -33,7 +33,9 @@ Open <http://127.0.0.1:5483/ticketd/>. The upload directory is `apps/docs/build/
 
 The Quality workflow checks the Pages layout on Linux and Windows. When Quality passes on `main`, the Website workflow requests a fresh build of that commit. Publishing, editing or withdrawing a GitHub Release also requests a refresh, as does the nightly Quality run. A maintainer can run Website manually on `main`.
 
-Deployments wait in the `github-pages` queue. The newest refresh number for the current commit owns publication, so a slow build cannot replace newer release information. If that refresh fails, the published site stays available and a maintainer can rerun Website.
+Deployments wait in the `github-pages` queue. The newest refresh number for the current commit owns publication, so a slow build cannot replace newer release information. If that build fails, fix the cause and rerun Website on `main`.
+
+If Quality fails on `main`, the last successful deployment stays live. Fix or revert the failing change through review. If the live site must come down immediately, disable the Website workflow, cancel any runs still deploying, and choose **Unpublish site** in the repository’s Pages settings. After the reviewed fix passes Quality on `main`, re-enable Website and run it on `main` to publish again. [GitHub’s unpublishing guide](https://docs.github.com/en/pages/getting-started-with-github-pages/unpublishing-a-github-pages-site)
 
 ## Drawing and demonstration
 
@@ -70,4 +72,4 @@ The Fumadocs pages and navigation live in `content/docs`. The glossary includes 
 
 At build time the site reads the repository’s public, unauthenticated GitHub Releases feed. Published release notes supply Changelog. Download buttons point to uploaded assets on those releases. With an empty feed the primary action opens the source repository. A feed error displays an availability message.
 
-Run `npm test --workspace @ticketd/docs` for the geometry, screen framing, demonstration and release-selection tests, and `./scripts/check` from the root for the repository’s full checks.
+Run `npm test --workspace @ticketd/docs` to check the geometry, screenshot framing and retries, demonstration, and release selection. Run `./scripts/check` from the root for the repository’s full checks.
