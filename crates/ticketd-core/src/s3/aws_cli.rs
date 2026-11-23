@@ -188,15 +188,58 @@ impl AwsCli {
                 &["configure", "export-credentials", "--profile", profile],
                 self.timeout,
             )
-            .map_err(|error| match error {
-                AwsCliError::Failed { exit_code, message }
-                    if ended_session(exit_code, &message) =>
-                {
-                    AwsCliError::SignInNeeded { message }
-                }
-                other => other,
-            })?;
+            .map_err(sign_in_if_ended)?;
         parse_credentials(&stdout)
+    }
+
+    /// The ARN of the identity the profile signs in as (`aws sts get-caller-identity`),
+    /// which is also how setup learns that the profile is signed in.
+    pub fn identity(&self, profile: &str) -> Result<String, AwsCliError> {
+        let stdout = self
+            .checked(
+                &[
+                    "sts",
+                    "get-caller-identity",
+                    "--profile",
+                    profile,
+                    "--query",
+                    "Arn",
+                    "--output",
+                    "text",
+                ],
+                self.timeout,
+            )
+            .map_err(sign_in_if_ended)?;
+        non_empty(&stdout).ok_or(AwsCliError::Unreadable)
+    }
+
+    /// The names of the buckets the profile may list, or `None` when it may not
+    /// (`AccessDenied`), so setup asks for the name instead. Any other failure is an error.
+    pub fn buckets(&self, profile: &str) -> Result<Option<Vec<String>>, AwsCliError> {
+        let args = [
+            "s3api",
+            "list-buckets",
+            "--profile",
+            profile,
+            "--query",
+            "Buckets[].Name",
+            "--output",
+            "json",
+        ];
+        let output = run(&self.program, &args, self.timeout)?;
+        match output.code {
+            Some(0) => {
+                // An account without buckets has no `Buckets`, and the query prints `null`.
+                let names: Option<Vec<String>> =
+                    serde_json::from_str(&output.stdout).map_err(|_| AwsCliError::Unreadable)?;
+                Ok(Some(names.unwrap_or_default()))
+            }
+            code if output.stderr.contains("AccessDenied") => {
+                tracing::debug!(exit_code = ?code, "aws profile may not list buckets");
+                Ok(None)
+            }
+            code => Err(sign_in_if_ended(failed(code, &output.stderr))),
+        }
     }
 
     /// The profile's region and S3 endpoint. A service-specific endpoint (a `services`
@@ -453,6 +496,16 @@ fn parse_credentials(stdout: &str) -> Result<Credentials, AwsCliError> {
         session_token: exported.session_token.filter(|token| !token.is_empty()),
         expires_at,
     })
+}
+
+/// A failure that means the session ended becomes [`AwsCliError::SignInNeeded`].
+fn sign_in_if_ended(error: AwsCliError) -> AwsCliError {
+    match error {
+        AwsCliError::Failed { exit_code, message } if ended_session(exit_code, &message) => {
+            AwsCliError::SignInNeeded { message }
+        }
+        other => other,
+    }
 }
 
 fn non_empty(text: &str) -> Option<String> {

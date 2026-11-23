@@ -25,7 +25,6 @@ import {
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { ago } from "@/features/tickets/ticket-source";
-import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
 import {
   describeFailure,
@@ -43,6 +42,8 @@ import {
 import { syncReview } from "@/lib/sync-review-api";
 import { attachments } from "@/lib/api/attachments";
 import { useNow } from "@/lib/use-now";
+import { SyncFailure as Failure } from "./SyncFailure";
+import { useCommand } from "./use-sync-command";
 import { recoveryCopy } from "./sync-recovery";
 import { useSyncStatus } from "./sync-status";
 import "@/features/settings/settings.css";
@@ -57,58 +58,6 @@ const contents = (counts: SyncCounts) =>
     plural(counts.documents, "Document"),
     plural(counts.attachments, "Attachment"),
   ].join(", ");
-
-/** Runs one sync command at a time and keeps what it failed with. */
-function useCommand() {
-  const { apply } = useSyncStatus();
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<FailureDescription | null>(null);
-  // Set at once, where `busy` waits for a render: a confirmation that is
-  // still closing cannot start its command a second time.
-  const running = useRef(false);
-  /** `action` says what did not happen: "connect Google Drive". */
-  async function run(command: () => Promise<SyncStatus>, action: string) {
-    if (running.current) return false;
-    running.current = true;
-    setBusy(true);
-    setFailure(null);
-    try {
-      apply(await command());
-      return true;
-    } catch (reason) {
-      setFailure(describeFailure(reason, action));
-      return false;
-    } finally {
-      running.current = false;
-      setBusy(false);
-    }
-  }
-  return { busy, failure, run };
-}
-
-/**
- * A command that failed (compact error Alert with Details), or a value that
- * cannot be saved (a field message, nothing sent).
- */
-function Failure({
-  children,
-  onRetry,
-}: {
-  children: FailureDescription | string | null;
-  onRetry?: () => void;
-}) {
-  if (!children) return null;
-  return typeof children === "string" ? (
-    <FieldError className="mt-3">{children}</FieldError>
-  ) : (
-    <FailureAlert
-      size="compact"
-      failure={children}
-      className="mt-3"
-      {...(onRetry && { onRetry })}
-    />
-  );
-}
 
 function ConnectedAs({
   account,
@@ -178,7 +127,7 @@ function StatusSkeleton() {
   );
 }
 
-/** Settings › Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
+/** Settings › Workspace sync, for Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
 export function SyncSettings({
   onReplaced,
 }: {

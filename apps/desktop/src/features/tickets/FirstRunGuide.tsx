@@ -141,17 +141,17 @@ export function FirstRunGuide({
                 )}
               </>
             }
-            description="Sync this workspace through your own Google Drive."
+            description="Sync this workspace between your computers."
             action={
               <Tooltip
-                content="Open Google Drive sync"
+                content="Open Workspace sync"
                 shortcut={shortcutLabel("go-sync")}
               >
                 <Button
                   size="compact"
                   variant="ghost"
                   aria-keyshortcuts={ariaKeyShortcuts("go-sync")}
-                  onClick={() => settings?.("google-drive")}
+                  onClick={() => settings?.("workspace-sync")}
                 >
                   Set up
                 </Button>
