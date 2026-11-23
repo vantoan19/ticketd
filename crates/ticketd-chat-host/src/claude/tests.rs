@@ -987,7 +987,13 @@ async fn the_built_bridge_answers_hello() {
         eprintln!("skipped: {} has not been built", bridge.display());
         return;
     }
-    let mut io = spawn(&bridge, &[], crate::stdio::Serving::Nothing).expect("the bridge starts");
+    let mut io = spawn(
+        &bridge,
+        &[],
+        crate::stdio::Serving::Nothing,
+        crate::Harness::ClaudeCode,
+    )
+    .expect("the bridge starts");
     let hello = b"{\"id\":\"t1\",\"cmd\":\"hello\",\"protocol\":1}\n";
     io.stdin.write_all(hello).await.expect("stdin");
     io.stdin.flush().await.expect("stdin");

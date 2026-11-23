@@ -17,6 +17,8 @@ pub mod diffstat;
 mod host;
 mod install;
 mod outcome;
+#[cfg(all(debug_assertions, unix))]
+mod recording;
 pub mod records;
 #[cfg(test)]
 mod scripted;

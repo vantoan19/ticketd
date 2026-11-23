@@ -278,15 +278,29 @@ impl<'a> Serving<'a> {
 /// that Chat's ID in `CHAT_ID_VARIABLE`, one for an Automation run the run's ID in
 /// `AUTOMATION_RUN_ID_VARIABLE`, and the ticketd CLI's folder first on `PATH`, and
 /// nothing else; the commands the harness runs inherit them.
-pub(crate) fn spawn(executable: &Path, arguments: &[&str], serving: Serving) -> io::Result<Io> {
+pub(crate) fn spawn(
+    executable: &Path,
+    arguments: &[&str],
+    serving: Serving,
+    harness: Harness,
+) -> io::Result<Io> {
     let mut child = command(executable, arguments, serving).spawn()?;
     let missing = || io::Error::other("the process has no standard streams");
-    Ok(Io {
+    let io = Io {
         stdin: Box::new(child.stdin.take().ok_or_else(missing)?),
         stdout: Box::new(child.stdout.take().ok_or_else(missing)?),
         stderr: child.stderr.take().map(|stderr| Box::new(stderr) as Reader),
         child: Box::new(Process(child)),
-    })
+    };
+    #[cfg(all(debug_assertions, unix))]
+    {
+        crate::recording::tap(io, harness, serving)
+    }
+    #[cfg(not(all(debug_assertions, unix)))]
+    {
+        let _ = harness;
+        Ok(io)
+    }
 }
 
 /// The command `spawn` starts, for a caller that also needs its working directory.
@@ -319,6 +333,8 @@ pub(crate) fn command(executable: &Path, arguments: &[&str], serving: Serving) -
             None => command.env_remove(variable),
         };
     }
+    #[cfg(all(debug_assertions, unix))]
+    command.env_remove(crate::recording::SWITCH);
     hide_console(&mut command);
     command
 }
@@ -603,6 +619,113 @@ mod tests {
             assert_eq!(event["spans"][0]["name"], "chat");
             assert_eq!(event["spans"][0]["chat_id"], "chat-1");
         }
+    }
+
+    #[cfg(all(debug_assertions, unix))]
+    #[test]
+    fn only_opted_in_interactive_harnesses_record_their_actual_pipes() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command as TestCommand;
+
+        const CHILD: &str = "TICKETD_SYNTHETIC_RECORDING_CHILD";
+        const STIMULUS: &[u8] = b"{\"message\":\"synthetic\"}\n";
+        let captures = |directory: &Path| {
+            std::fs::read_dir(directory)
+                .expect("capture directory")
+                .map(|entry| entry.expect("entry").path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "wire"))
+                .collect::<Vec<_>>()
+        };
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            runtime.block_on(async {
+                if mode == "inside-git" {
+                    assert!(spawn(Path::new("/bin/cat"), &[], chat(None), Harness::Codex).is_err());
+                    return;
+                }
+                for (serving, harness) in [
+                    (Serving::Nothing, Harness::Codex),
+                    (chat(Some("run-1")), Harness::Codex),
+                    (chat(None), Harness::ClaudeCode),
+                    (chat(None), Harness::Codex),
+                    (chat(None), Harness::Codex),
+                ] {
+                    let mut io =
+                        spawn(Path::new("/bin/cat"), &[], serving, harness).expect("spawn");
+                    io.stdin.write_all(STIMULUS).await.expect("send");
+                    drop(io.stdin);
+                    let mut echoed = Vec::new();
+                    io.stdout.read_to_end(&mut echoed).await.expect("receive");
+                    assert_eq!(echoed, STIMULUS);
+                    drop(io.stdout);
+                    assert_eq!(io.child.wait().await, Some(0));
+                }
+            });
+            if mode == "enabled" {
+                let workspace = std::env::var_os("TICKETD_TEST_WORKSPACE").expect("test Workspace");
+                let directory = Path::new(&workspace).parent().expect("private folder");
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while captures(directory).len() < 2 && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            return;
+        }
+
+        let directory = tempfile::Builder::new()
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .expect("private temporary Workspace");
+        let invoke =
+            |mode, directory: &Path| {
+                let mut command =
+                    TestCommand::new(std::env::current_exe().expect("test executable"));
+                command
+                .args([
+                    "--exact",
+                    "stdio::tests::only_opted_in_interactive_harnesses_record_their_actual_pipes",
+                ])
+                .env(CHILD, mode)
+                .env("TICKETD_TEST_WORKSPACE", directory.join("workspace.sqlite3"))
+                .env_remove("TICKETD_RECORD_HARNESS");
+                if mode != "disabled" {
+                    command.env("TICKETD_RECORD_HARNESS", "codex");
+                }
+                assert!(command.status().expect("test child").success());
+            };
+        let entries = |directory| {
+            std::fs::read_dir(directory)
+                .expect("private folder")
+                .count()
+        };
+
+        invoke("disabled", directory.path());
+        assert_eq!(entries(directory.path()), 0);
+        invoke("enabled", directory.path());
+        let files = captures(directory.path());
+        assert_eq!(files.len(), 2);
+        assert_eq!(entries(directory.path()), 2);
+        for file in files {
+            let mut expected = b"ticketd-harness-recording-v1\n".to_vec();
+            for direction in [1, 2] {
+                expected.push(direction);
+                expected.extend((STIMULUS.len() as u32).to_le_bytes());
+                expected.extend(STIMULUS);
+            }
+            assert_eq!(std::fs::read(&file).expect("recording"), expected);
+            assert_eq!(
+                file.metadata().expect("metadata").permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        // Even an otherwise private temporary directory may itself be a checkout.
+        std::fs::create_dir(directory.path().join(".git")).expect("Git marker");
+        invoke("inside-git", directory.path());
+        assert_eq!(entries(directory.path()), 3);
     }
 
     #[test]
