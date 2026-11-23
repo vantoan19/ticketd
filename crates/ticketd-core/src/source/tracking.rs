@@ -1911,7 +1911,9 @@ fn apply_issue(
                 chrono::DateTime::parse_from_rfc3339(&updated_at),
             ) {
                 (Ok(incoming), Ok(current)) => incoming < current,
-                _ => !updated_at.is_empty() && issue.updated_at < updated_at,
+                (Err(_), Ok(_)) => true,
+                (Ok(_), Err(_)) => false,
+                (Err(_), Err(_)) => !updated_at.is_empty() && issue.updated_at < updated_at,
             };
             if older {
                 return Ok(());

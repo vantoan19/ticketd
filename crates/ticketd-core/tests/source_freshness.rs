@@ -412,6 +412,27 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Done);
     assert_eq!(ticket.title, "Issue 1");
+
+    f.remote(|r| r.issues.get_mut(&1).unwrap().updated_at = "unknown".into());
+    f.refresh_at(T3);
+    let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
+    assert_eq!(ticket.status, Status::Done);
+    assert_eq!(ticket.title, "Issue 1");
+}
+
+#[test]
+fn a_dated_observation_repairs_an_undated_cached_issue() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "unknown"));
+    f.refresh_at(T0);
+    let mut closed = issue(1, T1);
+    closed.state = ExternalState::named(StateCategory::Completed, "Closed");
+    f.publish(closed);
+    f.refresh_at(T1);
+    assert_eq!(
+        f.workspace.show_ticket("T-KQ1").unwrap().status,
+        Status::Done
+    );
 }
 
 #[test]
