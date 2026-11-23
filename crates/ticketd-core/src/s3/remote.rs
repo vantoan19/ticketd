@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -159,6 +159,24 @@ impl Lookup {
     }
 }
 
+/// The prefix with its trailing `/` added when it lacks one, or why the S3 storage would
+/// refuse it. Whoever records a prefix checks it here, so no binding is made that cannot sync.
+pub fn checked_prefix(prefix: &str) -> Result<String, S3TargetError> {
+    let safe = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/');
+    if !prefix.bytes().all(safe)
+        || prefix.starts_with('/')
+        || prefix.contains("//")
+        || prefix.len() > 512
+    {
+        return Err(S3TargetError::Prefix);
+    }
+    Ok(if prefix.is_empty() || prefix.ends_with('/') {
+        prefix.to_owned()
+    } else {
+        format!("{prefix}/")
+    })
+}
+
 /// What a ranged read learned about an object while reading it.
 struct Fetched {
     /// ticketd's SHA-256 from the object's metadata, if it has any (`aws s3 cp` drops it).
@@ -180,6 +198,23 @@ pub struct S3Remote<'a> {
     checked: AtomicBool,
 }
 
+impl S3Remote<'static> {
+    /// [`S3Remote::new`] for a remote that keeps its credentials and transport alive itself,
+    /// so they go when it does.
+    pub fn shared(
+        target: S3Target,
+        prefix: &str,
+        credentials: Arc<dyn CredentialSource>,
+        transport: Arc<dyn S3Transport>,
+    ) -> Result<Self, S3TargetError> {
+        let prefix = checked_prefix(prefix)?;
+        Ok(Self::with_client(
+            S3Client::shared(target, credentials, transport),
+            prefix,
+        ))
+    }
+}
+
 impl<'a> S3Remote<'a> {
     /// `prefix` is where the Workspace folders go, such as `ticketd/`; a missing trailing
     /// `/` is added.
@@ -189,26 +224,21 @@ impl<'a> S3Remote<'a> {
         credentials: &'a dyn CredentialSource,
         transport: &'a dyn S3Transport,
     ) -> Result<Self, S3TargetError> {
-        let safe = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/');
-        if !prefix.bytes().all(safe)
-            || prefix.starts_with('/')
-            || prefix.contains("//")
-            || prefix.len() > 512
-        {
-            return Err(S3TargetError::Prefix);
-        }
-        let prefix = if prefix.is_empty() || prefix.ends_with('/') {
-            prefix.to_owned()
-        } else {
-            format!("{prefix}/")
-        };
-        Ok(Self {
-            client: S3Client::new(target, credentials, transport),
+        let prefix = checked_prefix(prefix)?;
+        Ok(Self::with_client(
+            S3Client::new(target, credentials, transport),
+            prefix,
+        ))
+    }
+
+    fn with_client(client: S3Client<'a>, prefix: String) -> Self {
+        Self {
+            client,
             prefix,
             part_size: parts::PART_SIZE,
             known: Mutex::new(HashSet::new()),
             checked: AtomicBool::new(false),
-        })
+        }
     }
 
     /// Replace the wait between retries, so tests control time.
@@ -306,8 +336,10 @@ impl<'a> S3Remote<'a> {
         Ok(())
     }
 
-    /// Every entry S3 lists for exactly `object`, newest first. S3 sorts the listing by key,
-    /// so the entries are together and the pages end where they end.
+    /// The entries S3 lists for exactly `object`, newest first, up to and including its latest
+    /// delete marker: the versions below it belong to an earlier file, and nothing here reads
+    /// them. S3 sorts the listing by key, so the entries are together and the pages end where
+    /// they end.
     fn versions(&self, object: &str) -> Result<Vec<Listed>, RemoteError> {
         let mut found = Vec::new();
         let mut markers: Option<(String, Option<String>)> = None;
@@ -327,7 +359,11 @@ impl<'a> S3Remote<'a> {
             let mut beyond = false;
             for entry in page.entries {
                 if entry.key == object {
+                    let marker = entry.is_delete_marker();
                     found.push(entry);
+                    if marker {
+                        return Ok(found);
+                    }
                 } else {
                     beyond = true;
                 }

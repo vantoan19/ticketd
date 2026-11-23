@@ -10,7 +10,7 @@ use std::{
 
 use serde::Serialize;
 use ticketd_core::{
-    s3::{AwsCli, AwsCliError, ProfileCredentials},
+    s3::{AwsCli, AwsCliError, ProfileCredentials, S3Target, checked_prefix},
     sync::{S3Binding, SyncStatus},
 };
 
@@ -139,16 +139,34 @@ pub fn credentials(cli: &AwsCli, profile: &str) -> Arc<ProfileCredentials> {
 pub fn s3_sign_in(profile: String) -> Outcome<()> {
     check_profile(&profile)?;
     let cli = cli()?;
+    if !sign_in_with(&cli, &profile)? {
+        return rejected("This profile has no sign-in command. Sign in with the AWS CLI.");
+    }
+    Ok(())
+}
+
+/// Runs the profile's sign-in command; `false` when it has none, so nothing ran.
+fn sign_in_with(cli: &AwsCli, profile: &str) -> Outcome<bool> {
     let Some(command) = cli
-        .sign_in_command(&profile)
+        .sign_in_command(profile)
         .map_err(|error| failed(&error))?
     else {
-        return rejected("This profile has no sign-in command. Sign in with the AWS CLI.");
+        return Ok(false);
     };
     let result = command.run();
     // Whether or not it finished, what was kept may no longer be right.
-    credentials(&cli, &profile).forget();
-    result.map_err(|error| failed(&error))
+    credentials(cli, profile).forget();
+    result.map_err(|error| failed(&error))?;
+    Ok(true)
+}
+
+/// What recovering from an ended authorization does first: sign the profile in again when it
+/// has a command for that. A profile with static keys or a credential helper has none, and
+/// there is nothing to sign in to, so the recovery just tries again.
+pub fn sign_in_for_recovery(profile: &str) -> Outcome<()> {
+    check_profile(profile)?;
+    let cli = cli()?;
+    sign_in_with(&cli, profile).map(drop)
 }
 
 /// The bucket names the profile may list; `None` when it may not, so the interface asks
@@ -189,17 +207,11 @@ fn check_profile(profile: &str) -> Outcome<()> {
 }
 
 /// The key prefix as the Workspace folders are kept under it: no leading slash, one trailing
-/// slash, and empty only when the person wants the bucket's root.
+/// slash, and empty only when the person wants the bucket's root. The rules of what the S3
+/// storage accepts are the core's, so a prefix that passes here can sync.
 fn normalize_prefix(prefix: &str) -> Outcome<String> {
     let trimmed = prefix.trim().trim_start_matches('/');
-    if trimmed.chars().count() > 512 || trimmed.contains("//") || trimmed.contains('\n') {
-        return rejected("use a shorter prefix without empty parts, such as ticketd/");
-    }
-    Ok(match trimmed {
-        "" => String::new(),
-        text if text.ends_with('/') => text.to_owned(),
-        text => format!("{text}/"),
-    })
+    checked_prefix(trimmed).map_err(|error| BridgeFailure::plain(&error.to_string()))
 }
 
 fn check_bucket(bucket: &str) -> Outcome<&str> {
@@ -207,9 +219,9 @@ fn check_bucket(bucket: &str) -> Outcome<&str> {
     if bucket.is_empty() {
         return rejected("name the S3 bucket");
     }
-    if bucket.chars().count() > 255 || bucket.contains(|c: char| c.is_whitespace() || c == '/') {
-        return rejected("an S3 bucket name has no spaces or slashes");
-    }
+    // The same rules as the storage that will use the name; the region does not matter here.
+    S3Target::new(bucket, "us-east-1", None)
+        .map_err(|error| BridgeFailure::plain(&error.to_string()))?;
     Ok(bucket)
 }
 
@@ -272,6 +284,51 @@ mod tests {
         assert_eq!(of(""), "");
         assert_eq!(of("/"), "");
         assert!(normalize_prefix("team//ticketd").is_err());
+        // What the S3 storage refuses is refused here, where the setup can say so.
+        assert!(normalize_prefix("my team/ticketd").is_err());
+        assert!(normalize_prefix("tickets\u{e9}/").is_err());
+    }
+
+    /// A stand-in `aws` program: a profile signs in through SSO only when `sso` is set, and
+    /// a run of any other command is logged in `ran.log` beside it.
+    #[cfg(unix)]
+    fn stand_in(sso: bool) -> (tempfile::TempDir, AwsCli) {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let program = directory.path().join("aws");
+        let sso_answer = if sso {
+            "echo my-session; exit 0"
+        } else {
+            "exit 1"
+        };
+        let script = [
+            "#!/bin/sh".to_owned(),
+            "case \"$1\" in".to_owned(),
+            "--version) echo 'aws-cli/2.19.5 Python/3.12.7';;".to_owned(),
+            format!("configure) case \"$3\" in sso_session) {sso_answer};; *) exit 1;; esac;;"),
+            "*) echo \"$@\" >> \"$(dirname \"$0\")/ran.log\";;".to_owned(),
+            "esac".to_owned(),
+        ]
+        .join("\n");
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cli = AwsCli::locate(Some(&program)).unwrap();
+        (directory, cli)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_recovery_signs_a_profile_in_only_when_it_has_a_sign_in_command() {
+        let (directory, cli) = stand_in(false);
+        // Static keys or a credential helper: nothing to sign in to, so nothing runs and the
+        // recovery goes on to try again.
+        assert!(!sign_in_with(&cli, "keys").unwrap());
+        assert!(!directory.path().join("ran.log").exists());
+
+        let (directory, cli) = stand_in(true);
+        assert!(sign_in_with(&cli, "work").unwrap());
+        let ran = std::fs::read_to_string(directory.path().join("ran.log")).unwrap();
+        assert_eq!(ran.trim(), "sso login --profile work");
     }
 
     #[test]
@@ -280,5 +337,9 @@ mod tests {
         assert!(check_bucket("").is_err());
         assert!(check_bucket("my bucket").is_err());
         assert!(check_bucket("s3://my-bucket").is_err());
+        // Nor is it one S3 would refuse later.
+        assert!(check_bucket("My_Bucket").is_err());
+        assert!(check_bucket("ab").is_err());
+        assert!(check_bucket("-bucket").is_err());
     }
 }

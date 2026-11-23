@@ -70,6 +70,8 @@ export function S3Setup() {
   const [buckets, setBuckets] = useState<string[] | null | undefined>(
     undefined,
   );
+  // The list could not be read, which is not the same as the profile not being allowed to.
+  const [bucketsFailed, setBucketsFailed] = useState(false);
   const [bucket, setBucket] = useState("");
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
   const { busy, failure, run } = useCommand();
@@ -121,6 +123,7 @@ export function S3Setup() {
     setSignIn({ kind: "checking" });
     setSignInFailure(carried);
     setBuckets(undefined);
+    setBucketsFailed(false);
     setBucket("");
     try {
       const identity = await s3Api.identity(name);
@@ -134,7 +137,16 @@ export function S3Setup() {
         return;
       }
       setSignIn({ kind: "signed_in", identity: identity.identity });
-      const listed = await s3Api.buckets(name).catch(() => null);
+      let listed: string[] | null = null;
+      try {
+        listed = await s3Api.buckets(name);
+      } catch (reason) {
+        // Only a refusal to list is `null`; any other failure is shown, and the name typed.
+        if (current === generation.current) {
+          setBucketsFailed(true);
+          setSignInFailure(describeFailure(reason, "list your buckets"));
+        }
+      }
       if (current === generation.current) setBuckets(listed);
     } catch (reason) {
       if (current !== generation.current) return;
@@ -143,15 +155,20 @@ export function S3Setup() {
     }
   }
   async function startSignIn() {
+    // The profile chosen when it started, which the person may change while the browser
+    // is open; a later choice owns the page, so this one's result is dropped.
+    const started = profile;
+    const current = generation.current;
     setSignIn({ kind: "waiting" });
     setSignInFailure(null);
     let failure: FailureDescription | null = null;
     try {
-      await s3Api.signIn(profile);
+      await s3Api.signIn(started);
     } catch (reason) {
       failure = describeFailure(reason, "sign in to AWS");
     }
-    await check(profile, failure);
+    if (current !== generation.current) return;
+    await check(started, failure);
   }
 
   if (cli === null) return <SetupSkeleton />;
@@ -202,7 +219,9 @@ export function S3Setup() {
           title={<Label htmlFor="s3-bucket">Bucket</Label>}
           description={
             buckets === null
-              ? "This profile may not list buckets, so type the name."
+              ? bucketsFailed
+                ? "The buckets could not be listed, so type the name."
+                : "This profile may not list buckets, so type the name."
               : "The bucket that keeps this workspace."
           }
           trailing={

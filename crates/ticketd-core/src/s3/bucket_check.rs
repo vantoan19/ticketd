@@ -7,7 +7,7 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256};
 
-use super::client::{S3Call, S3Client, error_of, refusal};
+use super::client::{S3Call, S3Client, ended_session_on_head, error_of, refusal};
 use super::provider::{CredentialSource, S3Response, S3Target, S3Transport};
 use super::xml::{versioning_status, versions_page};
 use crate::sync::remote::RemoteError;
@@ -105,6 +105,9 @@ fn head_bucket() -> S3Call<'static> {
 /// A HEAD answer has no body, so only its status says what went wrong.
 fn head_failure(target: &S3Target, head: &S3Response) -> BucketCheckError {
     // S3 names the bucket's region in every answer, including a refusal.
+    if ended_session_on_head("HEAD", head) {
+        return BucketCheckError::Storage(RemoteError::Unauthorized);
+    }
     let elsewhere = head
         .header("x-amz-bucket-region")
         .filter(|region| *region != target.region());

@@ -2169,6 +2169,29 @@ fn a_binding_to_s3_reports_its_provider_and_location_in_status_and_binding() {
 }
 
 #[test]
+fn a_bucket_or_prefix_the_s3_storage_would_refuse_is_not_recorded_as_a_binding() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    for (bucket, prefix) in [
+        ("My_Bucket", "ticketd/"),
+        ("ab", "ticketd/"),
+        ("notes-bucket", "my prefix/"),
+        ("notes-bucket", "team//ticketd/"),
+        ("notes-bucket", "/ticketd/"),
+    ] {
+        assert!(
+            matches!(
+                desk.sync_connect_s3(&s3(bucket, prefix, "work"), IDENTITY),
+                Err(Error::Sync(_))
+            ),
+            "{bucket} {prefix}"
+        );
+    }
+    // Nothing was recorded, so the Workspace still offers the choice of a storage.
+    assert_eq!(desk.sync_status().unwrap().s3, None);
+}
+
+#[test]
 fn a_bound_workspace_is_not_connected_to_another_storage_or_bucket() {
     let desks = desks();
     let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();

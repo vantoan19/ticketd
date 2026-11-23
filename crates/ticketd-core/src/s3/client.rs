@@ -2,6 +2,8 @@
 //! fetching them again once when S3 says they expired, retrying throttling and server
 //! failures with backoff, and reading S3's refusals as sync's recovery states. The adapters
 //! (`S3Remote`, and later the bucket check and multipart uploads) build on this.
+use std::ops::Deref;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use aws_credential_types::Credentials as SigningCredentials;
@@ -42,10 +44,27 @@ impl<'a> S3Call<'a> {
     }
 }
 
+/// A value the client borrows, or shares with whoever else holds it.
+enum Held<'a, T: ?Sized> {
+    Borrowed(&'a T),
+    Shared(Arc<T>),
+}
+
+impl<T: ?Sized> Deref for Held<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Shared(value) => value,
+        }
+    }
+}
+
 pub struct S3Client<'a> {
     target: S3Target,
-    credentials: &'a dyn CredentialSource,
-    transport: &'a dyn S3Transport,
+    credentials: Held<'a, dyn CredentialSource + 'a>,
+    transport: Held<'a, dyn S3Transport + 'a>,
     pause: Box<dyn Fn(Duration) + Send + Sync + 'a>,
 }
 
@@ -57,8 +76,22 @@ impl<'a> S3Client<'a> {
     ) -> Self {
         Self {
             target,
-            credentials,
-            transport,
+            credentials: Held::Borrowed(credentials),
+            transport: Held::Borrowed(transport),
+            pause: Box::new(std::thread::sleep),
+        }
+    }
+
+    /// A client that keeps what it signs and sends with alive, so nothing outlives it.
+    pub fn shared(
+        target: S3Target,
+        credentials: Arc<dyn CredentialSource>,
+        transport: Arc<dyn S3Transport>,
+    ) -> S3Client<'static> {
+        S3Client {
+            target,
+            credentials: Held::Shared(credentials),
+            transport: Held::Shared(transport),
             pause: Box::new(std::thread::sleep),
         }
     }
@@ -98,13 +131,19 @@ impl<'a> S3Client<'a> {
                 return Ok(response);
             }
             let code = error_code(&response);
-            if credentials_expired(response.status, code.as_deref()) {
+            let mismatch = code.as_deref() == Some("SignatureDoesNotMatch");
+            if credentials_expired(response.status, code.as_deref())
+                || response.status == 401
+                || mismatch
+                || ended_session_on_head(call.method, &response)
+            {
                 if !renewed {
                     renewed = true;
                     self.credentials.forget();
                     continue;
                 }
-                if !self.credentials.can_sign_in() {
+                // A mismatch that persists is not an ended session; the caller words it.
+                if !mismatch && !self.credentials.can_sign_in() {
                     // Not an ended session, which signing in would mend: the key is wrong.
                     return Err(RemoteError::Other(
                         "S3 refused the access key of this AWS profile. Check the profile's keys with the AWS CLI".into(),
@@ -229,9 +268,17 @@ fn credentials_expired(status: u16, code: Option<&str>) -> bool {
                     | "TokenRefreshRequired"
                     | "InvalidAccessKeyId"
                     | "InvalidClientTokenId"
-                    | "SignatureDoesNotMatch"
             )
         )
+}
+
+/// A HEAD answer has no body, so an ended or revoked session shows only as a refusal that
+/// names no region. S3 names the bucket's region even in a refusal of a request that was
+/// signed well, so a refusal without it is the credentials'.
+pub(crate) fn ended_session_on_head(method: &str, response: &S3Response) -> bool {
+    method == "HEAD"
+        && matches!(response.status, 400 | 401 | 403)
+        && response.header("x-amz-bucket-region").is_none()
 }
 
 fn retry_after(response: &S3Response) -> Option<Duration> {
@@ -269,6 +316,9 @@ pub fn refusal(response: &S3Response) -> RemoteError {
             RemoteError::Offline
         }
         (507, _) => RemoteError::StorageFull,
+        (_, "SignatureDoesNotMatch") => RemoteError::Other(
+            "S3 rejected the request's signature. The profile's secret key may be wrong, or the region or endpoint it signs for; check the profile with the AWS CLI".into(),
+        ),
         (_, "RequestTimeTooSkewed") => RemoteError::Other(
             "S3 refused the request because this computer's clock is wrong; correct the date and time".into(),
         ),

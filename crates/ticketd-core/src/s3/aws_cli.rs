@@ -358,6 +358,9 @@ pub struct ProfileCredentials {
     profile: String,
     clock: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     kept: Mutex<Option<ProfileAccess>>,
+    /// The profile's region and endpoint, read once: they do not change with the session, and
+    /// each read is a process of the CLI.
+    settings: Mutex<Option<ProfileSettings>>,
 }
 
 impl ProfileCredentials {
@@ -376,6 +379,7 @@ impl ProfileCredentials {
             profile: profile.into(),
             clock: Box::new(clock),
             kept: Mutex::new(None),
+            settings: Mutex::new(None),
         }
     }
 
@@ -390,7 +394,7 @@ impl ProfileCredentials {
         }
         *kept = None;
         let credentials = self.cli.credentials(&self.profile)?;
-        let settings = self.cli.settings(&self.profile)?;
+        let settings = self.settings()?;
         let access = ProfileAccess {
             credentials,
             region: settings.region,
@@ -398,6 +402,16 @@ impl ProfileCredentials {
         };
         *kept = Some(access.clone());
         Ok(access)
+    }
+
+    fn settings(&self) -> Result<ProfileSettings, AwsCliError> {
+        let mut read = self.settings.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(settings) = read.as_ref() {
+            return Ok(settings.clone());
+        }
+        let settings = self.cli.settings(&self.profile)?;
+        *read = Some(settings.clone());
+        Ok(settings)
     }
 
     /// Drops what is kept, such as after the person signs in again or the service refuses

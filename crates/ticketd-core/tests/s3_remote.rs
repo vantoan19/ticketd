@@ -524,7 +524,8 @@ fn stale_uploads_of_the_key_are_aborted_and_other_keys_are_left_alone() {
     let bench = Bench::new();
     let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
     let name = object(&folder, &key);
-    bench.sim.begin_upload(&name);
+    // No parts yet: another desktop may have just begun it, so it is left alone.
+    let just_begun = bench.sim.begin_upload(&name);
     let other_file = bench.sim.begin_upload(&name);
     bench
         .sim
@@ -535,11 +536,26 @@ fn stale_uploads_of_the_key_are_aborted_and_other_keys_are_left_alone() {
 
     put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
     let pending = bench.sim.pending();
-    assert_eq!(pending.len(), 1);
+    assert_eq!(pending.len(), 2);
+    assert_eq!(pending[0].id, just_begun);
     assert_eq!(
-        (pending[0].key.as_str(), pending[0].id.as_str()),
+        (pending[1].key.as_str(), pending[1].id.as_str()),
         (neighbour_key.as_str(), neighbour.as_str())
     );
+    assert!(bench.sim.object(&name).unwrap().bytes == bytes);
+}
+
+#[test]
+fn an_upload_another_desktop_just_began_is_not_aborted() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let name = object(&folder, &key);
+    let theirs = bench.sim.begin_upload(&name);
+
+    put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    let pending = bench.sim.pending();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, theirs);
     assert!(bench.sim.object(&name).unwrap().bytes == bytes);
 }
 
@@ -796,6 +812,81 @@ fn refused_credentials_with_no_sign_in_are_a_failure_not_an_expiry() {
         panic!("a refused static key is not Unauthorized");
     };
     assert!(message.contains("refused the access key"), "{message}");
+}
+
+#[test]
+fn a_401_for_a_profile_with_no_sign_in_is_an_access_key_error_not_an_expiry() {
+    // Static keys or a credential helper, refused with a bare 401: the sign-in prompt would
+    // have no command to run, so the error says what to check instead.
+    let bench =
+        Bench::with_credentials(FakeCredentials::new(&["token-1", "token-2"]).without_sign_in());
+    let (remote, folder) = (bench.remote(), bench.folder());
+    let mut fault = Fault::new("GET", "versions", 401, "Unauthorized");
+    fault.body.clear();
+    fault.times = 10;
+    bench.sim.fault(fault);
+    let Err(RemoteError::Other(message)) = remote.list(&folder) else {
+        panic!("a refused static key is not Unauthorized");
+    };
+    assert!(message.contains("refused the access key"), "{message}");
+}
+
+#[test]
+fn a_signing_mismatch_is_its_own_error_and_not_a_request_to_sign_in() {
+    let bench = Bench::with_credentials(FakeCredentials::new(&["token-1", "token-2"]));
+    let (remote, folder) = (bench.remote(), bench.folder());
+    let mut fault = Fault::new("GET", "versions", 403, "SignatureDoesNotMatch");
+    fault.times = 10;
+    bench.sim.fault(fault);
+    let Err(RemoteError::Other(message)) = remote.list(&folder) else {
+        panic!("a signing mismatch is not Unauthorized");
+    };
+    assert!(message.contains("signature"), "{message}");
+    // The credentials were fetched again once, in case the secret was rotated.
+    assert_eq!(bench.credentials.forgets(), 1);
+}
+
+#[test]
+fn a_write_reads_the_versions_only_back_to_the_files_latest_delete_marker() {
+    let bench = Bench::new();
+    let (remote, folder, key) = (bench.remote(), bench.folder(), ticket());
+    let mut latest = put(&remote, &folder, &key, None, b"v0").unwrap();
+    for n in 1..6 {
+        latest = put(
+            &remote,
+            &folder,
+            &key,
+            Some(&latest.version),
+            format!("v{n}").as_bytes(),
+        )
+        .unwrap();
+    }
+    // A person deletes it and sync writes the key again: a new file with a short history.
+    bench.sim.delete(&object(&folder, &key));
+    let again = put(&remote, &folder, &key, None, b"again").unwrap();
+
+    bench.sim.page_size(2);
+    let before = bench.sim.count("GET", "versions");
+    let next = put(&remote, &folder, &key, Some(&again.version), b"next").unwrap();
+    // Newest first, the marker is the second entry: one page reaches it, not the six
+    // versions of the first file below it.
+    assert_eq!(bench.sim.count("GET", "versions") - before, 1);
+    assert_eq!(next.file_id, again.file_id);
+}
+
+#[test]
+fn a_remote_that_shares_its_credentials_and_transport_lets_them_go_when_it_is_dropped() {
+    use std::sync::Arc;
+    let credentials = Arc::new(FakeCredentials::default());
+    let sim = Arc::new(S3Sim::default());
+    let remote = S3Remote::shared(target(), "ticketd/", credentials.clone(), sim.clone()).unwrap();
+    remote.ensure_folder("folder-1", "Home").unwrap();
+    assert_eq!(remote.list("folder-1"), Ok(vec![]));
+    assert_eq!(Arc::strong_count(&credentials), 2);
+    assert_eq!(Arc::strong_count(&sim), 2);
+    drop(remote);
+    assert_eq!(Arc::strong_count(&credentials), 1);
+    assert_eq!(Arc::strong_count(&sim), 1);
 }
 
 struct SignedOut;

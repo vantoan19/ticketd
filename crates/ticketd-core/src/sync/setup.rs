@@ -23,7 +23,11 @@ use super::{
     engine::{dirty_kind, touch},
     remote::{RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteKind, RemoteStorage},
 };
-use crate::{Error, SyncKind, Workspace, sync_files::MAX_FILE_BYTES};
+use crate::{
+    Error, SyncKind, Workspace,
+    s3::{S3Target, checked_prefix},
+    sync_files::MAX_FILE_BYTES,
+};
 
 /// The shortest time between two polls of the storage.
 pub const MIN_POLL_INTERVAL_SECS: u64 = 30;
@@ -742,6 +746,11 @@ impl Workspace {
                 "name the S3 bucket and the AWS CLI profile to sign in through".into(),
             ));
         }
+        // What the S3 storage would refuse later, refused now: a binding that can never sync
+        // is worse than none.
+        S3Target::new(&s3.bucket, "us-east-1", None)
+            .map_err(|error| Error::Sync(error.to_string()))?;
+        checked_prefix(&s3.prefix).map_err(|error| Error::Sync(error.to_string()))?;
         let state = state(&self.connection)?;
         if state.folder.is_some() {
             if state.provider != SyncProvider::S3 {
