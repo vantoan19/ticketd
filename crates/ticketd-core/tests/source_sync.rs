@@ -537,6 +537,47 @@ fn live_connection_count_uses_only_the_target_repository_and_keeps_the_filters()
 }
 
 #[test]
+fn connection_review_tracks_discovery_rules_only_when_it_would_change_them() {
+    let mut f = Fixture::new();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Target",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/target"),
+        )
+        .unwrap();
+    let preview = |workspace: &Workspace| {
+        workspace
+            .preview_connect_source(&f.engine, "fake", &project.id)
+            .unwrap()
+    };
+    let initial = preview(&f.workspace);
+    let unchanged = json!({"repositories": ["o/r"]});
+    f.workspace
+        .save_source(&f.engine, "fake", unchanged.as_object().unwrap())
+        .unwrap();
+    assert_eq!(preview(&f.workspace), initial);
+    let filtered = json!({"repositories": ["o/r"], "labels": ["bug"]});
+    f.workspace
+        .save_source(&f.engine, "fake", filtered.as_object().unwrap())
+        .unwrap();
+    assert_ne!(preview(&f.workspace).fingerprint, initial.fingerprint);
+
+    let listed = json!({"repositories": ["o/r", "o/target"]});
+    f.workspace
+        .save_source(&f.engine, "fake", listed.as_object().unwrap())
+        .unwrap();
+    let backfill = preview(&f.workspace);
+    assert_eq!(backfill.source, ConnectSourceAction::AlreadyListed);
+    let listed_with_filter = json!({"repositories": ["o/target"], "labels": ["bug"]});
+    f.workspace
+        .save_source(&f.engine, "fake", listed_with_filter.as_object().unwrap())
+        .unwrap();
+    assert_eq!(preview(&f.workspace), backfill);
+}
+
+#[test]
 fn connecting_rechecks_the_exact_ticket_set_after_remote_validation() {
     let mut f = Fixture::new();
     for id in [1, 2] {

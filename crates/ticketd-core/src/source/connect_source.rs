@@ -51,7 +51,6 @@ struct EligibleTicket {
     external_id: String,
 }
 
-#[derive(Serialize)]
 struct Effect {
     project_id: String,
     project_remote: String,
@@ -64,7 +63,27 @@ struct Effect {
 
 impl Effect {
     fn fingerprint(&self) -> Result<String, Error> {
-        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(self)?)))
+        // Only an addition depends on the rest of the source's rules. Saving
+        // identical settings again has no effect on what was reviewed.
+        let configuration = match self.action {
+            ConnectSourceAction::AddRepository => self
+                .saved
+                .as_ref()
+                .map(|source| (&source.config, &source.account)),
+            ConnectSourceAction::AlreadyListed | ConnectSourceAction::NotConnected => None,
+        };
+        let reviewed = (
+            &self.project_id,
+            &self.project_remote,
+            &self.provider,
+            self.action,
+            configuration,
+            &self.tickets,
+        );
+        Ok(format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&reviewed)?)
+        ))
     }
 
     fn check(&self, expected: &str) -> Result<(), Error> {

@@ -885,7 +885,9 @@ when an incoming ticket gains or changes its external location.
 `Workspace::preview_connect_source` reads one local snapshot of the Project
 remote, the saved source, and the exact set of eligible ticket identities. It
 matches stored repositories on the source's host independently of discovery
-filters and fingerprints the effect. `Workspace::connect_source` checks this
+filters and fingerprints the effect. The fingerprint includes saved discovery
+rules and the account when confirmation would add a repository.
+`Workspace::connect_source` checks this
 fingerprint before contacting the provider, then rechecks under the write lock.
 When adding a repository, it shares the validation and persistence path of
 `save_source`. Provider validation and discovery preview finish before the lock.
