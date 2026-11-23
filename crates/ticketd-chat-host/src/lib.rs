@@ -19,6 +19,7 @@ mod install;
 mod json_rpc;
 mod outcome;
 pub mod records;
+mod runtime;
 #[cfg(test)]
 mod scripted;
 mod stdio;

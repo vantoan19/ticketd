@@ -1,7 +1,7 @@
 //! Codex commands and observations for one `codex app-server` process.
 //!
-//! The shared JSON-RPC connection applies incoming frames in order. Codex tracks the
-//! thread and turn and translates harness requests into interactions.
+//! The shared runtime coordinates the active turn and live requests. Codex handles
+//! the app-server handshake, thread settings, and command and observation mapping.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,7 +20,6 @@ use crate::{
 
 use crate::json_rpc::{
     self, CallOutcome, Connection, Incoming, MAX_FRAME_BYTES, Peer, Reply, Response, RpcError,
-    WriteFailure,
 };
 use crate::stdio::Io;
 
@@ -116,12 +115,11 @@ impl Peer for CodexPeer {
     }
 
     fn disconnected(&mut self) {
-        self.session.clear_live();
+        self.session.disconnected();
     }
 }
 
 struct AppServer {
-    generation: RuntimeGeneration,
     rpc: Arc<Connection<CodexPeer>>,
     options: Options,
 }
@@ -138,14 +136,7 @@ impl AppServer {
                 reply_timeout: options.rpc_timeout,
             },
         );
-        (
-            Arc::new(Self {
-                generation,
-                rpc,
-                options,
-            }),
-            events,
-        )
+        (Arc::new(Self { rpc, options }), events)
     }
 
     async fn call(
@@ -584,15 +575,8 @@ impl std::fmt::Debug for CodexRuntime {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("CodexRuntime")
-            .field("generation", &self.connection.generation)
+            .field("generation", &self.connection.rpc.generation())
             .finish_non_exhaustive()
-    }
-}
-
-impl CodexRuntime {
-    fn stale(&self, command: RuntimeGeneration) -> Option<Refusal> {
-        let current = self.connection.generation;
-        (command != current).then_some(Refusal::StaleGeneration { current })
     }
 }
 
@@ -607,142 +591,104 @@ impl Drop for CodexRuntime {
 #[async_trait]
 impl HarnessRuntime for CodexRuntime {
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
-        if let Some(refusal) = self.stale(submission.generation) {
-            return DispatchOutcome::NotSent(refusal);
-        }
         let Submission {
             submission: id,
+            generation,
             kind,
             text,
-            ..
         } = submission;
         let method = match kind {
             SubmissionKind::StartTurn => "turn/start",
             SubmissionKind::Steer { .. } => "turn/steer",
         };
-        let outcome = self
-            .connection
-            .call(method, |session| {
-                let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
-                let active = session.active_turn().cloned();
-                let mismatch = Err(Refusal::TurnMismatch {
-                    active: active.clone(),
-                });
-                let input = json!([{"type": "text", "text": text, "text_elements": []}]);
-                let prepared = match kind {
-                    SubmissionKind::StartTurn if active.is_some() => return mismatch,
-                    SubmissionKind::StartTurn => {
-                        let mut params =
-                            json!({"threadId": thread, "clientUserMessageId": id.0, "input": input});
-                        // The person's choices, for this turn and the ones after it.
-                        let overrides = &session.reports.overrides;
-                        if let Some(model) = &overrides.model {
-                            params["model"] = json!(model);
-                        }
-                        if let Some(effort) = &overrides.effort {
-                            params["effort"] = json!(effort);
-                        }
-                        if let Some(permissions) = session.reports.permission_params() {
-                            merge(&mut params, permissions);
-                        }
-                        // An unattended session's approvals and sandbox, again every turn.
-                        if let Some(unattended) = session.turn_overrides.clone() {
-                            merge(&mut params, unattended);
-                        }
-                        (params, Call::StartTurn(id.clone()))
+        let prepare = |peer: &mut CodexPeer| {
+            let session = &mut peer.session;
+            let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
+            session.runtime.check_submission(&kind, self.steering)?;
+            let input = json!([{"type": "text", "text": text, "text_elements": []}]);
+            let prepared = match kind {
+                SubmissionKind::StartTurn => {
+                    let mut params =
+                        json!({"threadId": thread, "clientUserMessageId": id.0, "input": input});
+                    // The person's choices, for this turn and the ones after it.
+                    let overrides = &session.reports.overrides;
+                    if let Some(model) = &overrides.model {
+                        params["model"] = json!(model);
                     }
-                    SubmissionKind::Steer { .. } if !self.steering => {
-                        return Err(Refusal::Unsupported);
+                    if let Some(effort) = &overrides.effort {
+                        params["effort"] = json!(effort);
                     }
-                    SubmissionKind::Steer { expected_turn }
-                        if active != Some(expected_turn.clone()) =>
-                    {
-                        return mismatch;
+                    if let Some(permissions) = session.reports.permission_params() {
+                        merge(&mut params, permissions);
                     }
-                    SubmissionKind::Steer { expected_turn } => (
-                        json!({
-                            "threadId": thread,
-                            "expectedTurnId": expected_turn.0,
-                            "clientUserMessageId": id.0,
-                            "input": input,
-                        }),
-                        Call::Steer(id.clone()),
-                    ),
-                };
-                session.submission_written(&id);
-                Ok(prepared)
-            })
-            .await;
-        match outcome {
-            CallOutcome::Refused(refusal) => DispatchOutcome::NotSent(refusal),
-            CallOutcome::Reply(result) => {
-                let turn = result
-                    .pointer("/turn/id")
-                    .or_else(|| result.get("turnId"))
-                    .and_then(Value::as_str);
-                match turn {
-                    Some(turn) => DispatchOutcome::Acknowledged {
-                        turn: NativeTurnId::new(turn),
-                    },
-                    // Answered without naming a turn: delivered, nothing more known.
-                    None => DispatchOutcome::Written,
+                    // An unattended session's approvals and sandbox, again every turn.
+                    if let Some(unattended) = session.turn_overrides.clone() {
+                        merge(&mut params, unattended);
+                    }
+                    (params, Call::StartTurn(id.clone()))
                 }
-            }
-            CallOutcome::Error(error) => DispatchOutcome::Rejected {
-                reason: rejection_reason(&error),
-            },
-            CallOutcome::TimedOut => DispatchOutcome::Written,
-            CallOutcome::Lost => DispatchOutcome::UnknownAfterLoss,
-        }
+                SubmissionKind::Steer { expected_turn } => (
+                    json!({
+                        "threadId": thread,
+                        "expectedTurnId": expected_turn.0,
+                        "clientUserMessageId": id.0,
+                        "input": input,
+                    }),
+                    Call::Steer(id.clone()),
+                ),
+            };
+            session.runtime.submission_written(&id);
+            Ok(prepared)
+        };
+        self.connection
+            .rpc
+            .submit(
+                generation,
+                method,
+                prepare,
+                |result| {
+                    result
+                        .pointer("/turn/id")
+                        .or_else(|| result.get("turnId"))
+                        .and_then(Value::as_str)
+                        .map(NativeTurnId::new)
+                },
+                rejection_reason,
+            )
+            .await
     }
 
     async fn respond(&self, response: InteractionResponse) -> RespondOutcome {
-        if let Some(refusal) = self.stale(response.generation) {
-            return RespondOutcome::NotSent(refusal);
-        }
-        let written = self
-            .connection
+        self.connection
             .rpc
-            .write(|peer| peer.session.answer(&response.request, &response.answer))
-            .await;
-        match written {
-            Ok(()) => RespondOutcome::Sent,
-            Err(WriteFailure::Refused(refusal)) => RespondOutcome::NotSent(refusal),
-            Err(WriteFailure::Lost) => RespondOutcome::UnknownAfterLoss,
-        }
+            .respond(response.generation, |peer| {
+                peer.session.answer(&response.request, &response.answer)
+            })
+            .await
     }
 
     async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome {
-        if let Some(refusal) = self.stale(request.generation) {
-            return InterruptOutcome::NotSent(refusal);
-        }
-        let outcome = self
-            .connection
-            .call("turn/interrupt", |session| {
+        self.connection
+            .rpc
+            .interrupt(request.generation, "turn/interrupt", |peer| {
+                let session = &mut peer.session;
                 let thread = session.thread().ok_or(Refusal::RuntimeClosed)?;
-                if session.active_turn() != Some(&request.expected_turn) {
-                    return Err(Refusal::TurnMismatch {
-                        active: session.active_turn().cloned(),
-                    });
-                }
                 let params = json!({"threadId": thread, "turnId": request.expected_turn.0});
-                session.interrupt_asked(&request.expected_turn);
+                session.runtime.mark_interrupt(&request.expected_turn)?;
                 Ok((params, Call::Plain))
             })
-            .await;
-        match outcome {
-            CallOutcome::Refused(refusal) => InterruptOutcome::NotSent(refusal),
-            CallOutcome::Reply(_) => InterruptOutcome::Acknowledged,
-            CallOutcome::Error(_) | CallOutcome::TimedOut | CallOutcome::Lost => {
-                InterruptOutcome::Unconfirmed
-            }
-        }
+            .await
     }
 
     /// Codex takes model and effort as overrides on `turn/start`, so a change is kept
     /// and goes out with the next turn; the thread keeps it for the turns after.
     async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
-        if self.stale(change.generation).is_some() {
+        if self
+            .connection
+            .rpc
+            .check_generation(change.generation)
+            .is_err()
+        {
             return SettingOutcome::Refused {
                 reason: "the session it was meant for has ended".to_owned(),
             };
