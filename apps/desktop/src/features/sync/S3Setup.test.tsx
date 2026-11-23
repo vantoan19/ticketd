@@ -12,7 +12,7 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { s3Api, type S3Identity, type S3Profiles } from "@/lib/s3-api";
 import { syncApi } from "@/lib/sync-api";
 import { revealFailureDetails } from "@/test/failure-details";
-import { S3Connected, S3Setup } from "./S3Setup";
+import { S3Setup } from "./S3Setup";
 import { SyncStatusProvider } from "./SyncStatusProvider";
 import { hostFailure, syncStatus } from "./sync-fixtures";
 
@@ -274,37 +274,6 @@ test("a long bucket name stays inside its field", async () => {
   expect(trigger.textContent).toContain(long);
 });
 
-test("connected to S3, the page names the bucket, prefix and profile and offers Disconnect", async () => {
-  const connected = syncStatus({
-    connection: "choosing",
-    provider: "s3",
-    account: ARN,
-    folder: null,
-    s3: {
-      bucket: "team-ticketd",
-      prefix: "ticketd/",
-      profile: "work",
-      aws_cli_path: null,
-    },
-  });
-  sync.status.mockResolvedValue(connected);
-  sync.disconnect.mockResolvedValue(
-    syncStatus({ connection: "not_connected", account: null, folder: null }),
-  );
-  render(
-    <SyncStatusProvider>
-      <S3Connected status={connected} />
-    </SyncStatusProvider>,
-  );
-  expect(screen.getByText("Connected")).toBeTruthy();
-  expect(screen.getByText(ARN)).toBeTruthy();
-  expect(
-    screen.getByText("s3://team-ticketd/ticketd/ · profile work"),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-  await waitFor(() => expect(sync.disconnect).toHaveBeenCalled());
-});
-
 test("the sync commands go over the bridge with the host's names", async () => {
   vi.mocked(invoke).mockResolvedValue({
     cli: { state: "ready" },
@@ -318,4 +287,13 @@ test("the sync commands go over the bridge with the host's names", async () => {
   vi.mocked(invoke).mockResolvedValue(null);
   expect(await real.buckets("work")).toBeNull();
   expect(invoke).toHaveBeenCalledWith("s3_buckets", { profile: "work" });
+  vi.mocked(invoke).mockResolvedValue({
+    address: "s3://b/p/f/",
+    console: true,
+  });
+  expect(await real.folderLinks()).toEqual({
+    address: "s3://b/p/f/",
+    console: true,
+  });
+  expect(invoke).toHaveBeenCalledWith("s3_folder_links");
 });

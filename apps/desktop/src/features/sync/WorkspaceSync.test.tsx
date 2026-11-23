@@ -31,6 +31,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     connect: vi.fn(),
     settings: vi.fn(),
     disconnect: vi.fn(),
+    setupOptions: vi.fn(),
   },
 }));
 const sync = vi.mocked(syncApi);
@@ -96,7 +97,12 @@ test("a connected Google Drive Workspace shows no storage choice", async () => {
   expect(screen.queryByRole("radiogroup", { name: "Storage" })).toBeNull();
 });
 
-test("an S3 connection shows its bucket and no storage choice", async () => {
+test("an S3 connection goes on to choosing a Workspace, with no storage choice", async () => {
+  sync.setupOptions.mockResolvedValue({
+    local: { tickets: 3, documents: 1, attachments: 0 },
+    existing: [],
+    reconnect: null,
+  });
   sync.status.mockResolvedValue(
     syncStatus({
       connection: "choosing",
@@ -113,7 +119,7 @@ test("an S3 connection shows its bucket and no storage choice", async () => {
   );
   show();
   expect(
-    await screen.findByText("s3://team-ticketd/ticketd/ · profile work"),
+    await screen.findByRole("radio", { name: /Upload this Workspace/ }),
   ).toBeTruthy();
   expect(screen.queryByRole("radiogroup", { name: "Storage" })).toBeNull();
 });

@@ -461,10 +461,11 @@ impl State {
             return None;
         }
         let current = self.current(key).map(Version::etag);
-        if header(request, "if-none-match") == Some("*") && current.is_some() {
+        let conditions = !self.ignores_conditions;
+        if conditions && header(request, "if-none-match") == Some("*") && current.is_some() {
             return Some(failure(412, "PreconditionFailed"));
         }
-        if let Some(wanted) = header(request, "if-match") {
+        if let Some(wanted) = header(request, "if-match").filter(|_| conditions) {
             match current {
                 None => return Some(failure(404, "NoSuchKey")),
                 Some(etag) if etag != wanted => return Some(failure(412, "PreconditionFailed")),

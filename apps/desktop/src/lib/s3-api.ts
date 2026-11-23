@@ -35,6 +35,14 @@ const identitySchema = z.discriminatedUnion("state", [
 ]);
 export type S3Identity = z.infer<typeof identitySchema>;
 
+const folderLinksSchema = z.object({
+  /** `s3://bucket/prefix/folder/`, which every S3 service has. */
+  address: z.string(),
+  /** Whether the folder has a page in the AWS console, which `syncApi.openFolder` opens. */
+  console: z.boolean(),
+});
+export type S3FolderLinks = z.infer<typeof folderLinksSchema>;
+
 const invoke = (...call: Parameters<typeof bridge>) =>
   structured(bridge<unknown>(...call));
 
@@ -55,6 +63,11 @@ export const s3Api = {
    */
   async signIn(profile: string): Promise<void> {
     await invoke("s3_sign_in", { profile });
+  },
+
+  /** `s3_folder_links`: where the connected Workspace's folder can be looked at. */
+  async folderLinks(): Promise<S3FolderLinks> {
+    return folderLinksSchema.parse(await invoke("s3_folder_links"));
   },
 
   /** `s3_buckets`: the bucket names the profile may list, or `null` when it may not. */

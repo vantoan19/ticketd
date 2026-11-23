@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Cloud, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import {
   Alert,
   AlertActions,
@@ -23,16 +23,14 @@ import { StatusLabel } from "@/components/ui/status-label";
 import {
   SettingsList,
   SettingsRow,
-  SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
-import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { workspaceClient } from "@/lib/api/workspace";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { s3Api, type S3Profiles } from "@/lib/s3-api";
-import { syncApi, type SyncStatus } from "@/lib/sync-api";
+import { syncApi } from "@/lib/sync-api";
 import { SyncFailure as Failure } from "./SyncFailure";
 import { useCommand } from "./use-sync-command";
 import "@/features/settings/settings.css";
@@ -474,63 +472,5 @@ function NoProfiles({
       </Alert>
       <Failure>{failure}</Failure>
     </div>
-  );
-}
-
-/**
- * S3 is recorded as this Workspace's storage. Choosing a Workspace to upload or
- * download follows; until then this desktop can only be disconnected.
- */
-export function S3Connected({ status }: { status: SyncStatus }) {
-  const { busy, failure, run } = useCommand();
-  const s3 = status.s3;
-  return (
-    <>
-      <div className="sync-block">
-        <SettingsList>
-          <SettingsRow
-            leading={
-              <SettingsRowTile>
-                <Cloud size={20} />
-              </SettingsRowTile>
-            }
-            title={<StatusLabel tone="positive">Connected</StatusLabel>}
-            description={
-              <>
-                {status.account && (
-                  <span className="block wrap-anywhere">{status.account}</span>
-                )}
-                {s3 && (
-                  <span className="block wrap-anywhere">
-                    s3://{s3.bucket}/{s3.prefix} · profile {s3.profile}
-                  </span>
-                )}
-              </>
-            }
-          />
-        </SettingsList>
-      </div>
-      <SettingsSection title="Disconnect">
-        <SettingsList>
-          <SettingsRow
-            title="Disconnect this desktop"
-            description="Stops syncing here. Nothing in the bucket or on this computer is deleted."
-            trailing={
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  void run(syncApi.disconnect, "disconnect from S3")
-                }
-              >
-                Disconnect
-              </Button>
-            }
-          />
-        </SettingsList>
-        <Failure>{failure}</Failure>
-      </SettingsSection>
-    </>
   );
 }

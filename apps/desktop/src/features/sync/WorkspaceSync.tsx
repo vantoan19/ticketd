@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { S3Connected, S3Setup } from "./S3Setup";
-import { SyncSettings } from "./SyncSettings";
+import { S3Setup } from "./S3Setup";
+import { SyncSettings, Track } from "./SyncSettings";
 import { useSyncStatus } from "./sync-status";
 import "./sync.css";
 
@@ -21,7 +21,6 @@ export function WorkspaceSync({
   const { status } = useSyncStatus();
   const [chosen, setChosen] = useState<Storage>("google_drive");
   const connected = status !== null && status.connection !== "not_connected";
-  const storage: Storage = connected ? status.provider : chosen;
   return (
     <>
       {status && !connected && (
@@ -37,12 +36,12 @@ export function WorkspaceSync({
           />
         </div>
       )}
-      {storage === "s3" ? (
-        connected ? (
-          <S3Connected status={status} />
-        ) : (
+      {!connected && chosen === "s3" ? (
+        // Its setup steps are the first of the four every storage goes through.
+        <div className="settings-sync">
+          <Track status={status} />
           <S3Setup />
-        )
+        </div>
       ) : (
         <SyncSettings onReplaced={onReplaced} />
       )}
