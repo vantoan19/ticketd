@@ -5,7 +5,10 @@
 A project can claim one hosted repository by its Project remote,
 `host/owner/name`. Each remote can belong to one project in a Workspace.
 The match ignores case and includes the host so that GitHub Enterprise and
-public GitHub repositories can share an owner and name.
+public GitHub repositories can share an owner and name. Project remotes are
+local to each device, like checkout registrations and saved source settings.
+Workspace export and backups retain them. Drive sync shares the Project's name
+and ticket membership, so a person sets up routing where they use it.
 
 When discovery imports a new ticket, it uses the source's reported repository
 and sets the matching project in the same transaction as the import. The link
@@ -22,4 +25,6 @@ changing membership during refresh.
 
 One remote per project gives discovery an unambiguous destination. A Plan can
 group work across several projects. Project creation still starts with a local
-checkout. Projects defined solely by a hosted repository are deferred.
+checkout. Linking a saved discovery repository from Settings also requires a
+checkout on this device. Projects defined solely by a hosted repository are
+deferred.

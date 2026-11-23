@@ -166,32 +166,9 @@ impl Workspace {
         path: &str,
         remote: Option<&str>,
     ) -> Result<Project, Error> {
-        let (name, path) = validate(name, path)?;
-        let remote = remote.map(validate_remote).transpose()?;
-        let normalized = normalize(path)?;
-        let path = normalized.as_str();
-        let project = Project {
-            id: Uuid::new_v4().to_string(),
-            name: name.to_owned(),
-            path: path.to_owned(),
-            paths: vec![path.to_owned()],
-            remote,
-        };
-        crate::write_scope::run(&self.connection, |tx| {
-            ensure_path_free(tx, path, &project.id)?;
-            if let Some(remote) = &project.remote {
-                ensure_remote_free(tx, remote, &project.id)?;
-            }
-            tx.execute(
-                "INSERT INTO projects (id, name, path, remote) VALUES (?1, ?2, ?3, ?4)",
-                params![project.id, project.name, project.path, project.remote],
-            )?;
-            tx.execute(
-                "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
-                params![project.id, project.path],
-            )?;
-            Ok(project)
-        })
+        let mut project = prepare_create(name, path)?;
+        project.remote = remote.map(validate_remote).transpose()?;
+        crate::write_scope::run(&self.connection, |tx| insert(tx, project))
     }
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
@@ -293,6 +270,37 @@ impl Workspace {
     }
 }
 
+pub(crate) fn prepare_create(name: &str, path: &str) -> Result<Project, Error> {
+    let (name, path) = validate(name, path)?;
+    let path = normalize(path)?;
+    Ok(Project {
+        id: Uuid::new_v4().to_string(),
+        name: name.to_owned(),
+        paths: vec![path.clone()],
+        path,
+        remote: None,
+    })
+}
+
+pub(crate) fn insert(
+    tx: &crate::write_scope::WriteScope<'_>,
+    project: Project,
+) -> Result<Project, Error> {
+    ensure_path_free(tx, &project.path, &project.id)?;
+    if let Some(remote) = &project.remote {
+        ensure_remote_free(tx, remote, &project.id)?;
+    }
+    tx.execute(
+        "INSERT INTO projects (id, name, path, remote) VALUES (?1, ?2, ?3, ?4)",
+        params![project.id, project.name, project.path, project.remote],
+    )?;
+    tx.execute(
+        "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
+        params![project.id, project.path],
+    )?;
+    Ok(project)
+}
+
 /// Reject a checkout folder already registered to another Project. Checked in code,
 /// not by a UNIQUE index, so existing workspaces that already hold duplicates still open.
 fn ensure_path_free(connection: &Connection, path: &str, project_id: &str) -> Result<(), Error> {
@@ -317,6 +325,9 @@ pub(crate) fn link_remote_if_unset(
     let mut project = find(tx, id)?;
     if project.remote.is_some() {
         return Err(Error::ProjectAlreadyHasRemote(project.name));
+    }
+    if project.paths.is_empty() {
+        return Err(Error::ProjectCheckoutRequired(project.name));
     }
     let remote = validate_remote(remote)?;
     ensure_remote_free(tx, &remote, id)?;

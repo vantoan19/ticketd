@@ -19,13 +19,15 @@ import {
 
 type Choices = { projects: Project[] } | { failure: FailureDescription };
 type Exit =
-  { action: "cancel" | "create" } | { action: "link"; projectId: string };
+  | { action: "cancel" | "create" | "reload" }
+  | { action: "link"; projectId: string };
 
 export function LinkRepositoryProjectDialog({
   provider,
   repository,
   onClose,
   onCreate,
+  onReloadRoutes,
   onLinked,
   resolveReturnFocus,
 }: {
@@ -33,6 +35,7 @@ export function LinkRepositoryProjectDialog({
   repository: string;
   onClose: () => void;
   onCreate: () => void;
+  onReloadRoutes: () => void;
   onLinked: (projectId: string) => void;
   resolveReturnFocus: () => HTMLElement | null;
 }) {
@@ -50,7 +53,9 @@ export function LinkRepositoryProjectDialog({
       (projects) => {
         if (current)
           setChoices({
-            projects: projects.filter((project) => !project.remote),
+            projects: projects.filter(
+              (project) => !project.remote && project.paths.length > 0,
+            ),
           });
       },
       (reason) => {
@@ -82,7 +87,11 @@ export function LinkRepositoryProjectDialog({
     } catch (reason) {
       const failed = describeFailure(reason, "link the project");
       setFailure(failed);
-      if (failed.action === "reload") setRevision((value) => value + 1);
+      if (
+        failed.action === "reload" &&
+        failed.code !== "source_repository_not_listed"
+      )
+        setRevision((value) => value + 1);
     } finally {
       setBusy(false);
     }
@@ -96,6 +105,7 @@ export function LinkRepositoryProjectDialog({
         if (closing?.action === "link") onLinked(closing.projectId);
         if (closing?.action === "create") onCreate();
         if (closing?.action === "cancel") onClose();
+        if (closing?.action === "reload") onReloadRoutes();
       }}
       resolveReturnFocus={resolveReturnFocus}
       title="Link to project"
@@ -116,9 +126,11 @@ export function LinkRepositoryProjectDialog({
       blockedReason={
         busy
           ? "Linking…"
-          : projects.length && !projectId
-            ? "Choose a project."
-            : null
+          : failure?.code === "source_repository_not_listed"
+            ? "Choose a saved repository to continue."
+            : projects.length && !projectId
+              ? "Choose a project."
+              : null
       }
       onSubmit={() => void link()}
       error={
@@ -127,6 +139,18 @@ export function LinkRepositoryProjectDialog({
             size="compact"
             failure={failure}
             onRetry={() => void link()}
+            actions={
+              failure.code === "source_repository_not_listed" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setClosing({ action: "reload" })}
+                >
+                  Reload repository routes
+                </Button>
+              )
+            }
           />
         ) : loadFailure ? (
           <FailureAlert

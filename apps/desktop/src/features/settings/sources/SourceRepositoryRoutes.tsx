@@ -9,6 +9,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { client } from "@/lib/api/client";
 import { sourcesClient, type SourceRepositoryRoute } from "@/lib/api/sources";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 
@@ -34,9 +35,10 @@ export function SourceRepositoryRoutes({
     remote: string;
     step: "choose" | "create";
   } | null>(null);
-  const [createExit, setCreateExit] = useState<{ projectId?: string } | null>(
-    null,
-  );
+  const [createExit, setCreateExit] = useState<{
+    projectId?: string;
+    reload?: boolean;
+  } | null>(null);
   const table = useRef<HTMLTableElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const returnFocus = () =>
@@ -74,7 +76,7 @@ export function SourceRepositoryRoutes({
     };
   }, [provider, hidden, savedKey, refresh, version]);
 
-  if (!routes.length && !failure) return null;
+  if (!routes.length && !failure && !selection) return null;
   return (
     <SettingsSection title={title}>
       {failure ? (
@@ -139,6 +141,10 @@ export function SourceRepositoryRoutes({
           provider={provider}
           repository={selection.repository}
           onClose={close}
+          onReloadRoutes={() => {
+            close();
+            reload();
+          }}
           onCreate={() => setSelection({ ...selection, step: "create" })}
           onLinked={linked}
           resolveReturnFocus={returnFocus}
@@ -149,11 +155,23 @@ export function SourceRepositoryRoutes({
           open={createExit === null}
           initialRemote={selection.remote}
           lockRemote
+          createProject={(name, path) =>
+            client.createSourceRepositoryProject(
+              provider,
+              selection.repository,
+              name,
+              path,
+            )
+          }
+          onReloadRoutes={() => setCreateExit({ reload: true })}
           onOpenChange={(open) => !open && setCreateExit({})}
           onSaved={(project) => setCreateExit({ projectId: project.id })}
           onExitComplete={() => {
             if (createExit?.projectId) linked(createExit.projectId);
-            else close();
+            else {
+              close();
+              if (createExit?.reload) reload();
+            }
           }}
           resolveReturnFocus={returnFocus}
         />

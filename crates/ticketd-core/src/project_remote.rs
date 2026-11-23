@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 
 /// Normalize a hosted Git remote URL to a Project remote.
-pub fn normalize_project_remote_url(input: &str) -> Option<String> {
+fn normalize_project_remote_url(input: &str) -> Option<String> {
     let input = input.trim();
     if input.contains(|c: char| c.is_whitespace() || c.is_control() || c == '\\') {
         return None;

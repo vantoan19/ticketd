@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
@@ -34,6 +35,8 @@ export function ProjectFormDialog({
   project,
   initialRemote,
   lockRemote = false,
+  createProject,
+  onReloadRoutes,
   onOpenChange,
   onExitComplete,
   resolveReturnFocus,
@@ -44,6 +47,8 @@ export function ProjectFormDialog({
   /** An explicit repository selected by the caller takes precedence over detection. */
   initialRemote?: string;
   lockRemote?: boolean;
+  createProject?: (name: string, path: string) => Promise<Project>;
+  onReloadRoutes?: () => void;
   onOpenChange: (open: boolean) => void;
   onExitComplete?: () => void;
   resolveReturnFocus?: () => HTMLElement | null;
@@ -75,9 +80,11 @@ export function ProjectFormDialog({
     initialRemote === undefined &&
     !project?.remote;
 
+  const staleRepository = failure?.code === "source_repository_not_listed";
+
   function edit(change: Draft) {
     setDrafts((old) => ({ ...old, [scope]: { ...old[scope], ...change } }));
-    setFailure(null);
+    if (!staleRepository) setFailure(null);
     setRemoteError("");
   }
 
@@ -104,6 +111,8 @@ export function ProjectFormDialog({
                 value || null,
               )
             : await client.editProject(project.id, name.trim(), path);
+      } else if (createProject) {
+        saved = await createProject(name.trim(), path);
       } else {
         saved = value
           ? await client.createProject(name.trim(), path, value)
@@ -151,13 +160,15 @@ export function ProjectFormDialog({
       blockedReason={
         busy
           ? "Saving…"
-          : !project && !path
-            ? "Choose a folder to continue."
-            : !name.trim()
-              ? "Enter a project name."
-              : waiting
-                ? "Checking the checkout for a Project remote…"
-                : null
+          : staleRepository
+            ? "Choose a saved repository to continue."
+            : !project && !path
+              ? "Choose a folder to continue."
+              : !name.trim()
+                ? "Enter a project name."
+                : waiting
+                  ? "Checking the checkout for a Project remote…"
+                  : null
       }
       error={
         failure && (
@@ -165,6 +176,19 @@ export function ProjectFormDialog({
             size="compact"
             failure={failure}
             onRetry={() => void save()}
+            actions={
+              staleRepository &&
+              onReloadRoutes && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onReloadRoutes}
+                >
+                  Reload repository routes
+                </Button>
+              )
+            }
           />
         )
       }

@@ -758,6 +758,21 @@ export const client = {
       }),
     );
   },
+  async createSourceRepositoryProject(
+    provider: string,
+    repository: string,
+    name: string,
+    path: string,
+  ) {
+    return projectSchema.parse(
+      await invoke("create_source_repository_project", {
+        provider,
+        repository,
+        name,
+        path,
+      }),
+    );
+  },
   async detectProjectRemote(path: string) {
     return projectRemoteDetectionSchema.parse(
       await invoke("detect_project_remote", { path }),

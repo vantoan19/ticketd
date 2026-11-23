@@ -112,7 +112,7 @@ pub(crate) fn migrate_issue_opening(connection: &rusqlite::Connection) -> Result
     tracking::migrate_issue_opening(connection)
 }
 
-pub(crate) use tracking::migrate_issue_repository;
+pub(crate) use tracking::{migrate_github_issue_hosts, migrate_issue_repository};
 
 /// Derive a repository from existing external identity without a connector or network access.
 pub(crate) fn repository_from_saved_issue(
@@ -124,6 +124,25 @@ pub(crate) fn repository_from_saved_issue(
         github::PROVIDER => github::repository_from_issue_url(locator, url),
         _ => None,
     }
+}
+
+/// Older Drive records still carry bare numeric GitHub IDs; normalize those
+/// before comparing them to identities in the upgraded Workspace.
+pub(crate) fn scope_saved_issue_identity(
+    provider: &str,
+    id: &str,
+    locator: &str,
+    url: &str,
+) -> Option<String> {
+    if provider != github::PROVIDER {
+        return None;
+    }
+    let repository = repository_from_saved_issue(provider, locator, url);
+    let host = repository
+        .as_deref()
+        .and_then(|remote| remote.split_once('/'))
+        .map(|(host, _)| host);
+    github::scope_legacy_issue_id(id, host).filter(|scoped| scoped != id)
 }
 
 /// Format version 82: the parts of each source that have been read.

@@ -141,6 +141,12 @@ impl From<ticketd_core::Error> for BridgeFailure {
             ticketd_core::Error::ProjectRemoteTaken { .. } => {
                 Self::coded("project_remote_taken", error.to_string())
             }
+            ticketd_core::Error::ProjectCheckoutRequired(_) => {
+                Self::coded("project_checkout_required", error.to_string())
+            }
+            ticketd_core::Error::SourceRepositoryNotListed(_) => {
+                Self::coded("source_repository_not_listed", error.to_string())
+            }
             ticketd_core::Error::ProjectSourceHostMismatch { .. } => {
                 Self::coded("project_source_host_mismatch", error.to_string())
             }
@@ -1484,6 +1490,21 @@ fn link_source_repository_project(
     )?)
 }
 #[tauri::command(async)]
+fn create_source_repository_project(
+    provider: String,
+    repository: String,
+    name: String,
+    path: String,
+) -> Result<Project, BridgeFailure> {
+    Ok(open_workspace()?.create_source_repository_project(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        &repository,
+        &name,
+        &path,
+    )?)
+}
+#[tauri::command(async)]
 fn source_check_connection(
     provider: String,
     config: ticketd_core::source::ConfigValues,
@@ -2057,6 +2078,7 @@ pub fn run() -> Result<(), tauri::Error> {
             list_sources,
             source_repository_routes,
             link_source_repository_project,
+            create_source_repository_project,
             refresh_sources,
             take_ownership,
             source_health,

@@ -357,6 +357,43 @@ fn saved_discovery_repositories_report_their_routed_project_on_the_source_host()
 }
 
 #[test]
+fn routing_from_settings_requires_a_checkout_and_a_still_saved_repository() {
+    let mut f = Fixture::new();
+    let path = f.dir.path().to_str().unwrap();
+    let project = f.workspace.create_project("No checkout", path).unwrap();
+    f.workspace.remove_checkout(&project.id, path).unwrap();
+    let refused = f
+        .workspace
+        .link_source_repository_project(&f.engine, "fake", "o/r", &project.id)
+        .unwrap_err();
+    assert!(refused.to_string().contains("Register a checkout"));
+    assert!(
+        f.workspace
+            .show_project(&project.id)
+            .unwrap()
+            .remote
+            .is_none()
+    );
+
+    let config = json!({"repositories": ["other/repo"]});
+    f.workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap();
+    assert!(matches!(
+        f.workspace.create_source_repository_project(&f.engine, "fake", "o/r", "Stale", path),
+        Err(Error::SourceRepositoryNotListed(repository)) if repository == "o/r"
+    ));
+    assert_eq!(f.workspace.list_projects().unwrap().len(), 1);
+
+    let created = f
+        .workspace
+        .create_source_repository_project(&f.engine, "fake", "other/repo", "Current", path)
+        .unwrap();
+    assert_eq!(created.remote.as_deref(), Some("example.test/other/repo"));
+    assert_eq!(created.paths, [path]);
+}
+
+#[test]
 fn linking_a_saved_repository_sets_only_an_unclaimed_projects_remote() {
     let mut f = Fixture::new();
     let path = f.dir.path().to_str().unwrap();
@@ -583,6 +620,42 @@ fn connecting_an_already_listed_repository_links_only_eligible_tickets_offline()
         (remote.connection_calls, remote.discover_calls),
         network_calls
     );
+}
+
+#[test]
+fn backfill_keeps_a_known_repository_until_the_external_location_changes() {
+    let mut f = Fixture::new();
+    let mut found = reported_issue("example.test", "o/r", 1, "Original issue");
+    f.publish(found.clone(), true);
+    f.refresh();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Original repository",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/r"),
+        )
+        .unwrap();
+
+    found.repository = None;
+    found.title = "Still at the original repository".into();
+    f.publish(found.clone(), true);
+    f.refresh();
+    let preview = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(preview.tickets, ["T-KQ1"]);
+
+    found.reference.locator = "o/moved#1".into();
+    found.url = "https://example.test/o/moved/issues/1".into();
+    f.publish(found, true);
+    f.refresh();
+    let preview = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert!(preview.tickets.is_empty());
 }
 
 #[test]

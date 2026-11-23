@@ -365,6 +365,82 @@ pub(crate) fn migrate_issue_repository(connection: &Connection) -> Result<(), Er
     Ok(())
 }
 
+/// Format version 88: GitHub Enterprise identities need the host as well as the
+/// database ID. This covers local takeover provenance and saved duplicate targets.
+pub(crate) fn migrate_github_issue_hosts(connection: &Connection) -> Result<(), Error> {
+    use super::github::{
+        PROVIDER, issue_id_host, repository_from_issue_url, scope_legacy_issue_id,
+    };
+
+    let mut identities = connection.prepare(
+        "SELECT ticket_id, external_id, repository, locator, url FROM external_identities WHERE provider = ?1",
+    )?;
+    let rows = identities
+        .query_map([PROVIDER], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (ticket, id, repository, locator, url) in rows {
+        let repository = repository.or_else(|| repository_from_issue_url(&locator, &url));
+        let host = repository
+            .as_deref()
+            .and_then(|remote| remote.split_once('/'))
+            .map(|(host, _)| host);
+        if let Some(scoped) = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id) {
+            connection.execute(
+                "UPDATE external_identities SET external_id = ?2 WHERE ticket_id = ?1",
+                params![ticket, scoped],
+            )?;
+        }
+    }
+
+    // Both records can retain an issue ID even after it is no longer fetchable.
+    for (table, key) in [
+        ("external_duplicate_targets", "ticket_id"),
+        ("publication_attempts", "id"),
+    ] {
+        let mut related = connection.prepare(&format!(
+            "SELECT r.{key}, r.external_id, r.locator, r.url, i.external_id
+             FROM {table} r LEFT JOIN external_identities i ON i.ticket_id = r.ticket_id AND i.provider = r.provider
+             WHERE r.provider = ?1 AND r.external_id IS NOT NULL"
+        ))?;
+        let rows = related
+            .query_map([PROVIDER], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (record, id, locator, url, owner) in rows {
+            let repository = locator
+                .zip(url)
+                .and_then(|(locator, url)| repository_from_issue_url(&locator, &url));
+            let host = repository
+                .as_deref()
+                .and_then(|remote| remote.split_once('/'))
+                .map(|(host, _)| host)
+                .or_else(|| owner.as_deref().and_then(issue_id_host));
+            if let Some(scoped) = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id) {
+                connection.execute(
+                    &format!("UPDATE {table} SET external_id = ?2 WHERE {key} = ?1"),
+                    params![record, scoped],
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The issue's author and opening time as stored: an empty value is unknown.
 fn opening(issue: &ExternalIssue) -> (Option<&str>, Option<&str>) {
     fn known(value: &str) -> Option<&str> {
@@ -1579,14 +1655,21 @@ fn apply_issue(
             if observed != old_state {
                 changed = true;
             }
-            if locator != issue.reference.locator
+            let same_location = locator == issue.reference.locator && url == issue.url;
+            let observed_repository = issue.repository.as_deref().or_else(|| {
+                if same_location {
+                    repository.as_deref()
+                } else {
+                    None
+                }
+            });
+            if !same_location
                 || display != issue.display
-                || url != issue.url
-                || repository != issue.repository
+                || repository.as_deref() != observed_repository
             {
                 connection.execute(
                     "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4, repository = ?5 WHERE ticket_id = ?1",
-                    params![id, issue.reference.locator, issue.display, issue.url, issue.repository],
+                    params![id, issue.reference.locator, issue.display, issue.url, observed_repository],
                 )?;
                 changed = true;
             }

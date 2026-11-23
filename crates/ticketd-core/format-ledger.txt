@@ -1037,3 +1037,6 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 
 ## 87
 + column external_identities.repository
+
+## 88
+(no table, column, trigger or unique index changes)

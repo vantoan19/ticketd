@@ -225,7 +225,7 @@ test("create project chooses a checkout and uses the saved repository as the Pro
   vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue(created.path);
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "list_projects") return [];
-    if (command === "create_project") return created;
+    if (command === "create_source_repository_project") return created;
     throw new Error(`Unexpected command ${command}`);
   });
   vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
@@ -260,11 +260,62 @@ test("create project chooses a checkout and uses the saved repository as the Pro
   );
 
   expect(await screen.findByText("No existing tickets to link.")).toBeTruthy();
-  expect(invoke).toHaveBeenCalledWith("create_project", {
+  expect(invoke).toHaveBeenCalledWith("create_source_repository_project", {
+    provider: "github",
+    repository: "other/repo",
     name: created.name,
     path: created.path,
-    remote: created.remote,
   });
+});
+
+test("creating from a stale route asks the person to reload saved repositories", async () => {
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/checkout");
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "list_projects") return [];
+    if (command === "create_source_repository_project") {
+      vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(
+        repositoryRoutes.slice(0, 1),
+      );
+      throw {
+        code: "source_repository_not_listed",
+        message:
+          "other/repo is no longer in the saved discovery repositories. Reload the routes and choose a saved repository.",
+      };
+    }
+    throw new Error(`Unexpected command ${command}`);
+  });
+  vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
+  render(<SourceCardWithProjectReview />);
+
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Link to project for other/repo",
+    }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create project…" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "New project" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Choose…" }));
+  await within(dialog).findByDisplayValue("Checkout");
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Create project" }),
+  );
+  const reload = await within(dialog).findByRole("button", {
+    name: "Reload repository routes",
+  });
+  expect(within(dialog).getByRole("alert").textContent).toContain(
+    "Other/repo is no longer in the saved discovery repositories",
+  );
+  fireEvent.click(reload);
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Link to project for other/repo" }),
+    ).toBeNull(),
+  );
+  expect(sourcesClient.previewConnectSource).not.toHaveBeenCalled();
 });
 
 const preview: DiscoveryPreview = {
