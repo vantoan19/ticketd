@@ -52,6 +52,8 @@ struct Flaky<'a> {
     inner: &'a UreqS3Transport,
     fail_when: Mutex<Option<String>>,
     seen: Mutex<Vec<String>>,
+    /// Another desktop's write, made once just before the first completion of an upload.
+    rival: Mutex<Option<Box<dyn FnOnce() + Send + 'a>>>,
 }
 
 impl<'a> Flaky<'a> {
@@ -60,7 +62,13 @@ impl<'a> Flaky<'a> {
             inner,
             fail_when: Mutex::new(None),
             seen: Mutex::new(vec![]),
+            rival: Mutex::new(None),
         }
+    }
+
+    /// Runs `write` once, just before the next request that completes an upload.
+    fn before_completion(&self, write: impl FnOnce() + Send + 'a) {
+        *self.rival.lock().unwrap() = Some(Box::new(write));
     }
 
     /// Fails every request whose URL has `text` in it, until `None`.
@@ -85,6 +93,12 @@ impl S3Transport for Flaky<'_> {
             .lock()
             .unwrap()
             .push(format!("{} {}", request.method, request.url));
+        if request.method == "POST" && request.url.contains("uploadId=") {
+            let rival = self.rival.lock().unwrap().take();
+            if let Some(write) = rival {
+                write();
+            }
+        }
         let down = self
             .fail_when
             .lock()
@@ -388,6 +402,43 @@ fn live_an_upload_cut_short_resumes_with_only_the_missing_parts() {
     );
     assert_eq!(live.pending_uploads(&name), 0);
     assert!(get(&again, &folder, &key, &file.version) == bytes);
+}
+
+#[test]
+fn live_a_completion_refused_because_another_desktop_finished_first_aborts_its_upload() {
+    let Some(live) = live() else { return };
+    let a = live.remote().with_part_size(PARTS);
+    let flaky = Flaky::over(&live.transport);
+    let b = S3Remote::new(live.target(), &live.prefix, &live.credentials, &flaky)
+        .unwrap()
+        .with_part_size(PARTS);
+    let (folder, key, bytes) = (folder(&a), attachment(), big());
+    let name = format!("{}{folder}/attachments/{}", live.prefix, key.id);
+
+    // `b` found the file missing and sent its parts; then `a` creates it, so the completion's
+    // `If-None-Match: *` is refused with 412.
+    let (rival_folder, rival_key) = (folder.clone(), key.clone());
+    let rivals = a;
+    flaky.before_completion(move || {
+        put(
+            &rivals,
+            &rival_folder,
+            &rival_key,
+            None,
+            b"another desktop's file",
+        )
+        .unwrap();
+    });
+    assert!(matches!(
+        put(&b, &folder, &key, None, &bytes),
+        Err(RemoteError::PreconditionFailed { current: Some(current) }) if current.size == 22
+    ));
+    assert_eq!(flaky.count("POST", "uploadId="), 1);
+    assert_eq!(
+        live.pending_uploads(&name),
+        0,
+        "the refused upload was aborted"
+    );
 }
 
 #[test]
