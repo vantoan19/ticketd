@@ -1,7 +1,7 @@
 name: Package
 
 # Manual builds of the installable packages. Kept out of the Quality workflow so its required
-# "CI result" check always runs the full set of checks and never reports a skip.
+# "CI result" check only has to account for the jobs of the change plan.
 on:
   workflow_dispatch:
     inputs:

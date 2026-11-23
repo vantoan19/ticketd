@@ -114,7 +114,12 @@ At public launch, configure and verify these settings:
   GitHub Actions; require the branch to be up to date. Keep force pushes and
   branch deletion disabled. `CI result` covers every job and test shard on Linux,
   macOS and Windows, so no other check needs to be required, and a change to the
-  number of shards never changes the protection rule.
+  number of shards never changes the protection rule. It passes only when the
+  `Change plan` job succeeded, every job the plan asked for succeeded and every
+  other job was skipped, so a job skipped by a path-based plan is not a hole in
+  the protection; do not add a workflow-level `paths:` filter, which would leave
+  the required check Pending. Add the `ci-full` label to a pull request to run
+  every job.
 - Verify a harmless PR from an outside fork: approval is required, Linux runs
   on a GitHub-hosted runner, distribution is skipped, and the required check
   reports against the PR before merge.

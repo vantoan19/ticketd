@@ -39,7 +39,12 @@ echo "cargo $*" >> "${log}"`,
   } catch {
     // No tool was called.
   }
-  return { status: result.status, stderr: result.stderr, calls };
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    calls,
+  };
 }
 
 test("rust runs every test through nextest, then the doc-tests", () => {
@@ -101,6 +106,24 @@ test("a malformed partition is a usage error", () => {
 test("a partition only applies to rust and ui", () => {
   assert.equal(run(["fast", "--partition", "1/2"]).status, 2);
   assert.equal(run(["clippy", "--partition", "1/2"]).status, 2);
+});
+
+test("plan needs a base revision and takes no partition", () => {
+  assert.equal(run(["plan"]).status, 2);
+  assert.equal(run(["plan", "HEAD", "--partition", "1/2"]).status, 2);
+  assert.equal(run(["rust", "HEAD"]).status, 2);
+  assert.equal(run(["plan", "HEAD", "HEAD"]).status, 2);
+});
+
+test("plan prints the change plan and runs no build tool", () => {
+  // A push plans everything whatever the diff says, so this does not depend on the checkout.
+  const { status, stdout, calls } = run(["plan", "HEAD"], {
+    env: { GITHUB_EVENT_NAME: "push" },
+  });
+  assert.equal(status, 0);
+  assert.match(stdout, /frontend lane: true/);
+  assert.match(stdout, /rust lane:\s+true/);
+  assert.deepEqual(calls, []);
 });
 
 test("clippy runs on its own", () => {

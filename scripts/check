@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Usage: scripts/check [fast|clippy|rust|ui|slow] [--partition k/n]
+#        scripts/check plan <base>
 #   fast    checks that compile nothing: Markdown, versions, whitespace, formatting, lint, types
 #   clippy  Clippy
 #   rust    the Rust tests
 #   ui      the frontend tests
 #   slow    clippy, rust, then ui
+#   plan    which CI lanes the changes since <base> need (a revision, e.g. $(git merge-base origin/main HEAD));
+#           CI passes HEAD^1 of the pull request's merge commit. Not part of the default run.
 # With no argument it runs everything. CI runs fast, clippy, rust and ui as separate jobs so the
 # fast result arrives first and the slow parts run side by side.
 #
@@ -18,13 +21,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: scripts/check [fast|clippy|rust|ui|slow] [--partition k/n]" >&2
+  echo "usage: scripts/check [fast|clippy|rust|ui|slow] [--partition k/n] | scripts/check plan <base>" >&2
   exit 2
 }
 
 mode=all
 mode_set=false
 partition=""
+base="" # the revision `plan` diffs against
 while (($#)); do
   case "$1" in
     --partition)
@@ -36,13 +40,17 @@ while (($#)); do
       partition="${1#--partition=}"
       shift
       ;;
-    all | fast | slow | clippy | rust | ui)
+    all | fast | slow | clippy | rust | ui | plan)
       [[ "$mode_set" == false ]] || usage
       mode="$1"
       mode_set=true
       shift
       ;;
-    *) usage ;;
+    *)
+      [[ "$mode" == plan && -z "$base" ]] || usage
+      base="$1"
+      shift
+      ;;
   esac
 done
 
@@ -55,6 +63,12 @@ if [[ -n "$partition" ]]; then
   shards="${BASH_REMATCH[2]}"
   ((shard <= shards)) || usage
 fi
+if [[ "$mode" == plan ]]; then
+  [[ -n "$base" && -z "$partition" ]] || usage
+  # Local runs behave like a pull request; in CI the event comes from GITHUB_EVENT_NAME.
+  exec node scripts/ci-plan.mjs --base "$base" ${PLAN_LABELS:+--labels "$PLAN_LABELS"}
+fi
+[[ -z "$base" ]] || usage
 runs() { [[ "$mode" == all || " $* " == *" $mode "* ]]; }
 
 if runs fast; then

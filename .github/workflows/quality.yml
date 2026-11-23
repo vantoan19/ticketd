@@ -3,6 +3,8 @@ name: Quality
 on:
   workflow_dispatch:
   pull_request:
+    # `labeled` makes adding the ci-full label start a run that runs everything.
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   schedule:
@@ -25,6 +27,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  plan:
+    # Decides which jobs this change needs; see scripts/ci-plan.mjs and ADR 0023. A path that
+    # matches no rule, a git failure, a push to main, the nightly run, a manual run and the
+    # ci-full label all plan every job. CI result fails unless the jobs followed the plan.
+    name: Change plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.plan.outputs.frontend }}
+      rust: ${{ steps.plan.outputs.rust }}
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      # A pull request checks out its merge commit; HEAD^1 is the base branch tip.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: plan
+        env:
+          PLAN_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: ./scripts/check plan HEAD^1
+
   fast:
     # Everything that compiles nothing, so formatting, lint and type errors report in minutes.
     name: Fast checks
@@ -55,6 +79,8 @@ jobs:
   clippy:
     # Clippy has its own job, so it never waits for the tests and the tests never wait for it.
     name: Clippy
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -79,6 +105,8 @@ jobs:
     # one build cache. Shard 1 of each OS also runs the doc-tests; the last shard also builds the
     # desktop and CLI (and checks the Pages URLs on Windows), so the extra work is not all in one shard.
     name: Rust tests (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +160,8 @@ jobs:
   ui:
     # The frontend tests need no Rust build, so they run beside the Rust jobs, in three shards.
     name: Frontend tests (${{ matrix.shard }}/3)
+    needs: plan
+    if: needs.plan.outputs.frontend == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -156,16 +186,21 @@ jobs:
           node apps/docs/check-pages.mjs
 
   result:
-    # The one required check. It always reports, and fails unless every job above succeeded,
-    # so a failed, canceled or skipped job can never look like a pass.
+    # The one required check. It always reports. It passes only when the plan job succeeded,
+    # every job the plan asked for succeeded and every other job was skipped, so a failed,
+    # canceled or wrongly skipped job can never look like a pass.
     name: CI result
     if: always()
-    needs: [fast, clippy, rust, ui]
+    needs: [plan, fast, clippy, rust, ui]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Summarize run times
         env:
           GH_TOKEN: ${{ github.token }}
@@ -182,13 +217,7 @@ jobs:
               ($jobs[] | select(.completed_at != null and .started_at != null)
                 | "| \(.name) | \(.conclusion) | \((.started_at | t) - (.created_at | t) | mins) | \((.completed_at | t) - (.started_at | t) | mins) | \((.completed_at | t) - $start | mins) |")
           ' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Could not read job timings for the summary."
-      - name: Require every job to succeed
+      - name: Require the planned jobs to succeed and the rest to be skipped
         env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: |
-          failed=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$RESULTS")
-          if [[ -n "$failed" ]]; then
-            while IFS= read -r line; do echo "::error::Required job did not succeed: $line"; done <<<"$failed"
-            exit 1
-          fi
-          echo "All required jobs succeeded."
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci-plan.mjs result
