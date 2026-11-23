@@ -481,17 +481,7 @@ impl ManagedChild {
     }
 
     fn exit_success(&mut self) -> Option<bool> {
-        use rustix::process::{WaitId, WaitIdOptions, waitid};
-        self.group.and_then(|group| {
-            // Keep the child's PID reserved until the final signal to its group.
-            waitid(
-                WaitId::Pid(group),
-                WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
-            )
-            .ok()
-            .flatten()
-            .map(|status| status.exit_status() == Some(0))
-        })
+        self.group.and_then(group_leader_exit_success)
     }
 
     async fn shutdown(&mut self) {
@@ -517,10 +507,29 @@ impl Drop for ManagedChild {
 }
 
 #[cfg(unix)]
+fn group_leader_exit_success(group: rustix::process::Pid) -> Option<bool> {
+    use rustix::process::{WaitId, WaitIdOptions, waitid};
+    // Keep the child's PID reserved until the final signal to its group.
+    waitid(
+        WaitId::Pid(group),
+        WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+    )
+    .ok()
+    .flatten()
+    .map(|status| status.exit_status() == Some(0))
+}
+
+#[cfg(unix)]
 fn signal(group: rustix::process::Pid, signal: rustix::process::Signal) -> bool {
     match rustix::process::kill_process_group(group, signal) {
         Ok(()) => true,
         Err(rustix::io::Errno::SRCH) => false,
+        #[cfg(target_os = "macos")]
+        Err(rustix::io::Errno::PERM) if group_leader_exit_success(group) == Some(true) => {
+            // macOS can report EPERM for an empty group with an unreaped leader.
+            tracing::debug!("source extension group leader already exited");
+            true
+        }
         Err(error) => {
             tracing::warn!(%error, "could not terminate source extension process group");
             true

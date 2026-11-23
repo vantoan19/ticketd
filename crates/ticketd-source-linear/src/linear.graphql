@@ -1,25 +1,47 @@
 query LinearConnection($team: String!) {
-  viewer { id displayName }
-  organization { id name urlKey }
-  team(id: $team) { id }
+  viewer {
+    id
+    displayName
+  }
+  organization {
+    id
+    name
+    urlKey
+  }
+  team(id: $team) {
+    id
+  }
 }
 
 query LinearMe {
-  viewer { id }
+  viewer {
+    id
+  }
 }
 
 query LinearTeams($first: Int!, $after: String) {
   teams(first: $first, after: $after) {
-    nodes { id key name }
-    pageInfo { ...LinearPage }
+    nodes {
+      id
+      key
+      name
+    }
+    pageInfo {
+      ...LinearPage
+    }
   }
 }
 
 query LinearAssignees($team: String!, $first: Int!, $after: String) {
   team(id: $team) {
     members(first: $first, after: $after) {
-      nodes { id displayName }
-      pageInfo { ...LinearPage }
+      nodes {
+        id
+        displayName
+      }
+      pageInfo {
+        ...LinearPage
+      }
     }
   }
 }
@@ -28,38 +50,62 @@ query LinearLabels($team: ID!, $first: Int!, $after: String) {
   issueLabels(
     first: $first
     after: $after
-    filter: { or: [{ team: { id: { eq: $team } } }, { team: { null: true } }], isGroup: { eq: false } }
+    filter: {
+      or: [{ team: { id: { eq: $team } } }, { team: { null: true } }]
+      isGroup: { eq: false }
+    }
   ) {
-    nodes { id name }
-    pageInfo { ...LinearPage }
+    nodes {
+      id
+      name
+    }
+    pageInfo {
+      ...LinearPage
+    }
   }
 }
 
 query LinearProjects($team: String!, $first: Int!, $after: String) {
   team(id: $team) {
     projects(first: $first, after: $after) {
-      nodes { id name }
-      pageInfo { ...LinearPage }
+      nodes {
+        id
+        name
+      }
+      pageInfo {
+        ...LinearPage
+      }
     }
   }
 }
 
 query LinearDiscover($first: Int!, $after: String, $filter: IssueFilter!) {
   issues(first: $first, after: $after, filter: $filter) {
-    nodes { ...LinearIssue }
-    pageInfo { ...LinearPage }
+    nodes {
+      ...LinearIssue
+    }
+    pageInfo {
+      ...LinearPage
+    }
   }
 }
 
 query LinearFetch($id: String!) {
-  issue(id: $id) { ...LinearIssue }
+  issue(id: $id) {
+    ...LinearIssue
+  }
 }
 
 query LinearIssueLabels($id: String!, $first: Int!, $after: String) {
   issue(id: $id) {
     labels(first: $first, after: $after) {
-      nodes { id name }
-      pageInfo { ...LinearPage }
+      nodes {
+        id
+        name
+      }
+      pageInfo {
+        ...LinearPage
+      }
     }
   }
 }
@@ -69,10 +115,21 @@ query LinearRelations($id: String!, $first: Int!, $after: String) {
     relations(first: $first, after: $after) {
       nodes {
         type
-        issue { id }
-        relatedIssue { id identifier url team { id } }
+        issue {
+          id
+        }
+        relatedIssue {
+          id
+          identifier
+          url
+          team {
+            id
+          }
+        }
       }
-      pageInfo { ...LinearPage }
+      pageInfo {
+        ...LinearPage
+      }
     }
   }
 }
@@ -86,10 +143,17 @@ query LinearComments($id: String!, $first: Int!, $after: String) {
         updatedAt
         url
         body
-        user { displayName }
-        botActor { name userDisplayName }
+        user {
+          displayName
+        }
+        botActor {
+          name
+          userDisplayName
+        }
       }
-      pageInfo { ...LinearPage }
+      pageInfo {
+        ...LinearPage
+      }
     }
   }
 }
@@ -100,19 +164,39 @@ query LinearHistory($id: String!, $first: Int!, $after: String) {
       nodes {
         id
         createdAt
-        actor { displayName }
-        botActor { name userDisplayName }
+        actor {
+          displayName
+        }
+        botActor {
+          name
+          userDisplayName
+        }
         fromStateId
         toStateId
-        fromState { name type }
-        toState { name type }
+        fromState {
+          name
+          type
+        }
+        toState {
+          name
+          type
+        }
         fromAssigneeId
         toAssigneeId
-        fromAssignee { displayName }
-        toAssignee { displayName }
-        relationChanges { type identifier }
+        fromAssignee {
+          displayName
+        }
+        toAssignee {
+          displayName
+        }
+        relationChanges {
+          type
+          identifier
+        }
       }
-      pageInfo { ...LinearPage }
+      pageInfo {
+        ...LinearPage
+      }
     }
   }
 }
@@ -126,13 +210,27 @@ fragment LinearIssue on Issue {
   createdAt
   updatedAt
   trashed
-  team { id }
-  state { name type }
-  creator { displayName }
-  assignee { displayName }
+  team {
+    id
+  }
+  state {
+    name
+    type
+  }
+  creator {
+    displayName
+  }
+  assignee {
+    displayName
+  }
   labels(first: 50) {
-    nodes { id name }
-    pageInfo { ...LinearPage }
+    nodes {
+      id
+      name
+    }
+    pageInfo {
+      ...LinearPage
+    }
   }
 }
 
