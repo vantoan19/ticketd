@@ -7,6 +7,7 @@ import {
   formatVersion,
   handWrittenNotes,
   versionBumpBody,
+  versionBumpLink,
 } from "./release-notes.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -48,4 +49,15 @@ test("a PR without the markers has no release notes", () => {
     extractNotes("<!-- release-notes:start -->\n<!-- release-notes:end -->"),
     null,
   );
+});
+
+test("the fallback link opens the version-bump PR prefilled", () => {
+  const link = new URL(versionBumpLink("0.2.0", "Body & notes"));
+  assert.equal(
+    link.pathname,
+    "/vantoan19/ticketd/compare/main...release/v0.2.0",
+  );
+  assert.equal(link.searchParams.get("title"), "Release 0.2.0");
+  assert.equal(link.searchParams.get("labels"), "release");
+  assert.equal(link.searchParams.get("body"), "Body & notes");
 });

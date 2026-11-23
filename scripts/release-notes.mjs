@@ -2,6 +2,8 @@
 //
 //   node scripts/release-notes.mjs pr-body --version 0.2.0
 //     The version-bump PR body, with the hand-written section drafted between markers.
+//   node scripts/release-notes.mjs pr-link --version 0.2.0
+//     A link that opens that PR, prefilled, for when the workflow token may not open PRs.
 //   node scripts/release-notes.mjs release --version 0.2.0 --sha <sha> --source <checkout> --out <file>
 //     The draft release body: the hand-written section from the merged version-bump PR (or the
 //     template when the commit has none, as in a dry run), then GitHub's generated notes,
@@ -10,7 +12,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { gh, isPrerelease } from "./release-version.mjs";
+import { gh, isPrerelease, parseVersion } from "./release-version.mjs";
 
 const repository = "vantoan19/ticketd";
 const start = "<!-- release-notes:start -->";
@@ -90,6 +92,18 @@ ${end}
 `;
 }
 
+export function versionBumpLink(version, body) {
+  parseVersion(version);
+  const query = new URLSearchParams({
+    quick_pull: "1",
+    labels: "release",
+    title: `Release ${version}`,
+    body,
+  });
+  // A valid version has only URL-safe characters, and GitHub expects the branch's slash as is.
+  return `https://github.com/${repository}/compare/main...release/v${version}?${query}`;
+}
+
 function releaseBody({ version, sha, source }) {
   const pulls = JSON.parse(
     gh(["api", `repos/${repository}/commits/${sha}/pulls`]),
@@ -129,9 +143,11 @@ function main(args) {
       out: { type: "string" },
     },
   });
-  if (command === "pr-body" && values.version) {
+  if ((command === "pr-body" || command === "pr-link") && values.version) {
     const root = fileURLToPath(new URL("..", import.meta.url));
-    process.stdout.write(versionBumpBody(values.version, formatVersion(root)));
+    const body = versionBumpBody(values.version, formatVersion(root));
+    if (command === "pr-body") process.stdout.write(body);
+    else console.log(versionBumpLink(values.version, body));
     return;
   }
   if (
@@ -147,7 +163,7 @@ function main(args) {
     return;
   }
   throw new Error(
-    "Usage: node scripts/release-notes.mjs pr-body --version <v> | release --version <v> --sha <sha> --source <checkout> --out <file>",
+    "Usage: node scripts/release-notes.mjs pr-body --version <v> | pr-link --version <v> | release --version <v> --sha <sha> --source <checkout> --out <file>",
   );
 }
 
