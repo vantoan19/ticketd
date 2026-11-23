@@ -204,7 +204,8 @@ mod tests {
         let descriptor = HarnessDescriptor {
             key: "sample-agent".parse().unwrap(),
             name: "Sample agent",
-            skills: SkillLocation::UserHome(".sample/support/skills"),
+            config_home: ".sample",
+            skills: SkillLocation::ConfigHome("support/skills"),
             ..CLAUDE_CODE.clone()
         };
         let harnesses = [&CLAUDE_CODE, &descriptor];
@@ -213,11 +214,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let directories =
             skill_directories(&["sample-agent".into()], &harnesses, home.path(), |_| None).unwrap();
+        let directory = home.path().join(".sample/support/skills/ticketd");
+        assert_eq!(directories.as_slice(), std::slice::from_ref(&directory));
         assert_eq!(
-            directories,
-            [home
-                .path()
-                .join(Path::new(".sample/support/skills/ticketd"))]
+            agent_skills::install_skill(&directory, false).unwrap(),
+            InstallOutcome::Installed
         );
+        assert!(!descriptor.detected(home.path(), |_| None));
+
+        std::fs::write(home.path().join(".sample/settings.toml"), "").unwrap();
+        assert!(descriptor.detected(home.path(), |_| None));
     }
 }

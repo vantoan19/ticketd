@@ -8,7 +8,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::io::{Error, ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The discovery skill shipped with this build.
 pub const DISCOVERY_SKILL: &str = include_str!("../../../skills/ticketd/SKILL.md");
@@ -52,8 +52,22 @@ impl Agent {
     /// Whether the harness has run for this user: its home folder holds
     /// something besides the skills folder, which installing may create itself.
     pub fn detected(&self, user_home: &Path, env: impl Fn(&str) -> Option<OsString>) -> bool {
+        let skill_root = match self.skills {
+            SkillLocation::ConfigHome(path) => {
+                Path::new(path).components().find_map(|part| match part {
+                    Component::Normal(name) => Some(name),
+                    _ => None,
+                })
+            }
+            SkillLocation::UserHome(_) => None,
+        };
         std::fs::read_dir(self.home(user_home, env)).is_ok_and(|mut entries| {
-            entries.any(|entry| entry.is_ok_and(|entry| entry.file_name() != "skills"))
+            entries.any(|entry| {
+                entry.is_ok_and(|entry| {
+                    let name = entry.file_name();
+                    name != "skills" && Some(name.as_os_str()) != skill_root
+                })
+            })
         })
     }
 }
