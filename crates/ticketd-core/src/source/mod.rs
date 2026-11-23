@@ -17,6 +17,7 @@ mod engine;
 mod freshness;
 mod github;
 mod publication;
+mod repository_routes;
 mod schedule;
 mod schema;
 mod takeover;
@@ -44,6 +45,7 @@ pub use publication::{
     PublicationLocalData, PublicationPreview, PublicationReview, PublishOptions, PublishOutcome,
     PublishedIssue, Resolution, ResolutionAction, ResolveOptions,
 };
+pub use repository_routes::{SourceRepositoryProject, SourceRepositoryRoute};
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
@@ -57,6 +59,8 @@ pub use tracking::{
 };
 
 use crate::{Error, Workspace};
+
+const REPOSITORIES: &str = "repositories";
 
 /// A source's validated configuration as saved in the workspace.
 ///

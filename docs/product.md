@@ -439,6 +439,11 @@ listed, backfill works offline. If the source needs setup, the preview identifie
 the repository to add. Confirming applies the reviewed changes together. If the
 effect changes before confirmation, review the updated preview.
 
+GitHub source settings show the project each saved discovery repository routes to.
+Link an unclaimed repository to a project without a Project remote, or create a
+project from a checkout folder, then review backfill. Removing a repository from
+discovery leaves its Project remote on the project.
+
 ### Workspace sync
 
 A person using ticketd on several desktops gets the same Workspace content and

@@ -13,11 +13,13 @@ export function SourcePage({
   active,
   initialRepository,
   onSaved,
+  onProjectLinked,
 }: {
   entry: SourceEntry;
   active: boolean;
   initialRepository?: string;
   onSaved?: () => void;
+  onProjectLinked?: (projectId: string) => void;
 }) {
   const [visited, setVisited] = useState(active);
   if (active && !visited) setVisited(true);
@@ -28,6 +30,7 @@ export function SourcePage({
       hidden={!active}
       {...(initialRepository && { initialRepository })}
       {...(onSaved && { onSaved })}
+      {...(onProjectLinked && { onProjectLinked })}
     />
   );
 }

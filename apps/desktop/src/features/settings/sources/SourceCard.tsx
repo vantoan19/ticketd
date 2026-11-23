@@ -29,6 +29,7 @@ import {
   draftFromConfig,
   type Draft,
 } from "@/features/settings/sources/config-values";
+import { SourceRepositoryRoutes } from "@/features/settings/sources/SourceRepositoryRoutes";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
@@ -125,8 +126,8 @@ function PreviewPanel({
         </Button>
       </div>
       {preview.issues.length > 0 && (
-        <div className="source-preview-table-scroll">
-          <table>
+        <div className="source-table-scroll">
+          <table className="source-table">
             <thead>
               <tr>
                 <th scope="col">Issue</th>
@@ -222,6 +223,7 @@ export function SourceCard({
   hidden = false,
   initialRepository,
   onSaved,
+  onProjectLinked,
 }: {
   entry: SourceEntry;
   /** Keeps the page mounted but out of sight, so its draft and preview survive. */
@@ -229,6 +231,7 @@ export function SourceCard({
   /** The repository that opened first-time source setup. */
   initialRepository?: string;
   onSaved?: () => void;
+  onProjectLinked?: (projectId: string) => void;
 }) {
   const now = useNow();
   const { connector } = entry;
@@ -629,6 +632,14 @@ export function SourceCard({
           )}
         </SettingsList>
       </SettingsSection>
+      {connector.provider === "github" && (
+        <SourceRepositoryRoutes
+          provider={connector.provider}
+          hidden={hidden}
+          savedKey={saved ? configKey(saved.config) : ""}
+          {...(onProjectLinked && { onProjectLinked })}
+        />
+      )}
       <SettingsSection
         title="Sync"
         actions={

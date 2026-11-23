@@ -314,6 +314,109 @@ struct Fixture {
     dir: tempfile::TempDir,
 }
 
+#[test]
+fn saved_discovery_repositories_report_their_routed_project_on_the_source_host() {
+    let mut f = Fixture::new();
+    let config = json!({"repositories": ["o/r", "other/repo"]});
+    f.workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap();
+    let matching = f
+        .workspace
+        .create_project_with_remote(
+            "Matching checkout",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/O/R"),
+        )
+        .unwrap();
+    let other_checkout = tempfile::tempdir().unwrap();
+    f.workspace
+        .create_project_with_remote(
+            "Different host",
+            other_checkout.path().to_str().unwrap(),
+            Some("github.com/other/repo"),
+        )
+        .unwrap();
+    f.remote(|remote| remote.outage = Some("offline".into()));
+
+    let routes = f
+        .workspace
+        .source_repository_routes(&f.engine, "fake")
+        .unwrap();
+    assert_eq!(routes.len(), 2);
+    assert_eq!(routes[0].repository, "o/r");
+    assert_eq!(
+        routes[0].project_remote.as_deref(),
+        Some("example.test/o/r")
+    );
+    let project = routes[0].project.as_ref().unwrap();
+    assert_eq!(project.id, matching.id);
+    assert_eq!(project.name, "Matching checkout");
+    assert_eq!(routes[1].repository, "other/repo");
+    assert!(routes[1].project.is_none());
+}
+
+#[test]
+fn linking_a_saved_repository_sets_only_an_unclaimed_projects_remote() {
+    let mut f = Fixture::new();
+    let path = f.dir.path().to_str().unwrap();
+    let project = f.workspace.create_project("Before rename", path).unwrap();
+    let checkout = tempfile::tempdir().unwrap();
+    let renamed = f
+        .workspace
+        .edit_project(
+            &project.id,
+            "After rename",
+            checkout.path().to_str().unwrap(),
+        )
+        .unwrap();
+
+    let linked = f
+        .workspace
+        .link_source_repository_project(&f.engine, "fake", "o/r", &project.id)
+        .unwrap();
+    assert_eq!(linked.remote.as_deref(), Some("example.test/o/r"));
+    assert_eq!(linked.name, renamed.name);
+    assert_eq!(linked.paths, renamed.paths);
+    assert_eq!(
+        f.workspace
+            .preview_connect_source(&f.engine, "fake", &project.id)
+            .unwrap()
+            .source,
+        ConnectSourceAction::AlreadyListed
+    );
+
+    let config = json!({"repositories": ["other/repo"]});
+    f.workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap();
+    assert_eq!(f.workspace.show_project(&project.id).unwrap(), linked);
+    assert!(
+        f.workspace
+            .source_repository_routes(&f.engine, "fake")
+            .unwrap()[0]
+            .project
+            .is_none()
+    );
+    assert!(matches!(
+        f.workspace
+            .link_source_repository_project(&f.engine, "fake", "other/repo", &project.id),
+        Err(Error::ProjectAlreadyHasRemote(name)) if name == "After rename"
+    ));
+    assert_eq!(f.workspace.show_project(&project.id).unwrap(), linked);
+
+    let unclaimed = f
+        .workspace
+        .create_project("Unclaimed checkout", path)
+        .unwrap();
+    assert!(matches!(
+        f.workspace
+            .link_source_repository_project(&f.engine, "fake", "o/r", &unclaimed.id),
+        Err(Error::SourceRepositoryNotListed(repo)) if repo == "o/r"
+    ));
+    assert_eq!(f.workspace.show_project(&unclaimed.id).unwrap(), unclaimed);
+}
+
 impl Fixture {
     fn new() -> Self {
         let fake = Fake::default();

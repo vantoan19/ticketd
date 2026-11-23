@@ -33,14 +33,20 @@ export function ProjectFormDialog({
   open,
   project,
   initialRemote,
+  lockRemote = false,
   onOpenChange,
+  onExitComplete,
+  resolveReturnFocus,
   onSaved,
 }: {
   open: boolean;
   project?: Project;
   /** An explicit repository selected by the caller takes precedence over detection. */
   initialRemote?: string;
+  lockRemote?: boolean;
   onOpenChange: (open: boolean) => void;
+  onExitComplete?: () => void;
+  resolveReturnFocus?: () => HTMLElement | null;
   onSaved: (project: Project) => void;
 }) {
   const nameId = useId();
@@ -54,7 +60,9 @@ export function ProjectFormDialog({
   const draft = drafts[scope];
   const path = project?.path ?? draft?.path ?? "";
   const name = draft?.name ?? project?.name ?? nameFromFolder(path);
-  const { detection, pending } = useProjectRemoteDetection(open ? path : "");
+  const { detection, pending } = useProjectRemoteDetection(
+    open && !lockRemote ? path : "",
+  );
   const remote =
     draft?.remote ??
     initialRemote ??
@@ -132,6 +140,8 @@ export function ProjectFormDialog({
     <DialogShell
       open={open}
       onOpenChange={close}
+      {...(onExitComplete && { onExitComplete })}
+      {...(resolveReturnFocus && { resolveReturnFocus })}
       title={project ? "Edit project" : "New project"}
       {...(!project && {
         description: "Start from the repository folder on this computer.",
@@ -195,6 +205,7 @@ export function ProjectFormDialog({
             placeholder="host/owner/name"
             autoComplete="off"
             disabled={busy}
+            readOnly={lockRemote}
             aria-invalid={Boolean(remoteError) || undefined}
             aria-describedby={remoteError ? remoteErrorId : undefined}
             onChange={(event) => edit({ remote: event.target.value })}

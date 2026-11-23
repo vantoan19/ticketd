@@ -1464,6 +1464,26 @@ fn list_sources() -> Result<Vec<SourceEntry>, SourceFailure> {
         .collect()
 }
 #[tauri::command(async)]
+fn source_repository_routes(
+    provider: String,
+) -> Result<Vec<ticketd_core::source::SourceRepositoryRoute>, BridgeFailure> {
+    Ok(open_workspace()?
+        .source_repository_routes(&ticketd_core::source::Engine::builtin(), &provider)?)
+}
+#[tauri::command(async)]
+fn link_source_repository_project(
+    provider: String,
+    repository: String,
+    project_id: String,
+) -> Result<Project, BridgeFailure> {
+    Ok(open_workspace()?.link_source_repository_project(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        &repository,
+        &project_id,
+    )?)
+}
+#[tauri::command(async)]
 fn source_check_connection(
     provider: String,
     config: ticketd_core::source::ConfigValues,
@@ -2035,6 +2055,8 @@ pub fn run() -> Result<(), tauri::Error> {
             save_document,
             backup_workspace,
             list_sources,
+            source_repository_routes,
+            link_source_repository_project,
             refresh_sources,
             take_ownership,
             source_health,

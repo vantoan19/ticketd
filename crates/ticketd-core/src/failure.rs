@@ -110,7 +110,9 @@ impl Error {
             Self::TicketChanged(_)
             | Self::DocumentChanged(_)
             | Self::RequestConflict(_)
-            | Self::ConnectSourceChanged => FailureKind::Conflict,
+            | Self::ConnectSourceChanged
+            | Self::ProjectAlreadyHasRemote(_)
+            | Self::SourceRepositoryNotListed(_) => FailureKind::Conflict,
             Self::NotFound(_)
             | Self::DocumentNotFound(_)
             | Self::ChatNotFound(_)

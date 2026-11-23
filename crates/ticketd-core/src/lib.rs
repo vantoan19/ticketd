@@ -307,6 +307,10 @@ pub enum Error {
         "Project remote {remote} belongs to {project}. Choose another remote or clear it on that project."
     )]
     ProjectRemoteTaken { remote: String, project: String },
+    #[error("{0} already has a Project remote. Choose a project without one.")]
+    ProjectAlreadyHasRemote(String),
+    #[error("{0} is no longer in the saved discovery repositories.")]
+    SourceRepositoryNotListed(String),
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
     #[error("Set a Project remote on {0} before connecting its ticket source.")]

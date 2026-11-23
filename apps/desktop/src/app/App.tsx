@@ -1305,6 +1305,10 @@ function AppContent() {
                                             setView("inbox");
                                           }}
                                           onRestore={replaceWorkspace}
+                                          onProjectLinked={(projectId) => {
+                                            void reportChange();
+                                            reviewProjectSource(projectId);
+                                          }}
                                           {...(pendingSourceSetup && {
                                             projectSourceSetup:
                                               pendingSourceSetup,
