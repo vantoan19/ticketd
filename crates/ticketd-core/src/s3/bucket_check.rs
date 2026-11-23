@@ -75,6 +75,7 @@ const PUT_OBJECT: &str = "s3:PutObject";
 const GET_OBJECT: &str = "s3:GetObject";
 const GET_OBJECT_VERSION: &str = "s3:GetObjectVersion";
 const LIST_VERSIONS: &str = "s3:ListBucketVersions";
+const LIST_UPLOADS: &str = "s3:ListBucketMultipartUploads";
 
 /// Runs the whole check: a failure is the first thing wrong.
 pub(super) fn run(client: &S3Client<'_>, prefix: &str) -> Result<(), BucketCheckError> {
@@ -90,6 +91,7 @@ pub(super) fn run(client: &S3Client<'_>, prefix: &str) -> Result<(), BucketCheck
     }
     versioning_is_on(client)?;
     let probe = format!("{prefix}{PROBE}");
+    can_list_uploads(client, &probe)?;
     refuses_a_second_create(client, &probe)?;
     refuses_a_mismatched_update(client, &probe)?;
     read_back(client, &probe, None, GET_OBJECT)?;
@@ -213,8 +215,22 @@ fn versioning_is_on(client: &S3Client<'_>) -> Result<(), BucketCheckError> {
     }
 }
 
+/// A file in parts lists the uploads in progress for its key before it sends the first part,
+/// so a profile that may not is refused here and not on the first Attachment.
+fn can_list_uploads(client: &S3Client<'_>, probe: &str) -> Result<(), BucketCheckError> {
+    let response = client.send(&S3Call::get(
+        "",
+        &[("uploads", ""), ("prefix", probe), ("max-uploads", "1")],
+    ))?;
+    if response.status != 200 {
+        return Err(failure(client.target(), &response, LIST_UPLOADS));
+    }
+    Ok(())
+}
+
 enum Created {
-    New,
+    /// The probe was written, as this version.
+    New(Option<String>),
     AlreadyThere,
 }
 
@@ -236,7 +252,11 @@ fn create_probe(client: &S3Client<'_>, key: &str) -> Result<Created, BucketCheck
             body: PROBE_BYTES,
         })?;
         match response.status {
-            200 => return Ok(Created::New),
+            200 => {
+                return Ok(Created::New(
+                    response.header("x-amz-version-id").map(str::to_owned),
+                ));
+            }
             412 => return Ok(Created::AlreadyThere),
             409 => client.wait(std::time::Duration::from_millis(100 << attempt)),
             501 => return Err(BucketCheckError::NoConditionalWrites),
@@ -253,10 +273,20 @@ fn create_probe(client: &S3Client<'_>, key: &str) -> Result<Created, BucketCheck
 fn refuses_a_second_create(client: &S3Client<'_>, key: &str) -> Result<(), BucketCheckError> {
     match create_probe(client, key)? {
         Created::AlreadyThere => Ok(()),
-        Created::New => match create_probe(client, key)? {
-            Created::AlreadyThere => Ok(()),
-            Created::New => Err(BucketCheckError::NoConditionalWrites),
-        },
+        Created::New(version) => {
+            // Versioning may have been suspended since it was read: the probe would then sit in
+            // the one `null` version, which the next write replaces. A probe from before is
+            // only read, so a `null` one stays acceptable.
+            match version.as_deref() {
+                Some("null") => return Err(BucketCheckError::VersioningOff { suspended: true }),
+                None => return Err(BucketCheckError::VersioningOff { suspended: false }),
+                Some(_) => {}
+            }
+            match create_probe(client, key)? {
+                Created::AlreadyThere => Ok(()),
+                Created::New(_) => Err(BucketCheckError::NoConditionalWrites),
+            }
+        }
     }
 }
 

@@ -247,6 +247,23 @@ fn an_identity_that_fails_otherwise_is_a_failure() {
 }
 
 #[test]
+fn the_identity_of_a_profile_with_an_endpoint_never_carries_the_endpoints_user_info() {
+    // An endpoint may hold a user name and password, a path or a query; the label is kept
+    // with the Workspace, so it names the host and port and nothing else.
+    let aws = StandIn::new()
+        .once(IDENTITY, fails(254, "InvalidClientTokenId"))
+        .once("configure get region --profile work", ok("us-east-1\n"))
+        .once("configure get services --profile work", fails(1, ""))
+        .once(
+            "configure get endpoint_url --profile work",
+            ok("https://admin:hunter2@minio.example.com:9000/base?token=abc\n"),
+        )
+        .once(EXPORT, ok(&credentials_json("minioadmin", None)));
+    let identity = aws.cli().identity("work").unwrap();
+    assert_eq!(identity, "work on minio.example.com:9000");
+}
+
+#[test]
 fn a_profile_with_an_endpoint_is_checked_through_its_credentials_not_sts() {
     // STS is AWS's: a MinIO profile's keys fail there, though they work for the bucket.
     let aws = StandIn::new()
@@ -711,24 +728,23 @@ fn an_endpoint_in_a_services_section_wins_over_the_profile_endpoint() {
 }
 
 #[test]
-fn a_cli_that_cannot_read_a_services_section_falls_back_to_the_profile_endpoint() {
-    // CLI 2.19.5 has no `configure get --services`; it exits 252 with this message.
+fn a_cli_that_cannot_read_a_services_section_does_not_guess_its_endpoint() {
+    // CLI 2.19.5 has no `configure get --services`; it exits 252 with this message. The
+    // profile names a services section, which may hold the S3 endpoint, so the profile's own
+    // `endpoint_url` (or none, which is AWS) is not known to be the one.
     let aws = StandIn::new()
         .once("configure get region --profile minio", ok("us-east-1\n"))
         .once("configure get services --profile minio", ok("storage\n"))
         .once(
             "configure get --services storage s3.endpoint_url --profile minio",
             fails(252, "\nUnknown options: --services,storage\n"),
-        )
-        .once(
-            "configure get endpoint_url --profile minio",
-            ok("http://localhost:9000\n"),
         );
-    let settings = aws.cli().settings("minio").unwrap();
-    assert_eq!(
-        settings.endpoint_url.as_deref(),
-        Some("http://localhost:9000")
+    let error = aws.cli().settings("minio").unwrap_err();
+    assert!(
+        matches!(error, AwsCliError::ServicesNeedNewerCli { .. }),
+        "{error:?}"
     );
+    assert!(error.to_string().contains("2.34.22"), "{error}");
 }
 
 #[test]

@@ -620,6 +620,59 @@ fn a_write_to_a_bucket_whose_versioning_was_suspended_is_refused_and_the_check_r
     }
 }
 
+/// A transport that holds the first listing of versions until the test lets it go.
+struct Held<'a> {
+    sim: &'a S3Sim,
+    reached: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl S3Transport for Held<'_> {
+    fn send(&self, request: S3Request) -> Result<S3Response, S3TransportError> {
+        let held = request.method == "GET" && request.url.contains("versions");
+        let reached = if held {
+            self.reached.lock().unwrap().take()
+        } else {
+            None
+        };
+        if let Some(reached) = reached {
+            reached.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+        }
+        self.sim.send(request)
+    }
+}
+
+#[test]
+fn a_check_that_began_before_a_null_version_write_does_not_keep_its_pass() {
+    // The check passed Versioning, then Versioning was suspended and a write found the `null`
+    // version, which clears the pass. The check, still running, must not store it again.
+    let bench = Bench::new();
+    let folder = bench.folder();
+    let (reached, arrived) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let held = Held {
+        sim: &bench.sim,
+        reached: Mutex::new(Some(reached)),
+        release: Mutex::new(released),
+    };
+    let remote = S3Remote::new(target(), "ticketd/", &bench.credentials, &held)
+        .unwrap()
+        .with_pause(|_| {});
+    std::thread::scope(|scope| {
+        let checking = scope.spawn(|| remote.check_bucket());
+        arrived.recv().unwrap();
+        bench.sim.versioning(s3_sim::Versioning::Suspended);
+        assert!(put(&remote, &folder, &ticket(), None, b"one").is_err());
+        release.send(()).unwrap();
+        checking.join().unwrap().unwrap();
+    });
+    assert_eq!(
+        remote.check_bucket(),
+        Err(BucketCheckError::VersioningOff { suspended: true })
+    );
+}
+
 #[test]
 fn a_null_version_that_was_there_before_versioning_is_still_read() {
     let bench = Bench::new();
@@ -1255,6 +1308,115 @@ fn the_real_transport_refuses_a_request_for_another_host_without_sending_it() {
         transport.send(request).unwrap_err(),
         S3TransportError::NotAllowed
     );
+}
+
+type Matches = fn(&S3Request) -> bool;
+
+/// A listing that answers every matching request with the same truncated page, as a broken
+/// endpoint can; it gives up with "offline" after a few, so a loop that never ends fails
+/// the test and does not hang it.
+struct Stuck<'a> {
+    inner: &'a S3Sim,
+    when: Matches,
+    page: &'static str,
+    asked: std::sync::atomic::AtomicUsize,
+}
+
+impl S3Transport for Stuck<'_> {
+    fn send(&self, request: S3Request) -> Result<S3Response, S3TransportError> {
+        if !(self.when)(&request) {
+            return self.inner.send(request);
+        }
+        if self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 10 {
+            return Err(S3TransportError::Offline);
+        }
+        Ok(S3Response {
+            status: 200,
+            headers: vec![],
+            body: self.page.as_bytes().to_vec(),
+        })
+    }
+}
+
+#[test]
+fn a_listing_that_repeats_its_cursor_is_an_unreadable_response_not_an_endless_loop() {
+    let truncated = |root, next| {
+        let page: &'static str = Box::leak(
+            format!("<{root}><IsTruncated>true</IsTruncated>{next}</{root}>").into_boxed_str(),
+        );
+        page
+    };
+    let listing = |request: &S3Request| {
+        request.method == "GET"
+            && request.url.contains("versions")
+            && !request.url.contains("versionId")
+    };
+    let folders =
+        |request: &S3Request| request.method == "GET" && request.url.contains("list-type");
+    let uploads = |request: &S3Request| request.method == "GET" && request.url.contains("uploads");
+    let cases: [(&str, Matches, &str); 4] = [
+        (
+            "versions",
+            listing,
+            truncated(
+                "ListVersionsResult",
+                "<NextKeyMarker>k</NextKeyMarker><NextVersionIdMarker>v</NextVersionIdMarker>",
+            ),
+        ),
+        (
+            "list",
+            listing,
+            truncated(
+                "ListVersionsResult",
+                "<NextKeyMarker>k</NextKeyMarker><NextVersionIdMarker>v</NextVersionIdMarker>",
+            ),
+        ),
+        (
+            "folders",
+            folders,
+            truncated(
+                "ListBucketResult",
+                "<NextContinuationToken>t</NextContinuationToken>",
+            ),
+        ),
+        (
+            "uploads",
+            uploads,
+            truncated(
+                "ListMultipartUploadsResult",
+                "<NextKeyMarker>k</NextKeyMarker><NextUploadIdMarker>u</NextUploadIdMarker>",
+            ),
+        ),
+    ];
+    for (name, when, page) in cases {
+        let bench = Bench::new();
+        let (folder, key) = (bench.folder(), attachment());
+        let stuck = Stuck {
+            inner: &bench.sim,
+            when,
+            page,
+            asked: 0.into(),
+        };
+        let remote = S3Remote::new(target(), "ticketd/", &bench.credentials, &stuck)
+            .unwrap()
+            .with_part_size(SMALL_PARTS)
+            .with_pause(|_| {});
+        let outcome = match name {
+            "versions" => remote.revisions(&folder, &key).map(drop),
+            "list" => remote.list(&folder).map(drop),
+            "folders" => remote.folders().map(drop),
+            _ => put(&remote, &folder, &key, None, &over_the_limit()).map(drop),
+        };
+        assert!(
+            matches!(&outcome, Err(RemoteError::Other(message)) if message.contains("unreadable")),
+            "{name}: {outcome:?}"
+        );
+        // The second page is the first repeated: no third request is made.
+        assert!(
+            stuck.asked.load(std::sync::atomic::Ordering::SeqCst) <= 2,
+            "{name}"
+        );
+    }
 }
 
 /// Passes requests to the simulator and keeps a copy of each.

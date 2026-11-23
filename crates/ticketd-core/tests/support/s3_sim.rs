@@ -225,6 +225,9 @@ pub enum Versioning {
     Enabled,
     Suspended,
     NeverSet,
+    /// Versioning is read as enabled, and an administrator suspends it right after: the next
+    /// write is stored in the `null` version.
+    SuspendedAfterTheRead,
 }
 
 pub struct S3Sim {
@@ -418,12 +421,15 @@ impl State {
         }
     }
 
-    fn versioning_answer(&self) -> S3Response {
+    fn versioning_answer(&mut self) -> S3Response {
         let status = match self.versioning {
-            Versioning::Enabled => "<Status>Enabled</Status>",
+            Versioning::Enabled | Versioning::SuspendedAfterTheRead => "<Status>Enabled</Status>",
             Versioning::Suspended => "<Status>Suspended</Status>",
             Versioning::NeverSet => "",
         };
+        if self.versioning == Versioning::SuspendedAfterTheRead {
+            self.versioning = Versioning::Suspended;
+        }
         answer(
             200,
             vec![],

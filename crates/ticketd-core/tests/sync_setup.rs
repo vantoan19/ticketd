@@ -2247,6 +2247,36 @@ fn a_folder_bound_by_another_connection_while_s3_is_connected_is_not_given_anoth
 }
 
 #[test]
+fn a_folder_bound_by_another_connection_while_drive_is_connected_is_not_kept_by_drive() {
+    // `sync_connect` reads the binding, then writes: another connection to the same
+    // Workspace file that binds an S3 folder in between must not have its folder kept by a
+    // Drive update that clears the S3 settings.
+    let desks = desks();
+    let path = desks.directory.path().join("a");
+    let mut desk = Workspace::open(&path).unwrap();
+    desk.sync_connect_s3(&s3("one", "ticketd/", "work"), IDENTITY)
+        .unwrap();
+
+    let other = rusqlite::Connection::open(&path).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let connecting = std::thread::spawn(move || {
+        let outcome = desk.sync_connect("connection-1", "person@example.com");
+        (desk, outcome)
+    });
+    // The connect is under way, held up by the other connection's write lock.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    other
+        .execute_batch(
+            "UPDATE sync_state SET folder = 'bound-by-other', folder_name = 'Home'; COMMIT",
+        )
+        .unwrap();
+
+    let (desk, outcome) = connecting.join().unwrap();
+    assert!(matches!(outcome, Err(Error::Sync(_))), "{outcome:?}");
+    assert_eq!(desk.sync_status().unwrap().provider, SyncProvider::S3);
+}
+
+#[test]
 fn reconnect_is_offered_for_the_same_bucket_prefix_and_folder_of_an_s3_binding() {
     let desks = desks();
     let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();

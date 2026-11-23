@@ -11,6 +11,7 @@ mod s3_sim;
 use s3_sim::{BUCKET, FakeCredentials, Fault, S3Sim, Versioning, target};
 
 const PROBE: &str = "ticketd/.ticketd-bucket-check";
+const PROBE_BYTES: &[u8] = b"ticketd checked that this bucket can hold a synced Workspace.\n";
 
 struct Bench {
     sim: S3Sim,
@@ -95,6 +96,25 @@ fn a_bucket_that_ignores_if_none_match_is_refused() {
 }
 
 #[test]
+fn a_probe_stored_in_the_null_version_is_refused() {
+    // Versioning was read as on, then suspended before the probe was written: the probe
+    // would sit in the one `null` version, which the next write replaces.
+    let bench = Bench::new();
+    bench.sim.versioning(Versioning::SuspendedAfterTheRead);
+    assert_eq!(
+        bench.check(),
+        Err(BucketCheckError::VersioningOff { suspended: true })
+    );
+
+    // A `null` probe made before Versioning was turned on is only read, and is accepted.
+    let bench = Bench::new();
+    bench.sim.versioning(Versioning::Suspended);
+    bench.sim.put_foreign(PROBE, PROBE_BYTES);
+    bench.sim.versioning(Versioning::Enabled);
+    bench.check().unwrap();
+}
+
+#[test]
 fn a_bucket_that_ignores_if_match_is_refused() {
     // An update that names another ETag must be refused, or an edit made after sync read the
     // file could overwrite another device's.
@@ -124,6 +144,8 @@ fn a_denied_action_is_named_wherever_the_bucket_denies_it() {
         ("GET", "versioning", "s3:GetBucketVersioning"),
         ("PUT", ".ticketd-bucket-check", "s3:PutObject"),
         ("GET", "&versions", "s3:ListBucketVersions"),
+        // Files in parts list the uploads in progress before the first part.
+        ("GET", "uploads", "s3:ListBucketMultipartUploads"),
     ];
     for (method, url, action) in steps {
         let bench = Bench::new();

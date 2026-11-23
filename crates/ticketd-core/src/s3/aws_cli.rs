@@ -102,6 +102,10 @@ pub enum AwsCliError {
         "This profile signs in with `aws login`, which needs AWS CLI version 2.32 or later; this one is {found}. Update the AWS CLI."
     )]
     LoginNeedsNewerCli { found: String },
+    #[error(
+        "This profile has a `services` section, which the AWS CLI {found} cannot read (it needs 2.34.22 or later), so ticketd cannot tell which S3 endpoint the profile names. Update the AWS CLI, or put the S3 endpoint in the profile's own endpoint_url and remove `services`."
+    )]
+    ServicesNeedNewerCli { found: String },
     #[error("Could not run the AWS CLI: {0}")]
     Io(#[source] io::Error),
 }
@@ -223,11 +227,13 @@ impl AwsCli {
                 let Some(endpoint) = endpoint else {
                     return Err(error);
                 };
+                // The label is kept with the Workspace, so it names the service by host and port
+                // only: an endpoint may carry a user name and password, a path or a query.
+                let Some(service) = service_name(&endpoint) else {
+                    return Err(error);
+                };
                 self.credentials(profile)?;
-                let host = endpoint
-                    .split_once("://")
-                    .map_or(endpoint.as_str(), |(_, host)| host);
-                Ok(format!("{profile} on {}", host.trim_end_matches('/')))
+                Ok(format!("{profile} on {service}"))
             }
             other => other,
         }
@@ -282,7 +288,8 @@ impl AwsCli {
     }
 
     /// The profile's region and S3 endpoint. A service-specific endpoint (a `services`
-    /// section) wins over `endpoint_url`, as in the AWS CLI itself.
+    /// section) wins over `endpoint_url`, as in the AWS CLI itself. A CLI too old to read
+    /// that section is an error when the profile has one.
     pub fn settings(&self, profile: &str) -> Result<ProfileSettings, AwsCliError> {
         let region = self.config_value(&["region"], profile)?;
         let endpoint_url = match self.services_endpoint(profile)? {
@@ -313,10 +320,13 @@ impl AwsCli {
             Some(0) => Ok(non_empty(&output.stdout)),
             Some(1) if output.stderr.trim().is_empty() => Ok(None),
             // `configure get --services` arrived in AWS CLI 2.34.22; older ones reject the
-            // option. The profile's own `endpoint_url` is then the only one readable.
+            // option. The section may hold the S3 endpoint, and the profile's own
+            // `endpoint_url` would then be the wrong one, so the profile is not guessed at.
             Some(252) if output.stderr.contains("Unknown options") => {
                 tracing::debug!("aws cli cannot read a services section");
-                Ok(None)
+                Err(AwsCliError::ServicesNeedNewerCli {
+                    found: format!("{}.{}", self.version.0, self.version.1),
+                })
             }
             code => Err(failed(code, &output.stderr)),
         }
@@ -572,6 +582,16 @@ fn sign_in_if_ended(error: AwsCliError) -> AwsCliError {
         }
         other => other,
     }
+}
+
+/// The host and port of a service's endpoint, without any user info, path or query.
+fn service_name(endpoint: &str) -> Option<String> {
+    let url = url::Url::parse(endpoint).ok()?;
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    })
 }
 
 fn non_empty(text: &str) -> Option<String> {
