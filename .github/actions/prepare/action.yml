@@ -156,7 +156,7 @@ runs:
     - name: Save Linux desktop packages
       if: >-
         inputs.desktop == 'true' && runner.os == 'Linux' && inputs.cache != 'none'
-        && steps.apt-cache.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || true)
+        && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.apt-key.outputs.dir }}/*.deb
