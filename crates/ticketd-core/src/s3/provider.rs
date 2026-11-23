@@ -161,9 +161,10 @@ impl S3Target {
     }
 
     /// Whether [`UreqS3Transport`] sends this request: reading or writing objects of this
-    /// bucket at its endpoint. No credential or signature goes anywhere else.
+    /// bucket at its endpoint. An upload in parts begins and completes with a POST and is
+    /// abandoned with a DELETE. No credential or signature goes anywhere else.
     pub fn allows(&self, method: &str, url: &str) -> bool {
-        if !matches!(method, "GET" | "HEAD" | "PUT") {
+        if !matches!(method, "GET" | "HEAD" | "PUT" | "POST" | "DELETE") {
             return false;
         }
         let Ok(parsed) = url::Url::parse(url) else {
@@ -300,6 +301,20 @@ impl S3Transport for UreqS3Transport {
                     builder = builder.header(name, value);
                 }
                 builder.call()
+            }
+            "DELETE" => {
+                let mut builder = self.agent.delete(&request.url);
+                for (name, value) in &request.headers {
+                    builder = builder.header(name, value);
+                }
+                builder.call()
+            }
+            "POST" => {
+                let mut builder = self.agent.post(&request.url);
+                for (name, value) in &request.headers {
+                    builder = builder.header(name, value);
+                }
+                builder.send(&request.body)
             }
             _ => {
                 let mut builder = self.agent.put(&request.url);

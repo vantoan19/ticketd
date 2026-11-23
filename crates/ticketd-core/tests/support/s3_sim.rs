@@ -2,7 +2,9 @@
 //! markers, conditional writes, ranged reads and paginated listings, enough for the S3
 //! adapter's tests. It checks what a real S3 checks of a request that the adapter could get
 //! wrong: that it is for this bucket, that every `x-amz-*` header is signed, that the payload
-//! hash is the body's, and that the credentials are the ones it accepts.
+//! hash is the body's, and that the credentials are the ones it accepts. Uploads in parts
+//! follow S3's rules: a checksum on every part, parts of at least 5 MiB but the last,
+//! consecutive part numbers in a completion, and the completion's own conditions.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)] // Shared deterministic fixture.
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -102,6 +104,38 @@ pub struct Stored {
     pub content_type: Option<String>,
 }
 
+/// One part of an upload in progress.
+#[derive(Clone)]
+struct Part {
+    bytes: Vec<u8>,
+    checksum: String,
+}
+
+impl Part {
+    fn etag(&self) -> String {
+        format!("\"{:.32}\"", hex(&Sha256::digest(&self.bytes)))
+    }
+}
+
+/// An upload begun and not yet completed or aborted.
+struct Upload {
+    key: String,
+    id: String,
+    metadata: Vec<(String, String)>,
+    disposition: Option<String>,
+    content_type: Option<String>,
+    checksummed: bool,
+    parts: BTreeMap<u32, Part>,
+}
+
+/// What an upload in progress holds, as a test sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pending {
+    pub key: String,
+    pub id: String,
+    pub parts: Vec<u32>,
+}
+
 /// A response to give instead of (or after) the simulated behaviour.
 pub struct Fault {
     pub method: &'static str,
@@ -167,6 +201,7 @@ struct State {
     ignores_conditions: bool,
     /// Where the bucket lives, when it is not where the sim's target says.
     bucket_region: Option<String>,
+    uploads: Vec<Upload>,
 }
 
 /// What GetBucketVersioning answers.
@@ -228,6 +263,24 @@ fn escape(text: &str) -> String {
 fn authorization(request: &S3Request) -> &str {
     header(request, "authorization").expect("a signed request")
 }
+
+fn metadata_of(request: &S3Request) -> Vec<(String, String)> {
+    request
+        .headers
+        .iter()
+        .filter(|(name, _)| name.to_ascii_lowercase().starts_with("x-amz-meta-"))
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+        .collect()
+}
+
+/// The text of the first `<name>…</name>` in `xml`, with the entities S3 clients send undone.
+fn tag(xml: &str, name: &str) -> Option<String> {
+    let rest = xml.split_once(&format!("<{name}>"))?.1;
+    let text = rest.split_once(&format!("</{name}>"))?.0;
+    Some(text.replace("&quot;", "\"").replace("&amp;", "&"))
+}
+
+const MIN_PART: usize = 5 * 1024 * 1024;
 
 fn header<'r>(request: &'r S3Request, name: &str) -> Option<&'r str> {
     request
@@ -321,6 +374,18 @@ impl State {
                 vec![],
             ),
             ("GET", true) if query.get("versioning").is_some() => self.versioning_answer(),
+            ("GET", true) if query.get("uploads").is_some() => self.list_uploads(&query),
+            ("GET", false) if query.get("uploadId").is_some() => self.list_parts(&key, &query),
+            ("POST", false) if query.get("uploads").is_some() => self.create_upload(request, &key),
+            ("PUT", false) if query.get("partNumber").is_some() => {
+                self.upload_part(request, &key, &query)
+            }
+            ("POST", false) if query.get("uploadId").is_some() => {
+                self.complete_upload(request, &key, query.get("uploadId").unwrap())
+            }
+            ("DELETE", false) if query.get("uploadId").is_some() => {
+                self.abort_upload(&key, query.get("uploadId").unwrap())
+            }
             ("GET", true) if query.get("versions").is_some() => self.list_versions(&query),
             ("GET", true) if query.get("list-type") == Some("2") => self.list_folders(&query),
             ("GET", false) => self.get(request, &key, query.get("versionId")),
@@ -378,7 +443,8 @@ impl State {
             .then(|| failure(400, "ExpiredToken"))
     }
 
-    fn put(&mut self, request: &S3Request, key: &str) -> S3Response {
+    /// Another device's write that lands just before this request.
+    fn apply_interleaved(&mut self, key: &str) {
         if let Some(index) = self
             .interleaved
             .iter()
@@ -387,29 +453,36 @@ impl State {
             let (_, bytes) = self.interleaved.remove(index);
             self.store(key, bytes, vec![], None, None, None);
         }
+    }
+
+    /// The `if-match` / `if-none-match` of a write against what the key holds now.
+    fn refuse_condition(&self, request: &S3Request, key: &str) -> Option<S3Response> {
+        let current = self.current(key).map(Version::etag);
+        let conditions = !self.ignores_conditions;
+        if conditions && header(request, "if-none-match") == Some("*") && current.is_some() {
+            return Some(failure(412, "PreconditionFailed"));
+        }
+        if let Some(wanted) = header(request, "if-match").filter(|_| conditions) {
+            match current {
+                None => return Some(failure(404, "NoSuchKey")),
+                Some(etag) if etag != wanted => return Some(failure(412, "PreconditionFailed")),
+                Some(_) => {}
+            }
+        }
+        None
+    }
+
+    fn put(&mut self, request: &S3Request, key: &str) -> S3Response {
+        self.apply_interleaved(key);
         if let Some(sent) = header(request, "x-amz-checksum-sha256")
             && sent != STANDARD.encode(Sha256::digest(&request.body))
         {
             return failure(400, "BadDigest");
         }
-        let current = self.current(key).map(Version::etag);
-        let conditions = !self.ignores_conditions;
-        if conditions && header(request, "if-none-match") == Some("*") && current.is_some() {
-            return failure(412, "PreconditionFailed");
+        if let Some(refused) = self.refuse_condition(request, key) {
+            return refused;
         }
-        if let Some(wanted) = header(request, "if-match").filter(|_| conditions) {
-            match current {
-                None => return failure(404, "NoSuchKey"),
-                Some(etag) if etag != wanted => return failure(412, "PreconditionFailed"),
-                Some(_) => {}
-            }
-        }
-        let metadata = request
-            .headers
-            .iter()
-            .filter(|(name, _)| name.to_ascii_lowercase().starts_with("x-amz-meta-"))
-            .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
-            .collect();
+        let metadata = metadata_of(request);
         let (id, etag) = self.store(
             key,
             request.body.clone(),
@@ -546,6 +619,216 @@ impl State {
         }
         xml.push_str("</ListVersionsResult>");
         answer(200, vec![], xml)
+    }
+
+    fn upload(&mut self, key: &str, id: &str) -> Option<&mut Upload> {
+        self.uploads.iter_mut().find(|u| u.key == key && u.id == id)
+    }
+
+    fn create_upload(&mut self, request: &S3Request, key: &str) -> S3Response {
+        let checksummed = header(request, "x-amz-checksum-algorithm") == Some("SHA256");
+        assert!(
+            checksummed,
+            "an upload in parts is created with the SHA256 checksum algorithm"
+        );
+        self.counter += 1;
+        let id = format!("upload-{}", self.counter);
+        self.uploads.push(Upload {
+            key: key.to_owned(),
+            id: id.clone(),
+            metadata: metadata_of(request),
+            disposition: header(request, "content-disposition").map(str::to_owned),
+            content_type: header(request, "content-type").map(str::to_owned),
+            checksummed,
+            parts: BTreeMap::new(),
+        });
+        answer(
+            200,
+            vec![],
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><InitiateMultipartUploadResult><Bucket>{BUCKET}</Bucket><Key>{}</Key><UploadId>{id}</UploadId></InitiateMultipartUploadResult>",
+                escape(key)
+            ),
+        )
+    }
+
+    fn upload_part(&mut self, request: &S3Request, key: &str, query: &Query) -> S3Response {
+        let number: u32 = query.get("partNumber").unwrap().parse().unwrap();
+        let id = query.get("uploadId").expect("a part names its upload");
+        let Some(upload) = self.upload(key, id) else {
+            return failure(404, "NoSuchUpload");
+        };
+        if !(1..=10_000).contains(&number) {
+            return failure(400, "InvalidArgument");
+        }
+        let Some(sent) = header(request, "x-amz-checksum-sha256") else {
+            return failure(400, "InvalidRequest");
+        };
+        if sent != STANDARD.encode(Sha256::digest(&request.body)) {
+            return failure(400, "BadDigest");
+        }
+        let part = Part {
+            bytes: request.body.clone(),
+            checksum: sent.to_owned(),
+        };
+        let etag = part.etag();
+        upload.parts.insert(number, part);
+        answer(200, vec![("etag".into(), etag)], vec![])
+    }
+
+    fn list_uploads(&self, param: &Query) -> S3Response {
+        let prefix = param.get("prefix").unwrap_or("");
+        let mut found: Vec<&Upload> = self
+            .uploads
+            .iter()
+            .filter(|u| u.key.starts_with(prefix))
+            .collect();
+        found.sort_by(|a, b| a.key.cmp(&b.key));
+        let start = match (param.get("key-marker"), param.get("upload-id-marker")) {
+            (Some(key), Some(id)) => {
+                found
+                    .iter()
+                    .position(|u| u.key == key && u.id == id)
+                    .expect("a marker the listing gave")
+                    + 1
+            }
+            _ => 0,
+        };
+        let limit = self.page_limit(param);
+        let end = (start + limit).min(found.len());
+        let truncated = end < found.len();
+        let mut xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListMultipartUploadsResult><Bucket>{BUCKET}</Bucket><Prefix>{}</Prefix><IsTruncated>{truncated}</IsTruncated>",
+            escape(prefix)
+        );
+        if truncated {
+            let last = found[end - 1];
+            xml.push_str(&format!(
+                "<NextKeyMarker>{}</NextKeyMarker><NextUploadIdMarker>{}</NextUploadIdMarker>",
+                escape(&last.key),
+                last.id
+            ));
+        }
+        for upload in &found[start..end] {
+            xml.push_str(&format!(
+                "<Upload><Key>{}</Key><UploadId>{}</UploadId><Initiator><ID>sim</ID></Initiator><Initiated>2026-11-23T00:00:00.000Z</Initiated></Upload>",
+                escape(&upload.key),
+                upload.id
+            ));
+        }
+        xml.push_str("</ListMultipartUploadsResult>");
+        answer(200, vec![], xml)
+    }
+
+    fn list_parts(&self, key: &str, param: &Query) -> S3Response {
+        let id = param.get("uploadId").unwrap();
+        let Some(upload) = self.uploads.iter().find(|u| u.key == key && u.id == id) else {
+            return failure(404, "NoSuchUpload");
+        };
+        let after: u32 = param
+            .get("part-number-marker")
+            .map_or(0, |n| n.parse().unwrap());
+        let later: Vec<(&u32, &Part)> = upload.parts.range(after + 1..).collect();
+        let limit = self.page_limit(param);
+        let shown = &later[..limit.min(later.len())];
+        let truncated = shown.len() < later.len();
+        let mut xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListPartsResult><Bucket>{BUCKET}</Bucket><Key>{}</Key><UploadId>{id}</UploadId><IsTruncated>{truncated}</IsTruncated>",
+            escape(key)
+        );
+        if truncated {
+            xml.push_str(&format!(
+                "<NextPartNumberMarker>{}</NextPartNumberMarker>",
+                shown.last().unwrap().0
+            ));
+        }
+        for (number, part) in shown {
+            xml.push_str(&format!(
+                "<Part><PartNumber>{number}</PartNumber><LastModified>2026-11-23T00:00:00.000Z</LastModified><ETag>{}</ETag><Size>{}</Size><ChecksumSHA256>{}</ChecksumSHA256></Part>",
+                escape(&part.etag()),
+                part.bytes.len(),
+                part.checksum
+            ));
+        }
+        xml.push_str("</ListPartsResult>");
+        answer(200, vec![], xml)
+    }
+
+    fn abort_upload(&mut self, key: &str, id: &str) -> S3Response {
+        let before = self.uploads.len();
+        self.uploads.retain(|u| !(u.key == key && u.id == id));
+        if self.uploads.len() == before {
+            return failure(404, "NoSuchUpload");
+        }
+        answer(204, vec![], vec![])
+    }
+
+    fn complete_upload(&mut self, request: &S3Request, key: &str, id: &str) -> S3Response {
+        self.apply_interleaved(key);
+        if self.upload(key, id).is_none() {
+            return failure(404, "NoSuchUpload");
+        }
+        let body = std::str::from_utf8(&request.body).unwrap();
+        let listed: Vec<(u32, String, Option<String>)> = body
+            .split("<Part>")
+            .skip(1)
+            .map(|part| {
+                (
+                    tag(part, "PartNumber").unwrap().parse().unwrap(),
+                    tag(part, "ETag").unwrap(),
+                    tag(part, "ChecksumSHA256"),
+                )
+            })
+            .collect();
+        for (index, (number, _, _)) in listed.iter().enumerate() {
+            assert_eq!(
+                *number as usize,
+                index + 1,
+                "a completion lists consecutive part numbers from 1, in order"
+            );
+        }
+        let upload = self.upload(key, id).unwrap();
+        let mut bytes = Vec::new();
+        let mut digests = Vec::new();
+        for (index, (number, etag, checksum)) in listed.iter().enumerate() {
+            let Some(part) = upload.parts.get(number) else {
+                return failure(400, "InvalidPart");
+            };
+            if &part.etag() != etag
+                || (upload.checksummed && checksum.as_ref() != Some(&part.checksum))
+            {
+                return failure(400, "InvalidPart");
+            }
+            if index + 1 < listed.len() && part.bytes.len() < MIN_PART {
+                return failure(400, "EntityTooSmall");
+            }
+            bytes.extend_from_slice(&part.bytes);
+            digests.extend_from_slice(&Sha256::digest(&part.bytes));
+        }
+        let composite = format!(
+            "{}-{}",
+            STANDARD.encode(Sha256::digest(&digests)),
+            listed.len()
+        );
+        let (metadata, disposition, content_type) = (
+            upload.metadata.clone(),
+            upload.disposition.clone(),
+            upload.content_type.clone(),
+        );
+        if let Some(refused) = self.refuse_condition(request, key) {
+            return refused;
+        }
+        self.uploads.retain(|u| !(u.key == key && u.id == id));
+        let (version, etag) = self.store(key, bytes, metadata, disposition, content_type, None);
+        answer(
+            200,
+            vec![("x-amz-version-id".into(), version)],
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><CompleteMultipartUploadResult><Bucket>{BUCKET}</Bucket><Key>{}</Key><ETag>{}</ETag><ChecksumSHA256>{composite}</ChecksumSHA256></CompleteMultipartUploadResult>",
+                escape(key),
+                escape(&etag)
+            ),
+        )
     }
 
     /// Folders: the common prefixes of the current objects.
@@ -685,6 +968,49 @@ impl S3Sim {
         self.state()
             .interleaved
             .push((key_contains.to_owned(), bytes.to_vec()));
+    }
+
+    /// Every upload in progress, with the numbers of the parts each holds.
+    pub fn pending(&self) -> Vec<Pending> {
+        self.state()
+            .uploads
+            .iter()
+            .map(|u| Pending {
+                key: u.key.clone(),
+                id: u.id.clone(),
+                parts: u.parts.keys().copied().collect(),
+            })
+            .collect()
+    }
+
+    /// Another desktop (or an earlier run) began an upload of `key`; its parts are added with
+    /// [`S3Sim::put_part`].
+    pub fn begin_upload(&self, key: &str) -> String {
+        let mut state = self.state();
+        state.counter += 1;
+        let id = format!("upload-{}", state.counter);
+        state.uploads.push(Upload {
+            key: key.to_owned(),
+            id: id.clone(),
+            metadata: vec![],
+            disposition: None,
+            content_type: None,
+            checksummed: true,
+            parts: BTreeMap::new(),
+        });
+        id
+    }
+
+    pub fn put_part(&self, key: &str, id: &str, number: u32, bytes: &[u8]) {
+        let part = Part {
+            bytes: bytes.to_vec(),
+            checksum: STANDARD.encode(Sha256::digest(bytes)),
+        };
+        self.state()
+            .upload(key, id)
+            .expect("the upload exists")
+            .parts
+            .insert(number, part);
     }
 
     /// The current version of a key.
