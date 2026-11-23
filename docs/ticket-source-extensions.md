@@ -61,9 +61,20 @@ executable in place and run conformance again. Relink when you change the
 manifest or the description returned by the executable, since ticketd caches
 the registration and description. Use `ticketd source extension list` to
 inspect registrations and `ticketd source extension remove ID` to remove one.
-For an isolated registry and database with a debug build, follow the
-[disposable workspace setup](development.md#use-a-disposable-workspace) and set
-`TICKETD_SOURCE_EXTENSIONS_DIR` to a separate absolute directory.
+For a debug build, set `TICKETD_TEST_WORKSPACE` to an absolute SQLite file path
+and `TICKETD_SOURCE_EXTENSIONS_DIR` to a separate absolute directory. Use the
+same environment for each command and verify the database path before linking
+or adding a connection.
+
+```sh
+mkdir -p target/source-author
+export TICKETD_TEST_WORKSPACE="$PWD/target/source-author/workspace.sqlite3"
+export TICKETD_SOURCE_EXTENSIONS_DIR="$PWD/target/source-author/extensions"
+ticketd workspace
+```
+
+The [disposable Workspace setup](development.md#use-a-disposable-workspace)
+has native Windows examples.
 
 To install a copy, run `ticketd source extension add PATH`. ticketd shows the
 exact executable, arguments, working directory, provider ID, version and
