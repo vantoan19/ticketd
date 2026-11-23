@@ -745,6 +745,7 @@ impl ExtensionRegistry {
             description,
             connection_id: None,
             credentials: Default::default(),
+            workflow_config: None,
             host: self.host.clone(),
             refresh: None,
         }))

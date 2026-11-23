@@ -171,7 +171,10 @@ async function dispatch({ id, method, params }, signal) {
             account:
               mode === "session"
                 ? `${params.connection_id}:${process.pid}`
-                : "octo",
+                : mode === "credential_account" &&
+                    credential !== "private-first"
+                  ? "another-account"
+                  : "octo",
             site: "fixture",
           },
           derived: {
@@ -239,6 +242,15 @@ async function dispatch({ id, method, params }, signal) {
       };
     }
     case "publish":
+      if (mode === "credential_account") {
+        return credential === "private-first"
+          ? { result: issue("33", params.request.title) }
+          : problem(
+              "forbidden",
+              "credential belongs to another account",
+              "auth",
+            );
+      }
       if (mode === "refuse") return problem("forbidden", "no access", "auth");
       if (mode === "not_sent")
         return problem("not_sent", "request was never sent", "transient");

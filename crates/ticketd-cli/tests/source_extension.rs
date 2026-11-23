@@ -310,6 +310,67 @@ fn an_extension_credential_is_resolved_for_each_cli_invocation() {
 }
 
 #[test]
+fn a_publication_uses_the_same_credential_as_its_account_check() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("workspace.sqlite3");
+    let registry = directory.path().join("extensions");
+    let extension = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ticketd-core/tests/fixtures/source-extension");
+    let count = directory.path().join("credential-calls");
+    let alternating = serde_json::to_string(&[
+        "node",
+        "-e",
+        "const fs = require('node:fs'); const f = process.argv[1];
+         const n = fs.existsSync(f) ? Number(fs.readFileSync(f, 'utf8')) : 0;
+         fs.writeFileSync(f, String(n + 1));
+         console.log(n % 2 === 0 ? 'private-first' : 'private-second');",
+        count.to_str().unwrap(),
+    ])
+    .unwrap();
+    let run = |args: &[&str], password_command: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ticketd"));
+        command
+            .env("TICKETD_TEST_WORKSPACE", &workspace)
+            .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
+            .env_remove("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY")
+            .env_remove("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY_COMMAND");
+        if password_command {
+            command.env("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY_COMMAND", &alternating);
+        } else {
+            command.env("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY", "private-first");
+        }
+        let output = command.args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    run(
+        &["source", "extension", "link", extension.to_str().unwrap()],
+        false,
+    );
+    run(
+        &[
+            "source",
+            "add",
+            "scripted",
+            "--set",
+            "mode=credential_account",
+        ],
+        false,
+    );
+    let local = run(&["create", "Send this ticket"], false);
+    let outcome = run(
+        &["source", "publish", local["reference"].as_str().unwrap()],
+        true,
+    );
+    assert_eq!(outcome["ticket"]["source"]["origin"], "published");
+    assert_eq!(std::fs::read_to_string(count).unwrap(), "1");
+}
+
+#[test]
 fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = directory.path().join("workspace.sqlite3");

@@ -539,9 +539,8 @@ impl Workspace {
         let saved =
             configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
         let started = clock(&self.connection, None)?;
-        let engine = saved.bind(engine);
-        match saved.check(&engine) {
-            Ok(checked) => Ok(checked.connection),
+        match saved.check(engine) {
+            Ok((_, checked)) => Ok(checked.connection),
             Err(error) => {
                 if error.class() == ErrorClass::Auth
                     && engine
@@ -577,8 +576,10 @@ impl Workspace {
         id: &str,
         raw: &ConfigValues,
     ) -> Result<Engine, Error> {
-        check_credential_environment(&self.connection, engine, provider, id)?;
-        let references = credentials::references(&self.connection, id)?;
+        let references = crate::read_scope::run(&self.connection, |connection| {
+            check_credential_environment(connection, engine, provider, id)?;
+            credentials::references(connection, id)
+        })?;
         Ok(engine.for_connection_with_secret_refs(provider, id, raw, &references))
     }
 
@@ -648,8 +649,9 @@ impl Workspace {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, Error> {
-        let config = engine.validate_configuration(provider, raw)?;
-        self.preview_source_with_config(engine, provider, &config)
+        let scoped = engine.with_workflow_credentials(provider, raw)?;
+        let config = scoped.validate_configuration(provider, raw)?;
+        self.preview_source_with_config(&scoped, provider, &config)
             .map(|(preview, _, _)| preview)
     }
 
@@ -725,6 +727,8 @@ impl Workspace {
         let mut raw = previous.saved.config.clone();
         raw.extend(secrets.clone());
         let scoped = self.source_draft_engine(engine, provider, id, &raw)?;
+        previous.verify_effective_site(&scoped)?;
+        let scoped = scoped.with_workflow_credentials(provider, &raw)?;
         let normalized = scoped.validate_configuration(provider, &raw)?;
         let verified = scoped.check_connection(provider, &normalized)?;
         previous.verify_account(&verified)?;
@@ -785,6 +789,7 @@ impl Workspace {
         {
             previous.verify_effective_site(&scoped)?;
         }
+        let scoped = scoped.with_workflow_credentials(provider, raw)?;
         let config = scoped.validate_configuration(provider, raw)?;
         let (preview, derived, verified) =
             self.preview_source_with_config(&scoped, provider, &config)?;
@@ -1049,11 +1054,13 @@ impl ConfiguredSource {
         Ok(())
     }
 
-    fn check(&self, engine: &Engine) -> Result<ConnectionCheck, SourceError> {
-        self.verify_effective_site(engine)?;
-        let checked = engine.check(&self.saved.provider, &self.saved.config)?;
+    fn check(&self, engine: &Engine) -> Result<(Engine, ConnectionCheck), SourceError> {
+        let scoped = self.bind(engine);
+        self.verify_effective_site(&scoped)?;
+        let scoped = scoped.with_workflow_credentials(&self.saved.provider, &self.saved.config)?;
+        let checked = scoped.check(&self.saved.provider, &self.saved.config)?;
         self.verify_account(&checked.connection)?;
-        Ok(checked)
+        Ok((scoped, checked))
     }
 
     fn verify_account(&self, actual: &ConnectionInfo) -> Result<(), SourceError> {

@@ -39,6 +39,7 @@ struct ProcessConnector {
     description: SourceDescription,
     connection_id: Option<String>,
     credentials: credentials::References,
+    workflow_config: Option<Arc<ConfigValues>>,
     host: Arc<Host>,
     refresh: Option<RefreshControl>,
 }
@@ -53,12 +54,7 @@ impl ProcessConnector {
             refresh.check()?;
         }
         let id = self.connection_id()?;
-        let resolved = credentials::resolve(
-            &self.description.descriptor.schema,
-            id,
-            &self.credentials,
-            config,
-        )?;
+        let resolved = self.resolve_credentials(id, config)?;
         let call = call(ConnectionParams {
             connection_id: id.into(),
             config: Cow::Borrowed(config),
@@ -68,13 +64,32 @@ impl ProcessConnector {
         let resolved = if matches!(call, Call::Options { .. }) {
             resolved
         } else {
-            self.description
-                .descriptor
-                .schema
-                .validate(&resolved)
-                .map_err(SourceError::InvalidConfiguration)?
+            Cow::Owned(
+                self.description
+                    .descriptor
+                    .schema
+                    .validate(&resolved)
+                    .map_err(SourceError::InvalidConfiguration)?,
+            )
         };
         self.call(id, &resolved, call)
+    }
+
+    fn resolve_credentials<'a>(
+        &'a self,
+        id: &str,
+        raw: &ConfigValues,
+    ) -> Result<Cow<'a, ConfigValues>, SourceError> {
+        if let Some(config) = &self.workflow_config {
+            return Ok(Cow::Borrowed(config));
+        }
+        credentials::resolve(
+            &self.description.descriptor.schema,
+            id,
+            &self.credentials,
+            raw,
+        )
+        .map(Cow::Owned)
     }
 
     fn connection_id(&self) -> Result<&str, SourceError> {
@@ -133,6 +148,7 @@ impl Connector for ProcessConnector {
         Some(Box::new(Self {
             connection_id: Some(id.to_owned()),
             credentials,
+            workflow_config: None,
             ..self.clone()
         }))
     }
@@ -140,7 +156,7 @@ impl Connector for ProcessConnector {
     fn validate_draft(&self, raw: &ConfigValues) -> Result<ConfigValues, SourceError> {
         let id = self.connection_id()?;
         let schema = &self.description.descriptor.schema;
-        let resolved = credentials::resolve(schema, id, &self.credentials, raw)?;
+        let resolved = self.resolve_credentials(id, raw)?;
         let redactions = redaction::Redactions::default();
         redactions.register(schema.fields.iter().filter_map(|field| {
             if matches!(field.kind, FieldKind::Secret) {
@@ -187,6 +203,20 @@ impl Connector for ProcessConnector {
             }
         }
         Ok(config)
+    }
+
+    fn with_workflow_credentials(
+        &self,
+        config: &ConfigValues,
+    ) -> Result<Option<Box<dyn Connector>>, SourceError> {
+        if self.workflow_config.is_some() {
+            return Ok(None);
+        }
+        let resolved = self.resolve_credentials(self.connection_id()?, config)?;
+        Ok(Some(Box::new(Self {
+            workflow_config: Some(Arc::new(resolved.into_owned())),
+            ..self.clone()
+        })))
     }
 
     fn for_refresh(&self, control: &RefreshControl) -> Option<Box<dyn Connector>> {

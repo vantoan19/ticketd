@@ -124,6 +124,26 @@ impl Engine {
         }
     }
 
+    pub(super) fn with_workflow_credentials(
+        &self,
+        provider: &str,
+        config: &ConfigValues,
+    ) -> Result<Self, SourceError> {
+        self.check_refresh_canceled()?;
+        let connector = self.connector(provider)?;
+        let prepared = with_guidance(connector, connector.with_workflow_credentials(config))?;
+        let mut scoped = self.clone();
+        if let Some(prepared) = prepared
+            && let Some(bound) = scoped
+                .connectors
+                .iter_mut()
+                .find(|candidate| candidate.descriptor().provider == provider)
+        {
+            *bound = prepared.into();
+        }
+        Ok(scoped)
+    }
+
     /// Scopes progress and cancellation to this refresh and its connection calls.
     pub fn with_refresh_control(mut self, control: super::RefreshControl) -> Self {
         self.refresh = Some(control);
@@ -372,8 +392,10 @@ impl Engine {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, SourceError> {
-        let config = self.validate_configuration(provider, raw)?;
-        self.preview_with(provider, &config, |_| None)
+        let scoped = self.with_workflow_credentials(provider, raw)?;
+        let config = scoped.validate_configuration(provider, raw)?;
+        scoped
+            .preview_with(provider, &config, |_| None)
             .map(|(preview, _, _)| preview)
     }
 

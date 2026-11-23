@@ -337,6 +337,16 @@ pub trait Connector: Send + Sync {
         self.for_connection(id, config)
     }
 
+    /// Resolves credentials once for a workflow that can make several calls
+    /// with the same settings. Single requests and drafts may resolve on demand.
+    #[doc(hidden)]
+    fn with_workflow_credentials(
+        &self,
+        _config: &ConfigValues,
+    ) -> Result<Option<Box<dyn Connector>>, SourceError> {
+        Ok(None)
+    }
+
     /// Attaches controls to a connection-scoped connector that supports them.
     fn for_refresh(&self, _control: &super::RefreshControl) -> Option<Box<dyn Connector>> {
         None

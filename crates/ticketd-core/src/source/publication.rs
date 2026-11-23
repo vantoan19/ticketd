@@ -1165,10 +1165,8 @@ impl Workspace {
 
         // The remote write. Nothing is held open: another process may read or
         // write the workspace meanwhile and sees the attempt in flight.
-        let scoped = started.source.bind(engine);
-        let verified = started.source.check(&scoped);
-        let (result, sent) = match verified {
-            Ok(_) => (
+        let (result, sent) = match started.source.check(engine) {
+            Ok((scoped, _)) => (
                 scoped.publish(provider, &started.source.saved.config, &started.request),
                 true,
             ),
@@ -2083,9 +2081,7 @@ fn verified_publication_engine(
     engine: &Engine,
     source: &super::ConfiguredSource,
 ) -> Result<Engine, SourceError> {
-    let scoped = source.bind(engine);
-    source.check(&scoped)?;
-    Ok(scoped)
+    source.check(engine).map(|(scoped, _)| scoped)
 }
 
 /// An attempt that has been persisted and is about to call the connector.
