@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Cloud, LaptopMinimal, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { FailureAlert } from "@/components/ui/failure-alert";

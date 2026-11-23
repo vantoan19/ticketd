@@ -7,7 +7,8 @@ fn links_and_syncs_the_typescript_tracker() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = directory.path().join("workspace.sqlite3");
     let registry = directory.path().join("extensions");
-    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ticket-source");
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ticket-source-example-ts");
     let run = |args: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
             .env("TICKETD_TEST_WORKSPACE", &workspace)

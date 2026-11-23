@@ -88,8 +88,9 @@ function plainCause(code: FailureCode, message: string): string {
       return "This build of ticketd has no Google Drive app configuration. Install a build with Google Drive enabled. Your local files are unaffected.";
     case "sign_in_cancelled":
       return "Sign-in wasn't finished in your browser, so nothing changed.";
-    case "offline":
     case "extension_crash_limit":
+      return "The source extension stopped after repeated crashes.";
+    case "offline":
     case "unavailable":
       return "ticketd can't reach the service. Check the connection.";
     case "rate_limited":

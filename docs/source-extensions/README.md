@@ -5,12 +5,12 @@ your OS user. Link code you trust, including any dependencies and interpreter
 it launches. Linking points at the author's build folder on this device and
 marks the extension as Development.
 
-Use Node 22.23.4 to try the [TypeScript example](../../examples/ticket-source/tracker.ts)
+Use Node 22.23.4 to try the [TypeScript example](../../examples/ticket-source-example-ts/tracker.ts)
 from this repository. Make sure `node` is available on the PATH used to start
 ticketd, including when the desktop starts it.
 
 ```sh
-ticketd source extension link examples/ticket-source
+ticketd source extension link examples/ticket-source-example-ts
 ticketd source conformance example-tracker --set board=Demo --strict
 ```
 

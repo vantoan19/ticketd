@@ -766,7 +766,7 @@ export function SourceCard({
             description="Agents can sync without the desktop open"
           >
             <CommandBlock
-              command="ticketd source refresh"
+              command={`ticketd source ${connectionId ?? "CONNECTION"} refresh`}
               copyLabel="Copy sync command"
             />
           </SettingsRow>
