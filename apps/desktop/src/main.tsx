@@ -92,3 +92,5 @@ function showStartupFailure() {
   script.src = "/startup-fallback.js";
   document.head.append(script);
 }
+
+// Throwaway CI proof: a frontend-only change. Never merged.
