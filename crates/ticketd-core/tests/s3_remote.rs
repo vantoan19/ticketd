@@ -1310,12 +1310,14 @@ fn the_real_transport_refuses_a_request_for_another_host_without_sending_it() {
     );
 }
 
+type Matches = fn(&S3Request) -> bool;
+
 /// A listing that answers every matching request with the same truncated page, as a broken
 /// endpoint can; it gives up with "offline" after a few, so a loop that never ends fails
 /// the test and does not hang it.
 struct Stuck<'a> {
     inner: &'a S3Sim,
-    when: fn(&S3Request) -> bool,
+    when: Matches,
     page: &'static str,
     asked: std::sync::atomic::AtomicUsize,
 }
@@ -1352,7 +1354,7 @@ fn a_listing_that_repeats_its_cursor_is_an_unreadable_response_not_an_endless_lo
     let folders =
         |request: &S3Request| request.method == "GET" && request.url.contains("list-type");
     let uploads = |request: &S3Request| request.method == "GET" && request.url.contains("uploads");
-    let cases: [(&str, fn(&S3Request) -> bool, &str); 4] = [
+    let cases: [(&str, Matches, &str); 4] = [
         (
             "versions",
             listing,
