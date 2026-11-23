@@ -1,0 +1,227 @@
+#![allow(clippy::unwrap_used)]
+
+use std::{
+    io::Read,
+    net::{Ipv4Addr, TcpListener},
+    path::Path,
+    thread,
+    time::{Duration, Instant},
+};
+
+use serde_json::json;
+
+use crate::source::conformance::{
+    self, ClosureProbes, CommentProbe, Driver, Fixture, PublishFailure,
+};
+
+use super::{host::Limits, *};
+
+fn fixture_connector(host: Arc<Host>, connection: &str) -> ProcessConnector {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
+    let launch = Arc::new(Launch::load(&folder).unwrap());
+    let probe = Host::default();
+    let hello = probe.probe(launch.clone(), &[CONTRACT_VERSION]).unwrap();
+    ProcessConnector {
+        description: hello.description.clone().unwrap(),
+        definition: Definition {
+            launch,
+            cached: Some(Arc::new(hello)),
+        },
+        connection_id: Some(connection.into()),
+        host,
+    }
+}
+
+fn configuration(mode: &str) -> ConfigValues {
+    json!({ "mode": mode }).as_object().unwrap().clone()
+}
+
+fn reference(id: u32) -> ExternalRef {
+    ExternalRef {
+        identity: crate::source::ExternalIdentity {
+            provider: "scripted".into(),
+            id: id.to_string(),
+        },
+        locator: format!("o/r#{id}"),
+        partition: "o/r".into(),
+    }
+}
+
+struct ProcessDriver;
+
+fn fixture<T>(mode: &str, data: T) -> Fixture<T> {
+    Fixture {
+        connector: Box::new(fixture_connector(Arc::new(Host::default()), "fixture")),
+        config: configuration(mode),
+        data,
+    }
+}
+
+impl Driver for ProcessDriver {
+    fn discovery() -> Fixture<String> {
+        fixture("valid", "3".into())
+    }
+
+    fn invalid_configuration() -> Fixture<()> {
+        Fixture {
+            config: ConfigValues::new(),
+            ..fixture("valid", ())
+        }
+    }
+
+    fn closures() -> Fixture<ClosureProbes> {
+        fixture(
+            "closure",
+            ClosureProbes {
+                open: reference(1),
+                completed: reference(2),
+                no_reason: reference(3),
+                unknown_reason: reference(4),
+                missing: reference(5),
+                unreadable: reference(6),
+            },
+        )
+    }
+
+    fn comments() -> Fixture<CommentProbe> {
+        fixture(
+            "valid",
+            CommentProbe {
+                reference: reference(1),
+                // The scripted source reports the edited body on the second request.
+                edit: Box::new(|| {}),
+            },
+        )
+    }
+
+    fn publish_failure(failure: PublishFailure) -> Fixture<PublishRequest> {
+        let mode = match failure {
+            PublishFailure::Refused => "refuse",
+            PublishFailure::NotSent => "not_sent",
+            PublishFailure::ResponseLost => "lose_response",
+        };
+        fixture(mode, conformance::publication_search().request)
+    }
+
+    fn publication_search(complete: bool) -> Fixture<PublicationSearch> {
+        fixture(
+            if complete { "complete" } else { "incomplete" },
+            conformance::publication_search(),
+        )
+    }
+}
+
+conformance::contract_tests!(scripted, super::ProcessDriver);
+
+#[test]
+fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    let malformed = connector
+        .check_connection(&configuration("broken"))
+        .unwrap_err();
+    assert!(matches!(malformed, SourceError::Protocol(_)));
+    assert!(malformed.to_string().contains("\"not a protocol message\""));
+    let large = connector
+        .check_connection(&configuration("oversized"))
+        .unwrap_err();
+    assert!(matches!(large, SourceError::Protocol(_)));
+    assert!(large.to_string().contains("line exceeds"));
+    let checked = connector.check_connection(&configuration("noisy")).unwrap();
+    assert_eq!(checked.connection.account, "octo");
+}
+
+#[test]
+fn a_timeout_covers_reads_and_blocked_writes() {
+    let host = Arc::new(Host::with_limits(Limits {
+        request: Duration::from_millis(300),
+        ..Limits::default()
+    }));
+    let connector = fixture_connector(host, "first");
+    let read = connector
+        .check_connection(&configuration("hang"))
+        .unwrap_err();
+    assert!(read.to_string().contains("timed out"));
+    connector
+        .check_connection(&configuration("stop_reading"))
+        .unwrap();
+    let output = connector.options(
+        "field",
+        &"a".repeat(2 * 1024 * 1024),
+        &configuration("valid"),
+    );
+    assert!(output.unwrap_err().to_string().contains("timed out"));
+    assert!(connector.check_connection(&configuration("valid")).is_ok());
+}
+
+#[test]
+fn a_crash_latch_is_specific_to_one_connection_and_retry_clears_it() {
+    let host = Arc::new(Host::default());
+    let first = fixture_connector(host.clone(), "first");
+    let second = first
+        .for_connection("second", &configuration("valid"))
+        .unwrap();
+    for _ in 0..5 {
+        let error = first.check_connection(&configuration("crash")).unwrap_err();
+        assert!(matches!(error, SourceError::Unavailable(_)), "{error}");
+    }
+    let error = first.check_connection(&configuration("valid")).unwrap_err();
+    assert!(matches!(error, SourceError::ExtensionCrashLimit), "{error}");
+    assert!(second.check_connection(&configuration("valid")).is_ok());
+    host.retry("first");
+    assert!(first.check_connection(&configuration("valid")).is_ok());
+}
+
+#[test]
+fn connections_reuse_their_own_process_until_idle() {
+    let host = Arc::new(Host::with_limits(Limits {
+        idle: Duration::from_millis(500),
+        ..Limits::default()
+    }));
+    let first = fixture_connector(host, "first");
+    let config = configuration("session");
+    let second = first.for_connection("second", &config).unwrap();
+    let account = |connector: &dyn Connector| {
+        connector
+            .check_connection(&config)
+            .unwrap()
+            .connection
+            .account
+    };
+    let first_process = account(&first);
+    assert!(first_process.starts_with("first:"));
+    assert_eq!(account(&first), first_process);
+    let second_process = account(second.as_ref());
+    assert!(second_process.starts_with("second:"));
+    assert_ne!(
+        first_process.split_once(':').unwrap().1,
+        second_process.split_once(':').unwrap().1
+    );
+    thread::sleep(Duration::from_millis(850));
+    assert_ne!(account(&first), first_process);
+}
+
+#[test]
+fn an_exited_leader_is_unavailable_and_its_descendant_is_stopped() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let mut config = configuration("orphan");
+    config.insert(
+        "port".into(),
+        listener.local_addr().unwrap().port().to_string().into(),
+    );
+    let start = Instant::now();
+    let error = connector.check_connection(&config).unwrap_err();
+    assert!(matches!(error, SourceError::Unavailable(_)), "{error}");
+    assert!(
+        start.elapsed() < Duration::from_secs(4),
+        "the descendant held the process open"
+    );
+    listener.set_nonblocking(true).unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let mut text = String::new();
+    stream.read_to_string(&mut text).unwrap();
+    assert_eq!(text, "ready");
+}

@@ -14,12 +14,12 @@ use serde_json::{Map, Value};
 /// Configuration values keyed by schema field.
 pub type ConfigValues = Map<String, Value>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConfigSchema {
     pub fields: Vec<SchemaField>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SchemaField {
     pub key: String,
     pub label: String,
@@ -40,7 +40,7 @@ pub struct SchemaField {
     pub kind: FieldKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FieldKind {
     /// One line of text. An empty value means the field is not set.
@@ -67,14 +67,14 @@ pub enum FieldKind {
 }
 
 /// A regular expression and instructions for correcting a mismatched value.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FieldPattern {
     pub regex: String,
     pub message: String,
 }
 
 /// Where a selector gets its options.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum OptionSource {
     Static {
@@ -88,7 +88,7 @@ pub enum OptionSource {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChoiceOption {
     pub value: String,
     pub label: String,
@@ -97,7 +97,7 @@ pub struct ChoiceOption {
 }
 
 /// Built-in syntax checks a field can ask for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ValueFormat {
     /// `owner/name`, as in a repository path.
@@ -108,7 +108,7 @@ pub enum ValueFormat {
     Label,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FieldIssue {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,

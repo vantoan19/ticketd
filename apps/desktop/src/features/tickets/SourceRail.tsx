@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Cloud, LaptopMinimal, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { FailureAlert } from "@/components/ui/failure-alert";
@@ -41,12 +42,17 @@ export function SourceRail({
   const activity = useSourceActivity();
   const sync = useTicketRefresh(ticket.reference, refresh);
   const ownerName = owner ? owner.provider_name : "";
+  const ownerIcon = owner?.provider_icon_svg ? (
+    <SourceIcon svg={owner.provider_icon_svg} size={16} />
+  ) : (
+    <Cloud aria-hidden="true" />
+  );
   const body = (
     <>
       {owner ? (
         <div className="rail-source">
           <span className="rail-value rail-source-identity">
-            <Cloud aria-hidden="true" />
+            {ownerIcon}
             <SourceLink url={owner.url} icon={false} title={owner.display}>
               {owner.place && owner.number ? (
                 <>
@@ -164,7 +170,7 @@ export function SourceRail({
             <FailureAlert
               size="compact"
               failure={sync.failure}
-              onRetry={() => void sync.run()}
+              onRetry={() => void sync.run(true)}
             />
           )}
         </div>
@@ -203,13 +209,7 @@ export function SourceRail({
       <PopoverTrigger asChild>
         <RailRow
           aria-label={`Source: ${name}`}
-          icon={
-            owner ? (
-              <Cloud aria-hidden="true" />
-            ) : (
-              <LaptopMinimal aria-hidden="true" />
-            )
-          }
+          icon={owner ? ownerIcon : <LaptopMinimal aria-hidden="true" />}
         >
           {name}
         </RailRow>

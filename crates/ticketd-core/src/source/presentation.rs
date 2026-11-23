@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
 use super::{ConnectorDescriptor, Surface};
 
 /// The schema and presentation for a source registered with the engine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SourceDescription {
     #[serde(flatten)]
     pub descriptor: ConnectorDescriptor,
     pub presentation: SourcePresentation,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SourcePresentation {
     pub icon_svg: Option<String>,
@@ -29,7 +29,7 @@ pub struct SourcePresentation {
 
 /// The last occurrence of the separator ends the place. The separator is
 /// included in the displayed number when it is part of the issue's name.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct IssueName {
     pub separator: String,
@@ -88,7 +88,7 @@ impl IssueName {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SignInGuidance {
     pub terminal_hint: Option<String>,
@@ -106,14 +106,14 @@ impl SignInGuidance {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct FieldPresentation {
     pub placeholder: Option<String>,
     pub additional_placeholder: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TargetPresentation {
     pub field: String,
     pub label: String,
@@ -123,7 +123,7 @@ pub struct TargetPresentation {
 }
 
 /// How to recognize an evidence link with the path /owner/project/segment/number.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullRequestLink {
     pub host: String,
     pub segment: String,
@@ -131,7 +131,7 @@ pub struct PullRequestLink {
 
 /// One piece of the human-readable configuration summary. Clients render
 /// ordinary text with optional emphasis.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SummaryPart {
     pub text: String,
     pub emphasis: bool,

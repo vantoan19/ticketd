@@ -819,16 +819,17 @@ and optional publication. The core owns scheduling, identity preservation, local
 data, and persistence. ticketd renders provider-specific configuration and filter
 forms from schemas shared by the desktop and CLI.
 
-The layers below describe the current built-in implementation. The decision
-to support locally installed, out-of-process ticket source extensions and to
-publish contract 2 is in [ADR 0021](adr/0021-ticket-source-extensions-run-out-of-process.md).
+The built-in connector and linked development extensions run through the same
+engine. The decision and the released wire shapes are recorded in
+[ADR 0021](adr/0021-ticket-source-extensions-run-out-of-process.md) and the
+[Contract 2 JSON Schema](source-extensions/contract-2.schema.json).
 
 ### Source connector layers
 
 The code lives in `ticketd_core::source`, from the inside out:
 
 - **Contract** (`contract.rs`): the `Connector` trait and its provider-neutral
-  types (`ExternalIssue`, `ExternalIdentity`, `ExternalState`, `ClosureReason`,
+  types (`ExternalIssue`, `ExternalIdentity`, `ExternalState`,
   `SourceError`). `CONTRACT_VERSION` identifies the contract; the engine refuses
   a connector that declares another version. Once published, changes to existing
   operations and types bump the version, while optional capabilities can be added
@@ -845,6 +846,13 @@ The code lives in `ticketd_core::source`, from the inside out:
   A schema declaring a secret is refused until keychain-backed settings ship.
   Preview and Save run connector validation after normalization, before discovery.
   Connector problems can point to an input or describe the whole form.
+- **Extension host** (`extension/`): caches linked descriptions in a registry
+  beside the default Workspace. Desktop keeps one process per connection, starts
+  it on demand, and closes it after five idle minutes or at quit. CLI commands
+  close their sessions before exit. Each request has a deadline, and a broken
+  connection can restart unless five crashes within three minutes latched it.
+  Retry clears that connection's latch. The host owns the process group on Unix or
+  Job Object on Windows and escalates shutdown for the whole tree.
 - **Engine** (`engine.rs`): the only caller of connectors. It validates
   configuration, walks pages with a progress guard, de-duplicates by external
   identity, bounds previews, and holds no database handle.

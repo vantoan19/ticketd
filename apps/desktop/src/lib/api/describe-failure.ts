@@ -89,6 +89,7 @@ function plainCause(code: FailureCode, message: string): string {
     case "sign_in_cancelled":
       return "Sign-in wasn't finished in your browser, so nothing changed.";
     case "offline":
+    case "extension_crash_limit":
     case "unavailable":
       return "ticketd can't reach the service. Check the connection.";
     case "rate_limited":

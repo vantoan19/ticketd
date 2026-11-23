@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { AlignLeft, CircleDot, Link, RefreshCw, UserRound } from "lucide-react";
@@ -225,6 +226,7 @@ export function SourceCard({
       : item.provider === provider,
   );
   const lastRefreshed = health?.last_refreshed_at;
+  const retry = health?.error?.code === "extension_crash_limit";
   const syncing =
     health === undefined ||
     health.health === "synced" ||
@@ -382,7 +384,9 @@ export function SourceCard({
   async function refreshConnection(id: string) {
     setSyncingNow(true);
     try {
-      const report = await sourcesClient.refresh(undefined, id);
+      const report = await (retry
+        ? sourcesClient.refresh(undefined, id, true)
+        : sourcesClient.refresh(undefined, id));
       if (report.failures.length > 0) throw report.failures[0];
     } catch (reason) {
       setNotice(describeFailure(reason, "sync this connection").sentence);
@@ -573,6 +577,9 @@ export function SourceCard({
       }
       icon={CircleDot}
       iconContent={<SourceIcon svg={presentation?.icon_svg} />}
+      titleAccessory={
+        entry.development && <Badge variant="experimental">Development</Badge>
+      }
       lede={`Bring matching ${connector.name} issues into this workspace. Their ${syncedFields} sync inward; ${connector.name} stays the place to edit them.`}
       endSlot={
         <StatusLabel tone={short.tone} size="caption">
@@ -733,7 +740,7 @@ export function SourceCard({
             }
           >
             <RefreshCw aria-hidden="true" />
-            Sync now
+            {retry ? "Retry" : "Sync now"}
           </Button>
         }
       >

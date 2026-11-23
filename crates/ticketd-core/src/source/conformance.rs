@@ -1,536 +1,408 @@
-//! One suite for the fake and every ticket source adapter. The driver controls
-//! what the provider reports. Each check observes the public connector contract
-//! or, for configuration and de-duplication, the Engine that enforces it.
+//! Contract checks against a real configured source. Seeded fixtures also
+//! exercise scenarios that cannot be inferred from a live tracker.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
-use std::{collections::BTreeMap, ops::ControlFlow};
-
-use serde_json::json;
-
-use super::{
-    Capability, ConfigValues, Connector, Conversation, DiscoveryRequest, Engine, ErrorClass,
-    ExternalComment, ExternalIssue, ExternalRef, ExternalState, PublicationSearch, PublishRequest,
-    StateCategory,
+use std::{
+    collections::{HashMap, HashSet},
+    ops::ControlFlow,
 };
 
-use crate as ticketd_core;
+use serde::Serialize;
 
-#[path = "../../tests/support/fake_source.rs"]
-mod fake_source;
-use fake_source::{FakeSource, PublishMode, discovery_page, issue, issue_in};
+use super::{
+    Capability, ConfigValues, Connector, DiscoveryRequest, Engine, ErrorClass, ExternalIdentity,
+    ExternalIssue, FieldKind, OptionSource, PublicationSearch, PublishRequest, SourceError,
+    publication::check_destination,
+};
 
-pub(in crate::source) const FIRST: &str = "First issue";
-pub(in crate::source) const REOBSERVED: &str = "First issue after a move";
-pub(in crate::source) const LAST: &str = "Issue after the empty page";
-pub(in crate::source) const TITLE_MATCH: &str = "Conformance publication";
-pub(in crate::source) const BODY_MATCH: &str = "Issue originally sent as Conformance publication";
-pub(in crate::source) const RECENT: &str = "Recent issue with different content";
-pub(in crate::source) const SEARCH_SINCE: &str = "2026-01-01T00:00:00Z";
+#[cfg(test)]
+mod fixtures;
+#[cfg(test)]
+pub(in crate::source) use fixtures::*;
 
-pub(in crate::source) struct Fixture<T> {
-    pub connector: Box<dyn Connector>,
-    pub config: ConfigValues,
-    pub data: T,
+const SAMPLE_SIZE: usize = 10;
+const PROBE_PAGES: usize = 10;
+
+#[derive(Debug, Default)]
+pub struct ConformanceOptions {
+    /// An explicit destination permits one creation and its recovery queries.
+    pub publish: Option<String>,
+    /// Require observations for advertised capabilities when they can be exercised.
+    pub strict: bool,
 }
 
-impl<T> Fixture<T> {
-    fn engine(self) -> (Engine, String, ConfigValues) {
-        let provider = self.connector.descriptor().provider;
-        let mut engine = Engine::new();
-        engine.register(self.connector).unwrap();
-        (engine, provider, self.config)
-    }
-
-    fn require(&self, capability: Capability) {
-        assert!(
-            self.connector
-                .descriptor()
-                .capabilities
-                .contains(&capability),
-            "fixture requires {capability:?}"
-        );
-    }
+#[derive(Debug, Serialize)]
+pub struct ConformanceReport {
+    pub provider: String,
+    pub passed: bool,
+    pub checks: Vec<ConformanceCheck>,
 }
 
-pub(in crate::source) struct ClosureProbes {
-    pub open: ExternalRef,
-    pub completed: ExternalRef,
-    pub no_reason: ExternalRef,
-    pub unknown_reason: ExternalRef,
-    pub missing: ExternalRef,
-    pub unreadable: ExternalRef,
+#[derive(Debug, Serialize)]
+pub struct ConformanceCheck {
+    pub name: &'static str,
+    pub outcome: ConformanceOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
-pub(in crate::source) struct CommentProbe {
-    pub reference: ExternalRef,
-    pub edit: Box<dyn FnOnce()>,
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConformanceOutcome {
+    Passed,
+    Failed,
+    Skipped,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(in crate::source) enum PublishFailure {
-    Refused,
-    NotSent,
-    ResponseLost,
-}
-
-pub(in crate::source) trait Driver {
-    /// Three pages, containing FIRST, an empty continuation, then the same
-    /// identity with new display data (REOBSERVED) and LAST. The data is a valid
-    /// opaque cursor beyond those pages. Discovery must be readable twice.
-    fn discovery() -> Fixture<String>;
-    fn invalid_configuration() -> Fixture<()>;
-    fn closures() -> Fixture<ClosureProbes>;
-    /// Two comments, "original" and "second". The edit changes "original" to
-    /// "edited", preserving the source identity.
-    fn comments() -> Fixture<CommentProbe>;
-    fn publish_failure(failure: PublishFailure) -> Fixture<PublishRequest>;
-    /// A title match (TITLE_MATCH), a description match (BODY_MATCH), a recent
-    /// issue of the signed-in account (RECENT), and issues outside the window
-    /// or belonging to someone else. Incomplete searches do not cover the window.
-    fn publication_search(complete: bool) -> Fixture<PublicationSearch>;
-
-    /// Any omitted check must give a nonempty reason. The two fixture drivers
-    /// exercise all checks.
-    fn skip_reason(_check: &str) -> Option<&'static str> {
-        None
-    }
-}
-
-pub(in crate::source) fn run_check(name: &str, skip_reason: Option<&str>, check: impl FnOnce()) {
-    if let Some(reason) = skip_reason {
-        assert!(
-            !reason.trim().is_empty(),
-            "{name}: a skipped check needs a reason"
-        );
-        tracing::info!(check = name, reason, "conformance check skipped");
-    } else {
-        check();
-    }
-}
-
-pub(in crate::source) fn paging_keeps_an_empty_continuation<D: Driver>() {
-    let Fixture {
-        connector, config, ..
-    } = D::discovery();
-    let page = |cursor| {
-        connector
-            .discover(DiscoveryRequest {
-                config: &config,
-                cursor,
-                page_size: 100,
-            })
-            .unwrap()
-    };
-
-    let first = page(None);
-    assert_eq!(titles(&first.issues), [FIRST]);
-    let empty = page(Some(
-        first.next_cursor.as_deref().expect("first continuation"),
-    ));
-    assert!(empty.issues.is_empty(), "second page contains no issues");
-    let last = page(Some(
-        empty
-            .next_cursor
-            .as_deref()
-            .expect("empty page continuation"),
-    ));
-    assert_eq!(titles(&last.issues), [REOBSERVED, LAST]);
-    assert_eq!(last.next_cursor, None);
-}
-
-pub(in crate::source) fn a_cursor_past_the_end_returns_no_issues_or_continuation<D: Driver>() {
-    let Fixture {
-        connector,
-        config,
-        data: past_end,
-    } = D::discovery();
-    let page = connector
-        .discover(DiscoveryRequest {
-            config: &config,
-            cursor: Some(&past_end),
-            page_size: 100,
-        })
-        .unwrap();
-    assert!(page.issues.is_empty());
-    assert!(page.skipped.is_empty());
-    assert_eq!(page.next_cursor, None);
-}
-
-pub(in crate::source) fn discovery_delivers_each_identity_once<D: Driver>() {
-    let (engine, provider, config) = D::discovery().engine();
-    let issues = discover_all(&engine, &provider, &config);
-    assert_eq!(titles(&issues), [FIRST, LAST]);
-}
-
-pub(in crate::source) fn issue_ids_are_stable_across_runs_and_fetch<D: Driver>() {
-    let (engine, provider, config) = D::discovery().engine();
-    let first_run = discover_all(&engine, &provider, &config);
-    let second_run = discover_all(&engine, &provider, &config);
-    assert_eq!(titles(&first_run), [FIRST, LAST]);
-    assert_eq!(titles(&second_run), [FIRST, LAST]);
-
-    for (first, second) in first_run.iter().zip(second_run) {
-        let identity = &first.reference.identity;
-        assert!(!identity.id.trim().is_empty(), "an issue must have an id");
-        assert_eq!(identity.provider, provider);
-        assert_eq!(
-            *identity, second.reference.identity,
-            "id changed for {}",
-            first.title
-        );
-        let fetched = engine.fetch(&provider, &config, &first.reference).unwrap();
-        assert_eq!(
-            *identity, fetched.reference.identity,
-            "fetch changed the id"
-        );
-        assert_eq!(fetched.title, first.title);
-    }
-}
-
-pub(in crate::source) fn discovered_refs_name_the_parts_returned_by_check<D: Driver>() {
-    let fixture = D::discovery();
-    let checked = fixture.connector.check_connection(&fixture.config).unwrap();
-    assert_eq!(checked.connection.account, "octo");
-    assert_eq!(checked.derived.partitions, ["o/r"]);
-    assert_eq!(checked.derived.publication.destinations, ["o/r"]);
-    let first = fixture
-        .connector
-        .discover(DiscoveryRequest {
-            config: &fixture.config,
-            cursor: None,
-            page_size: 100,
-        })
-        .unwrap();
-    assert_eq!(first.issues[0].reference.partition, "o/r");
-}
-
-pub(in crate::source) fn invalid_configuration_is_a_configuration_error<D: Driver>() {
-    let (engine, provider, invalid) = D::invalid_configuration().engine();
-    let error = engine
-        .discover(&provider, &invalid, |_| ControlFlow::Continue(()))
-        .unwrap_err();
-    assert_eq!(error.class(), ErrorClass::Config, "{error}");
-    assert_eq!(error.code(), "invalid_configuration");
-    assert!(!error.issues().is_empty(), "{error}");
-}
-
-pub(in crate::source) fn closure_requires_positive_tracker_state<D: Driver>() {
-    let Fixture {
-        connector,
-        config,
-        data,
-    } = D::closures();
-    for (reference, category) in [
-        (data.open, StateCategory::Open),
-        (data.completed, StateCategory::Completed),
-        (data.no_reason, StateCategory::Unknown),
-        (data.unknown_reason, StateCategory::Unknown),
-    ] {
-        let issue = connector.fetch(&config, &reference).unwrap();
-        assert_eq!(issue.state.category, category, "{}", reference.locator);
-    }
-    for reference in [data.missing, data.unreadable] {
-        assert!(
-            connector.fetch(&config, &reference).is_err(),
-            "{}",
-            reference.locator
-        );
-    }
-}
-
-pub(in crate::source) fn comment_ids_survive_repeated_reads_and_edits<D: Driver>() {
-    let fixture = D::comments();
-    fixture.require(Capability::Comments);
-    let Fixture {
-        connector,
-        config,
-        data,
-    } = fixture;
-    let read = || {
-        let comments = connector
-            .conversation(&config, &data.reference)
-            .unwrap()
-            .comments;
-        assert_eq!(comments.len(), 2);
-        comments
-            .into_iter()
-            .map(|comment| (comment.body, comment.id))
-            .collect::<BTreeMap<_, _>>()
-    };
-
-    let first = read();
-    assert!(!first["original"].trim().is_empty());
-    assert!(!first["second"].trim().is_empty());
-    assert_ne!(first["original"], first["second"]);
-
-    (data.edit)();
-    let second = read();
-    assert_eq!(first["original"], second["edited"]);
-    assert_eq!(first["second"], second["second"]);
-}
-
-pub(in crate::source) fn failed_publication_classifies_creation_honestly<D: Driver>() {
-    for (failure, class, ruled_out) in [
-        (PublishFailure::Refused, ErrorClass::Auth, true),
-        (PublishFailure::NotSent, ErrorClass::Transient, true),
-        (PublishFailure::ResponseLost, ErrorClass::Transient, false),
-    ] {
-        let fixture = D::publish_failure(failure);
-        fixture.require(Capability::Publish);
-        let error = fixture
-            .connector
-            .publication()
-            .unwrap()
-            .publish(&fixture.config, &fixture.data)
-            .unwrap_err();
-        assert_eq!(error.class(), class, "{failure:?}: {error}");
-        assert_eq!(
-            error.ruled_out_creation(),
-            ruled_out,
-            "{failure:?}: {error}"
-        );
-    }
-}
-
-pub(in crate::source) fn uncertain_search_distinguishes_matches_recent_and_incomplete<D: Driver>() {
-    let fixture = D::publication_search(true);
-    fixture.require(Capability::Publish);
-    let result = fixture
-        .connector
-        .publication()
-        .unwrap()
-        .find_published(&fixture.config, &fixture.data)
-        .unwrap();
-    assert!(result.complete, "the source read the whole window");
-    let mut matched = titles(&result.matches);
-    matched.sort_unstable();
-    assert_eq!(matched, [TITLE_MATCH, BODY_MATCH]);
-    assert_eq!(titles(&result.recent), [RECENT]);
-
-    let fixture = D::publication_search(false);
-    let result = fixture
-        .connector
-        .publication()
-        .unwrap()
-        .find_published(&fixture.config, &fixture.data)
-        .unwrap();
-    assert!(
-        !result.complete,
-        "a partial search cannot rule out creation"
-    );
-    assert!(
-        result.matches.is_empty(),
-        "this fixture finds no matches in the visible pages"
-    );
-}
-
-fn titles(issues: &[ExternalIssue]) -> Vec<&str> {
-    issues.iter().map(|issue| issue.title.as_str()).collect()
-}
-
-fn discover_all(engine: &Engine, provider: &str, config: &ConfigValues) -> Vec<ExternalIssue> {
-    let mut issues = Vec::new();
-    let summary = engine
-        .discover(provider, config, |issue| {
-            issues.push(issue);
-            ControlFlow::Continue(())
-        })
-        .unwrap();
-    assert!(summary.complete);
-    assert!(summary.skipped.is_empty());
-    issues
-}
-
-macro_rules! contract_checks {
-    ($driver:ty; $($check:ident),+ $(,)?) => {$(
-        #[test]
-        fn $check() {
-            conformance::run_check(
-                stringify!($check),
-                <$driver as Driver>::skip_reason(stringify!($check)),
-                conformance::$check::<$driver>,
-            );
-        }
-    )+};
-}
-pub(in crate::source) use contract_checks;
-
-macro_rules! contract_tests {
-    ($module:ident, $driver:ty) => {
-        mod $module {
-            use crate::source::conformance::{self, Driver};
-
-            $crate::source::conformance::contract_checks!(
-                $driver;
-                paging_keeps_an_empty_continuation,
-                a_cursor_past_the_end_returns_no_issues_or_continuation,
-                discovery_delivers_each_identity_once,
-                issue_ids_are_stable_across_runs_and_fetch,
-                invalid_configuration_is_a_configuration_error,
-                discovered_refs_name_the_parts_returned_by_check,
-                closure_requires_positive_tracker_state,
-                comment_ids_survive_repeated_reads_and_edits,
-                failed_publication_classifies_creation_honestly,
-                uncertain_search_distinguishes_matches_recent_and_incomplete,
-            );
-        }
-    };
-}
-pub(in crate::source) use contract_tests;
-
-struct FakeDriver;
-
-impl Driver for FakeDriver {
-    fn discovery() -> Fixture<String> {
-        let fake = FakeSource::default();
-        let first = issue(1, FIRST);
-        let reobserved = issue_in("o/moved", 1, REOBSERVED);
-        let last = issue(2, LAST);
-        let mut remote = fake.0.lock().unwrap();
-        remote
-            .issues
-            .extend([(1, first.clone()), (2, last.clone())]);
-        remote.pages = vec![
-            Ok(discovery_page(vec![first], Some("1".into()))),
-            Ok(discovery_page(Vec::new(), Some("2".into()))),
-            Ok(discovery_page(vec![reobserved, last], None)),
-        ];
-        drop(remote);
-        fake_fixture(fake, "3".into())
-    }
-
-    fn invalid_configuration() -> Fixture<()> {
-        Fixture {
-            config: ConfigValues::new(),
-            ..fake_fixture(FakeSource::default(), ())
+impl ConformanceReport {
+    fn new(provider: &str) -> Self {
+        Self {
+            provider: provider.to_owned(),
+            passed: true,
+            checks: Vec::new(),
         }
     }
 
-    fn closures() -> Fixture<ClosureProbes> {
-        let fake = FakeSource::default();
-        let add = |id, category, name| {
-            let mut issue = issue(id, "Issue state probe");
-            issue.state = ExternalState::named(category, name);
-            let reference = issue.reference.clone();
-            fake.0.lock().unwrap().issues.insert(id, issue);
-            reference
-        };
-        let data = ClosureProbes {
-            open: add(1, StateCategory::Open, "Done"),
-            completed: add(2, StateCategory::Completed, "Released"),
-            no_reason: add(3, StateCategory::Unknown, "Closed"),
-            unknown_reason: add(4, StateCategory::Unknown, "Completed"),
-            missing: issue(5, "Missing").reference,
-            unreadable: issue(6, "Unreadable").reference,
-        };
-        fake.0.lock().unwrap().broken.push(6);
-        fake_fixture(fake, data)
+    fn pass(&mut self, name: &'static str) {
+        self.push(name, ConformanceOutcome::Passed, None);
     }
 
-    fn comments() -> Fixture<CommentProbe> {
-        let fake = FakeSource::default();
-        let mut first = comment("101", "original");
-        let second = comment("102", "second");
-        fake.0.lock().unwrap().conversations.insert(
-            1,
-            Conversation {
-                comments: vec![first.clone(), second.clone()],
-                events: vec![],
-            },
-        );
-        let remote = fake.0.clone();
-        let edit = Box::new(move || {
-            first.body = "edited".into();
-            remote.lock().unwrap().conversations.insert(
-                1,
-                Conversation {
-                    comments: vec![second, first],
-                    events: vec![],
-                },
-            );
+    fn fail(&mut self, name: &'static str, reason: impl ToString) {
+        self.passed = false;
+        self.push(name, ConformanceOutcome::Failed, Some(reason.to_string()));
+    }
+
+    fn skip(&mut self, name: &'static str, reason: &'static str, strict: bool) {
+        if strict {
+            self.fail(name, reason);
+        } else {
+            self.push(name, ConformanceOutcome::Skipped, Some(reason.to_owned()));
+        }
+    }
+
+    fn result(&mut self, name: &'static str, result: Result<(), SourceError>) {
+        match result {
+            Ok(()) => self.pass(name),
+            Err(error) => self.fail(name, error),
+        }
+    }
+
+    fn push(&mut self, name: &'static str, outcome: ConformanceOutcome, reason: Option<String>) {
+        self.checks.push(ConformanceCheck {
+            name,
+            outcome,
+            reason,
         });
-        fake_fixture(
-            fake,
-            CommentProbe {
-                reference: issue(1, FIRST).reference,
-                edit,
-            },
-        )
     }
+}
 
-    fn publish_failure(failure: PublishFailure) -> Fixture<PublishRequest> {
-        let fake = FakeSource::default();
-        fake.0.lock().unwrap().publish_mode = match failure {
-            PublishFailure::Refused => PublishMode::Refuse,
-            PublishFailure::NotSent => PublishMode::NotSent,
-            PublishFailure::ResponseLost => PublishMode::LoseResponse,
-        };
-        fake_fixture(fake, publication_search().request)
-    }
-
-    fn publication_search(complete: bool) -> Fixture<PublicationSearch> {
-        let fake = FakeSource::default();
-        let mut remote = fake.0.lock().unwrap();
-        remote.search_incomplete = !complete;
-        if complete {
-            let mut body_match = issue(2, BODY_MATCH);
-            body_match.body = publication_search().request.body;
-            let mut edited = issue(3, RECENT);
-            edited.author = Some("octo".into());
-            let mut old = issue(5, TITLE_MATCH);
-            old.created_at = "2025-12-31T00:00:00Z".into();
-            remote.issues.extend([
-                (1, issue(1, TITLE_MATCH)),
-                (2, body_match),
-                (3, edited),
-                (4, issue(4, "Other account's issue")),
-                (5, old),
-            ]);
+pub(super) fn run(
+    engine: &Engine,
+    provider: &str,
+    raw: &ConfigValues,
+    refusal: Result<(), SourceError>,
+    options: &ConformanceOptions,
+) -> Result<ConformanceReport, SourceError> {
+    let descriptor = engine.descriptor(provider)?;
+    let engine = engine.for_connection(provider, "conformance", raw);
+    let connector = engine.connector(provider)?;
+    let mut report = ConformanceReport::new(provider);
+    report.result("version_refusal", refusal);
+    let checked = engine
+        .validate_configuration(provider, raw)
+        .and_then(|config| engine.check(provider, &config).map(|check| (config, check)));
+    let (config, connection) = match checked {
+        Ok(checked) => {
+            report.pass("handshake");
+            report.pass("validate_and_check_connection");
+            checked
         }
-        drop(remote);
-        fake_fixture(fake, publication_search())
+        Err(error) => {
+            report.fail("validate_and_check_connection", error);
+            return Ok(report);
+        }
+    };
+
+    let mut invalid = config.clone();
+    invalid.insert(
+        "invalid setting (conformance probe)".into(),
+        serde_json::Value::Bool(true),
+    );
+    let bad_settings = engine.validate_configuration(provider, &invalid);
+    if matches!(bad_settings, Err(ref error) if error.class() == ErrorClass::Config && !error.issues().is_empty())
+    {
+        report.pass("invalid_configuration");
+    } else {
+        report.fail(
+            "invalid_configuration",
+            "unknown settings must produce field-level configuration errors",
+        );
     }
+    let suspect = descriptor.schema.fields.iter().any(|field| {
+        !matches!(field.kind, FieldKind::Secret)
+            && field.key.split(['_', '-']).any(|part| {
+                matches!(
+                    part.to_ascii_lowercase().as_str(),
+                    "password" | "token" | "secret" | "credential"
+                )
+            })
+    });
+    if suspect {
+        report.fail(
+            "secret_fields",
+            "a credential-like setting must be declared secret",
+        );
+    } else {
+        report.pass("secret_fields");
+    }
+    if let Some(field) = descriptor.schema.fields.iter().find(|field| {
+        matches!(
+            field.kind,
+            FieldKind::MultiSelect {
+                options: OptionSource::Dynamic { .. },
+                ..
+            }
+        )
+    }) {
+        report.result(
+            "options",
+            engine
+                .options(provider, &field.key, "", &config)
+                .map(|_| ()),
+        );
+    } else {
+        report.skip("options", "the schema declares no dynamic selectors", false);
+    }
+
+    let paging = probe_pages(connector, &config);
+    match paging {
+        Ok(true) => report.pass("empty_continuation"),
+        Ok(false) => report.skip(
+            "empty_continuation",
+            "the sampled pages had no empty continuation",
+            false,
+        ),
+        Err(error) => report.fail("empty_continuation", error),
+    }
+    report.skip(
+        "past_end_cursor",
+        "the provider owns cursor syntax; a valid cursor beyond its data requires a seeded fixture",
+        false,
+    );
+
+    let first = sample(&engine, provider, &config)?;
+    if first.is_empty() {
+        report.skip(
+            "stable_identity",
+            "discovery returned no issues to fetch",
+            options.strict,
+        );
+        report.skip(
+            "conversation",
+            "discovery returned no issues with a conversation to check",
+            options.strict && descriptor.capabilities.contains(&Capability::Comments),
+        );
+    } else {
+        let repeated = sample(&engine, provider, &config)?;
+        report.result(
+            "stable_identity",
+            verify_sample(
+                &engine,
+                provider,
+                &config,
+                &first,
+                &repeated,
+                &connection.derived.partitions,
+            ),
+        );
+        if descriptor.capabilities.contains(&Capability::Comments) {
+            let reference = &first[0].reference;
+            let repeated_read =
+                || comment_identity_set(connector.conversation(&config, reference)?.comments);
+            report.result(
+                "conversation",
+                repeated_read().and_then(|first| {
+                    let second = repeated_read()?;
+                    require(
+                        first == second,
+                        "the same conversation returned different comment IDs",
+                    )
+                }),
+            );
+        } else {
+            report.skip(
+                "conversation",
+                "the extension does not declare comments",
+                false,
+            );
+        }
+    }
+    report.skip(
+        "typed_closure_and_error_outcomes",
+        "true tracker states and refused or lost writes require controlled fixtures",
+        false,
+    );
+
+    match &options.publish {
+        Some(destination) => report.result("publication", check_publication(&engine, provider, &config, &connection, destination)),
+        None => report.skip(
+            "publication",
+            if descriptor.capabilities.contains(&Capability::Publish) {
+                "read-only run; pass --publish with a destination to create one issue and check recovery"
+            } else {
+                "the extension does not declare publication"
+            },
+            false,
+        ),
+    }
+    Ok(report)
 }
 
-fn fake_fixture<T>(fake: FakeSource, data: T) -> Fixture<T> {
-    Fixture {
-        connector: Box::new(fake),
-        config: json!({"repositories": ["o/r"]})
-            .as_object()
-            .unwrap()
-            .clone(),
-        data,
+fn probe_pages(connector: &dyn Connector, config: &ConfigValues) -> Result<bool, SourceError> {
+    let mut cursor = None;
+    let mut seen = HashSet::new();
+    let mut empty_continuation = false;
+    for _ in 0..PROBE_PAGES {
+        let page = connector.discover(DiscoveryRequest {
+            config,
+            cursor: cursor.as_deref(),
+            page_size: 1,
+        })?;
+        let Some(next) = page.next_cursor else {
+            return Ok(empty_continuation);
+        };
+        require(
+            seen.insert(next.clone()),
+            "discovery repeated a continuation cursor",
+        )?;
+        empty_continuation |= page.issues.is_empty();
+        cursor = Some(next);
     }
+    Ok(empty_continuation)
 }
 
-pub(in crate::source) fn publication_search() -> PublicationSearch {
-    PublicationSearch {
-        request: PublishRequest {
-            title: TITLE_MATCH.into(),
-            body: "The ticket description as sent.".into(),
-            destination: "o/r".into(),
-        },
-        account: Some("octo".into()),
-        since: SEARCH_SINCE.into(),
-    }
+fn sample(
+    engine: &Engine,
+    provider: &str,
+    config: &ConfigValues,
+) -> Result<Vec<ExternalIssue>, SourceError> {
+    let mut issues = Vec::new();
+    engine.discover(provider, config, |issue| {
+        issues.push(issue);
+        if issues.len() == SAMPLE_SIZE {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    })?;
+    Ok(issues)
 }
 
-fn comment(id: &str, body: &str) -> ExternalComment {
-    ExternalComment {
-        id: id.into(),
-        author: "alice".into(),
-        body: body.into(),
-        url: format!("https://example.test/o/r/issues/1#comment-{id}"),
-        created_at: "2026-02-01T00:00:00Z".into(),
-        updated_at: "2026-02-01T00:00:00Z".into(),
+fn verify_sample(
+    engine: &Engine,
+    provider: &str,
+    config: &ConfigValues,
+    first: &[ExternalIssue],
+    repeated: &[ExternalIssue],
+    partitions: &[String],
+) -> Result<(), SourceError> {
+    let repeated: HashMap<_, _> = repeated
+        .iter()
+        .map(|issue| (&issue.reference.locator, &issue.reference.identity))
+        .collect();
+    let mut distinct = HashSet::new();
+    for issue in first {
+        let identity = &issue.reference.identity;
+        verify_identity(provider, identity)?;
+        require(
+            distinct.insert(identity),
+            "discovery delivered the same identity twice",
+        )?;
+        require(
+            partitions.contains(&issue.reference.partition),
+            "a discovered issue named a part absent from the connection check",
+        )?;
+        if let Some(reobserved) = repeated.get(&issue.reference.locator) {
+            require(
+                *reobserved == identity,
+                "a repeated discovery returned a different identity for the same locator",
+            )?;
+        }
+        let fetched = engine.fetch(provider, config, &issue.reference)?;
+        require(
+            fetched.reference.identity == *identity,
+            "list and fetch returned different identities",
+        )?;
     }
+    Ok(())
 }
 
-contract_tests!(fake, super::FakeDriver);
+fn comment_identity_set(
+    comments: Vec<super::ExternalComment>,
+) -> Result<HashSet<String>, SourceError> {
+    let mut ids = HashSet::new();
+    for comment in comments {
+        require(!comment.id.trim().is_empty(), "a comment has no stable ID")?;
+        require(
+            ids.insert(comment.id),
+            "a conversation returned a comment ID more than once",
+        )?;
+    }
+    Ok(ids)
+}
 
-#[test]
-#[should_panic(expected = "discovery: a skipped check needs a reason")]
-fn a_skip_with_a_blank_reason_fails_the_suite() {
-    run_check("discovery", Some("   "), || unreachable!());
+fn check_publication(
+    engine: &Engine,
+    provider: &str,
+    config: &ConfigValues,
+    connection: &super::ConnectionCheck,
+    destination: &str,
+) -> Result<(), SourceError> {
+    require(
+        engine.can_publish(provider),
+        "this extension does not declare publication",
+    )?;
+    check_destination(&connection.derived.publication, destination)?;
+    let request = PublishRequest {
+        title: format!("ticketd conformance {}", uuid::Uuid::new_v4()),
+        body: "Created by an explicit ticketd source conformance publication check.".into(),
+        destination: destination.into(),
+    };
+    let since = chrono::Utc::now().to_rfc3339();
+    let issue = engine.publish(provider, config, &request)?;
+    let located = engine.locate(provider, config, destination, &issue.display)?;
+    require(
+        issue.reference.identity == located.reference.identity,
+        "locate did not return the created issue",
+    )?;
+    let search = PublicationSearch {
+        request,
+        since,
+        account: Some(connection.connection.account.clone()),
+    };
+    let found = engine.find_published(provider, config, &search)?;
+    require(
+        found
+            .matches
+            .iter()
+            .any(|candidate| candidate.reference.identity == issue.reference.identity),
+        "the publication recovery search did not return the issue just created",
+    )
+}
+
+pub(super) fn verify_identity(
+    provider: &str,
+    identity: &ExternalIdentity,
+) -> Result<(), SourceError> {
+    require(
+        identity.provider == provider && !identity.id.trim().is_empty(),
+        "an issue must have a stable ID under its source provider",
+    )
+}
+
+fn require(condition: bool, message: &'static str) -> Result<(), SourceError> {
+    if condition {
+        Ok(())
+    } else {
+        Err(SourceError::Protocol(message.into()))
+    }
 }

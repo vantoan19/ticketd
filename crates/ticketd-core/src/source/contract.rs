@@ -4,11 +4,9 @@
 //! A connector translates one provider's operations into the neutral types
 //! below. It never touches the workspace database: ticketd's engine decides
 //! when to call it, and ticketd's workflows persist whatever it returns.
-//! Connectors are compiled in; there is no user-installed extension runtime.
 //!
-//! The contract remains internal while the first public version is being
-//! prepared. Once published, changes to existing operations and types require
-//! a version bump. Adding an optional capability keeps the version.
+//! Changes to existing operations and types require a version bump. Adding an
+//! optional capability keeps the version.
 
 use serde::{Deserialize, Serialize};
 
@@ -17,10 +15,10 @@ use super::{SignInGuidance, SourcePresentation, SummaryPart};
 
 /// The contract version this build of ticketd speaks. The engine refuses to
 /// register a connector that declares a different one.
-pub const CONTRACT_VERSION: u32 = 1;
+pub const CONTRACT_VERSION: u32 = 2;
 
 /// What a connector can do beyond describing and validating its configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     /// List issues that match the discovery configuration.
@@ -33,7 +31,7 @@ pub enum Capability {
     Comments,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConnectorDescriptor {
     /// Stable provider id, such as `github`. It is part of every external identity.
     pub provider: String,
@@ -44,7 +42,7 @@ pub struct ConnectorDescriptor {
 }
 
 /// The account the connector is acting as. Never contains a credential.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConnectionInfo {
     pub account: String,
     /// Canonical site identity. Empty when the provider has only one site.
@@ -53,14 +51,14 @@ pub struct ConnectionInfo {
 }
 
 /// The verified connection and answers derived from its settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConnectionCheck {
     pub connection: ConnectionInfo,
     pub derived: DerivedConfiguration,
 }
 
 /// Configuration answers that ticketd can keep for use without a connector call.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DerivedConfiguration {
     /// Parts read by discovery, named as in [`ExternalRef::partition`].
     pub partitions: Vec<String>,
@@ -81,7 +79,7 @@ impl Default for DerivedConfiguration {
 }
 
 /// Destination choices and the rules for checking a destination locally.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DestinationRules {
     /// Accepted destinations in their canonical spelling. Empty when the
     /// connector cannot enumerate them.
@@ -91,7 +89,7 @@ pub struct DestinationRules {
     pub validation: Option<DestinationValidation>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DestinationValidation {
     pub format: ValueFormat,
     pub message: String,
@@ -99,7 +97,7 @@ pub struct DestinationValidation {
 
 /// An external issue's immutable identity. Titles, numbers and repository
 /// names can change; this cannot. Never match issues by display text.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalIdentity {
     pub provider: String,
     pub id: String,
@@ -107,7 +105,7 @@ pub struct ExternalIdentity {
 
 /// Enough to ask the connector for an issue again. `locator` is opaque to
 /// ticketd and defined by the connector (for GitHub, `owner/name#number`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalRef {
     pub identity: ExternalIdentity,
     pub locator: String,
@@ -118,7 +116,7 @@ pub struct ExternalRef {
 
 /// How a source state affects ticketd's workflow. Connectors derive the
 /// category from typed provider data and use Unknown for an unrecognized value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StateCategory {
     Open,
@@ -160,7 +158,7 @@ impl StateCategory {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalState {
     pub category: StateCategory,
     /// The tracker's own name for the state, used only for display. Older
@@ -178,7 +176,7 @@ impl ExternalState {
 }
 
 /// An issue as the provider reports it, in provider-neutral form.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalIssue {
     pub reference: ExternalRef,
     /// Human-readable name such as `owner/name#12`. Display only.
@@ -192,13 +190,11 @@ pub struct ExternalIssue {
     /// When the issue was opened at the source.
     pub created_at: String,
     pub updated_at: String,
-    /// The source identity that opened the issue. Additive to contract 1;
-    /// connectors that cannot tell leave it `None`.
+    /// The source identity that opened the issue, when known.
     #[serde(default)]
     pub author: Option<String>,
     /// For an issue closed as a duplicate: the canonical issue, when the provider
-    /// names an accessible one. Absent means the target is unknown. Additive to
-    /// contract 1; connectors that cannot tell leave it `None`.
+    /// names an accessible one. Absent means the target is unknown.
     #[serde(default)]
     pub duplicate_of: Option<ExternalRef>,
     /// Where the canonical issue can be opened, when the provider says.
@@ -213,7 +209,7 @@ pub struct ExternalIssue {
 
 /// A comment on an external issue, as its source reports it. Authors are the
 /// source's own identities, never ticketd editing agents.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalComment {
     /// Stable within the issue; repeated reads of one comment return one id.
     pub id: String,
@@ -226,7 +222,7 @@ pub struct ExternalComment {
 }
 
 /// What happened in an external timeline event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "event", content = "category", rename_all = "snake_case")]
 pub enum ExternalEventKind {
     Closed(StateCategory),
@@ -236,7 +232,7 @@ pub enum ExternalEventKind {
 }
 
 /// A timeline event such as a closure, reopening or assignment change.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalEvent {
     pub id: String,
     pub kind: ExternalEventKind,
@@ -249,7 +245,7 @@ pub struct ExternalEvent {
 
 /// An issue's whole conversation. Order is not significant; the engine sorts
 /// it chronologically.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Conversation {
     pub comments: Vec<ExternalComment>,
     pub events: Vec<ExternalEvent>,
@@ -264,7 +260,7 @@ pub struct DiscoveryRequest<'a> {
     pub page_size: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DiscoveryPage {
     pub issues: Vec<ExternalIssue>,
     /// `Some` while more results remain. A page may be empty and still have a
@@ -276,7 +272,7 @@ pub struct DiscoveryPage {
 }
 
 /// One part of the discovery rules that could not be read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SkippedPartition {
     /// The failure code of the part (`not_found` or `forbidden`).
     pub code: String,
@@ -292,7 +288,7 @@ pub struct SkippedPartition {
 /// A request to create an ordinary issue. Connectors that do not declare
 /// [`Capability::Publish`] keep the default implementation. It carries exactly
 /// what the person previewed: no ticketd metadata, labels or comments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PublishRequest {
     pub title: String,
     pub body: String,
@@ -301,7 +297,7 @@ pub struct PublishRequest {
 }
 
 /// A search for issues an earlier, uncertain publish may have created.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PublicationSearch {
     /// Exactly what the earlier attempt sent.
     pub request: PublishRequest,
@@ -321,7 +317,7 @@ pub struct PublicationSearch {
 /// `complete` is true only when the connector read the whole window: then an
 /// empty `matches` proves that nothing was created, while an incomplete read
 /// proves nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PublicationCandidates {
     pub matches: Vec<ExternalIssue>,
     #[serde(default)]
@@ -338,7 +334,7 @@ pub enum Surface {
 }
 
 /// A broad cause that a caller can handle without knowing every failure code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorClass {
     Config,
@@ -375,6 +371,8 @@ pub enum SourceError {
     RateLimited { retry_after_secs: Option<u64> },
     #[error("{0}")]
     Unavailable(String),
+    #[error("the source extension crashed five times in three minutes. Retry to restart it")]
+    ExtensionCrashLimit,
     /// The request never left this machine (no DNS answer, connection refused),
     /// so the provider certainly did not act on it. Reads as unavailable
     /// everywhere else, but a failed `publish` with it proves nothing was created.
@@ -410,6 +408,7 @@ pub(crate) enum FailureCode {
     NotFound,
     RateLimited,
     Unavailable,
+    ExtensionCrashLimit,
     Rejected,
     Protocol,
     Unsupported,
@@ -420,12 +419,13 @@ pub(crate) enum FailureCode {
 }
 
 impl FailureCode {
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::Unauthenticated,
         Self::Forbidden,
         Self::NotFound,
         Self::RateLimited,
         Self::Unavailable,
+        Self::ExtensionCrashLimit,
         Self::Rejected,
         Self::Protocol,
         Self::Unsupported,
@@ -442,6 +442,7 @@ impl FailureCode {
             Self::NotFound => "not_found",
             Self::RateLimited => "rate_limited",
             Self::Unavailable => "unavailable",
+            Self::ExtensionCrashLimit => "extension_crash_limit",
             Self::Rejected => "rejected",
             Self::Protocol => "protocol",
             Self::Unsupported => "unsupported",
@@ -460,7 +461,9 @@ impl FailureCode {
             | Self::InvalidConfiguration
             | Self::UnknownProvider
             | Self::NotConfigured => ErrorClass::Config,
-            Self::RateLimited | Self::Unavailable => ErrorClass::Transient,
+            Self::RateLimited | Self::Unavailable | Self::ExtensionCrashLimit => {
+                ErrorClass::Transient
+            }
             Self::Protocol | Self::Unsupported | Self::IncompatibleContract => ErrorClass::System,
         }
     }
@@ -476,6 +479,7 @@ impl FailureCode {
     pub(crate) fn is_unavailable(self) -> bool {
         match self {
             Self::Unavailable
+            | Self::ExtensionCrashLimit
             | Self::Unauthenticated
             | Self::Forbidden
             | Self::NotFound
@@ -496,7 +500,10 @@ impl FailureCode {
     /// the others.
     pub(crate) fn interrupts_source(self) -> bool {
         match self {
-            Self::Unavailable | Self::RateLimited | Self::Unauthenticated => true,
+            Self::Unavailable
+            | Self::ExtensionCrashLimit
+            | Self::RateLimited
+            | Self::Unauthenticated => true,
             Self::Forbidden
             | Self::NotFound
             | Self::Rejected
@@ -518,6 +525,7 @@ impl SourceError {
             Self::NotFound(_) => FailureCode::NotFound,
             Self::RateLimited { .. } => FailureCode::RateLimited,
             Self::Unavailable(_) | Self::NotSent(_) => FailureCode::Unavailable,
+            Self::ExtensionCrashLimit => FailureCode::ExtensionCrashLimit,
             Self::Rejected(_) => FailureCode::Rejected,
             Self::Protocol(_) => FailureCode::Protocol,
             Self::Unsupported(_) => FailureCode::Unsupported,
@@ -565,6 +573,7 @@ impl SourceError {
             | Self::RateLimited { .. }
             | Self::Rejected(_)
             | Self::NotSent(_)
+            | Self::ExtensionCrashLimit
             | Self::Unsupported(_)
             | Self::InvalidConfiguration(_)
             | Self::UnknownProvider(_)

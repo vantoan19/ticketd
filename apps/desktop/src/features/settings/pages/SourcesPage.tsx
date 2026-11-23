@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { FailureAlert } from "@/components/ui/failure-alert";
@@ -112,6 +113,9 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
                     trailing={
                       !editing && (
                         <>
+                          {entry.development && (
+                            <Badge variant="experimental">Development</Badge>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -199,6 +203,7 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
               >
                 <Plus aria-hidden="true" /> Add {entry.connector.name}{" "}
                 connection
+                {entry.development && <span>(development)</span>}
               </Button>
             ))}
         </>

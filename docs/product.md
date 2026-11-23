@@ -389,9 +389,14 @@ system's secure store.
 
 ### Ticket sources
 
-A ticket source connects an external tracker; GitHub Issues is the provider
-([ADR 0006](adr/0006-external-ticket-authority.md)). The first connector is built in
-and run through a shared extension interface.
+Link a local development extension with `ticketd source extension link PATH`.
+It appears alongside built-in providers in Settings → Sources. The
+[extension guide](source-extensions/README.md) includes a TypeScript example,
+the published contract and the conformance command.
+
+A ticket source connects an external tracker. GitHub Issues is built in. GitHub
+and linked extensions use the same ticket authority and refresh workflows
+([ADR 0006](adr/0006-external-ticket-authority.md)).
 
 - Add and name source connections under Settings → Sources. Several accounts can
   connect to the same provider. Connections stay on this device and are excluded

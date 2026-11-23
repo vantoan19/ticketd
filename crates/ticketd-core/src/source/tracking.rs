@@ -109,6 +109,8 @@ pub struct TicketSource {
     pub provider: String,
     /// What people call the provider, such as "GitHub".
     pub provider_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_icon_svg: Option<String>,
     /// Where the issue lives, such as "owner/repo" (empty when the locator has no place).
     pub place: String,
     /// Formatted place label for the state line.
@@ -610,6 +612,9 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     };
     ticket.source = Some(TicketSource {
         provider_name,
+        provider_icon_svg: description
+            .as_ref()
+            .and_then(|source| source.presentation.icon_svg.clone()),
         place,
         place_label,
         number,
@@ -875,6 +880,20 @@ impl Workspace {
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
         self.refresh_selected(engine, options, None)
+    }
+
+    /// The connection that would refresh the externally owned ticket on this device.
+    pub fn ticket_source_connection(&self, reference: &str) -> Result<Option<String>, Error> {
+        let tracked = tracked(&self.connection, Some(reference))?;
+        let Some(ticket) = tracked.first() else {
+            return Ok(None);
+        };
+        super::selected_connection(
+            &self.connection,
+            &ticket.ticket_id,
+            &ticket.provider,
+            &ticket.partition,
+        )
     }
 
     /// Refreshes a single connection and the tickets routed to it.

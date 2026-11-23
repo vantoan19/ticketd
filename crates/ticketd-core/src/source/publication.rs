@@ -2299,7 +2299,7 @@ fn complete_attempt(
     )?)
 }
 
-fn check_destination(rules: &DestinationRules, chosen: &str) -> Result<(), SourceError> {
+pub(super) fn check_destination(rules: &DestinationRules, chosen: &str) -> Result<(), SourceError> {
     if let Some(validation) = &rules.validation
         && !validation.format.is_valid(chosen)
     {

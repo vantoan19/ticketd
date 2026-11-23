@@ -277,6 +277,7 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: "T-KQ1",
+    retry: true,
   });
   // A failed retry does not claim success.
   expect(
