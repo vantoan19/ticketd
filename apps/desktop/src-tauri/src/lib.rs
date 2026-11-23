@@ -2234,6 +2234,24 @@ mod tests {
     }
 
     #[test]
+    fn a_source_failure_crosses_the_bridge_with_the_public_message() {
+        use ticketd_core::source::SourceError;
+
+        let error = SourceError::Unavailable("GitHub could not be reached".into())
+            .with_detail("synthetic transport diagnostic");
+        let failure =
+            serde_json::to_value(super::SourceFailure::from(error)).expect("serializable");
+        assert_eq!(
+            failure,
+            serde_json::json!({
+                "code": "unavailable",
+                "message": "GitHub could not be reached",
+                "fields": [],
+            })
+        );
+    }
+
+    #[test]
     fn a_failure_crosses_the_bridge_with_its_kind_and_cause() {
         let read_only = || {
             ticketd_core::Error::Directory(std::io::Error::new(

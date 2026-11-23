@@ -10,8 +10,8 @@ use serde_json::json;
 
 use super::{
     Capability, ClosureReason, ConfigValues, Connector, Conversation, DiscoveryRequest, Engine,
-    ExternalComment, ExternalIssue, ExternalRef, ExternalState, PublicationSearch, PublishRequest,
-    SourceError,
+    ErrorClass, ExternalComment, ExternalIssue, ExternalRef, ExternalState, PublicationSearch,
+    PublishRequest,
 };
 
 use crate as ticketd_core;
@@ -185,15 +185,31 @@ pub(in crate::source) fn issue_ids_are_stable_across_runs_and_fetch<D: Driver>()
     }
 }
 
+pub(in crate::source) fn discovered_refs_name_the_parts_returned_by_check<D: Driver>() {
+    let fixture = D::discovery();
+    let checked = fixture.connector.check_connection(&fixture.config).unwrap();
+    assert_eq!(checked.connection.account, "octo");
+    assert_eq!(checked.derived.partitions, ["o/r"]);
+    assert_eq!(checked.derived.publication.destinations, ["o/r"]);
+    let first = fixture
+        .connector
+        .discover(DiscoveryRequest {
+            config: &fixture.config,
+            cursor: None,
+            page_size: 100,
+        })
+        .unwrap();
+    assert_eq!(first.issues[0].reference.partition, "o/r");
+}
+
 pub(in crate::source) fn invalid_configuration_is_a_configuration_error<D: Driver>() {
     let (engine, provider, invalid) = D::invalid_configuration().engine();
     let error = engine
         .discover(&provider, &invalid, |_| ControlFlow::Continue(()))
         .unwrap_err();
-    assert!(
-        matches!(error, SourceError::InvalidConfiguration(ref issues) if !issues.is_empty()),
-        "{error}"
-    );
+    assert_eq!(error.class(), ErrorClass::Config, "{error}");
+    assert_eq!(error.code(), "invalid_configuration");
+    assert!(!error.issues().is_empty(), "{error}");
 }
 
 pub(in crate::source) fn unknown_closure_is_never_completed<D: Driver>() {
@@ -249,17 +265,20 @@ pub(in crate::source) fn comment_ids_survive_repeated_reads_and_edits<D: Driver>
 }
 
 pub(in crate::source) fn failed_publication_classifies_creation_honestly<D: Driver>() {
-    for (failure, ruled_out) in [
-        (PublishFailure::Refused, true),
-        (PublishFailure::NotSent, true),
-        (PublishFailure::ResponseLost, false),
+    for (failure, class, ruled_out) in [
+        (PublishFailure::Refused, ErrorClass::Auth, true),
+        (PublishFailure::NotSent, ErrorClass::Transient, true),
+        (PublishFailure::ResponseLost, ErrorClass::Transient, false),
     ] {
         let fixture = D::publish_failure(failure);
         fixture.require(Capability::Publish);
         let error = fixture
             .connector
+            .publication()
+            .unwrap()
             .publish(&fixture.config, &fixture.data)
             .unwrap_err();
+        assert_eq!(error.class(), class, "{failure:?}: {error}");
         assert_eq!(
             error.ruled_out_creation(),
             ruled_out,
@@ -273,6 +292,8 @@ pub(in crate::source) fn uncertain_search_distinguishes_matches_recent_and_incom
     fixture.require(Capability::Publish);
     let result = fixture
         .connector
+        .publication()
+        .unwrap()
         .find_published(&fixture.config, &fixture.data)
         .unwrap();
     assert!(result.complete, "the source read the whole window");
@@ -284,6 +305,8 @@ pub(in crate::source) fn uncertain_search_distinguishes_matches_recent_and_incom
     let fixture = D::publication_search(false);
     let result = fixture
         .connector
+        .publication()
+        .unwrap()
         .find_published(&fixture.config, &fixture.data)
         .unwrap();
     assert!(
@@ -339,6 +362,7 @@ macro_rules! contract_tests {
                 discovery_delivers_each_identity_once,
                 issue_ids_are_stable_across_runs_and_fetch,
                 invalid_configuration_is_a_configuration_error,
+                discovered_refs_name_the_parts_returned_by_check,
                 unknown_closure_is_never_completed,
                 comment_ids_survive_repeated_reads_and_edits,
                 failed_publication_classifies_creation_honestly,

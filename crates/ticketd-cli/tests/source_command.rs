@@ -153,6 +153,7 @@ impl Cli {
                 self.dir.path().join("workspace.sqlite3"),
             )
             .env("TICKETD_GITHUB_API_URL", &self.api)
+            .env("TICKETD_LOG", "ticketd_core::source=debug")
             .env_remove("GH_TOKEN")
             .env_remove("GITHUB_TOKEN")
             .env_remove("TICKETD_GITHUB_TOKEN");
@@ -217,7 +218,20 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
     let cli = Cli::new();
     assert_eq!(cli.run(&["source", "test", "github"])["account"], "octo");
     let stderr = cli.fail(&["source", "test", "github"], Some("wrong-token"));
-    assert!(stderr.contains("rejected the credential"), "{stderr}");
+    let user_message = stderr
+        .lines()
+        .find(|line| line.starts_with("error:"))
+        .unwrap();
+    assert!(user_message.contains("rejected the credential"), "{stderr}");
+    assert!(!user_message.contains("Bad credentials"), "{stderr}");
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.contains("error_kind=\"unauthenticated\"")
+                && line.contains("error_class=\"auth\"")
+                && line.contains("HTTP 401")),
+        "{stderr}"
+    );
     assert!(!stderr.contains("wrong-token"));
     let stderr = cli.fail(&["source", "test", "github"], None);
     assert!(stderr.contains("gh auth login"), "{stderr}");

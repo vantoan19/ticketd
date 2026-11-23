@@ -782,9 +782,12 @@ The code lives in `ticketd_core::source`, from the inside out:
 - **Contract** (`contract.rs`): the `Connector` trait and its provider-neutral
   types (`ExternalIssue`, `ExternalIdentity`, `ExternalState`, `ClosureReason`,
   `SourceError`). `CONTRACT_VERSION` identifies the contract; the engine refuses
-  a connector that declares another version. Changing a signature or the meaning
-  of a type bumps the version. Adding an optional capability does not. Publication
-  is an optional capability with a default "unsupported" implementation.
+  a connector that declares another version. Once published, changes to existing
+  operations and types bump the version, while optional capabilities can be added
+  within a version. Publication is one optional capability covering creation,
+  lookup and uncertain-publication search. Source errors pair a stable code with a
+  configuration, authentication, transient or system class. The interface receives
+  the person's message, and diagnostics go to the local log.
 - **Schema** (`schema.rs`): fields, selectors, dynamic options, and validation,
   shared by every client. Desktop forms and CLI `--set key=value` flags both build
   raw values that `ConfigSchema::validate` checks and normalizes.
@@ -808,6 +811,13 @@ caches its description locally so existing tickets can still name their source.
 
 Saved source configuration is workspace data (`source_configurations`), is
 included in export and backups, and is separate from any imported ticket.
+Saving and refreshing start with a connection check. Its account result confirms
+the connection, and its derived answers describe the discovery parts, filters
+and publication destinations. The core caches the latest successful answers for
+offline previews and compares them with publication requests in the write that
+records an attempt. A failed connection check keeps the cached answers. External
+issue references carry the discovery part so ticketd can compare it without
+interpreting the source's locator.
 
 An imported ticket stores three things apart, each keyed by the ticket:
 `external_identities` (provenance: which external issue it is or was, never

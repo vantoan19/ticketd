@@ -26,15 +26,16 @@ mod tracking;
 
 use std::borrow::Cow;
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub use contract::{
-    CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
-    Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
-    ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
-    Surface,
+    CONTRACT_VERSION, Capability, ClosureReason, ConnectionCheck, ConnectionInfo, Connector,
+    ConnectorDescriptor, Conversation, DerivedConfiguration, DestinationRules,
+    DestinationValidation, DiscoveryPage, DiscoveryRequest, ErrorClass, ExternalComment,
+    ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+    Publication, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
+    SourceError, Surface,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
@@ -134,6 +135,31 @@ pub(crate) fn migrate_presentations(connection: &rusqlite::Connection) -> Result
         "CREATE TABLE IF NOT EXISTS source_presentations (provider TEXT PRIMARY KEY, description TEXT NOT NULL);",
     )?;
     Ok(())
+}
+
+/// Format version 87: derived answers from source connection checks and the
+/// part carried in each observed issue reference.
+pub(crate) fn migrate_contract_data(connection: &Connection) -> Result<(), Error> {
+    for (table, column, definition) in [
+        ("source_configurations", "derived_configuration", "TEXT"),
+        (
+            "source_configurations",
+            "revision",
+            "TEXT NOT NULL DEFAULT ''",
+        ),
+        ("source_configurations", "derived_checked_at", "TEXT"),
+        ("external_identities", "partition", "TEXT"),
+        ("publication_attempts", "partition", "TEXT"),
+    ] {
+        crate::format::add_column_if_missing(connection, table, column, definition)?;
+    }
+    Ok(())
+}
+
+/// Older Workspace sync files carry the locator but no part. GitHub was the
+/// only source that could create them and its locator names the repository.
+pub(crate) fn legacy_reference_partition(provider: &str, locator: &str) -> String {
+    github::legacy_reference_partition(provider, locator).unwrap_or_default()
 }
 
 /// Describes a provider from the device-local cache, or its built-in
@@ -279,13 +305,26 @@ impl Workspace {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, Error> {
+        let config = engine.validate(provider, raw)?;
+        self.preview_source_with_config(engine, provider, &config)
+            .map(|(preview, _)| preview)
+    }
+
+    fn preview_source_with_config(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        config: &ConfigValues,
+    ) -> Result<(DiscoveryPreview, DerivedConfiguration), Error> {
         let mut statement = self.connection.prepare("SELECT i.external_id, t.reference FROM external_identities i JOIN tickets t ON t.id = i.ticket_id WHERE i.provider = ?1")?;
         let known = statement
             .query_map([provider], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
-        Ok(engine.preview_with(provider, raw, |identity| known.get(&identity.id).cloned())?)
+        Ok(engine.preview_with(provider, config, |identity| {
+            known.get(&identity.id).cloned()
+        })?)
     }
 
     /// Validates `raw`, previews discovery against the provider, and only then
@@ -300,26 +339,24 @@ impl Workspace {
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
         let config = engine.validate(provider, raw)?;
-        let preview = self.preview_source(engine, provider, &config)?;
+        let (preview, derived) = self.preview_source_with_config(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
+        let derived_configuration = serde_json::to_string(&derived)?;
+        let revision = uuid::Uuid::new_v4().to_string();
         let description = serde_json::to_string(&engine.description(provider)?)?;
         crate::write_scope::run(&self.connection, |transaction| {
-            let previous: Option<String> = transaction
-                .query_row(
-                    "SELECT configuration FROM source_configurations WHERE provider = ?1",
-                    [provider],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let previous = previous
-                .map(|raw| serde_json::from_str::<ConfigValues>(&raw))
-                .transpose()?;
-            if previous.as_ref() != Some(&config) {
-                transaction.execute("UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN (SELECT i.ticket_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external')", [provider])?;
+            let previous = configured_source(transaction, provider)?;
+            if previous.is_none_or(|previous| {
+                previous.saved.config != config || !same_discovery(&previous.derived, &derived)
+            }) {
+                clear_discovery_matches(transaction, provider)?;
             }
             transaction.execute(
-            "INSERT INTO source_configurations (provider, configuration, account, contract_version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(provider) DO UPDATE SET configuration = excluded.configuration, account = excluded.account, contract_version = excluded.contract_version, saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-            params![provider, configuration, preview.account, CONTRACT_VERSION],
+            "INSERT INTO source_configurations (provider, configuration, account, contract_version, derived_configuration, revision) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(provider) DO UPDATE SET configuration = excluded.configuration, \
+             account = excluded.account, contract_version = excluded.contract_version, saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), \
+             derived_configuration = excluded.derived_configuration, revision = excluded.revision, derived_checked_at = NULL",
+            params![provider, configuration, preview.account, CONTRACT_VERSION, derived_configuration, revision],
         )?;
             transaction.execute(
                 "INSERT INTO source_presentations (provider, description) VALUES (?1, ?2) ON CONFLICT(provider) DO UPDATE SET description = excluded.description",
@@ -351,4 +388,71 @@ fn into_saved(
         account,
         saved_at,
     })
+}
+
+// The public source settings omit these device-local answers and the revision
+// protecting writes that took a network round trip.
+struct ConfiguredSource {
+    saved: SavedSource,
+    derived: DerivedConfiguration,
+    revision: String,
+}
+
+type SavedRow = (String, String, String, String);
+
+const CONFIGURED_SOURCE: &str = "SELECT provider, configuration, account, saved_at, derived_configuration, revision \
+     FROM source_configurations WHERE (?1 IS NULL OR provider = ?1) ORDER BY provider";
+
+fn configured_source(
+    connection: &Connection,
+    provider: &str,
+) -> Result<Option<ConfiguredSource>, Error> {
+    connection
+        .query_row(CONFIGURED_SOURCE, [provider], configured_row)
+        .optional()?
+        .map(into_configured)
+        .transpose()
+}
+
+fn configured_sources(connection: &Connection) -> Result<Vec<ConfiguredSource>, Error> {
+    let mut statement = connection.prepare(CONFIGURED_SOURCE)?;
+    let rows = statement.query_map([None::<&str>], configured_row)?;
+    rows.map(|row| into_configured(row?)).collect()
+}
+
+fn configured_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(SavedRow, Option<String>, String)> {
+    Ok((row_parts(row)?, row.get(4)?, row.get(5)?))
+}
+
+fn into_configured(
+    (row, raw, revision): (SavedRow, Option<String>, String),
+) -> Result<ConfiguredSource, Error> {
+    let saved = into_saved(row)?;
+    let derived = match raw {
+        Some(raw) => serde_json::from_str(&raw)?,
+        // GitHub's rules were calculated locally before format 87. Preserve
+        // offline previews until a successful check can save the cached data.
+        None => {
+            github::legacy_derived_configuration(&saved.provider, &saved.config).unwrap_or_default()
+        }
+    };
+    Ok(ConfiguredSource {
+        saved,
+        derived,
+        revision,
+    })
+}
+
+fn same_discovery(previous: &DerivedConfiguration, current: &DerivedConfiguration) -> bool {
+    previous.partitions == current.partitions && previous.discovery_scope == current.discovery_scope
+}
+
+fn clear_discovery_matches(connection: &Connection, provider: &str) -> Result<(), Error> {
+    connection.execute(
+        "UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN \
+         (SELECT i.ticket_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id \
+          WHERE i.provider = ?1 AND o.authority = 'external')",
+        [provider],
+    )?;
+    Ok(())
 }

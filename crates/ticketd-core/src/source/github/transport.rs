@@ -100,30 +100,25 @@ impl UreqTransport {
     }
 }
 
-/// What went wrong in words a person can act on, followed by the library's own
-/// text in parentheses so the underlying cause is never lost.
-fn describe_transport_error(error: &ureq::Error) -> String {
+/// Describe the failure without rendering a URL or the response body.
+fn describe_transport_error(error: &ureq::Error) -> &'static str {
     use std::io::ErrorKind;
-    let human = match error {
-        ureq::Error::HostNotFound => Some("the server's address could not be found"),
-        ureq::Error::ConnectionFailed => Some("the connection could not be made"),
-        ureq::Error::Timeout(_) => Some("the request timed out"),
+    match error {
+        ureq::Error::HostNotFound => "the server's address could not be found",
+        ureq::Error::ConnectionFailed => "the connection could not be made",
+        ureq::Error::Timeout(_) => "the request timed out",
         ureq::Error::Io(io) => match io.kind() {
-            ErrorKind::ConnectionRefused => Some("the connection was refused"),
+            ErrorKind::ConnectionRefused => "the connection was refused",
             ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe => {
-                Some("the connection was dropped")
+                "the connection was dropped"
             }
-            ErrorKind::TimedOut => Some("the request timed out"),
+            ErrorKind::TimedOut => "the request timed out",
             ErrorKind::NotConnected | ErrorKind::AddrNotAvailable => {
-                Some("there is no network connection")
+                "there is no network connection"
             }
-            _ => None,
+            _ => "the network request failed",
         },
-        _ => None,
-    };
-    match human {
-        Some(human) => format!("{human} ({error})"),
-        None => error.to_string(),
+        _ => "the network request failed",
     }
 }
 
@@ -159,7 +154,7 @@ impl HttpTransport for UreqTransport {
                     | ureq::Error::BadUri(_)
                     | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
             ),
-            message: describe_transport_error(&error),
+            message: describe_transport_error(&error).into(),
         })?;
         let status = response.status().as_u16();
         let headers = response
@@ -175,7 +170,7 @@ impl HttpTransport for UreqTransport {
         let body = response
             .body_mut()
             .read_to_vec()
-            .map_err(|error| TransportError::from(error.to_string()))?;
+            .map_err(|error| TransportError::from(describe_transport_error(&error)))?;
         Ok(HttpResponse {
             status,
             headers,
@@ -190,20 +185,18 @@ mod tests {
     use std::io::{Error, ErrorKind};
 
     #[test]
-    fn network_failures_read_as_sentences_and_keep_the_underlying_cause() {
+    fn network_failures_read_as_sentences_without_technical_details() {
         let refused =
             describe_transport_error(&ureq::Error::Io(Error::from(ErrorKind::ConnectionRefused)));
-        assert!(
-            refused.starts_with("the connection was refused ("),
-            "{refused}"
-        );
-        assert!(refused.contains("io:"), "{refused}");
+        assert_eq!(refused, "the connection was refused");
         assert!(
             describe_transport_error(&ureq::Error::HostNotFound)
                 .starts_with("the server's address could not be found")
         );
-        // An error without a better description is passed through unchanged.
         let other = ureq::Error::TooManyRedirects;
-        assert_eq!(describe_transport_error(&other), other.to_string());
+        assert_eq!(
+            describe_transport_error(&other),
+            "the network request failed"
+        );
     }
 }

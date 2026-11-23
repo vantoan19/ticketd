@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     SourceDescription, SummaryPart,
     contract::{
-        CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
-        DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector,
+        ConnectorDescriptor, Conversation, DerivedConfiguration, DiscoveryRequest,
+        ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, Publication,
         PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
     },
     github::GithubConnector,
@@ -115,6 +116,13 @@ impl Engine {
                 descriptor.provider
             )));
         }
+        if descriptor.capabilities.contains(&Capability::Publish)
+            != connector.publication().is_some()
+        {
+            return Err(SourceError::Protocol(
+                "the source must declare and implement publication together".into(),
+            ));
+        }
         self.connectors.push(connector);
         Ok(())
     }
@@ -175,6 +183,14 @@ impl Engine {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<ConnectionInfo, SourceError> {
+        Ok(self.check(provider, raw)?.connection)
+    }
+
+    pub(crate) fn check(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<ConnectionCheck, SourceError> {
         let connector = self.connector(provider)?;
         // Connection setup is allowed before the discovery rules are complete.
         with_guidance(connector, connector.check_connection(raw))
@@ -286,22 +302,26 @@ impl Engine {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, SourceError> {
-        self.preview_with(provider, raw, |_| None)
+        let config = self.validate(provider, raw)?;
+        self.preview_with(provider, &config, |_| None)
+            .map(|(preview, _)| preview)
     }
 
     pub(crate) fn preview_with(
         &self,
         provider: &str,
-        raw: &ConfigValues,
+        config: &ConfigValues,
         mut existing: impl FnMut(&ExternalIdentity) -> Option<String>,
-    ) -> Result<DiscoveryPreview, SourceError> {
-        let config = self.validate(provider, raw)?;
-        let account = self.check_connection(provider, &config)?.account;
+    ) -> Result<(DiscoveryPreview, DerivedConfiguration), SourceError> {
+        let ConnectionCheck {
+            connection,
+            derived,
+        } = self.check(provider, config)?;
         let issue_name = self.description(provider)?.presentation.issue_name;
         let mut issues = Vec::new();
         let mut matched = 0;
         let mut already_here = 0;
-        let summary = self.discover(provider, &config, |issue| {
+        let summary = self.discover(provider, config, |issue| {
             matched += 1;
             let ticket = existing(&issue.reference.identity);
             already_here += usize::from(ticket.is_some());
@@ -344,15 +364,16 @@ impl Engine {
         }
         // Stopping exactly at the limit still proves nothing about what follows.
         let complete = summary.complete;
-        Ok(DiscoveryPreview {
+        let preview = DiscoveryPreview {
             provider: provider.to_owned(),
-            account,
+            account: connection.account,
             issues,
             matched,
             new: matched - already_here,
             already_here,
             complete,
-        })
+        };
+        Ok((preview, derived))
     }
 
     /// Re-reads one issue by reference.
@@ -380,40 +401,6 @@ impl Engine {
         Ok(issue)
     }
 
-    /// Where `provider` can publish, for the saved configuration.
-    pub fn publish_destinations(
-        &self,
-        provider: &str,
-        raw: &ConfigValues,
-    ) -> Result<Vec<String>, SourceError> {
-        let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Ok(Vec::new());
-        }
-        let config = self.validate(provider, raw)?;
-        Ok(connector.destinations(&config))
-    }
-
-    /// Whether `destination` is well formed for `provider`; no network call.
-    pub fn check_destination(&self, provider: &str, destination: &str) -> Result<(), SourceError> {
-        self.connector(provider)?.check_destination(destination)
-    }
-
-    /// Whether `destination` is one of `allowed` (the saved destinations) for
-    /// `provider`. An empty `allowed` list places no restriction.
-    pub fn destination_allowed(
-        &self,
-        provider: &str,
-        destination: &str,
-        allowed: &[String],
-    ) -> Result<bool, SourceError> {
-        let connector = self.connector(provider)?;
-        Ok(allowed.is_empty()
-            || allowed
-                .iter()
-                .any(|saved| connector.same_destination(saved, destination)))
-    }
-
     /// Whether `provider` declares the optional publication capability.
     pub fn can_publish(&self, provider: &str) -> bool {
         self.descriptor(provider)
@@ -430,11 +417,9 @@ impl Engine {
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Err(SourceError::Unsupported("publishing"));
-        }
+        let publication = publication(connector)?;
         let config = self.validate(provider, raw)?;
-        let issue = with_guidance(connector, connector.publish(&config, request))?;
+        let issue = with_guidance(connector, publication.publish(&config, request))?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
                 "the created issue named a different provider".into(),
@@ -458,11 +443,9 @@ impl Engine {
         text: &str,
     ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Err(SourceError::Unsupported("publishing"));
-        }
+        let publication = publication(connector)?;
         let config = self.validate(provider, raw)?;
-        let issue = with_guidance(connector, connector.locate(&config, destination, text))?;
+        let issue = with_guidance(connector, publication.locate(&config, destination, text))?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
                 "the issue named a different provider".into(),
@@ -479,11 +462,9 @@ impl Engine {
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, SourceError> {
         let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Err(SourceError::Unsupported("publishing"));
-        }
+        let publication = publication(connector)?;
         let config = self.validate(provider, raw)?;
-        let found = with_guidance(connector, connector.find_published(&config, search))?;
+        let found = with_guidance(connector, publication.find_published(&config, search))?;
         if found
             .matches
             .iter()
@@ -542,39 +523,6 @@ impl Engine {
             .map(AsRef::as_ref)
     }
 
-    /// The part of its source an issue belongs to; see [`Connector::partition`].
-    pub(crate) fn partition(&self, provider: &str, reference: &ExternalRef) -> String {
-        self.find(provider)
-            .map(|connector| connector.partition(reference))
-            .unwrap_or_default()
-    }
-
-    /// The parts `raw` asks discovery to read; see [`Connector::partitions`].
-    pub(crate) fn partitions(
-        &self,
-        provider: &str,
-        raw: &ConfigValues,
-    ) -> Result<Vec<String>, SourceError> {
-        let config = self.validate(provider, raw)?;
-        Ok(self.connector(provider)?.partitions(&config))
-    }
-
-    /// What to append to the name of a part to name it as read under the
-    /// discovery rules of `raw` (see [`Connector::discovery_scope`]): empty when
-    /// no rule narrows discovery, so such a part keeps its bare name.
-    pub(crate) fn partition_scope(&self, provider: &str, raw: &ConfigValues) -> String {
-        let scope = self
-            .find(provider)
-            .zip(self.validate(provider, raw).ok())
-            .map(|(connector, config)| connector.discovery_scope(&config))
-            .unwrap_or_default();
-        if scope.is_empty() {
-            scope
-        } else {
-            format!("?{scope}")
-        }
-    }
-
     fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
@@ -593,4 +541,10 @@ fn with_guidance<T>(
     result: Result<T, SourceError>,
 ) -> Result<T, SourceError> {
     result.map_err(|error| error.with_sign_in(|| connector.presentation().sign_in))
+}
+
+fn publication(connector: &dyn Connector) -> Result<&dyn Publication, SourceError> {
+    connector
+        .publication()
+        .ok_or(SourceError::Unsupported("publishing"))
 }

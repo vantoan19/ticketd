@@ -257,6 +257,7 @@ fn closure_reasons_map_to_neutral_states() {
                 id: "7".into(),
             },
             locator: "o/one#7".into(),
+            partition: "o/one".into(),
         };
         let fetched = engine
             .fetch(
@@ -279,6 +280,7 @@ fn fetch_refuses_a_pull_request_and_a_different_identity() {
             id: id.into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     let mut pull_request = issue(7, 7, "o/one");
     pull_request["pull_request"] = json!({});
@@ -360,6 +362,7 @@ fn a_gone_issue_is_not_found_not_an_unusable_answer() {
             id: "7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     for code in [404, 410] {
         fixture.respond(
@@ -436,6 +439,7 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
 #[test]
 fn a_repository_has_one_name_as_a_part_of_the_source() {
     let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
     fixture.respond(
         &format!("{API}/repos/O/Gone/issues?state=open&per_page=100"),
         status(404, json!({"message": "Not Found"}), &[]),
@@ -448,12 +452,12 @@ fn a_repository_has_one_name_as_a_part_of_the_source() {
     let mut found = Vec::new();
     let summary = engine
         .discover("github", &values, |issue| {
-            found.push(engine.partition("github", &issue.reference));
+            found.push(issue.reference.partition);
             ControlFlow::Continue(())
         })
         .unwrap();
     assert_eq!(
-        engine.partitions("github", &values).unwrap(),
+        engine.check("github", &values).unwrap().derived.partitions,
         ["o/gone", "o/live"]
     );
     assert_eq!(found, ["o/live"]);
@@ -464,16 +468,23 @@ fn a_repository_has_one_name_as_a_part_of_the_source() {
 /// case or order, and by its bare name when neither narrows discovery.
 #[test]
 fn a_repository_is_read_under_its_assignee_and_labels() {
-    let (_fixture, engine) = setup(Some(TOKEN));
-    let scope = |values: serde_json::Value| engine.partition_scope("github", &config(values));
+    let (fixture, engine) = setup(Some(TOKEN));
+    let scope = |values: serde_json::Value| {
+        fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+        engine
+            .check("github", &config(values))
+            .unwrap()
+            .derived
+            .discovery_scope
+    };
     assert_eq!(scope(json!({"repositories": ["o/r"]})), "");
     assert_eq!(
         scope(json!({"repositories": ["o/r"], "assignee": "Octo", "labels": ["Bug", "a"]})),
-        "?assignee=octo&labels=a,bug"
+        "assignee=octo&labels=a,bug"
     );
     assert_eq!(
         scope(json!({"repositories": ["o/r"], "assignee": "octo", "labels": ["bug", "A"]})),
-        "?assignee=octo&labels=a,bug"
+        "assignee=octo&labels=a,bug"
     );
 }
 
@@ -739,6 +750,7 @@ fn fetch_duplicate(
             id: "7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     engine
         .fetch(
@@ -924,6 +936,7 @@ fn only_duplicate_closures_ask_for_a_canonical_issue() {
             id: "7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     engine
         .fetch(
@@ -1050,6 +1063,7 @@ fn conversation_of(engine: &Engine) -> Result<Conversation, SourceError> {
             id: "7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     engine
         .conversation(
@@ -1414,7 +1428,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
         .unwrap_err();
     assert_eq!(
         rejected.to_string(),
-        "GitHub rejected the credential: Bad credentials. Run `gh auth login` to sign in again."
+        "GitHub rejected the credential. Run `gh auth login` to sign in again."
     );
 
     for error in [&missing, &rejected] {
@@ -1457,34 +1471,14 @@ fn a_missing_repository_list_reads_as_a_sentence() {
 }
 
 #[test]
-fn only_owner_name_destinations_can_be_published_to() {
-    let (_, engine) = setup(Some(TOKEN));
-    assert!(engine.check_destination("github", "o/r").is_ok());
-    for bad in ["nonsense", "a b/c", "o/"] {
-        let error = engine.check_destination("github", bad).unwrap_err();
-        assert_eq!(error.issues()[0].field, "destination", "{bad}");
-    }
-}
-
-#[test]
-fn github_destinations_are_compared_without_regard_to_case() {
-    let (_, engine) = setup(Some(TOKEN));
-    let allowed = vec!["Acme/Tracker".to_owned()];
-    assert!(
-        engine
-            .destination_allowed("github", "acme/tracker", &allowed)
-            .unwrap()
-    );
-    assert!(
-        !engine
-            .destination_allowed("github", "acme/secret-roadmap", &allowed)
-            .unwrap()
-    );
-    assert!(
-        engine
-            .destination_allowed("github", "any/repo", &[])
-            .unwrap()
-    );
+fn github_connection_answers_describe_repository_destinations() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    let config = config(json!({"repositories": ["Acme/Tracker"]}));
+    let rules = engine.check("github", &config).unwrap().derived.publication;
+    assert_eq!(rules.destinations, ["Acme/Tracker"]);
+    assert!(rules.case_insensitive);
+    assert_eq!(rules.validation.unwrap().format, ValueFormat::OwnerName);
 }
 
 #[test]

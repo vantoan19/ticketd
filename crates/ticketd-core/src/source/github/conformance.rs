@@ -18,6 +18,7 @@ struct GitHubDriver;
 impl Driver for GitHubDriver {
     fn discovery() -> Fixture<String> {
         let transport = Arc::new(TransportFixture::default());
+        transport.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
         let first_url = format!("{API}/repos/o/r/issues?state=open&per_page=100");
         let empty_url = format!("{API}/repos/o/r/issues?page=2");
         let last_url = format!("{API}/repos/o/r/issues?page=3");
@@ -103,7 +104,7 @@ impl Driver for GitHubDriver {
     fn publish_failure(failure: PublishFailure) -> Fixture<PublishRequest> {
         let transport = Arc::new(TransportFixture::default());
         let response = match failure {
-            PublishFailure::Refused => status(422, json!({"message": "Validation failed"}), &[]),
+            PublishFailure::Refused => status(403, json!({"message": "Creation forbidden"}), &[]),
             PublishFailure::NotSent => Err(TransportError {
                 message: "connection refused".into(),
                 before_send: true,
@@ -169,6 +170,7 @@ fn reference(number: u64, id: u64) -> ExternalRef {
             id: id.to_string(),
         },
         locator: format!("o/r#{number}"),
+        partition: "o/r".into(),
     }
 }
 

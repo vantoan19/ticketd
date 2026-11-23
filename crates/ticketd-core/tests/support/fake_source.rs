@@ -9,11 +9,12 @@ use std::{
 };
 
 use super::ticketd_core::source::{
-    CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema, ConfigValues, ConnectionInfo,
-    Connector, ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest,
+    CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema, ConfigValues, ConnectionCheck,
+    ConnectionInfo, Connector, ConnectorDescriptor, Conversation, DerivedConfiguration,
+    DestinationRules, DestinationValidation, DiscoveryPage, DiscoveryRequest, ErrorClass,
     ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FieldIssue, FieldKind,
-    OptionSource, PublicationCandidates, PublicationSearch, PublishRequest, SchemaField,
-    SkippedPartition, SourceError, SourcePresentation, ValueFormat,
+    OptionSource, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
+    SchemaField, SkippedPartition, SourceError, SourcePresentation, ValueFormat,
 };
 
 pub type Hook = Arc<dyn Fn() + Send + Sync>;
@@ -61,6 +62,8 @@ pub struct Remote {
     pub pages: Vec<Result<DiscoveryPage, String>>,
     pub outage: Option<Failure>,
     pub connection_error: Option<String>,
+    pub publish_destinations: Option<Vec<String>>,
+    pub after_check: Option<Hook>,
     pub version: Option<u32>,
     pub display_name: Option<String>,
     pub presentation: SourcePresentation,
@@ -147,13 +150,42 @@ impl Connector for FakeSource {
         self.0.lock().unwrap().presentation.clone()
     }
 
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        match self.0.lock().unwrap().connection_error.clone() {
-            Some(message) => Err(SourceError::Unauthenticated(message)),
-            None => Ok(ConnectionInfo {
-                account: "octo".into(),
-            }),
+    fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
+        let (connection_error, choices, hook) = {
+            let mut remote = self.0.lock().unwrap();
+            (
+                remote.connection_error.clone(),
+                remote.publish_destinations.clone(),
+                remote.after_check.take(),
+            )
+        };
+        if let Some(hook) = hook {
+            hook();
         }
+        if let Some(message) = connection_error {
+            return Err(SourceError::Unauthenticated(message));
+        }
+        let partitions: Vec<String> = strings(config, "repositories")
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        Ok(ConnectionCheck {
+            connection: ConnectionInfo {
+                account: "octo".into(),
+            },
+            derived: DerivedConfiguration {
+                publication: DestinationRules {
+                    destinations: choices.unwrap_or_else(|| partitions.clone()),
+                    case_insensitive: true,
+                    validation: Some(DestinationValidation {
+                        format: ValueFormat::OwnerName,
+                        message: DESTINATION_FORMAT_MESSAGE.into(),
+                    }),
+                },
+                partitions,
+                discovery_scope: strings(config, "labels").join(","),
+            },
+        })
     }
 
     fn options(
@@ -200,21 +232,6 @@ impl Connector for FakeSource {
         Ok(page)
     }
 
-    fn partition(&self, reference: &ExternalRef) -> String {
-        repository_of(reference).into()
-    }
-
-    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
-        strings(config, "repositories")
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
-    }
-
-    fn discovery_scope(&self, config: &ConfigValues) -> String {
-        strings(config, "labels").join(",")
-    }
-
     fn fetch(
         &self,
         _: &ConfigValues,
@@ -253,26 +270,14 @@ impl Connector for FakeSource {
         Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
     }
 
-    fn destinations(&self, config: &ConfigValues) -> Vec<String> {
-        self.partitions(config)
+    fn publication(&self) -> Option<&dyn Publication> {
+        Some(self)
     }
+}
 
-    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
-        match destination.split_once('/') {
-            Some((owner, name)) if !owner.is_empty() && !name.is_empty() && !name.contains('/') => {
-                Ok(())
-            }
-            _ => Err(configuration_error(
-                "destination",
-                "must be a repository in the form owner/name".into(),
-            )),
-        }
-    }
+const DESTINATION_FORMAT_MESSAGE: &str = "must be a repository in the form owner/name";
 
-    fn same_destination(&self, a: &str, b: &str) -> bool {
-        a.eq_ignore_ascii_case(b)
-    }
-
+impl Publication for FakeSource {
     // A panic simulates the process dying after the provider created its issue.
     #[allow(clippy::panic)]
     fn publish(
@@ -280,7 +285,18 @@ impl Connector for FakeSource {
         _: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
-        self.check_destination(&request.destination)?;
+        if !request
+            .destination
+            .split_once('/')
+            .is_some_and(|(owner, name)| {
+                !owner.is_empty() && !name.is_empty() && !name.contains('/')
+            })
+        {
+            return Err(configuration_error(
+                "destination",
+                DESTINATION_FORMAT_MESSAGE.into(),
+            ));
+        }
         let (issue, mode, hook) = {
             let mut remote = self.0.lock().unwrap();
             match remote.publish_mode {
@@ -328,7 +344,7 @@ impl Connector for FakeSource {
             let (repository, number) = text.rsplit_once('#').unwrap_or((destination, text));
             let not_in_destination =
                 || configuration_error("issue", format!("is not in {destination}"));
-            if !self.same_destination(repository, destination) {
+            if !repository.eq_ignore_ascii_case(destination) {
                 return Err(not_in_destination());
             }
             let id = number
@@ -339,7 +355,7 @@ impl Connector for FakeSource {
                 .get(&id)
                 .cloned()
                 .ok_or_else(|| SourceError::NotFound("no such issue".into()))?;
-            if !self.same_destination(repository_of(&issue.reference), destination) {
+            if !repository_of(&issue.reference).eq_ignore_ascii_case(destination) {
                 return Err(not_in_destination());
             }
             Ok(issue)
@@ -356,8 +372,8 @@ impl Connector for FakeSource {
             let mut recent = Vec::new();
             let since = chrono::DateTime::parse_from_rfc3339(&search.since).unwrap();
             for issue in remote.issues.values() {
-                if !self
-                    .same_destination(repository_of(&issue.reference), &search.request.destination)
+                if !repository_of(&issue.reference)
+                    .eq_ignore_ascii_case(&search.request.destination)
                     || chrono::DateTime::parse_from_rfc3339(&issue.created_at).unwrap() < since
                 {
                     continue;
@@ -466,6 +482,7 @@ fn issue_page(remote: &Remote, request: DiscoveryRequest<'_>, start: usize) -> D
             .iter()
             .map(|partition| SkippedPartition {
                 code: "not_found".into(),
+                class: ErrorClass::Config,
                 message: format!("{partition} was not found"),
                 field: None,
                 partition: partition.clone(),
@@ -495,6 +512,7 @@ pub fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
                 id: id.to_string(),
             },
             locator: format!("{repository}#{id}"),
+            partition: repository.into(),
         },
         display: format!("{repository}#{id}"),
         url: format!("https://example.test/{repository}/issues/{id}"),
