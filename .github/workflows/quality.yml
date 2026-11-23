@@ -76,7 +76,8 @@ jobs:
   rust:
     # The Rust tests on all three release platforms, split into shards that run side by side.
     # Every shard compiles its own tests and runs its share of them; the shards of one OS share
-    # one build cache. Shard 1 of each OS also runs the doc-tests and the desktop and CLI build.
+    # one build cache. Shard 1 of each OS also runs the doc-tests; the last shard also builds the
+    # desktop and CLI (and checks the Pages URLs on Windows), so the extra work is not all in one shard.
     name: Rust tests (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.shards }})
     strategy:
       fail-fast: false
@@ -107,7 +108,7 @@ jobs:
       # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
       - run: npm run build
       - name: Check nested Pages URLs on Windows
-        if: runner.os == 'Windows' && matrix.shard == 1
+        if: runner.os == 'Windows' && matrix.shard == matrix.shards
         env:
           DOCS_PROJECT_PAGES: "1"
         run: |
@@ -125,7 +126,7 @@ jobs:
           retention-days: 7
       # This replaces target/debug/ticketd, which the tests built with a fixed device code.
       - name: Build desktop and CLI
-        if: matrix.shard == 1
+        if: matrix.shard == matrix.shards
         run: cargo build --workspace --locked
 
   ui:
