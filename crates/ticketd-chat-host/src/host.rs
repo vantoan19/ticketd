@@ -589,7 +589,7 @@ impl ChatHost {
     /// Asks the live session to use `value` for `setting` from the next turn. While a
     /// turn runs the change is held and sent when it ends, so every turn runs on one
     /// set of settings. Returns where the change stands; later states are in
-    /// `ChatLive::settings`. A value the harness did not offer, or full access, is
+    /// `ChatLive::settings`. A value the harness did not offer, or does not allow, is
     /// refused without being sent.
     pub async fn change_setting(
         &self,

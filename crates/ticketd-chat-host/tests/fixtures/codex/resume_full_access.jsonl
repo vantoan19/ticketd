@@ -1,0 +1,9 @@
+{"note":"Hand-built from the codex-cli 0.171.0 JSON schema. Not captured from a live session; every value is synthetic. A Chat that was in Full access, resumed after a restart: the thread still never asks and has no sandbox, and leaving Full access gives it the settings the Chat recorded as the person's own."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.171.0 (Mac OS 26.5.0; arm64)","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"macos"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"thread/resume","params":{"threadId":"thr_1","cwd":"/work/chat-1","excludeTurns":true}}}
+{"server":{"id":2,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.171.0","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"never","approvalsReviewer":"user","sandbox":{"type":"dangerFullAccess"},"activePermissionProfile":null,"cwd":"/work/chat-1","instructionSources":[]}}}
+{"mark":"resumed"}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Careful now","text_elements":[]}],"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}

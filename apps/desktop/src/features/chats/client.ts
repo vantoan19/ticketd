@@ -518,7 +518,7 @@ export const settingChangeSchema = z.object({
 });
 export type SettingChange = z.infer<typeof settingChangeSchema>;
 
-/** One harness setting. Full access is never among the choosable options. */
+/** One harness setting, as the harness reported it and ticketd lets it be chosen. */
 const settingSchema = z.object({
   current: z.string().nullish(),
   options: z.array(

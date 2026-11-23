@@ -1,0 +1,350 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 740
+  },
+  "screens": {
+    "plan": {
+      "ready": {
+        "x": 500,
+        "y": 429,
+        "left": 258,
+        "top": 410,
+        "width": 300,
+        "height": 86
+      },
+      "waiting": {
+        "x": 617,
+        "y": 289,
+        "left": 602,
+        "top": 222,
+        "width": 300,
+        "height": 86
+      },
+      "spec": {
+        "x": 1024,
+        "y": 120,
+        "left": 1021,
+        "top": 108,
+        "width": 231,
+        "height": 28
+      }
+    },
+    "context": {
+      "purpose": {
+        "x": 795,
+        "y": 342,
+        "left": 792,
+        "top": 330,
+        "width": 440,
+        "height": 48
+      },
+      "subticket": {
+        "x": 982,
+        "y": 531,
+        "left": 979,
+        "top": 521,
+        "width": 150,
+        "height": 20
+      }
+    },
+    "board": {
+      "working": {
+        "x": 498,
+        "y": 343,
+        "left": 483,
+        "top": 301,
+        "width": 213,
+        "height": 85
+      }
+    },
+    "done": {
+      "completed": {
+        "x": 959,
+        "y": 252,
+        "left": 944,
+        "top": 210,
+        "width": 213,
+        "height": 85
+      }
+    },
+    "ticket": {
+      "update": {
+        "x": 807,
+        "y": 376,
+        "left": 804,
+        "top": 366,
+        "width": 422,
+        "height": 20
+      }
+    },
+    "evidence": {
+      "verification": {
+        "x": 823,
+        "y": 466,
+        "left": 784,
+        "top": 446,
+        "width": 456,
+        "height": 59
+      }
+    },
+    "inbox": {
+      "review": {
+        "x": 269,
+        "y": 116,
+        "left": 266,
+        "top": 106,
+        "width": 341,
+        "height": 38
+      },
+      "note": {
+        "x": 269,
+        "y": 216,
+        "left": 266,
+        "top": 206,
+        "width": 459,
+        "height": 38
+      },
+      "earlier": {
+        "x": 269,
+        "y": 274,
+        "left": 266,
+        "top": 264,
+        "width": 284,
+        "height": 38
+      }
+    },
+    "rules": {
+      "notify": {
+        "x": 798,
+        "y": 402,
+        "left": 783,
+        "top": 246,
+        "width": 240,
+        "height": 208
+      }
+    },
+    "rules-triage": {
+      "branch": {
+        "x": 850,
+        "y": 326,
+        "left": 691,
+        "top": 170,
+        "width": 384,
+        "height": 360
+      }
+    },
+    "rules-weekly": {
+      "agent": {
+        "x": 798,
+        "y": 336,
+        "left": 783,
+        "top": 180,
+        "width": 240,
+        "height": 340
+      }
+    }
+  },
+  "compact": {
+    "plan": {
+      "viewport": {
+        "width": 640,
+        "height": 740
+      },
+      "regions": {
+        "ready": {
+          "x": 244,
+          "y": 557,
+          "left": 34,
+          "top": 538,
+          "width": 268,
+          "height": 86
+        },
+        "waiting": {
+          "x": 361,
+          "y": 417,
+          "left": 346,
+          "top": 350,
+          "width": 268,
+          "height": 86
+        },
+        "spec": {
+          "x": 31,
+          "y": 248,
+          "left": 28,
+          "top": 236,
+          "width": 231,
+          "height": 28
+        }
+      }
+    },
+    "context": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "purpose": {
+          "x": 51,
+          "y": 500,
+          "left": 48,
+          "top": 488,
+          "width": 384,
+          "height": 48
+        },
+        "subticket": {
+          "x": 238,
+          "y": 689,
+          "left": 235,
+          "top": 679,
+          "width": 94,
+          "height": 20
+        }
+      }
+    },
+    "board": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "working": {
+          "x": 273,
+          "y": 471,
+          "left": 258,
+          "top": 429,
+          "width": 212,
+          "height": 85
+        }
+      }
+    },
+    "done": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "completed": {
+          "x": 159,
+          "y": 380,
+          "left": 144,
+          "top": 338,
+          "width": 212,
+          "height": 85
+        }
+      }
+    },
+    "ticket": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "update": {
+          "x": 63,
+          "y": 504,
+          "left": 60,
+          "top": 494,
+          "width": 366,
+          "height": 20
+        }
+      }
+    },
+    "evidence": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "verification": {
+          "x": 79,
+          "y": 594,
+          "left": 40,
+          "top": 574,
+          "width": 400,
+          "height": 75
+        }
+      }
+    },
+    "inbox": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "review": {
+          "x": 45,
+          "y": 116,
+          "left": 42,
+          "top": 106,
+          "width": 341,
+          "height": 38
+        },
+        "note": {
+          "x": 45,
+          "y": 216,
+          "left": 42,
+          "top": 206,
+          "width": 364,
+          "height": 38
+        },
+        "earlier": {
+          "x": 45,
+          "y": 274,
+          "left": 42,
+          "top": 264,
+          "width": 284,
+          "height": 38
+        }
+      }
+    },
+    "rules": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "notify": {
+          "x": 135,
+          "y": 402,
+          "left": 120,
+          "top": 246,
+          "width": 240,
+          "height": 208
+        }
+      }
+    },
+    "rules-triage": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "branch": {
+          "x": 192,
+          "y": 333,
+          "left": 46,
+          "top": 189,
+          "width": 351,
+          "height": 329
+        }
+      }
+    },
+    "rules-weekly": {
+      "viewport": {
+        "width": 480,
+        "height": 740
+      },
+      "regions": {
+        "agent": {
+          "x": 135,
+          "y": 336,
+          "left": 120,
+          "top": 180,
+          "width": 240,
+          "height": 340
+        }
+      }
+    }
+  }
+}

@@ -35,12 +35,22 @@ pub(super) const DEFAULT_PERMISSION_MODE: &str = "default";
 const AUTOMATION_RUNNING: &str =
     "An Automation is running this Chat. Reply or stop it to take it over first.";
 
-/// Permission modes ticketd can offer: never `bypassPermissions`.
+/// Permission modes ticketd offers for a person's Chat. `bypassPermissions` is Full
+/// access: Claude Code runs every tool without asking, which the bridge makes
+/// possible in every person's session (never in an Automation's).
 const PERMISSION_MODES: &[(&str, &str, PermissionKind)] = &[
     ("default", "Ask before edits", PermissionKind::Ask),
     ("acceptEdits", "Accept edits", PermissionKind::AcceptEdits),
     ("plan", "Plan only", PermissionKind::ReadOnly),
+    (
+        "bypassPermissions",
+        "Full access",
+        PermissionKind::FullAccess,
+    ),
 ];
+
+/// What the menu says under Full access, the one mode that needs saying.
+const FULL_ACCESS_NOTE: &str = "Runs tools and commands without asking";
 
 #[derive(Debug)]
 struct Thinking {
@@ -433,6 +443,11 @@ impl Reports {
         }
     }
 
+    /// The effort in effect, when known.
+    pub fn effort(&self) -> Option<&str> {
+        self.effort.as_deref()
+    }
+
     /// The session runs an Automation's agent: its settings are reported unchangeable.
     pub fn unattended(&mut self) {
         self.unattended = true;
@@ -508,14 +523,12 @@ impl Reports {
         });
         let permission = self.permission_mode.as_ref().map(|mode| {
             let mut options = permission_options();
-            let bypass = mode == "bypassPermissions";
             if !options.iter().any(|option| &option.id == mode) {
                 // A mode ticketd does not offer is shown as what is in effect.
                 options.push(SettingOption {
                     id: mode.clone(),
                     // Named as the SDK's `PermissionMode` describes each (#387 M15).
                     label: match mode.as_str() {
-                        "bypassPermissions" => "Full access",
                         "dontAsk" => "Never asks",
                         "auto" => "Auto",
                         other => other,
@@ -523,19 +536,14 @@ impl Reports {
                     .to_owned(),
                     description: None,
                     is_default: false,
-                    permission: bypass.then_some(PermissionKind::FullAccess),
+                    permission: None,
                     allowed: false,
                 });
             }
             Setting {
                 current: Some(mode.clone()),
                 options,
-                // ticketd never moves a session out of, or into, skipped permissions.
-                unchangeable: if bypass {
-                    Some("Set in Claude Code's settings".to_owned())
-                } else {
-                    locked
-                },
+                unchangeable: locked,
                 applies_from: AppliesFrom::NextRequest,
                 answered_by: None,
             }
@@ -582,6 +590,17 @@ fn effort_options(entry: &Value) -> Vec<SettingOption> {
         .collect()
 }
 
+/// The permission setting before a session: the modes ticketd offers, `mode` current.
+pub(super) fn permission_setting(mode: String) -> Setting {
+    Setting {
+        current: Some(mode),
+        options: permission_options(),
+        unchangeable: None,
+        applies_from: AppliesFrom::NextRequest,
+        answered_by: None,
+    }
+}
+
 /// Whether ticketd offers `mode`, and so may open a session in it.
 pub(super) fn offered_permission(mode: &str) -> bool {
     PERMISSION_MODES.iter().any(|(id, ..)| *id == mode)
@@ -593,7 +612,7 @@ fn permission_options() -> Vec<SettingOption> {
         .map(|(id, label, kind)| SettingOption {
             id: (*id).to_owned(),
             label: (*label).to_owned(),
-            description: None,
+            description: (*kind == PermissionKind::FullAccess).then(|| FULL_ACCESS_NOTE.to_owned()),
             is_default: *id == DEFAULT_PERMISSION_MODE,
             permission: Some(*kind),
             allowed: true,

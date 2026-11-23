@@ -397,6 +397,10 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
         }),
         option("acceptEdits", "Accept edits", { permission: "accept_edits" }),
         option("plan", "Plan only", { permission: "read_only" }),
+        option("bypassPermissions", "Full access", {
+          description: "Runs tools and commands without asking",
+          permission: "full_access",
+        }),
       ],
       changeable: true,
       applies_from: "next_request",
@@ -424,11 +428,13 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
     ],
     permission: {
       options: [
-        option(":workspace", "workspace"),
-        option(":read-only", "read-only"),
+        option("own", "Codex settings", { is_default: true }),
+        option("full-access", "Full access", {
+          description: "Never asks, and runs without a sandbox",
+          permission: "full_access",
+        }),
       ],
-      changeable: false,
-      reason: "Codex sets permissions in its own configuration",
+      changeable: true,
       applies_from: "next_turn",
     },
   },
