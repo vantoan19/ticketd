@@ -1664,7 +1664,7 @@ fn apply_issue(
                 changed = true;
             }
             let same_location = locator == issue.reference.locator && url == issue.url;
-            let observed_repository = issue.repository.as_deref().or_else(|| {
+            let observed_repository = issue.repository.as_deref().or({
                 if same_location {
                     repository.as_deref()
                 } else {
