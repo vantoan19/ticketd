@@ -992,6 +992,7 @@ async fn the_built_bridge_answers_hello() {
         &[],
         crate::stdio::Serving::Nothing,
         crate::Harness::ClaudeCode,
+        None,
     )
     .expect("the bridge starts");
     let hello = b"{\"id\":\"t1\",\"cmd\":\"hello\",\"protocol\":1}\n";

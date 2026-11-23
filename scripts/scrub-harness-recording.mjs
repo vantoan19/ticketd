@@ -65,7 +65,16 @@ function readChunk(bytes, stream, frames) {
     try {
       const text = decoder.decode(Buffer.concat(stream.chunks, stream.size));
       if (text.trim() !== "") {
-        const frame = JSON.parse(text);
+        const frame = JSON.parse(text, (_key, value) => {
+          if (
+            typeof value === "number" &&
+            (!Number.isFinite(value) ||
+              (Number.isInteger(value) && !Number.isSafeInteger(value)))
+          ) {
+            throw new Error();
+          }
+          return value;
+        });
         if (
           frame === null ||
           Array.isArray(frame) ||
@@ -95,13 +104,41 @@ const sessionFields =
 const accountFields =
   /^(?:accounts?|account(?:id|name|info|number)|organizations?|organization(?:id|name|uuid)|org(?:id|name|uuid)|email(?:address)?|user(?:id|name)|(?:access|refresh|auth|oauth|api)token|apikey|authorization|password|secret|credentials)$/;
 const unixHome =
-  /(?:^|(?<=["']))\/(?:Users|home)\/[^/\r\n"'<>|]+(?=\/|["']|$)|\/(?:Users|home)\/(?:\\ |[^\s\/\\"'<>,:;|&()[\]{}])+|\/root(?=\/|[\s"'<>]|$)/g;
+  /(?:^|(?<=["']))\/(?:[Uu][Ss][Ee][Rr][Ss]|[Hh][Oo][Mm][Ee])\/[^/\r\n"'<>|]+(?=\/|["']|$)|\/(?:[Uu][Ss][Ee][Rr][Ss]|[Hh][Oo][Mm][Ee])\/(?:\\ |[^\s\/\\"'<>,:;|&()[\]{}])+|\/root(?![\p{L}\p{N}_-])/g;
 const windowsHome =
-  /[A-Za-z]:[\\/][Uu]sers[\\/][^\\/\r\n"'<>|:]+?(?=[\\/]|["'<>]|$)/gi;
+  /[A-Za-z]:[\\/][Uu][Ss][Ee][Rr][Ss][\\/][^\\/\r\n"'<>|:]+?(?=[\\/]|["'<>]|$)/gi;
 const email = /[\p{L}\p{N}._%+'-]+@[\p{L}\p{N}.-]+\.[\p{L}\p{N}]+/gu;
 const uuid = /\b[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\b/gi;
 
-function scopeFor(scope, key, parent) {
+// Account identities are private. These recognized labels express protocol
+// choices and keep the meaning of login reports after scrubbing.
+const accountLabels = new Map([
+  ["type", /^(?:chatgpt|apiKey)$/],
+  [
+    "apiprovider",
+    /^(?:firstParty|bedrock|vertex|foundry|anthropicAws|anthropicGoogleCloud|mantle|gateway)$/,
+  ],
+  [
+    "apikeysource",
+    /^(?:none|user|project|org|oauth|apiKeyHelper|ANTHROPIC_API_KEY|temporary)$/,
+  ],
+  [
+    "tokensource",
+    /^(?:none|claude\.ai|oauth|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN)$/,
+  ],
+  ["subscriptiontype", /^(?:free|pro|max|team|enterprise|ultra)$/i],
+]);
+const protocolLabels = new Set([
+  "cmd",
+  "event",
+  "jsonrpc",
+  "kind",
+  "method",
+  "name",
+  "type",
+]);
+
+function scopeFor(scope, key, parent, value) {
   const field = key.toLowerCase().replace(/[_-]/g, "");
   if (
     sessionFields.test(field) ||
@@ -109,8 +146,22 @@ function scopeFor(scope, key, parent) {
   ) {
     return "session";
   }
-  if (accountFields.test(field) || (scope === "account" && field !== "type")) {
+  if (
+    scope === "account" &&
+    typeof value === "string" &&
+    accountLabels.get(field)?.test(value)
+  ) {
+    return "label";
+  }
+  if (accountFields.test(field) || scope === "account") {
     return "account";
+  }
+  if (
+    protocolLabels.has(field) &&
+    typeof value === "string" &&
+    /^[\w/.-]+$/.test(value)
+  ) {
+    return "label";
   }
   return null;
 }
@@ -124,7 +175,7 @@ function visit(value, scope, parent, scalar, key) {
       key(field),
       visit(
         entry,
-        scopeFor(scope, field, parent),
+        scopeFor(scope, field, parent, entry),
         field.toLowerCase(),
         scalar,
         key,
@@ -183,7 +234,8 @@ function scrub(frames, input) {
       frame,
       null,
       "",
-      (value, scope) => (scope ? replaceScoped(value, scope) : value),
+      (value, scope) =>
+        scope && scope !== "label" ? replaceScoped(value, scope) : value,
       (key) => key,
     );
   }
@@ -225,12 +277,16 @@ function scrub(frames, input) {
       null,
       "",
       (value, scope) =>
-        scope
-          ? replaceScoped(value, scope)
-          : typeof value === "string"
-            ? replaceText(value)
-            : value,
-      replaceText,
+        scope === "label"
+          ? value
+          : scope
+            ? replaceScoped(value, scope)
+            : typeof value === "string"
+              ? replaceText(value)
+              : value,
+      // Plain property names belong to the protocol. Dictionary keys containing
+      // paths, email addresses and punctuated identifiers can carry private data.
+      (key) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key)),
     ),
   );
 }

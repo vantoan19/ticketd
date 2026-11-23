@@ -147,3 +147,48 @@ test("rejects malformed data before creating a fixture or printing private bytes
   assert.ok(!result.stderr.includes(directory));
   assert.equal(existsSync(output), false);
 });
+
+test("keeps protocol labels and known login metadata when an alias shares their spelling", (t) => {
+  const { output, scrub } = capture(t);
+  const account = {
+    api_provider: "firstParty",
+    api_key_source: "none",
+    subscription_type: "max",
+    email: "profile@example.invalid",
+  };
+  const result = scrub([
+    [1, line({ id: 1, method: "thread/resume", params: { threadId: "id" } })],
+    [2, line({ id: 1, event: "options", account, command: "cd /root," })],
+    [2, line({ path: "/users/SyntheticLower/example.txt" })],
+    [2, line({ path: "C:\\USERS\\Synthetic Upper\\example.txt" })],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const fixture = readFileSync(output, "utf8");
+  for (const secret of [
+    account.email,
+    "/root,",
+    "SyntheticLower",
+    "Synthetic Upper",
+  ]) {
+    assert.ok(!fixture.includes(secret), "private value escaped scrubbing");
+  }
+  const [request, reply] = fixture.trimEnd().split("\n").map(JSON.parse);
+  assert.equal(request.client.id, 1);
+  assert.equal(request.client.method, "thread/resume");
+  assert.notEqual(request.client.params.threadId, "id");
+  assert.equal(reply.server.id, 1);
+  assert.equal(reply.server.event, "options");
+  assert.equal(reply.server.account.api_provider, "firstParty");
+  assert.equal(reply.server.account.api_key_source, "none");
+  assert.equal(reply.server.account.subscription_type, "max");
+});
+
+test("rejects frames with integers the scrubber cannot preserve", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [1, Buffer.from('{"id":9007199254740993,"method":"thread/resume"}\n')],
+  ]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Invalid client JSON frame at line 1/);
+  assert.equal(existsSync(output), false);
+});

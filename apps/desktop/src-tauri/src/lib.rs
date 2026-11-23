@@ -1767,6 +1767,12 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
+            #[cfg(all(debug_assertions, unix))]
+            ticketd_chat_host::prepare_harness_recording(|| {
+                open_workspace()?
+                    .workspace_info()
+                    .map(|info| info.path.into())
+            })?;
             // The boot module shows the window first (revealed), then loads the
             // application modules (booted). A broken module or stalled painting
             // IPC must never leave the process invisible or blank.

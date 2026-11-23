@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::task::{Context, Poll};
 use std::thread;
 
@@ -22,53 +22,187 @@ const HEADER: &[u8] = b"ticketd-harness-recording-v1\n";
 const CHUNK_BYTES: usize = 64 * 1024;
 const MAX_RECORDING_BYTES: usize = 64 * 1024 * 1024;
 
-pub(super) fn tap(mut io: Io, harness: Harness, serving: Serving) -> io::Result<Io> {
-    let name = harness_key(harness);
-    if matches!(serving, Serving::Chat { run_id: None, .. })
-        && env::var(SWITCH).is_ok_and(|selected| selected == name)
-    {
-        let sender = start(&private_run_directory()?, name)?;
-        io.stdout = Box::new(TappedReader(io.stdout, Arc::clone(&sender)));
-        io.stdin = Box::new(TappedWriter(io.stdin, sender));
-    }
-    Ok(io)
-}
-
-/// Confine recording to a private temporary run containing a development Workspace.
-fn private_run_directory() -> io::Result<PathBuf> {
-    let invalid = || {
-        io::Error::other(
-            "Harness recording needs TICKETD_TEST_WORKSPACE in a private temporary folder outside Git",
-        )
+/// Called once during desktop startup, before the Workspace is opened elsewhere.
+/// The callback returns the path from the actual opened Workspace.
+pub fn prepare_harness_recording(
+    open_workspace: impl FnOnce() -> Result<PathBuf, ticketd_core::Error>,
+) -> io::Result<()> {
+    let Some(selected) = env::var_os(SWITCH) else {
+        return Ok(());
     };
-    let workspace = env::var_os("TICKETD_TEST_WORKSPACE")
+    let harness = match selected.to_str() {
+        Some("claude-code") => Harness::ClaudeCode,
+        Some("codex") => Harness::Codex,
+        _ => {
+            return Err(io::Error::other(
+                "Choose claude-code or codex for harness recording",
+            ));
+        }
+    };
+
+    let requested = env::var_os("TICKETD_TEST_WORKSPACE")
         .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .ok_or_else(invalid)?;
-    // Opening a symlink or hard link could have pointed the desktop at real data.
-    match fs::symlink_metadata(&workspace) {
-        Ok(metadata) if metadata.is_file() && metadata.nlink() == 1 => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        _ => return Err(invalid()),
-    }
-    let directory = workspace
-        .parent()
-        .ok_or_else(invalid)?
+        .filter(|path| path.is_absolute() && path.file_name() == Some("workspace.sqlite3".as_ref()))
+        .ok_or_else(invalid_run)?;
+    let parent = requested.parent().ok_or_else(invalid_run)?;
+    let metadata = parent.symlink_metadata().map_err(|_| invalid_run())?;
+    let directory = parent.canonicalize().map_err(|_| invalid_run())?;
+    let temp = Path::new("/tmp")
         .canonicalize()
-        .map_err(|_| invalid())?;
-    let temp = env::temp_dir().canonicalize().map_err(|_| invalid())?;
-    let metadata = directory.metadata().map_err(|_| invalid())?;
-    if directory == temp
-        || !directory.starts_with(temp)
-        || !metadata.is_dir()
+        .map_err(|_| invalid_run())?;
+    if !metadata.is_dir()
         || metadata.mode() & 0o077 != 0
+        || directory.parent() != Some(temp.as_path())
         || directory
             .ancestors()
-            .any(|ancestor| ancestor.join(".git").try_exists().unwrap_or(true))
+            .any(|path| path.join(".git").try_exists().unwrap_or(true))
     {
-        return Err(invalid());
+        return Err(invalid_run());
     }
-    Ok(directory)
+    // SQLite also opens sidecar files by name. The only existing entry may be
+    // the synthetic work folder, so no old database, lock or sidecar is reused.
+    let mut entries = fs::read_dir(&directory).map_err(|_| invalid_run())?;
+    if !matches!(entries.next(), Some(Ok(entry)) if entry.file_name() == "work")
+        || entries.next().is_some()
+    {
+        return Err(invalid_run());
+    }
+    let work = directory.join("work");
+    let work_metadata = check_work(&work, metadata.uid()).map_err(|_| invalid_run())?;
+    let workspace = directory.join("workspace.sqlite3");
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&workspace)
+        .map_err(|_| invalid_run())?;
+    let database = file.metadata().map_err(|_| invalid_run())?;
+    if database.uid() != metadata.uid() {
+        return Err(invalid_run());
+    }
+
+    let actual = open_workspace()
+        .and_then(|path| path.canonicalize().map_err(Into::into))
+        .map_err(|_| invalid_run())?;
+    if actual != workspace || !FileIdentity::of(&database).matches_file(&actual) {
+        return Err(invalid_run());
+    }
+    let run = RecordingRun {
+        harness,
+        directory,
+        workspace,
+        work,
+        root_identity: FileIdentity::of(&metadata),
+        database_identity: FileIdentity::of(&database),
+        work_identity: FileIdentity::of(&work_metadata),
+        owner: metadata.uid(),
+    };
+    RUN.set(run).map_err(|_| invalid_run())
+}
+
+fn invalid_run() -> io::Error {
+    io::Error::other(
+        "Harness recording needs a fresh private folder under /tmp with a work folder and a new workspace.sqlite3",
+    )
+}
+
+static RUN: OnceLock<RecordingRun> = OnceLock::new();
+
+pub(super) struct RecordingRun {
+    harness: Harness,
+    directory: PathBuf,
+    workspace: PathBuf,
+    work: PathBuf,
+    root_identity: FileIdentity,
+    database_identity: FileIdentity,
+    work_identity: FileIdentity,
+    owner: u32,
+}
+
+#[derive(PartialEq, Eq)]
+struct FileIdentity(u64, u64);
+
+impl FileIdentity {
+    fn of(metadata: &fs::Metadata) -> Self {
+        Self(metadata.dev(), metadata.ino())
+    }
+
+    fn matches_file(&self, path: &Path) -> bool {
+        path.symlink_metadata().is_ok_and(|metadata| {
+            metadata.is_file() && metadata.nlink() == 1 && Self::of(&metadata) == *self
+        })
+    }
+}
+
+/// A scratch folder may contain ordinary files and directories owned by the run
+/// owner. Following links here would allow fixture prompts to read other data.
+fn check_work(work: &Path, owner: u32) -> io::Result<fs::Metadata> {
+    let root = work.symlink_metadata()?;
+    if !root.is_dir() || root.uid() != owner || root.mode() & 0o022 != 0 {
+        return Err(invalid_run());
+    }
+    let mut pending = vec![work.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        for entry in fs::read_dir(folder)? {
+            let entry = entry?;
+            let metadata = entry.path().symlink_metadata()?;
+            if metadata.uid() != owner || metadata.mode() & 0o022 != 0 {
+                return Err(invalid_run());
+            }
+            if metadata.is_dir() {
+                pending.push(entry.path());
+            } else if !metadata.is_file() || metadata.nlink() != 1 {
+                return Err(invalid_run());
+            }
+        }
+    }
+    Ok(root)
+}
+
+pub(super) fn before_spawn(
+    harness: Harness,
+    serving: Serving,
+    working_directory: Option<&Path>,
+) -> io::Result<Option<&'static RecordingRun>> {
+    let Some(run) = RUN.get().filter(|run| {
+        run.harness == harness && matches!(serving, Serving::Chat { run_id: None, .. })
+    }) else {
+        return Ok(None);
+    };
+    let valid = working_directory
+        .filter(|path| {
+            path.symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir())
+        })
+        .and_then(|path| path.canonicalize().ok())
+        .is_some_and(|path| path == run.work)
+        && run.directory.symlink_metadata().is_ok_and(|metadata| {
+            metadata.is_dir()
+                && metadata.mode() & 0o077 == 0
+                && FileIdentity::of(&metadata) == run.root_identity
+        })
+        && run.database_identity.matches_file(&run.workspace)
+        && check_work(&run.work, run.owner)
+            .is_ok_and(|metadata| FileIdentity::of(&metadata) == run.work_identity);
+    if !valid {
+        return Err(io::Error::other(
+            "Use this recording run's private work folder and its original disposable Workspace",
+        ));
+    }
+    Ok(Some(run))
+}
+
+impl RecordingRun {
+    pub(super) fn work(&self) -> &Path {
+        &self.work
+    }
+
+    pub(super) fn tap(&self, mut io: Io) -> io::Result<Io> {
+        let sender = start(&self.directory, harness_key(self.harness))?;
+        io.stdout = Box::new(TappedReader(io.stdout, Arc::clone(&sender)));
+        io.stdin = Box::new(TappedWriter(io.stdin, sender));
+        Ok(io)
+    }
 }
 
 struct Chunk {
