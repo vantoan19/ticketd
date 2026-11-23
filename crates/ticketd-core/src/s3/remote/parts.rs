@@ -242,6 +242,10 @@ impl S3Remote<'_> {
             };
             match resumed {
                 Some(etags) => chosen = Some((id, etags)),
+                // Another desktop may have begun it a moment ago and not sent a part yet;
+                // aborting it would fail that desktop's upload. It costs nothing while it
+                // holds no part, and the write that finds the file complete ends it.
+                None if self.holds_no_part(object, &id)? => {}
                 None => self.abort(object, &id),
             }
         }
@@ -318,6 +322,13 @@ impl S3Remote<'_> {
             return Err(refusal(&response));
         }
         created_upload(&response.body).ok_or_else(unreadable)
+    }
+
+    /// Whether upload `id` is still there and holds no part yet.
+    fn holds_no_part(&self, object: &str, id: &str) -> Result<bool, RemoteError> {
+        Ok(self
+            .parts_of(object, id)?
+            .is_some_and(|parts| parts.is_empty()))
     }
 
     /// The ETag of each part of `plan` that upload `id` already holds, if every part it holds

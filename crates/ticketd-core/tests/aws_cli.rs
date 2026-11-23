@@ -398,6 +398,27 @@ fn credentials_are_kept_until_shortly_before_they_expire_and_then_exported_again
 }
 
 #[test]
+fn a_refresh_exports_the_credentials_and_does_not_read_the_profile_settings_again() {
+    let start: DateTime<Utc> = "2026-11-23T10:00:00Z".parse().unwrap();
+    let first = credentials_json("ASIAFIRST", Some("2026-11-23T11:00:00+00:00"));
+    let second = credentials_json("ASIASECOND", Some("2026-11-23T12:00:00+00:00"));
+    let aws = plain_settings(StandIn::new().on(EXPORT, vec![ok(&first), ok(&second)]));
+    let (source, now) = source(&aws, start);
+    source.access().unwrap();
+    *now.lock().unwrap() = start + TimeDelta::minutes(58);
+    source.access().unwrap();
+    assert_eq!(aws.calls(EXPORT), 2);
+    for name in ["region", "services", "endpoint_url"] {
+        let read = format!("configure get {name} --profile work");
+        assert!(
+            aws.calls(&read) <= 1,
+            "{read} ran {} times",
+            aws.calls(&read)
+        );
+    }
+}
+
+#[test]
 fn static_keys_are_exported_once() {
     let json = credentials_json("AKIAEXAMPLE", None);
     let aws = plain_settings(StandIn::new().once(EXPORT, ok(&json)));

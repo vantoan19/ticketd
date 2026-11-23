@@ -198,7 +198,9 @@ impl S3Target {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum S3TargetError {
-    #[error("that is not a valid S3 bucket name")]
+    #[error(
+        "that is not a valid S3 bucket name; use 3 to 63 lowercase letters, digits, hyphens and dots, starting and ending with a letter or digit"
+    )]
     Bucket,
     #[error("that is not a valid AWS region")]
     Region,

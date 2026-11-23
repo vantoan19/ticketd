@@ -1064,7 +1064,7 @@ pub fn sync_recover(
     if status.recovery == Some(SyncRecovery::AuthorizationExpired) {
         match status.s3 {
             // The profile's own sign-in; what it signs in as stays what the binding says.
-            Some(s3) => crate::s3_commands::s3_sign_in(s3.profile)?,
+            Some(s3) => crate::s3_commands::sign_in_for_recovery(&s3.profile)?,
             None => {
                 let (connection, account) = sign_in(&app)?;
                 open_workspace()?.sync_connect(&connection, &account)?;

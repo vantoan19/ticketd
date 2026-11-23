@@ -183,6 +183,61 @@ test("a profile that may not list buckets gets a field to type the name", async 
   );
 });
 
+test("a failed bucket listing is shown, and only a refusal to list says the profile may not", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockImplementation(async () => {
+    throw hostFailure("The AWS CLI failed (exit code 255): could not connect");
+  });
+  show();
+  const bucket = (await screen.findByLabelText("Bucket")) as HTMLInputElement;
+  await waitFor(() => expect(bucket.disabled).toBe(false));
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("could not connect");
+  expect(screen.queryByText(/may not list buckets/)).toBeNull();
+  // The name can still be typed.
+  fireEvent.change(bucket, { target: { value: "my-bucket" } });
+  expect(bucket.value).toBe("my-bucket");
+});
+
+test("a sign-in that finishes after another profile was chosen does not replace that profile's state", async () => {
+  s3.profiles.mockResolvedValue(ready("work", "personal"));
+  s3.identity.mockImplementation(async (name: string) =>
+    name === "work"
+      ? { state: "sign_in_needed", can_sign_in: true, message: "" }
+      : { state: "signed_in", identity: "arn:personal" },
+  );
+  s3.buckets.mockResolvedValue(null);
+  let finish = () => {};
+  s3.signIn.mockReturnValue(
+    new Promise((resolve) => (finish = () => resolve())),
+  );
+  show();
+  await choose(
+    await screen.findByRole("combobox", { name: "AWS profile" }),
+    "work",
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /Sign in/ }));
+  expect(
+    await screen.findByText("Waiting for sign-in in your browser…"),
+  ).toBeTruthy();
+
+  // The person picks the other profile while the browser sign-in of the first is open.
+  await choose(
+    screen.getByRole("combobox", { name: "AWS profile" }),
+    "personal",
+  );
+  expect(await screen.findByText("arn:personal")).toBeTruthy();
+
+  finish();
+  await waitFor(() => expect(s3.signIn).toHaveBeenCalledTimes(1));
+  // Work's result is not checked again, and does not take the page back.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(s3.identity).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("arn:personal")).toBeTruthy();
+  expect(screen.queryByText("Not signed in")).toBeNull();
+});
+
 test("Sign in runs the profile's sign-in and then checks again", async () => {
   s3.profiles.mockResolvedValue(ready("work"));
   s3.identity

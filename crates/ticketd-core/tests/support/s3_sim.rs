@@ -347,7 +347,11 @@ impl State {
     }
 
     fn handle(&mut self, request: &S3Request, target: &S3Target) -> S3Response {
-        if let Some(refused) = self.authenticate(request, target) {
+        if let Some(mut refused) = self.authenticate(request, target) {
+            // An answer to HEAD never has a body, so the error code is not there to read.
+            if request.method == "HEAD" {
+                refused.body.clear();
+            }
             return refused;
         }
         if self.missing_bucket {

@@ -17,4 +17,4 @@ pub use provider::{
     CredentialSource, S3Request, S3Response, S3Target, S3TargetError, S3Transport,
     S3TransportError, UreqS3Transport,
 };
-pub use remote::{S3Remote, SINGLE_PART_LIMIT};
+pub use remote::{S3Remote, SINGLE_PART_LIMIT, checked_prefix};

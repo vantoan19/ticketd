@@ -120,10 +120,12 @@ fn a_denied_action_is_named_wherever_the_bucket_denies_it() {
         assert_eq!(bench.check(), Err(denied(action)), "{action}");
     }
 
-    // HeadBucket has no body, so the check names the action it was trying.
+    // HeadBucket has no body, so the check names the action it was trying. S3 names the
+    // bucket's region even in a refusal of the request, and a session that ended has none.
     let bench = Bench::new();
     let mut head = Fault::new("HEAD", BUCKET, 403, "AccessDenied");
     head.body.clear();
+    head.headers = vec![("x-amz-bucket-region".into(), s3_sim::REGION.into())];
     bench.sim.fault(head);
     assert_eq!(bench.check(), Err(denied("s3:ListBucket")));
 
@@ -133,6 +135,37 @@ fn a_denied_action_is_named_wherever_the_bucket_denies_it() {
         .sim
         .fault(Fault::new("GET", "versioning", 403, "AccessDenied"));
     assert_eq!(bench.check(), Err(denied("s3:GetBucketVersioning")));
+}
+
+#[test]
+fn a_session_that_ended_on_head_bucket_renews_the_credentials_once_and_then_needs_sign_in() {
+    // The answer to HeadBucket has no body, so the code that says "the session ended" is not
+    // there: the status and the missing region header are all there is.
+    let bench = Bench {
+        sim: S3Sim::default(),
+        credentials: FakeCredentials::new(&["token-1", "token-2"]),
+    };
+    bench.sim.accept_token("token-2");
+    bench.check().unwrap();
+    assert_eq!(bench.credentials.forgets(), 1);
+
+    let bench = Bench {
+        sim: S3Sim::default(),
+        credentials: FakeCredentials::new(&["token-1", "token-2"]),
+    };
+    bench.sim.accept_token("token-3");
+    assert_eq!(
+        bench.check(),
+        Err(BucketCheckError::Storage(RemoteError::Unauthorized))
+    );
+    assert_eq!(bench.credentials.forgets(), 1);
+
+    // The same when the region is what the check is asking for.
+    let probe = S3Target::new(BUCKET, "us-east-1", None).unwrap();
+    assert_eq!(
+        discover_bucket_region(&probe, &bench.credentials, &bench.sim),
+        Err(BucketCheckError::Storage(RemoteError::Unauthorized))
+    );
 }
 
 #[test]
