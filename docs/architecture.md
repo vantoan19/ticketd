@@ -258,7 +258,9 @@ bring back a mode the person left; the record a view shows is only ever the save
 one. Nothing is dispatched while a setting change is on its way to the harness, so
 the next message runs on what the person last chose; a permission change the
 harness refuses, or does not confirm, pauses the queue, so nothing runs on a mode
-the person left until they resume it.
+the person left until they resume it. Losing the harness while a change is on its
+way pauses the queue too, and a permission change it never answered is kept for
+the next session.
 
 - **Claude Code.** Full access is the Agent SDK's `bypassPermissions`. The bridge
   starts every person's session with `allowDangerouslySkipPermissions`, because

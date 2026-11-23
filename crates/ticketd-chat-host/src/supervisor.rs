@@ -1213,11 +1213,28 @@ impl Supervisor {
     fn on_loss(&mut self, detail: String) {
         // With nothing in flight, or while ticketd itself closes the runtime, the
         // session simply ended: no turn failed, and the next message opens it again.
+        // A setting change on its way is in flight too.
         let quiet = self.closing
             || (self.active.is_none()
                 && self.dispatching.is_none()
                 && self.unconfirmed_start.is_none()
-                && self.interactions.is_empty());
+                && self.interactions.is_empty()
+                && !self.setting_on_its_way());
+        // A permission change the lost process never answered is still the person's
+        // choice: the next session opens with it, not with the mode they left.
+        let unanswered = self.runtime.as_ref().and_then(|runtime| {
+            runtime
+                .setting_changes
+                .iter()
+                .find(|change| {
+                    change.setting == SettingKey::Permission
+                        && matches!(
+                            change.state,
+                            SettingChangeState::Held | SettingChangeState::Sent
+                        )
+                })
+                .map(|change| change.value.clone())
+        });
         self.record(Vec::new());
         self.runtime = None;
         if self.closing {
@@ -1225,6 +1242,10 @@ impl Supervisor {
             return;
         }
         self.runtime_gone(&TurnEnding::ContactLost(Some(detail.clone())));
+        if let Some(value) = unanswered {
+            self.record_permission(&value);
+            self.start_settings.permission = Some(value);
+        }
         if !quiet {
             self.pause(ChatProblem::RuntimeLost { detail });
         }

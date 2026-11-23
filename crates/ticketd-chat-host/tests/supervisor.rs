@@ -2109,6 +2109,51 @@ async fn an_unconfirmed_permission_change_pauses_the_queue() {
     assert_eq!(f.queued(), ["second"]);
 }
 
+/// A harness lost while a permission change is on its way stops the queue, and its next
+/// session opens with that change: nothing runs on the mode the person left.
+#[tokio::test(start_paused = true)]
+async fn a_harness_lost_with_a_permission_change_on_its_way_pauses_and_keeps_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    let changed = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(changed, SettingChangeState::Sent);
+    f.fake.lose_process().await;
+    settle().await;
+    drop(answer);
+    settle().await;
+
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert!(
+        chat.queue_paused,
+        "a loss with a change in flight is not quiet"
+    );
+    assert_eq!(
+        chat.effective_settings.as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+    let live = f.live().await;
+    assert!(matches!(
+        live.problem,
+        Some(ChatProblem::RuntimeLost { .. })
+    ));
+    assert_eq!(
+        live.settings
+            .and_then(|settings| settings.reported.permission)
+            .and_then(|permission| permission.current)
+            .as_deref(),
+        Some("ask")
+    );
+}
+
 /// A record that could not be saved is not shown: the idle Chat keeps showing what its
 /// next session will open with, the saved record.
 #[tokio::test(start_paused = true)]
