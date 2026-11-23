@@ -818,11 +818,12 @@ fn installed_executable(
 
 fn executable_file(path: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
-    let path = if path.extension().is_none() {
-        path.with_extension("exe")
-    } else {
-        path.to_owned()
-    };
+    let default_executable = path
+        .extension()
+        .is_none()
+        .then(|| path.with_extension("exe"));
+    #[cfg(windows)]
+    let path = default_executable.as_deref().unwrap_or(path);
     #[cfg(windows)]
     if !path
         .extension()
