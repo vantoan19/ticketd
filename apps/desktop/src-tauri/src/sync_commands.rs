@@ -405,7 +405,22 @@ pub fn unread(workspace: &Workspace) -> Result<u32, Error> {
 #[serde(rename_all = "snake_case")]
 pub enum Source {
     Local,
+    /// The revisions of the file in Google Drive.
     Drive,
+    /// The versions of the object in the S3 bucket.
+    S3,
+}
+
+impl Source {
+    /// The storage a version is read from, as a person names it; `None` for
+    /// the versions this desktop keeps.
+    fn storage(self) -> Option<&'static str> {
+        match self {
+            Self::Local => None,
+            Self::Drive => Some("Google Drive"),
+            Self::S3 => Some("S3"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -506,22 +521,20 @@ fn versions(
 ) -> Outcome<Vec<VersionEntry>> {
     // Also what rejects an id that is not a record of this kind.
     let record = workspace.export_sync_record(sync_kind(kind), id)?;
-    if source == Source::Drive {
+    if let Some(storage) = source.storage() {
         // Without sync there is simply nothing earlier.
         let Some(bound) = bound else {
             return Ok(Vec::new());
         };
         let mut revisions = match bound.remote.revisions(&bound.folder, &remote_key(kind, id)) {
             Ok(revisions) => revisions,
-            // Never uploaded: Drive has no versions of it.
+            // Never uploaded: the storage has no versions of it.
             Err(RemoteError::NotFound) => return Ok(Vec::new()),
             Err(error) => {
-                return rejected(&format!(
-                    "Could not load versions from Google Drive: {error}"
-                ));
+                return rejected(&format!("Could not load versions from {storage}: {error}"));
             }
         };
-        // Drive lists oldest first. Its newest revision is left out only when
+        // The storage lists oldest first. Its newest version is left out only when
         // it is what this desktop holds now: a file changed elsewhere and not
         // yet downloaded here is a version to compare and restore like the rest.
         // ponytail: only the newest revision is read; an older one that equals
@@ -610,7 +623,8 @@ fn version_content(
             }
             Ok(Content::saved(saved))
         }
-        Source::Drive => {
+        Source::Drive | Source::S3 => {
+            let storage = source.storage().unwrap_or_default();
             let Some(bound) = bound else {
                 return rejected("Sync is not connected");
             };
@@ -619,11 +633,11 @@ fn version_content(
             }
             let unloaded = |error: RemoteError| {
                 BridgeFailure::plain(&format!(
-                    "Could not load this version from Google Drive: {error}"
+                    "Could not load this version from {storage}: {error}"
                 ))
             };
             let key = remote_key(kind, id);
-            // Drive says how large a version is before any of it is read.
+            // The storage says how large a version is before any of it is read.
             let revisions = bound
                 .remote
                 .revisions(&bound.folder, &key)
@@ -670,7 +684,7 @@ fn version_detail(
 
 /// Makes an earlier version's title, text and status current again as an
 /// ordinary edit, so what it replaces becomes a version too. Trash is left as
-/// it is. A version kept here is restored by the core; one read from Drive is
+/// it is. A version kept here is restored by the core; one read from the storage is
 /// written as the edit it amounts to.
 fn restore(
     workspace: &mut Workspace,
@@ -689,7 +703,7 @@ fn restore(
             Ok(id) => WriteRequest::RestoreVersion { id },
             Err(_) => return rejected("This version is no longer available"),
         },
-        (Source::Drive, RecordKind::Ticket) => WriteRequest::ChangeTicket {
+        (Source::Drive | Source::S3, RecordKind::Ticket) => WriteRequest::ChangeTicket {
             reference: text(&record, "ref"),
             patch: TicketPatch {
                 title: Some(earlier.title),
@@ -702,7 +716,7 @@ fn restore(
                 ..Default::default()
             },
         },
-        (Source::Drive, RecordKind::Document) => WriteRequest::ChangeDocument {
+        (Source::Drive | Source::S3, RecordKind::Document) => WriteRequest::ChangeDocument {
             id: id.to_owned(),
             patch: DocumentPatch {
                 title: Some(Some(earlier.title).filter(|title| !title.is_empty())),
@@ -760,7 +774,7 @@ pub fn set_sync_read(ids: Vec<String>, read: bool) -> Outcome<()> {
     Ok(open_workspace()?.set_sync_read(&ids, read)?)
 }
 
-// History reads Drive when asked to, so these run off the UI thread.
+// History reads the storage when asked to, so these run off the UI thread.
 #[tauri::command(async)]
 pub fn record_versions(
     host: tauri::State<'_, SyncHost>,
@@ -1618,6 +1632,75 @@ mod tests {
         assert_eq!(
             failure.message,
             "Could not load versions from Google Drive: the storage cannot be reached"
+        );
+    }
+
+    #[test]
+    fn s3_history_lists_and_restores_the_objects_earlier_versions() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_there();
+        retitle(&mut desks.there, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        let list = versions(&desks.here, bound, kind, id, Source::S3).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].timestamp, "2026-03-01T09:00:00Z");
+        let detail = version_detail(&desks.here, bound, kind, id, Source::S3, &list[0].id).unwrap();
+        assert_eq!(
+            detail.fields,
+            [VersionField {
+                field: "title",
+                value: "One".into(),
+                current: "Two".into()
+            }]
+        );
+
+        restore(
+            &mut desks.here,
+            bound,
+            kind,
+            id,
+            Source::S3,
+            &list[0].id,
+            "r",
+        )
+        .unwrap();
+        assert_eq!(
+            desks.here.show_ticket(&ticket.reference).unwrap().title,
+            "One"
+        );
+    }
+
+    #[test]
+    fn s3_history_names_s3_when_it_could_not_be_asked() {
+        let mut desks = desks();
+        let ticket = desks.here.create_ticket("One").unwrap();
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+        desks.sync_here();
+        let binding = desks.bound.clone();
+        let bound = Some(&binding);
+
+        desks
+            .remote
+            .fail(RemoteOp::Revisions, 1, RemoteError::Offline);
+        let failure = versions(&desks.here, bound, kind, id, Source::S3).unwrap_err();
+        assert_eq!(
+            failure.message,
+            "Could not load versions from S3: the storage cannot be reached"
+        );
+        desks
+            .remote
+            .fail(RemoteOp::Revisions, 1, RemoteError::Offline);
+        let failure = version_detail(&desks.here, bound, kind, id, Source::S3, "1").unwrap_err();
+        assert_eq!(
+            failure.message,
+            "Could not load this version from S3: the storage cannot be reached"
         );
     }
 

@@ -76,7 +76,7 @@ const statusSchema = z.object({
   connection: z.enum(["not_connected", "choosing", "connected"]),
   /** The signed-in Google account's email address (an AWS identity for S3). */
   account: z.string().nullable(),
-  /** The storage this Workspace syncs with. The desktop connects either. */
+  /** The storage this Workspace syncs with. Wording that names it follows this. */
   provider: z.enum(["google_drive", "s3"]),
   /** For S3: the bucket and prefix of the Workspace folders and this desktop's AWS CLI profile. */
   s3: z
@@ -117,6 +117,8 @@ const statusSchema = z.object({
     .nullable(),
 });
 export type SyncStatus = z.infer<typeof statusSchema>;
+/** The storage a Workspace syncs with. */
+export type SyncProvider = SyncStatus["provider"];
 
 const countsSchema = z.object({
   tickets: z.number().int().nonnegative(),
