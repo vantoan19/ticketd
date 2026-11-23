@@ -258,6 +258,13 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "google-drive",
   },
   {
+    title: "Source connections",
+    description:
+      "Add and name the accounts that bring external tickets into ticketd.",
+    keywords: "source connection provider account discovery refresh settings",
+    section: "sources",
+  },
+  {
     title: "Everywhere",
     description: "These work wherever you are in ticketd.",
     keywords:
