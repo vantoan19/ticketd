@@ -13087,6 +13087,9 @@ test("Settings renders the registered providers' display data as text and an iso
     await screen.findByText("Open Beacon Console and sign in."),
   ).toBeTruthy();
   expect(screen.getByText("Use a Beacon team key.")).toBeTruthy();
+  expect(
+    screen.getByText("Routine sync only reads from Beacon Tracker."),
+  ).toBeTruthy();
   expect(screen.getByPlaceholderText("e.g. PLATFORM")).toHaveProperty(
     "value",
     "PLATFORM",

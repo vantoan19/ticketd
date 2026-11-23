@@ -209,6 +209,10 @@ export function SourceCard({
   const now = useNow();
   const { connector } = entry;
   const { presentation, provider } = connector;
+  const publishes = connector.capabilities.includes("publish");
+  const syncedFields = connector.capabilities.includes("comments")
+    ? "title, description, state and comments"
+    : "title, description and state";
   const schedule = useSourceActivity();
   const health = schedule.sources.find(
     (item) => item.provider === connector.provider,
@@ -497,7 +501,7 @@ export function SourceCard({
       label={connector.name}
       icon={CircleDot}
       iconContent={<SourceIcon svg={presentation?.icon_svg} />}
-      lede={`Bring matching ${connector.name} issues into this workspace. Their title, description, state and comments sync inward; ${connector.name} stays the place to edit them.`}
+      lede={`Bring matching ${connector.name} issues into this workspace. Their ${syncedFields} sync inward; ${connector.name} stays the place to edit them.`}
       endSlot={
         <StatusLabel tone={short.tone} size="caption">
           {short.text}
@@ -538,8 +542,12 @@ export function SourceCard({
             }
             description={
               saved
-                ? `Routine sync only reads; ticketd writes to ${connector.name} only when you publish a ticket.`
-                : `Save discovery rules below to connect this workspace. Until then tickets can't be published to ${connector.name}.`
+                ? publishes
+                  ? `Routine sync only reads; ticketd writes to ${connector.name} only when you publish a ticket.`
+                  : `Routine sync only reads from ${connector.name}.`
+                : publishes
+                  ? `Save discovery rules below to connect this workspace. Until then tickets can't be published to ${connector.name}.`
+                  : "Save discovery rules below to connect this workspace."
             }
           />
           <SettingsRow
