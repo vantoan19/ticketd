@@ -114,10 +114,10 @@ export function bridgeDefault(
       return { unread_inbox: 0, ready: 0, in_progress: 0 };
     case "is_following":
       return false;
-    case "reminder":
-    case "last_backup":
     case "detect_project_remote":
       return { suggested: null, candidates: [] };
+    case "reminder":
+    case "last_backup":
     case "project_icon": // no favicon: the letter tile
       return null;
     case "workspace_info":
