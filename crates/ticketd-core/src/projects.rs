@@ -47,9 +47,16 @@ pub(crate) fn migrate_checkouts(tx: &Transaction<'_>) -> Result<(), Error> {
 }
 
 pub(crate) fn migrate_remote(tx: &Transaction<'_>) -> Result<(), Error> {
+    let present: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name = 'remote')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        tx.execute_batch("ALTER TABLE projects ADD COLUMN remote TEXT COLLATE NOCASE")?;
+    }
     tx.execute_batch(
-        "ALTER TABLE projects ADD COLUMN remote TEXT COLLATE NOCASE;
-         CREATE UNIQUE INDEX projects_remote ON projects(remote) WHERE remote IS NOT NULL;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS projects_remote ON projects(remote) WHERE remote IS NOT NULL",
     )?;
     Ok(())
 }
