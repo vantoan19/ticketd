@@ -21,6 +21,7 @@ mod outcome;
 #[cfg(all(debug_assertions, unix))]
 mod recording;
 pub mod records;
+mod runtime;
 #[cfg(test)]
 mod scripted;
 mod stdio;

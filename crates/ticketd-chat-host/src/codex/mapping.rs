@@ -1,26 +1,25 @@
-//! Translates app-server traffic into contract events and tracks what the protocol
-//! has told us about the thread: its active turn, live requests and correlations.
+//! Translates app-server traffic into contract events and keeps the protocol data
+//! needed to interpret the thread, tools, errors and settings.
 //!
 //! Everything here is synchronous and runs on the protocol reader in arrival order.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
 use crate::json_rpc::{Reply, RpcError};
+use crate::runtime::RuntimeState;
 use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
-    InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
+    InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    Problem, ProblemKind, ProviderDetail, Question, Refusal, SubmissionId, ToolStatus,
+    TurnEvidence, TurnOutcome, reset_time,
 };
 
 use super::report::{REOPEN_WITH, Reports};
 
 /// Live tool output kept between a command's start and its authoritative completion.
 const MAX_LIVE_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
-/// Recently ended turns and written submissions remembered for late correlation.
-const MAX_REMEMBERED: usize = 64;
 
 /// Notifications that carry nothing a Chat shows. Listed so they are not reported as
 /// unknown traffic; anything absent from this list and unmodeled becomes `Unknown`.
@@ -71,11 +70,9 @@ pub(super) enum Call {
 }
 
 #[derive(Debug)]
-struct LiveRequest {
+pub(super) struct Request {
     id: Value,
-    turn: Option<String>,
     kind: RequestKind,
-    answered: bool,
 }
 
 #[derive(Debug)]
@@ -94,24 +91,13 @@ struct ToolProgress {
 #[derive(Debug, Default)]
 pub(super) struct Session {
     thread: Option<String>,
-    active_turn: Option<NativeTurnId>,
-    ended_turns: VecDeque<String>,
-    written_submissions: VecDeque<SubmissionId>,
-    turn_submissions: HashMap<String, Vec<SubmissionId>>,
-    requests: HashMap<NativeRequestId, LiveRequest>,
+    pub(super) runtime: RuntimeState<Request>,
     tools: HashMap<String, ToolProgress>,
     /// The last non-retried error per turn, for a failed turn that carries none.
     turn_errors: HashMap<String, Value>,
     /// Set for an unattended session: what every `turn/start` adds, which keeps
     /// approvals off and the sandbox as the agent's allowed tools set it.
     pub(super) turn_overrides: Option<Value>,
-    /// Why the open turn of an unattended session fails: the first tool Codex
-    /// declined, or file it declined or could not change, in the order they came.
-    declined: Vec<String>,
-    /// Why Codex could not start a command in the open turn of an unattended session.
-    not_started: Option<String>,
-    /// The turn a Stop was sent for: a tool of it that then fails was cut off.
-    interrupted: Option<NativeTurnId>,
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
@@ -125,28 +111,15 @@ impl Session {
         self.thread.as_deref()
     }
 
-    pub fn active_turn(&self) -> Option<&NativeTurnId> {
-        self.active_turn.as_ref()
-    }
-
-    /// Remembers a submission about to be written so provider output naming it can be
-    /// recognized as evidence.
-    pub fn submission_written(&mut self, submission: &SubmissionId) {
-        if self.written_submissions.len() == MAX_REMEMBERED {
-            self.written_submissions.pop_front();
-        }
-        self.written_submissions.push_back(submission.clone());
-    }
-
-    /// A Stop was sent for `turn`.
+    #[cfg(test)]
     pub fn interrupt_asked(&mut self, turn: &NativeTurnId) {
-        self.interrupted = Some(turn.clone());
+        self.runtime
+            .mark_interrupt(turn)
+            .expect("the turn is active");
     }
 
-    /// The runtime is gone: nothing is active and no request can be answered.
-    pub fn clear_live(&mut self) {
-        self.active_turn = None;
-        self.requests.clear();
+    pub fn disconnected(&mut self) {
+        self.runtime.disconnected();
         self.tools.clear();
     }
 
@@ -170,16 +143,25 @@ impl Session {
                 let Some(turn) = text(result, &["turn", "id"]) else {
                     return vec![unknown("turn/start reply without a turn", result)];
                 };
+                let turn = NativeTurnId::new(turn);
                 if text(result, &["turn", "status"]) == Some("inProgress") {
-                    self.turn_is_active(turn);
+                    self.runtime.turn_started(Some(&turn));
                 }
-                let mut events = self.acknowledged(submission, turn, late);
+                let mut events: Vec<_> = self
+                    .runtime
+                    .acknowledged(submission, &turn, late)
+                    .into_iter()
+                    .collect();
                 // The turn carried the person's choice: the Chat now runs with it.
                 events.extend(self.record_choice());
                 events
             }
             (Call::Steer(submission), Ok(result)) => match text(result, &["turnId"]) {
-                Some(turn) => self.acknowledged(submission, turn, late),
+                Some(turn) => self
+                    .runtime
+                    .acknowledged(submission, &NativeTurnId::new(turn), late)
+                    .into_iter()
+                    .collect(),
                 None => vec![unknown("turn/steer reply without a turn", result)],
             },
             (Call::StartTurn(submission) | Call::Steer(submission), Err(error)) if late => {
@@ -252,45 +234,6 @@ impl Session {
         })
     }
 
-    fn acknowledged(
-        &mut self,
-        submission: &SubmissionId,
-        turn: &str,
-        late: bool,
-    ) -> Vec<EventKind> {
-        self.correlate(turn, submission);
-        if !late {
-            return Vec::new();
-        }
-        vec![EventKind::SubmissionEvidence {
-            submission: submission.clone(),
-            evidence: DeliveryEvidence::Acknowledged {
-                turn: NativeTurnId::new(turn),
-            },
-        }]
-    }
-
-    /// Returns whether the correlation is new.
-    fn correlate(&mut self, turn: &str, submission: &SubmissionId) -> bool {
-        if self.ended_turns.iter().any(|ended| ended == turn) {
-            return false;
-        }
-        let submissions = self.turn_submissions.entry(turn.to_owned()).or_default();
-        if submissions.contains(submission) {
-            return false;
-        }
-        submissions.push(submission.clone());
-        true
-    }
-
-    /// A turn that already ended stays ended: its completion may precede the reply
-    /// that names it.
-    fn turn_is_active(&mut self, turn: &str) {
-        if !self.ended_turns.iter().any(|ended| ended == turn) {
-            self.active_turn = Some(NativeTurnId::new(turn));
-        }
-    }
-
     // -- notifications ------------------------------------------------------------
 
     pub fn notification(&mut self, method: &str, params: &Value) -> Vec<EventKind> {
@@ -302,11 +245,10 @@ impl Session {
         }
         let events = match method {
             "turn/started" => text(params, &["turn", "id"]).map(|turn| {
-                self.turn_is_active(turn);
+                let turn = NativeTurnId::new(turn);
+                self.runtime.turn_started(Some(&turn));
                 self.reports.turn_started();
-                vec![EventKind::TurnStarted {
-                    turn: NativeTurnId::new(turn),
-                }]
+                vec![EventKind::TurnStarted { turn }]
             }),
             "turn/completed" => params
                 .get("turn")
@@ -340,9 +282,12 @@ impl Session {
                 Some(self.reports.settings_updated(params).into_iter().collect())
             }
             "error" => self.error(params),
-            "serverRequest/resolved" => params
-                .get("requestId")
-                .map(|id| self.request_resolved(&request_key(id))),
+            "serverRequest/resolved" => params.get("requestId").map(|id| {
+                self.runtime
+                    .resolve_request(&request_key(id))
+                    .into_iter()
+                    .collect()
+            }),
             "account/rateLimits/updated" => params.get("rateLimits").map(|limits| {
                 self.rate_limits = Some(limits.clone());
                 Vec::new()
@@ -424,14 +369,6 @@ impl Session {
 
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
-        // What the harness said happened. A declined tool or a command it could not
-        // start in an unattended session is reported as evidence (#387 D2); whether it
-        // changes how the turn reads is the supervisor's to decide.
-        let evidence = TurnEvidence {
-            interrupt_written: false,
-            denied: Self::denied_reason(std::mem::take(&mut self.declined)),
-            not_started: self.not_started.take(),
-        };
         let outcome = match text(turn, &["status"])? {
             "completed" => TurnOutcome::Completed,
             "interrupted" => TurnOutcome::Interrupted,
@@ -442,47 +379,19 @@ impl Session {
             }
             _ => return None,
         };
-        if self
-            .active_turn
-            .as_ref()
-            .is_some_and(|active| active.0 == id)
-        {
-            self.active_turn = None;
-        }
-        if self.ended_turns.len() == MAX_REMEMBERED {
-            self.ended_turns.pop_front();
-        }
-        self.ended_turns.push_back(id.to_owned());
         self.turn_errors.remove(id);
         self.tools.clear();
         self.reports.turn_ended(id);
-
-        // The turn's unanswered requests can no longer be answered.
-        let mut events = Vec::new();
-        self.requests.retain(|request, live| {
-            if live.turn.as_deref() != Some(id) {
-                return true;
-            }
-            if !live.answered {
-                events.push(EventKind::InteractionResolved {
-                    request: request.clone(),
-                    resolution: InteractionResolution::Withdrawn,
-                });
-            }
-            false
-        });
-        if !evidence.is_empty() {
-            events.push(EventKind::TurnEvidence {
-                turn: NativeTurnId::new(id),
-                evidence,
-            });
-        }
-        events.push(EventKind::TurnEnded {
-            turn: NativeTurnId::new(id),
-            outcome,
-            submissions: self.turn_submissions.remove(id).unwrap_or_default(),
-        });
-        Some(events)
+        // Codex reports interruption as an outcome. Unattended denials and
+        // commands it could not start are additional observations.
+        Some(
+            self.runtime
+                .end_turn(NativeTurnId::new(id), outcome, |marks| TurnEvidence {
+                    interrupt_written: false,
+                    denied: Self::denied_reason(marks.denied),
+                    not_started: marks.not_started,
+                }),
+        )
     }
 
     fn problem(&self, error: &Value) -> Problem {
@@ -578,15 +487,10 @@ impl Session {
         let Some(submission) = text(item, &["clientId"]).map(SubmissionId::new) else {
             return Vec::new();
         };
-        if !self.written_submissions.contains(&submission) || !self.correlate(turn, &submission) {
-            return Vec::new();
-        }
-        vec![EventKind::SubmissionEvidence {
-            submission,
-            evidence: DeliveryEvidence::Processing {
-                turn: NativeTurnId::new(turn),
-            },
-        }]
+        self.runtime
+            .processing(submission, NativeTurnId::new(turn))
+            .into_iter()
+            .collect()
     }
 
     /// Codex could not start the command, so it never ran: it failed with no process,
@@ -659,35 +563,32 @@ impl Session {
         item: &Value,
         completed: bool,
     ) -> EventKind {
+        let turn = NativeTurnId::new(turn);
         if self.turn_overrides.is_some()
             && let Some(denial) = Self::denial(kind, &title, item)
-            && !self.declined.contains(&denial)
         {
             // ticketd's own guide command is not what the person needs to hear about
             // (#387 5A3): it still ends the turn as failed, with the generic reason.
-            if title.contains("ticketd skills get") {
-                self.declined.push(String::new());
+            let reason = if title.contains("ticketd skills get") {
+                String::new()
             } else {
-                self.declined.push(denial);
-            }
+                denial
+            };
+            self.runtime.mark_denial(&turn, reason);
         }
-        if kind == "commandExecution"
-            && self.turn_overrides.is_some()
-            && self.not_started.is_none()
-            && Self::never_started(item)
+        if kind == "commandExecution" && self.turn_overrides.is_some() && Self::never_started(item)
         {
-            let output = text(item, &["aggregatedOutput"]).unwrap_or_default();
-            let reason = output.lines().map(str::trim).find(|line| !line.is_empty());
-            self.not_started = Some(
-                reason
+            self.runtime.mark_not_started(&turn, || {
+                let output = text(item, &["aggregatedOutput"]).unwrap_or_default();
+                output
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
                     .unwrap_or("Codex could not start a command and gave no reason.")
-                    .to_owned(),
-            );
+                    .to_owned()
+            });
         }
-        let cut_off = self
-            .interrupted
-            .as_ref()
-            .is_some_and(|stopped| stopped.0 == turn);
+        let cut_off = self.runtime.interrupted(&turn);
         let status = match text(item, &["status"]) {
             // Reported as it came: what a failure after a Stop means is not decided
             // here (#387 3B3).
@@ -719,7 +620,7 @@ impl Session {
             self.tools.insert(id.to_owned(), progress);
         }
         EventKind::ToolUpdated {
-            turn: NativeTurnId::new(turn),
+            turn,
             item: NativeItemId::new(id),
             title,
             status,
@@ -765,7 +666,7 @@ impl Session {
         params: &Value,
     ) -> (Vec<EventKind>, Option<Value>) {
         let request = request_key(id);
-        if self.requests.contains_key(&request) {
+        if self.runtime.has_request(&request) {
             // Redelivery of a request that is already on screen.
             return (Vec::new(), None);
         }
@@ -831,19 +732,18 @@ impl Session {
         let item = matches!(kind, RequestKind::Approval { .. })
             .then(|| text(params, &["itemId"]).map(NativeItemId::new))
             .flatten();
-        let turn = text(params, &["turnId"]);
-        self.requests.insert(
+        let turn = text(params, &["turnId"]).map(NativeTurnId::new);
+        self.runtime.register_request(
             request.clone(),
-            LiveRequest {
+            turn.as_ref(),
+            Request {
                 id: id.clone(),
-                turn: turn.map(str::to_owned),
                 kind,
-                answered: false,
             },
         );
         let requested = EventKind::InteractionRequested(InteractionRequest {
             request,
-            turn: turn.map(NativeTurnId::new),
+            turn,
             item,
             kind: shown,
             detail: Some(detail(method, params)),
@@ -858,12 +758,14 @@ impl Session {
         request: &NativeRequestId,
         answer: &InteractionAnswer,
     ) -> Result<Value, Refusal> {
-        let live = self
-            .requests
-            .get_mut(request)
-            .filter(|live| !live.answered)
-            .ok_or(Refusal::UnknownRequest)?;
-        let result = match (&live.kind, answer) {
+        self.runtime
+            .answer(request, |request| request.encode_answer(answer))
+    }
+}
+
+impl Request {
+    fn encode_answer(&self, answer: &InteractionAnswer) -> Result<Value, Refusal> {
+        let result = match (&self.kind, answer) {
             (RequestKind::Approval { decisions }, InteractionAnswer::Approval(decision))
                 if decisions.contains(decision) =>
             {
@@ -895,23 +797,7 @@ impl Session {
             }
             _ => return Err(Refusal::Unsupported),
         };
-        live.answered = true;
-        Ok(json!({"id": live.id, "result": result}))
-    }
-
-    fn request_resolved(&mut self, request: &NativeRequestId) -> Vec<EventKind> {
-        let Some(live) = self.requests.remove(request) else {
-            return Vec::new();
-        };
-        let resolution = if live.answered {
-            InteractionResolution::Answered
-        } else {
-            InteractionResolution::Withdrawn
-        };
-        vec![EventKind::InteractionResolved {
-            request: request.clone(),
-            resolution,
-        }]
+        Ok(json!({"id": self.id, "result": result}))
     }
 }
 

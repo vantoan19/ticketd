@@ -283,6 +283,7 @@ pub(crate) struct Connection<P: Peer> {
     child: AsyncMutex<Box<dyn ChildProcess>>,
     stderr: StderrTail,
     options: Options,
+    generation: RuntimeGeneration,
 }
 
 impl<P: Peer> Connection<P> {
@@ -307,10 +308,15 @@ impl<P: Peer> Connection<P> {
             child: AsyncMutex::new(io.child),
             stderr,
             options,
+            generation,
         });
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
-        tokio::spawn(Arc::clone(&connection).read(io.stdout, sender, generation));
+        tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));
         (connection, events)
+    }
+
+    pub(crate) fn generation(&self) -> RuntimeGeneration {
+        self.generation
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, State<P>> {
@@ -398,12 +404,8 @@ impl<P: Peer> Connection<P> {
         }
     }
 
-    async fn read(
-        self: Arc<Self>,
-        stdout: Reader,
-        events: mpsc::Sender<RuntimeEvent>,
-        generation: RuntimeGeneration,
-    ) {
+    async fn read(self: Arc<Self>, stdout: Reader, events: mpsc::Sender<RuntimeEvent>) {
+        let generation = self.generation;
         let mut stdout = BufReader::new(stdout);
         while let Ok(Some(frame)) = read_frame(&mut stdout, MAX_FRAME_BYTES).await {
             let (kinds, response) = self.state().apply(frame);
