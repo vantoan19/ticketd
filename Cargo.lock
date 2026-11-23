@@ -5027,6 +5027,7 @@ dependencies = [
 name = "ticketd-core"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "base64 0.23.1",
  "chrono",
  "directories",

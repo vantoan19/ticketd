@@ -18,9 +18,13 @@ use tokio::{
 };
 
 use super::super::{RefreshControl, RefreshProgress, SourceError};
-use super::wire::{
-    CancelMethod, CancelNotification, CancelParams, JsonRpc, ProgressNotification,
-    REQUEST_CANCELED, Response,
+use super::{
+    logs::ExtensionLog,
+    redaction::Redactions,
+    wire::{
+        CancelMethod, CancelNotification, CancelParams, JsonRpc, ProgressNotification,
+        REQUEST_CANCELED, Response,
+    },
 };
 
 pub(super) const LINE_LIMIT: usize = 4 * 1024 * 1024;
@@ -90,7 +94,11 @@ pub(super) struct Process {
 }
 
 impl Process {
-    pub(super) fn spawn(mut command: Command) -> Result<Self, SourceError> {
+    pub(super) fn spawn(
+        mut command: Command,
+        redactions: Redactions,
+        log: Option<Arc<ExtensionLog>>,
+    ) -> Result<Self, SourceError> {
         let mut child = ManagedChild::spawn(
             command
                 .stdin(Stdio::piped())
@@ -106,13 +114,34 @@ impl Process {
         let mut reader = child.stderr().ok_or_else(missing_pipe)?;
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
         let tail = stderr.clone();
+        let stderr_redactions = redactions.clone();
         let drain = tokio::spawn(async move {
+            let mut stream = stderr_redactions.stream();
             let mut buffer = [0; 4096];
-            while let Ok(length @ 1..) = reader.read(&mut buffer).await {
-                let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
-                let discard = (tail.len() + length).saturating_sub(STDERR_LIMIT);
-                tail.drain(..discard);
-                tail.extend(&buffer[..length]);
+            let mut log = log;
+            loop {
+                let (bytes, finished) = match reader.read(&mut buffer).await {
+                    Ok(length @ 1..) => (stream.push(&buffer[..length]), false),
+                    _ => (stream.finish(), true),
+                };
+                {
+                    let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
+                    tail.extend(bytes.iter().rev().take(STDERR_LIMIT).rev());
+                    let discard = tail.len().saturating_sub(STDERR_LIMIT);
+                    tail.drain(..discard);
+                }
+                if let Some(sink) = log.clone()
+                    && !bytes.is_empty()
+                    && !tokio::task::spawn_blocking(move || sink.append(&bytes))
+                        .await
+                        .is_ok_and(|result| result.is_ok())
+                {
+                    tracing::warn!("could not write source extension stderr");
+                    log = None;
+                }
+                if finished {
+                    break;
+                }
             }
         });
         Ok(Self {
@@ -121,6 +150,7 @@ impl Process {
             stdout: Lines {
                 reader: BufReader::new(stdout),
                 frame: Vec::new(),
+                redactions,
             },
             stderr,
             drain,
@@ -206,7 +236,7 @@ impl Process {
                 let _ = reply.jsonrpc;
                 Ok(Inbound::Reply(Response::Failure(reply)))
             }
-            _ => Err(unexpected(&line)),
+            _ => Err(self.stdout.unexpected(&line)),
         }
     }
 
@@ -272,8 +302,10 @@ impl Process {
             timeout(EOF_GRACE + REAP_LIMIT, drain_stdout),
             self.child.shutdown(),
         );
-        self.drain.abort();
-        let _ = self.drain.await;
+        if timeout(REAP_LIMIT, &mut self.drain).await.is_err() {
+            self.drain.abort();
+            let _ = self.drain.await;
+        }
         let captured = self
             .stderr
             .lock()
@@ -297,6 +329,7 @@ async fn watch_for_exit(child: &mut ManagedChild, polls: &mut Interval) {
 pub(super) struct Lines {
     reader: BufReader<ChildStdout>,
     frame: Vec<u8>,
+    redactions: Redactions,
 }
 
 impl Lines {
@@ -307,7 +340,7 @@ impl Lines {
                 return Err(if self.frame.is_empty() {
                     Fault::Crash
                 } else {
-                    unexpected(&self.frame)
+                    self.unexpected(&self.frame)
                 });
             }
             let newline = bytes.iter().position(|byte| *byte == b'\n');
@@ -324,12 +357,18 @@ impl Lines {
             }
         }
     }
-}
 
-pub(super) fn unexpected(line: &[u8]) -> Fault {
-    let preview = String::from_utf8_lossy(&line[..line.len().min(240)]);
-    let suffix = if line.len() > 240 { "…" } else { "" };
-    Fault::Protocol(format!("unexpected stdout line {preview:?}{suffix}"))
+    pub(super) fn unexpected(&self, line: &[u8]) -> Fault {
+        // Match the full line before taking a short preview, including a value
+        // that starts within the preview and ends after it.
+        let redacted = self.redactions.text(&String::from_utf8_lossy(line));
+        let limit = redacted.floor_char_boundary(240.min(redacted.len()));
+        let suffix = if limit < redacted.len() { "…" } else { "" };
+        Fault::Protocol(format!(
+            "unexpected stdout line {:?}{suffix}",
+            &redacted[..limit]
+        ))
+    }
 }
 
 #[cfg(unix)]

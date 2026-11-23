@@ -833,6 +833,18 @@ enum SourceCommand {
 
 #[derive(Subcommand)]
 enum ExtensionCommand {
+    /// Copy and approve an extension from a local folder
+    Add {
+        /// Folder containing ticketd-source.json
+        path: PathBuf,
+    },
+    /// List installed and development extensions
+    List,
+    /// Remove an extension registration
+    Remove {
+        /// Extension ID
+        id: String,
+    },
     /// Link and run an extension from a local development folder
     Link {
         /// Folder containing ticketd-source.json
@@ -1401,15 +1413,8 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
     };
     let command = match command {
         Command::Source {
-            command:
-                SourceCommand::Extension {
-                    command: ExtensionCommand::Link { path },
-                },
-        } => {
-            let registry = ExtensionRegistry::device()?;
-            writeln!(output, "{}", serde_json::to_string(&registry.link(&path)?)?)?;
-            return Ok(());
-        }
+            command: SourceCommand::Extension { command },
+        } => return extension_command(output, command),
         Command::Source {
             command:
                 SourceCommand::Conformance {
@@ -2323,6 +2328,63 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         Command::Source { command } => source_command(&mut workspace, command)?,
     };
     writeln!(output, "{text}")?;
+    Ok(())
+}
+
+fn extension_command(
+    output: &mut impl Write,
+    command: ExtensionCommand,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let registry = ExtensionRegistry::device()?;
+    let result = match command {
+        ExtensionCommand::Add { path } => {
+            let prepared = registry.prepare_add(&path)?;
+            let consent = prepared.consent();
+            {
+                let mut prompt = std::io::stderr().lock();
+                writeln!(
+                    prompt,
+                    "Extension {} {}",
+                    consent.extension.id, consent.extension.version
+                )?;
+                writeln!(
+                    prompt,
+                    "Program {}",
+                    serde_json::to_string(&consent.executable)?
+                )?;
+                writeln!(
+                    prompt,
+                    "Arguments {}",
+                    serde_json::to_string(&consent.args)?
+                )?;
+                writeln!(
+                    prompt,
+                    "Working directory {}",
+                    serde_json::to_string(&consent.extension.path)?
+                )?;
+                writeln!(
+                    prompt,
+                    "Declared hosts {}",
+                    serde_json::to_string(&consent.extension.hosts)?
+                )?;
+                write!(prompt, "Run with your OS permissions and install? [y/N] ")?;
+                prompt.flush()?;
+            }
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer)?;
+            if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                return Err("extension installation declined".into());
+            }
+            serde_json::to_string(&registry.add(prepared)?)?
+        }
+        ExtensionCommand::Link { path } => serde_json::to_string(&registry.link(&path)?)?,
+        ExtensionCommand::List => serde_json::to_string(&registry.list()?)?,
+        ExtensionCommand::Remove { id } => {
+            registry.remove(&id)?;
+            r#"{"ok":true}"#.into()
+        }
+    };
+    writeln!(output, "{result}")?;
     Ok(())
 }
 

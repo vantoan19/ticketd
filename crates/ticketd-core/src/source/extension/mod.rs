@@ -1,7 +1,9 @@
 //! Device-local development links and the process connector.
 
 mod host;
+mod logs;
 mod process;
+mod redaction;
 mod registry;
 mod wire;
 
@@ -22,7 +24,7 @@ use host::{Definition, Host};
 use registry::Launch;
 use wire::{Call, ConnectionParams, IssueParams};
 
-pub use registry::{ExtensionRegistry, LinkedExtension};
+pub use registry::{ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension};
 
 /// The published JSON Schema generated from the types that encode and decode
 /// messages on the process boundary.

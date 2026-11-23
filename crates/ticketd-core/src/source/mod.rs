@@ -43,7 +43,9 @@ pub use contract::{
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
-pub use extension::{ExtensionRegistry, LinkedExtension, contract_schema};
+pub use extension::{
+    ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension, contract_schema,
+};
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use presentation::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,
