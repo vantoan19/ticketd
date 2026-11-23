@@ -214,6 +214,126 @@ pub(crate) fn prefixes_page(xml: &[u8]) -> Option<PrefixesPage> {
     Some(page)
 }
 
+/// The id InitiateMultipartUpload answers with.
+pub(crate) fn created_upload(xml: &[u8]) -> Option<String> {
+    items(xml)?.into_iter().find_map(|item| match item {
+        Item::Text(parent, name, text)
+            if parent == "InitiateMultipartUploadResult" && name == "UploadId" =>
+        {
+            Some(text)
+        }
+        _ => None,
+    })
+}
+
+/// One page of ListMultipartUploads: the uploads begun and not yet completed or aborted.
+#[derive(Debug, Default)]
+pub(crate) struct UploadsPage {
+    /// `(key, upload id)`, oldest first within a key.
+    pub uploads: Vec<(String, String)>,
+    pub truncated: bool,
+    pub next_key_marker: Option<String>,
+    pub next_upload_marker: Option<String>,
+}
+
+pub(crate) fn uploads_page(xml: &[u8]) -> Option<UploadsPage> {
+    let mut page = UploadsPage::default();
+    let mut open: Option<(String, String)> = None;
+    for item in items(xml)? {
+        match item {
+            Item::Open(name) if name == "Upload" => open = Some(Default::default()),
+            Item::Close(name) if name == "Upload" => {
+                let (key, id) = open.take()?;
+                if key.is_empty() || id.is_empty() {
+                    return None;
+                }
+                page.uploads.push((key, id));
+            }
+            Item::Text(parent, name, text) => match (parent.as_str(), name.as_str()) {
+                ("Upload", "Key") => open.as_mut()?.0 = text,
+                ("Upload", "UploadId") => open.as_mut()?.1 = text,
+                ("ListMultipartUploadsResult", "IsTruncated") => page.truncated = text == "true",
+                ("ListMultipartUploadsResult", "NextKeyMarker") => {
+                    page.next_key_marker = Some(text);
+                }
+                ("ListMultipartUploadsResult", "NextUploadIdMarker") => {
+                    page.next_upload_marker = Some(text);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    if page.truncated && page.next_key_marker.is_none() {
+        return None;
+    }
+    Some(page)
+}
+
+/// A part an upload already holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListedPart {
+    pub number: u32,
+    pub size: u64,
+    pub etag: String,
+    /// The part's SHA-256 as base64, when the upload was created with that checksum.
+    pub checksum: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PartsPage {
+    pub parts: Vec<ListedPart>,
+    pub truncated: bool,
+    pub next_marker: Option<String>,
+}
+
+pub(crate) fn parts_page(xml: &[u8]) -> Option<PartsPage> {
+    #[derive(Default)]
+    struct Draft {
+        number: Option<u32>,
+        size: Option<u64>,
+        etag: String,
+        checksum: Option<String>,
+    }
+    let mut page = PartsPage::default();
+    let mut open: Option<Draft> = None;
+    for item in items(xml)? {
+        match item {
+            Item::Open(name) if name == "Part" => open = Some(Draft::default()),
+            Item::Close(name) if name == "Part" => {
+                let draft = open.take()?;
+                page.parts.push(ListedPart {
+                    number: draft.number?,
+                    size: draft.size?,
+                    etag: draft.etag,
+                    checksum: draft.checksum,
+                });
+            }
+            Item::Text(parent, name, text) => match (parent.as_str(), name.as_str()) {
+                ("Part", field) => {
+                    if let Some(draft) = open.as_mut() {
+                        match field {
+                            "PartNumber" => draft.number = Some(text.parse().ok()?),
+                            "Size" => draft.size = Some(text.parse().ok()?),
+                            "ETag" => draft.etag = text,
+                            "ChecksumSHA256" => draft.checksum = Some(text),
+                            _ => {}
+                        }
+                    }
+                }
+                ("ListPartsResult", "IsTruncated") => page.truncated = text == "true",
+                ("ListPartsResult", "NextPartNumberMarker") => page.next_marker = Some(text),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    if page.truncated && page.next_marker.is_none() {
+        return None;
+    }
+    Some(page)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +381,33 @@ mod tests {
                 size: 7
             })
         );
+    }
+
+    #[test]
+    fn the_answers_about_uploads_in_parts_are_read() {
+        let created = b"<InitiateMultipartUploadResult><Bucket>b</Bucket><Key>k</Key><UploadId>u1</UploadId></InitiateMultipartUploadResult>";
+        assert_eq!(created_upload(created).as_deref(), Some("u1"));
+
+        let uploads = br#"<ListMultipartUploadsResult><IsTruncated>true</IsTruncated>
+            <NextKeyMarker>k</NextKeyMarker><NextUploadIdMarker>u2</NextUploadIdMarker>
+            <Upload><Key>k</Key><UploadId>u1</UploadId><Initiator><ID>x</ID></Initiator></Upload>
+            <Upload><Key>k</Key><UploadId>u2</UploadId></Upload></ListMultipartUploadsResult>"#;
+        let page = uploads_page(uploads).unwrap();
+        assert_eq!(
+            page.uploads,
+            [("k".into(), "u1".into()), ("k".into(), "u2".into())]
+        );
+        assert!(page.truncated);
+        assert_eq!(page.next_upload_marker.as_deref(), Some("u2"));
+
+        let parts = br#"<ListPartsResult><IsTruncated>false</IsTruncated>
+            <Part><PartNumber>1</PartNumber><ETag>&quot;e1&quot;</ETag><Size>5</Size><ChecksumSHA256>c1=</ChecksumSHA256></Part>
+            <Part><PartNumber>2</PartNumber><ETag>&quot;e2&quot;</ETag><Size>3</Size></Part></ListPartsResult>"#;
+        let page = parts_page(parts).unwrap();
+        assert_eq!(page.parts.len(), 2);
+        assert_eq!(page.parts[0].etag, "\"e1\"");
+        assert_eq!(page.parts[0].checksum.as_deref(), Some("c1="));
+        assert_eq!(page.parts[1].checksum, None);
     }
 
     #[test]

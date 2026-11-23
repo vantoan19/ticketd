@@ -291,17 +291,279 @@ fn a_large_file_is_read_in_ranges() {
     assert_eq!(reads, 2);
 }
 
+// ---- uploads in parts -------------------------------------------------------------------
+
+const MIB: usize = 1024 * 1024;
+/// The smallest part S3 takes, so a file just over the single-part limit is four parts.
+const SMALL_PARTS: u64 = 5 * 1024 * 1024;
+
+fn attachment() -> RemoteKey {
+    RemoteKey::new(RemoteKind::Attachment, uuid::Uuid::new_v4().to_string())
+}
+
+/// Bytes with no repeating part, so a part uploaded in the wrong place is noticed.
+fn noise(len: usize) -> Vec<u8> {
+    let mut x: u64 = 0x2545_f491_4f6c_dd1d;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+fn over_the_limit() -> Vec<u8> {
+    noise(SINGLE_PART_LIMIT as usize + MIB)
+}
+
+fn parted(bench: &Bench) -> S3Remote<'_> {
+    bench.remote().with_part_size(SMALL_PARTS)
+}
+
 #[test]
-fn a_file_over_the_single_part_limit_is_not_uploaded_in_one_request() {
+fn a_file_over_the_limit_uploads_in_parts_and_downloads_intact() {
     let bench = Bench::new();
-    let (remote, folder) = (bench.remote(), bench.folder());
-    let key = RemoteKey::new(RemoteKind::Attachment, uuid::Uuid::new_v4().to_string());
-    let bytes = vec![7u8; SINGLE_PART_LIMIT as usize + 1];
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let spy = Spy::over(&bench.sim);
+    let remote = S3Remote::new(target(), "ticketd/", &bench.credentials, &spy)
+        .unwrap()
+        .with_part_size(SMALL_PARTS);
+    let file = put(&remote, &folder, &key, None, &bytes).unwrap();
+    assert_eq!(file.size, bytes.len() as u64);
+
+    let name = object(&folder, &key);
+    let stored = bench.sim.object(&name).unwrap();
+    assert!(stored.bytes == bytes);
+    assert!(
+        stored
+            .metadata
+            .contains(&("x-amz-meta-ticketd-sha256".to_owned(), sha256_hex(&bytes)))
+    );
+    assert!(stored.disposition.unwrap().contains("T-KQ1%20Title.md"));
+    assert!(bench.sim.pending().is_empty());
+
+    let seen = spy.seen.lock().unwrap();
+    let writes: Vec<&S3Request> = seen
+        .iter()
+        .filter(|r| r.url.contains("attachments") && r.method != "GET")
+        .collect();
+    let steps: Vec<(&str, &str)> = writes
+        .iter()
+        .map(|r| {
+            let query = r.url.split_once('?').map_or("", |(_, query)| query);
+            (r.method, query.split('&').next().unwrap_or(""))
+        })
+        .collect();
+    assert_eq!(steps.len(), 6, "{steps:?}");
+    assert_eq!(
+        steps[..5],
+        [
+            ("POST", "uploads"),
+            ("PUT", "partNumber=1"),
+            ("PUT", "partNumber=2"),
+            ("PUT", "partNumber=3"),
+            ("PUT", "partNumber=4"),
+        ]
+    );
+    assert_eq!(steps[5].0, "POST");
+    assert!(steps[5].1.starts_with("uploadId="));
+
+    let create = writes[0];
+    let hash = sha256_hex(&bytes);
+    assert_eq!(
+        header(create, "x-amz-meta-ticketd-sha256"),
+        Some(hash.as_str())
+    );
+    assert_eq!(header(create, "x-amz-checksum-algorithm"), Some("SHA256"));
+    for part in &writes[1..5] {
+        assert!(header(part, "x-amz-checksum-sha256").is_some());
+    }
+    let complete = writes[5];
+    assert_eq!(header(complete, "if-none-match"), Some("*"));
+    let listed = String::from_utf8(complete.body.clone()).unwrap();
+    for number in 1..=4 {
+        assert!(listed.contains(&format!("<PartNumber>{number}</PartNumber>")));
+    }
+    drop(seen);
+
+    assert!(get(&remote, &folder, &key, &file.version) == bytes);
+}
+
+#[test]
+fn an_upload_interrupted_after_some_parts_resumes_with_only_the_remaining_ones() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let name = object(&folder, &key);
+    // Part 3 fails for the first call and every retry it makes: the connection is gone.
+    let mut fault = Fault::new("PUT", "partNumber=3&", 500, "InternalError");
+    fault.times = 5;
+    bench.sim.fault(fault);
+    assert_eq!(
+        put(&parted(&bench), &folder, &key, None, &bytes).unwrap_err(),
+        RemoteError::Offline
+    );
+    let pending = bench.sim.pending();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].parts, [1, 2]);
+    assert!(bench.sim.object(&name).is_none());
+
+    // The app was quit and started again: a new adapter, and nothing kept from before.
+    let file = put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    assert_eq!(bench.sim.count("PUT", "partNumber=1&"), 1);
+    assert_eq!(bench.sim.count("PUT", "partNumber=2&"), 1);
+    assert_eq!(bench.sim.count("PUT", "partNumber=4&"), 1);
+    assert_eq!(
+        bench.sim.count("POST", "?uploads"),
+        1,
+        "the upload begun before is the one finished"
+    );
+    assert!(bench.sim.object(&name).unwrap().bytes == bytes);
+    assert!(bench.sim.pending().is_empty());
+    assert_eq!(file.size, bytes.len() as u64);
+}
+
+#[test]
+fn another_desktop_completing_the_same_attachment_first_is_already_uploaded() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let name = object(&folder, &key);
+    bench.sim.interleave(&name, &bytes);
+    let file = put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    let versions = bench.sim.versions(&name);
+    assert_eq!(versions.len(), 1, "ours added no second version");
+    assert_eq!(file.version, versions[0].0);
+    assert!(
+        bench.sim.pending().is_empty(),
+        "our upload was aborted, not left billing"
+    );
+    assert_eq!(bench.sim.count("DELETE", "uploadId="), 1);
+}
+
+#[test]
+fn a_different_file_completed_first_is_a_precondition_failure_and_our_upload_is_aborted() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let name = object(&folder, &key);
+    bench.sim.interleave(&name, b"someone else's file");
     assert!(matches!(
-        put(&remote, &folder, &key, None, &bytes),
-        Err(RemoteError::Other(_))
+        put(&parted(&bench), &folder, &key, None, &bytes),
+        Err(RemoteError::PreconditionFailed { current: Some(current) }) if current.size == 19
     ));
-    assert_eq!(bench.sim.count("PUT", "attachments"), 0);
+    assert!(bench.sim.pending().is_empty());
+    assert_eq!(
+        bench.sim.object(&name).unwrap().bytes,
+        b"someone else's file"
+    );
+}
+
+#[test]
+fn a_conflict_on_completion_aborts_the_upload_and_starts_it_again() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    bench.sim.fault(Fault::new(
+        "POST",
+        "uploadId=",
+        409,
+        "ConditionalRequestConflict",
+    ));
+    put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    assert_eq!(bench.sim.count("POST", "?uploads"), 2);
+    assert_eq!(bench.sim.count("DELETE", "uploadId="), 1);
+    assert_eq!(
+        bench.sim.count("PUT", "partNumber=1&"),
+        2,
+        "every part is sent again"
+    );
+    assert!(bench.sim.object(&object(&folder, &key)).unwrap().bytes == bytes);
+    assert!(bench.sim.pending().is_empty());
+}
+
+#[test]
+fn a_completion_answered_200_with_an_error_body_failed_and_the_next_try_only_completes() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let name = object(&folder, &key);
+    bench
+        .sim
+        .fault(Fault::new("POST", "uploadId=", 200, "InternalError"));
+    assert_eq!(
+        put(&parted(&bench), &folder, &key, None, &bytes).unwrap_err(),
+        RemoteError::Offline
+    );
+    assert!(
+        bench.sim.object(&name).is_none(),
+        "an error body is not a success"
+    );
+    assert_eq!(bench.sim.pending()[0].parts, [1, 2, 3, 4]);
+
+    put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    assert_eq!(
+        bench.sim.count("PUT", "partNumber="),
+        4,
+        "no part is sent twice"
+    );
+    assert!(bench.sim.object(&name).unwrap().bytes == bytes);
+}
+
+#[test]
+fn an_upload_that_no_longer_exists_is_found_again_or_begun_again() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    bench
+        .sim
+        .fault(Fault::new("PUT", "partNumber=2&", 404, "NoSuchUpload"));
+    put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    assert!(bench.sim.object(&object(&folder, &key)).unwrap().bytes == bytes);
+    assert!(bench.sim.pending().is_empty());
+}
+
+#[test]
+fn stale_uploads_of_the_key_are_aborted_and_other_keys_are_left_alone() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let name = object(&folder, &key);
+    bench.sim.begin_upload(&name);
+    let other_file = bench.sim.begin_upload(&name);
+    bench
+        .sim
+        .put_part(&name, &other_file, 1, &noise(SMALL_PARTS as usize));
+    // `<key>0` starts with this key but is another key.
+    let neighbour_key = format!("{name}0");
+    let neighbour = bench.sim.begin_upload(&neighbour_key);
+
+    put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    let pending = bench.sim.pending();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        (pending[0].key.as_str(), pending[0].id.as_str()),
+        (neighbour_key.as_str(), neighbour.as_str())
+    );
+    assert!(bench.sim.object(&name).unwrap().bytes == bytes);
+}
+
+#[test]
+fn a_corrupted_download_of_an_upload_in_parts_is_refused() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let remote = parted(&bench);
+    let file = put(&remote, &folder, &key, None, &bytes).unwrap();
+    bench.sim.corrupt(&object(&folder, &key));
+    let mut output = Vec::new();
+    assert!(matches!(
+        remote.download(&folder, &key, &file.version, &mut output),
+        Err(RemoteError::Other(message)) if message.contains("checksum")
+    ));
+}
+
+#[test]
+fn a_part_is_never_smaller_than_the_five_mib_s3_requires() {
+    let bench = Bench::new();
+    let (folder, key, bytes) = (bench.folder(), attachment(), over_the_limit());
+    let remote = bench.remote().with_part_size(1);
+    put(&remote, &folder, &key, None, &bytes).unwrap();
+    assert_eq!(bench.sim.count("PUT", "partNumber="), 4);
 }
 
 // ---- file identity ----------------------------------------------------------------------
@@ -662,8 +924,18 @@ fn the_transport_sends_only_to_the_configured_bucket() {
     ] {
         assert!(!aws.allows("GET", &refused), "{refused}");
     }
-    assert!(!aws.allows("DELETE", &aws.url(key, &[])));
-    assert!(!aws.allows("POST", &aws.url(key, &[])));
+    // An upload in parts is begun and completed with POST and abandoned with DELETE.
+    assert!(aws.allows("POST", &aws.url(key, &[("uploads", "")])));
+    assert!(aws.allows("DELETE", &aws.url(key, &[("uploadId", "u1")])));
+    assert!(!aws.allows("PATCH", &aws.url(key, &[])));
+    assert!(!aws.allows(
+        "POST",
+        &format!("https://evil.example/{BUCKET}/{key}?uploads")
+    ));
+    assert!(!aws.allows(
+        "DELETE",
+        &format!("https://other-bucket.s3.us-east-1.amazonaws.com/{key}?uploadId=u1")
+    ));
 
     // An S3-compatible service takes the bucket in the path, at its own endpoint only.
     let minio = S3Target::new("ticketd-test", "us-east-1", Some("http://localhost:9000")).unwrap();
