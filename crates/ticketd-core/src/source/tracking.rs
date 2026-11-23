@@ -1066,11 +1066,7 @@ impl Workspace {
                         }
                     }
                     batch.issues = issues;
-                    let scoped = engine.for_connection(
-                        &source.saved.provider,
-                        &source.saved.id,
-                        &source.saved.config,
-                    );
+                    let scoped = source.bind(engine);
                     gather_conversations(
                         &self.connection,
                         &scoped,
@@ -1105,8 +1101,7 @@ fn gather_connection(
     provider: &str,
     configured: Option<&super::ConfiguredSource>,
 ) -> Result<Gathered, Error> {
-    let engine = configured
-        .map(|source| engine.for_connection(provider, &source.saved.id, &source.saved.config));
+    let engine = configured.map(|source| source.bind(engine));
     let source_id = configured.map(|source| source.saved.id.as_str());
     let assigned = |ticket: &Tracked| {
         !ticket.removed

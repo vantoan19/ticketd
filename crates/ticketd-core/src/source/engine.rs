@@ -87,13 +87,32 @@ pub struct Engine {
 impl Engine {
     /// An engine using the credential associated with one local connection.
     pub fn for_connection(&self, provider: &str, id: &str, config: &ConfigValues) -> Self {
+        self.for_connection_with_secret_refs(
+            provider,
+            id,
+            config,
+            &super::credentials::References::new(),
+        )
+    }
+
+    pub(super) fn for_connection_with_secret_refs(
+        &self,
+        provider: &str,
+        id: &str,
+        config: &ConfigValues,
+        references: &super::credentials::References,
+    ) -> Self {
         Self {
             connectors: self
                 .connectors
                 .iter()
                 .map(|connector| {
                     if connector.descriptor().provider == provider
-                        && let Some(bound) = connector.for_connection(id, config)
+                        && let Some(bound) = connector.for_connection_with_secret_refs(
+                            id,
+                            config,
+                            references.clone(),
+                        )
                     {
                         return bound.into();
                     }
@@ -210,14 +229,8 @@ impl Engine {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<ConfigValues, SourceError> {
-        let config = self.validate(provider, raw)?;
         let connector = self.connector(provider)?;
-        let issues = with_guidance(connector, connector.validate(&config))?;
-        if issues.is_empty() {
-            Ok(config)
-        } else {
-            Err(SourceError::InvalidConfiguration(issues))
-        }
+        with_guidance(connector, connector.validate_draft(raw))
     }
 
     /// Verifies credentials and permissions for validated or unvalidated values.

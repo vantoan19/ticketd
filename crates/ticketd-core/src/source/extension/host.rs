@@ -24,7 +24,8 @@ use tokio::{
 
 use super::{
     CONTRACT_VERSION, Launch, SourceError,
-    process::{EXIT_POLL, Fault, LINE_LIMIT, Process, unexpected},
+    process::{EXIT_POLL, Fault, LINE_LIMIT, Process},
+    redaction::Redactions,
     wire::{Call, Description, JsonRpc, Request},
 };
 
@@ -131,6 +132,7 @@ enum Message {
 struct Endpoint {
     serial: Mutex<()>,
     sender: mpsc::Sender<Message>,
+    redactions: Redactions,
 }
 
 impl Host {
@@ -171,12 +173,18 @@ impl Host {
         };
         let closing = runtime.closing.subscribe();
         let (sender, messages) = mpsc::channel(1);
-        let task = runtime
-            .handle
-            .spawn(session(key.clone(), self.limits, closing, messages));
+        let redactions = Redactions::default();
+        let task = runtime.handle.spawn(session(
+            key.clone(),
+            self.limits,
+            closing,
+            messages,
+            redactions.clone(),
+        ));
         let endpoint = Arc::new(Endpoint {
             serial: Mutex::new(()),
             sender,
+            redactions,
         });
         state.connections.insert(key, (endpoint.clone(), task));
         Ok(endpoint)
@@ -203,12 +211,23 @@ impl Host {
         id: Option<&str>,
         call: Call<'_>,
     ) -> Result<T, SourceError> {
+        self.call_with_secrets(definition, id, &[], call)
+    }
+
+    pub(super) fn call_with_secrets<T: DeserializeOwned>(
+        &self,
+        definition: &Definition,
+        id: Option<&str>,
+        secrets: &[&str],
+        call: Call<'_>,
+    ) -> Result<T, SourceError> {
         let request = self.encode(call)?;
         let endpoint = self.endpoint(definition, id)?;
         let _serial = endpoint
             .serial
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        endpoint.redactions.register(secrets.iter().copied());
         let (reply, result) = blocking::sync_channel(1);
         endpoint
             .sender
@@ -219,8 +238,12 @@ impl Host {
             })
             .map_err(|_| SourceError::NotSent("the source extension session has stopped".into()))?;
         let value = result.recv().map_err(|_| disconnected())??;
-        serde_json::from_value(value)
-            .map_err(|error| SourceError::Protocol(format!("invalid result: {error}")))
+        serde_json::from_value(value).map_err(|error| {
+            SourceError::Protocol(format!(
+                "invalid result: {}",
+                endpoint.redactions.text(&error.to_string())
+            ))
+        })
     }
 
     fn encode(&self, call: Call<'_>) -> Result<EncodedRequest, SourceError> {
@@ -311,6 +334,7 @@ async fn session(
     limits: Limits,
     mut closing: watch::Receiver<()>,
     mut messages: mpsc::Receiver<Message>,
+    redactions: Redactions,
 ) {
     let mut active: Option<(Arc<Launch>, Process)> = None;
     let mut idle_at = Instant::now() + limits.idle;
@@ -339,7 +363,7 @@ async fn session(
                     if active.as_ref().is_some_and(|(launch, _)| launch != &definition.launch) {
                         stop(&mut active).await;
                     }
-                    let operation = serve(&mut active, &definition, key.id.is_some(), &request, limits);
+                    let operation = serve(&mut active, &definition, key.id.is_some(), &request, limits, &redactions);
                     let result = tokio::select! {
                         biased;
                         _ = closing.changed() => break,
@@ -385,7 +409,7 @@ async fn idle_stdout(active: &mut Option<(Arc<Launch>, Process)>) -> Fault {
         return std::future::pending().await;
     };
     match process.stdout.read().await {
-        Ok(line) => unexpected(&line),
+        Ok(line) => process.unexpected(&line),
         Err(fault) => fault,
     }
 }
@@ -413,9 +437,14 @@ async fn serve(
     connection: bool,
     request: &EncodedRequest,
     limits: Limits,
+    redactions: &Redactions,
 ) -> Result<Result<Value, SourceError>, Fault> {
     if active.is_none() {
-        let process = match definition.launch.command().and_then(Process::spawn) {
+        let process = match definition
+            .launch
+            .command()
+            .and_then(|command| Process::spawn(command, redactions.clone()))
+        {
             Ok(process) => process,
             Err(error) => return Ok(Err(error)),
         };

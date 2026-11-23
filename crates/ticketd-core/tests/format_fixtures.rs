@@ -3,7 +3,7 @@
 //! The fixtures hold what that code really wrote, so they catch an edit to an old
 //! migration step or to the backup check that the current ladder alone would not
 //! show. `scripts/regenerate-format-fixtures` makes them through each commit's own
-//! CLI: v55 (#214), v65 (#284) and v72 (#375).
+//! CLI: v55 (#214), v65 (#284), v72 (#375) and v90 (#562).
 
 use std::path::{Path, PathBuf};
 
@@ -26,7 +26,7 @@ fn copy_of(version: i64, dir: &Path) -> PathBuf {
 
 #[test]
 fn a_backup_saved_by_older_code_validates_restores_and_migrates_to_the_current_version() {
-    for version in [55, 65, 72] {
+    for version in [55, 65, 72, 90] {
         let dir = tempfile::tempdir().unwrap();
         let backup = copy_of(version, dir.path());
         let stored: i64 = Connection::open(&backup)

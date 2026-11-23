@@ -407,6 +407,7 @@ impl ExtensionRegistry {
             },
             description,
             connection_id: None,
+            credentials: Default::default(),
             host: self.host.clone(),
         }))
     }

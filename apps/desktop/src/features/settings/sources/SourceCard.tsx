@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { AlignLeft, CircleDot, Link, RefreshCw, UserRound } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import {
   describeFailure,
@@ -79,6 +80,100 @@ const SIGNED_OUT: readonly string[] = [
   "not_signed_in",
   "forbidden",
 ];
+const NO_SECRETS: readonly string[] = [];
+const SESSION_NOTICE =
+  "The system keyring is unavailable. These credentials last until ticketd closes.";
+
+function CredentialDialog({
+  entry,
+  saved,
+  onClose,
+  onSaved,
+}: {
+  entry: SourceEntry;
+  saved: SavedSource & { id: string };
+  onClose: () => void;
+  onSaved: (saved: SavedSource) => void;
+}) {
+  const fields = entry.connector.schema.fields;
+  const [draft, setDraft] = useState(() =>
+    draftFromConfig(fields, saved.config),
+  );
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<SourceFailure | null>(null);
+  const stored = saved.secret_fields ?? NO_SECRETS;
+  const visible = activeFields(fields, draft, stored);
+  const config = configFromDraft(fields, draft, stored);
+  const credentials = Object.fromEntries(
+    visible
+      .filter(
+        (field) => field.type === "secret" && Object.hasOwn(config, field.key),
+      )
+      .map((field) => [field.key, config[field.key]]),
+  );
+  const errors = new Map<string, string[]>();
+  const formErrors: string[] = [];
+  for (const { field, message } of failure?.fields ?? []) {
+    if (
+      field &&
+      visible.some(
+        (setting) => setting.key === field && setting.type === "secret",
+      )
+    ) {
+      errors.set(field, [...(errors.get(field) ?? []), message]);
+    } else {
+      formErrors.push(field ? `${field} ${message}` : message);
+    }
+  }
+  async function save() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      onSaved(await sourcesClient.signIn(saved.id, credentials));
+    } catch (reason) {
+      setFailure(toSourceFailure(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <DialogShell
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title="Re-enter credentials"
+      description={`Update the credentials for ${saved.name ?? entry.connector.name}.`}
+      primaryLabel={busy ? "Saving…" : "Save credentials"}
+      blockedReason={
+        busy
+          ? "Checking credentials…"
+          : Object.keys(credentials).length === 0
+            ? "Enter a credential to save."
+            : null
+      }
+      onSubmit={() => void save()}
+      busy={busy}
+      error={failure && failure.fields.length === 0 ? failure.message : null}
+    >
+      <SchemaForm
+        fields={fields}
+        presentation={entry.connector.presentation?.fields}
+        draft={draft}
+        storedSecrets={stored}
+        secretsOnly
+        errors={Object.fromEntries(errors)}
+        formErrors={formErrors}
+        disabled={busy}
+        loadOptions={async () => []}
+        onChange={(field, value) => {
+          setDraft((current) => ({ ...current, [field]: value }));
+          setFailure(null);
+        }}
+      />
+    </DialogShell>
+  );
+}
 
 /**
  * What to do when the credential is missing or refused. Not signed in needs a
@@ -239,6 +334,7 @@ export function SourceCard({
   const [failure, setFailure] = useState<SourceFailure | null>(null);
   const [failedStep, setFailedStep] = useState<Exclude<Busy, null>>("saving");
   const [account, setAccount] = useState<Account | null>(null);
+  const [signIn, setSignIn] = useState(false);
   const checks = useRef(0);
   const [previewed, setPreviewed] = useState<{
     key: string;
@@ -248,8 +344,25 @@ export function SourceCard({
   // A stale response must not overwrite a newer draft's outcome.
   const latest = useRef(0);
 
-  const config = useMemo(() => configFromDraft(fields, draft), [fields, draft]);
+  const storedSecrets = saved?.secret_fields ?? NO_SECRETS;
+  const config = useMemo(
+    () => configFromDraft(fields, draft, storedSecrets),
+    [fields, draft, storedSecrets],
+  );
   const key = configKey(config);
+  const publicConfig = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(config).filter(
+          ([key]) =>
+            !fields.some(
+              (field) => field.key === key && field.type === "secret",
+            ),
+        ),
+      ),
+    [config, fields],
+  );
+  const publicKey = configKey(publicConfig);
   const [readback, setReadback] = useState<{
     key: string;
     parts: SummaryPart[];
@@ -257,9 +370,9 @@ export function SourceCard({
   useEffect(() => {
     if (hidden) return;
     let current = true;
-    void sourcesClient.configurationSummary(provider, config).then(
+    void sourcesClient.configurationSummary(provider, publicConfig).then(
       (parts) => {
-        if (current) setReadback({ key, parts });
+        if (current) setReadback({ key: publicKey, parts });
       },
       () => {
         if (current) setReadback(null);
@@ -268,7 +381,7 @@ export function SourceCard({
     return () => {
       current = false;
     };
-  }, [config, hidden, key, provider]);
+  }, [publicConfig, hidden, publicKey, provider]);
   const dirty =
     saved === null
       ? Object.keys(config).length > 0
@@ -278,32 +391,24 @@ export function SourceCard({
   const working = busy !== null;
   const targetField = presentation?.target;
   const target = targetField ? config[targetField.field] : undefined;
-  const visible = activeFields(fields, draft);
+  const visible = activeFields(fields, draft, storedSecrets);
   const hasTarget =
     !visible.some((field) => field.key === targetField?.field) ||
     ((Array.isArray(target) || typeof target === "string") &&
       target.length > 0);
-  const secretDeclared = fields.some((field) => field.type === "secret");
-  const canPreview = !working && hasTarget && !secretDeclared;
+  const secretDeclared = visible.some((field) => field.type === "secret");
+  const canPreview = !working && hasTarget;
   const canSave =
-    !secretDeclared &&
     preview !== null &&
     !working &&
     (dirty || saved === null) &&
     (!adding || name.trim().length > 0);
   const fieldErrors = new Map<string, string[]>();
-  const formErrors = secretDeclared
-    ? [
-        "This source declares a secret setting. Secret settings are not supported yet.",
-      ]
-    : [];
+  const formErrors: string[] = [];
   for (const { field, message } of failure?.fields ?? []) {
     const visibleField =
       field && visible.find((setting) => setting.key === field);
-    if (
-      visibleField &&
-      (visibleField.type === "text" || visibleField.type === "multi_select")
-    ) {
+    if (visibleField && visibleField.type !== "link") {
       fieldErrors.set(visibleField.key, [
         ...(fieldErrors.get(visibleField.key) ?? []),
         message,
@@ -525,22 +630,28 @@ export function SourceCard({
   );
 
   const signedIn = account?.status === "signed_in" ? account.account : null;
-  const accountLabel =
-    account === null || account.status === "checking" ? (
-      <span className="source-checking">
-        Checking your {connector.name} account…
-      </span>
-    ) : account.status === "signed_in" ? (
-      <StatusLabel tone="positive">Signed in as {account.account}</StatusLabel>
-    ) : account.status === "signed_out" ? (
-      <StatusLabel tone="attention">
-        Not signed in to {connector.name}
-      </StatusLabel>
-    ) : (
-      <StatusLabel tone="attention">
-        Couldn't check your {connector.name} account
-      </StatusLabel>
-    );
+  const credentialRecovery =
+    saved?.id &&
+    secretDeclared &&
+    (account?.status === "signed_out" ||
+      SIGNED_OUT.includes(health?.error?.code ?? ""));
+  const accountLabel = credentialRecovery ? (
+    <StatusLabel tone="attention">Needs sign-in</StatusLabel>
+  ) : account === null || account.status === "checking" ? (
+    <span className="source-checking">
+      Checking your {connector.name} account…
+    </span>
+  ) : account.status === "signed_in" ? (
+    <StatusLabel tone="positive">Signed in as {account.account}</StatusLabel>
+  ) : account.status === "signed_out" ? (
+    <StatusLabel tone="attention">
+      Not signed in to {connector.name}
+    </StatusLabel>
+  ) : (
+    <StatusLabel tone="attention">
+      Couldn't check your {connector.name} account
+    </StatusLabel>
+  );
   const accountFailure =
     account?.status === "signed_out" || account?.status === "failed"
       ? account.failure
@@ -550,8 +661,9 @@ export function SourceCard({
   // not been found signed out itself.
   const needsSignIn = (code: string) =>
     code === "unauthenticated" || code === "not_signed_in";
-  const accountSentence =
-    accountFailure && needsSignIn(accountFailure.code)
+  const accountSentence = credentialRecovery
+    ? "Re-enter the credentials for this connection."
+    : accountFailure && needsSignIn(accountFailure.code)
       ? signInStep(connector)
       : accountFailure?.sentence;
   const healthSentence = health?.error
@@ -563,7 +675,7 @@ export function SourceCard({
         ).sentence
     : undefined;
   const healthRepeatsAccount =
-    account?.status === "signed_out" &&
+    (credentialRecovery || account?.status === "signed_out") &&
     !!health?.error &&
     SIGNED_OUT.includes(health.error.code);
 
@@ -660,11 +772,24 @@ export function SourceCard({
                   : `ticketd uses your own ${connector.name} sign-in and permissions.`
             }
             trailing={
-              accountFailure?.details ? (
+              credentialRecovery ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSignIn(true)}
+                >
+                  Re-enter credentials
+                </Button>
+              ) : accountFailure?.details ? (
                 <FailureDetails small details={accountFailure.details} />
               ) : undefined
             }
           />
+          {!!saved?.session_secret_fields?.length && (
+            <SettingsRow
+              description={<span role="status">{SESSION_NOTICE}</span>}
+            />
+          )}
           {saved && health && !syncing && !healthRepeatsAccount && (
             <SettingsRow
               title={
@@ -699,6 +824,7 @@ export function SourceCard({
               presentation={presentation?.fields}
               targetField={targetField?.field}
               draft={draft}
+              storedSecrets={storedSecrets}
               errors={Object.fromEntries(fieldErrors)}
               formErrors={formErrors}
               disabled={working}
@@ -713,7 +839,7 @@ export function SourceCard({
               </p>
             )}
           </SettingsRow>
-          {readback?.key === key && readback.parts.length > 0 && (
+          {readback?.key === publicKey && readback.parts.length > 0 && (
             <Readback parts={readback.parts} />
           )}
           {preview && (
@@ -726,6 +852,18 @@ export function SourceCard({
           )}
         </SettingsList>
       </SettingsSection>
+      {signIn && saved?.id && (
+        <CredentialDialog
+          entry={entry}
+          saved={{ ...saved, id: saved.id }}
+          onClose={() => setSignIn(false)}
+          onSaved={(updated) => {
+            setSignIn(false);
+            setSaved(updated);
+            setAccount({ status: "signed_in", account: updated.account });
+          }}
+        />
+      )}
       <SettingsSection
         title="Sync"
         actions={

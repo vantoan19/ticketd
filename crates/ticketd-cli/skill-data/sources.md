@@ -19,6 +19,7 @@ ticketd source add PROVIDER --set KEY=VALUE --preview
 ticketd source add PROVIDER --name "Work" --set KEY=VALUE
 ticketd source CONNECTION show
 ticketd source CONNECTION status
+ticketd source CONNECTION sign-in --config-file -
 ticketd source CONNECTION refresh --ticket T-KQ1
 ticketd source CONNECTION remove
 ticketd context T-KQ1 --conversation
@@ -35,6 +36,12 @@ help for `--set` and `--config-file`.
 that connection. Refresh can return a JSON report with failures and a nonzero exit
 code. `source take-ownership T-KQ1` explicitly changes authority for an unavailable
 ticket. Connections and their credentials stay on the local device.
+
+If a connection needs sign-in, use the provider's terminal instructions or the
+`sign-in` command for extensions that declare secret fields. The command
+reads a JSON object of credential values from stdin when passed
+`--config-file -`. Read credential values through an already authorized secure
+mechanism and keep them out of command arguments and working files.
 
 Removing a connection keeps the ticket’s last synced content, local work, and
 external identity. Its tickets read Connection removed on this desktop until a

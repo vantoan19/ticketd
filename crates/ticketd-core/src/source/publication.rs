@@ -1159,7 +1159,7 @@ impl Workspace {
 
         // The remote write. Nothing is held open: another process may read or
         // write the workspace meanwhile and sees the attempt in flight.
-        let scoped = engine.for_connection(provider, connection_id, &started.source.saved.config);
+        let scoped = started.source.bind(engine);
         let verified = started.source.check(&scoped);
         let (result, sent) = match verified {
             Ok(_) => (
@@ -2077,8 +2077,7 @@ fn verified_publication_engine(
     engine: &Engine,
     source: &super::ConfiguredSource,
 ) -> Result<Engine, SourceError> {
-    let saved = &source.saved;
-    let scoped = engine.for_connection(&saved.provider, &saved.id, &saved.config);
+    let scoped = source.bind(engine);
     source.check(&scoped)?;
     Ok(scoped)
 }

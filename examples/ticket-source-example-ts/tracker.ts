@@ -24,6 +24,12 @@ const description = {
         max_items: 5,
         options: { source: "dynamic", depends_on: ["board"] },
       },
+      {
+        key: "api_key",
+        label: "API key",
+        type: "secret",
+        help: "Only the Sign-in example board requires a key.",
+      },
     ],
   },
   presentation: {
@@ -99,11 +105,12 @@ function dispatch(method: unknown, params: RecordValue): unknown {
   }
   const config = object(params.config);
   const board = config.board;
-  const validBoard = board === "Demo" || board === "Sandbox";
+  const validBoard =
+    board === "Demo" || board === "Sandbox" || board === "Sign-in";
   if (method === "validate") {
     return validBoard
       ? []
-      : [{ field: "board", message: "Choose Demo or Sandbox." }];
+      : [{ field: "board", message: "Choose Demo, Sandbox or Sign-in." }];
   }
   if (method === "options") {
     if (params.field !== "labels")
@@ -114,7 +121,12 @@ function dispatch(method: unknown, params: RecordValue): unknown {
       .map((label) => ({ label, value: label }));
   }
   if (!validBoard)
-    throw new TrackerError("invalid_configuration", "Choose Demo or Sandbox.");
+    throw new TrackerError(
+      "invalid_configuration",
+      "Choose Demo, Sandbox or Sign-in.",
+    );
+  if (board === "Sign-in" && typeof config.api_key !== "string")
+    throw new TrackerError("unauthenticated", "The Sign-in board needs an API key.");
 
   if (method === "check_connection") {
     return {
@@ -187,7 +199,11 @@ for await (const line of createInterface({
             error: {
               code: -32000,
               message,
-              data: { class: "config", code: error.code, message },
+              data: {
+                class: error.code === "unauthenticated" ? "auth" : "config",
+                code: error.code,
+                message,
+              },
             },
           }
         : { error: { code: -32603, message } };

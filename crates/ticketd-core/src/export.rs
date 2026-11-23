@@ -222,6 +222,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "device-local settings and credential references",
     ),
     (
+        "source_secret_references",
+        "device-local references to source credentials in the operating system keychain",
+    ),
+    (
         "source_connection_status",
         "device-local refresh scheduling and coverage",
     ),

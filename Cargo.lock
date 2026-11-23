@@ -5026,8 +5026,10 @@ dependencies = [
 name = "ticketd-core"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "base64 0.23.1",
  "chrono",
+ "dbus-secret-service",
  "directories",
  "fs2",
  "keyring",
@@ -5038,6 +5040,7 @@ dependencies = [
  "rustix",
  "saphyr",
  "schemars 1.2.3",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "sha2",

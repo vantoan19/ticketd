@@ -415,6 +415,8 @@ export function SchemaForm({
   draft,
   errors,
   formErrors = [],
+  storedSecrets = [],
+  secretsOnly = false,
   disabled,
   loadOptions,
   onChange,
@@ -425,14 +427,18 @@ export function SchemaForm({
   draft: Draft;
   errors: Record<string, string[]>;
   formErrors?: string[];
+  storedSecrets?: readonly string[];
+  secretsOnly?: boolean;
   disabled: boolean;
   loadOptions: LoadOptions;
   onChange: (key: string, value: string | string[]) => void;
 }) {
   const advancedId = useId();
   const [expanded, setExpanded] = useState(false);
-  const visible = activeFields(fields, draft);
-  const advanced = visible.filter((field) => field.advanced);
+  const visible = activeFields(fields, draft, storedSecrets).filter(
+    (field) => !secretsOnly || field.type === "secret",
+  );
+  const advanced = secretsOnly ? [] : visible.filter((field) => field.advanced);
   const hasAdvancedErrors = advanced.some((field) => errors[field.key]?.length);
   const showAdvanced = expanded || hasAdvancedErrors;
 
@@ -444,8 +450,6 @@ export function SchemaForm({
     switch (field.type) {
       case "link":
         return <SetupLink key={field.key} field={field} />;
-      case "secret":
-        return null;
       case "multi_select":
         return (
           <MultiSelectField
@@ -461,6 +465,7 @@ export function SchemaForm({
           />
         );
       case "text":
+      case "secret":
         return (
           <TextField
             key={field.key}
@@ -468,6 +473,9 @@ export function SchemaForm({
             presentation={presentation?.[field.key]}
             target={targetField === field.key}
             value={typeof value === "string" ? value : ""}
+            stored={
+              field.type === "secret" && storedSecrets.includes(field.key)
+            }
             errors={fieldErrors}
             disabled={disabled}
             onChange={(next) => onChange(field.key, next)}
@@ -480,7 +488,9 @@ export function SchemaForm({
     <>
       <FieldError errors={formErrors.map((message) => ({ message }))} />
       <FieldGroup className="flex-row flex-wrap">
-        {visible.filter((field) => !field.advanced).map(renderField)}
+        {visible
+          .filter((field) => secretsOnly || !field.advanced)
+          .map(renderField)}
       </FieldGroup>
       {advanced.length > 0 && (
         <>
@@ -553,14 +563,16 @@ function TextField({
   target,
   value,
   errors,
+  stored,
   disabled,
   onChange,
 }: {
-  field: Extract<SchemaField, { type: "text" }>;
+  field: Extract<SchemaField, { type: "text" | "secret" }>;
   presentation: FieldPresentation | undefined;
   target: boolean;
   value: string;
   errors: string[];
+  stored: boolean;
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
@@ -581,10 +593,14 @@ function TextField({
       </FieldLabel>
       <Input
         id={id}
+        type={field.type === "secret" ? "password" : "text"}
+        autoComplete={field.type === "secret" ? "new-password" : undefined}
         value={value}
         disabled={disabled}
         placeholder={
-          presentation?.placeholder ?? field.placeholder ?? undefined
+          stored
+            ? "Credential saved"
+            : (presentation?.placeholder ?? field.placeholder ?? undefined)
         }
         aria-describedby={describedBy(
           id,
@@ -592,7 +608,7 @@ function TextField({
           fieldMessages(field, errors, "", ""),
         )}
         aria-invalid={errors.length > 0 || undefined}
-        aria-required={field.required || undefined}
+        aria-required={(field.required && !stored) || undefined}
         onChange={(event) => onChange(event.target.value)}
       />
       <FieldNote id={id} field={field} errors={errors} />

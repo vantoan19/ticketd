@@ -28,6 +28,7 @@ fn fixture_connector(host: Arc<Host>, connection: &str) -> ProcessConnector {
             cached: Some(Arc::new(hello)),
         },
         connection_id: Some(connection.into()),
+        credentials: Default::default(),
         host,
     }
 }

@@ -30,6 +30,7 @@ pulldown-cmark = "0.13"
 ureq = "3"
 url = "2"
 regex = "1"
+aho-corasick = "1"
 base64 = "0.23"
 saphyr = { version = "0.3", default-features = false }
 
@@ -56,10 +57,12 @@ rustix = { version = "1.1.6", features = ["process"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "job-object", "kill-on-drop", "creation-flags"] }
 windows = { version = "0.62.2", features = ["Win32_System_Threading"] }
-keyring = { version = "=3.6.3", features = ["windows-native"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "=3.6.3", features = ["apple-native"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+security-framework = "=3.7.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "=3.6.3", features = ["sync-secret-service", "crypto-rust", "vendored"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
+dbus-secret-service = { version = "=4.1.0", default-features = false, features = ["crypto-rust", "vendored"] }

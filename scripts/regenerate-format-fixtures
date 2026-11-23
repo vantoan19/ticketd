@@ -8,6 +8,7 @@
 #   v55  dbf9154c  attachments (#214)
 #   v65  7b65e8e1  personal sync through Google Drive (#284)
 #   v72  20efcc73  Chat experience (#375)
+#   v90  6210a65c  ticket source connections (#562)
 #
 # For each commit the script checks it out in a temporary git worktree outside this
 # repository, builds `ticketd-cli` there with its own target directory, seeds a new
@@ -15,7 +16,7 @@
 # target. Plan for a few GB of free disk and a few minutes. Cargo runs with your
 # environment, so export any toolchain variables your machine needs first.
 #
-#   scripts/regenerate-format-fixtures            # all three
+#   scripts/regenerate-format-fixtures            # all fixtures
 #   scripts/regenerate-format-fixtures v55        # one
 #   scripts/regenerate-format-fixtures seed BINARY OUTPUT   # seed with a built CLI
 set -euo pipefail
@@ -48,7 +49,8 @@ commits() {
     v55) echo dbf9154c ;;
     v65) echo 7b65e8e1 ;;
     v72) echo 20efcc73 ;;
-    *) echo "unknown fixture: $1 (expected v55, v65 or v72)" >&2; return 1 ;;
+    v90) echo 6210a65c ;;
+    *) echo "unknown fixture: $1 (expected v55, v65, v72 or v90)" >&2; return 1 ;;
   esac
 }
 
@@ -82,7 +84,8 @@ seed() {
 
   plan="$("$ticketd" plan create Release | field .id)"
   "$ticketd" plan add "$plan" "$first" >/dev/null
-  "$ticketd" project create App /tmp/fixture-app >/dev/null
+  mkdir "$scratch/fixture-app"
+  "$ticketd" project create App "$scratch/fixture-app" >/dev/null
   document="$("$ticketd" document create --title "Importer notes" \
     --body "Background for $first." | field .id)"
   "$ticketd" document tag "$document" importer >/dev/null
@@ -118,7 +121,7 @@ if [[ "${1:-}" == seed ]]; then
   exit
 fi
 
-for version in "${@:-v55 v65 v72}"; do
+for version in "${@:-v55 v65 v72 v90}"; do
   for each in $version; do
     build_and_seed "$each"
   done

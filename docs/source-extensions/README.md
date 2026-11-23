@@ -18,6 +18,8 @@ In Settings → Sources, add an Example Tracker connection. Enter `Demo` as the
 board, preview matches, save, and select Sync now. The example uses local data
 and sends no network requests. `ticketd source add example-tracker --set board=Demo`
 and `ticketd source example-tracker refresh` provide the corresponding CLI flow.
+The example also has a `Sign-in` board that accepts any nonblank synthetic API
+key. Try it to exercise the optional `secret` field.
 
 ## Manifest
 
@@ -60,6 +62,14 @@ provider can have several local connections. An issue's external identity uses
 the provider ID and a stable tracker ID unique across the provider's accounts
 and sites.
 
+Declare credentials as fields of type `secret`. ticketd supplies active
+secrets in each operation's `config`, alongside discovery settings. Treat
+them as request-scoped values. Keep them out of the extension's files,
+environment, results and diagnostics, including transport error messages.
+ticketd redacts exact known values and common JSON, URL and Base64 forms from
+diagnostics. It rejects results that echo a known credential. Conformance flags
+credential-like field names that use another type.
+
 | Method             | Result                                       |
 | ------------------ | -------------------------------------------- |
 | `check_connection` | Account, site and derived discovery settings |
@@ -89,3 +99,40 @@ publication must stay unresolved.
 Conformance is read-only unless you pass `--publish DESTINATION`, which creates
 one real issue and checks the recovery queries. Use a test destination. The
 report explains which checks need capabilities or data unavailable in the run.
+
+## Supplying credentials
+
+Enter them when adding or editing a connection under **Settings → Sources**.
+When a tracker refuses authentication, **Needs sign-in → Re-enter credentials**
+opens the credential fields by themselves. In the CLI, pipe a JSON object of
+those fields to `ticketd source CONNECTION sign-in --config-file -`.
+
+For each request, ticketd checks the current draft value, a direct environment
+override, a password command, the session store and the operating system
+keychain, in that order. The environment variable is
+`TICKETD_SOURCE_<CONNECTION>_<FIELD>`. Uppercase the connection ID and field
+key and replace characters outside ASCII letters and digits with underscores.
+The override is read by ticketd and stripped from extension processes. Launch
+ticketd or its desktop app with the variable in its environment. For example,
+this asks 1Password to supply the example connection's key when needed:
+
+```sh
+export TICKETD_SOURCE_EXAMPLE_TRACKER_API_KEY_COMMAND='["op","read","op://Example/Tracker/credential"]'
+ticketd source example-tracker refresh
+```
+
+The `_COMMAND` value is a JSON array of executable and argument strings.
+ticketd runs the command directly, with no shell or interactive input, and
+reads its UTF-8 stdout for up to five seconds. Keep secret literals out of the
+command arguments. Set the environment with the secret manager or system
+launcher when using the desktop. The CLI can read a typed credential from
+stdin during setup through `source add PROVIDER --config-file -`.
+
+On Linux, if Secret Service is missing or locked, a credential entered in
+ticketd lasts until that ticketd process closes. Startup and refresh never
+trigger an unlock prompt. On macOS, an ad hoc preview or rebuilt binary can
+lose access to an item created by another build or by the other ticketd
+executable. Re-enter the credential in the app or executable you use, or use
+an override or password command. On Windows, Credential Manager accepts up to
+2,560 UTF-8 bytes per credential. Windows enterprise profile policy can roam
+credential entries. ticketd keeps their connection references on the device.

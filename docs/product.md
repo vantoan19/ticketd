@@ -401,6 +401,12 @@ and linked extensions use the same ticket authority and refresh workflows
 - Add and name source connections under Settings → Sources. Several accounts can
   connect to the same provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
+- Extension credentials go in the system keychain. When a tracker rejects
+  authentication, **Needs sign-in** opens the credential fields for that
+  connection. On Linux without a usable keyring, ticketd keeps entered
+  credentials until the current process closes and displays a notice.
+  [Credential setup](source-extensions/README.md#supplying-credentials) covers
+  environment overrides and password commands.
 - Discovery rules (selected repositories, optional assignee and label filters) can be
   previewed before saving, and matching issues are imported automatically. Refresh runs
   at desktop startup, periodically while the desktop is open, and on demand

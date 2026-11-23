@@ -17,6 +17,7 @@ use tokio::{
 };
 
 use super::super::SourceError;
+use super::redaction::Redactions;
 use super::wire::Response;
 
 pub(super) const LINE_LIMIT: usize = 4 * 1024 * 1024;
@@ -25,6 +26,7 @@ const EOF_GRACE: Duration = Duration::from_millis(150);
 #[cfg(unix)]
 const TERMINATE_GRACE: Duration = Duration::from_millis(150);
 const REAP_LIMIT: Duration = Duration::from_secs(1);
+const PASSWORD_COMMAND_LIMIT: Duration = Duration::from_secs(5);
 pub(super) const EXIT_POLL: Duration = Duration::from_millis(100);
 
 pub(super) enum Fault {
@@ -49,10 +51,11 @@ pub(super) struct Process {
     pub stdout: Lines,
     stderr: Arc<Mutex<VecDeque<u8>>>,
     drain: JoinHandle<()>,
+    redactions: Redactions,
 }
 
 impl Process {
-    pub(super) fn spawn(mut command: Command) -> Result<Self, SourceError> {
+    pub(super) fn spawn(mut command: Command, redactions: Redactions) -> Result<Self, SourceError> {
         let mut child = ManagedChild::spawn(
             command
                 .stdin(Stdio::piped())
@@ -68,14 +71,13 @@ impl Process {
         let mut reader = child.stderr().ok_or_else(missing_pipe)?;
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
         let tail = stderr.clone();
+        let mut stream = redactions.stream();
         let drain = tokio::spawn(async move {
             let mut buffer = [0; 4096];
             while let Ok(length @ 1..) = reader.read(&mut buffer).await {
-                let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
-                let discard = (tail.len() + length).saturating_sub(STDERR_LIMIT);
-                tail.drain(..discard);
-                tail.extend(&buffer[..length]);
+                keep_stderr(&tail, &stream.push(&buffer[..length]));
             }
+            keep_stderr(&tail, &stream.finish());
         });
         Ok(Self {
             child,
@@ -83,9 +85,11 @@ impl Process {
             stdout: Lines {
                 reader: BufReader::new(stdout),
                 frame: Vec::new(),
+                redactions: redactions.clone(),
             },
             stderr,
             drain,
+            redactions,
         })
     }
 
@@ -122,14 +126,23 @@ impl Process {
         match serde_json::from_slice::<Response<Value>>(&result) {
             Ok(Response::Success(response)) if response.id == id => {
                 let _ = response.jsonrpc;
+                if self.redactions.contains_secret(&response.result) {
+                    return Err(Fault::Protocol(
+                        "source extension returned a credential in its result".into(),
+                    ));
+                }
                 Ok(Ok(response.result))
             }
             Ok(Response::Failure(response)) if response.id == id => {
                 let _ = response.jsonrpc;
-                Ok(Err(response.error.into_source_error()))
+                Ok(Err(response.error.into_source_error(&self.redactions)))
             }
-            _ => Err(unexpected(&result)),
+            _ => Err(self.unexpected(&result)),
         }
+    }
+
+    pub(super) fn unexpected(&self, line: &[u8]) -> Fault {
+        unexpected(line, &self.redactions)
     }
 
     pub(super) async fn shutdown(mut self) {
@@ -159,6 +172,7 @@ impl Process {
 pub(super) struct Lines {
     reader: BufReader<ChildStdout>,
     frame: Vec<u8>,
+    redactions: Redactions,
 }
 
 impl Lines {
@@ -169,7 +183,7 @@ impl Lines {
                 return Err(if self.frame.is_empty() {
                     Fault::Crash
                 } else {
-                    unexpected(&self.frame)
+                    unexpected(&self.frame, &self.redactions)
                 });
             }
             let newline = bytes.iter().position(|byte| *byte == b'\n');
@@ -188,10 +202,82 @@ impl Lines {
     }
 }
 
-pub(super) fn unexpected(line: &[u8]) -> Fault {
-    let preview = String::from_utf8_lossy(&line[..line.len().min(240)]);
-    let suffix = if line.len() > 240 { "…" } else { "" };
+fn unexpected(line: &[u8], redactions: &Redactions) -> Fault {
+    let redacted = redactions.bytes(line);
+    let preview = String::from_utf8_lossy(&redacted[..redacted.len().min(240)]);
+    let suffix = if redacted.len() > 240 { "…" } else { "" };
     Fault::Protocol(format!("unexpected stdout line {preview:?}{suffix}"))
+}
+
+fn keep_stderr(tail: &Mutex<VecDeque<u8>>, bytes: &[u8]) {
+    let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
+    let bytes = &bytes[bytes.len().saturating_sub(STDERR_LIMIT)..];
+    let discard = (tail.len() + bytes.len()).saturating_sub(STDERR_LIMIT);
+    tail.drain(..discard);
+    tail.extend(bytes);
+}
+
+pub(in crate::source) fn password_output(args: Vec<String>) -> Result<String, ()> {
+    // Keep the blocking connector interface callable regardless of whether its
+    // caller already runs on a Tokio runtime.
+    std::thread::Builder::new()
+        .name("source-password-command".into())
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| ())?
+                .block_on(run_password_command(&args))
+        })
+        .map_err(|_| ())?
+        .join()
+        .map_err(|_| ())?
+}
+
+async fn run_password_command(args: &[String]) -> Result<String, ()> {
+    let (program, arguments) = args.split_first().ok_or(())?;
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .stdout(Stdio::piped());
+    for (key, _) in std::env::vars_os() {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("TICKETD_")
+        {
+            command.env_remove(key);
+        }
+    }
+    let mut child = ManagedChild::spawn(&mut command).map_err(|_| ())?;
+    let stdout = child.stdout().ok_or(())?;
+    let mut bytes = Vec::new();
+    let result = timeout(PASSWORD_COMMAND_LIMIT, async {
+        let mut stdout = stdout.take((super::super::credentials::VALUE_LIMIT + 3) as u64);
+        stdout.read_to_end(&mut bytes).await.map_err(|_| ())?;
+        if bytes.len() > super::super::credentials::VALUE_LIMIT + 2 {
+            return Err(());
+        }
+        let mut polls = interval(Duration::from_millis(10));
+        loop {
+            polls.tick().await;
+            if let Some(success) = child.exit_success() {
+                return success.then_some(()).ok_or(());
+            }
+        }
+    })
+    .await;
+    child.shutdown().await;
+    result.map_err(|_| ())??;
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes).map_err(|_| ())
 }
 
 #[cfg(unix)]
@@ -227,14 +313,20 @@ impl ManagedChild {
     }
 
     pub(super) fn exited(&mut self) -> bool {
+        self.exit_success().is_some()
+    }
+
+    fn exit_success(&mut self) -> Option<bool> {
         use rustix::process::{WaitId, WaitIdOptions, waitid};
-        self.group.is_some_and(|group| {
+        self.group.and_then(|group| {
             // Keep the child's PID reserved until the final signal to its group.
             waitid(
                 WaitId::Pid(group),
                 WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
             )
-            .is_ok_and(|status| status.is_some())
+            .ok()
+            .flatten()
+            .map(|status| status.exit_status() == Some(0))
         })
     }
 
@@ -300,10 +392,16 @@ impl ManagedChild {
     }
 
     pub(super) fn exited(&mut self) -> bool {
+        self.exit_success().is_some()
+    }
+
+    fn exit_success(&mut self) -> Option<bool> {
         self.0
             .inner_mut()
             .try_wait()
-            .is_ok_and(|status| status.is_some())
+            .ok()
+            .flatten()
+            .map(|status| status.success())
     }
 
     async fn shutdown(&mut self) {

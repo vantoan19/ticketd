@@ -643,6 +643,17 @@ pub trait Connector: Send + Sync {
         None
     }
 
+    /// Binds the vault references belonging to a connection without reading them.
+    #[doc(hidden)]
+    fn for_connection_with_secret_refs(
+        &self,
+        id: &str,
+        config: &ConfigValues,
+        _references: std::collections::BTreeMap<String, uuid::Uuid>,
+    ) -> Option<Box<dyn Connector>> {
+        self.for_connection(id, config)
+    }
+
     /// Site known locally before credentials are used, when the connector can tell.
     fn effective_site(&self) -> Option<String> {
         None
@@ -663,6 +674,21 @@ pub trait Connector: Send + Sync {
     /// can point at one field, or describe the configuration as a whole.
     fn validate(&self, _config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {
         Ok(Vec::new())
+    }
+
+    #[doc(hidden)]
+    fn validate_draft(&self, raw: &ConfigValues) -> Result<ConfigValues, SourceError> {
+        let config = self
+            .descriptor()
+            .schema
+            .validate(raw)
+            .map_err(SourceError::InvalidConfiguration)?;
+        let issues = self.validate(&config)?;
+        if issues.is_empty() {
+            Ok(config)
+        } else {
+            Err(SourceError::InvalidConfiguration(issues))
+        }
     }
 
     /// Verifies credentials and permissions, and derives how ticketd will use

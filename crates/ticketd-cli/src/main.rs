@@ -870,6 +870,12 @@ enum SourceConnectionCommand {
         #[command(flatten)]
         settings: SourceSettings,
     },
+    /// Replace credential fields without changing discovery rules
+    SignIn {
+        /// Read a JSON object of credential settings from a file or - for stdin
+        #[arg(long)]
+        config_file: String,
+    },
     /// Change the connection's display name
     Rename {
         /// The new display name
@@ -2366,16 +2372,18 @@ fn source_command(
             let values = source_settings(&engine, &provider, ConfigValues::new(), settings)?;
             let id = workspace.next_source_connection_id(&provider)?;
             if preview {
-                let scoped = engine.for_connection(&provider, &id, &values);
+                let scoped = workspace.source_draft_engine(&engine, &provider, &id, &values)?;
                 serde_json::to_string(&workspace.preview_source(&scoped, &provider, &values)?)?
             } else {
-                serde_json::to_string(&workspace.add_source_connection(
+                let outcome = workspace.add_source_connection(
                     &engine,
                     &provider,
                     Some(&id),
                     name.as_deref(),
                     &values,
-                )?)?
+                )?;
+                source_credential_notice(&outcome.source);
+                serde_json::to_string(&outcome)?
             }
         }
         SourceCommand::TakeOwnership { reference, agent } => {
@@ -2406,7 +2414,18 @@ fn run_source_connection(
     let text = match operation {
         SourceConnectionCommand::Show => serde_json::to_string(&saved)?,
         SourceConnectionCommand::Test => {
-            serde_json::to_string(&workspace.test_source_connection(&engine, connection)?)?
+            match workspace.test_source_connection(&engine, connection) {
+                Err(ticketd_core::Error::Source(error))
+                    if error.class() == ticketd_core::source::ErrorClass::Auth =>
+                {
+                    return Err(format!(
+                        "{error}{}",
+                        source_sign_in_guidance(&engine, &saved.provider, connection),
+                    )
+                    .into());
+                }
+                result => serde_json::to_string(&result?)?,
+            }
         }
         SourceConnectionCommand::Options {
             field,
@@ -2414,19 +2433,35 @@ fn run_source_connection(
             settings,
         } => {
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
-            let scoped = engine.for_connection(&saved.provider, connection, &values);
+            let scoped =
+                workspace.source_draft_engine(&engine, &saved.provider, connection, &values)?;
             serde_json::to_string(&scoped.options(&saved.provider, &field, &query, &values)?)?
         }
         SourceConnectionCommand::Preview { settings } => {
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
-            let scoped = engine.for_connection(&saved.provider, connection, &values);
+            let scoped =
+                workspace.source_draft_engine(&engine, &saved.provider, connection, &values)?;
             serde_json::to_string(&workspace.preview_source(&scoped, &saved.provider, &values)?)?
         }
         SourceConnectionCommand::Edit { settings } => {
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
-            serde_json::to_string(
-                &workspace.update_source_connection(&engine, connection, &values)?,
-            )?
+            let outcome = workspace.update_source_connection(&engine, connection, &values)?;
+            source_credential_notice(&outcome.source);
+            serde_json::to_string(&outcome)?
+        }
+        SourceConnectionCommand::SignIn { config_file } => {
+            let values = source_settings(
+                &engine,
+                &saved.provider,
+                ticketd_core::source::ConfigValues::new(),
+                SourceSettings {
+                    config_file: Some(config_file),
+                    set: Vec::new(),
+                },
+            )?;
+            let updated = workspace.update_source_credentials(&engine, connection, &values)?;
+            source_credential_notice(&updated);
+            serde_json::to_string(&updated)?
         }
         SourceConnectionCommand::Rename { name } => {
             serde_json::to_string(&workspace.rename_source(connection, &name)?)?
@@ -2450,15 +2485,11 @@ fn run_source_connection(
             // Give scripts the report even when a failure also exits nonzero.
             writeln!(output, "{}", serde_json::to_string(&report)?)?;
             if let Some(failure) = report.failures.first() {
-                let guidance = (failure.code == "unauthenticated")
-                    .then(|| {
-                        engine
-                            .description(&saved.provider)
-                            .ok()
-                            .and_then(|description| description.presentation.sign_in.terminal_hint)
-                    })
-                    .flatten()
-                    .map_or_else(String::new, |hint| format!(" {hint}"));
+                let guidance = if matches!(failure.code.as_str(), "unauthenticated" | "forbidden") {
+                    source_sign_in_guidance(&engine, &saved.provider, connection)
+                } else {
+                    String::new()
+                };
                 return Err(format!(
                     "refresh failed for {} ({}): {}{}",
                     failure.reference.as_deref().unwrap_or(connection),
@@ -2473,6 +2504,40 @@ fn run_source_connection(
     };
     writeln!(output, "{text}")?;
     Ok(())
+}
+
+fn source_credential_notice(source: &ticketd_core::source::SavedSource) {
+    if !source.session_secret_fields.is_empty() {
+        tracing::warn!("system keyring unavailable; credentials last until this invocation exits");
+    }
+}
+
+fn source_sign_in_guidance(
+    engine: &ticketd_core::source::Engine,
+    provider: &str,
+    connection: &str,
+) -> String {
+    use ticketd_core::source::FieldKind;
+    let Ok(description) = engine.description(provider) else {
+        return String::new();
+    };
+    if description
+        .descriptor
+        .schema
+        .fields
+        .iter()
+        .any(|field| matches!(field.kind, FieldKind::Secret))
+    {
+        format!(
+            " To replace the credential, run `ticketd source {connection} sign-in --config-file -` and supply a JSON object of credential fields on stdin."
+        )
+    } else {
+        description
+            .presentation
+            .sign_in
+            .terminal_hint
+            .map_or_else(String::new, |hint| format!(" {hint}"))
+    }
 }
 
 fn source_settings(
