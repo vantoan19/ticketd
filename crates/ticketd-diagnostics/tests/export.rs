@@ -306,30 +306,32 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
 }
 
 #[test]
-fn the_bundle_includes_current_and_rotated_source_connection_logs() {
+fn the_bundle_includes_source_log_counts_without_extension_text() {
     let logs_dir = tempfile::tempdir().unwrap();
     let out = tempfile::tempdir().unwrap();
     let sources = logs_dir.path().join("sources");
     fs::create_dir(&sources).unwrap();
     fs::write(
         sources.join("example-tracker.log"),
-        "connected from /home/example\n",
+        "Private acquisition ticket\nprivate-contact@example.com\n",
     )
     .unwrap();
     fs::write(sources.join("example-tracker.1.log"), "old stderr\n").unwrap();
     fs::write(sources.join("example-tracker.lock"), "private bookkeeping").unwrap();
     let logs = DesktopLogs::open(logs_dir.path(), Config::default());
-    let mut facts = facts();
-    facts.known.home = Some("/home/example".into());
-
-    let files = read_zip(&logs.export(out.path(), &facts).unwrap().path);
+    let files = read_zip(&logs.export(out.path(), &facts()).unwrap().path);
     assert_eq!(
         file(&files, "logs/sources/example-tracker.log"),
-        "connected from ~\n"
+        "stderr_lines: 2\n"
     );
     assert_eq!(
         file(&files, "logs/sources/example-tracker.1.log"),
-        "old stderr\n"
+        "stderr_lines: 1\n"
     );
+    for (_, text) in &files {
+        assert!(!text.contains("Private acquisition ticket"));
+        assert!(!text.contains("private-contact@example.com"));
+        assert!(!text.contains("old stderr"));
+    }
     assert!(!names(&files).contains(&"logs/sources/example-tracker.lock"));
 }

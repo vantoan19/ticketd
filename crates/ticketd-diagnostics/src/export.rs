@@ -304,7 +304,7 @@ pub(crate) fn write(
         ("workspace.json", json(&facts.workspace, &redactor)?),
         ("errors.json", json(&errors, &redactor)?),
     ];
-    let mut logs = extension_logs(dir, &redactor);
+    let mut logs = extension_log_summaries(dir);
     logs.extend(log_texts(dir, &redactor));
 
     // Compression decides the size, so cut by trial: build, and if it is too big, keep
@@ -365,8 +365,8 @@ fn log_texts(dir: &Path, redactor: &Redactor) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
-/// Stderr is redacted by the source host before it reaches the log folder.
-fn extension_logs(dir: &Path, redactor: &Redactor) -> Vec<(String, Vec<String>)> {
+/// Summarize recent source logs. An extension can write arbitrary private data to stderr.
+fn extension_log_summaries(dir: &Path) -> Vec<(String, Vec<String>)> {
     const FILE_LIMIT: u64 = 256 * 1024;
     const RECENT_FILES: usize = 16;
     let Ok(entries) = std::fs::read_dir(dir.join("sources")) else {
@@ -404,11 +404,11 @@ fn extension_logs(dir: &Path, redactor: &Redactor) -> Vec<(String, Vec<String>)>
                 .take(FILE_LIMIT)
                 .read_to_end(&mut bytes)
                 .ok()?;
-            let lines = String::from_utf8_lossy(&bytes)
-                .lines()
-                .map(|line| redactor.text(line))
-                .collect();
-            Some((format!("logs/sources/{name}"), lines))
+            let count = bytes.split_inclusive(|byte| *byte == b'\n').count();
+            Some((
+                format!("logs/sources/{name}"),
+                vec![format!("stderr_lines: {count}")],
+            ))
         })
         .collect()
 }

@@ -450,6 +450,8 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   this desktop. Discovery of the same issue through a covering connection resumes
   sync unless you took ownership. Any unresolved publication stays recorded
   and continues to block a second create.
+- Extension stderr stays in bounded local logs with known credentials redacted.
+  The Diagnostics export includes line counts from recent source connection logs.
 - Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
   to find its ID. When several connections can publish, pass
   `ticketd source publish T-XYZ --connection CONNECTION --preview`.

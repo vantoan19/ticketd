@@ -308,8 +308,9 @@ current value in an operation's `config`, using a keychain reference for a saved
 credential. Treat values as request-scoped. Keep them out of files, process
 environment, results, stderr and error messages, including raw HTTP errors.
 ticketd rejects results echoing a known credential and redacts known values
-and common encodings from extension diagnostics. Recent extension stderr is
-available in local logs and the desktop Diagnostics export.
+and common encodings from extension diagnostics. Raw extension stderr can
+contain private data and stays in bounded local logs. The desktop Diagnostics
+export includes line counts for recent source log files.
 
 The extension starts in its registered folder. It inherits a restricted set of
 OS, locale, PATH, temporary-directory and proxy variables, plus those declared in
