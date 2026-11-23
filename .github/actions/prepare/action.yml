@@ -1,0 +1,111 @@
+name: Prepare
+description: >-
+  Set up a runner for this repository: pinned Node and npm with node_modules restored from the
+  cache, optionally the pinned Rust toolchain with its build cache and the Linux packages the
+  desktop app compiles against. Run it right after actions/checkout.
+
+inputs:
+  rust:
+    description: Install the Rust toolchain pinned in rust-toolchain.toml.
+    default: "false"
+  desktop:
+    description: Install the Linux system packages the Tauri desktop crate compiles against.
+    default: "false"
+  cache:
+    description: >-
+      Name of the Rust build this job shares with other jobs (clippy, test, build). Jobs and
+      shards with the same name and OS share one cache entry. Leave empty for no Rust cache;
+      "none" turns off every cache, for builds that ship to people.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # The hosted D: drive is faster than C: for small-file IO; the checkout and target/ are
+    # already there, but TEMP (where tests create their Workspaces) and CARGO_HOME are not. A
+    # ReFS Dev Drive is no faster on standard runners and changes directory-delete events.
+    - name: "Move Windows temp and Cargo home to D:"
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path D:\tmp, D:\.cargo\bin | Out-Null
+        if (Test-Path "$env:USERPROFILE\.cargo") { Copy-Item "$env:USERPROFILE\.cargo\*" D:\.cargo\ -Recurse -Force }
+        @(
+          "TMP=D:\tmp"
+          "TEMP=D:\tmp"
+          "CARGO_HOME=D:\.cargo"
+          "RUSTUP_HOME=D:\.rustup"
+        ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        "D:\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+
+    - name: Install pinned npm
+      shell: bash
+      run: |
+        wanted=$(node -p 'require("./package.json").packageManager.split("@")[1]')
+        if [[ "$(npm --version)" != "$wanted" ]]; then npm install --global "npm@$wanted"; fi
+
+    # setup-node caches only npm's download cache, so npm ci would still unpack every package
+    # in every job. Restore node_modules itself; only main writes it, so PRs never fill the
+    # shared cache storage. The key covers every manifest, so a package.json that disagrees
+    # with the lockfile misses the cache and npm ci reports it.
+    - name: Compute node_modules key
+      id: node-key
+      if: inputs.cache != 'none'
+      shell: bash
+      run: |
+        echo "key=node-modules-v1-${RUNNER_OS}-${RUNNER_ARCH}-node$(node --version)-${{ hashFiles('package-lock.json', 'package.json', 'apps/*/package.json') }}" >> "$GITHUB_OUTPUT"
+    - name: Restore node_modules
+      id: node-cache
+      if: inputs.cache != 'none'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+        key: ${{ steps.node-key.outputs.key }}
+    - name: Install npm packages
+      if: steps.node-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci
+    - name: Save node_modules
+      if: inputs.cache != 'none' && steps.node-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+        key: ${{ steps.node-key.outputs.key }}
+
+    - name: Install pinned Rust toolchain
+      if: inputs.rust == 'true'
+      shell: bash
+      run: rustup show active-toolchain
+    - name: Restore Rust build cache
+      if: inputs.rust == 'true' && inputs.cache != '' && inputs.cache != 'none'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        shared-key: ${{ inputs.cache }}
+        # Only main writes the cache. PRs read it and never fill the shared storage.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+
+    # The hosted mirrors sometimes stall one connection for minutes. A short timeout with no
+    # retries makes apt move on to the next mirror in /etc/apt/apt-mirrors.txt (as uv does),
+    # and the man-db trigger, which can take minutes, is switched off. The settings stay in
+    # place for any later apt step in the job.
+    - name: Install Linux desktop packages
+      if: inputs.desktop == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        printf '%s\n' \
+          'Acquire::Retries "0";' \
+          'Acquire::http::Timeout "10";' \
+          'Acquire::https::Timeout "10";' \
+          | sudo tee /etc/apt/apt.conf.d/80-ci-timeouts > /dev/null
+        sudo rm -f /var/lib/man-db/auto-update
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
