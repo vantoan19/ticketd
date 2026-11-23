@@ -23,6 +23,7 @@ import {
 } from "./workspace";
 import { entriesAt } from "./inbox-model";
 import { DemoInbox } from "./DemoInbox";
+import { focusWorkspaceControl } from "./focus";
 import { Board } from "./Board";
 import { TicketDetail } from "./TicketDetail";
 import { WorkspaceTitle } from "./WorkspaceTitle";
@@ -68,10 +69,8 @@ export function DesktopDisplay({
         item.dataset.demoControl === nextFocus.current &&
         item.getClientRects().length,
     );
-    target?.focus({ preventScroll: true });
-    const strip = target?.closest<HTMLElement>(".flow-strip");
-    if (target && strip)
-      strip.scrollLeft = target.offsetLeft - strip.clientLeft;
+    if (target && display.current)
+      focusWorkspaceControl(target, display.current);
     nextFocus.current = null;
   }, [state]);
   function open(ref: string, from = ref) {

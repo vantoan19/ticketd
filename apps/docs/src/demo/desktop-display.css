@@ -5,6 +5,8 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  /* Swapping workspace views must not move the surrounding landing page. */
+  overflow-anchor: none;
   border-radius: 5px;
   box-shadow: 0 0 0 1px var(--border);
   background: var(--background);
