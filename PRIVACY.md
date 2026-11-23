@@ -141,7 +141,7 @@ including the Limited Use requirements.
 
 S3 sync stores no AWS credential. It gets credentials from the AWS CLI's profile
 you chose and keeps them only in memory. Diagnostics exports replace the AWS identity
-(its ARN and account ID). See [S3 sync setup](docs/install.md#s3-sync-setup).
+(its ARN and account ID). See [S3 sync setup](https://github.com/vantoan19/ticketd/blob/main/docs/install.md#s3-sync-setup).
 
 ## Retention, backups, and removal
 
