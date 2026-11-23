@@ -273,8 +273,12 @@ pub(crate) struct Supervisor {
     /// The context of the live session is being read again; nothing is dispatched until
     /// it is, so the next message carries it.
     refreshing: Option<RuntimeGeneration>,
-    /// New Chat's picks, given to the next new session; kept until one opens.
+    /// The person's picks for the next session, new or resumed: New Chat's, or a change
+    /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
+    /// What the Chat's sessions last reported in effect, as recorded with the Chat
+    /// (`Chat::effective_settings`): what a session opened for it again starts with.
+    recorded_settings: Option<String>,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -357,6 +361,7 @@ impl Supervisor {
             unpublished: true,
             refreshing: None,
             start_settings: StartSettings::default(),
+            recorded_settings: chat.effective_settings.clone(),
         };
         tokio::spawn(supervisor.run().instrument(span));
         sender
@@ -564,9 +569,7 @@ impl Supervisor {
     fn change_setting(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
         let busy = self.active.is_some() || self.dispatching.is_some();
         let Some(runtime) = &mut self.runtime else {
-            return SettingChangeState::Done(SettingOutcome::Refused {
-                reason: "no session is running".to_owned(),
-            });
+            return self.pick_for_next_session(setting, value);
         };
         let state = match runtime.settings.as_ref().and_then(|s| s.get(setting)) {
             None => SettingChangeState::Done(SettingOutcome::Unsupported),
@@ -588,6 +591,52 @@ impl Supervisor {
             self.send_setting(setting, value);
         }
         state
+    }
+
+    /// With no session running, the permission can still be chosen: the next session,
+    /// new or resumed, opens with it. Held until then, so the trigger shows it as the
+    /// mode the next message runs in.
+    fn pick_for_next_session(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
+        let refused = |reason: &str| {
+            SettingChangeState::Done(SettingOutcome::Refused {
+                reason: reason.to_owned(),
+            })
+        };
+        let shown = self.settings_before_session();
+        let Some(offered) = shown.as_ref().and_then(|shown| shown.get(setting)) else {
+            return refused(if self.opening.is_some() {
+                "the session is starting"
+            } else {
+                "no session is running"
+            });
+        };
+        if let Some(reason) = offered.refusal(&value) {
+            return SettingChangeState::Done(SettingOutcome::Refused { reason });
+        }
+        match setting {
+            SettingKey::Permission => self.start_settings.permission = Some(value),
+            // Only the permission is shown before a session.
+            SettingKey::Model | SettingKey::Effort => return refused("no session is running"),
+        }
+        SettingChangeState::Held
+    }
+
+    /// The settings shown while no session runs or opens: the permission its next
+    /// session starts with, as the adapter reads the pick and the Chat's record. An
+    /// Automation's agent shows none: its settings are the agent's.
+    fn settings_before_session(&self) -> Option<HarnessSettings> {
+        if self.unattended.is_some() || self.opening.is_some() || self.runtime.is_some() {
+            return None;
+        }
+        let permission = self.adapter.as_ref()?.permission_before_session(
+            self.recorded_settings.as_deref(),
+            self.start_settings.permission.as_deref(),
+        )?;
+        Some(HarnessSettings {
+            model: None,
+            effort: None,
+            permission: Some(permission),
+        })
     }
 
     fn send_setting(&self, setting: SettingKey, value: String) {
@@ -963,12 +1012,9 @@ impl Supervisor {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
-            // New Chat's picks are for a new session; what a Chat ran with before
-            // is in `recorded_settings`.
-            settings: match session {
-                SessionStart::New => self.start_settings.clone(),
-                SessionStart::Resume(_) => StartSettings::default(),
-            },
+            // The person's picks for this session, new or resumed; what the Chat ran
+            // with before is in `recorded_settings`.
+            settings: self.start_settings.clone(),
             session,
             recorded_settings: chat.effective_settings.clone(),
             unattended: self.unattended.clone(),
@@ -1941,6 +1987,7 @@ impl Supervisor {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());
                     let chat = self.chat_id.clone();
                     let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
+                    self.recorded_settings = Some(settings);
                 }
             },
             EventKind::ReasoningUpdated {
@@ -2265,12 +2312,20 @@ impl Supervisor {
                 None => self.problem.clone(),
             },
             context: self.runtime.as_ref().and_then(|r| r.context.clone()),
-            settings: self.runtime.as_ref().and_then(|runtime| {
-                Some(Box::new(LiveSettings {
-                    reported: runtime.settings.clone()?,
-                    changes: runtime.setting_changes.clone(),
-                }))
-            }),
+            settings: match &self.runtime {
+                Some(runtime) => runtime.settings.clone().map(|reported| {
+                    Box::new(LiveSettings {
+                        reported,
+                        changes: runtime.setting_changes.clone(),
+                    })
+                }),
+                None => self.settings_before_session().map(|reported| {
+                    Box::new(LiveSettings {
+                        reported,
+                        changes: Vec::new(),
+                    })
+                }),
+            },
             commands: self
                 .runtime
                 .as_ref()

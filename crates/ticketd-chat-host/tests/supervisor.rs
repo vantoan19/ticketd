@@ -1869,7 +1869,7 @@ fn setting_changes(f: &Fixture) -> Vec<SettingChange> {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_is_never_sent() {
+async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("Start").await;
     f.emit(EventKind::SettingsState(settings("ask"))).await;
@@ -1899,10 +1899,8 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
         .unwrap();
     settle().await;
 
-    assert!(matches!(
-        full,
-        SettingChangeState::Done(SettingOutcome::Refused { .. })
-    ));
+    // Full access is held like any other choice.
+    assert_eq!(full, SettingChangeState::Held);
     assert!(matches!(
         unknown,
         SettingChangeState::Done(SettingOutcome::Refused { .. })
@@ -1913,9 +1911,12 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
 
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
 
-    let sent = setting_changes(&f);
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].value, "gpt-b");
+    let mut sent: Vec<String> = setting_changes(&f)
+        .into_iter()
+        .map(|change| change.value)
+        .collect();
+    sent.sort();
+    assert_eq!(sent, ["full", "gpt-b"]);
     let live = f.live().await;
     let settings = live.settings.unwrap();
     assert_eq!(
@@ -1924,6 +1925,76 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_i
     );
     assert!(settings.changes.iter().any(|change| change.value == "gpt-b"
         && change.state == SettingChangeState::Done(SettingOutcome::Applied)));
+}
+
+/// T-QZ66: with no session running, a Chat shows the permission its next session opens
+/// with, as its record says, and a change then goes to that session, resumed too.
+#[tokio::test(start_paused = true)]
+async fn an_idle_chat_shows_its_next_permission_and_a_pick_goes_to_the_resumed_session() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: String::new(),
+        detail: Some(ProviderDetail::new("settings", r#"{"permission":"full"}"#)),
+    })
+    .await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.fake.lose_process().await;
+    settle().await;
+
+    let idle = f
+        .live()
+        .await
+        .settings
+        .expect("shown with no session running");
+    assert_eq!(
+        idle.reported.permission.and_then(|p| p.current).as_deref(),
+        Some("full")
+    );
+    assert!(idle.reported.model.is_none(), "models wait for a session");
+
+    let picked = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(picked, SettingChangeState::Held);
+    let shown = f
+        .live()
+        .await
+        .settings
+        .unwrap()
+        .reported
+        .permission
+        .unwrap();
+    assert_eq!(shown.current.as_deref(), Some("ask"));
+    let model = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Model, "gpt-b")
+        .await
+        .unwrap();
+    assert!(matches!(
+        model,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+    let reopened = f.fake.opens()[1].clone();
+    assert_eq!(
+        reopened.session,
+        SessionStart::Resume(NativeSessionId::new("native-1"))
+    );
+    assert_eq!(reopened.settings.permission.as_deref(), Some("ask"));
+    assert_eq!(
+        reopened.recorded_settings.as_deref(),
+        Some(r#"{"permission":"full"}"#)
+    );
 }
 
 /// How a turn ended is stored as a typed fact, one per reason ticketd has to stop a

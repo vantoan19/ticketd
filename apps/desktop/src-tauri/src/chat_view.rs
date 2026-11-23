@@ -1817,7 +1817,7 @@ pub fn chat_state(
         queue: around.queue.clone(),
         queue_paused: chat.queue_paused,
         context: chat_reports::context(live),
-        settings: chat_reports::settings(live, name),
+        settings: chat_reports::settings(live),
         unseen: chat.marked_unread
             || tracker
                 .last_turn

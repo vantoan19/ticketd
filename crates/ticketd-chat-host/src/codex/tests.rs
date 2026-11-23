@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
+use super::CodexAdapter;
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
 use crate::conformance::{NewTurn, Provider};
@@ -18,17 +19,16 @@ use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
-    HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
-    LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
-    OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
+    HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome,
+    InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
     RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
     TurnOutcome,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
 /// The settings the handshake fixture's `thread/start` reply reports.
-const SETTINGS: &str =
-    "settings model=gpt-test[] permission=workspaceWrite[\"workspaceWrite\"] fixed";
+const SETTINGS: &str = "settings model=gpt-test[] permission=own[\"own\", \"full-access\"]";
 
 macro_rules! fixture {
     ($name:literal) => {
@@ -673,10 +673,16 @@ async fn the_options_probe_lists_every_page_of_models_with_their_efforts_and_clo
     );
     let default_effort = options.models[0].efforts.iter().find(|e| e.is_default);
     assert_eq!(default_effort.map(|e| e.id.as_str()), Some("medium"));
-    let permission = options.permission.expect("profiles were listed");
+    // The person's own Codex settings, or Full access.
+    let permission = options.permission.expect("the permission choices");
     assert_eq!(permission.current, None);
-    assert!(permission.unchangeable.is_some(), "Codex sets permissions");
-    assert_eq!(permission.options.len(), 2);
+    assert_eq!(permission.unchangeable, None);
+    let choices: Vec<_> = permission
+        .options
+        .iter()
+        .map(|o| (o.id.as_str(), o.is_default, o.allowed))
+        .collect();
+    assert_eq!(choices, [("own", true, true), ("full-access", false, true)]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -709,6 +715,177 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
             turn: turn("turn_1")
         }
     );
+}
+
+fn permission_shown(events: &[EventKind]) -> Option<String> {
+    events.iter().rev().find_map(|event| match event {
+        EventKind::SettingsState(settings) => settings.permission.as_ref()?.current.clone(),
+        _ => None,
+    })
+}
+
+/// Full access goes out with every turn while it is chosen, and the turn after leaving
+/// it gives the thread back the approval policy and sandbox it opened with, which are
+/// recorded with the Chat for a later session.
+#[tokio::test(start_paused = true)]
+async fn full_access_goes_out_with_each_turn_and_leaving_it_restores_the_threads_own() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("full_access"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: None,
+        settings: StartSettings {
+            permission: Some("full-access".to_owned()),
+            ..StartSettings::default()
+        },
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread opens");
+    let events = drain(&mut opened.events).await;
+    // The pick shows before the turn that carries it.
+    assert_eq!(permission_shown(&events).as_deref(), Some("full-access"));
+    let recorded = events.iter().find_map(|event| match event {
+        EventKind::Notice {
+            kind: NoticeKind::EffectiveSettings,
+            detail: Some(detail),
+            ..
+        } => serde_json::from_str::<Value>(detail.payload()).ok(),
+        _ => None,
+    });
+    let recorded = recorded.expect("the settings are recorded");
+    assert_eq!(recorded["own"]["approvalPolicy"], json!("on-request"));
+    // The Chat's choice, which a session opened for it again applies.
+    assert_eq!(recorded["reopen_with"]["permission"], json!("full-access"));
+
+    let runtime = opened.runtime;
+    for (submission, text) in [("sub-1", "Go"), ("sub-2", "Go on")] {
+        let outcome = submit(&mut peer, &runtime, start_turn(submission, text)).await;
+        assert!(matches!(outcome, DispatchOutcome::Acknowledged { .. }));
+        drain(&mut opened.events).await;
+    }
+    let change = crate::SettingChange {
+        generation: GENERATION,
+        setting: crate::SettingKey::Permission,
+        value: "own".to_owned(),
+    };
+    assert_eq!(
+        runtime.change_setting(change).await,
+        crate::SettingOutcome::Applied
+    );
+    let outcome = submit(&mut peer, &runtime, start_turn("sub-3", "Careful now")).await;
+    assert!(matches!(outcome, DispatchOutcome::Acknowledged { .. }));
+    // The turn that carried the change records it with the Chat.
+    let rerecorded = drain(&mut opened.events)
+        .await
+        .into_iter()
+        .find_map(|event| match event {
+            EventKind::Notice {
+                kind: NoticeKind::EffectiveSettings,
+                detail: Some(detail),
+                ..
+            } => serde_json::from_str::<Value>(detail.payload()).ok(),
+            _ => None,
+        });
+    assert_eq!(
+        rerecorded.map(|settings| settings["reopen_with"]["permission"].clone()),
+        Some(json!("own"))
+    );
+}
+
+/// T-QZ66: a Chat shows, before any session, the choice its record kept, and the
+/// session opened for it applies that choice, whatever the thread itself kept.
+#[tokio::test(start_paused = true)]
+async fn a_reopened_chat_shows_and_applies_the_choice_its_record_kept() {
+    let shown = |recorded: Option<Value>, picked: Option<&str>| {
+        let recorded = recorded.map(|recorded| recorded.to_string());
+        CodexAdapter::new()
+            .permission_before_session(recorded.as_deref(), picked)
+            .and_then(|setting| setting.current)
+    };
+    let kept = json!({"approvalPolicy": "on-request", "sandbox": {"type": "workspaceWrite"},
+                      "reopen_with": {"permission": "full-access"}});
+    assert_eq!(
+        shown(Some(kept.clone()), None).as_deref(),
+        Some("full-access")
+    );
+    assert_eq!(
+        shown(Some(kept.clone()), Some("own")).as_deref(),
+        Some("own")
+    );
+    // A record from before the choice was kept: how the thread last opened.
+    let never = json!({"approvalPolicy": "never", "sandbox": {"type": "dangerFullAccess"}});
+    assert_eq!(shown(Some(never), None).as_deref(), Some("full-access"));
+    let asks = json!({"approvalPolicy": "on-request", "sandbox": {"type": "readOnly"}});
+    assert_eq!(shown(Some(asks), None).as_deref(), Some("own"));
+    assert_eq!(shown(None, None), None, "no record: nothing to say yet");
+
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_recorded_choice"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: Some(kept.to_string()),
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread resumes");
+    let events = drain(&mut opened.events).await;
+    assert_eq!(permission_shown(&events).as_deref(), Some("full-access"));
+    // The thread itself reports asking: the first turn says Full access again.
+    let outcome = submit(&mut peer, &opened.runtime, start_turn("sub-1", "Go")).await;
+    assert!(matches!(outcome, DispatchOutcome::Acknowledged { .. }));
+}
+
+/// After a restart the thread still runs in Full access, which is what the Chat
+/// shows, and leaving it restores the person's settings as the Chat recorded them.
+#[tokio::test(start_paused = true)]
+async fn a_resumed_chat_in_full_access_leaves_it_for_the_recorded_own_settings() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_full_access"));
+    let own = json!({
+        "approvalPolicy": "on-request",
+        "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false,
+                          "excludeTmpdirEnvVar": false, "excludeSlashTmp": false},
+    });
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: Some(json!({"model": "gpt-test", "own": own}).to_string()),
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread resumes");
+    let events = drain(&mut opened.events).await;
+    assert_eq!(permission_shown(&events).as_deref(), Some("full-access"));
+
+    let runtime = opened.runtime;
+    let change = crate::SettingChange {
+        generation: GENERATION,
+        setting: crate::SettingKey::Permission,
+        value: "own".to_owned(),
+    };
+    assert_eq!(
+        runtime.change_setting(change).await,
+        crate::SettingOutcome::Applied
+    );
+    let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Careful now")).await;
+    assert!(matches!(outcome, DispatchOutcome::Acknowledged { .. }));
 }
 
 #[tokio::test(start_paused = true)]
@@ -1451,27 +1628,27 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
 
     let settings = drain(&mut opened.events).await;
     let models = "model=gpt-a[\"gpt-a\", \"gpt-b\"] effort=medium[\"low\", \"medium\", \"high\"]";
-    let profiles = "[\":read-only\", \":workspace\", \":danger-no-sandbox\"] fixed";
+    let permission = "permission=own[\"own\", \"full-access\"]";
     assert_eq!(
         settings.iter().map(brief).collect::<Vec<_>>(),
         [
             "session thr_1".to_owned(),
-            // Before the lists: the thread's own answer, with no choices.
-            "settings model=gpt-a[] permission=workspaceWrite[\"workspaceWrite\"] fixed".to_owned(),
+            // Before the lists: the thread's own answer, with no model choices.
+            format!("settings model=gpt-a[] {permission}"),
             "notice EffectiveSettings".to_owned(),
             // Hidden models are not choices; efforts are the current model's, in order.
-            format!("settings {models} permission=workspaceWrite[\"workspaceWrite\"] fixed"),
-            format!("settings {models} permission=?{profiles}"),
-            format!("settings {models} permission=:workspace{profiles}"),
+            format!("settings {models} {permission}"),
+            format!("settings {models} {permission}"),
+            format!("settings {models} {permission}"),
         ]
     );
     let Some(EventKind::SettingsState(last)) = settings.last() else {
         panic!("settings last, got {settings:?}");
     };
-    let profile_options = &last.permission.as_ref().expect("permission").options;
+    let full = &last.permission.as_ref().expect("permission").options[1];
     assert!(
-        !profile_options[2].allowed,
-        "Codex's policy refuses this profile"
+        !full.allowed,
+        "Codex's requirements refuse the no-sandbox profile, so Full access too"
     );
 
     let runtime = opened.runtime;

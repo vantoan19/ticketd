@@ -142,7 +142,7 @@ async fn handing_input_to_the_sdk_is_a_write_and_later_evidence_arrives_as_event
         [
             "session sess-1",
             "notice EffectiveSettings",
-            "settings model=claude-test[] permission=default[\"default\", \"acceptEdits\", \"plan\"]",
+            "settings model=claude-test[] permission=default[\"default\", \"acceptEdits\", \"plan\", \"bypassPermissions\"]",
             "turn-started local-turn-1",
             "delta text-1 \"Here\"",
             &processing("sub-1", "local-turn-1"),
@@ -544,15 +544,19 @@ async fn the_options_probe_lists_models_with_their_efforts_and_closes_the_bridge
     // The default row names what it runs; a row of its own name names nothing.
     assert_eq!(options.models[0].runs_as.as_deref(), Some("Opus 5.5"));
     assert_eq!(options.models[1].runs_as, None);
-    // Before a session Claude Code's own mode is unknown, and full access is no choice.
+    // Before a session Claude Code's own mode is unknown; Full access is a choice.
     let permission = options.permission.expect("Claude Code's modes");
     assert_eq!(permission.current, None);
-    assert!(
-        permission
-            .options
-            .iter()
-            .all(|o| o.permission != Some(crate::PermissionKind::FullAccess))
+    let full = permission
+        .options
+        .iter()
+        .find(|o| o.permission == Some(crate::PermissionKind::FullAccess))
+        .expect("Full access is offered");
+    assert_eq!(
+        (full.id.as_str(), full.allowed),
+        ("bypassPermissions", true)
     );
+    assert_eq!(permission.refusal("bypassPermissions"), None);
 }
 
 #[tokio::test(start_paused = true)]
@@ -657,6 +661,89 @@ async fn a_resumed_chat_opens_with_the_settings_it_last_ran_with() {
     assert!(opened.is_ok(), "the session opens");
 }
 
+/// A Chat the person put in Full access is still in it after a restart.
+#[tokio::test(start_paused = true)]
+async fn a_resumed_chat_in_full_access_stays_in_it() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_full_access"));
+    let recorded = json!({
+        "model": "claude-opus-test",
+        "permission_mode": "bypassPermissions",
+        "reopen_with": {"permission_mode": "bypassPermissions"},
+    });
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: Some(recorded.to_string()),
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// The effort a Chat last ran with is kept with its record, so a session opened for it
+/// again runs with it: Claude Code resumes no effort of its own.
+#[tokio::test(start_paused = true)]
+async fn a_resumed_chat_opens_with_the_effort_it_last_ran_with() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_effort"));
+    let recorded = json!({
+        "model": "claude-opus-test",
+        "permission_mode": "plan",
+        "reopen_with": {"permission_mode": "plan", "effort": "low"},
+    });
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
+        recorded_settings: Some(recorded.to_string()),
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// T-QZ66: before any session a Chat shows the mode opening gives it.
+#[test]
+fn a_chat_shows_the_mode_it_reopens_with_before_a_session() {
+    use crate::HarnessAdapter;
+    let shown = |recorded: Option<Value>, picked: Option<&str>| {
+        let recorded = recorded.map(|recorded| recorded.to_string());
+        super::ClaudeAdapter::new("bridge")
+            .permission_before_session(recorded.as_deref(), picked)
+            .and_then(|setting| setting.current)
+    };
+    let full = json!({"permission_mode": "bypassPermissions",
+                      "reopen_with": {"permission_mode": "bypassPermissions"}});
+    assert_eq!(
+        shown(Some(full.clone()), None).as_deref(),
+        Some("bypassPermissions")
+    );
+    assert_eq!(
+        shown(Some(full), Some("default")).as_deref(),
+        Some("default")
+    );
+    // An Automation agent's record is not the person's: a Chat that ran asks before edits.
+    let agent =
+        json!({"permission_mode": "dontAsk", "reopen_with": {"permission_mode": "dontAsk"}});
+    assert_eq!(shown(Some(agent), None).as_deref(), Some("default"));
+    // Without a record, Claude Code's own `defaultMode` decides, which only a session shows.
+    assert_eq!(shown(None, None), None);
+}
+
 /// #408: an earlier ticketd recorded only a session's first report, so its record can
 /// name a mode the person has left since, such as Accept edits after they chose Ask
 /// before edits. Its mode is not reopened with: the Chat asks before edits.
@@ -737,6 +824,21 @@ fn the_settings_in_effect_are_recorded_each_time_they_change() {
     assert!(
         applied[0].contains(r#""reopen_with":{"permission_mode":"default"}"#),
         "the mode a reopened session asks with is the one applied: {applied:?}"
+    );
+
+    // An effort Claude Code applied is kept to reopen with, beside the mode.
+    let effort: Value = serde_json::from_str(
+        &recorded(
+            session
+                .setting_applied(crate::SettingKey::Effort, "high")
+                .into_iter()
+                .collect(),
+        )[0],
+    )
+    .unwrap();
+    assert_eq!(
+        effort["reopen_with"],
+        json!({"permission_mode": "default", "effort": "high"})
     );
 }
 
@@ -1239,7 +1341,7 @@ async fn thinking_the_plan_files_and_context_carry_only_what_claude_code_reporte
     assert_eq!(
         shown,
         [
-            "settings model=claude-opus-test[] permission=default[\"default\", \"acceptEdits\", \"plan\"]",
+            "settings model=claude-opus-test[] permission=default[\"default\", \"acceptEdits\", \"plan\", \"bypassPermissions\"]",
             "turn-started local-turn-1",
             &processing("sub-1", "local-turn-1"),
             "reasoning thinking-1 running Some(1730910000000) None None None",
@@ -1354,7 +1456,7 @@ fn the_picked_effort_stays_until_claude_code_reports_another() {
 }
 
 #[test]
-fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
+fn settings_offer_the_sdk_models_and_full_access_either_way() {
     use super::session::Session;
     let mut session = Session::default();
     let models = json!({"models": [
@@ -1383,13 +1485,9 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
     let effort = settings.effort.as_ref().expect("the model takes effort");
     assert_eq!(effort.current.as_deref(), Some("medium"));
     let permission = settings.permission.as_ref().expect("permission");
-    assert!(
-        permission
-            .options
-            .iter()
-            .all(|option| option.id != "bypassPermissions")
-    );
+    assert_eq!(permission.refusal("bypassPermissions"), None);
 
+    // A session in Full access, however it got there, can be moved out of it.
     let (events, _) = session
         .event("session_info", &info("bypassPermissions"))
         .expect("modeled");
@@ -1397,14 +1495,16 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
         panic!("settings, got {events:?}");
     };
     let permission = settings.permission.as_ref().expect("permission");
-    assert_eq!(
-        permission.unchangeable.as_deref(),
-        Some("Set in Claude Code's settings")
-    );
-    assert_eq!(
-        permission.refusal("acceptEdits").as_deref(),
-        Some("Set in Claude Code's settings")
-    );
+    assert_eq!(permission.current.as_deref(), Some("bypassPermissions"));
+    assert_eq!(permission.unchangeable, None);
+    assert_eq!(permission.refusal("default"), None);
+    let full = permission
+        .options
+        .iter()
+        .find(|option| option.id == "bypassPermissions")
+        .expect("listed once");
+    assert_eq!(full.label, "Full access");
+    assert_eq!(full.permission, Some(crate::PermissionKind::FullAccess));
 }
 
 /// #387 M15: modes ticketd does not offer are named in words, and a run's agent

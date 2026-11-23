@@ -505,6 +505,41 @@ fn resume_problem(error: &RpcError) -> Problem {
     }
 }
 
+/// The permission choice a person's Chat runs with when opened again, from its record:
+/// the one recorded (`reopen_with`), else how its thread last opened (Full access when
+/// that never asked and had no sandbox). `None` without a record.
+pub(super) fn recorded_permission(recorded: Option<&str>) -> Option<String> {
+    let recorded: Value = serde_json::from_str(recorded?).ok()?;
+    if let Some(choice) = recorded[super::report::REOPEN_WITH]["permission"]
+        .as_str()
+        .filter(|choice| [super::report::OWN_SETTINGS, super::report::FULL_ACCESS].contains(choice))
+    {
+        return Some(choice.to_owned());
+    }
+    let opened = recorded.get("approvalPolicy").is_some() || recorded.get("sandbox").is_some();
+    let full =
+        recorded["approvalPolicy"] == "never" && recorded["sandbox"]["type"] == "dangerFullAccess";
+    opened.then(|| {
+        if full {
+            super::report::FULL_ACCESS
+        } else {
+            super::report::OWN_SETTINGS
+        }
+        .to_owned()
+    })
+}
+
+/// The person's own approval policy and sandbox, as the Chat's last session recorded
+/// them with its settings (`own`).
+fn recorded_own(recorded: Option<&str>) -> Option<Value> {
+    let recorded: Value = serde_json::from_str(recorded?).ok()?;
+    let own = recorded.get("own")?;
+    (own.get("approvalPolicy")
+        .is_some_and(|policy| !policy.is_null())
+        && own.get("sandboxPolicy").is_some_and(Value::is_object))
+    .then(|| own.clone())
+}
+
 /// Adds the fields of `extra` to `params`; both are JSON objects.
 fn merge(params: &mut Value, extra: Value) {
     if let (Some(params), Value::Object(extra)) = (params.as_object_mut(), extra) {
@@ -519,11 +554,31 @@ pub(super) async fn open_over(
     options: Options,
 ) -> Result<OpenedRuntime, Problem> {
     let (connection, events) = Connection::start(io, request.generation, options);
-    // New Chat's picks go out with the first turn, as a later change would.
-    connection.state().session.reports.overrides = Overrides {
-        model: request.settings.model.clone(),
-        effort: request.settings.effort.clone(),
-    };
+    {
+        let reports = &mut connection.state().session.reports;
+        // New Chat's picks go out with the first turn, as a later change would.
+        reports.overrides = Overrides {
+            model: request.settings.model.clone(),
+            effort: request.settings.effort.clone(),
+            permission: request.settings.permission.clone(),
+        };
+        // A person's own settings: what the Chat's last session recorded when its
+        // thread is resumed, since that thread may still have Full access, or else
+        // the thread's reply. A new thread's reply is always theirs. A Chat taken
+        // over from a run has its approvals set back to the person's at this resume,
+        // and its record is the agent's.
+        reports.persons = request.unattended.is_none();
+        if reports.persons && !request.taken_over {
+            if matches!(request.session, SessionStart::Resume(_)) {
+                reports.own = recorded_own(request.recorded_settings.as_deref());
+            }
+            // The choice the Chat ran with applies again, as it was shown.
+            if reports.overrides.permission.is_none() {
+                reports.overrides.permission =
+                    recorded_permission(request.recorded_settings.as_deref());
+            }
+        }
+    }
     match connection.open_thread(request).await {
         Ok(capabilities) => {
             if connection.options.list_settings {
@@ -713,6 +768,9 @@ impl HarnessRuntime for CodexRuntime {
                         }
                         if let Some(effort) = &overrides.effort {
                             params["effort"] = json!(effort);
+                        }
+                        if let Some(permissions) = session.reports.permission_params() {
+                            merge(&mut params, permissions);
                         }
                         // An unattended session's approvals and sandbox, again every turn.
                         if let Some(unattended) = session.turn_overrides.clone() {

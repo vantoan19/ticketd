@@ -391,19 +391,23 @@ impl Connection {
             open["unattended"] = super::unattended_options(unattended);
             self.state().session.mark_unattended();
         }
-        // New Chat's picks, when the person made them. The bridge accepts no mode
-        // that skips permissions. A Chat taken over from a run is an ordinary Chat
-        // from here on (#387 M1, D11): what was not picked is what an untouched New
-        // Chat sends, so neither the agent's "don't ask" nor Claude Code's own
-        // `defaultMode` decides how the person's session asks.
+        // New Chat's picks, when the person made them, Full access among them. A Chat
+        // taken over from a run is an ordinary Chat from here on (#387 M1, D11): what
+        // was not picked is what an untouched New Chat sends, so neither the agent's
+        // "don't ask" nor Claude Code's own `defaultMode` decides how the person's
+        // session asks.
         let mut picks = request.settings.clone();
-        // Claude Code resumes a session's history, not its model or permission mode:
-        // without them its own settings would decide (#408). What the Chat last ran
-        // with is what it shows, so a session opened for it again gets that.
+        // Claude Code resumes a session's history, not its model, effort or permission
+        // mode: without them its own settings would decide (#408). What the Chat last
+        // ran with is what it shows, so a session opened for it again gets that.
         if request.unattended.is_none() {
             let recorded = recorded_settings(request.recorded_settings.as_deref());
             if picks.model.is_none() {
                 picks.model = recorded.model;
+                // The effort it ran with belongs to that model.
+                if picks.effort.is_none() {
+                    picks.effort = recorded.effort;
+                }
             }
             if picks.permission.is_none() {
                 picks.permission = recorded.permission;
@@ -742,11 +746,11 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
     }
 }
 
-/// The model and permission mode a Chat's sessions last reported in effect, from
-/// what `Session` recorded. The mode is read from `REOPEN_WITH` only, and one ticketd
-/// does not offer is left out; a record of an Automation agent's session ("don't
-/// ask") is not the person's and gives nothing.
-fn recorded_settings(recorded: Option<&str>) -> StartSettings {
+/// The model, effort and permission mode a Chat's sessions last reported in effect,
+/// from what `Session` recorded. The effort and mode are read from `REOPEN_WITH` only,
+/// and a mode ticketd does not offer is left out; a record of an Automation agent's
+/// session ("don't ask") is not the person's and gives nothing.
+pub(super) fn recorded_settings(recorded: Option<&str>) -> StartSettings {
     let Some(Value::Object(recorded)) = recorded.and_then(|text| serde_json::from_str(text).ok())
     else {
         return StartSettings::default();
@@ -760,18 +764,26 @@ fn recorded_settings(recorded: Option<&str>) -> StartSettings {
     if field("permission_mode") == Some("dontAsk") {
         return StartSettings::default();
     }
-    let reopen = recorded
-        .get(REOPEN_WITH)
-        .and_then(|reopen| reopen.get("permission_mode"))
-        .and_then(Value::as_str);
+    let reopen = |name: &str| {
+        recorded
+            .get(REOPEN_WITH)
+            .and_then(|reopen| reopen.get(name))
+            .and_then(Value::as_str)
+    };
     StartSettings {
         model: field("model").map(str::to_owned),
-        effort: None,
-        permission: reopen
+        // Only a level the bridge takes: an unknown one would refuse the whole open.
+        effort: reopen("effort")
+            .filter(|effort| EFFORTS.contains(effort))
+            .map(str::to_owned),
+        permission: reopen("permission_mode")
             .filter(|mode| super::report::offered_permission(mode))
             .map(str::to_owned),
     }
 }
+
+/// The effort levels the bridge's `open` accepts.
+const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
 fn open_problem(event: &Value, resuming: bool) -> Problem {
     let message = reason(&event["error"]["message"]);

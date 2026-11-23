@@ -332,6 +332,36 @@ impl HarnessAdapter for FakeAdapter {
             .ok_or_else(|| "the fake lists no options".to_owned())
     }
 
+    /// The fake records its permission as `{"permission": id}`; it offers `ask` and
+    /// `full`.
+    fn permission_before_session(
+        &self,
+        recorded: Option<&str>,
+        picked: Option<&str>,
+    ) -> Option<crate::Setting> {
+        let recorded = recorded
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .and_then(|value| value["permission"].as_str().map(str::to_owned));
+        let option = |id: &str, permission| crate::SettingOption {
+            id: id.to_owned(),
+            label: id.to_owned(),
+            description: None,
+            is_default: id == "ask",
+            permission: Some(permission),
+            allowed: true,
+        };
+        Some(crate::Setting {
+            current: Some(picked.map(str::to_owned).or(recorded)?),
+            options: vec![
+                option("ask", crate::PermissionKind::Ask),
+                option("full", crate::PermissionKind::FullAccess),
+            ],
+            unchangeable: None,
+            applies_from: crate::AppliesFrom::NextTurn,
+            answered_by: None,
+        })
+    }
+
     /// Opening replaces any live runtime, whose stream then ends.
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let hold = self.state().open_holds.pop_front();
