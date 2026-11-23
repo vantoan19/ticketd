@@ -108,6 +108,7 @@ pub use upload_destination::AttachmentUploadDestination;
 pub use versions::{RecordKind, Version, VersionSummary};
 pub mod drive;
 mod embedded_attachments;
+pub mod s3;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
