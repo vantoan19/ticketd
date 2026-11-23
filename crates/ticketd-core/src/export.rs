@@ -226,6 +226,14 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "device-local references to source credentials in the operating system keychain",
     ),
     (
+        "source_connection_id_reservations",
+        "device-local connection IDs reserved to isolate credentials",
+    ),
+    (
+        "source_credential_env_reservations",
+        "device-local reserved credential override names",
+    ),
+    (
         "source_connection_status",
         "device-local refresh scheduling and coverage",
     ),
