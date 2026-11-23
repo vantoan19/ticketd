@@ -48,13 +48,20 @@ fn links_and_syncs_the_typescript_tracker() {
         "--strict",
     ]);
     assert_eq!(report["passed"], true, "{report}");
-    assert!(
-        report["checks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|check| { check["name"] == "cancellation" && check["outcome"] == "passed" })
-    );
+    let checks = report["checks"].as_array().unwrap();
+    for name in [
+        "cancellation",
+        "empty_continuation",
+        "stable_identity",
+        "conversation",
+    ] {
+        assert!(
+            checks
+                .iter()
+                .any(|check| check["name"] == name && check["outcome"] == "passed"),
+            "{name}: {report}"
+        );
+    }
 
     let added = run(&["source", "add", "example-tracker", "--set", "board=Demo"]);
     assert_eq!(added["preview"]["matched"], 2);

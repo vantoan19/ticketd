@@ -57,6 +57,48 @@ Runtime failures exit with status 1 and argument errors with status 2.
   `{"ticket": ..., "latest_update": ...}` rows. The update, with its bounded brief, appears only
   beside the ticket; the ticket inside the row has no `latest_update` of its own.
 
+## Ticket sources
+
+Use `ticketd source list` to find a provider and read its settings schema.
+Each row has a `connector` description and a `saved` connection. An available
+provider with no saved connection has `saved: null`. Use `connector.provider`
+to add a connection and `saved.id` to operate on one. A display name can change
+while the ID stays the same. The `list` and `search` filter `--source PROVIDER`
+matches externally owned tickets across the provider's connections.
+Use `--source local` for locally owned tickets.
+
+```sh
+ticketd source add PROVIDER --set KEY=VALUE --preview
+ticketd source add PROVIDER --name "Work" --set KEY=VALUE
+ticketd source CONNECTION status
+ticketd source CONNECTION refresh
+```
+
+Adding or editing a connection validates and stores its settings. Refresh
+imports matches and updates tracked tickets. Use `refresh --ticket T-KQ1` to
+refresh one externally owned ticket. Inspect the JSON report and exit status,
+including when a refresh was partly successful. Interactive refresh prints
+progress on stderr. Press Ctrl+C to cancel and receive exit status 130.
+
+Supply secrets in a JSON object through stdin with `--config-file -`.
+Use `ticketd source CONNECTION sign-in --config-file -` to replace credentials
+for a saved connection without changing its discovery settings. The author guide
+also covers keychain storage, environment overrides and password commands.
+[Credential setup](ticket-source-extensions.md#supplying-credentials)
+
+Use `ticketd source extension list` to inspect extension registrations.
+`ticketd source extension add PATH` asks for approval before running and
+installing a local package. `ticketd source extension link PATH` runs the
+development copy in place. `ticketd source extension remove ID` removes the
+registration. Test a registered extension with
+`ticketd source conformance PROVIDER --set KEY=VALUE`. The default run is
+read-only and prints a report with any skip reasons. Use `--strict` for additional
+required observations. `--publish DESTINATION` opts into one tracker write.
+[Author guide](ticket-source-extensions.md)
+
+For publishing a local ticket and resolving an uncertain attempt, open the
+bundled source guide with `ticketd skills get sources`.
+
 ## Atomic batches
 
 `ticketd batch plan.json` accepts a JSON array; use `ticketd batch -` to read

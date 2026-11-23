@@ -389,22 +389,20 @@ system's secure store.
 
 ### Ticket sources
 
-Install an extension from a local folder with `ticketd source extension add PATH`.
-Review the program and declared hosts before approving. The installed copy
-appears alongside built-in providers in Settings → Sources. Authors can
-link their build folder with `ticketd source extension link PATH`. The
-[extension guide](source-extensions/README.md) includes a TypeScript example,
-the published contract and the conformance command.
+GitHub Issues is built in. Linear ships with the desktop app as a ticket
+source extension. Extensions use the same ticket authority and refresh
+workflows as GitHub. [External ticket authority](adr/0006-external-ticket-authority.md)
 
-A ticket source connects an external tracker. GitHub Issues is built in. GitHub
-and extensions use the same ticket authority and refresh workflows
-([ADR 0006](adr/0006-external-ticket-authority.md)).
+Install another extension from a local folder with `ticketd source extension add PATH`.
+Review the program and declared hosts before approving. The provider then
+appears in Settings → Sources. Authors can link their build folder with
+`ticketd source extension link PATH`. The author guide covers the contract,
+the TypeScript example and conformance. [Write a ticket source extension](ticket-source-extensions.md)
 
-- **Linear** ships with the desktop app. Connect your Linear teams with
+- Connect your **Linear** teams with
   a personal API key that can read them. Filter discovery by assignee, labels, or
   project. ticketd syncs the issue's current state and its comments and
   timeline.
-
 - Add and name source connections under Settings → Sources. Several accounts can
   connect to the same provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
@@ -412,18 +410,18 @@ and extensions use the same ticket authority and refresh workflows
   authentication, **Needs sign-in** opens the credential fields for that
   connection. On Linux without a usable keyring, ticketd keeps entered
   credentials until the current process closes and displays a notice.
-  [Credential setup](source-extensions/README.md#supplying-credentials) covers
+  [Credential setup](ticket-source-extensions.md#supplying-credentials) covers
   environment overrides and password commands.
-- Discovery rules (selected repositories, optional assignee and label filters) can be
-  previewed before saving, and matching issues are imported automatically. Refresh runs
-  at desktop startup, periodically while the desktop is open, and on demand
+- Preview discovery rules before saving. The available rules depend on the provider.
+  Matching issues are imported on refresh, which runs at desktop startup,
+  periodically while the desktop is open, and on demand
   (`ticketd source CONNECTION refresh`). When connections overlap, one ticket is
   imported and refreshed through one connection. When no local connection covers
   a ticket, it shows its last synced content and says the provider isn’t connected
   on this desktop. The ticket carries the provider’s display name and icon.
-- A synchronized ticket is **externally owned**: its title, description, and status
-  are read-only and flow one way, from the tracker into ticketd. Plan membership,
-  relationships, tags, Activities, and Documents stay local and are never overwritten.
+- An **externally owned** ticket receives its title, description, confirmed closures
+  and reopenings from the tracker. Progress on open issues, Plan membership,
+  relationships, tags, Activities, and Documents stay in ticketd.
   A source reports a typed state category and its own name for the state. Every
   non-terminal state is open and imports as Todo. A completed issue is Done, a
   not-planned issue is Canceled, and a duplicate is Duplicate. An unknown state
@@ -432,8 +430,9 @@ and extensions use the same ticket authority and refresh workflows
   issue returns to Todo. The detail shows the tracker's state name alongside
   ticketd's status, for example “GitHub: Closed (not planned)”.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
-  as a normal issue. Preview shows exactly what would be sent; ownership transfers
-  only after ticketd confirms the issue exists, and an uncertain result is resolved
+  through a connection that supports publication. Preview shows exactly what
+  would be sent. Ownership transfers after ticketd confirms the issue exists.
+  An uncertain result is resolved
   before any retry so no second issue is created. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
