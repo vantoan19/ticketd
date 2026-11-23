@@ -223,7 +223,10 @@ test("a sign-in that finishes after another profile was chosen does not replace 
   ).toBeTruthy();
 
   // The person picks the other profile while the browser sign-in of the first is open.
-  await choose(screen.getByRole("combobox", { name: "AWS profile" }), "personal");
+  await choose(
+    screen.getByRole("combobox", { name: "AWS profile" }),
+    "personal",
+  );
   expect(await screen.findByText("arn:personal")).toBeTruthy();
 
   finish();
