@@ -543,7 +543,8 @@ pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<
         .collect::<Result<_, _>>()?;
     for id in affected {
         let kind = SyncKind::Ticket;
-        let local = find_record(connection, kind, &id)?;
+        let local =
+            crate::sync_files::read_record_before_source_presentation(connection, kind, &id)?;
         let remote = stored(connection, kind, &id)?.base;
         if let (Some(local), Some(remote)) = (&local, &remote)
             && ["source_provider", "source_external_id"]

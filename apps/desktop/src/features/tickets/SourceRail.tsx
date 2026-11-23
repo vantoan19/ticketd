@@ -13,12 +13,17 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { StatusDot } from "@/components/ui/status-dot";
+import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import { client, type Ticket } from "@/lib/api/client";
 import { LocalPublication } from "./PublishToSource";
 import { RailRow, RailSection } from "./RailSection";
 import { SourceLink } from "./SourceLink";
 import { useSourceActivity } from "./source-activity";
-import { externalSource, freshness } from "./ticket-source";
+import {
+  connectionUnavailableText,
+  externalSource,
+  freshness,
+} from "./ticket-source";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
 import { useTicketRefresh } from "./useTicketRefresh";
@@ -42,7 +47,8 @@ export function SourceRail({
   const activity = useSourceActivity();
   const sync = useTicketRefresh(ticket.reference, refresh);
   const ownerName = owner ? owner.provider_name : "";
-  const ownerIcon = owner?.provider_icon_svg ? (
+  const connectionUnavailable = owner ? connectionUnavailableText(owner) : null;
+  const providerIcon = owner?.provider_icon_svg ? (
     <SourceIcon svg={owner.provider_icon_svg} size={16} />
   ) : (
     <Cloud aria-hidden="true" />
@@ -52,7 +58,7 @@ export function SourceRail({
       {owner ? (
         <div className="rail-source">
           <span className="rail-value rail-source-identity">
-            {ownerIcon}
+            {providerIcon}
             <SourceLink url={owner.url} icon={false} title={owner.display}>
               {owner.place && owner.number ? (
                 <>
@@ -68,11 +74,13 @@ export function SourceRail({
             <>
               <span className="rail-value">
                 <StatusDot tone="attention" size={10} />
-                Unavailable since {formatDateTime(owner.unavailable.since)}
+                {connectionUnavailable ??
+                  `Unavailable since ${formatDateTime(owner.unavailable.since)}`}
               </span>
               <small className="rail-note">
-                Showing the last synced copy. Nothing in ticketd was deleted or
-                completed.
+                {connectionUnavailable
+                  ? "Showing the last synced copy."
+                  : "Showing the last synced copy. Nothing in ticketd was deleted or completed."}
               </small>
             </>
           ) : (
@@ -111,7 +119,7 @@ export function SourceRail({
               />
             </small>
           )}
-          {owner.origin === "imported" && (
+          {owner.origin === "imported" && !connectionUnavailable && (
             <small className="rail-note">
               {owner.discovery_matches === false ? (
                 "No longer matches discovery. It keeps syncing while you have access."
@@ -209,7 +217,7 @@ export function SourceRail({
       <PopoverTrigger asChild>
         <RailRow
           aria-label={`Source: ${name}`}
-          icon={owner ? ownerIcon : <LaptopMinimal aria-hidden="true" />}
+          icon={owner ? providerIcon : <LaptopMinimal aria-hidden="true" />}
         >
           {name}
         </RailRow>

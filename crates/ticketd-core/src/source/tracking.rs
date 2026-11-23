@@ -109,6 +109,7 @@ pub struct TicketSource {
     pub provider: String,
     /// What people call the provider, such as "GitHub".
     pub provider_name: String,
+    /// An optional provider mark, cached with the ticket for other desktops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_icon_svg: Option<String>,
     /// Where the issue lives, such as "owner/repo" (empty when the locator has no place).
@@ -214,9 +215,15 @@ pub(crate) fn availability_projection(
             .unwrap_or_default(),
     };
     let attempted: Option<String> = row.get(4)?;
-    let unavailable = if authority == "external"
-        && super::selected_connection(connection, ticket_id, &provider, &part)?.is_none()
-    {
+    let unavailable = if authority != "external" {
+        None
+    } else if let Some(since) = super::connection_removed_at(connection, ticket_id)? {
+        Some(SourceUnavailable {
+            code: super::CONNECTION_REMOVED.into(),
+            message: "Connection removed".into(),
+            since,
+        })
+    } else if super::selected_connection(connection, ticket_id, &provider, &part)?.is_none() {
         Some(SourceUnavailable {
             code: FailureCode::NotConfigured.as_str().into(),
             message: "Not connected on this desktop".into(),
@@ -226,9 +233,11 @@ pub(crate) fn availability_projection(
             },
         })
     } else {
+        let code: Option<String> = row.get(1)?;
         unavailable(
             &authority,
-            row.get::<_, Option<String>>(1)?.as_deref(),
+            code.as_deref()
+                .filter(|code| *code != FailureCode::NotConfigured.as_str()),
             row.get::<_, Option<String>>(2)?.as_deref(),
             row.get::<_, Option<String>>(3)?.as_deref(),
             attempted.as_deref(),
@@ -513,6 +522,8 @@ struct SourceRow {
     conversation_error_message: Option<String>,
     author: Option<String>,
     created_at: Option<String>,
+    provider_name: Option<String>,
+    provider_icon_svg: Option<String>,
 }
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
@@ -522,7 +533,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     s.state_category, s.state_name, s.last_refreshed_at, \
                     s.last_attempt_at, s.last_error_code, s.last_error_message, \
                     s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at, \
-                    s.external_author, s.external_created_at \
+                    s.external_author, s.external_created_at, i.provider_name, i.provider_icon_svg \
              FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
@@ -551,6 +562,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     ownership_changed_at: row.get(16)?,
                     author: row.get(17)?,
                     created_at: row.get(18)?,
+                    provider_name: row.get(19)?,
+                    provider_icon_svg: row.get(20)?,
                 })
             },
         )
@@ -611,10 +624,10 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         _ => None,
     };
     ticket.source = Some(TicketSource {
-        provider_name,
-        provider_icon_svg: description
-            .as_ref()
-            .and_then(|source| source.presentation.icon_svg.clone()),
+        provider_name: row.provider_name.unwrap_or(provider_name),
+        provider_icon_svg: row.provider_icon_svg.or_else(|| {
+            description.and_then(|description| description.presentation.icon_svg.clone())
+        }),
         place,
         place_label,
         number,
@@ -642,10 +655,13 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         last_refreshed_at: row.refreshed,
         last_attempt_at: row.attempted,
         unavailable,
-        last_error: row.error_code.map(|code| SourceFailure {
-            code,
-            message: row.error_message.unwrap_or_default(),
-        }),
+        last_error: row
+            .error_code
+            .filter(|code| code != FailureCode::NotConfigured.as_str())
+            .map(|code| SourceFailure {
+                code,
+                message: row.error_message.unwrap_or_default(),
+            }),
         conversation_error: row.conversation_error_code.map(|code| SourceFailure {
             code,
             message: row.conversation_error_message.unwrap_or_default(),
@@ -834,8 +850,26 @@ pub(super) struct Tracked {
     external_id: String,
     locator: String,
     pub(super) partition: String,
-    pub(super) affinity: Option<String>,
+    affinity: Option<String>,
     pub(super) error_code: Option<String>,
+    removed: bool,
+}
+
+impl Tracked {
+    pub(super) fn connection<'a>(
+        &self,
+        sources: &'a [super::ConfiguredSource],
+    ) -> Option<&'a super::ConfiguredSource> {
+        if self.removed {
+            return None;
+        }
+        super::select_connection(
+            sources,
+            self.affinity.as_deref(),
+            &self.provider,
+            &self.partition,
+        )
+    }
 }
 
 pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
@@ -917,13 +951,9 @@ impl Workspace {
         let tracked = tracked(&self.connection, options.ticket.as_deref())?;
         let sources = super::configured_sources(&self.connection)?;
         let routed = |ticket: &Tracked| {
-            super::select_connection(
-                &sources,
-                ticket.affinity.as_deref(),
-                &ticket.provider,
-                &ticket.partition,
-            )
-            .map(|source| source.saved.id.as_str())
+            ticket
+                .connection(&sources)
+                .map(|source| source.saved.id.as_str())
         };
         if let (Some(selected), Some(ticket)) = (selected, tracked.first())
             && options.ticket.is_some()
@@ -936,6 +966,26 @@ impl Workspace {
                 )])
                 .into(),
             );
+        }
+        if let (Some(_), Some(ticket)) = (&options.ticket, tracked.first())
+            && ticket.removed
+        {
+            return Ok(RefreshReport {
+                imported: Vec::new(),
+                updated: Vec::new(),
+                unchanged: 0,
+                failures: vec![RefreshFailure {
+                    provider: ticket.provider.clone(),
+                    connection_id: None,
+                    reference: Some(ticket.reference.clone()),
+                    scope: FailureScope::Ticket,
+                    code: super::CONNECTION_REMOVED.into(),
+                    message: "Add a connection and refresh discovery to resume synchronization"
+                        .into(),
+                    retry_after_secs: None,
+                }],
+                refreshed_at: started,
+            });
         }
         let jobs: Vec<_> = sources
             .iter()
@@ -1005,18 +1055,13 @@ impl Workspace {
                     // already. Do not read its conversation a second time.
                     let mut issues = Vec::with_capacity(batch.issues.len());
                     for issue in std::mem::take(&mut batch.issues) {
-                        let reference = &issue.reference;
-                        let route = ticket_for_identity(&self.connection, &reference.identity)?
-                            .map(|ticket| {
-                                super::selected_connection(
-                                    &self.connection,
-                                    &ticket,
-                                    &reference.identity.provider,
-                                    &reference.partition,
-                                )
-                            })
-                            .transpose()?;
-                        if route.is_none() || route.flatten().as_deref() == Some(&source.saved.id) {
+                        if issue_can_refresh(
+                            &self.connection,
+                            &issue,
+                            &batch.partitions,
+                            Some(&source.saved.id),
+                            false,
+                        )? {
                             issues.push(issue);
                         }
                     }
@@ -1040,7 +1085,7 @@ impl Workspace {
         if selected.is_none() {
             let missing: HashSet<_> = tracked
                 .iter()
-                .filter(|ticket| routed(ticket).is_none())
+                .filter(|ticket| !ticket.removed && routed(ticket).is_none())
                 .map(|ticket| ticket.provider.as_str())
                 .collect();
             for provider in missing {
@@ -1064,14 +1109,11 @@ fn gather_connection(
         .map(|source| engine.for_connection(provider, &source.saved.id, &source.saved.config));
     let source_id = configured.map(|source| source.saved.id.as_str());
     let assigned = |ticket: &Tracked| {
-        super::select_connection(
-            sources,
-            ticket.affinity.as_deref(),
-            provider,
-            &ticket.partition,
-        )
-        .map(|source| source.saved.id.as_str())
-            == source_id
+        !ticket.removed
+            && ticket
+                .connection(sources)
+                .map(|source| source.saved.id.as_str())
+                == source_id
     };
     let _source =
         tracing::info_span!("source", source_id = source_id.unwrap_or(provider)).entered();
@@ -1152,7 +1194,13 @@ fn gather_connection(
                 .find(|ticket| {
                     ticket.provider == provider && ticket.external_id == issue.reference.identity.id
                 })
-                .is_some_and(|ticket| !assigned(ticket))
+                .is_some_and(|ticket| {
+                    if ticket.removed {
+                        !derived.partitions.contains(&issue.reference.partition)
+                    } else {
+                        !assigned(ticket)
+                    }
+                })
             {
                 return ControlFlow::Continue(());
             }
@@ -1391,9 +1439,10 @@ fn gather_conversations(
 
 pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
     let mut statement = connection.prepare(
-            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition, c.connection_id, s.last_error_code FROM external_identities i \
+            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition, c.connection_id, s.last_error_code, r.ticket_id IS NOT NULL FROM external_identities i \
              LEFT JOIN source_connection_tickets c ON c.ticket_id = i.ticket_id \
              LEFT JOIN source_sync s ON s.ticket_id = i.ticket_id \
+             LEFT JOIN source_connection_removals r ON r.ticket_id = i.ticket_id \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
              JOIN tickets t ON t.id = i.ticket_id \
              WHERE (?1 IS NULL OR t.reference = ?1) ORDER BY t.number",
@@ -1414,6 +1463,7 @@ pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec
                 locator,
                 affinity: row.get(6)?,
                 error_code: row.get(7)?,
+                removed: row.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1430,6 +1480,51 @@ pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec
         });
     }
     Ok(rows)
+}
+
+/// The route is checked again inside the write, after a possible removal or
+/// another connection's discovery. A removed ticket can only be claimed by
+/// actual discovery under the connection's current covering rules.
+fn issue_can_refresh(
+    connection: &Connection,
+    issue: &ExternalIssue,
+    discovery: &HashMap<(String, String), String>,
+    source_id: Option<&str>,
+    replaced_config: bool,
+) -> Result<bool, Error> {
+    let reference = &issue.reference;
+    let identity = &reference.identity;
+    let Some(id) = ticket_for_identity(connection, identity)? else {
+        return Ok(!replaced_config);
+    };
+    if super::connection_removed_at(connection, &id)?.is_some() {
+        if replaced_config
+            || !discovery.contains_key(&(identity.provider.clone(), identity.id.clone()))
+        {
+            return Ok(false);
+        }
+        return Ok(source_id
+            .map(|id| super::configured_source(connection, id))
+            .transpose()?
+            .flatten()
+            .is_some_and(|source| {
+                source.saved.provider == identity.provider
+                    && source.derived.partitions.contains(&reference.partition)
+            }));
+    }
+    let partition: Option<String> = connection.query_row(
+        "SELECT partition FROM external_identities WHERE ticket_id = ?1",
+        [&id],
+        |row| row.get(0),
+    )?;
+    Ok(super::selected_connection(
+        connection,
+        &id,
+        &identity.provider,
+        partition.as_deref().unwrap_or(&reference.partition),
+    )?
+    .as_deref()
+        == source_id)
 }
 
 impl Workspace {
@@ -1511,24 +1606,14 @@ impl Workspace {
                 if replaced_config && existing.is_none() {
                     continue;
                 }
-                if let Some(id) = &existing {
-                    let part = tracked
-                        .iter()
-                        .find(|ticket| &ticket.ticket_id == id)
-                        .map_or(issue.reference.partition.as_str(), |ticket| {
-                            ticket.partition.as_str()
-                        });
-                    if super::selected_connection(
-                        transaction,
-                        id,
-                        &issue.reference.identity.provider,
-                        part,
-                    )?
-                    .as_deref()
-                        != source_id
-                    {
-                        continue;
-                    }
+                if !issue_can_refresh(
+                    transaction,
+                    issue,
+                    &gathered.partitions,
+                    source_id,
+                    replaced_config,
+                )? {
+                    continue;
                 }
                 let key = (
                     issue.reference.identity.provider.clone(),
@@ -1869,6 +1954,7 @@ fn apply_issue(
                  WHERE ticket_id = ?1",
                 params![id, category.as_str(), issue.state.name, issue.updated_at, now, author, created_at],
             )?;
+            super::cache_ticket_presentation(connection, &id, &identity.provider)?;
             if let Some(read) = read {
                 changed |= conversation::store(connection, &id, read, &issue.updated_at)?;
                 connection.execute(
@@ -2071,6 +2157,7 @@ pub(crate) fn link(
             issue.reference.partition,
         ],
     )?;
+    super::cache_ticket_presentation(connection, ticket_id, &identity.provider)?;
     connection.execute(
         "INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, 'external', ?2)",
         params![ticket_id, now],

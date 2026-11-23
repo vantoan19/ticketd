@@ -41,7 +41,7 @@ const ticketSourceSchema = lazySchema(() =>
     provider: z.string(),
     /** What people call the provider, such as "GitHub". */
     provider_name: z.string(),
-    provider_icon_svg: z.string().optional(),
+    provider_icon_svg: z.string().nullish(),
     /** Where the issue lives, such as "owner/repo". */
     place: z.string(),
     place_label: z.string().optional(),

@@ -909,12 +909,18 @@ failed read keeps what was retrieved. Authors are the source's identities, never
 an editing agent, and the rows survive takeover as provenance. Agents read it
 with `ticketd context T-KQ1 --conversation`.
 
-Freshness and availability are persisted, not inferred: `source_sync` records the
-start of each ticket's failure streak and `source_connection_status` records each connection's
-last run, current error and any rate-limit hold. A ticket reads _Source
-unavailable_ when it has no local connection or its latest attempt failed with an
-unreachable, unauthenticated, forbidden, missing or unusable answer; a rate
-limit is delayed, not unavailable. Neither changes content, status or ownership.
+`source_sync` records the start of each ticket's failure streak and
+`source_connection_status` records each connection's last run, current error and
+rate-limit hold. A ticket reads _Source unavailable_ when it has no covering
+local connection or its latest attempt failed with an unreachable, unauthenticated,
+forbidden, missing or unusable answer. A rate limit delays refresh.
+Removing a connection atomically deletes its local routing and run state.
+`source_connection_removals` marks the tickets that routed to it on this desktop.
+A later discovery that verifies the same stable external identity through a
+covering connection binds that ticket again if the tracker still owns it.
+The ticket carries only the provider’s name and mark in addition to its provenance
+and last observation. Full presentation and routing stay device-local.
+Both unavailable states preserve the ticket's content, status and ownership.
 A successful or partial whole-source run persists its distinct checked-issue
 count with its refresh time; a failed or single-ticket run does not replace it.
 The current tracked-ticket count is read separately. A source closure time comes

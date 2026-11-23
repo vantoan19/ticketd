@@ -77,7 +77,7 @@ const MAX_HEADER_INDENT: usize = 64;
 
 /// The format of sync files this version writes. A file that says a higher
 /// number is left alone until this desktop runs a ticketd that reads it.
-pub(crate) const FILE_FORMAT: i64 = 2;
+pub(crate) const FILE_FORMAT: i64 = 3;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -234,6 +234,12 @@ const SOURCE_STATE_V2: &[Field] = &[
     ("source_updated_at", Type::Text, false),
     ("source_partition", Type::Text, false),
 ];
+const SOURCE_PRESENTATION: &[Field] = &[
+    ("source_provider_name", Type::Text, false),
+    ("source_provider_icon_svg", Type::Text, false),
+];
+const SOURCE_PRESENTATION_NAMES: &[&str] = &["source_provider_name", "source_provider_icon_svg"];
+
 /// External-source provenance is stored and carried as a whole.
 const SOURCE_REQUIRED: &[&str] = &[
     "source_provider",
@@ -341,7 +347,14 @@ fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + C
         Block::Record(SyncKind::Ticket) => SOURCE_STATE_V2,
         _ => &[],
     };
-    (fields.iter().chain(state_fields), has_body)
+    let presentation = match block {
+        Block::Record(SyncKind::Ticket) if format >= 3 => SOURCE_PRESENTATION,
+        _ => &[],
+    };
+    (
+        fields.iter().chain(state_fields).chain(presentation),
+        has_body,
+    )
 }
 
 /// A set-valued field stored as rows of `table`: `owner` is the record whose file
@@ -643,8 +656,13 @@ fn quote(text: &str) -> String {
 type Labels = BTreeMap<String, String>;
 
 fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels: &Labels) {
-    let format = if fields.contains_key("source_provider") {
-        FILE_FORMAT
+    let format = if SOURCE_PRESENTATION_NAMES
+        .iter()
+        .any(|name| fields.contains_key(*name))
+    {
+        3
+    } else if fields.contains_key("source_provider") {
+        2
     } else {
         1
     };
@@ -1149,6 +1167,19 @@ fn validate_source(fields: &Fields, category: &str) -> Result<(), Error> {
             "the source_ fields go together; '{name}' is missing"
         )));
     }
+    for (name, valid) in [
+        (
+            "source_provider_name",
+            source::ticket_provider_name as fn(Option<&str>) -> Option<&str>,
+        ),
+        ("source_provider_icon_svg", source::ticket_provider_icon),
+    ] {
+        if let Some(value) = text(fields, name)
+            && valid(Some(value)).is_none()
+        {
+            return Err(bad(format!("'{name}' has an invalid display value")));
+        }
+    }
     Ok(())
 }
 
@@ -1250,6 +1281,28 @@ pub(crate) fn write_source(c: &Connection, record: &SyncRecord) -> Result<(), Er
 }
 
 fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRecord>, Error> {
+    let mut record = read_record_before_source_presentation(c, kind, id)?;
+    if let Some(record) = &mut record
+        && record.fields.contains_key("source_provider")
+    {
+        for values in rows(
+            c,
+            "SELECT provider_name, provider_icon_svg FROM external_identities WHERE ticket_id = ?1",
+            id,
+            SOURCE_PRESENTATION_NAMES,
+        )? {
+            record.fields.extend(values);
+        }
+    }
+    Ok(record)
+}
+
+/// Format 88 reads the earlier shape while it repairs source observations.
+pub(crate) fn read_record_before_source_presentation(
+    c: &Connection,
+    kind: SyncKind,
+    id: &str,
+) -> Result<Option<SyncRecord>, Error> {
     let follows = format!(
         "SELECT reference, title, status, body, project_id, plan_id, trashed, EXISTS(SELECT 1 FROM ticket_follows WHERE ticket_id = t.id AND person = '{LOCAL_PERSON}') FROM tickets t WHERE id = ?1"
     );
@@ -1692,6 +1745,7 @@ impl Apply<'_> {
                     )?;
                 }
             },
+            (SyncKind::Ticket, "source_provider_name" | "source_provider_icon_svg") => {}
             (SyncKind::Ticket, _) if field.starts_with("source_") => write_source(c, self.record)?,
             _ => {}
         }
@@ -1788,6 +1842,19 @@ impl Apply<'_> {
             if present(&current.fields, name) != present(&record.fields, name) {
                 self.write(name)?;
             }
+        }
+        if record.kind == SyncKind::Ticket
+            && record.fields.contains_key("source_provider")
+            && SOURCE_PRESENTATION_NAMES
+                .iter()
+                .any(|name| text(&current.fields, name) != text(&record.fields, name))
+        {
+            source::store_ticket_presentation(
+                c,
+                &record.id,
+                text(&record.fields, "source_provider_name"),
+                text(&record.fields, "source_provider_icon_svg"),
+            )?;
         }
         for gone in &current.parts {
             if !record.parts.iter().any(|part| part.id == gone.id) {
@@ -2002,8 +2069,18 @@ automation: name trashed
             "source_state source_closure_reason source_updated_at",
             "source_state_category source_state_name source_updated_at source_partition",
         );
-        assert_eq!(FILE_FORMAT, 2);
-        for (format, expected) in [(1, FORMAT_1), (2, format_2.as_str())] {
+        let format_3 = format_2.replace(
+            "source_partition
+",
+            "source_partition source_provider_name source_provider_icon_svg
+",
+        );
+        assert_eq!(FILE_FORMAT, 3);
+        for (format, expected) in [
+            (1, FORMAT_1),
+            (2, format_2.as_str()),
+            (3, format_3.as_str()),
+        ] {
             let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
             let blocks = SyncKind::ALL
                 .into_iter()

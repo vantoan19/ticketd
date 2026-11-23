@@ -1103,3 +1103,13 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 - trigger workspace_change_source_configurations_DELETE
 - trigger workspace_change_source_configurations_INSERT
 - trigger workspace_change_source_configurations_UPDATE
+
+## 90
++ table source_connection_removals
++ column external_identities.provider_icon_svg
++ column external_identities.provider_name
++ column source_connection_removals.removed_at
++ column source_connection_removals.ticket_id
++ trigger workspace_change_source_connection_removals_DELETE
++ trigger workspace_change_source_connection_removals_INSERT
++ trigger workspace_change_source_connection_removals_UPDATE

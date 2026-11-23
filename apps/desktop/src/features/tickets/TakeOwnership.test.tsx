@@ -219,3 +219,44 @@ test("history words the takeover", () => {
     }),
   ).toBe("Took ownership from GitHub; the ticket is now local");
 });
+
+test.each([
+  ["connection_removed", "Connection removed"],
+  ["not_configured", "Beacon isn't connected on this desktop"],
+])("shows the %s ticket notice and allows takeover", async (code, name) => {
+  bridge.invoke.mockResolvedValue(ticket());
+  const refresh = vi.fn(async () => {});
+  render(
+    <SourceUnavailableNotice
+      ticket={ticket({
+        source: source({
+          provider_name: "Beacon",
+          provider_icon_svg:
+            '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>',
+          unavailable: { code, message: "", since: "2026-01-01T00:00:00Z" },
+        }),
+      })}
+      refresh={refresh}
+    />,
+  );
+  const notice = screen.getByRole("region", { name });
+  expect(notice.querySelector("image")?.getAttribute("href")).toMatch(
+    /^data:image\/svg/,
+  );
+  expect(
+    within(notice).queryByRole("button", { name: "Retry now" }),
+  ).toBeNull();
+  fireEvent.click(
+    within(notice).getByRole("button", { name: "Take ownership…" }),
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Take ownership",
+    }),
+  );
+  await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+  expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("take_ownership", {
+    reference: "T-KQ1",
+    requestId: expect.any(String),
+  });
+});

@@ -246,6 +246,93 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
+/// Format 90: device-local removal state and portable ticket presentation.
+pub(crate) fn migrate_connection_lifecycle(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "ALTER TABLE external_identities ADD COLUMN provider_name TEXT;
+         ALTER TABLE external_identities ADD COLUMN provider_icon_svg TEXT;
+         CREATE TABLE source_connection_removals (
+             ticket_id TEXT PRIMARY KEY REFERENCES external_identities(ticket_id)
+                 ON UPDATE CASCADE ON DELETE CASCADE,
+             removed_at TEXT NOT NULL
+         );",
+    )?;
+    crate::change_token::track(connection, "source_connection_removals")?;
+    let providers: Vec<String> = connection
+        .prepare("SELECT DISTINCT provider FROM external_identities")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    for provider in providers {
+        if let Some(description) = cached_description(connection, &provider)? {
+            connection.execute(
+                "UPDATE external_identities SET provider_name = ?2, provider_icon_svg = ?3 WHERE provider = ?1",
+                params![
+                    provider,
+                    ticket_provider_name(Some(&description.descriptor.name)),
+                    ticket_provider_icon(description.presentation.icon_svg.as_deref()),
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) const CONNECTION_REMOVED: &str = "connection_removed";
+
+pub(crate) fn ticket_provider_name(name: Option<&str>) -> Option<&str> {
+    name.filter(|name| !name.is_empty() && name.len() <= 400 && !name.chars().any(char::is_control))
+}
+
+pub(crate) fn ticket_provider_icon(icon: Option<&str>) -> Option<&str> {
+    // The desktop displays this as an inert SVG image, with no inline markup.
+    icon.filter(|icon| !icon.is_empty() && icon.len() <= 16_384)
+}
+
+pub(crate) fn store_ticket_presentation(
+    connection: &Connection,
+    ticket_id: &str,
+    name: Option<&str>,
+    icon: Option<&str>,
+) -> Result<(), Error> {
+    let name = ticket_provider_name(name);
+    let icon = ticket_provider_icon(icon);
+    connection.execute(
+        "UPDATE external_identities SET provider_name = ?2, provider_icon_svg = ?3
+         WHERE ticket_id = ?1 AND (provider_name IS NOT ?2 OR provider_icon_svg IS NOT ?3)",
+        params![ticket_id, name, icon],
+    )?;
+    Ok(())
+}
+
+fn cache_ticket_presentation(
+    connection: &Connection,
+    ticket_id: &str,
+    provider: &str,
+) -> Result<(), Error> {
+    if let Some(description) = cached_description(connection, provider)? {
+        store_ticket_presentation(
+            connection,
+            ticket_id,
+            Some(&description.descriptor.name),
+            description.presentation.icon_svg.as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn connection_removed_at(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT removed_at FROM source_connection_removals WHERE ticket_id = ?1",
+            [ticket_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 /// Format version 88: preserve the last typed observation and source label
 /// independently of the local ticket's status and workflow history.
 pub(crate) fn migrate_state_categories(connection: &rusqlite::Connection) -> Result<(), Error> {
@@ -462,6 +549,37 @@ impl Workspace {
             configured_source(transaction, id)?
                 .map(|source| source.saved)
                 .ok_or_else(|| unknown_connection(id))
+        })
+    }
+
+    /// Removes one device-local connection and pauses its tickets until rediscovery.
+    pub fn remove_source_connection(&mut self, id: &str) -> Result<(), Error> {
+        crate::write_scope::run(&self.connection, |transaction| {
+            if configured_source(transaction, id)?.is_none() {
+                return Err(unknown_connection(id));
+            }
+            let sources = configured_sources(transaction)?;
+            let now = clock(transaction, None)?;
+            for ticket in tracking::tracked(transaction, None)? {
+                if ticket
+                    .connection(&sources)
+                    .map(|source| source.saved.id.as_str())
+                    == Some(id)
+                {
+                    transaction.execute(
+                        "INSERT INTO source_connection_removals (ticket_id, removed_at) VALUES (?1, ?2)",
+                        params![ticket.ticket_id, now],
+                    )?;
+                    transaction.execute(
+                        "UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id = ?1",
+                        [ticket.ticket_id],
+                    )?;
+                }
+            }
+            // Foreign keys discard only device-local bindings and run state.
+            // Publication attempts themselves remain intact and keep blocking a second create.
+            transaction.execute("DELETE FROM source_connections WHERE id = ?1", [id])?;
+            Ok(())
         })
     }
 
@@ -870,6 +988,9 @@ fn selected_connection(
     provider: &str,
     part: &str,
 ) -> Result<Option<String>, Error> {
+    if connection_removed_at(connection, ticket_id)?.is_some() {
+        return Ok(None);
+    }
     let affinity: Option<String> = connection
         .query_row(
             "SELECT connection_id FROM source_connection_tickets WHERE ticket_id = ?1",
@@ -888,7 +1009,14 @@ fn selected_connection(
 
 fn bind_ticket(connection: &Connection, ticket_id: &str, id: &str) -> Result<(), Error> {
     connection.execute(
-        "INSERT INTO source_connection_tickets (ticket_id, connection_id) VALUES (?1, ?2) ON CONFLICT(ticket_id) DO NOTHING",
+        "INSERT INTO source_connection_tickets (ticket_id, connection_id)
+         SELECT ?1, ?2 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external'
+         ON CONFLICT(ticket_id) DO NOTHING",
+        params![ticket_id, id],
+    )?;
+    connection.execute(
+        "DELETE FROM source_connection_removals WHERE ticket_id = ?1
+         AND EXISTS(SELECT 1 FROM source_connection_tickets WHERE ticket_id = ?1 AND connection_id = ?2)",
         params![ticket_id, id],
     )?;
     Ok(())
@@ -898,6 +1026,12 @@ fn bind_ticket(connection: &Connection, ticket_id: &str, id: &str) -> Result<(),
 /// which could otherwise retain deleted credential references.
 pub(crate) fn forget_connections(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch("PRAGMA secure_delete = ON")?;
+    if crate::backup::table_exists(connection, "source_connection_removals")? {
+        connection.execute_batch(
+            "DELETE FROM source_connection_removals;
+             DELETE FROM source_presentations;",
+        )?;
+    }
     if crate::backup::table_exists(connection, "source_connections")? {
         connection.execute_batch(
             "DELETE FROM publication_connections;
@@ -953,12 +1087,50 @@ pub(crate) fn retain_connections(
         [],
         |row| row.get(0),
     )?;
-    if !has_connections {
+    let has_removals = crate::backup::table_exists(current, "source_connection_removals")?
+        && current.query_row(
+            "SELECT EXISTS(SELECT 1 FROM source_connection_removals)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+    if !has_connections && !has_removals {
         return Ok(());
     }
-    if !crate::backup::table_exists(restored, "source_connections")? {
+    if !crate::backup::table_exists(restored, "source_connections")?
+        || (has_removals && !crate::backup::table_exists(restored, "source_connection_removals")?)
+    {
         let version = restored.pragma_query_value(None, "user_version", |row| row.get(0))?;
         crate::format::migrate(restored, version)?;
+    }
+    if has_removals {
+        let mut statement = current.prepare(
+            "SELECT r.ticket_id, r.removed_at, i.provider, i.external_id
+             FROM source_connection_removals r
+             JOIN external_identities i ON i.ticket_id = r.ticket_id",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let values = (0..4)
+                .map(|index| row.get::<_, String>(index))
+                .collect::<Result<Vec<_>, _>>()?;
+            restored.execute(
+                "INSERT INTO source_connection_removals
+                 SELECT i.ticket_id, ?2 FROM external_identities i
+                 JOIN external_ownership o ON o.ticket_id = i.ticket_id
+                 WHERE i.ticket_id = ?1 AND i.provider = ?3 AND i.external_id = ?4 AND o.authority = 'external'",
+                rusqlite::params_from_iter(values),
+            )?;
+        }
+    }
+    let mut descriptions =
+        current.prepare("SELECT provider, description FROM source_presentations")?;
+    let mut rows = descriptions.query([])?;
+    while let Some(row) = rows.next()? {
+        restored.execute(
+            "INSERT INTO source_presentations (provider, description) VALUES (?1, ?2)
+             ON CONFLICT(provider) DO UPDATE SET description = excluded.description",
+            params![row.get::<_, String>(0)?, row.get::<_, String>(1)?],
+        )?;
     }
     let mut statement = current.prepare(
         "SELECT id, name, provider, site, configuration, account, account_key,

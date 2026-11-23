@@ -365,7 +365,7 @@ fn takeover_survives_restart_export_backup_and_restore() {
     let path = f.path();
     let backup = f.dir.path().join("backup.sqlite3");
     f.workspace.backup(&backup).unwrap();
-    let before = f.workspace.show_ticket("T-KQ1").unwrap();
+    let mut before = f.workspace.show_ticket("T-KQ1").unwrap();
     let Fixture {
         workspace,
         engine,
@@ -388,6 +388,7 @@ fn takeover_survives_restart_export_backup_and_restore() {
     workspace
         .refresh_sources(&engine, &RefreshOptions::default())
         .unwrap();
+    before.source.as_mut().unwrap().discovery_matches = None;
     assert_eq!(workspace.show_ticket("T-KQ1").unwrap(), before);
     assert_eq!(workspace.list_tickets().unwrap().len(), 1);
     drop(dir);

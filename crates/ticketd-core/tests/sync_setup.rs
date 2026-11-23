@@ -1287,7 +1287,7 @@ fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_
     let (version, synced) = desks.file(&key);
     let newer = String::from_utf8(synced)
         .unwrap()
-        .replacen("format: 1\n", "format: 3\n", 1);
+        .replacen("format: 1\n", "format: 4\n", 1);
     desks
         .remote
         .write(
