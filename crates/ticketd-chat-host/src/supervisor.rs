@@ -273,8 +273,12 @@ pub(crate) struct Supervisor {
     /// The context of the live session is being read again; nothing is dispatched until
     /// it is, so the next message carries it.
     refreshing: Option<RuntimeGeneration>,
-    /// New Chat's picks, given to the next new session; kept until one opens.
+    /// The person's picks for the next session, new or resumed: New Chat's, or a change
+    /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
+    /// What the Chat's sessions last reported in effect, as recorded with the Chat
+    /// (`Chat::effective_settings`): what a session opened for it again starts with.
+    recorded_settings: Option<String>,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -357,6 +361,7 @@ impl Supervisor {
             unpublished: true,
             refreshing: None,
             start_settings: StartSettings::default(),
+            recorded_settings: chat.effective_settings.clone(),
         };
         tokio::spawn(supervisor.run().instrument(span));
         sender
@@ -480,12 +485,54 @@ impl Supervisor {
     }
 
     fn pause(&mut self, problem: ChatProblem) {
+        self.hold_queue();
+        self.problem = Some(problem);
+    }
+
+    /// Pauses the queue and drops what was to go ahead of it: input stays queued
+    /// until the person resumes or sends it.
+    fn hold_queue(&mut self) {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
         self.direct_from_queue.clear();
         self.resend = None;
-        self.problem = Some(problem);
+    }
+
+    /// Keeps the person's latest permission change the runtime has not answered (held
+    /// for the turn's end, or on its way) for the next session, saved with the Chat: the
+    /// runtime it was meant for is going away, and the next one must not open with the
+    /// mode they left.
+    fn keep_unanswered_permission(&mut self) {
+        let unanswered = self.runtime.as_ref().and_then(|runtime| {
+            runtime
+                .setting_changes
+                .iter()
+                .rfind(|change| {
+                    change.setting == SettingKey::Permission
+                        && matches!(
+                            change.state,
+                            SettingChangeState::Held | SettingChangeState::Sent
+                        )
+                })
+                .map(|change| change.value.clone())
+        });
+        if let Some(value) = unanswered {
+            // Kept for the next session whether or not it could be saved.
+            let _saved = self.record_permission(&value);
+            self.start_settings.permission = Some(value);
+        }
+    }
+
+    /// A setting change is on its way to the harness. Nothing is dispatched until it
+    /// is answered, so the next turn runs on the settings the person last chose.
+    fn setting_on_its_way(&self) -> bool {
+        self.runtime.as_ref().is_some_and(|runtime| {
+            runtime
+                .setting_changes
+                .iter()
+                .any(|change| change.state == SettingChangeState::Sent)
+        })
     }
 
     // ------------------------------------------------------------------
@@ -564,9 +611,7 @@ impl Supervisor {
     fn change_setting(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
         let busy = self.active.is_some() || self.dispatching.is_some();
         let Some(runtime) = &mut self.runtime else {
-            return SettingChangeState::Done(SettingOutcome::Refused {
-                reason: "no session is running".to_owned(),
-            });
+            return self.pick_for_next_session(setting, value);
         };
         let state = match runtime.settings.as_ref().and_then(|s| s.get(setting)) {
             None => SettingChangeState::Done(SettingOutcome::Unsupported),
@@ -576,9 +621,11 @@ impl Supervisor {
                 None => SettingChangeState::Sent,
             },
         };
+        // A change still on its way stays tracked until the harness answers it, whatever
+        // is asked meanwhile: nothing is dispatched before then (`setting_on_its_way`).
         runtime
             .setting_changes
-            .retain(|change| change.setting != setting);
+            .retain(|change| change.setting != setting || change.state == SettingChangeState::Sent);
         runtime.setting_changes.push(LiveSettingChange {
             setting,
             value: value.clone(),
@@ -588,6 +635,76 @@ impl Supervisor {
             self.send_setting(setting, value);
         }
         state
+    }
+
+    /// With no session running, the permission can still be chosen: the next session,
+    /// new or resumed, opens with it. Held until then, so the trigger shows it as the
+    /// mode the next message runs in.
+    fn pick_for_next_session(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
+        let refused = |reason: &str| {
+            SettingChangeState::Done(SettingOutcome::Refused {
+                reason: reason.to_owned(),
+            })
+        };
+        let shown = self.settings_before_session();
+        let Some(offered) = shown.as_ref().and_then(|shown| shown.get(setting)) else {
+            return refused(if self.opening.is_some() {
+                "the session is starting"
+            } else {
+                "no session is running"
+            });
+        };
+        if let Some(reason) = offered.refusal(&value) {
+            return SettingChangeState::Done(SettingOutcome::Refused { reason });
+        }
+        match setting {
+            // Taken only once saved: the shown mode must be the one the Chat reopens in.
+            SettingKey::Permission if !self.record_permission(&value) => {
+                return refused("the change could not be saved");
+            }
+            SettingKey::Permission => self.start_settings.permission = Some(value),
+            // Only the permission is shown before a session.
+            SettingKey::Model | SettingKey::Effort => return refused("no session is running"),
+        }
+        SettingChangeState::Held
+    }
+
+    /// Saves `value` with the Chat as the permission its next session opens with, as
+    /// soon as the change is accepted, so a restart before the next message cannot bring
+    /// back a mode the person left. The record views read changes only once it is saved.
+    /// `false` when saving failed; a Chat with no record yet has nothing to save.
+    fn record_permission(&mut self, value: &str) -> bool {
+        let Some(updated) = self.adapter.as_ref().and_then(|adapter| {
+            adapter.record_permission(self.recorded_settings.as_deref(), value)
+        }) else {
+            return true;
+        };
+        let chat = self.chat_id.clone();
+        let saved = self
+            .write(|core| core.set_chat_effective_settings(&chat, &updated))
+            .is_ok();
+        if saved {
+            self.recorded_settings = Some(updated);
+        }
+        saved
+    }
+
+    /// The settings shown while no session runs or opens: the permission its next
+    /// session starts with, as the adapter reads the pick and the Chat's record. An
+    /// Automation's agent shows none: its settings are the agent's.
+    fn settings_before_session(&self) -> Option<HarnessSettings> {
+        if self.unattended.is_some() || self.opening.is_some() || self.runtime.is_some() {
+            return None;
+        }
+        let permission = self.adapter.as_ref()?.permission_before_session(
+            self.recorded_settings.as_deref(),
+            self.start_settings.permission.as_deref(),
+        )?;
+        Some(HarnessSettings {
+            model: None,
+            effort: None,
+            permission: Some(permission),
+        })
     }
 
     fn send_setting(&self, setting: SettingKey, value: String) {
@@ -963,12 +1080,9 @@ impl Supervisor {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
-            // New Chat's picks are for a new session; what a Chat ran with before
-            // is in `recorded_settings`.
-            settings: match session {
-                SessionStart::New => self.start_settings.clone(),
-                SessionStart::Resume(_) => StartSettings::default(),
-            },
+            // The person's picks for this session, new or resumed; what the Chat ran
+            // with before is in `recorded_settings`.
+            settings: self.start_settings.clone(),
             session,
             recorded_settings: chat.effective_settings.clone(),
             unattended: self.unattended.clone(),
@@ -1076,6 +1190,7 @@ impl Supervisor {
         } else {
             None
         };
+        self.keep_unanswered_permission();
         self.runtime = None;
         self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
         if let Some(reason) = &unconfirmed {
@@ -1129,11 +1244,14 @@ impl Supervisor {
     fn on_loss(&mut self, detail: String) {
         // With nothing in flight, or while ticketd itself closes the runtime, the
         // session simply ended: no turn failed, and the next message opens it again.
+        // A setting change on its way is in flight too.
         let quiet = self.closing
             || (self.active.is_none()
                 && self.dispatching.is_none()
                 && self.unconfirmed_start.is_none()
-                && self.interactions.is_empty());
+                && self.interactions.is_empty()
+                && !self.setting_on_its_way());
+        self.keep_unanswered_permission();
         self.record(Vec::new());
         self.runtime = None;
         if self.closing {
@@ -1166,6 +1284,7 @@ impl Supervisor {
             || self.opening.is_some()
             || self.refreshing.is_some()
             || self.unconfirmed_start.is_some()
+            || self.setting_on_its_way()
         {
             return;
         }
@@ -1430,12 +1549,26 @@ impl Supervisor {
                     reported.current = Some(value.clone());
                 }
                 // A later change of the same setting replaced this one.
-                if let Some(change) = runtime.setting_changes.iter_mut().find(|change| {
+                let Some(change) = runtime.setting_changes.iter_mut().find(|change| {
                     change.setting == setting
                         && change.value == value
                         && change.state == SettingChangeState::Sent
-                }) {
-                    change.state = SettingChangeState::Done(outcome);
+                }) else {
+                    return;
+                };
+                change.state = SettingChangeState::Done(outcome.clone());
+                if setting == SettingKey::Permission {
+                    if outcome == SettingOutcome::Applied {
+                        // The harness already runs it: unsaved, this process still opens
+                        // the next session with it.
+                        if !self.record_permission(&value) {
+                            self.start_settings.permission = Some(value);
+                        }
+                    } else {
+                        // Nothing runs on a mode the person left: the queue waits for
+                        // them, and the dock says why the change did not take.
+                        self.hold_queue();
+                    }
                 }
             }
         }
@@ -1940,7 +2073,13 @@ impl Supervisor {
                 NoticeKind::EffectiveSettings => {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());
                     let chat = self.chat_id.clone();
-                    let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
+                    // The record `open` reads: shown only once it is saved.
+                    if self
+                        .write(|core| core.set_chat_effective_settings(&chat, &settings))
+                        .is_ok()
+                    {
+                        self.recorded_settings = Some(settings);
+                    }
                 }
             },
             EventKind::ReasoningUpdated {
@@ -2265,12 +2404,20 @@ impl Supervisor {
                 None => self.problem.clone(),
             },
             context: self.runtime.as_ref().and_then(|r| r.context.clone()),
-            settings: self.runtime.as_ref().and_then(|runtime| {
-                Some(Box::new(LiveSettings {
-                    reported: runtime.settings.clone()?,
-                    changes: runtime.setting_changes.clone(),
-                }))
-            }),
+            settings: match &self.runtime {
+                Some(runtime) => runtime.settings.clone().map(|reported| {
+                    Box::new(LiveSettings {
+                        reported,
+                        changes: runtime.setting_changes.clone(),
+                    })
+                }),
+                None => self.settings_before_session().map(|reported| {
+                    Box::new(LiveSettings {
+                        reported,
+                        changes: Vec::new(),
+                    })
+                }),
+            },
             commands: self
                 .runtime
                 .as_ref()

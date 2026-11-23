@@ -40,11 +40,24 @@ struct FileItem {
     files: Vec<FileChange>,
 }
 
+/// The permission choice that leaves approvals and the sandbox to the person's own
+/// Codex configuration, as Codex applied it to the thread.
+pub(super) const OWN_SETTINGS: &str = "own";
+/// The permission choice that never asks and runs outside the sandbox.
+pub(super) const FULL_ACCESS: &str = "full-access";
+/// Where a person's Chat records the choice a session opened for it again applies.
+pub(super) const REOPEN_WITH: &str = "reopen_with";
+/// Built-in profiles that mean no sandbox, by Codex version: whether the person's
+/// requirements allow one is whether Full access is offered.
+const FULL_ACCESS_PROFILES: &[&str] = &[":danger-full-access", ":danger-no-sandbox"];
+
 /// Overrides the person chose, sent with the next `turn/start`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct Overrides {
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// `OWN_SETTINGS` or `FULL_ACCESS`; `None` until the person picks.
+    pub permission: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -55,8 +68,20 @@ pub(super) struct Reports {
     turn_diffs: HashMap<String, HashMap<String, (u32, u32)>>,
     model: Option<String>,
     effort: Option<String>,
-    permission_profile: Option<String>,
+    /// The approval policy the thread last reported, by name.
+    approval: Option<String>,
     sandbox: Option<String>,
+    /// The person's own approval policy and sandbox for this thread, as Codex
+    /// reported them before ticketd changed anything (`approvalPolicy` and
+    /// `sandboxPolicy`, ready for `turn/start`). Leaving Full access restores them:
+    /// a thread keeps the last policy it was given, across a resume too. Never set
+    /// for an Automation's agent, whose sandbox is the agent's.
+    pub own: Option<Value>,
+    /// The session is a person's Chat, so its own settings are learned when it opens.
+    pub persons: bool,
+    /// ticketd sent Full access in this session: from then on every turn says which
+    /// choice it runs on.
+    full_access_sent: bool,
     models: Listing,
     profiles: Listing,
     rerouted_to: Option<String>,
@@ -375,11 +400,21 @@ impl Reports {
 
     // -- settings -----------------------------------------------------------------
 
-    /// The settings `thread/start` or `thread/resume` answered with.
+    /// The settings `thread/start` or `thread/resume` answered with. For a person's
+    /// Chat whose own settings are not known from its record, they are these: ticketd
+    /// sends no permissions when it opens a thread, so the reply is their Codex
+    /// configuration, or what an earlier session of the Chat last gave the thread.
     pub fn thread_opened(&mut self, result: &Value) -> EventKind {
         self.model = owned(result, "model");
         self.effort = owned(result, "reasoningEffort");
+        self.approval = approval_name(result.get("approvalPolicy"));
         self.sandbox = sandbox_type(result.get("sandbox"));
+        if self.persons && self.own.is_none() {
+            self.own = Some(serde_json::json!({
+                "approvalPolicy": result.get("approvalPolicy"),
+                "sandboxPolicy": result.get("sandbox"),
+            }));
+        }
         self.settings()
     }
 
@@ -387,11 +422,49 @@ impl Reports {
         let settings = params.get("threadSettings")?;
         self.model = owned(settings, "model").or(self.model.take());
         self.effort = owned(settings, "effort");
-        self.permission_profile = settings
-            .get("activePermissionProfile")
-            .and_then(|profile| owned(profile, "id"));
+        self.approval = approval_name(settings.get("approvalPolicy")).or(self.approval.take());
         self.sandbox = sandbox_type(settings.get("sandboxPolicy")).or(self.sandbox.take());
         Some(self.settings())
+    }
+
+    /// The person's choice for this Chat, which a session opened for it again applies:
+    /// the pick, else how the thread reports it runs. `None` for an Automation's agent.
+    pub fn permission_choice(&self) -> Option<String> {
+        let in_effect = if self.full_access_in_effect() {
+            FULL_ACCESS
+        } else {
+            OWN_SETTINGS
+        };
+        self.persons.then(|| {
+            self.overrides
+                .permission
+                .clone()
+                .unwrap_or_else(|| in_effect.to_owned())
+        })
+    }
+
+    /// The thread reports that it never asks and has no sandbox.
+    fn full_access_in_effect(&self) -> bool {
+        self.approval.as_deref() == Some("never")
+            && self.sandbox.as_deref() == Some("dangerFullAccess")
+    }
+
+    /// What the next `turn/start` adds for the person's permission choice: Full
+    /// access, or their own settings again once the thread has had Full access.
+    pub fn permission_params(&mut self) -> Option<Value> {
+        match self.overrides.permission.as_deref() {
+            Some(FULL_ACCESS) => {
+                self.full_access_sent = true;
+                Some(serde_json::json!({
+                    "approvalPolicy": "never",
+                    "sandboxPolicy": {"type": "dangerFullAccess"},
+                }))
+            }
+            Some(OWN_SETTINGS) if self.full_access_sent || self.full_access_in_effect() => {
+                self.own.clone()
+            }
+            _ => None,
+        }
     }
 
     pub fn rerouted(&mut self, params: &Value) -> EventKind {
@@ -409,12 +482,14 @@ impl Reports {
         self.settings()
     }
 
-    /// Records a change for the next turn. Permissions are set in Codex's own
-    /// configuration: `turn/start` takes no permission profile.
+    /// Records a change for the next turn.
     pub fn override_setting(&mut self, setting: SettingKey, value: &str) -> bool {
         match setting {
             SettingKey::Model => self.overrides.model = Some(value.to_owned()),
             SettingKey::Effort => self.overrides.effort = Some(value.to_owned()),
+            SettingKey::Permission if [OWN_SETTINGS, FULL_ACCESS].contains(&value) => {
+                self.overrides.permission = Some(value.to_owned());
+            }
             SettingKey::Permission => return false,
         }
         true
@@ -455,38 +530,24 @@ impl Reports {
                 answered_by: None,
             })
         });
-        let profiles: Vec<SettingOption> = match &self.profiles {
-            Listing::Listed(profiles) => profiles.iter().filter_map(profile_option).collect(),
-            _ => Vec::new(),
+        // Known once the thread has said how it runs. A pick shows from when it is
+        // made, as a model pick does, though it goes out with the next turn; before
+        // any pick, what the thread reports is shown.
+        let in_effect = if self.full_access_in_effect() {
+            FULL_ACCESS
+        } else {
+            OWN_SETTINGS
         };
-        // Without profiles, the sandbox Codex reported is what is in effect.
-        let (current, profiles) = match (&self.permission_profile, &self.sandbox) {
-            (None, Some(sandbox)) if profiles.is_empty() => (
-                Some(sandbox.clone()),
-                vec![SettingOption {
-                    id: sandbox.clone(),
-                    label: match sandbox.as_str() {
-                        "readOnly" => "Read only".to_owned(),
-                        "workspaceWrite" => "Workspace write".to_owned(),
-                        "dangerFullAccess" => "Full access".to_owned(),
-                        other => other.to_owned(),
-                    },
-                    description: None,
-                    is_default: false,
-                    permission: match sandbox.as_str() {
-                        "readOnly" => Some(PermissionKind::ReadOnly),
-                        "dangerFullAccess" => Some(PermissionKind::FullAccess),
-                        _ => None,
-                    },
-                    allowed: true,
-                }],
+        let permission = (self.approval.is_some() || self.sandbox.is_some()).then(|| Setting {
+            current: Some(
+                self.overrides
+                    .permission
+                    .clone()
+                    .unwrap_or_else(|| in_effect.to_owned()),
             ),
-            (current, _) => (current.clone(), profiles),
-        };
-        let permission = (current.is_some() || !profiles.is_empty()).then(|| Setting {
-            current,
-            options: profiles,
-            unchangeable: Some(PERMISSIONS_ELSEWHERE.to_owned()),
+            options: permission_options(&self.profiles),
+            // A run's agent keeps the agent's sandbox until the person takes it over.
+            unchangeable: (!self.persons).then(|| AUTOMATION_RUNNING.to_owned()),
             applies_from: AppliesFrom::NextTurn,
             answered_by: None,
         });
@@ -498,7 +559,59 @@ impl Reports {
     }
 }
 
-const PERMISSIONS_ELSEWHERE: &str = "Codex sets permissions in its own configuration";
+const AUTOMATION_RUNNING: &str =
+    "An Automation is running this Chat. Reply or stop it to take it over first.";
+
+/// The approval policy a reply names: its value, or `granular` for a granular one.
+fn approval_name(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(name) => Some(name.clone()),
+        Value::Object(fields) => fields.keys().next().cloned(),
+        _ => None,
+    }
+}
+
+/// The permission setting before a session: the two choices, `choice` current.
+pub(super) fn permission_setting(choice: String) -> Setting {
+    Setting {
+        current: Some(choice),
+        options: permission_options(&Listing::NotListed),
+        unchangeable: None,
+        applies_from: AppliesFrom::NextTurn,
+        answered_by: None,
+    }
+}
+
+/// The person's two choices. Full access is offered unless the person's Codex
+/// requirements refuse the no-sandbox profile; a Codex that lists no profiles
+/// refuses it, if at all, when the turn asks for it.
+fn permission_options(profiles: &Listing) -> Vec<SettingOption> {
+    let full_access_allowed = match profiles {
+        Listing::Listed(profiles) => profiles
+            .iter()
+            .find(|profile| FULL_ACCESS_PROFILES.contains(&text(profile, "id").unwrap_or("")))
+            .is_none_or(|profile| profile["allowed"] == true),
+        _ => true,
+    };
+    vec![
+        SettingOption {
+            id: OWN_SETTINGS.to_owned(),
+            label: "Codex settings".to_owned(),
+            description: None,
+            is_default: true,
+            permission: None,
+            allowed: true,
+        },
+        SettingOption {
+            id: FULL_ACCESS.to_owned(),
+            label: "Full access".to_owned(),
+            description: Some("Never asks, and runs without a sandbox".to_owned()),
+            is_default: false,
+            permission: Some(PermissionKind::FullAccess),
+            allowed: full_access_allowed,
+        },
+    ]
+}
 
 /// A model Codex lists and does not hide.
 fn model_option(entry: &Value) -> Option<SettingOption> {
@@ -538,23 +651,12 @@ fn effort_options(entry: &Value) -> Vec<SettingOption> {
         .collect()
 }
 
-fn profile_option(profile: &Value) -> Option<SettingOption> {
-    let id = owned(profile, "id")?;
-    Some(SettingOption {
-        label: id.trim_start_matches(':').to_owned(),
-        description: owned(profile, "description"),
-        is_default: false,
-        // Codex names profiles freely; what one allows is not reported.
-        permission: None,
-        allowed: profile["allowed"] == true,
-        id,
-    })
-}
-
 /// What Codex offers before a thread, from its `model/list` and
-/// `permissionProfile/list` replies. Without a thread no profile is in effect yet,
-/// and ticketd never chooses one.
+/// `permissionProfile/list` replies, and the two permission choices.
 pub(super) fn listed_options(models: &[Value], profiles: Option<&[Value]>) -> HarnessOptions {
+    let profiles = profiles.map_or(Listing::NotListed, |profiles| {
+        Listing::Listed(profiles.to_vec())
+    });
     HarnessOptions {
         models: models
             .iter()
@@ -567,10 +669,10 @@ pub(super) fn listed_options(models: &[Value], profiles: Option<&[Value]>) -> Ha
                 })
             })
             .collect(),
-        permission: profiles.map(|profiles| Setting {
+        permission: Some(Setting {
             current: None,
-            options: profiles.iter().filter_map(profile_option).collect(),
-            unchangeable: Some(PERMISSIONS_ELSEWHERE.to_owned()),
+            options: permission_options(&profiles),
+            unchangeable: None,
             applies_from: AppliesFrom::NextTurn,
             answered_by: None,
         }),

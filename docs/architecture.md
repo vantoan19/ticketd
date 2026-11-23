@@ -240,6 +240,54 @@ A harness process started for an Automation run also gets the run's ID in
 change it makes as a Workspace event with actor `automation`, and such events never
 trigger Automations. The value itself is not stored.
 
+### Permissions in a person's Chat
+
+The person picks how a Chat's harness asks from the permission modes its adapter
+reports, Full access among them ([ADR 0020](adr/0020-full-access-in-a-persons-chat.md)).
+A pick in New Chat opens the session with it; a change in a Chat is held while a
+turn runs and applies from the next message, like the model and effort. A reopened
+Chat keeps its mode, recorded with its settings (`reopen_with`): Claude Code is
+opened with the mode, and the effort, it last reported, and Codex with the choice
+its last turn carried. While no session runs, the Chat shows the mode its next
+session opens with (`HarnessAdapter::permission_before_session`, which reads the
+same record), so a Chat in Full access says so before its next message, and a
+change made then is kept for that session, new or resumed. A permission change is
+saved with the Chat's record as soon as it is accepted, live or idle
+(`HarnessAdapter::record_permission`), so a restart before the next message cannot
+bring back a mode the person left. An idle pick that cannot be saved is refused, so
+the idle Chat keeps showing its saved mode. When saving fails for a change the
+harness already applied, or one a lost or closed runtime never answered, this
+process still opens the next session with it, but a restart returns to the saved
+mode; the failed save also stops the Chat with a storage problem. Nothing is
+dispatched while a setting change is on its way to the harness, so
+the next message runs on what the person last chose; a permission change the
+harness refuses, or does not confirm, pauses the queue, so nothing runs on a mode
+the person left until they resume it. Losing the harness while a change is on its
+way pauses the queue too, and a permission change a lost or closed runtime never
+answered is kept for the next session.
+
+- **Claude Code.** Full access is the Agent SDK's `bypassPermissions`. The bridge
+  starts every person's session with `allowDangerouslySkipPermissions`, because
+  Claude Code switches a running session into that mode only when its process was
+  started able to; the flag makes the mode available and never puts a session in
+  it. Remembering an approval applies Claude Code's suggested updates except one
+  that would set `bypassPermissions`, so only the person's pick turns it on. A
+  request Claude Code still sends in Full access (its own safety checks, an ask
+  rule in the person's settings) is shown like any other.
+- **Codex.** The choices are "Codex settings", the approval policy and sandbox of
+  the person's own configuration (ticketd sends none), and Full access: approval
+  policy `never` and the `dangerFullAccess` sandbox, sent with every `turn/start`
+  while it is chosen. A thread keeps the policy it was last given, across a
+  resume too, so leaving Full access sends the approval policy and sandbox the
+  thread reported when it opened without ticketd's; they are recorded with the
+  Chat's settings (`own`) for a later session. The choice itself is recorded
+  when a turn carries it, so a session opened again states it on its first turn.
+  Full access is not offered when the person's Codex requirements refuse the
+  no-sandbox profile.
+
+An Automation's agent never gets Full access (see below), and a Chat taken over
+from a run opens asking as before.
+
 ### Automation runs
 
 `crates/ticketd-automation-runner` owns the loop and depends only on the core and

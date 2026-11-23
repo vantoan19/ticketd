@@ -1421,7 +1421,7 @@ impl Chats {
             permission: input.permission.clone(),
         };
         if !picks.is_empty() {
-            // Only what the harness offered, and never full access.
+            // Only what the harness offered and allows.
             let offered = self.options(&input.harness_id).await?;
             if let Some(reason) = offered.refusal(
                 picks.model.as_deref(),
