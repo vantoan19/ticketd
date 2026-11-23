@@ -742,6 +742,22 @@ fn a_chat_shows_the_mode_it_reopens_with_before_a_session() {
     assert_eq!(shown(Some(agent), None).as_deref(), Some("default"));
     // Without a record, Claude Code's own `defaultMode` decides, which only a session shows.
     assert_eq!(shown(None, None), None);
+
+    // A change the person makes is saved as the mode to reopen with; the rest stays.
+    let ran = json!({"model": "claude-opus-test", "permission_mode": "bypassPermissions",
+                     "reopen_with": {"permission_mode": "bypassPermissions", "effort": "low"}});
+    let saved: Value = serde_json::from_str(
+        &super::ClaudeAdapter::new("bridge")
+            .record_permission(Some(&ran.to_string()), "default")
+            .expect("the record changes"),
+    )
+    .unwrap();
+    assert_eq!(
+        saved["reopen_with"],
+        json!({"permission_mode": "default", "effort": "low"})
+    );
+    assert_eq!(saved["model"], json!("claude-opus-test"));
+    assert_eq!(shown(Some(saved), None).as_deref(), Some("default"));
 }
 
 /// #408: an earlier ticketd recorded only a session's first report, so its record can

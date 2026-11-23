@@ -824,6 +824,19 @@ async fn a_reopened_chat_shows_and_applies_the_choice_its_record_kept() {
     let asks = json!({"approvalPolicy": "on-request", "sandbox": {"type": "readOnly"}});
     assert_eq!(shown(Some(asks), None).as_deref(), Some("own"));
     assert_eq!(shown(None, None), None, "no record: nothing to say yet");
+    // A change the person makes is saved over the choice; their own policies stay.
+    let own = json!({"approvalPolicy": "on-request", "sandboxPolicy": {"type": "workspaceWrite"}});
+    let mut with_own = kept.clone();
+    with_own["own"] = own.clone();
+    let saved: Value = serde_json::from_str(
+        &CodexAdapter::new()
+            .record_permission(Some(&with_own.to_string()), "own")
+            .expect("the record changes"),
+    )
+    .unwrap();
+    assert_eq!(saved["reopen_with"]["permission"], json!("own"));
+    assert_eq!(saved["own"], own);
+    assert_eq!(CodexAdapter::new().record_permission(None, "own"), None);
 
     let (mut peer, io) = pipes();
     peer.load(fixture!("resume_recorded_choice"));

@@ -1974,6 +1974,15 @@ async fn an_idle_chat_shows_its_next_permission_and_a_pick_goes_to_the_resumed_s
         .permission
         .unwrap();
     assert_eq!(shown.current.as_deref(), Some("ask"));
+    // Saved at once: a restart before the next message keeps it.
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
     let model = f
         .host
         .change_setting(&f.chat.id, SettingKey::Model, "gpt-b")
@@ -1993,7 +2002,72 @@ async fn an_idle_chat_shows_its_next_permission_and_a_pick_goes_to_the_resumed_s
     assert_eq!(reopened.settings.permission.as_deref(), Some("ask"));
     assert_eq!(
         reopened.recorded_settings.as_deref(),
-        Some(r#"{"permission":"full"}"#)
+        Some(r#"{"permission":"ask"}"#)
+    );
+}
+
+fn recorded(permission: &str) -> EventKind {
+    EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: String::new(),
+        detail: Some(ProviderDetail::new(
+            "settings",
+            &format!(r#"{{"permission":"{permission}"}}"#),
+        )),
+    }
+}
+
+/// A permission change the live session accepts is saved with the Chat at once, not at
+/// its next turn: quitting before another message must not bring Full access back.
+#[tokio::test(start_paused = true)]
+async fn an_accepted_permission_change_is_recorded_at_once() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let changed = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    settle().await;
+
+    assert_eq!(changed, SettingChangeState::Sent);
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+}
+
+/// A record that could not be saved is not shown: the idle Chat keeps showing what its
+/// next session will open with, the saved record.
+#[tokio::test(start_paused = true)]
+async fn an_unsaved_record_is_not_shown_on_the_idle_chat() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(recorded("full")).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    f.storage_up.store(false, Ordering::SeqCst);
+    f.emit(recorded("ask")).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    f.storage_up.store(true, Ordering::SeqCst);
+
+    let shown = f
+        .live()
+        .await
+        .settings
+        .expect("idle once the harness is stopped");
+    assert_eq!(
+        shown.reported.permission.and_then(|p| p.current).as_deref(),
+        Some("full")
     );
 }
 

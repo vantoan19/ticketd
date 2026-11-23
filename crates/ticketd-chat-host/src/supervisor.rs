@@ -614,11 +614,32 @@ impl Supervisor {
             return SettingChangeState::Done(SettingOutcome::Refused { reason });
         }
         match setting {
-            SettingKey::Permission => self.start_settings.permission = Some(value),
+            SettingKey::Permission => {
+                self.record_permission(&value);
+                self.start_settings.permission = Some(value);
+            }
             // Only the permission is shown before a session.
             SettingKey::Model | SettingKey::Effort => return refused("no session is running"),
         }
         SettingChangeState::Held
+    }
+
+    /// Saves `value` with the Chat as the permission its next session opens with, as
+    /// soon as the change is accepted, so a restart before the next message cannot bring
+    /// back a mode the person left. The record views read changes only once it is saved.
+    fn record_permission(&mut self, value: &str) {
+        let Some(updated) = self.adapter.as_ref().and_then(|adapter| {
+            adapter.record_permission(self.recorded_settings.as_deref(), value)
+        }) else {
+            return;
+        };
+        let chat = self.chat_id.clone();
+        if self
+            .write(|core| core.set_chat_effective_settings(&chat, &updated))
+            .is_ok()
+        {
+            self.recorded_settings = Some(updated);
+        }
     }
 
     /// The settings shown while no session runs or opens: the permission its next
@@ -1481,7 +1502,10 @@ impl Supervisor {
                         && change.value == value
                         && change.state == SettingChangeState::Sent
                 }) {
-                    change.state = SettingChangeState::Done(outcome);
+                    change.state = SettingChangeState::Done(outcome.clone());
+                }
+                if outcome == SettingOutcome::Applied && setting == SettingKey::Permission {
+                    self.record_permission(&value);
                 }
             }
         }
@@ -1986,8 +2010,13 @@ impl Supervisor {
                 NoticeKind::EffectiveSettings => {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());
                     let chat = self.chat_id.clone();
-                    let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
-                    self.recorded_settings = Some(settings);
+                    // The record `open` reads: shown only once it is saved.
+                    if self
+                        .write(|core| core.set_chat_effective_settings(&chat, &settings))
+                        .is_ok()
+                    {
+                        self.recorded_settings = Some(settings);
+                    }
                 }
             },
             EventKind::ReasoningUpdated {

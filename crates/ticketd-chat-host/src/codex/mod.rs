@@ -278,4 +278,8 @@ impl HarnessAdapter for CodexAdapter {
             .or_else(|| runtime::recorded_permission(recorded))?;
         Some(report::permission_setting(choice))
     }
+
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        runtime::record_choice(recorded, value)
+    }
 }

@@ -529,6 +529,21 @@ pub(super) fn recorded_permission(recorded: Option<&str>) -> Option<String> {
     })
 }
 
+/// `recorded` with `choice` as the one a session opened for the Chat again applies;
+/// the person's own approval policy and sandbox (`own`) stay as recorded.
+pub(super) fn record_choice(recorded: Option<&str>, choice: &str) -> Option<String> {
+    let mut recorded: Value = serde_json::from_str(recorded?).ok()?;
+    let reopen = recorded
+        .as_object_mut()?
+        .entry(super::report::REOPEN_WITH)
+        .or_insert_with(|| json!({}));
+    if !reopen.is_object() {
+        *reopen = json!({});
+    }
+    reopen["permission"] = json!(choice);
+    Some(recorded.to_string())
+}
+
 /// The person's own approval policy and sandbox, as the Chat's last session recorded
 /// them with its settings (`own`).
 fn recorded_own(recorded: Option<&str>) -> Option<Value> {

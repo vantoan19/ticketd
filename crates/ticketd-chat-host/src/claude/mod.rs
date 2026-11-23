@@ -143,6 +143,10 @@ impl HarnessAdapter for ClaudeAdapter {
             .or_else(|| recorded.map(|_| report::DEFAULT_PERMISSION_MODE.to_owned()))?;
         Some(report::permission_setting(mode))
     }
+
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        runtime::record_reopen_with(recorded, "permission_mode", value)
+    }
 }
 
 impl ClaudeAdapter {

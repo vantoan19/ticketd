@@ -782,6 +782,24 @@ pub(super) fn recorded_settings(recorded: Option<&str>) -> StartSettings {
     }
 }
 
+/// `recorded` with `field` of `REOPEN_WITH` set to `value`; the rest unchanged.
+pub(super) fn record_reopen_with(
+    recorded: Option<&str>,
+    field: &str,
+    value: &str,
+) -> Option<String> {
+    let mut recorded: Value = serde_json::from_str(recorded?).ok()?;
+    let reopen = recorded
+        .as_object_mut()?
+        .entry(REOPEN_WITH)
+        .or_insert_with(|| json!({}));
+    if !reopen.is_object() {
+        *reopen = json!({});
+    }
+    reopen[field] = json!(value);
+    Some(recorded.to_string())
+}
+
 /// The effort levels the bridge's `open` accepts.
 const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 

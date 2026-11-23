@@ -905,6 +905,15 @@ pub trait HarnessAdapter: Send + Sync {
         let _ = (recorded, picked);
         None
     }
+
+    /// The Chat's record (`recorded`) with `value` as the permission a session opened
+    /// for it again starts with, saved as soon as the person's change is accepted: a
+    /// restart before the next message must not bring back a mode they left. `None`
+    /// when there is no record to change.
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        let _ = (recorded, value);
+        None
+    }
 }
 
 #[derive(Debug)]

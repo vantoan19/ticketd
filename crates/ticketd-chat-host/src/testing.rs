@@ -362,6 +362,14 @@ impl HarnessAdapter for FakeAdapter {
         })
     }
 
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        let mut recorded: serde_json::Value = serde_json::from_str(recorded?).ok()?;
+        recorded
+            .as_object_mut()?
+            .insert("permission".to_owned(), serde_json::json!(value));
+        Some(recorded.to_string())
+    }
+
     /// Opening replaces any live runtime, whose stream then ends.
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let hold = self.state().open_holds.pop_front();

@@ -251,7 +251,11 @@ opened with the mode, and the effort, it last reported, and Codex with the choic
 its last turn carried. While no session runs, the Chat shows the mode its next
 session opens with (`HarnessAdapter::permission_before_session`, which reads the
 same record), so a Chat in Full access says so before its next message, and a
-change made then is kept for that session, new or resumed.
+change made then is kept for that session, new or resumed. A permission change is
+saved with the Chat's record as soon as it is accepted, live or idle
+(`HarnessAdapter::record_permission`), so a restart before the next message cannot
+bring back a mode the person left; the record a view shows is only ever the saved
+one.
 
 - **Claude Code.** Full access is the Agent SDK's `bypassPermissions`. The bridge
   starts every person's session with `allowDangerouslySkipPermissions`, because
