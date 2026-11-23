@@ -60,9 +60,8 @@ test("suggestions float in a portal, so no page bar clips them, and ArrowDown re
   fireEvent.focus(input("Repositories"));
   const panel = list("Repositories");
   expect(panel).not.toBeNull();
-  expect(input("Repositories").closest(".source-form")?.contains(panel)).toBe(
-    false,
-  );
+  const fields = input("Repositories").closest('[data-slot="field-group"]');
+  expect(fields?.contains(panel)).toBe(false);
   // Focus stays in the field until the person moves into the list.
   expect(document.activeElement).not.toBe(
     screen.getByRole("button", { name: "Add One" }),

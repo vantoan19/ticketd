@@ -1,10 +1,14 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldGroup } from "@/components/ui/field";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { failureText } from "@/lib/api/describe-failure";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Popover,
@@ -245,7 +249,7 @@ function MultiSelectField({
   return (
     <Field
       ref={container}
-      className="source-field"
+      className="min-w-0 grow basis-60 data-[target=true]:basis-full"
       data-field={field.key}
       data-target={target || undefined}
       data-invalid={messages.length > 0 || undefined}
@@ -262,12 +266,12 @@ function MultiSelectField({
         if (!inside(event.relatedTarget as Node | null)) setOpen(false);
       }}
     >
-      <Label htmlFor={id}>
+      <FieldLabel htmlFor={id}>
         {field.label}
         <span className="source-required" aria-hidden="true">
           {field.required ? "Required" : "Optional"}
         </span>
-      </Label>
+      </FieldLabel>
       <Popover open={open && !full}>
         <PopoverAnchor asChild>
           <div className="source-chip-input">
@@ -475,7 +479,7 @@ export function SchemaForm({
   return (
     <>
       <FieldError errors={formErrors.map((message) => ({ message }))} />
-      <FieldGroup className="source-form">
+      <FieldGroup className="flex-row flex-wrap">
         {visible.filter((field) => !field.advanced).map(renderField)}
       </FieldGroup>
       {advanced.length > 0 && (
@@ -497,7 +501,7 @@ export function SchemaForm({
             Advanced settings
           </Button>
           <div id={advancedId} hidden={!showAdvanced}>
-            <FieldGroup className="source-form">
+            <FieldGroup className="flex-row flex-wrap">
               {advanced.map(renderField)}
             </FieldGroup>
           </div>
@@ -514,7 +518,10 @@ function SetupLink({
 }) {
   const url = safeSetupUrl(field.url);
   return (
-    <div className="source-field" data-field={field.key}>
+    <div
+      className="flex min-w-0 grow basis-60 flex-col gap-2"
+      data-field={field.key}
+    >
       {url ? (
         <SourceLink url={url}>{field.label}</SourceLink>
       ) : (
@@ -560,18 +567,18 @@ function TextField({
   const id = useId();
   return (
     <Field
-      className="source-field"
+      className="min-w-0 grow basis-60 data-[target=true]:basis-full"
       data-field={field.key}
       data-target={target || undefined}
       data-invalid={errors.length > 0 || undefined}
       data-disabled={disabled || undefined}
     >
-      <Label htmlFor={id}>
+      <FieldLabel htmlFor={id}>
         {field.label}
         <span className="source-required" aria-hidden="true">
           {field.required ? "Required" : "Optional"}
         </span>
-      </Label>
+      </FieldLabel>
       <Input
         id={id}
         value={value}
