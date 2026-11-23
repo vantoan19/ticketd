@@ -26,6 +26,7 @@ export function SourcePage({
         {...sectionMeta("sources")}
         title={entry.saved?.name ?? entry.connector.name}
         lede="The extension for this connection is unavailable. You can rename or remove the connection in Sources."
+        children={null}
       />
     ) : null;
   return <SourceCard entry={entry} hidden={!active} />;

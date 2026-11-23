@@ -72,14 +72,14 @@ function useSettingsNavItems() {
       needsSetup[id]
     )
       return { label: "Needs setup", tone: "attention" };
-    if (
-      entries.some(
-        (entry) =>
-          `source-${entry.saved?.id ?? entry.connector.provider}` === id &&
-          entry.saved,
-      )
-    )
-      return { label: "Connected", tone: "positive" };
+    const source = entries.find(
+      (entry) =>
+        `source-${entry.saved?.id ?? entry.connector.provider}` === id &&
+        entry.saved,
+    );
+    if (source?.unavailable)
+      return { label: "Extension unavailable", tone: "attention" };
+    if (source) return { label: "Connected", tone: "positive" };
     return null;
   };
   return { items, indicator };

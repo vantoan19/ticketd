@@ -148,7 +148,8 @@ export function ReviewBody({
   if (load.kind === "loading")
     return (
       <p role="status">
-        Reading the attempt and looking in {attempt.destination}…
+        Reading the attempt and looking in{" "}
+        {attempt.destination_label ?? attempt.destination}…
       </p>
     );
   if (load.kind === "failed")
@@ -389,7 +390,7 @@ export function ReviewBody({
         Check again
       </Button>
       <Candidates
-        label={`Issues in ${attempt.destination} that match what was sent`}
+        label={`Issues in ${attempt.destination_label ?? attempt.destination} that match what was sent`}
         candidates={review.candidates}
         busy={busy}
         attach={(candidate) =>
@@ -397,7 +398,7 @@ export function ReviewBody({
         }
       />
       <Candidates
-        label={`Other recent issues from your account in ${attempt.destination} (these do not block confirming that nothing was created)`}
+        label={`Other recent issues from your account in ${attempt.destination_label ?? attempt.destination} (these do not block confirming that nothing was created)`}
         candidates={review.other_recent}
         busy={busy}
         attach={(candidate) =>
