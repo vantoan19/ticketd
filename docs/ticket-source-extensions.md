@@ -161,6 +161,10 @@ whole. For a real tracker, use canonical site and partition keys, and set
 `account_id` when the display label can change or is shared. The
 `discovery_scope` key is stable for a particular set of filters and empty
 when discovery reads the whole partition.
+Publication can supply `destination_labels` with the canonical destination strings
+as keys. Ticketd uses these labels in the preview and sends the canonical value.
+The `find_published` search carries `account_id` when supplied, otherwise the
+account label.
 
 A trivial fixture can return one fixed issue from its first discovery page
 and return the same issue by identity from `fetch`. A page is
