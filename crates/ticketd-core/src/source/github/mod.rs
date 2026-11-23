@@ -58,12 +58,11 @@ impl GithubConnector {
     }
 
     fn ambient_for(id: Option<&str>, account: Option<&str>) -> Self {
-        let custom = std::env::var(API_URL_VARIABLE)
-            .ok()
-            .map(|url| url.trim().trim_end_matches('/').to_owned())
-            .filter(|url| !url.is_empty());
+        let custom = configured_api_url();
         // github.com tokens are for github.com: another host gets its own.
-        let custom_host = custom.as_deref().map(host_of);
+        let custom_host = custom
+            .as_deref()
+            .map(|url| host_of(url).to_ascii_lowercase());
         let mut connector = Self::new(
             custom.unwrap_or_else(|| DEFAULT_API_URL.to_owned()),
             Box::new(UreqTransport::new()),
@@ -87,15 +86,7 @@ impl GithubConnector {
     }
 
     fn site(&self) -> String {
-        let host = host_of(&self.api_url).to_ascii_lowercase();
-        if matches!(
-            host.as_str(),
-            "api.github.com" | "github.com" | "localhost" | "127.0.0.1" | "[::1]"
-        ) {
-            String::new()
-        } else {
-            host
-        }
+        site_of(&self.api_url)
     }
 
     fn schema() -> ConfigSchema {
@@ -563,6 +554,8 @@ impl Connector for GithubConnector {
                 account: account.to_owned(),
                 account_id: Some(account.to_ascii_lowercase()),
                 site: self.site(),
+                tracker_time: None,
+                publication_requires_tracker_time: false,
             },
             derived: Self::derived_configuration(config),
         })
@@ -1051,6 +1044,59 @@ pub(super) fn legacy_reference_partition(provider: &str, locator: &str) -> Optio
             .map_or(locator, |(part, _)| part)
             .to_lowercase()
     })
+}
+
+fn configured_api_url() -> Option<String> {
+    std::env::var(API_URL_VARIABLE)
+        .ok()
+        .map(|url| url.trim().trim_end_matches('/').to_owned())
+        .filter(|url| !url.is_empty())
+}
+
+fn site_of(url: &str) -> String {
+    let host = host_of(url).to_ascii_lowercase();
+    if matches!(
+        host.as_str(),
+        "api.github.com" | "github.com" | "localhost" | "127.0.0.1" | "[::1]"
+    ) {
+        String::new()
+    } else {
+        host
+    }
+}
+
+/// Historical GitHub IDs are numbers, so known different hosts cannot share one.
+pub(crate) fn legacy_issue_origin_matches(provider: &str, stored: &str, incoming: &str) -> bool {
+    if provider != PROVIDER || stored == incoming {
+        return true;
+    }
+    let site = |text: &str| {
+        let url = url::Url::parse(text).ok()?;
+        (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
+    };
+    match (site(stored), site(incoming)) {
+        (Some(stored), Some(incoming)) => stored == incoming,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+pub(super) fn legacy_site(issue_urls: &[String]) -> String {
+    // Prior settings did not store the API host. An explicit API gateway can
+    // differ from the hostname in a tracker’s human-readable issue links.
+    if let Some(api) = configured_api_url().filter(|api| credential_may_travel(api)) {
+        return site_of(&api);
+    }
+    let mut sites = issue_urls.iter().filter_map(|text| {
+        let url = url::Url::parse(text).ok()?;
+        (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
+    });
+    if let Some(site) = sites.next()
+        && sites.all(|observed| observed == site)
+    {
+        return site;
+    }
+    String::new()
 }
 
 pub(super) fn legacy_derived_configuration(

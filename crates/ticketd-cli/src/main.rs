@@ -754,6 +754,15 @@ enum SourceCommand {
         /// Require evidence for advertised capabilities when they can be exercised
         #[arg(long)]
         strict: bool,
+        /// A fixture's valid cursor beyond the last page
+        #[arg(long)]
+        past_end_cursor: Option<String>,
+        /// JSON file of external issue references for typed state and access probes
+        #[arg(long)]
+        closure_probes: Option<std::path::PathBuf>,
+        /// Record why a named check cannot run with this account or fixture
+        #[arg(long = "skip-check", value_name = "CHECK=REASON", value_parser = conformance_skip)]
+        skip_checks: Vec<(String, String)>,
         #[command(flatten)]
         settings: SourceSettings,
     },
@@ -1409,6 +1418,13 @@ impl Origin {
     }
 }
 
+fn conformance_skip(raw: &str) -> Result<(String, String), String> {
+    raw.split_once('=')
+        .filter(|(check, reason)| !check.is_empty() && !reason.trim().is_empty())
+        .map(|(check, reason)| (check.to_owned(), reason.trim().to_owned()))
+        .ok_or_else(|| "give a check and a nonempty reason as CHECK=REASON".into())
+}
+
 fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::error::Error>> {
     use clap::{CommandFactory, FromArgMatches};
     let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
@@ -1427,6 +1443,9 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     extension,
                     publish,
                     strict,
+                    past_end_cursor,
+                    closure_probes,
+                    skip_checks,
                     settings,
                 },
         } => {
@@ -1437,7 +1456,24 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 ticketd_core::source::ConfigValues::new(),
                 settings,
             )?;
-            let options = ticketd_core::source::ConformanceOptions { publish, strict };
+            let closure_probes = closure_probes
+                .map(|path| -> Result<_, Box<dyn std::error::Error>> {
+                    Ok(serde_json::from_reader(std::fs::File::open(path)?)?)
+                })
+                .transpose()?;
+            let mut skip_reasons = std::collections::BTreeMap::new();
+            for (check, reason) in skip_checks {
+                if skip_reasons.insert(check, reason).is_some() {
+                    return Err("supply only one skip reason per conformance check".into());
+                }
+            }
+            let options = ticketd_core::source::ConformanceOptions {
+                publish,
+                strict,
+                past_end_cursor,
+                closure_probes,
+                skip_reasons,
+            };
             let report = registry.conformance(&extension, &config, &options)?;
             writeln!(output, "{}", serde_json::to_string(&report)?)?;
             return if report.passed {
@@ -2413,15 +2449,27 @@ fn source_command(
                 if connections.is_empty() {
                     sources.push(output::SourceListing {
                         development: registry.is_development(&description.descriptor.provider),
+                        unavailable: false,
                         connector: description,
                         saved: None,
                     });
                 } else {
                     sources.extend(connections.into_iter().map(|saved| output::SourceListing {
                         development: registry.is_development(&description.descriptor.provider),
+                        unavailable: false,
                         connector: description.clone(),
                         saved: Some(saved),
                     }));
+                }
+            }
+            for source in &saved {
+                if engine.description(&source.provider).is_err() {
+                    sources.push(output::SourceListing {
+                        development: false,
+                        unavailable: true,
+                        connector: workspace.unavailable_source_description(&source.provider)?,
+                        saved: Some(source),
+                    });
                 }
             }
             serde_json::to_string(&sources)?

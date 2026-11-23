@@ -273,8 +273,7 @@ query LinearDestinationTeam($team: String!) {
 }
 
 query LinearPublicationSearch(
-  $team: ID!
-  $since: DateTimeOrDuration!
+  $filter: IssueFilter!
   $first: Int!
   $after: String
 ) {
@@ -283,7 +282,7 @@ query LinearPublicationSearch(
     after: $after
     includeArchived: true
     orderBy: createdAt
-    filter: { team: { id: { eq: $team } }, createdAt: { gte: $since } }
+    filter: $filter
   ) {
     nodes {
       ...LinearIssue

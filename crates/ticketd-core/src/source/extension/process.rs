@@ -64,6 +64,8 @@ pub(super) struct CallBudget {
 pub(super) struct CallControl<'a> {
     pub refresh: Option<&'a RefreshControl>,
     pub closing: &'a mut watch::Receiver<bool>,
+    pub deadline: Option<Instant>,
+    pub source_id: Option<&'a str>,
 }
 
 impl CallControl<'_> {
@@ -168,6 +170,7 @@ impl Process {
     ) -> Result<Result<Value, SourceError>, Fault> {
         let started = Instant::now();
         let hard = started + limits.hard;
+        let hard = control.deadline.map_or(hard, |deadline| hard.min(deadline));
         let mut deadline = hard.min(started + limits.soft);
         let mut polls = interval(EXIT_POLL);
         let stdin = self.stdin.as_mut().ok_or(Fault::Crash)?;
@@ -205,7 +208,7 @@ impl Process {
                 Ok(Inbound::Reply(Response::Failure(response))) => {
                     return Ok(Err(response
                         .error
-                        .into_source_error(&self.stdout.redactions)));
+                        .into_source_error(&self.stdout.redactions, control.source_id)));
                 }
                 Err(reason @ (Fault::Canceled | Fault::Timeout)) => {
                     if self.cancel_request(id, limits.grace, control.refresh).await {

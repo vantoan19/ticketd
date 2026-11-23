@@ -3,17 +3,30 @@ use super::redaction::Redactions;
 pub(super) use ticketd_source_sdk::wire::*;
 
 pub(super) trait RpcErrorExt {
-    fn into_source_error(self, secrets: &Redactions) -> SourceError;
+    fn into_source_error(self, secrets: &Redactions, source_id: Option<&str>) -> SourceError;
 }
 
 impl RpcErrorExt for RpcError {
-    fn into_source_error(self, secrets: &super::redaction::Redactions) -> SourceError {
+    fn into_source_error(self, secrets: &Redactions, source_id: Option<&str>) -> SourceError {
         if let Some(mut failure) = self.data
             && self.code == -32000
         {
             failure.message = secrets.text(&failure.message);
             secrets.fields(&mut failure.fields);
-            return into_source_error(failure);
+            let detail = failure
+                .detail
+                .take()
+                .filter(|detail| valid_failure_detail(detail));
+            let error = into_source_error(failure);
+            if let Some(detail) = detail {
+                tracing::debug!(
+                    source_id = source_id.unwrap_or_default(),
+                    error_kind = error.code(),
+                    error_detail = %secrets.text(&detail),
+                    "source extension reported an error detail"
+                );
+            }
+            return error;
         }
         SourceError::Protocol(format!(
             "JSON-RPC error {}: {}",

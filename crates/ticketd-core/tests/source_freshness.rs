@@ -392,7 +392,7 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
     f.refresh_at(T0);
-    let mut closed = issue(1, T2);
+    let mut closed = issue(1, "2026-02-01T00:20:00.500Z");
     closed.state = ExternalState::named(StateCategory::Completed, "Closed");
     f.publish(closed);
     f.refresh_at(T2);
@@ -405,13 +405,34 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     f.remote(|r| {
         let stale = r.issues.get_mut(&1).unwrap();
         stale.state = ExternalState::named(StateCategory::Open, "Open");
-        stale.updated_at = T1.into();
+        stale.updated_at = "2026-02-01T00:20:00Z".into();
         stale.title = "Stale title".into();
     });
     f.refresh_at(T3);
     let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Done);
     assert_eq!(ticket.title, "Issue 1");
+
+    f.remote(|r| r.issues.get_mut(&1).unwrap().updated_at = "unknown".into());
+    f.refresh_at(T3);
+    let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
+    assert_eq!(ticket.status, Status::Done);
+    assert_eq!(ticket.title, "Issue 1");
+}
+
+#[test]
+fn a_dated_observation_repairs_an_undated_cached_issue() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "unknown"));
+    f.refresh_at(T0);
+    let mut closed = issue(1, T1);
+    closed.state = ExternalState::named(StateCategory::Completed, "Closed");
+    f.publish(closed);
+    f.refresh_at(T1);
+    assert_eq!(
+        f.workspace.show_ticket("T-KQ1").unwrap().status,
+        Status::Done
+    );
 }
 
 #[test]
@@ -740,6 +761,52 @@ fn a_manual_refresh_overlapping_a_running_one_waits_instead_of_interleaving() {
     manual.join().unwrap();
     assert_eq!(*order.lock().unwrap(), vec!["background", "manual"]);
     assert!(!coordinator.is_refreshing());
+}
+
+#[test]
+fn a_queued_manual_refresh_can_be_canceled_before_the_running_one_finishes() {
+    use std::{sync::mpsc, time::Duration};
+    let coordinator = Arc::new(coordinator(&ManualClock::default()));
+    let (running_tx, running_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let background = {
+        let coordinator = coordinator.clone();
+        thread::spawn(move || {
+            coordinator.run_now(|| {
+                running_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(RefreshReport::default())
+            })
+        })
+    };
+    running_rx.recv().unwrap();
+    let control = ticketd_core::source::RefreshControl::default();
+    let engine = Engine::new().with_refresh_control(control.clone());
+    let (result_tx, result_rx) = mpsc::channel();
+    let foreground = {
+        let coordinator = coordinator.clone();
+        thread::spawn(move || {
+            let result = coordinator.refresh_now(
+                &engine,
+                &|| -> Result<Workspace, ticketd_core::Error> {
+                    panic!("a canceled queued refresh must not open its Workspace");
+                },
+                None,
+            );
+            result_tx.send(result).unwrap();
+        })
+    };
+    control.cancel();
+    let result = result_rx.recv_timeout(Duration::from_secs(2));
+    release_tx.send(()).unwrap();
+    background.join().unwrap().unwrap();
+    foreground.join().unwrap();
+    assert!(matches!(
+        result.unwrap(),
+        Err(ticketd_core::Error::Source(
+            ticketd_core::source::SourceError::RefreshCanceled
+        ))
+    ));
 }
 
 #[test]

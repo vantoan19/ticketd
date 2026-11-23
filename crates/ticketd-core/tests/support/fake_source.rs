@@ -213,6 +213,8 @@ impl Connector for FakeSource {
                 account: account.into(),
                 account_id,
                 site: String::new(),
+                tracker_time: None,
+                publication_requires_tracker_time: false,
             },
             derived: DerivedConfiguration {
                 publication: DestinationRules {

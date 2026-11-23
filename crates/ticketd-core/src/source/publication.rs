@@ -55,6 +55,9 @@ use crate::{Error, Status, Ticket, Workspace, activities, history};
 /// How long an `in_flight` attempt is trusted to still be running. The HTTP
 /// transport gives up after 30 seconds, so a live create finishes well inside it.
 const LEASE_SECONDS: i64 = 120;
+// The process host must finish or cancel the call before this dispatch window expires.
+const DISPATCH_SECONDS: u64 = 300;
+const DISPATCH_LEASE_SECONDS: i64 = 360;
 
 /// Where a publication attempt stands. `InFlight` and `Unresolved` block another
 /// create; `Failed` and `Succeeded` are final.
@@ -101,15 +104,27 @@ pub struct PublicationAttempt {
     pub reference: String,
     pub provider: String,
     pub destination: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_label: Option<String>,
     pub title: String,
     pub body: String,
     /// The effective state: a stored `in_flight` attempt past its lease reads
     /// as `unresolved`.
     pub state: AttemptState,
     pub started_at: String,
+    #[serde(skip)]
+    lease_expires_at: String,
     pub updated_at: String,
     pub failure: Option<SourceFailure>,
     pub issue: Option<PublishedIssue>,
+}
+
+impl PublicationAttempt {
+    fn display_destination(&self) -> &str {
+        self.destination_label
+            .as_deref()
+            .unwrap_or(&self.destination)
+    }
 }
 
 /// Why a ticket cannot be published now.
@@ -467,16 +482,16 @@ fn candidate(issue: &ExternalIssue, reason: CandidateReason) -> PublicationCandi
 const LISTING_LAG_SECONDS: i64 = 60;
 
 /// When a search first counts for a verdict, as RFC 3339.
-fn search_ready_at(started_at: &str) -> Option<String> {
-    parse_time(started_at).map(|time| {
-        (time + chrono::Duration::seconds(LEASE_SECONDS + LISTING_LAG_SECONDS))
+fn search_ready_at(dispatch_expires_at: &str) -> Option<String> {
+    parse_time(dispatch_expires_at).map(|time| {
+        (time + chrono::Duration::seconds(LISTING_LAG_SECONDS))
             .with_timezone(&chrono::Utc)
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     })
 }
 
-fn ready_text(started_at: &str) -> String {
-    search_ready_at(started_at)
+fn ready_text(dispatch_expires_at: &str) -> String {
+    search_ready_at(dispatch_expires_at)
         .as_deref()
         .and_then(parse_time)
         .map_or_else(
@@ -485,14 +500,12 @@ fn ready_text(started_at: &str) -> String {
         )
 }
 
-fn search_settled(started_at: &str, now: &str) -> bool {
-    match (
-        search_ready_at(started_at).as_deref().and_then(parse_time),
-        parse_time(now),
-    ) {
-        (Some(ready), Some(now)) => now >= ready,
-        _ => true,
-    }
+fn search_settled(dispatch_expires_at: &str, now: &str) -> bool {
+    search_ready_at(dispatch_expires_at)
+        .as_deref()
+        .and_then(parse_time)
+        .zip(parse_time(now))
+        .is_some_and(|(ready, now)| now >= ready)
 }
 
 /// The wording of text for comparison: line endings and outer blanks are not
@@ -562,8 +575,9 @@ pub(crate) fn awaited_by_open_attempt(
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
     let mut statement = connection.prepare(
-        "SELECT title, body, started_at FROM publication_attempts \
-         WHERE provider = ?1 AND status IN ('in_flight', 'unresolved')",
+        "SELECT a.title, a.body, COALESCE(c.tracker_started_at, a.started_at)
+         FROM publication_attempts a LEFT JOIN publication_connections c ON c.attempt_id = a.id
+         WHERE a.provider = ?1 AND a.status IN ('in_flight', 'unresolved')",
     )?;
     let attempts = statement
         .query_map([&issue.reference.identity.provider], |row| {
@@ -608,9 +622,19 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-const ATTEMPT_COLUMNS: &str = "a.id, t.reference, a.provider, a.destination, a.title, a.body, a.status, \
+const ATTEMPT_COLUMNS: &str =
+    "a.id, t.reference, a.provider, a.destination, a.title, a.body, a.status, \
      a.started_at, a.updated_at, a.failure_code, a.failure_message, a.external_id, a.locator, \
-     a.display, a.url, a.lease_expires_at, a.partition";
+     a.display, a.url, a.lease_expires_at, a.partition,
+     (SELECT j.value FROM publication_connections p
+      JOIN source_connections c ON c.id = p.connection_id
+      JOIN json_each(c.derived_configuration, '$.publication.destination_labels') j
+      WHERE p.attempt_id = a.id AND j.type = 'text'
+        AND (j.key = a.destination OR (
+            json_extract(c.derived_configuration, '$.publication.case_insensitive')
+            AND j.key = a.destination COLLATE NOCASE
+        ))
+      LIMIT 1)";
 
 /// Whether a lease has run out at `now`. Expiry is judged against the one
 /// effective clock of the call (the caller's `now`, else the database clock),
@@ -680,10 +704,12 @@ fn attempt_from_row(row: &rusqlite::Row<'_>, now: &str) -> rusqlite::Result<Publ
             }),
         provider,
         destination: row.get(3)?,
+        destination_label: row.get(17)?,
         title: row.get(4)?,
         body: row.get(5)?,
         state,
         started_at: row.get(7)?,
+        lease_expires_at: lease,
         updated_at: row.get(8)?,
         failure,
     })
@@ -830,12 +856,12 @@ fn eligibility(
             AttemptState::InFlight => {
                 format!(
                     "{reference} is already being published to {}",
-                    attempt.destination
+                    attempt.display_destination()
                 )
             }
             AttemptState::Unresolved | AttemptState::Failed | AttemptState::Succeeded => format!(
                 "an earlier attempt to publish {reference} to {} may have created an issue on {provider_name}; resolve it before creating another",
-                attempt.destination
+                attempt.display_destination()
             ),
         };
         return Ok(ineligible(IneligibleReason::AttemptOpen, message));
@@ -1165,13 +1191,21 @@ impl Workspace {
 
         // The remote write. Nothing is held open: another process may read or
         // write the workspace meanwhile and sees the attempt in flight.
-        let scoped = started.source.bind(engine);
-        let verified = started.source.check(&scoped);
-        let (result, sent) = match verified {
-            Ok(_) => (
-                scoped.publish(provider, &started.source.saved.config, &started.request),
-                true,
-            ),
+        let (result, sent) = match started.source.check(engine) {
+            Ok((scoped, checked)) => {
+                match self.claim_dispatch(&started, &checked.connection, options.now.as_deref()) {
+                    Ok(deadline) => (
+                        scoped.publish_before(
+                            provider,
+                            &started.source.saved.config,
+                            &started.request,
+                            Some(deadline),
+                        ),
+                        true,
+                    ),
+                    Err(error) => (Err(error), false),
+                }
+            }
             Err(error) => (Err(error), false),
         };
         match result {
@@ -1304,7 +1338,7 @@ impl Workspace {
             // the identity is a conflict.
             let adopt = match identity_owner(transaction, identity)? {
                 None => None,
-                Some(owner) if adoptable(&owner, &started_at) => Some(owner.ticket_id),
+                Some(owner) if adoptable(&owner, &started_at, issue) => Some(owner.ticket_id),
                 Some(owner) => {
                     return Ok(Linked::Conflict {
                         origin: owner.origin,
@@ -1331,6 +1365,70 @@ impl Workspace {
         })
     }
 
+    /// Recheck the lease and source revision immediately before handing off the write.
+    fn claim_dispatch(
+        &mut self,
+        started: &Started,
+        connection: &super::ConnectionInfo,
+        now: Option<&str>,
+    ) -> Result<std::time::Instant, SourceError> {
+        let tracker_time = connection
+            .tracker_time
+            .as_deref()
+            .filter(|time| parse_time(time).is_some());
+        if connection.publication_requires_tracker_time && tracker_time.is_none() {
+            return Err(SourceError::NotSent(
+                "the source did not confirm its clock for publication recovery".into(),
+            ));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(DISPATCH_SECONDS);
+        let claimed = crate::write_scope::run(&self.connection, |transaction| {
+            let now = clock(transaction, now)?;
+            let attempt = &started.attempt_id;
+            let changed = transaction.execute(
+                "UPDATE publication_attempts AS a
+                 SET lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', ?2, ?3)
+                 WHERE a.id = ?1 AND a.status = 'in_flight'
+                   AND julianday(a.lease_expires_at) > julianday(?2)
+                   AND EXISTS (
+                       SELECT 1 FROM publication_connections p
+                       JOIN source_connections c ON c.id = p.connection_id
+                       WHERE p.attempt_id = a.id AND c.revision = ?4
+                   )",
+                params![
+                    attempt,
+                    now,
+                    format!("+{DISPATCH_LEASE_SECONDS} seconds"),
+                    started.source.revision
+                ],
+            )?;
+            if changed == 0 {
+                return Ok(false);
+            }
+            transaction.execute(
+                "UPDATE publication_connections SET tracker_started_at = ?2 WHERE attempt_id = ?1",
+                params![attempt, tracker_time],
+            )?;
+            Ok(true)
+        });
+        match claimed {
+            Ok(true) => Ok(deadline),
+            Ok(false) => Err(SourceError::NotSent(
+                "the publication or its connection changed before the request could be sent".into(),
+            )),
+            Err(error) => {
+                tracing::warn!(
+                    source_id = %started.source.saved.id,
+                    error_kind = error.kind().code(),
+                    "could not claim a publication before dispatch"
+                );
+                Err(SourceError::NotSent(
+                    "the publication could not be recorded before sending".into(),
+                ))
+            }
+        }
+    }
+
     /// Moves an attempt that is still open to `failed` or `unresolved`, keeping
     /// the created issue when one is known. A settled attempt is never
     /// overwritten, with one exception: a creation that arrives after a person
@@ -1354,7 +1452,10 @@ impl Workspace {
             transaction.execute(
             "UPDATE publication_attempts SET status = ?2, updated_at = ?3, failure_code = ?4, failure_message = ?5, \
              external_id = COALESCE(?6, external_id), locator = COALESCE(?7, locator), display = COALESCE(?8, display), url = COALESCE(?9, url), \
-             partition = COALESCE(?11, partition) \
+             partition = COALESCE(?11, partition), \
+             lease_expires_at = CASE WHEN status = 'in_flight' AND ?2 = 'unresolved'
+                  THEN MAX(?3, strftime('%Y-%m-%dT%H:%M:%fZ', started_at, ?12))
+                  ELSE lease_expires_at END \
              WHERE id = ?1 AND (status IN ('in_flight', 'unresolved') \
                 OR (status = 'failed' AND failure_code = ?10 AND ?6 IS NOT NULL \
                     AND NOT EXISTS (SELECT 1 FROM publication_attempts o \
@@ -1371,6 +1472,7 @@ impl Workspace {
                 issue.map(|i| i.url.as_str()),
                 RULED_OUT,
                 issue.map(|i| i.reference.partition.as_str()),
+                format!("+{LEASE_SECONDS} seconds"),
             ],
         )?;
             if let Some((ticket, destination)) = first_unknown {
@@ -1445,7 +1547,8 @@ impl Workspace {
         let running = attempt.state == AttemptState::InFlight;
         let mut known = vec![format!(
             "ticketd asked {name} to create \"{}\" in {}.",
-            attempt.title, attempt.destination
+            attempt.title,
+            attempt.display_destination()
         )];
         if let Some(issue) = &attempt.issue {
             known.push(format!(
@@ -1495,17 +1598,16 @@ impl Workspace {
         let mut other_recent = Vec::new();
         let mut candidates_complete = None;
         let mut lookup_failure = None;
-        let settled = search_settled(&attempt.started_at, &now);
+        let settled = search_settled(&attempt.lease_expires_at, &now);
         let source = publication_connection(&self.connection, &attempt)?;
         if search && !running && attempt.issue.is_none() {
             let search_result = match source.as_ref() {
-                Some(source) => verified_publication_engine(engine, source).and_then(|engine| {
-                    engine.find_published(
-                        &attempt.provider,
-                        &source.saved.config,
-                        &search_for(&attempt, &source.account_key),
-                    )
-                }),
+                Some(source) => {
+                    let search = search_for(&self.connection, &attempt, &source.account_key)?;
+                    verified_publication_engine(engine, source).and_then(|engine| {
+                        engine.find_published(&attempt.provider, &source.saved.config, &search)
+                    })
+                }
                 None => Err(publication_connection_missing()),
             };
             match search_result {
@@ -1562,7 +1664,7 @@ impl Workspace {
                 } else {
                     format!(
                         "Name the issue in {} (a number or link). {name} is asked to verify it before anything is attached.",
-                        attempt.destination
+                        attempt.display_destination()
                     )
                 },
             },
@@ -1585,17 +1687,17 @@ impl Workspace {
                 } else if candidates_complete == Some(false) && !settled {
                     format!(
                         "Not possible yet: {name} may not list a just-created issue for a minute or so. Look again after {}.",
-                        ready_text(&attempt.started_at)
+                        ready_text(&attempt.lease_expires_at)
                     )
                 } else if candidates_complete == Some(false) {
                     format!(
                         "Not possible: only part of the recent issues in {} could be read.",
-                        attempt.destination
+                        attempt.display_destination()
                     )
                 } else {
                     format!(
                         "Only when {name}'s recent issues in {} can be read completely and none matches. Anything less leaves this unresolved.",
-                        attempt.destination
+                        attempt.display_destination()
                     )
                 },
             },
@@ -1609,7 +1711,7 @@ impl Workspace {
             candidates,
             other_recent,
             candidates_complete,
-            search_ready_at: search_ready_at(&attempt.started_at),
+            search_ready_at: search_ready_at(&attempt.lease_expires_at),
             lookup_failure,
             attempt,
         })
@@ -1691,13 +1793,14 @@ impl Workspace {
                         )
                         .map_err(unverified)?,
                     (None, None) => {
+                        let destination = attempt.display_destination();
+                        let message = format!(
+                            "name the issue that was created in {destination} (a number or link); ticketd never guesses it from the title",
+                        );
                         return Err(PublicationError::Mismatch {
                             reference: ticket.reference,
                             attempt_id: attempt.id,
-                            message: format!(
-                                "name the issue that was created in {} (a number or link); ticketd never guesses it from the title",
-                                attempt.destination
-                            ),
+                            message,
                         }
                         .into());
                     }
@@ -1813,14 +1916,17 @@ impl Workspace {
             })
         };
         if let Some(known) = &attempt.issue
-            && &known.identity != identity
+            && (&known.identity != identity
+                || !super::legacy_issue_origin_matches(&identity.provider, &known.url, &issue.url))
         {
             return Err(mismatch(format!(
                 "this attempt already created {}, not {}",
                 known.display, issue.display
             )));
         }
-        if attempt.issue.is_none() && predates(&issue.created_at, &attempt.started_at) {
+        let started_at = tracker_started_at(&self.connection, &attempt.id)?
+            .unwrap_or_else(|| attempt.started_at.clone());
+        if attempt.issue.is_none() && predates(&issue.created_at, &started_at) {
             return Err(mismatch(format!(
                 "{} was created before this publication began, so it cannot be its result",
                 issue.display
@@ -1876,7 +1982,7 @@ impl Workspace {
             }
             let owner = identity_owner(transaction, identity)?;
             let adopt = match &owner {
-                Some(owner) if adoptable(owner, &attempt.started_at) => {
+                Some(owner) if adoptable(owner, &attempt.started_at, issue) => {
                     Some(owner.ticket_id.clone())
                 }
                 _ => None,
@@ -1960,12 +2066,9 @@ impl Workspace {
                 source,
             })
         };
+        let search = search_for(&self.connection, attempt, &source.account_key)?;
         let found = engine
-            .find_published(
-                &attempt.provider,
-                &source.saved.config,
-                &search_for(attempt, &source.account_key),
-            )
+            .find_published(&attempt.provider, &source.saved.config, &search)
             .map_err(unverified)?;
         if !found.matches.is_empty() {
             return Err(publication(PublicationError::Candidates {
@@ -1977,18 +2080,18 @@ impl Workspace {
         if !found.complete {
             return Err(unverified(SourceError::Unavailable(format!(
                 "only part of the recent issues in {} could be read",
-                attempt.destination
+                attempt.display_destination()
             ))));
         }
         crate::write_scope::run(&self.connection, |transaction| {
             let now = clock(transaction, now)?;
             // The listing lags a creation by a few seconds, so a read this soon after
             // the create call could last have landed may miss the issue it made.
-            if !search_settled(&attempt.started_at, &now) {
+            if !search_settled(&attempt.lease_expires_at, &now) {
                 return Err(unverified(SourceError::Unavailable(format!(
                     "the issues in {} were read too soon to be conclusive, because a just-created issue may not be listed yet; look again after {}",
-                    attempt.destination,
-                    ready_text(&attempt.started_at)
+                    attempt.display_destination(),
+                    ready_text(&attempt.lease_expires_at)
                 ))));
             }
             let changed = transaction.execute(
@@ -2001,7 +2104,7 @@ impl Workspace {
                 RULED_OUT,
                 format!(
                     "Confirmed not created: the recent issues in {} were read completely and none matched, so a new attempt is safe.",
-                    attempt.destination
+                    attempt.display_destination()
                 ),
             ],
         )?;
@@ -2042,8 +2145,23 @@ fn without_retry_advice(message: &str) -> String {
 /// Failure code of an attempt a person confirmed was never created.
 const RULED_OUT: &str = "ruled_out";
 
-fn search_for(attempt: &PublicationAttempt, account: &str) -> PublicationSearch {
-    PublicationSearch {
+fn tracker_started_at(connection: &Connection, id: &str) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT tracker_started_at FROM publication_connections WHERE attempt_id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+fn search_for(
+    connection: &Connection,
+    attempt: &PublicationAttempt,
+    account: &str,
+) -> Result<PublicationSearch, Error> {
+    Ok(PublicationSearch {
         account: Some(account.to_owned()),
         request: PublishRequest {
             title: attempt.title.clone(),
@@ -2051,7 +2169,10 @@ fn search_for(attempt: &PublicationAttempt, account: &str) -> PublicationSearch 
             destination: attempt.destination.clone(),
         },
         since: search_start(&attempt.started_at),
-    }
+        tracker_since: tracker_started_at(connection, &attempt.id)?
+            .as_deref()
+            .map(search_start),
+    })
 }
 
 fn publication_connection(
@@ -2083,9 +2204,7 @@ fn verified_publication_engine(
     engine: &Engine,
     source: &super::ConfiguredSource,
 ) -> Result<Engine, SourceError> {
-    let scoped = source.bind(engine);
-    source.check(&scoped)?;
-    Ok(scoped)
+    source.check(engine).map(|(scoped, _)| scoped)
 }
 
 /// An attempt that has been persisted and is about to call the connector.
@@ -2133,6 +2252,7 @@ struct Owner {
     origin: String,
     authority: String,
     linked_at: String,
+    issue_url: String,
 }
 
 fn identity_owner(
@@ -2141,7 +2261,7 @@ fn identity_owner(
 ) -> Result<Option<Owner>, Error> {
     Ok(connection
         .query_row(
-            "SELECT i.ticket_id, i.origin, o.authority, i.linked_at FROM external_identities i \
+            "SELECT i.ticket_id, i.origin, o.authority, i.linked_at, i.url FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              WHERE i.provider = ?1 AND i.external_id = ?2",
             params![identity.provider, identity.id],
@@ -2151,6 +2271,7 @@ fn identity_owner(
                     origin: row.get(1)?,
                     authority: row.get(2)?,
                     linked_at: row.get(3)?,
+                    issue_url: row.get(4)?,
                 })
             },
         )
@@ -2161,8 +2282,12 @@ fn identity_owner(
 /// source still owns. That ticket is the same issue seen from the other side, so
 /// the published ticket takes its identity over instead of the two blocking each
 /// other forever.
-fn adoptable(owner: &Owner, attempt_started_at: &str) -> bool {
-    owner.origin == "imported"
+fn adoptable(owner: &Owner, attempt_started_at: &str, issue: &ExternalIssue) -> bool {
+    super::legacy_issue_origin_matches(
+        &issue.reference.identity.provider,
+        &owner.issue_url,
+        &issue.url,
+    ) && owner.origin == "imported"
         && owner.authority == "external"
         && matches!(
             (parse_time(&owner.linked_at), parse_time(attempt_started_at)),

@@ -1587,6 +1587,41 @@ fn attach_rechecks_eligibility_and_brings_a_closed_issues_closure() {
 }
 
 #[test]
+fn a_preflight_that_loses_its_attempt_never_dispatches_a_mutation() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Racing publication").unwrap();
+    let reference = ticket.reference.clone();
+    let path = f.path();
+    let engine = f.engine.clone();
+    f.fake.0.lock().unwrap().after_check = Some(Arc::new(move || {
+        let mut other = Workspace::open(&path).unwrap();
+        other
+            .resolve_publication(
+                &engine,
+                &reference,
+                &ResolveOptions {
+                    now: Some("2026-02-01T00:10:00Z".into()),
+                    ..not_created()
+                },
+            )
+            .unwrap();
+    }));
+    let options = PublishOptions {
+        now: Some("2026-02-01T00:00:00Z".into()),
+        ..options()
+    };
+    assert!(matches!(
+        publication_error(
+            f.workspace
+                .publish_ticket(&f.engine, &ticket.reference, &options)
+                .unwrap_err()
+        ),
+        PublicationError::Failed { .. }
+    ));
+    assert_eq!(f.created(), 0);
+}
+
+#[test]
 fn a_late_creation_after_a_not_created_verdict_reopens_the_attempt_with_the_issue() {
     let mut f = Fixture::new();
     let ticket = describe(&mut f, "Escalate", "Body");
@@ -1639,7 +1674,7 @@ fn one_clock_judges_the_lease_so_a_crashed_attempt_is_settled_consistently() {
     ));
     // After the lease the attempt settles as not created.
     let mut late = not_created();
-    late.now = Some("2000-01-01T00:05:00Z".into());
+    late.now = Some("2000-01-01T00:08:00Z".into());
     late.agent = Some("assistant".into());
     let settled = f.resolve(&ticket.reference, &late).unwrap();
     assert_eq!(settled.attempt.state, AttemptState::Failed);

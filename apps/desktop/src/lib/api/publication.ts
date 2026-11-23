@@ -31,6 +31,7 @@ export const publicationAttemptSchema = lazySchema(() =>
     reference: z.string(),
     provider: z.string(),
     destination: z.string(),
+    destination_label: z.string().optional(),
     title: z.string(),
     body: z.string(),
     state: z.enum(["in_flight", "unresolved", "failed", "succeeded"]),

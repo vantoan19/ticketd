@@ -400,7 +400,7 @@ fn removing_a_connection_preserves_work_and_only_rediscovery_resumes_sync() {
     assert!(remote.0.lock().unwrap().fetch_calls.is_empty());
 
     workspace.take_ownership(second, None).unwrap();
-    workspace
+    let reconnected = workspace
         .add_source_connection(
             &engine,
             "fake",
@@ -422,7 +422,7 @@ fn removing_a_connection_preserves_work_and_only_rediscovery_resumes_sync() {
     );
     remote.0.lock().unwrap().matching = vec![1, 2];
     let result = workspace
-        .refresh_connection(&engine, "fake", &RefreshOptions::default())
+        .refresh_connection(&engine, &reconnected.source.id, &RefreshOptions::default())
         .unwrap();
     assert!(result.imported.is_empty());
     let resumed = workspace.show_ticket(first).unwrap();

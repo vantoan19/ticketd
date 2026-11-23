@@ -55,6 +55,7 @@ impl Client {
             context,
             authorization,
             completed: Cell::new(0),
+            response_time: Cell::new(None),
         })
     }
 }
@@ -102,9 +103,14 @@ pub(crate) struct Graphql<'a> {
     context: &'a RequestContext<'a>,
     authorization: HeaderValue,
     completed: Cell<u32>,
+    response_time: Cell<Option<SystemTime>>,
 }
 
 impl Graphql<'_> {
+    pub(crate) fn response_time(&self) -> Option<SystemTime> {
+        self.response_time.get()
+    }
+
     pub(crate) fn request<T: DeserializeOwned>(
         &self,
         operation: &str,
@@ -154,6 +160,12 @@ impl Graphql<'_> {
                 };
                 ExtensionError::new(code, "could not reach the Linear API")
             })?;
+        let time = response
+            .headers()
+            .get("date")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| httpdate::parse_http_date(value).ok());
+        self.response_time.set(time);
         let status = response.status().as_u16();
         // The GraphQL read error codes do not establish when a mutation failed.
         if publishing && !(200..300).contains(&status) {

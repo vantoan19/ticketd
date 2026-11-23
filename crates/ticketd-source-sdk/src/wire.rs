@@ -194,12 +194,22 @@ pub struct WireFailure {
     pub class: ErrorClass,
     pub code: WireFailureCode,
     pub message: String,
-    /// Reserved for diagnostics. The host does not expose extension-supplied detail.
-    #[serde(rename = "detail")]
+    /// A fixed diagnostic code for local logs. Use up to 80 lower-case ASCII
+    /// letters, digits, underscores or hyphens. Never include tracker data or credentials.
     pub detail: Option<String>,
     #[serde(default)]
     pub fields: Vec<FieldIssue>,
     pub retry_after_secs: Option<u64>,
+}
+
+/// Validate a code before sending it or logging it.
+#[doc(hidden)]
+pub fn valid_failure_detail(detail: &str) -> bool {
+    !detail.is_empty()
+        && detail.len() <= 80
+        && detail.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

@@ -4,6 +4,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use super::ClosureProbes;
 use std::{collections::BTreeMap, ops::ControlFlow};
 
 use serde_json::json;
@@ -51,15 +52,6 @@ impl<T> Fixture<T> {
             "fixture requires {capability:?}"
         );
     }
-}
-
-pub(in crate::source) struct ClosureProbes {
-    pub open: ExternalRef,
-    pub completed: ExternalRef,
-    pub no_reason: ExternalRef,
-    pub unknown_reason: ExternalRef,
-    pub missing: ExternalRef,
-    pub unreadable: ExternalRef,
 }
 
 pub(in crate::source) struct CommentProbe {
@@ -145,16 +137,7 @@ pub(in crate::source) fn a_cursor_past_the_end_returns_no_issues_or_continuation
         config,
         data: past_end,
     } = D::discovery();
-    let page = connector
-        .discover(DiscoveryRequest {
-            config: &config,
-            cursor: Some(&past_end),
-            page_size: 100,
-        })
-        .unwrap();
-    assert!(page.issues.is_empty());
-    assert!(page.skipped.is_empty());
-    assert_eq!(page.next_cursor, None);
+    super::check_past_end(connector.as_ref(), &config, &past_end).unwrap();
 }
 
 pub(in crate::source) fn discovery_delivers_each_identity_once<D: Driver>() {
@@ -220,22 +203,7 @@ pub(in crate::source) fn closure_requires_positive_tracker_state<D: Driver>() {
         config,
         data,
     } = D::closures();
-    for (reference, category) in [
-        (data.open, StateCategory::Open),
-        (data.completed, StateCategory::Completed),
-        (data.no_reason, StateCategory::Unknown),
-        (data.unknown_reason, StateCategory::Unknown),
-    ] {
-        let issue = connector.fetch(&config, &reference).unwrap();
-        assert_eq!(issue.state.category, category, "{}", reference.locator);
-    }
-    for reference in [data.missing, data.unreadable] {
-        assert!(
-            connector.fetch(&config, &reference).is_err(),
-            "{}",
-            reference.locator
-        );
-    }
+    super::check_closures(connector.as_ref(), &config, &data).unwrap();
 }
 
 pub(in crate::source) fn comment_ids_survive_repeated_reads_and_edits<D: Driver>() {
@@ -510,6 +478,7 @@ pub(in crate::source) fn publication_search() -> PublicationSearch {
             body: "The ticket description as sent.".into(),
             destination: "o/r".into(),
         },
+        tracker_since: None,
         account: Some("octo".into()),
         since: SEARCH_SINCE.into(),
     }

@@ -112,9 +112,16 @@ pub(crate) fn find_published(
     search: &PublicationSearch,
 ) -> Result<PublicationCandidates, ExtensionError> {
     let team = destination(&search.request.destination)?;
-    let since = DateTime::parse_from_rfc3339(&search.since).map_err(|_| {
-        ExtensionError::configuration(vec![FieldIssue::for_field("since", "use an RFC 3339 time")])
-    })?;
+    // Device time cannot bound the tracker listing. Older attempts or missing
+    // Date headers can still return candidates, but cannot prove absence.
+    let since = search
+        .tracker_since
+        .as_deref()
+        .and_then(|time| DateTime::parse_from_rfc3339(time).ok());
+    let mut filter = json!({"team": {"id": {"eq": team}}});
+    if let Some(since) = since {
+        filter["createdAt"] = json!({"gte": since.to_rfc3339()});
+    }
     // A filtered list may be empty if the key lost access to the original team.
     destination_team(api, team)?;
     let account = search
@@ -134,7 +141,7 @@ pub(crate) fn find_published(
     for _ in 0..SEARCH_PAGES {
         let page: Page<Issue> = api.request(
             "LinearPublicationSearch",
-            json!({"team": team, "since": search.since, "first": PAGE_SIZE, "after": cursor}),
+            json!({"filter": filter, "first": PAGE_SIZE, "after": cursor}),
             &["issues"],
         )?;
         let next = page.next_cursor();
@@ -147,7 +154,7 @@ pub(crate) fn find_published(
             }
             let created_at = DateTime::parse_from_rfc3339(&issue.created_at)
                 .map_err(|_| protocol("Linear returned an invalid issue creation time"))?;
-            if created_at < since || !seen_issues.insert(issue.id) {
+            if since.is_some_and(|since| created_at < since) || !seen_issues.insert(issue.id) {
                 continue;
             }
             if normalized_text(&issue.title) == title
@@ -166,7 +173,7 @@ pub(crate) fn find_published(
         }
         match next {
             Ok(None) => {
-                found.complete = true;
+                found.complete = since.is_some();
                 break;
             }
             Ok(Some(next)) if seen_cursors.insert(next.clone()) => cursor = Some(next),

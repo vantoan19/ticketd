@@ -146,10 +146,21 @@
             "null"
           ]
         },
+        "publication_requires_tracker_time": {
+          "description": "Whether this source needs tracker time evidence before ticketd can safely publish.",
+          "type": "boolean"
+        },
         "site": {
           "description": "Canonical site identity. Empty when the provider has only one site.",
           "type": "string",
           "default": ""
+        },
+        "tracker_time": {
+          "description": "RFC 3339 time reported by the tracker during this authenticated check, when available.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -951,8 +962,15 @@
           "$ref": "#/$defs/PublishRequest"
         },
         "since": {
-          "description": "RFC 3339 instant before which the attempt cannot have created anything.",
+          "description": "The lower bound based on the device clock, in RFC 3339.",
           "type": "string"
+        },
+        "tracker_since": {
+          "description": "The lower bound based on the tracker clock immediately before the mutation, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1778,7 +1796,7 @@
           "$ref": "#/$defs/WireFailureCode"
         },
         "detail": {
-          "description": "Reserved for diagnostics. The host does not expose extension-supplied detail.",
+          "description": "A fixed diagnostic code for local logs. Use up to 80 lower-case ASCII\nletters, digits, underscores or hyphens. Never include tracker data or credentials.",
           "type": [
             "string",
             "null"

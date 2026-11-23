@@ -14,7 +14,9 @@ uses synthetic issues and makes no network requests.
 
 ```sh
 ticketd source extension link examples/ticket-source-example-ts
-ticketd source conformance example-tracker --set board=Demo --strict
+ticketd source conformance example-tracker --set board=Demo --strict \
+  --past-end-cursor fixture-end \
+  --skip-check 'typed_closure=the example fixture has no typed closure cases'
 ```
 
 The link returns the extension registration. The conformance report should have
@@ -268,6 +270,12 @@ a stable `code`, its matching `class`, and a message for the person in
 | `transient` | `rate_limited`, `unavailable`, `not_sent`        |
 | `system`    | `protocol`, `unsupported`                        |
 
+Keep the message actionable and free of private content. An optional
+`data.detail` is a fixed diagnostic code for local debug logs. Use at most 80
+lower-case ASCII letters, digits, underscores or hyphens. The host redacts
+known credentials and excludes the code from the Diagnostics ZIP. Rust
+extensions can use `ExtensionError::with_detail`.
+
 For `invalid_configuration`, `data.fields` can describe faulty inputs. For
 `rate_limited`, `data.retry_after_secs` can give an integer delay.
 `unauthenticated` opens the **Needs sign-in** flow. Use `forbidden` for known
@@ -279,7 +287,15 @@ A timeout, lost response or ambiguous tracker answer leaves publication
 unresolved. Report an appropriate `unavailable` or `protocol` error, so
 ticketd can check for a created issue before allowing another write.
 In `find_published`, report the search as complete only if you finished
-reading the relevant issues in that destination.
+reading the relevant issues in that destination and can trust the lower bound.
+A connection check can report the tracker’s current RFC 3339 `tracker_time`
+when the tracker provides it. ticketd keeps that time for the mutation and sends
+the derived `tracker_since` during recovery. A device-clock `since` alone can miss
+a committed issue if the device is ahead. With no reliable lower bound, use a
+bounded search for candidates and leave the result incomplete. A connector
+that needs this clock for safe recovery can set
+`publication_requires_tracker_time`. ticketd refuses to send a mutation if
+that check has no usable tracker time.
 
 ## Describe forms and presentation
 
@@ -308,8 +324,9 @@ current value in an operation's `config`, using a keychain reference for a saved
 credential. Treat values as request-scoped. Keep them out of files, process
 environment, results, stderr and error messages, including raw HTTP errors.
 ticketd rejects results echoing a known credential and redacts known values
-and common encodings from extension diagnostics. Recent extension stderr is
-available in local logs and the desktop Diagnostics export.
+and common encodings from extension diagnostics. Raw extension stderr can
+contain private data and stays in bounded local logs. The desktop Diagnostics
+export includes line counts for recent source log files.
 
 The extension starts in its registered folder. It inherits a restricted set of
 OS, locale, PATH, temporary-directory and proxy variables, plus those declared in
@@ -338,6 +355,8 @@ A password command is a JSON array with executable and argument strings.
 ticketd runs it directly with no shell or interactive input and waits up to
 five seconds for UTF-8 stdout. Keep secret literals out of its arguments.
 Set these variables in the environment of the CLI or the desktop launcher.
+A removed connection’s ID and environment override names stay reserved on this
+device. A replacement connection receives a new ID.
 
 On Linux, without an available Secret Service, entered credentials last until
 the ticketd process exits. Startup and refresh avoid unlock prompts.
@@ -367,12 +386,19 @@ The CLI prints a JSON report and exits with an error when a check fails.
   `locate` and recovery search. Use a dedicated test destination. The issue
   remains there for inspection.
 
-Each skipped check has a reason. Examples include a schema with no dynamic
-choices, an optional capability that is absent, and sampled pages without an
-empty continuation. A live conformance run cannot invent a valid opaque
-past-end cursor or arrange typed closure and ambiguous write outcomes.
-Cover those with controlled tracker fixtures. Publication is skipped in a
-read-only run and remains gated by `--publish` in strict mode.
+Every skipped check includes its reason. In strict mode, a check that could
+apply but needs data the suite didn't observe fails unless you provide that
+data or `--skip-check CHECK=REASON`. The option cannot turn a failed check into
+a pass. Capability inapplicability and read-only publication skips have
+automatic reasons.
+
+Use `--past-end-cursor CURSOR` for a valid opaque cursor your fixture recognizes
+after its last page. Use `--closure-probes FILE` with a JSON object whose `open`,
+`completed`, `no_reason`, `unknown_reason`, `missing` and `unreadable` keys
+each hold an `ExternalRef`. The two unrecognized closures must produce
+`unknown`, and missing or unreadable issues must fail. For a strict one-write
+run, give `publication_failure_outcomes` a skip reason and cover refusal and
+lost replies in a controlled fixture where no real issue will be created.
 
 ## Rust SDK
 

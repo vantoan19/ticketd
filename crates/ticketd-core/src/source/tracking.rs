@@ -820,7 +820,7 @@ struct Found {
 
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
-    read_conversations: bool,
+    conversation_engine: Option<Engine>,
     retry_limit: Option<u64>,
     configurations: HashMap<String, Option<CheckedConfiguration>>,
     discovery: Vec<(String, HashSet<String>)>,
@@ -1053,7 +1053,7 @@ impl Workspace {
             };
             for (source, mut batch) in batches {
                 engine.check_refresh_canceled()?;
-                if batch.read_conversations {
+                if let Some(scoped) = batch.conversation_engine.take() {
                     // The earlier connection may have imported a shared issue
                     // already. Do not read its conversation a second time.
                     let mut issues = Vec::with_capacity(batch.issues.len());
@@ -1069,7 +1069,6 @@ impl Workspace {
                         }
                     }
                     batch.issues = issues;
-                    let scoped = source.bind(engine);
                     gather_conversations(
                         &self.connection,
                         &scoped,
@@ -1107,7 +1106,6 @@ fn gather_connection(
     configured: Option<&super::ConfiguredSource>,
 ) -> Result<Gathered, Error> {
     engine.check_refresh_canceled()?;
-    let engine = configured.map(|source| source.bind(engine));
     let source_id = configured.map(|source| source.saved.id.as_str());
     let assigned = |ticket: &Tracked| {
         !ticket.removed
@@ -1120,7 +1118,7 @@ fn gather_connection(
         tracing::info_span!("source", source_id = source_id.unwrap_or(provider)).entered();
     let provider = provider.to_owned();
     let mut gathered = Gathered {
-        read_conversations: false,
+        conversation_engine: None,
         retry_limit: None,
         issues: Vec::new(),
         conversations: HashMap::new(),
@@ -1131,7 +1129,6 @@ fn gather_connection(
         partitions: HashMap::new(),
         imported_partitions: HashMap::new(),
     };
-    let engine = engine.as_ref();
     let config = configured.map(|source| &source.saved.config);
     let mut seen: HashSet<String> = HashSet::new();
     // Set when the source as a whole cannot be read, so asking for more
@@ -1142,9 +1139,13 @@ fn gather_connection(
     let mut skipped: Vec<String> = Vec::new();
     let mut read_partitions: Vec<String> = Vec::new();
     let mut skipped_partitions: Vec<String> = Vec::new();
-    let checked = configured.zip(engine).map(|(source, engine)| {
+    let mut scoped = None;
+    let checked = configured.map(|source| {
         let derived = match source.check(engine) {
-            Ok(checked) => Some(checked.derived),
+            Ok((prepared, checked)) => {
+                scoped = Some(prepared);
+                Some(checked.derived)
+            }
             Err(error) => {
                 retry_after_secs = rate_limit_hold(&error);
                 let failure = failure_of(&error);
@@ -1163,9 +1164,8 @@ fn gather_connection(
             derived,
         }
     });
-    if let Some(engine) = engine {
-        engine.check_refresh_canceled()?;
-    }
+    engine.check_refresh_canceled()?;
+    let engine = scoped.as_ref();
     if let (None, Some(config), Some(derived), Some(engine)) = (
         &options.ticket,
         config,
@@ -1325,7 +1325,9 @@ fn gather_connection(
             }
         }
     }
-    gathered.read_conversations = config.is_some() && blocked.is_none();
+    if blocked.is_none() {
+        gathered.conversation_engine = scoped;
+    }
     gathered.retry_limit = retry_after_secs;
     gathered.configurations.insert(provider.clone(), checked);
     if options.ticket.is_none() && config.is_some() {
@@ -1504,6 +1506,19 @@ fn issue_can_refresh(
     let Some(id) = ticket_for_identity(connection, identity)? else {
         return Ok(!replaced_config);
     };
+    let (url, partition): (String, Option<String>) = connection.query_row(
+        "SELECT url, partition FROM external_identities WHERE ticket_id = ?1",
+        [&id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if !super::legacy_issue_origin_matches(&identity.provider, &url, &issue.url) {
+        tracing::warn!(
+            source_id = source_id.unwrap_or_default(),
+            error_kind = "identity_conflict",
+            "source issue identity belongs to a different site"
+        );
+        return Ok(false);
+    }
     if super::connection_removed_at(connection, &id)?.is_some() {
         if replaced_config
             || !discovery.contains_key(&(identity.provider.clone(), identity.id.clone()))
@@ -1519,11 +1534,6 @@ fn issue_can_refresh(
                     && source.derived.partitions.contains(&reference.partition)
             }));
     }
-    let partition: Option<String> = connection.query_row(
-        "SELECT partition FROM external_identities WHERE ticket_id = ?1",
-        [&id],
-        |row| row.get(0),
-    )?;
     Ok(super::selected_connection(
         connection,
         &id,
@@ -1904,7 +1914,16 @@ fn apply_issue(
             // An overlapping run can deliver an observation older than one already
             // applied (the slower of two refreshes). Confirmed source state never
             // moves backwards, and an old observation confirms nothing now.
-            if !updated_at.is_empty() && issue.updated_at.as_str() < updated_at.as_str() {
+            let older = match (
+                chrono::DateTime::parse_from_rfc3339(&issue.updated_at),
+                chrono::DateTime::parse_from_rfc3339(&updated_at),
+            ) {
+                (Ok(incoming), Ok(current)) => incoming < current,
+                (Err(_), Ok(_)) => true,
+                (Ok(_), Err(_)) => false,
+                (Err(_), Err(_)) => !updated_at.is_empty() && issue.updated_at < updated_at,
+            };
+            if older {
                 return Ok(());
             }
             let previous = state_category.as_deref().map(StateCategory::parse);

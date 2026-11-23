@@ -886,8 +886,15 @@ core caches successful answers for offline routing and previews. GitHub can
 use the active GitHub CLI account, a named account already signed in with it,
 or a connection-specific token override such as `TICKETD_SOURCE_GITHUB_2_TOKEN`.
 Each request that can change authority checks the saved account and site first.
+When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its
+`TICKETD_GITHUB_API_URL` configured for the first open. The old format recorded
+no API URL. The upgrade uses the configured endpoint first, then a distinct
+known issue host if there is one.
 
-External identity remains provider plus opaque ID. A device refreshes a ticket
+External identity remains provider plus opaque ID. Historical GitHub issue IDs
+are numeric. If two GitHub sites return the same ID with different issue hosts,
+ticketd refuses to overwrite, rebind or adopt the first issue. The two issues
+cannot coexist under that legacy ID. A device refreshes a ticket
 through its local discovery connection, or the first saved connection that
 covers the issue's part. Tickets with no covering connection keep their cached
 source content. Connection settings, discovery affinity and refresh scheduling
@@ -958,8 +965,12 @@ published ticket returns it without calling the connector. The attempt remains
 readable on a restored device without the original binding. An unavailable
 connection cannot establish that the original create failed. Recovery uses the
 connection’s stable account identity to surface other issues the account created
-in the search window. Linear uses team UUIDs throughout publication and retains
-human-readable team labels in its connection’s derived configuration for preview.
+in the search window. Linear uses the tracker’s HTTP Date from the authenticated
+connection check. Core saves that time before the mutation and uses it to bound
+discovery and recovery across restarts. When the date is missing, Linear can still
+search a bounded set of issues for candidates and cannot confirm absence.
+Linear uses team UUIDs throughout publication and retains human-readable team
+labels in its connection’s derived configuration for preview.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only

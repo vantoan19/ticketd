@@ -1125,3 +1125,59 @@ test("removing a connection needs confirmation and removes only that connection"
   expect(screen.queryByRole("button", { name: "Remove Work" })).toBeNull();
   expect(screen.getByRole("button", { name: "Remove Personal" })).toBeTruthy();
 });
+
+test("Sources keeps an uninstalled provider's saved connection manageable", async () => {
+  const saved = {
+    id: "tracker",
+    name: "Archived tracker",
+    provider: "tracker",
+    account: "account",
+    config: {},
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    { ...githubSource, next_id: "github-2" },
+    {
+      connector: {
+        ...githubSource.connector,
+        name: "Fixture Tracker",
+        provider: "tracker",
+      },
+      saved,
+      unavailable: true,
+    },
+  ]);
+  vi.mocked(sourcesClient.rename).mockResolvedValue({
+    ...saved,
+    name: "Renamed tracker",
+  });
+  vi.mocked(sourcesClient.remove).mockResolvedValue(undefined);
+  render(<SourcesPage onOpen={vi.fn()} />);
+  expect(await screen.findByText("Extension unavailable")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /Add Fixture Tracker/ }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Add GitHub connection" }),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Rename Archived tracker" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: "Renamed tracker" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Remove Renamed tracker" }),
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Remove connection",
+    }),
+  );
+  await waitFor(() =>
+    expect(sourcesClient.remove).toHaveBeenCalledWith("tracker"),
+  );
+  expect(screen.queryByText("Renamed tracker")).toBeNull();
+});

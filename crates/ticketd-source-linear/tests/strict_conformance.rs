@@ -11,9 +11,13 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use ticketd_core::source::{
-    ConfigValues, ConformanceOptions, ConformanceOutcome, ExtensionRegistry, PublicationSearch,
-    PublishRequest,
+use ticketd_core::{
+    Error, Workspace,
+    source::{
+        ActionKind, ConfigValues, ConformanceOptions, ConformanceOutcome, ExtensionRegistry,
+        PublicationError, PublicationSearch, PublishOptions, PublishRequest, RefreshOptions,
+        Resolution, ResolveOptions,
+    },
 };
 
 const ENDPOINT: &str = "LINEAR_GRAPHQL_TEST_ENDPOINT";
@@ -24,6 +28,10 @@ const ISSUE_TWO: &str = "20000000-0000-4000-8000-000000000002";
 const USER: &str = "30000000-0000-4000-8000-000000000001";
 const USER_TWO: &str = "30000000-0000-4000-8000-000000000002";
 const CREATED: &str = "20000000-0000-4000-8000-000000000003";
+const LOST: &str = "20000000-0000-4000-8000-000000000004";
+const LOST_TITLE: &str = "Mutation committed before its answer was lost";
+const DEVICE_AHEAD: &str = "2025-01-03T15:20:00Z";
+const READY: &str = "2025-01-03T15:35:00Z";
 const SITE: &str = "40000000-0000-4000-8000-000000000001";
 const KEY: &str = "lin_api_synthetic_ticketd";
 const TIME: &str = "2025-01-03T09:20:00.000Z";
@@ -40,13 +48,14 @@ fn linear_passes_strict_conformance_through_the_host() {
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
         let mut created = None;
+        let mut lost = None;
         for stream in listener.incoming() {
             let stream = stream.unwrap();
-            if !serve(stream, &mut created) {
+            if !serve(stream, &mut created, &mut lost) {
                 break;
             }
         }
-        created
+        (created, lost)
     });
     let endpoint = format!("http://{address}/graphql");
     let output = Command::new(std::env::current_exe().unwrap())
@@ -58,10 +67,11 @@ fn linear_passes_strict_conformance_through_the_host() {
         .env("LINEAR_CONFORMANCE_CHILD", &endpoint)
         .env(ENDPOINT, &endpoint)
         .env("TICKETD_SOURCE_CONFORMANCE_API_KEY", KEY)
+        .env("TICKETD_SOURCE_LINEAR_API_KEY", KEY)
         .output()
         .unwrap();
     drop(TcpStream::connect(address).unwrap());
-    let created = server.join().unwrap();
+    let (created, lost) = server.join().unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",
@@ -69,6 +79,7 @@ fn linear_passes_strict_conformance_through_the_host() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(created.unwrap()["id"], CREATED);
+    assert_eq!(lost.unwrap()["id"], LOST);
 }
 
 fn verify_connector() {
@@ -132,6 +143,7 @@ fn verify_connector() {
                     destination: TEAM_TWO.into(),
                 },
                 since: TIME.into(),
+                tracker_since: Some("2025-01-03T09:19:00Z".into()),
                 account: Some(USER.into()),
             },
         )
@@ -142,6 +154,152 @@ fn verify_connector() {
     );
     assert_eq!(incomplete.matches.len(), 1);
     assert_eq!(incomplete.matches[0].reference.identity.id, ISSUE_TWO);
+    recover_lost_publication(&registry, root.path(), &bare_teams);
+}
+
+fn recover_lost_publication(registry: &ExtensionRegistry, root: &Path, config: &ConfigValues) {
+    let path = root.join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let engine = registry.engine().unwrap();
+    workspace
+        .add_source_connection(&engine, "linear", None, None, config)
+        .unwrap();
+    let reference = workspace.create_ticket(LOST_TITLE).unwrap().reference;
+    let options = PublishOptions {
+        provider: "linear".into(),
+        destination: Some(TEAM_TWO.into()),
+        now: Some(DEVICE_AHEAD.into()),
+        ..Default::default()
+    };
+    assert!(matches!(
+        workspace.publish_ticket(&engine, &reference, &options),
+        Err(Error::Publication(PublicationError::Unresolved { .. }))
+    ));
+    drop(workspace);
+    let mut workspace = Workspace::open(path).unwrap();
+
+    let report = workspace
+        .refresh_connection(
+            &engine,
+            "linear",
+            &RefreshOptions {
+                ticket: None,
+                now: Some(READY.into()),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        report.imported.len(),
+        2,
+        "a refresh must reserve the uncertain issue"
+    );
+    let review = workspace
+        .review_publication_at(&engine, &reference, true, Some(READY))
+        .unwrap();
+    assert_eq!(review.candidates.len(), 1, "{review:?}");
+    assert_eq!(review.candidates[0].identity.id, LOST);
+    assert_eq!(review.attempt.destination, TEAM_TWO);
+    assert_eq!(
+        review.attempt.destination_label.as_deref(),
+        Some("Second Team (SECOND)")
+    );
+    assert!(review.known[0].contains("Second Team (SECOND)"));
+    assert!(!review.known[0].contains(TEAM_TWO));
+    assert!(
+        review
+            .actions
+            .iter()
+            .any(|action| action.kind == ActionKind::NotCreated && !action.available)
+    );
+    assert!(matches!(
+        workspace.publish_ticket(
+            &engine,
+            &reference,
+            &PublishOptions {
+                now: Some(READY.into()),
+                ..options
+            }
+        ),
+        Err(Error::Publication(PublicationError::Ineligible { .. }))
+    ));
+    assert!(matches!(
+        workspace.resolve_publication(
+            &engine,
+            &reference,
+            &ResolveOptions {
+                resolution: Resolution::Attach { issue: Some("#1".into()) },
+                now: Some(READY.into()),
+                agent: None,
+                accept_different_content: true,
+            },
+        ),
+        Err(Error::Publication(PublicationError::Mismatch { message, .. }))
+            if message.contains("created before this publication began")
+    ));
+    let candidates_without_tracker_time = engine
+        .for_connection("linear", "linear", config)
+        .find_published(
+            "linear",
+            config,
+            &PublicationSearch {
+                request: PublishRequest {
+                    destination: TEAM_TWO.into(),
+                    title: LOST_TITLE.into(),
+                    body: String::new(),
+                },
+                since: DEVICE_AHEAD.into(),
+                tracker_since: None,
+                account: Some(USER.into()),
+            },
+        )
+        .unwrap();
+    assert!(!candidates_without_tracker_time.complete);
+    assert_eq!(
+        candidates_without_tracker_time.matches[0]
+            .reference
+            .identity
+            .id,
+        LOST
+    );
+
+    let result = workspace
+        .resolve_publication(
+            &engine,
+            &reference,
+            &ResolveOptions {
+                resolution: Resolution::Attach {
+                    issue: Some("https://linear.app/fixture/issue/SECOND-3".into()),
+                },
+                now: Some(READY.into()),
+                agent: None,
+                accept_different_content: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(result.ticket.reference, reference);
+    assert_eq!(result.attempt.issue.unwrap().identity.id, LOST);
+
+    let ticket = workspace.create_ticket("Untrusted tracker time").unwrap();
+    let error = workspace
+        .publish_ticket(
+            &engine,
+            &ticket.reference,
+            &PublishOptions {
+                provider: "linear".into(),
+                destination: Some(TEAM_TWO.into()),
+                now: Some(DEVICE_AHEAD.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Publication(PublicationError::Failed { .. })
+    ));
+    assert!(
+        error.to_string().contains("did not confirm its clock"),
+        "{error}"
+    );
 }
 
 fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues, publish: Option<&str>) {
@@ -152,6 +310,19 @@ fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues, publi
             &ConformanceOptions {
                 strict: true,
                 publish: publish.map(str::to_owned),
+                past_end_cursor: Some("fixture-end".into()),
+                skip_reasons: [
+                    (
+                        "typed_closure".into(),
+                        "this fixture does not model all typed states".into(),
+                    ),
+                    (
+                        "publication_failure_outcomes".into(),
+                        "the lost-mutation fixture runs separately".into(),
+                    ),
+                ]
+                .into(),
+                ..ConformanceOptions::default()
             },
         )
         .unwrap();
@@ -208,7 +379,7 @@ fn teams() -> Vec<Value> {
     ]
 }
 
-fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
+fn serve(stream: TcpStream, created: &mut Option<Value>, lost: &mut Option<Value>) -> bool {
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap() == 0 {
@@ -237,8 +408,14 @@ fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
     let variables = &request["variables"];
     let after = variables["after"].as_str();
     let fields = match request["operationName"].as_str().unwrap() {
-        "LinearConnection" => json!({"viewer": {"id": USER, "displayName": "Fixture User"},
-                   "organization": {"id": SITE}}),
+        "LinearConnection" => {
+            let fields = json!({"viewer": {"id": USER, "displayName": "Fixture User"},
+                   "organization": {"id": SITE}});
+            if lost.is_some() {
+                return respond_with_clock(stream, fields, None);
+            }
+            fields
+        }
         "LinearConfiguredTeams" => {
             assert_eq!(variables["teams"], json!([TEAM, TEAM_TWO]));
             json!({"teams": page(teams(), None)})
@@ -271,10 +448,28 @@ fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
             json!({"issues": match after {
                 None => page(vec![], Some("issues")),
                 Some("issues") if variables["first"] == 1 => page(vec![issue(ISSUE, TEAM, "TST-1")], Some("more-issues")),
-                Some("issues") => page(vec![issue(ISSUE, TEAM, "TST-1"), issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")], None),
+                Some("issues") => page(
+                    [issue(ISSUE, TEAM, "TST-1"), issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")]
+                        .into_iter().chain(lost.iter().cloned()).collect(),
+                    None,
+                ),
+                Some("fixture-end") => page(vec![], None),
                 Some("more-issues") => page(vec![issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")], None),
                 _ => unreachable!(),
             }})
+        }
+        "LinearPublish" if variables["input"]["title"] == LOST_TITLE => {
+            assert!(
+                lost.is_none(),
+                "ticketd must never repeat an uncertain mutation"
+            );
+            assert_eq!(variables["input"]["teamId"], TEAM_TWO);
+            let mut result = issue(LOST, TEAM_TWO, "SECOND-3");
+            result["title"] = json!(LOST_TITLE);
+            result["description"] = variables["input"]["description"].clone();
+            *lost = Some(result);
+            // The issue is durable, while the connection closes without a response.
+            return true;
         }
         "LinearPublish" => {
             assert!(
@@ -304,19 +499,41 @@ fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
             json!({"issueCreate": {"success": true, "issue": result}})
         }
         "LinearLocate" => {
-            assert_eq!(variables["id"], "SECOND-2");
-            json!({"issue": created.as_ref().unwrap()})
+            let found = match variables["id"].as_str() {
+                Some("SECOND-1") => {
+                    let mut old = issue(ISSUE_TWO, TEAM_TWO, "SECOND-1");
+                    old["createdAt"] = json!("2025-01-03T08:20:00Z");
+                    old
+                }
+                Some("SECOND-2") => created.clone().unwrap(),
+                Some("SECOND-3") => lost.clone().unwrap(),
+                _ => unreachable!(),
+            };
+            json!({"issue": found})
         }
         "LinearDestinationTeam" => {
             assert_eq!(variables["team"], TEAM_TWO);
             json!({"team": &teams()[1]})
         }
         "LinearPublicationSearch" => {
-            assert_eq!(variables["team"], TEAM_TWO);
-            assert!(
-                chrono::DateTime::parse_from_rfc3339(variables["since"].as_str().unwrap()).is_ok()
-            );
-            if variables["since"] == TIME {
+            let filter = &variables["filter"];
+            assert_eq!(filter["team"]["id"]["eq"], TEAM_TWO);
+            let since = filter["createdAt"]["gte"]
+                .as_str()
+                .map(|since| chrono::DateTime::parse_from_rfc3339(since).unwrap());
+            if let Some(lost) = lost.as_ref() {
+                let after_cutoff = since.is_none_or(|since| {
+                    chrono::DateTime::parse_from_rfc3339(TIME).unwrap() >= since
+                });
+                return respond(
+                    stream,
+                    json!({
+                        "issues": page(if after_cutoff { vec![lost.clone()] } else { vec![] }, None)
+                    }),
+                );
+            }
+            if since == Some(chrono::DateTime::parse_from_rfc3339("2025-01-03T09:19:00Z").unwrap())
+            {
                 return respond(
                     stream,
                     json!({"issues": match after {
@@ -341,7 +558,9 @@ fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
             json!({"issue": issue})
         }
         "LinearComments" => {
-            assert_eq!(variables["id"], ISSUE);
+            if variables["id"] != ISSUE {
+                return respond(stream, json!({"issue": {"comments": page(vec![], None)}}));
+            }
             let row = |id| json!({"id": id, "body": "A comment", "createdAt": TIME, "updatedAt": TIME, "url": "https://linear.app/fixture/issue/TST-1"});
             json!({"issue": {"comments": match after {
                 None => page(vec![row("50000000-0000-4000-8000-000000000001")], Some("more-comments")),
@@ -350,7 +569,6 @@ fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
             }}})
         }
         "LinearHistory" => {
-            assert_eq!(variables["id"], ISSUE);
             assert_eq!(after, None);
             json!({"issue": {"history": page(vec![], None)}})
         }
@@ -359,8 +577,13 @@ fn serve(stream: TcpStream, created: &mut Option<Value>) -> bool {
     respond(stream, fields)
 }
 
-fn respond(mut stream: TcpStream, fields: Value) -> bool {
+fn respond(stream: TcpStream, fields: Value) -> bool {
+    respond_with_clock(stream, fields, Some("Fri, 03 Jan 2025 09:20:00 GMT"))
+}
+
+fn respond_with_clock(mut stream: TcpStream, fields: Value, clock: Option<&str>) -> bool {
     let data = json!({"data": fields}).to_string();
-    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{data}", data.len()).unwrap();
+    let date = clock.map_or_else(String::new, |date| format!("Date: {date}\r\n"));
+    write!(stream, "HTTP/1.1 200 OK\r\n{date}Content-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{data}", data.len()).unwrap();
     true
 }

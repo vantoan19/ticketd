@@ -17,7 +17,7 @@ use crate::{
     wire::{
         Call, CancelNotification, Description, Failure, JsonRpc, LINE_LIMIT, ProgressMethod,
         ProgressNotification, ProgressParams, REQUEST_CANCELED, Request, ResultValue, RpcError,
-        Success, WireFailure,
+        Success, WireFailure, valid_failure_detail,
     },
 };
 
@@ -109,6 +109,7 @@ pub trait Extension: Send + Sync + 'static {
 pub struct ExtensionError {
     code: ErrorCode,
     message: String,
+    detail: Option<&'static str>,
     fields: Vec<FieldIssue>,
     retry_after_secs: Option<u64>,
 }
@@ -118,6 +119,7 @@ impl ExtensionError {
         Self {
             code,
             message: message.into(),
+            detail: None,
             fields: Vec::new(),
             retry_after_secs: None,
         }
@@ -147,6 +149,13 @@ impl ExtensionError {
         )
     }
 
+    /// Attach a fixed diagnostic code for local logs, separate from the person-facing message.
+    /// Never use tracker error text, credentials or issue content here.
+    pub fn with_detail(mut self, detail: &'static str) -> Self {
+        self.detail = valid_failure_detail(detail).then_some(detail);
+        self
+    }
+
     pub fn code(&self) -> ErrorCode {
         self.code
     }
@@ -166,7 +175,7 @@ impl ExtensionError {
                 class,
                 code: self.code,
                 message: self.message,
-                detail: None,
+                detail: self.detail.map(str::to_owned),
                 fields: self.fields,
                 retry_after_secs: self.retry_after_secs,
             }),

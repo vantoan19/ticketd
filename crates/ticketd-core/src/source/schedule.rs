@@ -20,10 +20,10 @@ use std::{
     borrow::BorrowMut,
     collections::HashMap,
     sync::{Arc, Condvar, Mutex, MutexGuard},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use super::{Engine, RefreshOptions, RefreshReport, SourceError};
+use super::{Engine, RefreshControl, RefreshOptions, RefreshReport, SourceError};
 use crate::{Error, Workspace};
 
 /// A source of "now" in whole seconds since the Unix epoch.
@@ -56,6 +56,20 @@ impl Default for RefreshPolicy {
             interval_secs: 300,
             max_backoff_secs: 3600,
         }
+    }
+}
+
+impl RefreshPolicy {
+    fn delay_after_run(self, failures: &mut u32, failed: bool, retry_after: u64) -> u64 {
+        if !failed {
+            *failures = 0;
+            return self.interval_secs;
+        }
+        *failures = failures.saturating_add(1);
+        self.interval_secs
+            .saturating_mul(1_u64 << (*failures).min(20))
+            .min(self.max_backoff_secs)
+            .max(retry_after)
     }
 }
 
@@ -165,7 +179,7 @@ impl RefreshCoordinator {
         &self,
         work: impl FnOnce() -> Result<RefreshReport, Error>,
     ) -> Result<RefreshReport, Error> {
-        self.run_explicit(true, work)
+        self.run_explicit(true, None, work)
     }
 
     /// Like [`Self::run_now`]. A run that covers one ticket only (`feeds_schedule`
@@ -174,15 +188,26 @@ impl RefreshCoordinator {
     fn run_explicit(
         &self,
         feeds_schedule: bool,
+        control: Option<&RefreshControl>,
         work: impl FnOnce() -> Result<RefreshReport, Error>,
     ) -> Result<RefreshReport, Error> {
         {
             let mut state = self.lock();
             while state.running {
-                state = self
-                    .idle
-                    .wait(state)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state = if let Some(control) = control {
+                    control.check()?;
+                    self.idle
+                        .wait_timeout(state, Duration::from_millis(100))
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .0
+                } else {
+                    self.idle
+                        .wait(state)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                };
+            }
+            if let Some(control) = control {
+                control.check()?;
             }
             state.running = true;
         }
@@ -200,27 +225,21 @@ impl RefreshCoordinator {
     ) -> Result<RefreshReport, Error> {
         let _running = Running(self);
         let result = work();
-        let now = self.clock.now_secs();
-        let mut state = self.lock();
-        match &result {
-            Ok(report) if !report.interrupted_by_source() => {
-                state.failures = 0;
-                state.next_due = now + self.policy.interval_secs;
-            }
-            other => {
-                state.failures = state.failures.saturating_add(1);
-                let doubled = self
-                    .policy
-                    .interval_secs
-                    .saturating_mul(1_u64 << state.failures.min(20));
-                let mut wait = doubled.min(self.policy.max_backoff_secs);
-                if let Ok(report) = other {
-                    wait = wait.max(report.retry_after_secs().unwrap_or(0));
-                }
-                state.next_due = now + wait;
-            }
+        if !matches!(result, Err(Error::Source(SourceError::RefreshCanceled))) {
+            let mut state = self.lock();
+            let failed = result
+                .as_ref()
+                .map_or(true, RefreshReport::interrupted_by_source);
+            let retry_after = result
+                .as_ref()
+                .ok()
+                .and_then(RefreshReport::retry_after_secs)
+                .unwrap_or(0);
+            let wait = self
+                .policy
+                .delay_after_run(&mut state.failures, failed, retry_after);
+            state.next_due = self.clock.now_secs().saturating_add(wait);
         }
-        drop(state);
         result
     }
 
@@ -309,7 +328,7 @@ impl RefreshCoordinator {
         connection: Option<&str>,
         ticket: Option<&str>,
     ) -> Result<RefreshReport, Error> {
-        self.run_explicit(false, || {
+        self.run_explicit(false, engine.refresh_control(), || {
             let mut workspace = open()?;
             let workspace = workspace.borrow_mut();
             let options = RefreshOptions {
@@ -356,21 +375,13 @@ impl RefreshCoordinator {
                     failure.connection_id.as_deref() == Some(id) && failure.interrupts()
                 })
             });
-            let wait = if failure.is_some() || result.is_err() {
-                schedule.failures = schedule.failures.saturating_add(1);
-                self.policy
-                    .interval_secs
-                    .saturating_mul(1_u64 << schedule.failures.min(20))
-                    .min(self.policy.max_backoff_secs)
-                    .max(
-                        failure
-                            .and_then(|failure| failure.retry_after_secs)
-                            .unwrap_or(0),
-                    )
-            } else {
-                schedule.failures = 0;
-                self.policy.interval_secs
-            };
+            let wait = self.policy.delay_after_run(
+                &mut schedule.failures,
+                failure.is_some() || result.is_err(),
+                failure
+                    .and_then(|failure| failure.retry_after_secs)
+                    .unwrap_or(0),
+            );
             schedule.next_due = now.saturating_add(wait);
         }
     }

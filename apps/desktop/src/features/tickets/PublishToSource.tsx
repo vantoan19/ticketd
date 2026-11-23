@@ -55,7 +55,9 @@ export function LocalPublication({
   const attempt = ticket.publication;
   if (attempt?.state === "in_flight")
     return (
-      <small className="rail-note">Publishing to {attempt.destination}…</small>
+      <small className="rail-note">
+        Publishing to {attempt.destination_label ?? attempt.destination}…
+      </small>
     );
   if (attempt)
     return (
@@ -145,8 +147,11 @@ export function PublicationNotice({
       <AlertTitle level={3}>Publish outcome unknown</AlertTitle>
       <AlertDescription>
         {providerName(attempt.provider, entries)} may have created an issue in{" "}
-        <span className="source-number">{attempt.destination}</span> when you
-        published <span className="source-number">{attempt.reference}</span> at{" "}
+        <span className="source-number">
+          {attempt.destination_label ?? attempt.destination}
+        </span>{" "}
+        when you published{" "}
+        <span className="source-number">{attempt.reference}</span> at{" "}
         {formatDateTime(attempt.started_at)}. This ticket stays Local until the
         outcome is settled.
       </AlertDescription>

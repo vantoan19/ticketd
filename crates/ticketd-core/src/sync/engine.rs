@@ -352,13 +352,24 @@ fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<
     else {
         return Ok(None);
     };
-    Ok(connection
+    let holder: Option<(String, String)> = connection
         .query_row(
-            "SELECT ticket_id FROM external_identities WHERE provider = ?1 AND external_id = ?2 AND ticket_id != ?3",
+            "SELECT ticket_id, url FROM external_identities WHERE provider = ?1 AND external_id = ?2 AND ticket_id != ?3",
             params![provider, external, record.id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()?)
+        .optional()?;
+    let Some((ticket, stored_url)) = holder else {
+        return Ok(None);
+    };
+    if let Some(incoming_url) = field("source_url")
+        && !crate::source::legacy_issue_origin_matches(provider, &stored_url, incoming_url)
+    {
+        return Err(Error::SyncFile(
+            "the legacy issue identifier is already used by an issue at a different site".into(),
+        ));
+    }
+    Ok(Some(ticket))
 }
 
 /// Take the source fields off a ticket and make it a Duplicate of `canonical`,

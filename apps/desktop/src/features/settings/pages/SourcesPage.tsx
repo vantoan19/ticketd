@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { StatusLabel } from "@/components/ui/status-label";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -151,13 +152,19 @@ export function SourcesPage({
                           {entry.development && (
                             <Badge variant="experimental">Development</Badge>
                           )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onOpen(id)}
-                          >
-                            Configure
-                          </Button>
+                          {entry.unavailable ? (
+                            <StatusLabel tone="attention">
+                              Extension unavailable
+                            </StatusLabel>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onOpen(id)}
+                            >
+                              Configure
+                            </Button>
+                          )}
                           <Button
                             size="icon-sm"
                             variant="ghost"

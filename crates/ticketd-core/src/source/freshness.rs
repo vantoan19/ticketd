@@ -292,6 +292,10 @@ fn health_of(
 impl Workspace {
     /// Each saved or previously run source's persisted status, by provider.
     pub fn source_statuses(&self) -> Result<Vec<SourceStatus>, Error> {
+        self.read(Self::read_source_statuses)
+    }
+
+    fn read_source_statuses(&self) -> Result<Vec<SourceStatus>, Error> {
         let mut statement = self.connection.prepare(
             "SELECT c.provider, s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message,
                     s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, c.id

@@ -965,6 +965,28 @@ test("connecting the source in Settings makes a local ticket publishable without
   await screen.findByRole("button", { name: /Publish to GitHub/ });
 });
 
+test("publication notices show the saved destination label instead of its UUID", async () => {
+  const destination = "10000000-0000-4000-8000-000000000001";
+  const labelled = attempt({
+    provider: "linear",
+    destination,
+    destination_label: "Platform Team (PLAT)",
+  });
+  reviewAnswers(
+    review({ attempt: labelled, provider_name: "Linear", known: [] }),
+  );
+  render(
+    <PublicationNotice
+      ticket={ticket({ publication: labelled })}
+      refresh={vi.fn(async () => {})}
+    />,
+  );
+  const panel = screen.getByRole("region", { name: "Publish outcome unknown" });
+  expect(within(panel).getByText("Platform Team (PLAT)")).toBeTruthy();
+  await within(panel).findByText(/Checked Linear just now/);
+  expect(panel.textContent).not.toContain(destination);
+});
+
 test("the inline unresolved panel keeps retry disabled after dismissing a candidate and can check again", async () => {
   const candidate = {
     identity: { provider: "github", id: "99" },

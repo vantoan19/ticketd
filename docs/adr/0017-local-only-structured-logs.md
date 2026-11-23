@@ -46,9 +46,9 @@ spans and never install a subscriber. Only the two binaries do, through the
   safe way to attach them to a GitHub issue.
 - **Source extension stderr.** The CLI and desktop keep stderr in two local
   files of up to 256 KiB per connection. The source host redacts known secret
-  values before writing bytes. The Diagnostics export includes recent files
-  under `logs/sources/`, with the same known-value redaction applied to the
-  rest of the export.
+  values before writing bytes. Because extensions can still print private
+  content, the Diagnostics export includes only a line count for each recent
+  file under `logs/sources/`.
 - **Recent errors and the export read the files.** `recent_errors()` groups the
   warnings and errors of the last 7 days of files (by the date in the file name) by
   target and error kind, so it covers earlier runs and any line written by other code

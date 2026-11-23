@@ -444,12 +444,16 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
 - If an issue disappears or becomes unavailable, ticketd keeps its status, content,
   and local work and shows a warning. **Take ownership** makes it local and stops
   synchronization.
+- A saved connection remains in Sources when its extension is uninstalled.
+  You can rename or remove it while the extension is unavailable.
 - Remove a connection in Settings → Sources or with
   `ticketd source CONNECTION remove`. Its tickets keep their external identity,
   last synced content, status and local work, and show **Connection removed** on
   this desktop. Discovery of the same issue through a covering connection resumes
   sync unless you took ownership. Any unresolved publication stays recorded
   and continues to block a second create.
+- Extension stderr stays in bounded local logs with known credentials redacted.
+  The Diagnostics export includes line counts from recent source connection logs.
 - Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
   to find its ID. When several connections can publish, pass
   `ticketd source publish T-XYZ --connection CONNECTION --preview`.
