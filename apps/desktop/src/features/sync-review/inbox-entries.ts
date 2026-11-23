@@ -4,6 +4,8 @@ import {
   type ConflictSummary,
   type Notice,
 } from "@/lib/sync-review-api";
+import type { SyncProvider } from "@/lib/sync-api";
+import { useSyncStatus } from "@/features/sync/sync-status";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import { fieldList } from "./labels";
 
@@ -20,7 +22,7 @@ export type SyncEntry = {
   conflict?: ConflictSummary;
   icon: "review" | "dependency" | "file";
   /**
-   * A notice about a Drive file: its summary names a path and wraps rather
+   * A notice about a file in the sync storage: its summary names a path and wraps rather
    * than being cut off.
    */
   file?: true;
@@ -44,48 +46,64 @@ type FileNotice = Extract<
   { kind: "unreadable_file" | "replaced_file" | "oversized_record" }
 >;
 
-const fileSummary: Record<
-  FileNotice["kind"],
-  [string, (n: FileNotice) => string]
+/** How a file notice names the stored file and where its earlier versions are kept. */
+const FILE_WORDS: Record<
+  SyncProvider,
+  { unreadable: string; replaced: string; history: string }
 > = {
-  unreadable_file: [
-    "A Drive file could not be read",
-    (n) => `${n.path} was skipped · ${n.reason}`,
-  ],
-  replaced_file: [
-    "A Drive file was replaced",
-    (n) =>
-      `${n.path} could not be read and was replaced by this desktop's version · ${n.reason} · the earlier file is in Drive's version history`,
-  ],
-  oversized_record: [
-    "A record is too large to sync",
-    (n) => `${n.path} was not uploaded · ${n.reason} · shorten it to sync it`,
-  ],
+  google_drive: {
+    unreadable: "A Drive file could not be read",
+    replaced: "A Drive file was replaced",
+    history: "the earlier file is in Drive's version history",
+  },
+  s3: {
+    unreadable: "An S3 object could not be read",
+    replaced: "An S3 object was replaced",
+    history: "the earlier object is in the bucket's version history",
+  },
 };
 
 /** A file notice opens the Ticket it belongs to when that Ticket is here. */
-function fromFileNotice(notice: FileNotice): SyncEntry {
-  const [title, summary] = fileSummary[notice.kind];
+function fromFileNotice(
+  notice: FileNotice,
+  provider: SyncProvider | undefined,
+): SyncEntry {
+  const words = FILE_WORDS[provider ?? "google_drive"];
+  const [title, summary] =
+    notice.kind === "unreadable_file"
+      ? [words.unreadable, `${notice.path} was skipped · ${notice.reason}`]
+      : notice.kind === "replaced_file"
+        ? [
+            words.replaced,
+            `${notice.path} could not be read and was replaced by this desktop's version · ${notice.reason} · ${words.history}`,
+          ]
+        : [
+            "A record is too large to sync",
+            `${notice.path} was not uploaded · ${notice.reason} · shorten it to sync it`,
+          ];
   return {
     id: notice.id,
     timestamp: notice.timestamp,
     read: notice.read,
     reference: notice.ticket_reference ?? null,
     title,
-    summary: summary(notice),
+    summary,
     icon: "file",
     file: true,
   };
 }
 
-function fromNotice(notice: Notice): SyncEntry {
+function fromNotice(
+  notice: Notice,
+  provider: SyncProvider | undefined,
+): SyncEntry {
   const { id, timestamp, read } = notice;
   if (
     notice.kind === "unreadable_file" ||
     notice.kind === "replaced_file" ||
     notice.kind === "oversized_record"
   )
-    return fromFileNotice(notice);
+    return fromFileNotice(notice, provider);
   if (notice.kind === "parent_removed")
     return {
       id,
@@ -118,15 +136,17 @@ export function useSyncEntries(revision: number): {
   const [entries, setEntries] = useState<SyncEntry[]>([]);
   const [tick, setTick] = useState(0);
   const change = useWorkspaceChange();
+  const provider = useSyncStatus().status?.provider;
   useEffect(() => {
     let active = true;
     Promise.all([syncReview.conflicts(), syncReview.notices()]).then(
       ([conflicts, notices]) => {
         if (!active) return;
         setEntries(
-          [...conflicts.map(fromConflict), ...notices.map(fromNotice)].sort(
-            (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
-          ),
+          [
+            ...conflicts.map(fromConflict),
+            ...notices.map((notice) => fromNotice(notice, provider)),
+          ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)),
         );
       },
       () => {
@@ -136,7 +156,7 @@ export function useSyncEntries(revision: number): {
     return () => {
       active = false;
     };
-  }, [change, tick, revision]);
+  }, [change, tick, revision, provider]);
   const reload = useCallback(() => setTick((value) => value + 1), []);
   return { entries, reload };
 }

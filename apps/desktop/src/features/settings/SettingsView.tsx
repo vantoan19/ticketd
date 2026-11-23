@@ -14,6 +14,7 @@ import { CommandLinePage } from "@/features/settings/pages/CommandLinePage";
 import { DiagnosticsPage } from "@/features/settings/pages/DiagnosticsPage";
 import { ExportPage } from "@/features/settings/pages/ExportPage";
 import { GoogleDrivePage } from "@/features/settings/pages/GoogleDrivePage";
+import { WorkspaceSyncPage } from "@/features/settings/pages/WorkspaceSyncPage";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 import { LocationPage } from "@/features/settings/pages/LocationPage";
 import {
@@ -103,7 +104,10 @@ export function SettingsView({
       {selected === "agent-skills" && <AgentSkillsPage />}
       {selected === "chat" && <ChatPage />}
       {selected === "automations" && <AutomationsPage />}
-      {selected === "google-drive" && <GoogleDrivePage onReplaced={replaced} />}
+      {selected === "workspace-sync" && (
+        <WorkspaceSyncPage onReplaced={replaced} />
+      )}
+      {selected === "google-drive" && <GoogleDrivePage />}
       {selected === "keyboard-shortcuts" && <KeyboardShortcutsPage />}
       {selected === "diagnostics" && <DiagnosticsPage />}
       {selected === "about" && <AboutPage />}

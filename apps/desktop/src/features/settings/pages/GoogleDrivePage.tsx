@@ -1,27 +1,80 @@
-import { SyncSettings } from "@/features/sync/SyncSettings";
-import { useSyncStatus } from "@/features/sync/sync-status";
-import { sectionMeta } from "@/features/settings/settings-sections";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { DriveSetupNotice } from "@/features/attachments/DriveSetupNotice";
 import {
-  AppliesRightAway,
-  SettingsPage,
-} from "@/features/settings/layout/SettingsPage";
+  SettingsList,
+  SettingsRow,
+} from "@/features/settings/layout/SettingsList";
+import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import { sectionMeta } from "@/features/settings/settings-sections";
+import { useSettingsState } from "@/features/settings/use-settings-state";
+import { attachments, type DriveConfiguration } from "@/lib/api/attachments";
 
-export function GoogleDrivePage({
-  onReplaced,
-}: {
-  /** Called after a download replaced this Workspace. */
-  onReplaced: () => Promise<void>;
-}) {
-  const { status } = useSyncStatus();
-  // Once syncing, the desktop's name and options save as they change.
-  const settled = status?.connection === "connected" && !status.first_sync;
+/**
+ * Settings › Google Drive: what Google Drive does for attachments. Syncing the
+ * Workspace is its own page, whichever storage it uses.
+ */
+export function GoogleDrivePage() {
+  const { openPage } = useSettingsState();
+  const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
+    null,
+  );
+  useEffect(() => {
+    let current = true;
+    attachments
+      .driveConfiguration()
+      .then((read) => {
+        if (current) setConfiguration(read);
+      })
+      .catch(() => {
+        // The attachment picker still reports why Drive cannot start.
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
   return (
     <SettingsPage
       {...sectionMeta("google-drive")}
-      lede="Keep this workspace in sync between your desktops through a folder in your own Google Drive."
-      {...(settled && { endSlot: <AppliesRightAway /> })}
+      lede="Attach files from your Google Drive, or keep new uploads there. ticketd only sees the files you choose."
     >
-      <SyncSettings onReplaced={onReplaced} />
+      <div className="mt-6">
+        {configuration && !configuration.configured && (
+          <DriveSetupNotice configuration={configuration} />
+        )}
+        <SettingsList>
+          <SettingsRow
+            title="Attach from Drive"
+            description="Choose Google Drive in the attachment picker. You sign in with Google the first time."
+          />
+          <SettingsRow
+            title="Upload destination"
+            description="New uploads can go to a folder in your Drive instead of this computer."
+            trailing={
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openPage("attachments")}
+              >
+                Open Attachments
+              </Button>
+            }
+          />
+          <SettingsRow
+            title="Workspace sync"
+            description="Keeping this workspace on every desktop has its own page, for Google Drive or S3."
+            trailing={
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openPage("workspace-sync")}
+              >
+                Open Workspace sync
+              </Button>
+            }
+          />
+        </SettingsList>
+      </div>
     </SettingsPage>
   );
 }

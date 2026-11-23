@@ -57,7 +57,7 @@ const open = () =>
   );
 
 beforeEach(() => {
-  stored = { local: versions, drive: [] };
+  stored = { local: versions, drive: [], s3: [] };
   vi.mocked(syncReview.versions).mockImplementation(
     async ({ source }) => stored[source],
   );
@@ -190,10 +190,13 @@ test("a Drive listing that fails is reported, not shown as no versions", async (
   expect(screen.queryByText("No earlier versions")).toBeNull();
 });
 
-const connected = (view: ReactNode) => (
+const connected = (
+  view: ReactNode,
+  provider: "google_drive" | "s3" = "google_drive",
+) => (
   <SyncStatusContext
     value={{
-      status: syncStatus(),
+      status: syncStatus({ provider }),
       apply: () => {},
       refresh: () => Promise.reject(new Error("unused")),
       openSettings: () => {},
@@ -311,4 +314,55 @@ test("Restore cannot be submitted twice, and restoring the same version again is
   const [first, second] = vi.mocked(syncReview.restore).mock.calls;
   expect(first?.[2]).toBeTruthy();
   expect(second?.[2]).toBe(first?.[2]);
+});
+
+test("an S3 binding reads, names and restores the bucket's versions, and never says Drive", async () => {
+  stored.s3 = [
+    { id: "ver-9", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  render(connected(history, "s3"));
+  const list = within(
+    await screen.findByRole("navigation", { name: "Versions" }),
+  );
+  fireEvent.click(list.getByRole("button", { name: "Older versions from S3" }));
+  const older = await list.findByRole("button", { name: /S3$/ });
+  expect(syncReview.versions).toHaveBeenLastCalledWith({
+    kind: "ticket",
+    id: "guid-12",
+    source: "s3",
+  });
+  fireEvent.click(older);
+  expect(await screen.findByText(/From S3\./)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(syncReview.restore).toHaveBeenCalledWith(
+      { kind: "ticket", id: "guid-12", source: "s3" },
+      "ver-9",
+      expect.any(String),
+    ),
+  );
+  expect(document.body.textContent).not.toMatch(/drive/i);
+});
+
+test("an S3 listing that finds no older versions says so in S3's name", async () => {
+  render(connected(history, "s3"));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Older versions from S3" }),
+  );
+  expect(await screen.findByText("No older versions in S3")).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/drive/i);
+});
+
+test("a desktop without local versions loads them from S3 and says so", async () => {
+  stored.local = [];
+  stored.s3 = [versions[1]!];
+  render(connected(history, "s3"));
+  await screen.findByRole("button", { name: /S3 · Description/ });
+  expect(screen.getByText(/From S3\./)).toBeTruthy();
+  expect(syncReview.versions).toHaveBeenCalledWith({
+    kind: "ticket",
+    id: "guid-12",
+    source: "s3",
+  });
+  expect(document.body.textContent).not.toMatch(/drive/i);
 });

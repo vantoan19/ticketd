@@ -210,6 +210,90 @@ fn profiles_are_listed_one_per_line() {
     );
 }
 
+// ---- who is signed in, and which buckets they can list -----------------------------------
+
+const IDENTITY: &str = "sts get-caller-identity --profile work --query Arn --output text";
+const BUCKETS: &str = "s3api list-buckets --profile work --query Buckets[].Name --output json";
+const ARN: &str = "arn:aws:sts::123456789012:assumed-role/Admin/me";
+
+#[test]
+fn the_identity_is_the_caller_arn() {
+    let aws = StandIn::new().once(IDENTITY, ok(&format!("{ARN}\n")));
+    assert_eq!(aws.cli().identity("work").unwrap(), ARN);
+}
+
+#[test]
+fn an_identity_asked_of_a_profile_that_never_signed_in_needs_sign_in() {
+    let aws = StandIn::new().once(
+        IDENTITY,
+        fails(
+            255,
+            "\nError loading SSO Token: Token for work does not exist",
+        ),
+    );
+    let error = aws.cli().identity("work").unwrap_err();
+    assert!(error.needs_sign_in(), "{error:?}");
+}
+
+#[test]
+fn an_identity_that_fails_otherwise_is_a_failure() {
+    let aws = StandIn::new().once(
+        IDENTITY,
+        fails(253, "The config profile (work) could not be found"),
+    );
+    let error = aws.cli().identity("work").unwrap_err();
+    assert!(!error.needs_sign_in(), "{error:?}");
+    assert!(matches!(error, AwsCliError::Failed { .. }), "{error:?}");
+}
+
+#[test]
+fn buckets_are_listed_by_name() {
+    let aws = StandIn::new().once(BUCKETS, ok("[\n    \"alpha\",\n    \"beta\"\n]\n"));
+    assert_eq!(
+        aws.cli().buckets("work").unwrap(),
+        Some(vec!["alpha".to_owned(), "beta".to_owned()])
+    );
+}
+
+#[test]
+fn an_account_without_buckets_lists_none() {
+    // With no `Buckets` in the reply the query prints `null`.
+    let aws = StandIn::new().once(BUCKETS, ok("null\n"));
+    assert_eq!(aws.cli().buckets("work").unwrap(), Some(Vec::new()));
+}
+
+#[test]
+fn a_profile_that_may_not_list_buckets_gets_none_not_an_error() {
+    let aws = StandIn::new().once(
+        BUCKETS,
+        fails(
+            254,
+            "\nAn error occurred (AccessDenied) when calling the ListBuckets operation: Access Denied",
+        ),
+    );
+    assert_eq!(aws.cli().buckets("work").unwrap(), None);
+}
+
+#[test]
+fn a_bucket_list_asked_of_an_ended_session_needs_sign_in() {
+    let aws = StandIn::new().once(
+        BUCKETS,
+        fails(
+            255,
+            "The SSO session associated with this profile has expired or is otherwise invalid.",
+        ),
+    );
+    let error = aws.cli().buckets("work").unwrap_err();
+    assert!(error.needs_sign_in(), "{error:?}");
+}
+
+#[test]
+fn a_bucket_list_that_cannot_be_read_is_unreadable() {
+    let aws = StandIn::new().once(BUCKETS, ok("not json"));
+    let error = aws.cli().buckets("work").unwrap_err();
+    assert!(matches!(error, AwsCliError::Unreadable), "{error:?}");
+}
+
 // ---- credentials -----------------------------------------------------------------------
 
 #[test]

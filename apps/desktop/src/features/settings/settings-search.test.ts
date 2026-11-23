@@ -73,9 +73,17 @@ test("search finds a row by the title its page shows", () => {
   const first = (query: string) => searchSettings(query, SETTINGS_ENTRIES)[0];
   expect(first("Largest file")?.section).toBe("attachments");
   expect(first("upload limit")?.section).toBe("attachments");
-  expect(first("Check for changes every")?.section).toBe("google-drive");
+  expect(first("Check for changes every")?.section).toBe("workspace-sync");
   expect(first("Third-party notices")?.section).toBe("about");
   expect(first("Dialogs and menus")?.section).toBe("keyboard-shortcuts");
+});
+
+test("sync is found on Workspace sync by either storage, and Drive attachments stay on Google Drive", () => {
+  const sections = (query: string) =>
+    searchSettings(query, SETTINGS_ENTRIES).map((hit) => hit.section);
+  for (const query of ["sync", "s3 bucket", "aws profile", "sso"])
+    expect(sections(query)[0], query).toBe("workspace-sync");
+  expect(sections("attach from drive")[0]).toBe("google-drive");
 });
 
 test("no two rows on one page share a title", () => {
