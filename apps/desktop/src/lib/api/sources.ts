@@ -121,6 +121,33 @@ const saveOutcomeSchema = lazySchema(() =>
   }),
 );
 
+const connectSourcePreviewSchema = lazySchema(() =>
+  z.object({
+    project_id: z.string(),
+    project_remote: z.string(),
+    provider: z.string(),
+    repository: z.string(),
+    source: z.enum(["not_connected", "add_repository", "already_listed"]),
+    tickets: z.array(z.string()),
+    fingerprint: z.string(),
+  }),
+);
+export type ConnectSourcePreview = z.infer<typeof connectSourcePreviewSchema>;
+
+const connectSourceMatchCountSchema = lazySchema(() =>
+  z.object({ matched: z.number(), complete: z.boolean() }).nullable(),
+);
+export type ConnectSourceMatchCount = NonNullable<
+  z.infer<typeof connectSourceMatchCountSchema>
+>;
+
+const connectSourceOutcomeSchema = lazySchema(() =>
+  z.object({
+    repository_added: z.boolean(),
+    linked_tickets: z.array(z.string()),
+  }),
+);
+
 const refreshReportSchema = lazySchema(() =>
   z.object({
     imported: z.array(z.string()),
@@ -357,6 +384,37 @@ export const sourcesClient = {
       );
   },
   /** Lists what discovery would match. Imports and saves nothing. */
+  async previewConnectSource(provider: string, projectId: string) {
+    return connectSourcePreviewSchema.parse(
+      await invoke("preview_connect_source", { provider, projectId }),
+    );
+  },
+  async connectSourceMatchCount(
+    provider: string,
+    projectId: string,
+    expectedFingerprint: string,
+  ) {
+    return connectSourceMatchCountSchema.parse(
+      await invoke("connect_source_match_count", {
+        provider,
+        projectId,
+        expectedFingerprint,
+      }),
+    );
+  },
+  async connectSource(
+    provider: string,
+    projectId: string,
+    expectedFingerprint: string,
+  ) {
+    return connectSourceOutcomeSchema.parse(
+      await invoke("connect_source", {
+        provider,
+        projectId,
+        expectedFingerprint,
+      }),
+    );
+  },
   async preview(provider: string, config: SourceConfig) {
     return previewSchema.parse(
       await structured(invoke("source_preview", { provider, config })),

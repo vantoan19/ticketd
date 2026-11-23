@@ -21,9 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input } from "@/components/ui/input";
 import { enter } from "@/components/ui/enter";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
 import { PathText } from "@/components/ui/path-text";
@@ -41,15 +39,16 @@ import {
 import { workspaceClient } from "@/lib/api/workspace";
 import { emptyCopy } from "@/lib/empty-copy";
 import { plural } from "@/lib/format";
-import { nameFromFolder } from "@/lib/paths";
 import { allowRemoval } from "@/lib/removal-guard";
 import { fileManagerName } from "@/lib/platform";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
+import { FolderPicker } from "@/features/projects/FolderPicker";
+import { ProjectFormDialog } from "@/features/projects/ProjectFormDialog";
 import "./projects.css";
 
 type OpenDialog =
   | { kind: "project" }
-  | { kind: "rename"; id: string }
+  | { kind: "edit"; id: string }
   | { kind: "checkout"; id: string };
 
 /** What a project's tickets add up to, once counted. */
@@ -135,54 +134,6 @@ function CheckoutRow({
   );
 }
 
-/** Shows the chosen folder, or that none is chosen, inside a field frame. */
-function FolderPicker({
-  path,
-  label,
-  title,
-  hint,
-  onChoose,
-}: {
-  path: string;
-  label: string;
-  title: string;
-  hint?: string;
-  onChoose: (path: string) => void;
-}) {
-  const [error, setError] = useState<FailureDescription | null>(null);
-  async function choose() {
-    try {
-      const chosen = await workspaceClient.chooseFolder({ title });
-      setError(null);
-      if (chosen) onChoose(chosen);
-    } catch (reason) {
-      setError(describeFailure(reason, "open the folder picker"));
-    }
-  }
-  return (
-    <Field>
-      <FieldLabel>{label}</FieldLabel>
-      <div className="folder-picker">
-        <Folder aria-hidden="true" className="folder-picker-icon" />
-        <span className="folder-path" data-empty={!path}>
-          {path ? <PathText path={path} layout="inline" /> : "No folder chosen"}
-        </span>
-        <Button type="button" variant="outline" size="sm" onClick={choose}>
-          {path ? "Change…" : "Choose…"}
-        </Button>
-      </div>
-      {hint && <small className="folder-hint">{hint}</small>}
-      {error && (
-        <FailureAlert
-          size="compact"
-          failure={error}
-          onRetry={() => void choose()}
-        />
-      )}
-    </Field>
-  );
-}
-
 /**
  * The Projects page (DESIGN.md section 10): a management page of calm project
  * rows (icon, name, "10 tickets · 8 open · 2 checkouts", Open tickets, one
@@ -195,6 +146,7 @@ export function Projects({
   onChange,
   onOpenTickets,
   onShowUnassigned,
+  onConnectSource,
 }: {
   projects: Project[];
   loading: boolean;
@@ -203,15 +155,13 @@ export function Projects({
   onOpenTickets?: (project: Project) => void;
   /** Opens the tickets that belong to no project. */
   onShowUnassigned?: () => void;
+  onConnectSource?: (projectId: string) => void;
 }) {
   const statusLine = useStatusLine();
   const { copy } = useCopy();
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  // Drafts survive closing a dialog; a successful save discards them.
-  const [newPath, setNewPath] = useState("");
-  const [newName, setNewName] = useState<string | undefined>(undefined);
-  const [renames, setRenames] = useState<Record<string, string>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [checkoutDrafts, setCheckoutDrafts] = useState<Record<string, string>>(
     {},
   );
@@ -252,12 +202,7 @@ export function Projects({
     };
   }, [projects]);
 
-  const newNameValue = newName ?? nameFromFolder(newPath);
-  const renaming =
-    dialog?.kind === "rename"
-      ? projects.find((item) => item.id === dialog.id)
-      : undefined;
-  const renameValue = renaming ? (renames[renaming.id] ?? renaming.name) : "";
+  const editing = projects.find((item) => item.id === editingId);
   const checkoutProject =
     dialog?.kind === "checkout"
       ? projects.find((item) => item.id === dialog.id)
@@ -268,6 +213,8 @@ export function Projects({
 
   function open(next: OpenDialog) {
     setError(null);
+    if (next.kind !== "checkout")
+      setEditingId(next.kind === "edit" ? next.id : null);
     setDialog(next);
   }
   /** Runs a dialog's write, refreshes, and reports whether it all succeeded. */
@@ -297,26 +244,12 @@ export function Projects({
       return next;
     });
   }
-  async function createProject() {
-    const saved = await save(
-      () => client.createProject(newNameValue.trim(), newPath),
-      "create the project",
-    );
-    if (!saved) return;
-    setNewPath("");
-    setNewName(undefined);
-    setDialog(null);
+  function projectSaved(project: Project) {
+    void onChange();
+    if (project.remote && project.remote !== editing?.remote)
+      onConnectSource?.(project.id);
   }
-  async function renameProject() {
-    if (!renaming) return;
-    const saved = await save(
-      () => client.editProject(renaming.id, renameValue.trim(), renaming.path),
-      "rename the project",
-    );
-    if (!saved) return;
-    drop(setRenames, renaming.id);
-    setDialog(null);
-  }
+
   async function registerCheckout() {
     if (!checkoutProject) return;
     const saved = await save(
@@ -467,11 +400,9 @@ export function Projects({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onSelect={() =>
-                              open({ kind: "rename", id: item.id })
-                            }
+                            onSelect={() => open({ kind: "edit", id: item.id })}
                           >
-                            <Pencil /> Rename…
+                            <Pencil /> Edit project…
                           </DropdownMenuItem>
                           <DropdownMenuItem onSelect={() => void copyId(item)}>
                             <Copy /> Copy project ID
@@ -543,87 +474,14 @@ export function Projects({
           </Button>
         </p>
       )}
-      <DialogShell
-        open={dialog?.kind === "project"}
+      <ProjectFormDialog
+        open={
+          dialog?.kind === "project" || (dialog?.kind === "edit" && !!editing)
+        }
+        {...(editing && { project: editing })}
         onOpenChange={(next) => !next && setDialog(null)}
-        title="New project"
-        description="Start from the repository folder on this computer."
-        primaryLabel="Create project"
-        busy={pending}
-        blockedReason={
-          blocked ??
-          (!newPath
-            ? "Choose a folder to continue."
-            : !newNameValue.trim()
-              ? "Enter a project name."
-              : null)
-        }
-        error={
-          error && (
-            <FailureAlert
-              size="compact"
-              failure={error}
-              onRetry={() => void createProject()}
-            />
-          )
-        }
-        onSubmit={() => void createProject()}
-      >
-        <div className="project-form">
-          <FolderPicker
-            label="Repository folder"
-            path={newPath}
-            title="Choose the repository folder"
-            hint="It becomes the project's first checkout."
-            onChoose={setNewPath}
-          />
-          <Field>
-            <FieldLabel htmlFor="project-name">Name</FieldLabel>
-            <Input
-              id="project-name"
-              value={newNameValue}
-              placeholder="e.g. Desktop app"
-              autoComplete="off"
-              onChange={(e) => setNewName(e.target.value)}
-            />
-          </Field>
-        </div>
-      </DialogShell>
-      <DialogShell
-        open={!!renaming}
-        onOpenChange={(next) => !next && setDialog(null)}
-        size="sm"
-        title="Rename project"
-        description="Its tickets and checkouts stay with it."
-        primaryLabel="Save name"
-        busy={pending}
-        blockedReason={
-          blocked ?? (!renameValue.trim() ? "Enter a project name." : null)
-        }
-        error={
-          error && (
-            <FailureAlert
-              size="compact"
-              failure={error}
-              onRetry={() => void renameProject()}
-            />
-          )
-        }
-        onSubmit={() => void renameProject()}
-      >
-        <Field>
-          <FieldLabel htmlFor="rename-name">Project name</FieldLabel>
-          <Input
-            id="rename-name"
-            value={renameValue}
-            autoComplete="off"
-            onChange={(e) =>
-              renaming &&
-              setRenames((old) => ({ ...old, [renaming.id]: e.target.value }))
-            }
-          />
-        </Field>
-      </DialogShell>
+        onSaved={projectSaved}
+      />
       <DialogShell
         open={!!checkoutProject}
         onOpenChange={(next) => !next && setDialog(null)}

@@ -347,9 +347,19 @@ const projectSchema = lazySchema(() =>
     name: z.string(),
     path: z.string(),
     paths: z.array(z.string()),
+    remote: z.string().nullish(),
   }),
 );
 export type Project = z.infer<typeof projectSchema>;
+const projectRemoteDetectionSchema = lazySchema(() =>
+  z.object({
+    suggested: z.string().nullable(),
+    candidates: z.array(z.object({ name: z.string(), remote: z.string() })),
+  }),
+);
+export type ProjectRemoteDetection = z.infer<
+  typeof projectRemoteDetectionSchema
+>;
 const activitySchema = lazySchema(() =>
   z.object({
     id: z.string(),
@@ -735,12 +745,29 @@ export const client = {
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
   },
-  async createProject(name: string, path: string) {
-    return projectSchema.parse(await invoke("create_project", { name, path }));
+  async detectProjectRemote(path: string) {
+    return projectRemoteDetectionSchema.parse(
+      await invoke("detect_project_remote", { path }),
+    );
   },
-  async editProject(id: string, name: string, path: string) {
+  async createProject(name: string, path: string, remote?: string) {
     return projectSchema.parse(
-      await invoke("edit_project", { id, name, path }),
+      await invoke("create_project", { name, path, ...(remote && { remote }) }),
+    );
+  },
+  async editProject(
+    id: string,
+    name: string,
+    path: string,
+    remote?: string | null,
+  ) {
+    return projectSchema.parse(
+      await invoke("edit_project", {
+        id,
+        name,
+        path,
+        ...(remote === null ? { clearRemote: true } : remote && { remote }),
+      }),
     );
   },
   async evidence(reference: string, offset: number) {

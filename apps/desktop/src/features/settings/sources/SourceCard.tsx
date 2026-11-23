@@ -220,10 +220,15 @@ function Readback({ config }: { config: SourceConfig }) {
 export function SourceCard({
   entry,
   hidden = false,
+  initialRepository,
+  onSaved,
 }: {
   entry: SourceEntry;
   /** Keeps the page mounted but out of sight, so its draft and preview survive. */
   hidden?: boolean;
+  /** The repository that opened first-time source setup. */
+  initialRepository?: string;
+  onSaved?: () => void;
 }) {
   const now = useNow();
   const { connector } = entry;
@@ -239,7 +244,11 @@ export function SourceCard({
   const fields = connector.schema.fields;
   const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
   const [draft, setDraft] = useState<Draft>(() =>
-    draftFromConfig(fields, entry.saved?.config),
+    draftFromConfig(
+      fields,
+      entry.saved?.config ??
+        (initialRepository ? { repositories: [initialRepository] } : undefined),
+    ),
   );
   const [busy, setBusy] = useState<Busy>(null);
   const [failure, setFailure] = useState<SourceFailure | null>(null);
@@ -253,6 +262,12 @@ export function SourceCard({
   const [notice, setNotice] = useState("");
   // A stale response must not overwrite a newer draft's outcome.
   const latest = useRef(0);
+  useEffect(
+    () => () => {
+      latest.current += 1;
+    },
+    [],
+  );
 
   const config = useMemo(() => configFromDraft(fields, draft), [fields, draft]);
   const key = configKey(config);
@@ -355,6 +370,7 @@ export function SourceCard({
         setNotice(
           "Saved. Matching issues are imported on the next sync, then kept up to date automatically.",
         );
+        onSaved?.();
       },
     );
 

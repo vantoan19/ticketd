@@ -11,12 +11,23 @@ import "@/features/settings/sources/sources.css";
 export function SourcePage({
   entry,
   active,
+  initialRepository,
+  onSaved,
 }: {
   entry: SourceEntry;
   active: boolean;
+  initialRepository?: string;
+  onSaved?: () => void;
 }) {
   const [visited, setVisited] = useState(active);
   if (active && !visited) setVisited(true);
   if (!visited) return null;
-  return <SourceCard entry={entry} hidden={!active} />;
+  return (
+    <SourceCard
+      entry={entry}
+      hidden={!active}
+      {...(initialRepository && { initialRepository })}
+      {...(onSaved && { onSaved })}
+    />
+  );
 }

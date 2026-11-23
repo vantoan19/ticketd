@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -8,14 +9,19 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { Projects } from "./Projects";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+Element.prototype.scrollIntoView = () => {};
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.mocked(invoke).mockReset();
 });
 
 const project = {
@@ -143,7 +149,7 @@ test("a new project waits for a folder, fills its name from it, then saves", asy
     "value",
     "Mobile App",
   );
-  expect(create_).toHaveProperty("disabled", false);
+  await waitFor(() => expect(create_).toHaveProperty("disabled", false));
   fireEvent.click(create_);
   await waitFor(() =>
     expect(create).toHaveBeenCalledWith(
@@ -153,6 +159,99 @@ test("a new project waits for a folder, fills its name from it, then saves", asy
   );
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(onChange).toHaveBeenCalled();
+});
+
+test("a new project can save the remote detected from its folder", async () => {
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/checkout");
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "detect_project_remote")
+      return { suggested: "github.com/team/app", candidates: [] };
+    if (command === "create_project")
+      return { ...project, remote: "github.com/team/app" };
+    return null;
+  });
+  render(<Projects {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  const dialog = within(screen.getByRole("dialog", { name: "New project" }));
+  fireEvent.click(dialog.getByRole("button", { name: "Choose…" }));
+  const remote = await dialog.findByRole("textbox", { name: "Project remote" });
+  await waitFor(() =>
+    expect(remote).toHaveProperty("value", "github.com/team/app"),
+  );
+  fireEvent.click(dialog.getByRole("button", { name: "Create project" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("create_project", {
+      name: "Checkout",
+      path: "/work/checkout",
+      remote: "github.com/team/app",
+    }),
+  );
+});
+
+test("a late checkout suggestion preserves the typed remote", async () => {
+  let finish!: (value: unknown) => void;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "detect_project_remote")
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    return null;
+  });
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/checkout");
+  render(<Projects {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+  await screen.findByRole("button", { name: "Change…" });
+  const field = screen.getByRole("textbox", { name: "Project remote" });
+  fireEvent.change(field, { target: { value: "github.com/me/fork" } });
+  await act(async () =>
+    finish({ suggested: "github.com/team/app", candidates: [] }),
+  );
+  expect(field).toHaveProperty("value", "github.com/me/fork");
+});
+
+test("the project remote can be changed to a checkout candidate or cleared after an inline refusal", async () => {
+  const saved = { ...project, remote: "github.com/team/app" };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "detect_project_remote")
+      return {
+        suggested: null,
+        candidates: [
+          { name: "archive", remote: "github.com/team/archive" },
+          { name: "mirror", remote: "github.com/team/mirror" },
+        ],
+      };
+    if (command === "edit_project") {
+      if (args && "clearRemote" in args) return { ...saved, remote: null };
+      throw {
+        code: "project_remote_taken",
+        message: "Project remote github.com/team/archive belongs to Archive.",
+      };
+    }
+    return null;
+  });
+  render(<Projects {...props} projects={[saved]} />);
+  await chooseAction("Edit project…");
+  const field = await screen.findByRole("textbox", { name: "Project remote" });
+  expect(field).toHaveProperty("value", saved.remote);
+  fireEvent.keyDown(
+    await screen.findByRole("combobox", { name: "Checkout remotes" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /archive/ }));
+  expect(field).toHaveProperty("value", "github.com/team/archive");
+  fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+  await screen.findByText(/belongs to Archive/);
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  fireEvent.change(field, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(invoke).toHaveBeenCalledWith("edit_project", {
+    id: saved.id,
+    name: saved.name,
+    path: saved.path,
+    clearRemote: true,
+  });
 });
 
 test("cancelling the folder picker keeps Create project disabled", async () => {
@@ -175,13 +274,12 @@ test("renames a project from its menu and shows a save failure in the dialog", a
     message: "workspace database error: attempt to write a readonly database",
   });
   render(<Projects {...props} />);
-  // One "…" holds Rename, Copy project ID and Register checkout (PR-04).
-  await chooseAction("Rename…");
-  const dialog = await screen.findByRole("dialog", { name: "Rename project" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
+  await chooseAction("Edit project…");
+  const dialog = await screen.findByRole("dialog", { name: "Edit project" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save project" }));
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain(
-    "Couldn't rename the project. The workspace is read-only, so nothing changed.",
+    "Couldn't save the project. The workspace is read-only, so nothing changed.",
   );
   // The raw text stays under Details, and the valid name is not marked invalid (PR-05).
   expect(alert.textContent).not.toContain("readonly database");
