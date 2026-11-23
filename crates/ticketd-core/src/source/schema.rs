@@ -4,7 +4,9 @@
 //! against that declaration, so the desktop and the CLI accept and reject the
 //! same input, and neither needs provider-specific code.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+
+use regex::Regex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -25,6 +27,15 @@ pub struct SchemaField {
     pub help: Option<String>,
     #[serde(default)]
     pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<FieldPattern>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub advanced: bool,
+    /// An input key that must have a value for this setting to apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_if: Option<String>,
     #[serde(flatten)]
     pub kind: FieldKind,
 }
@@ -34,8 +45,6 @@ pub struct SchemaField {
 pub enum FieldKind {
     /// One line of text. An empty value means the field is not set.
     Text {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        placeholder: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         format: Option<ValueFormat>,
     },
@@ -51,6 +60,17 @@ pub enum FieldKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         format: Option<ValueFormat>,
     },
+    /// An informational link. Its URL is metadata rather than a setting value.
+    Link { url: String },
+    /// Reserved for settings backed by the operating system keychain.
+    Secret,
+}
+
+/// A regular expression and instructions for correcting a mismatched value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldPattern {
+    pub regex: String,
+    pub message: String,
 }
 
 /// Where a selector gets its options.
@@ -90,8 +110,25 @@ pub enum ValueFormat {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldIssue {
-    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
     pub message: String,
+}
+
+impl FieldIssue {
+    pub fn for_field(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            field: Some(field.into()),
+            message: message.into(),
+        }
+    }
+
+    pub fn for_form(message: impl Into<String>) -> Self {
+        Self {
+            field: None,
+            message: message.into(),
+        }
+    }
 }
 
 impl ValueFormat {
@@ -143,10 +180,64 @@ impl ConfigSchema {
         self.fields.iter().find(|field| field.key == key)
     }
 
+    /// Checks that this schema can be used, even when no values are supplied.
+    pub(crate) fn check_definition(&self) -> Result<(), Vec<FieldIssue>> {
+        let mut issues = Vec::new();
+        let mut keys = HashSet::new();
+        for field in &self.fields {
+            if field.key.trim().is_empty() || !keys.insert(field.key.as_str()) {
+                issues.push(issue(&field.key, "has a blank or repeated setting key"));
+            }
+            if matches!(field.kind, FieldKind::Secret) {
+                issues.push(issue(&field.key, "secret settings are not supported yet"));
+            }
+            let mut seen = HashSet::from([field.key.as_str()]);
+            let mut current = field;
+            while let Some(dependency) = &current.show_if {
+                if !seen.insert(dependency) {
+                    issues.push(issue(&field.key, "has a circular show_if condition"));
+                    break;
+                }
+                match self.field(dependency) {
+                    Some(parent) if !matches!(parent.kind, FieldKind::Link { .. }) => {
+                        current = parent
+                    }
+                    _ => {
+                        issues.push(issue(
+                            &field.key,
+                            "has a show_if condition without a matching input",
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(issues)
+        }
+    }
+
+    fn is_active(&self, field: &SchemaField, raw: &ConfigValues) -> bool {
+        let mut current = field;
+        while let Some(dependency) = &current.show_if {
+            if !raw.get(dependency).is_some_and(has_value) {
+                return false;
+            }
+            let Some(parent) = self.field(dependency) else {
+                return false;
+            };
+            current = parent;
+        }
+        true
+    }
+
     /// Checks `raw` against the schema and returns the normalized values:
     /// text trimmed, empty optional fields omitted, selections trimmed and
     /// de-duplicated in order. Every problem is reported, not just the first.
     pub fn validate(&self, raw: &ConfigValues) -> Result<ConfigValues, Vec<FieldIssue>> {
+        self.check_definition()?;
         let mut issues = Vec::new();
         let mut values = ConfigValues::new();
         for key in raw.keys() {
@@ -155,6 +246,15 @@ impl ConfigSchema {
             }
         }
         for field in &self.fields {
+            if matches!(field.kind, FieldKind::Link { .. }) {
+                if raw.contains_key(&field.key) {
+                    issues.push(issue(&field.key, "is a link and does not take a value"));
+                }
+                continue;
+            }
+            if !self.is_active(field, raw) {
+                continue;
+            }
             let before = issues.len();
             let normalized = field.normalize(raw.get(&field.key), &mut issues);
             if issues.len() > before {
@@ -189,6 +289,7 @@ impl ConfigSchema {
         &self,
         assignments: &[String],
     ) -> Result<ConfigValues, Vec<FieldIssue>> {
+        self.check_definition()?;
         let mut issues = Vec::new();
         let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for assignment in assignments {
@@ -211,6 +312,9 @@ impl ConfigSchema {
                         .collect();
                     values.insert(key, Value::Array(items));
                 }
+                Some(FieldKind::Link { .. }) => {
+                    issues.push(issue(&key, "is a link and does not take a value"));
+                }
                 Some(FieldKind::Text { .. }) if entries.len() > 1 => {
                     issues.push(issue(&key, "was given more than once"));
                 }
@@ -230,13 +334,36 @@ impl ConfigSchema {
 
 impl SchemaField {
     fn normalize(&self, raw: Option<&Value>, issues: &mut Vec<FieldIssue>) -> Option<Value> {
-        let raw = raw.filter(|value| !value.is_null());
+        let raw = raw.filter(|value| !value.is_null())?;
+        let pattern = match self
+            .pattern
+            .as_ref()
+            .map(|pattern| Regex::new(&pattern.regex))
+            .transpose()
+        {
+            Ok(pattern) => pattern,
+            Err(_) => {
+                issues.push(issue(&self.key, "has an invalid validation pattern"));
+                return None;
+            }
+        };
+        let matches_pattern = |value: &str| {
+            pattern
+                .as_ref()
+                .is_none_or(|pattern| pattern.is_match(value))
+        };
+        let pattern_message = || {
+            self.pattern
+                .as_ref()
+                .map_or("does not match the expected format", |pattern| {
+                    pattern.message.as_str()
+                })
+        };
         match &self.kind {
             FieldKind::Text { format, .. } => {
                 let text = match raw {
-                    None => return None,
-                    Some(Value::String(text)) => text.trim(),
-                    Some(_) => {
+                    Value::String(text) => text.trim(),
+                    _ => {
                         issues.push(issue(&self.key, "must be text"));
                         return None;
                     }
@@ -254,6 +381,10 @@ impl SchemaField {
                     issues.push(issue(&self.key, message));
                     return None;
                 }
+                if !matches_pattern(text) {
+                    issues.push(issue(&self.key, pattern_message()));
+                    return None;
+                }
                 Some(Value::String(text.to_owned()))
             }
             FieldKind::MultiSelect {
@@ -264,9 +395,8 @@ impl SchemaField {
                 format,
             } => {
                 let list = match raw {
-                    None => return None,
-                    Some(Value::Array(list)) => list,
-                    Some(_) => {
+                    Value::Array(list) => list,
+                    _ => {
                         issues.push(issue(&self.key, "must be a list"));
                         return None;
                     }
@@ -286,6 +416,9 @@ impl SchemaField {
                     return None;
                 }
                 for item in &items {
+                    if !matches_pattern(item) {
+                        issues.push(issue(&self.key, format!("'{item}' {}", pattern_message())));
+                    }
                     if let Some(format) = format
                         && let Err(message) = format.check(item)
                     {
@@ -308,13 +441,21 @@ impl SchemaField {
                 }
                 Some(Value::Array(items.into_iter().map(Value::String).collect()))
             }
+            FieldKind::Link { .. } | FieldKind::Secret => None,
         }
     }
 }
 
 fn issue(field: &str, message: impl Into<String>) -> FieldIssue {
-    FieldIssue {
-        field: field.to_owned(),
-        message: message.into(),
+    FieldIssue::for_field(field, message)
+}
+
+fn has_value(value: &Value) -> bool {
+    match value {
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| item.as_str().is_some_and(|text| !text.trim().is_empty())),
+        _ => false,
     }
 }

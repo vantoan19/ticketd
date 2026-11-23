@@ -211,6 +211,53 @@ fn list_describes_the_github_connector_and_its_schema() {
         .map(|f| f["key"].as_str().unwrap())
         .collect();
     assert_eq!(fields, ["repositories", "assignee", "labels"]);
+    let schema = &github["connector"]["schema"]["fields"];
+    assert_eq!(schema[0]["required"], true);
+    assert!(schema[0]["help"].is_string());
+    assert!(schema[1]["pattern"]["regex"].is_string());
+}
+
+#[test]
+fn set_reports_required_pattern_and_connector_problems_before_preview() {
+    let cli = Cli::new();
+    let required = cli.fail(
+        &["source", "preview", "github", "--set", "assignee=octo"],
+        Some(TOKEN),
+    );
+    assert!(required.contains("repositories are required"), "{required}");
+
+    let pattern = cli.fail(
+        &[
+            "source",
+            "preview",
+            "github",
+            "--set",
+            "repositories=o/r",
+            "--set",
+            "assignee=-octo",
+        ],
+        Some(TOKEN),
+    );
+    assert!(pattern.contains("assignee must be a username"), "{pattern}");
+
+    let connector = cli.fail(
+        &[
+            "source",
+            "save",
+            "github",
+            "--set",
+            "repositories=o/r",
+            "--set",
+            "labels=first
+second",
+        ],
+        Some(TOKEN),
+    );
+    assert!(
+        connector.contains("labels") && connector.contains("without commas or line breaks"),
+        "{connector}"
+    );
+    assert!(cli.run(&["source", "show", "github"]).is_null());
 }
 
 #[test]

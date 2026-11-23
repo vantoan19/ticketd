@@ -52,8 +52,8 @@ pub use publication::{
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
-    ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
-    ValueFormat,
+    ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern, OptionSource,
+    SchemaField, ValueFormat,
 };
 pub(crate) use tracking::duplicate_target;
 pub use tracking::{
@@ -305,7 +305,7 @@ impl Workspace {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, Error> {
-        let config = engine.validate(provider, raw)?;
+        let config = engine.validate_configuration(provider, raw)?;
         self.preview_source_with_config(engine, provider, &config)
             .map(|(preview, _)| preview)
     }
@@ -338,7 +338,7 @@ impl Workspace {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
-        let config = engine.validate(provider, raw)?;
+        let config = engine.validate_configuration(provider, raw)?;
         let (preview, derived) = self.preview_source_with_config(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
         let derived_configuration = serde_json::to_string(&derived)?;

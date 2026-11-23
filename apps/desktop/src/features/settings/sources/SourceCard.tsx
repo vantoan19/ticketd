@@ -32,6 +32,7 @@ import {
   type LoadOptions,
 } from "@/features/settings/sources/SchemaForm";
 import {
+  activeFields,
   configFromDraft,
   configKey,
   draftFromConfig,
@@ -85,13 +86,6 @@ function signInStep(connector: SourceEntry["connector"]) {
     connector.presentation?.sign_in.desktop_instruction ??
     `Sign in to ${connector.name} on this computer, then choose Check connection.`
   );
-}
-
-function fieldErrors(failure: SourceFailure | null) {
-  const grouped: Record<string, string[]> = {};
-  for (const issue of failure?.fields ?? [])
-    (grouped[issue.field] ??= []).push(issue.message);
-  return grouped;
 }
 
 function PreviewPanel({
@@ -270,12 +264,39 @@ export function SourceCard({
   const working = busy !== null;
   const targetField = presentation?.target;
   const target = targetField ? config[targetField.field] : undefined;
+  const visible = activeFields(fields, draft);
   const hasTarget =
-    !targetField ||
+    !visible.some((field) => field.key === targetField?.field) ||
     ((Array.isArray(target) || typeof target === "string") &&
       target.length > 0);
-  const canPreview = !working && hasTarget;
-  const canSave = preview !== null && !working && (dirty || saved === null);
+  const secretDeclared = fields.some((field) => field.type === "secret");
+  const canPreview = !working && hasTarget && !secretDeclared;
+  const canSave =
+    !secretDeclared &&
+    preview !== null &&
+    !working &&
+    (dirty || saved === null);
+  const fieldErrors = new Map<string, string[]>();
+  const formErrors = secretDeclared
+    ? [
+        "This source declares a secret setting. Secret settings are not supported yet.",
+      ]
+    : [];
+  for (const { field, message } of failure?.fields ?? []) {
+    const visibleField =
+      field && visible.find((setting) => setting.key === field);
+    if (
+      visibleField &&
+      (visibleField.type === "text" || visibleField.type === "multi_select")
+    ) {
+      fieldErrors.set(visibleField.key, [
+        ...(fieldErrors.get(visibleField.key) ?? []),
+        message,
+      ]);
+    } else {
+      formErrors.push(field ? `${field} ${message}` : message);
+    }
+  }
 
   const loadOptions: LoadOptions = (field, query) =>
     sourcesClient.options(connector.provider, field, query, config);
@@ -604,7 +625,8 @@ export function SourceCard({
               presentation={presentation?.fields}
               targetField={targetField?.field}
               draft={draft}
-              errors={fieldErrors(failure)}
+              errors={Object.fromEntries(fieldErrors)}
+              formErrors={formErrors}
               disabled={working}
               loadOptions={loadOptions}
               onChange={edit}

@@ -22,6 +22,10 @@ const fieldBase = () => ({
   label: z.string(),
   help: z.string().nullish(),
   required: z.boolean(),
+  placeholder: z.string().nullish(),
+  pattern: z.object({ regex: z.string(), message: z.string() }).nullish(),
+  advanced: z.boolean().optional(),
+  show_if: z.string().nullish(),
 });
 
 const optionSourceSchema = lazySchema(() =>
@@ -42,7 +46,6 @@ const schemaFieldSchema = lazySchema(() =>
     z.object({
       ...fieldBase(),
       type: z.literal("text"),
-      placeholder: z.string().nullish(),
       format: z.string().nullish(),
     }),
     z.object({
@@ -54,6 +57,8 @@ const schemaFieldSchema = lazySchema(() =>
       max_items: z.number(),
       format: z.string().nullish(),
     }),
+    z.object({ ...fieldBase(), type: z.literal("link"), url: z.string() }),
+    z.object({ ...fieldBase(), type: z.literal("secret") }),
   ]),
 );
 export type SchemaField = z.infer<typeof schemaFieldSchema>;

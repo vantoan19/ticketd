@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
-import { X } from "lucide-react";
-import { FieldError } from "@/components/ui/field";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { failureText } from "@/lib/api/describe-failure";
 import { Label } from "@/components/ui/label";
@@ -15,7 +16,11 @@ import type {
   FieldPresentation,
   SchemaField,
 } from "@/lib/api/sources";
-import type { Draft } from "@/features/settings/sources/config-values";
+import {
+  activeFields,
+  type Draft,
+} from "@/features/settings/sources/config-values";
+import { SourceLink } from "@/features/tickets/SourceLink";
 
 const SUGGESTION_DELAY_MS = 250;
 /** Announces which field opened its suggestions, so the others close. */
@@ -238,11 +243,13 @@ function MultiSelectField({
     else options[Math.min(next, options.length - 1)]?.focus();
   }
   return (
-    <div
+    <Field
       ref={container}
       className="source-field"
       data-field={field.key}
       data-target={target || undefined}
+      data-invalid={messages.length > 0 || undefined}
+      data-disabled={disabled || undefined}
       onKeyDown={(event) => {
         // Escape closes only the foremost surface: this list, not the page.
         if (event.key === "Escape" && open) {
@@ -257,7 +264,9 @@ function MultiSelectField({
     >
       <Label htmlFor={id}>
         {field.label}
-        {!field.required && <span className="source-required">Optional</span>}
+        <span className="source-required" aria-hidden="true">
+          {field.required ? "Required" : "Optional"}
+        </span>
       </Label>
       <Popover open={open && !full}>
         <PopoverAnchor asChild>
@@ -292,10 +301,12 @@ function MultiSelectField({
                   ? presentation?.additional_placeholder
                   : undefined) ??
                 presentation?.placeholder ??
+                field.placeholder ??
                 "Search or type, then press Enter"
               }
               aria-describedby={describedBy(id, field, messages)}
               aria-invalid={messages.length > 0 || undefined}
+              aria-required={field.required || undefined}
               onFocus={() => {
                 if (!open) show();
               }}
@@ -384,7 +395,7 @@ function MultiSelectField({
         pending={query}
         refused={refused}
       />
-    </div>
+    </Field>
   );
 }
 
@@ -399,6 +410,7 @@ export function SchemaForm({
   targetField,
   draft,
   errors,
+  formErrors = [],
   disabled,
   loadOptions,
   onChange,
@@ -408,49 +420,124 @@ export function SchemaForm({
   targetField?: string | undefined;
   draft: Draft;
   errors: Record<string, string[]>;
+  formErrors?: string[];
   disabled: boolean;
   loadOptions: LoadOptions;
   onChange: (key: string, value: string | string[]) => void;
 }) {
-  return (
-    <div className="source-form">
-      {fields.map((field) => {
-        const fieldErrors = errors[field.key] ?? [];
-        if (field.type === "multi_select") {
-          const value = draft[field.key];
-          return (
-            <MultiSelectField
-              key={field.key}
-              field={field}
-              presentation={presentation?.[field.key]}
-              target={targetField === field.key}
-              value={Array.isArray(value) ? value : []}
-              errors={fieldErrors}
-              disabled={disabled}
-              loadOptions={loadOptions}
-              onChange={(next) => onChange(field.key, next)}
-            />
-          );
-        }
+  const advancedId = useId();
+  const [expanded, setExpanded] = useState(false);
+  const visible = activeFields(fields, draft);
+  const advanced = visible.filter((field) => field.advanced);
+  const hasAdvancedErrors = advanced.some((field) => errors[field.key]?.length);
+  const showAdvanced = expanded || hasAdvancedErrors;
+
+  function renderField(field: SchemaField) {
+    const value = draft[field.key];
+    const fieldErrors = Object.hasOwn(errors, field.key)
+      ? (errors[field.key] ?? [])
+      : [];
+    switch (field.type) {
+      case "link":
+        return <SetupLink key={field.key} field={field} />;
+      case "secret":
+        return null;
+      case "multi_select":
+        return (
+          <MultiSelectField
+            key={field.key}
+            field={field}
+            presentation={presentation?.[field.key]}
+            target={targetField === field.key}
+            value={Array.isArray(value) ? value : []}
+            errors={fieldErrors}
+            disabled={disabled}
+            loadOptions={loadOptions}
+            onChange={(next) => onChange(field.key, next)}
+          />
+        );
+      case "text":
         return (
           <TextField
             key={field.key}
             field={field}
             presentation={presentation?.[field.key]}
             target={targetField === field.key}
-            value={
-              typeof draft[field.key] === "string"
-                ? (draft[field.key] as string)
-                : ""
-            }
+            value={typeof value === "string" ? value : ""}
             errors={fieldErrors}
             disabled={disabled}
             onChange={(next) => onChange(field.key, next)}
           />
         );
-      })}
+    }
+  }
+
+  return (
+    <>
+      <FieldError errors={formErrors.map((message) => ({ message }))} />
+      <FieldGroup className="source-form">
+        {visible.filter((field) => !field.advanced).map(renderField)}
+      </FieldGroup>
+      {advanced.length > 0 && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="self-start"
+            aria-expanded={showAdvanced}
+            aria-controls={advancedId}
+            disabled={hasAdvancedErrors}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {showAdvanced ? (
+              <ChevronDown data-icon="inline-start" />
+            ) : (
+              <ChevronRight data-icon="inline-start" />
+            )}
+            Advanced settings
+          </Button>
+          <div id={advancedId} hidden={!showAdvanced}>
+            <FieldGroup className="source-form">
+              {advanced.map(renderField)}
+            </FieldGroup>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function SetupLink({
+  field,
+}: {
+  field: Extract<SchemaField, { type: "link" }>;
+}) {
+  const url = safeSetupUrl(field.url);
+  return (
+    <div className="source-field" data-field={field.key}>
+      {url ? (
+        <SourceLink url={url}>{field.label}</SourceLink>
+      ) : (
+        <span>{field.label}</span>
+      )}
+      {field.help && <p className="source-field-note">{field.help}</p>}
     </div>
   );
+}
+
+function safeSetupUrl(text: string) {
+  if (!text.startsWith("https://") || /[\\\s]/u.test(text)) return null;
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" &&
+      url.hostname &&
+      !url.username &&
+      !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function TextField({
@@ -472,14 +559,18 @@ function TextField({
 }) {
   const id = useId();
   return (
-    <div
+    <Field
       className="source-field"
       data-field={field.key}
       data-target={target || undefined}
+      data-invalid={errors.length > 0 || undefined}
+      data-disabled={disabled || undefined}
     >
       <Label htmlFor={id}>
         {field.label}
-        {!field.required && <span className="source-required">Optional</span>}
+        <span className="source-required" aria-hidden="true">
+          {field.required ? "Required" : "Optional"}
+        </span>
       </Label>
       <Input
         id={id}
@@ -494,9 +585,10 @@ function TextField({
           fieldMessages(field, errors, "", ""),
         )}
         aria-invalid={errors.length > 0 || undefined}
+        aria-required={field.required || undefined}
         onChange={(event) => onChange(event.target.value)}
       />
       <FieldNote id={id} field={field} errors={errors} />
-    </div>
+    </Field>
   );
 }
