@@ -1,14 +1,30 @@
-//! One contract for every remote file storage: the in-memory fake and the
-//! Google Drive adapter on the controlled transport must behave alike.
+//! One contract for every remote file storage: the in-memory fake, the Google Drive adapter
+//! and the S3 adapter, each on its controlled transport, must behave alike.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // Test helpers fail the test.
 use std::io::Cursor;
 
 use ticketd_core::drive::DriveRemote;
+use ticketd_core::s3::S3Remote;
 use ticketd_core::sync::remote::*;
 
 #[path = "support/drive_sim.rs"]
 mod drive_sim;
 use drive_sim::{DriveSim, Vault};
+#[path = "support/s3_sim.rs"]
+mod s3_sim;
+use s3_sim::{FakeCredentials, S3Sim};
+
+/// What a storage calls a file it was given the readable name `name` for. Drive and the fake
+/// keep it; S3's listings cannot return it, so S3 names a file after its key.
+type Naming = fn(&RemoteKey, &str) -> String;
+
+fn readable(_: &RemoteKey, name: &str) -> String {
+    name.to_owned()
+}
+
+fn from_key(key: &RemoteKey, _: &str) -> String {
+    format!("{}.md", key.id)
+}
 
 fn put(
     remote: &dyn RemoteStorage,
@@ -65,12 +81,13 @@ fn folders_are_found_created_once_and_required(a: &dyn RemoteStorage, b: &dyn Re
 fn a_created_file_is_listed_and_downloaded_by_another_device(
     a: &dyn RemoteStorage,
     b: &dyn RemoteStorage,
+    named: Naming,
 ) {
     let folder = new_folder(a, "Transfer");
     let key = ticket();
     let created = put(a, &folder, &key, "T-KQ1 Fix login.md", None, b"# Fix login").unwrap();
     assert_eq!(created.key, key);
-    assert_eq!(created.name, "T-KQ1 Fix login.md");
+    assert_eq!(created.name, named(&key, "T-KQ1 Fix login.md"));
     assert_eq!(created.size, 11);
     assert_eq!(b.list(&folder).unwrap(), std::slice::from_ref(&created));
     assert_eq!(get(b, &folder, &key, &created.version), b"# Fix login");
@@ -93,7 +110,11 @@ fn a_repeated_create_never_duplicates(a: &dyn RemoteStorage, b: &dyn RemoteStora
     assert_eq!(a.list(&folder).unwrap(), [created]);
 }
 
-fn an_update_applies_only_to_the_version_last_synced(a: &dyn RemoteStorage, b: &dyn RemoteStorage) {
+fn an_update_applies_only_to_the_version_last_synced(
+    a: &dyn RemoteStorage,
+    b: &dyn RemoteStorage,
+    named: Naming,
+) {
     let folder = new_folder(a, "Precondition");
     let key = ticket();
     let first = put(a, &folder, &key, "T-KQ1 Old.md", None, b"one").unwrap();
@@ -107,7 +128,7 @@ fn an_update_applies_only_to_the_version_last_synced(a: &dyn RemoteStorage, b: &
     )
     .unwrap();
     assert_ne!(second.version, first.version);
-    assert_eq!(second.name, "T-KQ1 New.md");
+    assert_eq!(second.name, named(&key, "T-KQ1 New.md"));
     assert_eq!(
         put(
             b,
@@ -225,13 +246,18 @@ fn unsafe_identifiers_are_refused(a: &dyn RemoteStorage) {
 }
 
 /// `a` and `b` are two devices' handles on the same storage account.
-fn contract(a: &dyn RemoteStorage, b: &dyn RemoteStorage, capabilities: RemoteCapabilities) {
+fn contract(
+    a: &dyn RemoteStorage,
+    b: &dyn RemoteStorage,
+    capabilities: RemoteCapabilities,
+    named: Naming,
+) {
     assert_eq!(a.capabilities(), capabilities);
     assert_eq!(b.capabilities(), capabilities);
     folders_are_found_created_once_and_required(a, b);
-    a_created_file_is_listed_and_downloaded_by_another_device(a, b);
+    a_created_file_is_listed_and_downloaded_by_another_device(a, b, named);
     a_repeated_create_never_duplicates(a, b);
-    an_update_applies_only_to_the_version_last_synced(a, b);
+    an_update_applies_only_to_the_version_last_synced(a, b, named);
     a_missing_file_is_reported_not_recreated(a);
     past_versions_stay_listed_and_downloadable(a, b);
     kinds_separate_files_and_attachment_bytes_survive(a, b);
@@ -243,7 +269,7 @@ fn the_fake_remote_meets_the_contract() {
     let a = FakeRemote::new();
     let b = a.clone();
     // The default fake behaves like Drive; tests switch it to conditional writes.
-    contract(&a, &b, drive_capabilities());
+    contract(&a, &b, drive_capabilities(), readable);
     a.set_capabilities(RemoteCapabilities {
         conditional_writes: true,
         keeps_revisions: true,
@@ -264,7 +290,20 @@ fn the_drive_adapter_meets_the_contract() {
     let connection = uuid::Uuid::new_v4().to_string();
     let a = DriveRemote::new(&connection, &Vault, &sim);
     let b = DriveRemote::new(&connection, &Vault, &sim);
-    contract(&a, &b, drive_capabilities());
+    contract(&a, &b, drive_capabilities(), readable);
+}
+
+#[test]
+fn the_s3_adapter_meets_the_contract() {
+    let sim = S3Sim::default();
+    let credentials = FakeCredentials::default();
+    let a = S3Remote::new(s3_sim::target(), "ticketd/", &credentials, &sim).unwrap();
+    let b = S3Remote::new(s3_sim::target(), "ticketd/", &credentials, &sim).unwrap();
+    let conditional = RemoteCapabilities {
+        conditional_writes: true,
+        keeps_revisions: true,
+    };
+    contract(&a, &b, conditional, from_key);
 }
 
 #[test]
