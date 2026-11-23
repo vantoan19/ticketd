@@ -13,6 +13,8 @@ query LinearConfiguredTeams($teams: [ID!]!, $first: Int!, $after: String) {
   teams(first: $first, after: $after, filter: { id: { in: $teams } }) {
     nodes {
       id
+      name
+      key
     }
     pageInfo {
       ...LinearPage
@@ -225,6 +227,7 @@ fragment LinearIssue on Issue {
     type
   }
   creator {
+    id
     displayName
   }
   assignee {
@@ -244,4 +247,44 @@ fragment LinearIssue on Issue {
 fragment LinearPage on PageInfo {
   hasNextPage
   endCursor
+}
+
+mutation LinearPublish($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      ...LinearIssue
+    }
+  }
+}
+
+query LinearLocate($id: String!) {
+  issue(id: $id) {
+    ...LinearIssue
+  }
+}
+
+query LinearDestinationTeam($team: String!) {
+  team(id: $team) {
+    id
+    key
+    name
+  }
+}
+
+query LinearPublicationSearch($team: ID!, $since: DateTimeOrDuration!, $first: Int!, $after: String) {
+  issues(
+    first: $first
+    after: $after
+    includeArchived: true
+    orderBy: createdAt
+    filter: { team: { id: { eq: $team } }, createdAt: { gte: $since } }
+  ) {
+    nodes {
+      ...LinearIssue
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
 }

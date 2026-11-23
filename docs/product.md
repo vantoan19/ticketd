@@ -437,6 +437,10 @@ and extensions use the same ticket authority and refresh workflows
   before any retry so no second issue is created. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
+  Linear publishes to one of the connection’s selected teams. Desktop shows the
+  team name and key. On the CLI, pass the team UUID from `--preview` as
+  `--destination` when more than one team is configured. The Linear key must
+  allow issue creation.
 - If an issue disappears or becomes unavailable, ticketd keeps its status, content,
   and local work and shows a warning. **Take ownership** makes it local and stops
   synchronization.

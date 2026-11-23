@@ -111,6 +111,28 @@ impl Graphql<'_> {
         variables: Value,
         path: &[&str],
     ) -> Result<T, ExtensionError> {
+        self.send(operation, variables, path, false)
+    }
+
+    pub(crate) fn create_issue<T: DeserializeOwned>(
+        &self,
+        input: Value,
+    ) -> Result<T, ExtensionError> {
+        self.send(
+            "LinearPublish",
+            json!({"input": input}),
+            &["issueCreate"],
+            true,
+        )
+    }
+
+    fn send<T: DeserializeOwned>(
+        &self,
+        operation: &str,
+        variables: Value,
+        path: &[&str],
+        publishing: bool,
+    ) -> Result<T, ExtensionError> {
         if self.context.is_canceled() {
             return Err(ExtensionError::new(
                 ErrorCode::NotSent,
@@ -133,6 +155,10 @@ impl Graphql<'_> {
                 ExtensionError::new(code, "could not reach the Linear API")
             })?;
         let status = response.status().as_u16();
+        // The GraphQL read error codes do not establish when a mutation failed.
+        if publishing && !(200..300).contains(&status) {
+            return Err(unconfirmed_creation());
+        }
         let retry_after = response
             .headers()
             .get("retry-after")
@@ -155,6 +181,9 @@ impl Graphql<'_> {
         let envelope: Envelope =
             serde_json::from_slice(&bytes).map_err(|_| failure(ErrorCode::Protocol))?;
         if !envelope.errors.is_empty() {
+            if publishing {
+                return Err(unconfirmed_creation());
+            }
             let code = envelope
                 .errors
                 .iter()
@@ -249,6 +278,13 @@ impl GraphqlError {
                 _ => None,
             })
     }
+}
+
+fn unconfirmed_creation() -> ExtensionError {
+    ExtensionError::new(
+        ErrorCode::Unavailable,
+        "Linear did not confirm whether it created the issue",
+    )
 }
 
 fn failure(code: ErrorCode) -> ExtensionError {

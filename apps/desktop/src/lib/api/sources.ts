@@ -291,6 +291,7 @@ const publicationPreviewSchema = lazySchema(() =>
     provider_name: z.string(),
     destination: z.string().nullable(),
     destinations: z.array(z.string()),
+    destination_labels: z.record(z.string(), z.string()).optional(),
     title: z.string(),
     body: z.string(),
     /** Identifies this title, description and destination; handed back to publish exactly this. */

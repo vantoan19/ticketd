@@ -934,7 +934,7 @@ refresh at once, with serial calls within a connection. Failure backoff and
 persisted rate-limit holds apply to each connection. CLI refresh and status
 take a connection ID and work without the desktop.
 
-Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
+Publication cannot be atomic across the external tracker and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
 eligibility and saves the attempt as `in_flight` with the exact title,
 description and destination. It binds the attempt to the original connection
@@ -948,7 +948,10 @@ its lease or `unresolved`: the ticket stays local and a second create is
 refused until the attempt is resolved. Replaying a request for an already
 published ticket returns it without calling the connector. The attempt remains
 readable on a restored device without the original binding. An unavailable
-connection cannot establish that the original create failed.
+connection cannot establish that the original create failed. Recovery uses the
+connection’s stable account identity to surface other issues the account created
+in the search window. Linear uses team UUIDs throughout publication and retains
+human-readable team labels in its connection’s derived configuration for preview.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only

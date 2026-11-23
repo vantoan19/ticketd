@@ -222,6 +222,7 @@ impl Connector for FakeSource {
                         format: ValueFormat::OwnerName,
                         message: DESTINATION_FORMAT_MESSAGE.into(),
                     }),
+                    ..DestinationRules::default()
                 },
                 partitions,
                 discovery_scope: strings(config, "labels").join(","),

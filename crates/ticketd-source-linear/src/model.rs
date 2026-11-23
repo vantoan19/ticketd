@@ -76,21 +76,34 @@ impl State {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Issue {
     pub(crate) id: Uuid,
-    identifier: String,
-    url: String,
-    title: String,
-    description: Option<String>,
-    created_at: String,
+    pub(crate) identifier: String,
+    pub(crate) url: String,
+    pub(crate) title: String,
+    pub(crate) description: Option<String>,
+    pub(crate) created_at: String,
     updated_at: String,
     pub(crate) trashed: Option<bool>,
     pub(crate) team: Id,
     pub(crate) state: State,
-    creator: Option<PersonName>,
+    pub(crate) creator: Option<Person>,
     assignee: Option<PersonName>,
     pub(crate) labels: Option<Page<Named>>,
 }
 
 impl Issue {
+    // The mutation receipt and search already carry an issue. Further reads can
+    // fail after creation, while a later refresh can fill in remaining labels.
+    pub(crate) fn into_publication_issue(mut self) -> ExternalIssue {
+        let labels = self
+            .labels
+            .take()
+            .into_iter()
+            .flat_map(|page| page.nodes)
+            .map(|label| label.name)
+            .collect();
+        self.into_external(labels, None)
+    }
+
     pub(crate) fn into_external(
         self,
         labels: Vec<String>,
