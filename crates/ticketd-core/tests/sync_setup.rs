@@ -601,6 +601,10 @@ struct Hooked<'a> {
 }
 
 impl RemoteStorage for Hooked<'_> {
+    fn capabilities(&self) -> ticketd_core::sync::remote::RemoteCapabilities {
+        self.remote.capabilities()
+    }
+
     fn folders(&self) -> Result<Vec<ticketd_core::sync::remote::RemoteFolder>, RemoteError> {
         self.remote.folders()
     }

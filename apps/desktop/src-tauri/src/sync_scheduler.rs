@@ -347,8 +347,8 @@ mod tests {
         sync::{
             SyncRecovery,
             remote::{
-                FakeRemote, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
-                RemoteOp, RemoteRevision,
+                FakeRemote, RemoteCapabilities, RemoteContent, RemoteError, RemoteFile,
+                RemoteFolder, RemoteKey, RemoteOp, RemoteRevision,
             },
         },
     };
@@ -364,6 +364,9 @@ mod tests {
     }
 
     impl RemoteStorage for Gated {
+        fn capabilities(&self) -> RemoteCapabilities {
+            self.inner.capabilities()
+        }
         fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
             self.inner.folders()
         }
