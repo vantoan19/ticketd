@@ -39,7 +39,8 @@ const rules = [
   },
   // The desktop build bundles the chat bridge, and the chat-host fixtures replay its protocol.
   { match: startsWith("apps/chat-bridge-claude/"), ...BOTH },
-  { match: startsWith("apps/desktop/src-tauri/"), frontend: false, rust: true },
+  // Frontend tests and the docs site read files here too (tauri.conf.json, icons/).
+  { match: startsWith("apps/desktop/src-tauri/"), frontend: true, rust: true },
   { match: startsWith("apps/desktop/"), frontend: true, rust: false },
   // The website is an npm workspace; its tests and Pages check run in the frontend shards.
   { match: startsWith("apps/docs/"), frontend: true, rust: false },
@@ -48,6 +49,8 @@ const rules = [
   { match: startsWith("skills/"), frontend: false, rust: true },
   // A Rust test parses the examples in this document (tests/sync_files.rs).
   { match: oneOf("docs/sync-file-format.md"), frontend: false, rust: true },
+  // The docs site includes this file (apps/docs/content/docs/reference/glossary.mdx).
+  { match: oneOf("GLOSSARY.md"), frontend: true, rust: false },
   // Documentation and files only people or the fast checks read.
   {
     match: (p) =>
@@ -220,6 +223,7 @@ export const JOBS = {
   clippy: { name: "Clippy", lane: "rust" },
   rust: { name: "Rust tests", lane: "rust" },
   ui: { name: "Frontend tests", lane: "frontend" },
+  pages: { name: "Windows Pages check", lane: "frontend" },
 };
 
 function readPlan(needs) {

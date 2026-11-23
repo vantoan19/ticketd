@@ -149,8 +149,9 @@ runs:
         DEB_DIR: ${{ steps.apt-key.outputs.dir }}
         CACHE_HIT: ${{ steps.apt-cache.outputs.cache-hit }}
       run: |
+        # Three retries and ten-second timeouts: a stalled mirror fails fast and is tried again.
         printf '%s\n' \
-          'Acquire::Retries "0";' \
+          'Acquire::Retries "3";' \
           'Acquire::http::Timeout "10";' \
           'Acquire::https::Timeout "10";' \
           | sudo tee /etc/apt/apt.conf.d/80-ci-timeouts > /dev/null

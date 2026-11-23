@@ -24,10 +24,19 @@ function run(args, { nextest = true, env = {} } = {}) {
 echo "cargo $*" >> "${log}"`,
   );
   stub("npm", `echo "npm $*" >> "${log}"`);
+  // The fast job runs these tests with real CI variables; scripts/check must not write to them.
+  const inherited = { ...process.env };
+  for (const name of [
+    "GITHUB_OUTPUT",
+    "GITHUB_STEP_SUMMARY",
+    "PLAN_LABELS",
+    "GITHUB_EVENT_NAME",
+  ])
+    delete inherited[name];
   const result = spawnSync(check, args, {
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...inherited,
       CI: "",
       ...env,
       PATH: `${dir}${path.delimiter}${process.env.PATH}`,
@@ -139,7 +148,9 @@ test("clippy runs on its own", () => {
 test("ui partition k/n becomes a vitest shard in every workspace", () => {
   const { status, calls } = run(["ui", "--partition", "2/3"]);
   assert.equal(status, 0);
-  assert.deepEqual(calls, ["npm run test --workspaces -- --shard 2/3"]);
+  assert.deepEqual(calls, [
+    "npm run test --workspaces -- --shard 2/3 --passWithNoTests",
+  ]);
 });
 
 test("ui without a partition runs the whole frontend suite", () => {

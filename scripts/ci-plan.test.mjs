@@ -13,6 +13,19 @@ const script = path.join(
   "ci-plan.mjs",
 );
 
+// The fast job runs these tests with real CI variables; a child process must not write to them.
+const childEnv = (extra = {}) => {
+  const env = { ...process.env };
+  for (const name of [
+    "GITHUB_OUTPUT",
+    "GITHUB_STEP_SUMMARY",
+    "PLAN_LABELS",
+    "GITHUB_EVENT_NAME",
+  ])
+    delete env[name];
+  return { ...env, ...extra };
+};
+
 const pr = (files, extra = {}) =>
   makePlan({ event: "pull_request", labels: [], files, ...extra });
 const lanes = (plan) => ({ frontend: plan.frontend, rust: plan.rust });
@@ -21,14 +34,13 @@ const FRONTEND = { frontend: true, rust: false };
 const RUST = { frontend: false, rust: true };
 const BOTH = { frontend: true, rust: true };
 
-// One row per line of the table in the agreed design (docs/adr/0022 and the Fast CI spec).
+// One row per line of the table in the agreed design (docs/adr/0023-ci-runs-the-jobs-a-change-needs.md and the Fast CI spec).
 const table = [
   // No lane: only the fast checks run.
   ["docs/architecture.md", NONE],
   ["docs/agents/quality.md", NONE],
   ["README.md", NONE],
   ["CONTRIBUTING.md", NONE],
-  ["GLOSSARY.md", NONE],
   ["LICENSE", NONE],
   [".github/ISSUE_TEMPLATE/bug.yml", NONE],
   [".github/pull_request_template.md", NONE],
@@ -45,15 +57,19 @@ const table = [
   ["apps/desktop/package.json", FRONTEND],
   ["apps/docs/content/docs/install.mdx", FRONTEND],
   ["apps/docs/check-pages.mjs", FRONTEND],
+  // The docs site includes the glossary (content/docs/reference/glossary.mdx).
+  ["GLOSSARY.md", FRONTEND],
   // Embedded by Rust at compile time: both.
   ["apps/desktop/src/features/chats/client.ts", BOTH],
   ["apps/desktop/src/features/chats/Transcript.tsx", BOTH],
   ["apps/desktop/public/startup-fallback.js", BOTH],
   // The chat bridge is bundled into the desktop build: both.
   ["apps/chat-bridge-claude/src/index.ts", BOTH],
+  // Frontend tests and the docs site read files under src-tauri (tauri.conf.json, icons): both.
+  ["apps/desktop/src-tauri/src/lib.rs", BOTH],
+  ["apps/desktop/src-tauri/tauri.conf.json", BOTH],
+  ["apps/desktop/src-tauri/icons/32x32.png", BOTH],
   // Rust only.
-  ["apps/desktop/src-tauri/src/lib.rs", RUST],
-  ["apps/desktop/src-tauri/tauri.conf.json", RUST],
   ["crates/ticketd-core/src/lib.rs", RUST],
   ["skills/ticketd/SKILL.md", RUST],
   // A Rust test reads this document.
@@ -236,7 +252,7 @@ function cli(dir, args, env = {}) {
   const result = spawnSync(process.execPath, [script, ...args], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, GITHUB_OUTPUT: outputFile, ...env },
+    env: childEnv({ GITHUB_OUTPUT: outputFile, ...env }),
   });
   const outputs = Object.fromEntries(
     readFileSync(outputFile, "utf8")
@@ -355,6 +371,7 @@ const allSuccess = {
   clippy: "success",
   rust: "success",
   ui: "success",
+  pages: "success",
 };
 
 test("verdict: a full run passes when every job succeeded", () => {
@@ -370,6 +387,7 @@ test("verdict: a docs-only run passes when only the fast checks ran", () => {
     clippy: "skipped",
     rust: "skipped",
     ui: "skipped",
+    pages: "skipped",
   };
   assert.deepEqual(verdict(needsFor(docsPlan(), results)), {
     ok: true,
@@ -383,6 +401,7 @@ test("verdict: a frontend-only run passes with the Rust lane skipped", () => {
     clippy: "skipped",
     rust: "skipped",
     ui: "success",
+    pages: "success",
   };
   assert.deepEqual(verdict(needsFor(frontendPlan(), results)), {
     ok: true,
@@ -403,8 +422,35 @@ test("verdict: an unplanned job that ran fails, because the plan and the workflo
     clippy: "skipped",
     rust: "skipped",
     ui: "success",
+    pages: "skipped",
   };
   assert.equal(verdict(needsFor(docsPlan(), results)).ok, false);
+});
+
+test("verdict: the Windows Pages check is planned with the frontend lane, so a skip fails", () => {
+  const results = {
+    fast: "success",
+    clippy: "skipped",
+    rust: "skipped",
+    ui: "success",
+    pages: "skipped",
+  };
+  const { ok, problems } = verdict(needsFor(frontendPlan(), results));
+  assert.equal(ok, false);
+  assert.match(problems.join("\n"), /pages: skipped/);
+  // And an unplanned run of it fails too.
+  assert.equal(
+    verdict(
+      needsFor(docsPlan(), {
+        fast: "success",
+        clippy: "skipped",
+        rust: "skipped",
+        ui: "skipped",
+        pages: "success",
+      }),
+    ).ok,
+    false,
+  );
 });
 
 test("verdict: a failed or cancelled job always fails, planned or not", () => {
@@ -419,6 +465,7 @@ test("verdict: a failed or cancelled job always fails, planned or not", () => {
       clippy: "skipped",
       rust: "skipped",
       ui: result,
+      pages: "skipped",
     };
     assert.equal(verdict(needsFor(docsPlan(), docsOnly)).ok, false, result);
   }
@@ -502,7 +549,7 @@ test("renderPlan says why everything runs", () => {
 function runResult(env) {
   return spawnSync(process.execPath, [script, "result"], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: childEnv(env),
   });
 }
 
@@ -520,6 +567,7 @@ test("cli result: exits 0 when the plan was followed", () => {
     clippy: "skipped",
     rust: "skipped",
     ui: "skipped",
+    pages: "skipped",
   });
   const result = runResult({ NEEDS_JSON: JSON.stringify(needs) });
   assert.equal(result.status, 0, result.stdout + result.stderr);
