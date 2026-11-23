@@ -187,15 +187,15 @@ pub(super) fn tool_detail(kind: &str, item: &Value) -> ProviderDetail {
         "imageView" => &["path"],
         _ => &["status"],
     };
+    let mut bytes = Value::Object(compact.clone()).to_string().len();
     for field in fields {
         if let Some(value) = item.get(field) {
-            compact.insert((*field).to_owned(), value.clone());
+            let field_bytes = field.len() + value.to_string().len() + 4;
+            if bytes + field_bytes <= MAX_PROVIDER_DETAIL_BYTES {
+                compact.insert((*field).to_owned(), value.clone());
+                bytes += field_bytes;
+            }
         }
-    }
-    let mut bytes = Value::Object(compact.clone()).to_string().len();
-    if bytes > MAX_PROVIDER_DETAIL_BYTES {
-        compact.retain(|key, _| key == "type" || key == "status");
-        bytes = Value::Object(compact.clone()).to_string().len();
     }
     if let Some(changes) = item["changes"].as_array().filter(|_| kind == "fileChange") {
         let mut files = Vec::new();

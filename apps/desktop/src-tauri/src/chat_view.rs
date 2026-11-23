@@ -823,9 +823,22 @@ fn asked_to_step(step: &Step) -> Option<(&'static str, &'static str, String)> {
             .join(", ")
     };
     match step.kind {
+        "read" if step.variant == Some("list") => {
+            Some(("wants to list", "asked to list", targets()))
+        }
+        "read" => Some(("wants to read", "asked to read", targets())),
+        "search" => Some(("wants to search for", "asked to search for", targets())),
         "run" => Some(("wants to run", "asked to run", step.target.clone())),
         "edit" | "create" => Some(("wants to edit", "asked to edit", targets())),
         "delete" => Some(("wants to delete", "asked to delete", targets())),
+        "web" if step.variant == Some("fetch") => {
+            Some(("wants to open", "asked to open", targets()))
+        }
+        "web" => Some((
+            "wants to search the web for",
+            "asked to search the web for",
+            targets(),
+        )),
         _ => None,
     }
 }
@@ -2290,6 +2303,14 @@ mod tests {
             title(&edit),
             (
                 "Codex asked to edit".to_owned(),
+                Some("src/a.ts".to_owned())
+            )
+        );
+        let read = one(&codex_command("cat src/a.ts", "inProgress", 0));
+        assert_eq!(
+            title(&read),
+            (
+                "Codex asked to read".to_owned(),
                 Some("src/a.ts".to_owned())
             )
         );
