@@ -37,6 +37,8 @@
 //! compare-and-set on the stored status, in one write transaction that holds no
 //! network call.
 
+use std::collections::BTreeMap;
+
 use pulldown_cmark::{Event, Parser, Tag};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -177,6 +179,9 @@ pub struct PublicationPreview {
     pub destination: Option<String>,
     /// Destinations the saved configuration suggests.
     pub destinations: Vec<String>,
+    /// Display labels keyed by canonical destination.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub destination_labels: BTreeMap<String, String>,
     /// Sent exactly as shown.
     pub title: String,
     pub body: String,
@@ -995,6 +1000,7 @@ impl Workspace {
             fingerprint: fingerprint(connection_id, &ticket.title, &ticket.body, destination.as_deref()),
             destination,
             destinations,
+            destination_labels: rules.map(|rules| rules.destination_labels.clone()).unwrap_or_default(),
             title: ticket.title,
             internal_attachments: publication_attachment_links(&self.connection, &ticket.body)?,
             body: ticket.body,
@@ -1497,7 +1503,7 @@ impl Workspace {
                     engine.find_published(
                         &attempt.provider,
                         &source.saved.config,
-                        &search_for(&attempt, Some(&source.saved.account)),
+                        &search_for(&attempt, &source.account_key),
                     )
                 }),
                 None => Err(publication_connection_missing()),
@@ -1647,7 +1653,7 @@ impl Workspace {
         };
         let source = publication_connection(&self.connection, &attempt)?
             .ok_or_else(|| unverified(publication_connection_missing()))?;
-        let saved = source.saved.clone();
+        let saved = &source.saved;
         let engine = verified_publication_engine(engine, &source).map_err(unverified)?;
         match &options.resolution {
             Resolution::Attach { issue } => {
@@ -1709,7 +1715,7 @@ impl Workspace {
                 &engine,
                 &ticket,
                 &attempt,
-                &saved,
+                &source,
                 options.now.as_deref(),
                 options.agent.as_deref(),
             ),
@@ -1932,7 +1938,7 @@ impl Workspace {
         engine: &Engine,
         ticket: &Subject,
         attempt: &PublicationAttempt,
-        saved: &super::SavedSource,
+        source: &ConfiguredSource,
         now: Option<&str>,
         agent: Option<&str>,
     ) -> Result<PublishOutcome, Error> {
@@ -1957,8 +1963,8 @@ impl Workspace {
         let found = engine
             .find_published(
                 &attempt.provider,
-                &saved.config,
-                &search_for(attempt, Some(&saved.account)),
+                &source.saved.config,
+                &search_for(attempt, &source.account_key),
             )
             .map_err(unverified)?;
         if !found.matches.is_empty() {
@@ -2036,9 +2042,9 @@ fn without_retry_advice(message: &str) -> String {
 /// Failure code of an attempt a person confirmed was never created.
 const RULED_OUT: &str = "ruled_out";
 
-fn search_for(attempt: &PublicationAttempt, account: Option<&str>) -> PublicationSearch {
+fn search_for(attempt: &PublicationAttempt, account: &str) -> PublicationSearch {
     PublicationSearch {
-        account: account.map(str::to_owned),
+        account: Some(account.to_owned()),
         request: PublishRequest {
             title: attempt.title.clone(),
             body: attempt.body.clone(),

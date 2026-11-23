@@ -412,7 +412,7 @@ fn check_publication(
     let search = PublicationSearch {
         request,
         since,
-        account: Some(connection.connection.account.clone()),
+        account: Some(connection.connection.account_key().to_owned()),
     };
     let found = engine.find_published(provider, config, &search)?;
     require(

@@ -266,6 +266,13 @@
           "description": "Whether destination matching ignores ASCII case.",
           "type": "boolean"
         },
+        "destination_labels": {
+          "description": "Optional display labels keyed by canonical destination.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "destinations": {
           "description": "Accepted destinations in their canonical spelling. Empty when the\nconnector cannot enumerate them.",
           "type": "array",
@@ -932,7 +939,7 @@
       "type": "object",
       "properties": {
         "account": {
-          "description": "The account the source was connected as. Whatever that account created in\nthe window is a candidate, whatever its text now says: a teammate or an\nautomation may have edited the title and description since.",
+          "description": "The account ID, or its label when the source has no separate ID. Whatever it created in\nthe window is a candidate, whatever its text now says: a teammate or an\nautomation may have edited the title and description since.",
           "type": [
             "string",
             "null"

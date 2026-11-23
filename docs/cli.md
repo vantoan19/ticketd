@@ -98,6 +98,12 @@ required observations. `--publish DESTINATION` opts into one tracker write.
 
 For publishing a local ticket and resolving an uncertain attempt, open the
 bundled source guide with `ticketd skills get sources`.
+For Linear, pass the team UUID from the preview when choosing between configured
+teams. Replace `linear` with your connection ID if it differs.
+
+```sh
+ticketd source publish T-KQ1 --connection linear --destination TEAM_UUID --preview
+```
 
 ## Atomic batches
 

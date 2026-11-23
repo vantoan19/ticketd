@@ -1,6 +1,7 @@
 mod api;
 mod linear;
 mod model;
+mod publication;
 
 use ticketd_source_sdk::serve_stdio;
 

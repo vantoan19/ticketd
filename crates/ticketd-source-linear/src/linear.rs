@@ -1,17 +1,19 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 use ticketd_source_sdk::{
     ChoiceOption, ConfigValues, ConnectionCheck, ConnectionInfo, Conversation,
-    DerivedConfiguration, DiscoveryPage, DiscoveryRequest, ErrorCode, Extension, ExtensionError,
-    ExternalIssue, ExternalRef, FieldIssue, RequestContext, SourceDescription, StateCategory,
+    DerivedConfiguration, DestinationRules, DiscoveryPage, DiscoveryRequest, ErrorCode, Extension,
+    ExtensionError, ExternalIssue, ExternalRef, FieldIssue, PublicationCandidates,
+    PublicationSearch, PublishRequest, RequestContext, SourceDescription, StateCategory,
 };
 use uuid::Uuid;
 
 use crate::{
     api::{Client, Graphql, Page},
     model::{Comment, History, Id, Issue, Named, PROVIDER, Person, RelatedIssue, Relation, Team},
+    publication,
 };
 
 pub(crate) struct Linear {
@@ -73,17 +75,22 @@ impl Extension for Linear {
         let teams = required_teams(config)?;
         let api = self.api(context, config)?;
         let connection: LinearConnection = api.request("LinearConnection", json!({}), &[])?;
-        let visible: HashSet<_> = api
-            .all::<Id>(
+        let destination_labels: BTreeMap<_, _> = api
+            .all::<Team>(
                 "LinearConfiguredTeams",
                 json!({"teams": teams}),
                 &["teams"],
                 None,
             )?
             .into_iter()
-            .map(|team| team.id)
+            .filter(|team| teams.contains(&team.id))
+            .map(|team| (team.id.to_string(), format!("{} ({})", team.name, team.key)))
             .collect();
-        if teams.iter().any(|team| !visible.contains(team)) {
+        let destinations: Vec<_> = teams.iter().map(Uuid::to_string).collect();
+        if destinations
+            .iter()
+            .any(|team| !destination_labels.contains_key(team))
+        {
             return Err(ExtensionError::configuration(vec![FieldIssue::for_field(
                 "team",
                 "choose teams this Linear API key can read",
@@ -104,9 +111,14 @@ impl Extension for Linear {
                 site: connection.organization.id.to_string(),
             },
             derived: DerivedConfiguration {
-                partitions: teams.iter().map(Uuid::to_string).collect(),
+                partitions: destinations.clone(),
                 discovery_scope: scope,
-                ..DerivedConfiguration::default()
+                publication: DestinationRules {
+                    destinations,
+                    destination_labels,
+                    case_insensitive: true,
+                    validation: None,
+                },
             },
         })
     }
@@ -213,6 +225,37 @@ impl Extension for Linear {
             ));
         }
         external_issue(&api, issue)
+    }
+
+    fn publish(
+        &self,
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, ExtensionError> {
+        let teams = required_teams(config)?;
+        publication::publish(&self.api(context, config)?, &teams, request)
+    }
+
+    fn locate(
+        &self,
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Result<ExternalIssue, ExtensionError> {
+        let api = self.api(context, config)?;
+        let issue = publication::locate(&api, destination, text)?;
+        external_issue(&api, issue)
+    }
+
+    fn find_published(
+        &self,
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, ExtensionError> {
+        publication::find_published(&self.api(context, config)?, search)
     }
 
     fn conversation(

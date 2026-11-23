@@ -2,13 +2,13 @@
   "provider": "linear",
   "name": "Linear",
   "contract_version": 2,
-  "capabilities": ["discover", "fetch", "comments"],
+  "capabilities": ["discover", "fetch", "comments", "publish"],
   "schema": {
     "fields": [
       {
         "key": "api_key",
         "label": "Personal API key",
-        "help": "Use a key that can read the team you want to sync.",
+        "help": "Use a key that can read these teams. To publish, also grant issue creation permission.",
         "required": true,
         "type": "secret"
       },
@@ -97,13 +97,13 @@
     "sign_in": {
       "terminal_hint": "Set the API key with TICKETD_SOURCE_<CONNECTION>_API_KEY.",
       "desktop_hint": "Enter a personal API key in Settings → Sources.",
-      "desktop_instruction": "Create a personal API key with read access to your Linear team."
+      "desktop_instruction": "Create a personal API key with read access to your teams and issue creation permission if you publish from ticketd."
     },
     "target": {
       "field": "team",
-      "label": "Teams",
+      "label": "Team",
       "example": "Engineering",
-      "choose": "Choose teams",
+      "choose": "Choose a team",
       "add": "Add a team"
     },
     "discovery_note": "Sync issues from selected Linear teams, optionally filtered by assignee, labels, or project.",

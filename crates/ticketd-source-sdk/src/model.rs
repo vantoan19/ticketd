@@ -1,4 +1,6 @@
 //! Source-independent values exchanged on the connector contract.
+use std::collections::BTreeMap;
+
 use crate::{ConfigSchema, ConfigValues, ValueFormat};
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +86,9 @@ pub struct DestinationRules {
     /// Accepted destinations in their canonical spelling. Empty when the
     /// connector cannot enumerate them.
     pub destinations: Vec<String>,
+    /// Optional display labels keyed by canonical destination.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub destination_labels: BTreeMap<String, String>,
     /// Whether destination matching ignores ASCII case.
     pub case_insensitive: bool,
     pub validation: Option<DestinationValidation>,
@@ -311,7 +316,7 @@ pub struct PublicationSearch {
     pub request: PublishRequest,
     /// RFC 3339 instant before which the attempt cannot have created anything.
     pub since: String,
-    /// The account the source was connected as. Whatever that account created in
+    /// The account ID, or its label when the source has no separate ID. Whatever it created in
     /// the window is a candidate, whatever its text now says: a teammate or an
     /// automation may have edited the title and description since.
     #[serde(default)]

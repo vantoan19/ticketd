@@ -949,6 +949,7 @@ impl GithubConnector {
                     format: ValueFormat::OwnerName,
                     message: DESTINATION_FORMAT_MESSAGE.into(),
                 }),
+                ..DestinationRules::default()
             },
         }
     }

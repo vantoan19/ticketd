@@ -335,6 +335,9 @@ export function PublishDialog({
   const name = preview?.provider_name ?? connector?.name ?? provider;
   const target = connector?.presentation?.target;
   const destinationPrompt = target?.choose ?? "Choose a destination";
+  const destinationLabels = new Map(
+    Object.entries(preview?.destination_labels ?? {}),
+  );
   const blocked = phase.kind === "blocked";
   const recovering = phase.kind === "unresolved" || phase.kind === "confirmed";
   return (
@@ -542,7 +545,7 @@ export function PublishDialog({
                   <SelectGroup>
                     {preview.destinations.map((item) => (
                       <SelectItem key={item} value={item}>
-                        {item}
+                        {destinationLabels.get(item) ?? item}
                       </SelectItem>
                     ))}
                   </SelectGroup>

@@ -184,6 +184,72 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
+test("Linear team choices show names and publish to the selected UUID", async () => {
+  const engineering = "20000000-0000-4000-8000-000000000001";
+  const design = "20000000-0000-4000-8000-000000000002";
+  const linear = {
+    ...githubEntry,
+    connector: {
+      ...githubEntry.connector,
+      provider: "linear",
+      name: "Linear",
+      presentation: {
+        ...githubEntry.connector.presentation,
+        target: {
+          field: "team",
+          label: "Team",
+          example: "Engineering",
+          choose: "Choose a team",
+          add: "Add a team",
+        },
+      },
+    },
+    saved: { ...githubEntry.saved, provider: "linear", name: "Linear" },
+  };
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "list_sources") return [linear];
+    if (command === "show_ticket") return ticket();
+    if (command === "preview_publication") {
+      return {
+        ...eligible,
+        provider: "linear",
+        provider_name: "Linear",
+        destination: args.destination,
+        destinations: [engineering, design],
+        destination_labels: {
+          [engineering]: "Engineering (ENG)",
+          [design]: "Design (DES)",
+        },
+      };
+    }
+    if (command === "publish_ticket")
+      return { attempt: attempt({ state: "succeeded" }), replayed: false };
+    return [];
+  });
+  rail(ticket());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Publish to Linear/ }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: /Publish T-KQ1 to Linear/,
+  });
+  const select = await within(dialog).findByRole("combobox", { name: "Team" });
+  fireEvent.keyDown(select, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: "Design (DES)" }));
+  await waitFor(() => expect(select.textContent).toContain("Design (DES)"));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Publish issue" }),
+  );
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
+      reference: "T-KQ1",
+      provider: "linear",
+      destination: design,
+      expectedFingerprint: "00000000000000a1",
+    }),
+  );
+});
+
 test("Publish stays in place while the preview reads again after an edit", async () => {
   bridgeAnswers(eligible);
   const props = {
