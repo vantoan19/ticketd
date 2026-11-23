@@ -31,7 +31,9 @@ npm run preview --workspace @ticketd/docs -- --host 127.0.0.1 --port 5483
 
 Open <http://127.0.0.1:5483/ticketd/>. The upload directory is `apps/docs/build/client`. It contains the page indexes, router data, search index, Markdown resources and a native `404.html`. Unset `DOCS_PROJECT_PAGES` to build at the domain root.
 
-The Quality workflow builds and checks the Pages layout on pull requests. After Quality passes for the current `main` commit, the Website workflow builds that commit and deploys the checked artifact through the `github-pages` environment. Publishing, editing or withdrawing a GitHub Release refreshes the site from `main`. The nightly Quality run also refreshes it. A maintainer can run the Website workflow manually on `main`.
+The Quality workflow checks the Pages layout on Linux and Windows. When Quality passes on `main`, the Website workflow requests a fresh build of that commit. Publishing, editing or withdrawing a GitHub Release also requests a refresh, as does the nightly Quality run. A maintainer can run Website manually on `main`.
+
+Deployments wait in the `github-pages` queue. The newest refresh number for the current commit owns publication, so a slow build cannot replace newer release information. If that refresh fails, the published site stays available and a maintainer can rerun Website.
 
 ## Drawing and demonstration
 
@@ -56,7 +58,7 @@ npm run capture --workspace @ticketd/docs
 
 The reference images use Chromium from the locked Playwright package. Setting `CAPTURE_BROWSER_CHANNEL=chrome` uses the installed Chrome and its own text and icon rendering. The CLI must be the debug binary in this checkout’s `target/debug`. Build with `CARGO_TARGET_DIR` set to this checkout’s `target` when your shell uses a shared target directory.
 
-The capture script creates an empty temporary directory under `target`, selects its database through the debug CLI’s workspace override and verifies that selection before seeding. It sets a fresh device identity and uses the CLI to create the Plan, spec, tickets, dependencies, followed ticket, agent update and evidence. At all four steps it checks the live demonstration’s ticket statuses, readiness and Plan counts against the core. Ticket references include the device code, so the ticket marked T-12 on the cart appears as T-LG12 in the app.
+The capture script creates an empty temporary directory under `target`, selects its database through the debug CLI’s workspace override and verifies that selection before seeding. It sets a fresh device identity and uses the CLI to create the Plan, spec, tickets, dependencies, followed ticket, agent update and evidence. At all four steps it checks the live demonstration’s ticket statuses, readiness and Plan counts against the core. The cart, demonstration and desktop screenshots all use the same device-qualified reference, T-LG12.
 
 Playwright opens the current desktop React app at 2× in both themes. It takes each screenshot in a 1280 × 740 window and again at a narrow native width. The narrow window is 480 pixels wide, or 640 for Plan Flow so two lanes stay visible. A capture-only adapter supplies the CLI snapshots to the desktop bridge and enables experimental Chat for the Automation examples. No external account is involved.
 

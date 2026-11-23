@@ -13,28 +13,27 @@ permissions: {}
 
 jobs:
   refresh:
-    name: Refresh public release information
-    if: github.event_name == 'release'
+    name: Request a refresh from main
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_run' &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule') &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_sha == github.sha)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
     steps:
-      # Release events run on a tag. Always publish the website from reviewed main.
+      # Releases arrive on tags. Give every refresh a numbered dispatch on main.
       - run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
         env:
           GH_TOKEN: ${{ github.token }}
 
   build:
     name: Prepare the Pages artifact
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'workflow_run' &&
-        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule') &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_repository.full_name == github.repository &&
-        github.event.workflow_run.head_sha == github.sha))
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -64,7 +63,9 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    concurrency: github-pages
+    concurrency:
+      group: github-pages
+      queue: max
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -74,7 +75,7 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Check this build still matches green main
+      - name: Check this is the latest refresh of green main
         id: current
         env:
           GH_TOKEN: ${{ github.token }}
@@ -84,12 +85,17 @@ jobs:
             echo "A newer main commit will publish after Quality passes."
             exit 0
           fi
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow quality.yml --branch main --commit "$GITHUB_SHA" --event push --status success --limit 1 --json conclusion --jq length)
-            if [[ "$passed" == 0 ]]; then
-              echo "The main push has not passed Quality. Its successful run will publish."
-              exit 0
-            fi
+          # A newer dispatch supersedes older release snapshots for this same
+          # commit, even when their builds finish and join the queue out of order.
+          latest=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow pages.yml --branch main --commit "$GITHUB_SHA" --event workflow_dispatch --limit 1 --json number --jq '.[0].number // error("Missing website refresh")')
+          if [[ "$latest" != "$GITHUB_RUN_NUMBER" ]]; then
+            echo "A newer website refresh owns this deployment."
+            exit 0
+          fi
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow quality.yml --branch main --commit "$GITHUB_SHA" --status success --json event --jq 'any(.[]; .event == "push" or .event == "schedule")')
+          if [[ "$passed" != true ]]; then
+            echo "Quality has not passed for this main commit. Its successful run will request a refresh."
+            exit 0
           fi
           echo "publish=true" >> "$GITHUB_OUTPUT"
       - id: deployment

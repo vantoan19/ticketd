@@ -31,8 +31,8 @@ export function PocketWorld() {
       <At p={[-114, 50, 0]}>
         <Plate w={45} d={43} h={4} shadow />
         <Spec p={[1, 0, 4]} w={42} h={29} title="Plan" />
-        <Ticket p={[4, 15, 4]} w={19} d={12} refId="T-9" />
-        <Ticket p={[22, 28, 4]} w={19} d={12} refId="T-13" />
+        <Ticket p={[4, 15, 4]} w={19} d={12} refId="T-LG9" />
+        <Ticket p={[22, 28, 4]} w={19} d={12} refId="T-LG13" />
         <Line
           points={[
             [13, 28, 4],
@@ -46,8 +46,8 @@ export function PocketWorld() {
       <At p={[52, -109, 0]}>
         <Plate w={48} d={29} h={4} shadow />
         <Gate p={[2, 0, 4]} w={34} h={21} label="Review" />
-        <Ticket p={[18, 19, 4]} refId="T-11" w={22} d={14} />
-        <Ticket p={[18, 19, 8]} refId="T-11" w={22} d={14} />
+        <Ticket p={[18, 19, 4]} refId="T-LG11" w={22} d={14} />
+        <Ticket p={[18, 19, 8]} refId="T-LG11" w={22} d={14} />
       </At>
       <At p={[-13, -4, 9]}>
         <Plate w={53} d={33} h={3} shadow />

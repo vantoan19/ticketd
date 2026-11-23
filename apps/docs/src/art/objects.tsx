@@ -23,12 +23,14 @@ export function Ticket({
   w?: number;
   d?: number;
 }) {
+  const inset = Math.min(5, w * 0.1);
+  const labelSize = Math.min(w / 4, (w - 2 * inset) / (refId.length * 0.62));
   return (
     <At p={p}>
       <Plate w={w} d={d} h={4} tone={active ? "blue" : "paper"} shadow>
         <Label
-          p={[5, d * 0.66, 4]}
-          size={w * 0.25}
+          p={[inset, d * 0.66, 4]}
+          size={labelSize}
           color={active ? "var(--on-blue)" : paint.ink}
         >
           {refId}

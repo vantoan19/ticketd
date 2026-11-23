@@ -2,6 +2,7 @@ import { useState } from "react";
 import sprite from "virtual:ticketd-art";
 import { stationIds as ids } from "../art/world-layout";
 import { useProgressiveControls } from "../components/useHydrated";
+import { featureRef } from "../demo/workspace";
 import { CaptureLink } from "./ProductImage";
 import { ProofScreen } from "./ProofScreen";
 import { stationPin, stops, type Stop } from "./stops";
@@ -207,12 +208,8 @@ export function Journey() {
     <div className="journey">
       <div className="journey-guide site-width">
         <div>
-          <span className="ticket-key">T-12</span>
-          <p>
-            Follow one ticket through the workspace.
-            <br />
-            <span>In the app, its full reference is T-LG12.</span>
-          </p>
+          <span className="ticket-key">{featureRef}</span>
+          <p>Follow one ticket through the workspace.</p>
         </div>
         <nav aria-label="Journey stops">
           {stops.map((s, i) => (

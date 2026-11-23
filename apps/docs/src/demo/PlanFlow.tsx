@@ -48,7 +48,7 @@ export function PlanFlow({
       reference={ticket.reference}
       title={ticket.title}
       aria-label={undefined}
-      icon={<StatusIcon status={ticket.status} size={12} decorative />}
+      icon={<StatusIcon status={ticket.status} size={12} />}
       trailing={<AvailabilityMark availability={ticket.availability} />}
       reason={flow.reason(ticket)}
       selected={ticket.reference === featureRef}

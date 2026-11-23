@@ -1,3 +1,4 @@
+import { featureRef } from "../demo/workspace.ts";
 import { At, Grid, Line, Outline, paint, Plate } from "./primitives.tsx";
 import {
   AgentCart,
@@ -197,7 +198,7 @@ export function Sprite() {
           <AgentCart />
         </g>
         <g id="done-ticket">
-          <Ticket refId="T-12" active w={40} d={27} />
+          <Ticket refId={featureRef} active w={40} d={27} />
         </g>
         {stationNames.map((name, i) => (
           <g key={name} id={"station-" + i}>

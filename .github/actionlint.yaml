@@ -1,0 +1,6 @@
+# GitHub supports concurrency.queue. actionlint 1.7.12 still reports this one
+# schema error: https://github.com/rhysd/actionlint/issues/657
+paths:
+  .github/workflows/pages.yml:
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'

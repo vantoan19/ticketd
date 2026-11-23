@@ -50,7 +50,7 @@ export const captures = {
   },
   inbox: {
     title: "Inbox",
-    alt: "Needs you contains a review request for the followed ticket. Updates contains the agent’s note and the earlier status change.",
+    alt: "Needs you contains a review request for the followed ticket. Updates contains the agent’s update and the earlier status change.",
     frame: [226, 0, 815],
     phoneWidth: 312,
   },

@@ -2,6 +2,7 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { bridgeDefault } from "../../desktop/src/test/bridge-defaults";
 import type {
   AuthoredActivity,
+  DependencyGraph,
   Evidence,
   FindFilter,
   Ticket,
@@ -29,7 +30,7 @@ interface Seed {
   )[];
   evidence: Evidence[];
   context: { relationships: unknown };
-  refs: unknown;
+  planGraph: DependencyGraph;
 }
 declare global {
   interface Window {
@@ -204,7 +205,7 @@ mockIPC(
       case "show_plan":
         return plan;
       case "plan_dependency_graph":
-        return workspace.refs;
+        return workspace.planGraph;
       case "show_ticket":
         return found?.ticket;
       case "count_tickets":

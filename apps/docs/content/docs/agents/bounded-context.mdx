@@ -68,16 +68,20 @@ when the ticket has no updates.
 The bounded result tells you what exists. Fetch full content only when you need
 it:
 
-| You need                | Run                                        |
-| ----------------------- | ------------------------------------------ |
-| The whole ticket        | `ticketd show T-LG12`                      |
-| The whole activity feed | `ticketd activity list T-LG12`             |
-| One complete update     | `ticketd activity show T-LG12 ACTIVITY_ID` |
-| A page of a Document    | `ticketd document read DOCUMENT_ID`        |
-| All evidence            | `ticketd evidence list T-LG12`             |
+| You need                    | Run                                        |
+| --------------------------- | ------------------------------------------ |
+| The whole ticket            | `ticketd show T-LG12`                      |
+| A page of the activity feed | `ticketd activity list T-LG12`             |
+| One complete update         | `ticketd activity show T-LG12 ACTIVITY_ID` |
+| A page of a Document        | `ticketd document read DOCUMENT_ID`        |
+| A page of evidence          | `ticketd evidence list T-LG12`             |
 
 Each Document in the `documents` scope carries a `fetch` field with the exact
 command to read it.
+
+`activity list` and `evidence list` return up to 50 entries by default. To read every entry, keep
+the same `--limit` and advance `--offset` by the number of entries returned.
+Stop when the page is empty.
 
 ## Errors
 

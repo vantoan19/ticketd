@@ -63,7 +63,7 @@ export function ProofScreen({
   // incoming responsive image loads. A second click supersedes the first.
   const [shown, setShown] = useState(selected);
   const [failure, setFailure] = useState<"failed" | "retrying">();
-  const [retry, setRetry] = useState({ index: -1, attempt: 0 });
+  const [attempts, setAttempts] = useState<Record<number, number>>({});
   const retryButton = useRef<HTMLButtonElement>(null);
   const currentSelection = useRef(selected);
   useLayoutEffect(() => {
@@ -114,7 +114,8 @@ export function ProofScreen({
                 phone={frameFor(item, true)}
                 alt={captures[item.screen].title + ". " + item.description}
                 pending={index !== shown}
-                attempt={index === retry.index ? retry.attempt : 0}
+                awaitingLoad={index === selected && busy}
+                attempt={attempts[index] ?? 0}
                 onLoad={() => settle(false)}
                 onError={() => settle(true)}
               />
@@ -130,7 +131,10 @@ export function ProofScreen({
                 onClick={() => {
                   if (busy) return;
                   setFailure("retrying");
-                  setRetry({ index: shown, attempt: retry.attempt + 1 });
+                  setAttempts((previous) => ({
+                    ...previous,
+                    [shown]: (previous[shown] ?? 0) + 1,
+                  }));
                 }}
               >
                 {busy ? "Loading preview…" : "Reload preview"}

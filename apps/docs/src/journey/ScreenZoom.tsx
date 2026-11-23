@@ -53,8 +53,8 @@ export function ScreenZoom({
   const titleId = useId();
   const resolvedTheme = useImageTheme();
   const source = imageUrl(screen, resolvedTheme ?? "light", width, compact);
-  const [retry, setRetry] = useState({ source: "", attempt: 0 });
-  const attempt = retry.source === source ? retry.attempt : 0;
+  const [attempts, setAttempts] = useState<Record<string, number>>({});
+  const attempt = attempts[source] ?? 0;
   const view: CaptureView | undefined =
     resolvedTheme === "light" || resolvedTheme === "dark"
       ? { tone: resolvedTheme, compact }
@@ -116,7 +116,10 @@ export function ScreenZoom({
     if (failure) {
       // Reopening this screenshot should reuse its successful retry.
       setFailure("retrying");
-      setRetry({ source, attempt: attempt + 1 });
+      setAttempts((previous) => ({
+        ...previous,
+        [source]: (previous[source] ?? 0) + 1,
+      }));
     } else if (zoomed) fitWindow();
     else setZoomed(true);
   }

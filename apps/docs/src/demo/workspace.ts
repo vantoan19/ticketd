@@ -1,28 +1,30 @@
+export const featureRef = "T-LG12";
+export const dependentRef = "T-LG13";
+
 export const stages = [
   {
     label: "Plan it",
     status: "Todo",
-    worldDescription:
-      "A cart waits beside the Plan table with the blue ticket T-12.",
-    caption: "T-LG12 is ready. The alerting ticket waits for the limiter.",
+    worldDescription: `A cart waits beside the Plan table with the blue ticket ${featureRef}.`,
+    caption: `${featureRef} is ready. The alerting ticket waits for the limiter.`,
   },
   {
     label: "Hand it off",
     status: "In progress",
-    worldDescription: "The cart has brought T-12 to the agent dock.",
-    caption: "T-LG12 moves to In progress under coding-agent’s name.",
+    worldDescription: `The cart has brought ${featureRef} to the agent dock.`,
+    caption: `${featureRef} moves to In progress under coding-agent’s name.`,
   },
   {
     label: "See the update",
     status: "In review",
-    worldDescription: "The cart stops at the Inbox with T-12 ready for review.",
+    worldDescription: `The cart stops at the Inbox with ${featureRef} ready for review.`,
     caption: "The tests pass. An update and a review request reach your Inbox.",
   },
   {
     label: "Approve",
     status: "Done",
-    worldDescription: "The cart has unloaded T-12 onto the Done stack.",
-    caption: "T-LG12 is Done. T-LG13 is ready to start.",
+    worldDescription: `The cart has unloaded ${featureRef} onto the Done stack.`,
+    caption: `${featureRef} is Done. ${dependentRef} is ready to start.`,
   },
 ] as const;
 export type Stage = 0 | 1 | 2 | 3;
@@ -34,8 +36,6 @@ export const report =
   "The limiter passes the boundary tests. Ready for review.";
 export const specification =
   "Protect sign-in from repeated failures. Count attempts inside a sliding window, report the result, and show when a person can try again.";
-export const featureRef = "T-LG12";
-export const dependentRef = "T-LG13";
 
 export const featuredTicket = {
   reference: featureRef,

@@ -143,6 +143,13 @@ jobs:
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: npm run build
+      - name: Check nested Pages URLs on Windows
+        if: runner.os == 'Windows'
+        env:
+          DOCS_PROJECT_PAGES: "1"
+        run: |
+          npm run build:docs
+          node apps/docs/check-pages.mjs
       # Report every failing test binary, not only the first, so one run shows them all.
       - name: Test Rust workspace
         run: cargo test --workspace --locked --no-fail-fast

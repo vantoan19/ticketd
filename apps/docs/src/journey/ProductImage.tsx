@@ -87,6 +87,7 @@ export function ProofPhoto({
   phone,
   alt,
   pending,
+  awaitingLoad,
   attempt,
   onLoad,
   onError,
@@ -96,6 +97,7 @@ export function ProofPhoto({
   phone: Frame;
   alt: string;
   pending: boolean;
+  awaitingLoad: boolean;
   attempt: number;
   onLoad: () => void;
   onError: () => void;
@@ -104,12 +106,12 @@ export function ProofPhoto({
   const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
     // A prerendered image can fail before hydration. Returning to an already
-    // loaded photo can also make it the pending selection without a new event.
+    // loaded photo or retry can select its bitmap without another load event.
     const current = image.current;
     if (!theme || !current?.currentSrc || !current.complete) return;
     if (!current.naturalWidth) onError();
-    else if (pending) onLoad();
-  }, [theme, pending, onLoad, onError]);
+    else if (awaitingLoad) onLoad();
+  }, [theme, awaitingLoad, onLoad, onError]);
   const sizes =
     "auto, (max-width: 759px) min(90vw, 590px), (max-width: 1440px) 52vw, 750px";
   // A host may cache a failed image response. Only an explicit retry needs

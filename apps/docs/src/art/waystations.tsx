@@ -1,3 +1,4 @@
+import { featureRef } from "../demo/workspace.ts";
 import { At, Label, Line, Plate, paint } from "./primitives.tsx";
 import { Beacon, Rail, Ticket, Walk } from "./objects.tsx";
 import type { Station } from "./world-layout.ts";
@@ -23,7 +24,7 @@ export function WaysideModel({
       <use href={"#station-" + index} />
       {name === "Plan" && (
         <g opacity="var(--parked-ticket, 1)">
-          <Ticket p={[11, 64, 13]} w={40} d={24} refId="T-12" active />
+          <Ticket p={[11, 64, 13]} w={40} d={24} refId={featureRef} active />
         </g>
       )}
       <At p={[62, 95, 0]}>

@@ -40,10 +40,10 @@ function PlanStation() {
       />
       <Dot p={[38, 76, 13]} r={1.8} />
       <Dot p={[93, 68, 13]} r={1.8} />
-      <Ticket p={[11, 32, 13]} refId="T-9" w={40} d={24} />
-      <Ticket p={[64, 32, 13]} refId="T-13" w={43} d={24} />
+      <Ticket p={[11, 32, 13]} refId="T-LG9" w={40} d={24} />
+      <Ticket p={[64, 32, 13]} refId="T-LG13" w={43} d={24} />
       <Outline x={10} y={64} z={13} w={43} d={26} dash="3 2" />
-      <Ticket p={[70, 67, 13]} refId="T-14" w={43} d={24} />
+      <Ticket p={[70, 67, 13]} refId="T-LG14" w={43} d={24} />
       <Person p={[128, 76, 13]} />
     </>
   );
@@ -230,9 +230,9 @@ export function ReviewDeck() {
     <>
       <Terrace p={[0, 0, 0]} w={145} d={93} h={13} title="Review" />
       <Gate p={[13, 19, 13]} w={61} label="In review" />
-      <Ticket p={[18, 27, 13]} refId="T-9" w={45} d={29} />
+      <Ticket p={[18, 27, 13]} refId="T-LG9" w={45} d={29} />
       {[0, 1, 2].map((i) => (
-        <Ticket key={i} p={[89, 15, 13 + i * 4]} refId="T-11" w={40} d={27} />
+        <Ticket key={i} p={[89, 15, 13 + i * 4]} refId="T-LG11" w={40} d={27} />
       ))}
       <Label p={[91, 53, 13]} size={13}>
         Done

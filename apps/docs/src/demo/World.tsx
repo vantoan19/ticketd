@@ -8,7 +8,7 @@ import {
 } from "../art/world-layout";
 import { project, round } from "../art/geometry";
 import { onWorld, type Pose } from "./vehicle";
-import { stages, type Stage } from "./workspace";
+import { featureRef, stages, type Stage } from "./workspace";
 
 const closingLabelSize = { wide: 16.5, tablet: 16, pocket: 15.5 };
 
@@ -194,7 +194,7 @@ export function World({
             role="img"
             aria-label={
               closing
-                ? "The four stations at rest. The blue ticket T-12 is stacked in Done."
+                ? `The four stations at rest. The blue ticket ${featureRef} is stacked in Done.`
                 : "A raised isometric walkway connects the Plan, agent dock, Inbox and Automation. " +
                   stages[stage].worldDescription
             }

@@ -1,5 +1,6 @@
 import { CallsToAction } from "../components/SiteChrome";
 import { ScreenZoom } from "./ScreenZoom";
+import { featureRef } from "../demo/workspace";
 import { World } from "../demo/World";
 import { siteUrl } from "../links";
 
@@ -9,7 +10,7 @@ export function Destination({ available }: { available: boolean }) {
       <div className="destination-model">
         <div className="destination-panel">
           <div className="destination-status">
-            <span aria-hidden="true">✓</span> T-LG12 <b>Done</b>
+            <span aria-hidden="true">✓</span> {featureRef} <b>Done</b>
             <ScreenZoom
               focus={{ screen: "done", region: "completed" }}
               label="View board"

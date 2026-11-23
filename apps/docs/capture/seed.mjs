@@ -85,7 +85,7 @@ export function seedWorkspace(directory, cli) {
       activity: run("activity", "list", featureRef),
       evidence: run("evidence", "list", featureRef),
       context: run("context", featureRef, "--relationships"),
-      refs: run("graph", featureRef),
+      planGraph: run("graph", "--plan", plan.id),
       info: {
         path: path.basename(database),
         format_version: location.format_version,
@@ -147,6 +147,12 @@ export function seedWorkspace(directory, cli) {
       "Desktop and demonstration ticket states at step " + (stage + 1),
     );
     assert.deepEqual(actual.plan.counts, planCounts(demo));
+    assert.equal(actual.planGraph.total_members, demo.length);
+    assert.deepEqual(
+      actual.planGraph.nodes.map((node) => node.reference).sort(),
+      demo.map((ticket) => ticket.reference).sort(),
+      "The captured Plan graph contains every seeded member",
+    );
   }
   return { planned, working, reported, review, done };
 }

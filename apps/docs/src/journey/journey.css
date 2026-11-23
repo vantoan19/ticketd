@@ -87,10 +87,6 @@
   font-size: 15px;
   line-height: 1.45;
 }
-.journey-guide p span {
-  color: var(--ink-soft);
-  font-size: 13px;
-}
 .journey-guide nav {
   gap: 18px;
 }
