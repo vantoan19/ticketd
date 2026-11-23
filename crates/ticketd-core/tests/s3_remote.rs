@@ -527,14 +527,21 @@ fn stale_uploads_of_the_key_are_aborted_and_other_keys_are_left_alone() {
     // No parts yet: another desktop may have just begun it, so it is left alone.
     let just_begun = bench.sim.begin_upload(&name);
     let other_file = bench.sim.begin_upload(&name);
-    bench
-        .sim
-        .put_part(&name, &other_file, 1, &noise(SMALL_PARTS as usize));
+    // `noise` starts from the same seed each call, so a part of it alone would be this file's
+    // first part, which the adapter resumes. One byte changed makes it another file's.
+    let mut foreign = noise(SMALL_PARTS as usize);
+    foreign[0] ^= 1;
+    bench.sim.put_part(&name, &other_file, 1, &foreign);
     // `<key>0` starts with this key but is another key.
     let neighbour_key = format!("{name}0");
     let neighbour = bench.sim.begin_upload(&neighbour_key);
 
     put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    assert_eq!(
+        bench.sim.count("DELETE", &format!("uploadId={other_file}")),
+        1,
+        "the other file's upload is aborted, not resumed"
+    );
     let pending = bench.sim.pending();
     assert_eq!(pending.len(), 2);
     assert_eq!(pending[0].id, just_begun);
@@ -553,6 +560,9 @@ fn an_upload_another_desktop_just_began_is_not_aborted() {
     let theirs = bench.sim.begin_upload(&name);
 
     put(&parted(&bench), &folder, &key, None, &bytes).unwrap();
+    // One look at its parts decides: a second look could see a part another writer added
+    // since the first, and abort the upload under it.
+    assert_eq!(bench.sim.count("GET", &format!("uploadId={theirs}")), 1);
     let pending = bench.sim.pending();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].id, theirs);
@@ -583,6 +593,46 @@ fn a_part_is_never_smaller_than_the_five_mib_s3_requires() {
 }
 
 // ---- file identity ----------------------------------------------------------------------
+
+#[test]
+fn a_write_to_a_bucket_whose_versioning_was_suspended_is_refused_and_the_check_runs_again() {
+    // The bucket passed its check, then an administrator suspended Versioning: S3 writes the
+    // one `null` version, which the next write replaces, so it is no stable revision.
+    for parts in [false, true] {
+        let bench = Bench::new();
+        let remote = parted(&bench);
+        remote.check_bucket().unwrap();
+        let folder = bench.folder();
+        bench.sim.versioning(s3_sim::Versioning::Suspended);
+        let (key, bytes) = if parts {
+            (attachment(), over_the_limit())
+        } else {
+            (ticket(), b"one".to_vec())
+        };
+        let Err(RemoteError::Other(message)) = put(&remote, &folder, &key, None, &bytes) else {
+            panic!("a write that has no version is not a success");
+        };
+        assert!(message.contains("Versioning"), "{message}");
+        assert_eq!(
+            remote.check_bucket(),
+            Err(BucketCheckError::VersioningOff { suspended: true })
+        );
+    }
+}
+
+#[test]
+fn a_null_version_that_was_there_before_versioning_is_still_read() {
+    let bench = Bench::new();
+    let (remote, folder, key) = (bench.remote(), bench.folder(), ticket());
+    bench.sim.versioning(s3_sim::Versioning::Suspended);
+    bench
+        .sim
+        .put_foreign(&object(&folder, &key), b"before versioning");
+    bench.sim.versioning(s3_sim::Versioning::Enabled);
+    let listed = remote.list(&folder).unwrap();
+    assert_eq!(listed[0].version, "null");
+    assert_eq!(get(&remote, &folder, &key, "null"), b"before versioning");
+}
 
 #[test]
 fn deleting_and_writing_again_is_another_file_and_removing_the_marker_restores_the_first() {
@@ -1079,6 +1129,38 @@ fn the_transport_sends_only_to_the_configured_bucket() {
     assert!(!minio.allows("GET", "http://localhost:9000/ticketd-test/../other/key"));
     assert!(!minio.allows("GET", &aws.url(key, &[])));
 
+    // Signed requests and the files in them cross the network only over TLS; plain http is for
+    // a service on this computer.
+    for local in [
+        "http://127.0.0.1:9000",
+        "http://[::1]:9000",
+        "http://LOCALHOST:9000",
+    ] {
+        assert!(
+            S3Target::new("ticketd-test", "us-east-1", Some(local)).is_ok(),
+            "{local}"
+        );
+    }
+    for remote in [
+        "http://nas.example.com:9000",
+        "http://10.0.0.5:9000",
+        "http://s3.localhost.example.com",
+    ] {
+        assert_eq!(
+            S3Target::new("ticketd-test", "us-east-1", Some(remote)),
+            Err(S3TargetError::InsecureEndpoint),
+            "{remote}"
+        );
+    }
+    assert!(
+        S3Target::new(
+            "ticketd-test",
+            "us-east-1",
+            Some("https://nas.example.com:9000")
+        )
+        .is_ok()
+    );
+
     // A bucket name with a dot is not in the host, which a certificate would not cover.
     let dotted = S3Target::new("my.bucket", "eu-west-1", None).unwrap();
     assert_eq!(
@@ -1087,6 +1169,40 @@ fn the_transport_sends_only_to_the_configured_bucket() {
     );
     assert!(dotted.allows("GET", &dotted.url("k", &[])));
     assert!(!dotted.allows("GET", "https://s3.eu-west-1.amazonaws.com/other/k"));
+}
+
+#[test]
+fn a_prefix_is_checked_as_it_will_be_used() {
+    // `.` and `..` segments are resolved by the URL, which would leave the bucket's path.
+    for refused in ["../", "a/./b/", "a/../b", "./"] {
+        assert_eq!(
+            checked_prefix(refused),
+            Err(S3TargetError::Prefix),
+            "{refused}"
+        );
+    }
+    // Dots inside a name are ordinary.
+    for (given, kept) in [
+        ("team.v2/", "team.v2/"),
+        (".hidden", ".hidden/"),
+        ("a..b/", "a..b/"),
+        ("", ""),
+    ] {
+        assert_eq!(checked_prefix(given).unwrap(), kept);
+    }
+    // The limit is on what is stored, with its trailing `/` added.
+    let long = "a".repeat(512);
+    assert_eq!(checked_prefix(&long), Err(S3TargetError::Prefix));
+    let fits = "a".repeat(511);
+    assert_eq!(checked_prefix(&fits).unwrap().len(), 512);
+    assert_eq!(checked_prefix(&format!("{fits}/")).unwrap().len(), 512);
+    assert_eq!(
+        checked_prefix(&format!("{long}/")),
+        Err(S3TargetError::Prefix)
+    );
+    // Whatever passes can be used.
+    let bench = Bench::new();
+    assert!(S3Remote::new(target(), &fits, &bench.credentials, &bench.sim).is_ok());
 }
 
 #[test]

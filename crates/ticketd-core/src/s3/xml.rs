@@ -58,6 +58,13 @@ fn items(xml: &[u8]) -> Option<Vec<Item>> {
     path.is_empty().then_some(out)
 }
 
+/// [`items`] of an answer whose root element is `root`. An HTTP 200 from a proxy or a captive
+/// page is well-formed too, and must not read as an empty listing.
+fn rooted(xml: &[u8], root: &str) -> Option<Vec<Item>> {
+    let found = items(xml)?;
+    matches!(found.first(), Some(Item::Open(name)) if name == root).then_some(found)
+}
+
 /// The five entities XML predefines; character references are resolved by the reader.
 fn entity(name: &str) -> Option<&'static str> {
     Some(match name {
@@ -150,7 +157,7 @@ pub(crate) fn versions_page(xml: &[u8]) -> Option<VersionsPage> {
     }
     let mut page = VersionsPage::default();
     let mut open: Option<Draft> = None;
-    for item in items(xml)? {
+    for item in rooted(xml, "ListVersionsResult")? {
         match item {
             Item::Open(name) if name == "Version" || name == "DeleteMarker" => {
                 open = Some(Draft::default());
@@ -214,7 +221,7 @@ pub(crate) struct PrefixesPage {
 pub(crate) fn prefixes_page(xml: &[u8]) -> Option<PrefixesPage> {
     let mut page = PrefixesPage::default();
     let mut truncated = false;
-    for item in items(xml)? {
+    for item in rooted(xml, "ListBucketResult")? {
         if let Item::Text(parent, name, text) = item {
             match (parent.as_str(), name.as_str()) {
                 ("CommonPrefixes", "Prefix") => page.prefixes.push(text),
@@ -258,7 +265,7 @@ pub(crate) struct UploadsPage {
 pub(crate) fn uploads_page(xml: &[u8]) -> Option<UploadsPage> {
     let mut page = UploadsPage::default();
     let mut open: Option<(String, String)> = None;
-    for item in items(xml)? {
+    for item in rooted(xml, "ListMultipartUploadsResult")? {
         match item {
             Item::Open(name) if name == "Upload" => open = Some(Default::default()),
             Item::Close(name) if name == "Upload" => {
@@ -316,7 +323,7 @@ pub(crate) fn parts_page(xml: &[u8]) -> Option<PartsPage> {
     }
     let mut page = PartsPage::default();
     let mut open: Option<Draft> = None;
-    for item in items(xml)? {
+    for item in rooted(xml, "ListPartsResult")? {
         match item {
             Item::Open(name) if name == "Part" => open = Some(Draft::default()),
             Item::Close(name) if name == "Part" => {
@@ -433,6 +440,49 @@ mod tests {
     fn a_truncated_page_without_markers_is_unreadable() {
         let body = b"<ListVersionsResult><IsTruncated>true</IsTruncated></ListVersionsResult>";
         assert!(versions_page(body).is_none());
+    }
+
+    #[test]
+    fn a_listing_needs_its_own_result_root_and_an_empty_one_is_still_a_listing() {
+        // A proxy's HTTP 200 page is not an empty listing.
+        let wrong = b"<html><body>Welcome</body></html>";
+        assert!(versions_page(wrong).is_none());
+        assert!(prefixes_page(wrong).is_none());
+        assert!(uploads_page(wrong).is_none());
+        assert!(parts_page(wrong).is_none());
+        // Another operation's answer is not this one's either.
+        assert!(versions_page(b"<ListBucketResult/>").is_none());
+
+        let empty = |root: &str| {
+            format!(
+                "<{root} xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><IsTruncated>false</IsTruncated></{root}>"
+            )
+        };
+        assert!(
+            versions_page(empty("ListVersionsResult").as_bytes())
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        assert!(
+            prefixes_page(empty("ListBucketResult").as_bytes())
+                .unwrap()
+                .prefixes
+                .is_empty()
+        );
+        assert!(
+            uploads_page(empty("ListMultipartUploadsResult").as_bytes())
+                .unwrap()
+                .uploads
+                .is_empty()
+        );
+        assert!(
+            parts_page(empty("ListPartsResult").as_bytes())
+                .unwrap()
+                .parts
+                .is_empty()
+        );
+        assert!(versions_page(b"<ListVersionsResult/>").is_some());
     }
 
     #[test]

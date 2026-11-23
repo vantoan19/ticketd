@@ -329,7 +329,13 @@ impl State {
         checksum: Option<String>,
     ) -> (String, String) {
         let modified = self.now();
-        let id = format!("v{}", self.counter);
+        // AWS version ids are opaque and can hold characters a URL must encode, such as +. A
+        // bucket whose Versioning was suspended writes the one `null` version.
+        let id = if self.versioning == Versioning::Suspended {
+            "null".to_owned()
+        } else {
+            format!("v{}+opaque", self.counter)
+        };
         let version = Version {
             id: id.clone(),
             bytes,
