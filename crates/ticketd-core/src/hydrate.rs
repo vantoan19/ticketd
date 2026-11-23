@@ -269,14 +269,14 @@ pub(crate) fn rows(connection: &Connection, rows: &mut [TicketRow]) -> Result<()
     let mut latest = latest_updates(connection, &ids)?;
     let mut pills = grouped(
         connection,
-        "SELECT i.ticket_id, i.provider, i.locator, i.display FROM external_identities i
+        "SELECT i.ticket_id, i.provider, i.locator, i.display, i.provider_name FROM external_identities i
            JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id
           WHERE o.authority = 'external' AND i.ticket_id IN (SELECT value FROM json_each(?1))",
         &ids,
         |row| {
             let (provider, locator, display): (String, String, String) =
                 (row.get(1)?, row.get(2)?, row.get(3)?);
-            Ok((provider, locator, display))
+            Ok((provider, locator, display, row.get::<_, Option<String>>(4)?))
         },
     )?;
     let mut descriptions = HashMap::new();
@@ -291,7 +291,8 @@ pub(crate) fn rows(connection: &Connection, rows: &mut [TicketRow]) -> Result<()
         row.parent = first(&mut parents, id);
         row.duplicate_of = first(&mut duplicate_of, id).map(|(_, reference)| reference);
         row.latest_update = first(&mut latest, id);
-        row.source = if let Some((provider, locator, display)) = first(&mut pills, id) {
+        row.source = if let Some((provider, locator, display, cached_name)) = first(&mut pills, id)
+        {
             let description = match descriptions.entry(provider.clone()) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::hash_map::Entry::Vacant(entry) => {
@@ -302,7 +303,7 @@ pub(crate) fn rows(connection: &Connection, rows: &mut [TicketRow]) -> Result<()
                 crate::source::display_parts(description.as_deref(), &provider, &locator, &display);
             Some(SourcePill {
                 provider,
-                provider_name,
+                provider_name: cached_name.unwrap_or(provider_name),
                 place,
                 number,
                 display,

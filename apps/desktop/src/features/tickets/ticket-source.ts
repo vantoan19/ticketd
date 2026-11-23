@@ -109,7 +109,7 @@ export function unavailableNotice(
       detail:
         unavailable.code === "connection_removed"
           ? "The last synced copy and your local work are still here. Sync resumes when a connection discovers this issue again."
-          : "You’re viewing the last synced copy. Add a covering connection in Settings → Sources to refresh this ticket.",
+          : "You’re viewing the last synced copy. Add a connection for this issue in Settings → Sources to refresh it.",
       since: `Since ${since}`,
       canRetry: false,
     };
