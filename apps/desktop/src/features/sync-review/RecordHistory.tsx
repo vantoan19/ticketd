@@ -119,6 +119,8 @@ export function RecordHistory({
   const requestId = useRequestIds();
   useEffect(() => {
     let active = true;
+    // Each source starts without the failure of one read before it.
+    setError(null);
     void (async () => {
       let found: Entry[];
       try {

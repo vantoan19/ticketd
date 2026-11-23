@@ -73,6 +73,8 @@ export function S3Setup() {
   // The list could not be read, which is not the same as the profile not being allowed to.
   const [bucketsFailed, setBucketsFailed] = useState(false);
   const [bucket, setBucket] = useState("");
+  // A bucket typed in, though the profile lists some: it may use more than it owns.
+  const [typing, setTyping] = useState(false);
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
   const { busy, failure, run } = useCommand();
   // A check that started before another one must not put its answer back.
@@ -125,6 +127,7 @@ export function S3Setup() {
     setBuckets(undefined);
     setBucketsFailed(false);
     setBucket("");
+    setTyping(false);
     try {
       const identity = await s3Api.identity(name);
       if (current !== generation.current) return;
@@ -229,7 +232,12 @@ export function S3Setup() {
               buckets={buckets}
               signedIn={signedIn}
               value={bucket}
+              typing={typing}
               onChange={setBucket}
+              onOther={() => {
+                setBucket("");
+                setTyping(true);
+              }}
             />
           }
         />
@@ -357,23 +365,35 @@ function SignInRow({
   }
 }
 
-/** A list when the profile may list buckets, a typed name otherwise. */
+/** The value of the list's last choice, which turns the field into a typed name. */
+const OTHER_BUCKET = "\u0000other";
+
+/** A list when the profile may list buckets, with a way to type one it does not show. */
 function BucketField({
   buckets,
   signedIn,
   value,
+  typing,
   onChange,
+  onOther,
 }: {
   buckets: string[] | null | undefined;
   signedIn: boolean;
   value: string;
+  typing: boolean;
   onChange: (value: string) => void;
+  onOther: () => void;
 }) {
   if (signedIn && buckets === undefined)
     return <Skeleton className="h-10 w-60" />;
-  if (buckets && buckets.length > 0)
+  if (buckets && buckets.length > 0 && !typing)
     return (
-      <Select value={value} onValueChange={onChange}>
+      <Select
+        value={value}
+        onValueChange={(chosen) =>
+          chosen === OTHER_BUCKET ? onOther() : onChange(chosen)
+        }
+      >
         <SelectTrigger id="s3-bucket" className="w-60" title={value}>
           <SelectValue placeholder="Choose a bucket" />
         </SelectTrigger>
@@ -384,6 +404,7 @@ function BucketField({
                 {name}
               </SelectItem>
             ))}
+            <SelectItem value={OTHER_BUCKET}>Another bucket…</SelectItem>
           </SelectGroup>
         </SelectContent>
       </Select>
@@ -397,6 +418,7 @@ function BucketField({
       placeholder="my-bucket"
       spellCheck={false}
       autoComplete="off"
+      autoFocus={typing}
       onChange={(event) => onChange(event.target.value)}
     />
   );

@@ -157,6 +157,32 @@ test("a profile signed in lists its buckets and connects with the chosen bucket 
   );
 });
 
+test("a bucket the list does not show can be typed instead", async () => {
+  // ListBuckets returns the buckets the account owns, not every one it may use.
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(["alpha"]);
+  sync.connectS3.mockResolvedValue(
+    syncStatus({ connection: "choosing", provider: "s3", folder: null }),
+  );
+  show();
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "Another bucket…",
+  );
+  const typed = (await screen.findByLabelText("Bucket")) as HTMLInputElement;
+  expect(typed.tagName).toBe("INPUT");
+  fireEvent.change(typed, { target: { value: " team-bucket " } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect S3" }));
+  await waitFor(() =>
+    expect(sync.connectS3).toHaveBeenCalledWith({
+      bucket: "team-bucket",
+      prefix: "ticketd/",
+      profile: "work",
+    }),
+  );
+});
+
 test("a profile that may not list buckets gets a field to type the name", async () => {
   s3.profiles.mockResolvedValue(ready("work"));
   s3.identity.mockResolvedValue(signedIn);
