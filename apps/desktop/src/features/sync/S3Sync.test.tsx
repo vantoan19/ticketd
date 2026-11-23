@@ -9,12 +9,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { writeClipboard } from "@/lib/clipboard";
+import { revealFailureDetails } from "@/test/failure-details";
 import { s3Api } from "@/lib/s3-api";
 import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
-import { syncSettings, syncStatus } from "./sync-fixtures";
+import { hostFailure, syncSettings, syncStatus } from "./sync-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/clipboard", () => ({ writeClipboard: vi.fn() }));
@@ -124,6 +125,29 @@ test("choosing a Workspace in a bucket uploads this one by default, in the bucke
   expect(screen.queryByText(/Drive/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Start sync" }));
   expect(await screen.findByText("Uploading 3 of 23 files")).toBeTruthy();
+});
+
+test("a bucket the check turns down says why, and is checked again once it is fixed", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.setupOptions
+    .mockRejectedValueOnce(
+      hostFailure("Turn on Versioning for the bucket team-ticketd"),
+    )
+    .mockResolvedValueOnce(options);
+  show();
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Turn on Versioning for the bucket team-ticketd",
+  );
+  // Nothing starts from a bucket that failed its check.
+  expect(
+    screen.getByRole("button", { name: "Start sync" }).hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(
+    await screen.findByRole("radio", { name: /Upload this Workspace/ }),
+  ).toBeTruthy();
+  expect(api.setupOptions).toHaveBeenCalledTimes(2);
 });
 
 test("downloading from the bucket asks first, like a restore", async () => {

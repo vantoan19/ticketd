@@ -348,6 +348,8 @@ function Choose({
     null,
   );
   const provider = status.provider;
+  // Read again when the person asks, once what the failure said is fixed.
+  const [attempt, setAttempt] = useState(0);
   const [choice, setChoice] = useState(UPLOAD);
   const [confirming, setConfirming] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -376,7 +378,7 @@ function Choose({
     return () => {
       current = false;
     };
-  }, [provider]);
+  }, [provider, attempt]);
   const download = options?.existing.find(
     (workspace) => workspace.folder_id === choice,
   );
@@ -391,7 +393,9 @@ function Choose({
     >
       {!options && !readFailure && (
         <p role="status" className="settings-hint">
-          Looking for Workspaces in {s3 ? "the bucket" : "your Drive"}…
+          {s3
+            ? "Checking the bucket and looking for Workspaces…"
+            : "Looking for Workspaces in your Drive…"}
         </p>
       )}
       {options && (
@@ -481,7 +485,16 @@ function Choose({
           Starting sync…
         </p>
       )}
-      <Failure>{readFailure ?? failure}</Failure>
+      <Failure
+        {...(readFailure && {
+          onRetry: () => {
+            setReadFailure(null);
+            setAttempt((count) => count + 1);
+          },
+        })}
+      >
+        {readFailure ?? failure}
+      </Failure>
       <DialogShell
         open={switching}
         onOpenChange={setSwitching}

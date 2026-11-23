@@ -13,7 +13,7 @@ use std::{
 use ticketd_core::{
     s3::{
         AwsCli, AwsCliError, CredentialSource, Credentials, ProfileCredentials, S3Remote, S3Target,
-        S3Transport, UreqS3Transport,
+        S3TargetError, S3Transport, UreqS3Transport, discover_bucket_region,
     },
     sync::{
         S3Binding,
@@ -115,6 +115,10 @@ impl RemoteStorage for S3Storage {
         }
     }
 
+    fn check_usable(&self) -> Result<(), RemoteError> {
+        self.storage()?.check_usable()
+    }
+
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
         self.storage()?.folders()
     }
@@ -179,24 +183,26 @@ impl CredentialSource for Shared {
 fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
     let cli = AwsCli::locate(binding.aws_cli_path.as_deref().map(Path::new)).map_err(cli_error)?;
     let settings = cli.settings(&binding.profile).map_err(cli_error)?;
-    let region = settings.region.ok_or_else(|| {
-        RemoteError::Other(format!(
-            "The AWS profile {} has no region. Set one with: aws configure set region <region> --profile {}",
-            binding.profile, binding.profile
-        ))
-    })?;
-    let target = S3Target::new(&binding.bucket, &region, settings.endpoint_url.as_deref())
-        .map_err(|error| RemoteError::Other(error.to_string()))?;
+    let other = |error: S3TargetError| RemoteError::Other(error.to_string());
+    let endpoint = settings.endpoint_url.as_deref();
+    let credentials = Shared(s3_commands::credentials(&cli, &binding.profile));
+    // An AWS bucket has a region of its own, which the profile's need not be: ask AWS where
+    // it is. Another service has no other region than the profile's.
+    let probe_region = match endpoint {
+        Some(_) => settings.region.as_deref().unwrap_or("us-east-1"),
+        None => "us-east-1",
+    };
+    let probe = S3Target::new(&binding.bucket, probe_region, endpoint).map_err(other)?;
+    let region =
+        discover_bucket_region(&probe, &credentials, &UreqS3Transport::new(probe.clone()))?;
+    let target = S3Target::new(&binding.bucket, &region, endpoint).map_err(other)?;
     // The adapter borrows what it signs and sends with. One value is built per binding for
-    // as long as the app runs, so what is given here lives that long.
-    let credentials: &'static Shared = Box::leak(Box::new(Shared(s3_commands::credentials(
-        &cli,
-        &binding.profile,
-    ))));
+    // as long as the app runs, and only a built one gets here, so what is given lives that long.
+    let credentials: &'static Shared = Box::leak(Box::new(credentials));
     let transport: &'static dyn S3Transport =
         Box::leak(Box::new(UreqS3Transport::new(target.clone())));
-    let remote = S3Remote::new(target.clone(), &binding.prefix, credentials, transport)
-        .map_err(|error| RemoteError::Other(error.to_string()))?;
+    let remote =
+        S3Remote::new(target.clone(), &binding.prefix, credentials, transport).map_err(other)?;
     Ok(Built {
         storage: Arc::new(remote),
         target,
@@ -260,6 +266,66 @@ mod tests {
         storage.ensure_folder("f1", "Team").unwrap();
         assert_eq!(storage.folders().unwrap()[0].id, "f1");
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    /// A bucket the check turns down; nothing else of it is used.
+    struct Unusable;
+
+    impl RemoteStorage for Unusable {
+        fn capabilities(&self) -> RemoteCapabilities {
+            RemoteCapabilities {
+                conditional_writes: true,
+                keeps_revisions: true,
+            }
+        }
+        fn check_usable(&self) -> Result<(), RemoteError> {
+            Err(RemoteError::Other("turn on Versioning".into()))
+        }
+        fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
+            Err(RemoteError::NotFound)
+        }
+        fn ensure_folder(&self, _: &str, _: &str) -> Result<(), RemoteError> {
+            Err(RemoteError::NotFound)
+        }
+        fn list(&self, _: &str) -> Result<Vec<RemoteFile>, RemoteError> {
+            Err(RemoteError::NotFound)
+        }
+        fn download(
+            &self,
+            _: &str,
+            _: &RemoteKey,
+            _: &str,
+            _: &mut dyn std::io::Write,
+        ) -> Result<(), RemoteError> {
+            Err(RemoteError::NotFound)
+        }
+        fn write(
+            &self,
+            _: &str,
+            _: &RemoteKey,
+            _: &str,
+            _: Option<&str>,
+            _: &mut dyn RemoteContent,
+        ) -> Result<RemoteFile, RemoteError> {
+            Err(RemoteError::NotFound)
+        }
+        fn revisions(&self, _: &str, _: &RemoteKey) -> Result<Vec<RemoteRevision>, RemoteError> {
+            Err(RemoteError::NotFound)
+        }
+    }
+
+    #[test]
+    fn the_buckets_own_check_is_what_the_core_gets() {
+        let storage = S3Storage::with_build(binding(), |_| {
+            Ok(Built {
+                storage: Arc::new(Unusable),
+                target: S3Target::new("team-bucket", "us-east-1", None).unwrap(),
+            })
+        });
+        let Err(RemoteError::Other(message)) = storage.check_usable() else {
+            panic!("the bucket's refusal did not reach the core");
+        };
+        assert_eq!(message, "turn on Versioning");
     }
 
     #[test]
