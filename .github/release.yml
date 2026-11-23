@@ -1,0 +1,25 @@
+# Groups GitHub's generated release notes by PR label. The Release workflow puts them under the
+# hand-written section of each draft. A PR matches the first category with one of its labels.
+changelog:
+  exclude:
+    labels:
+      - release
+      - duplicate
+      - invalid
+      - wontfix
+  categories:
+    - title: Features
+      labels:
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+    - title: Accessibility
+      labels:
+        - accessibility
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"
