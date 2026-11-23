@@ -225,7 +225,9 @@ fn unsafe_identifiers_are_refused(a: &dyn RemoteStorage) {
 }
 
 /// `a` and `b` are two devices' handles on the same storage account.
-fn contract(a: &dyn RemoteStorage, b: &dyn RemoteStorage) {
+fn contract(a: &dyn RemoteStorage, b: &dyn RemoteStorage, capabilities: RemoteCapabilities) {
+    assert_eq!(a.capabilities(), capabilities);
+    assert_eq!(b.capabilities(), capabilities);
     folders_are_found_created_once_and_required(a, b);
     a_created_file_is_listed_and_downloaded_by_another_device(a, b);
     a_repeated_create_never_duplicates(a, b);
@@ -240,7 +242,20 @@ fn contract(a: &dyn RemoteStorage, b: &dyn RemoteStorage) {
 fn the_fake_remote_meets_the_contract() {
     let a = FakeRemote::new();
     let b = a.clone();
-    contract(&a, &b);
+    // The default fake behaves like Drive; tests switch it to conditional writes.
+    contract(&a, &b, drive_capabilities());
+    a.set_capabilities(RemoteCapabilities {
+        conditional_writes: true,
+        keeps_revisions: true,
+    });
+    assert!(b.capabilities().conditional_writes);
+}
+
+fn drive_capabilities() -> RemoteCapabilities {
+    RemoteCapabilities {
+        conditional_writes: false,
+        keeps_revisions: true,
+    }
 }
 
 #[test]
@@ -249,7 +264,7 @@ fn the_drive_adapter_meets_the_contract() {
     let connection = uuid::Uuid::new_v4().to_string();
     let a = DriveRemote::new(&connection, &Vault, &sim);
     let b = DriveRemote::new(&connection, &Vault, &sim);
-    contract(&a, &b);
+    contract(&a, &b, drive_capabilities());
 }
 
 #[test]

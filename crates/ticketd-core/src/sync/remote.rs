@@ -132,6 +132,20 @@ pub enum RemoteError {
     Other(String),
 }
 
+/// What a storage guarantees beyond the calls of [`RemoteStorage`], so the
+/// sync engine does only the work the storage needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteCapabilities {
+    /// A [`RemoteStorage::write`] with `expected` is refused, atomically, when
+    /// the file is no longer at that version. When false the storage checks
+    /// the version just before it writes, so another device's write can land
+    /// in between and be replaced as the current version.
+    pub conditional_writes: bool,
+    /// [`RemoteStorage::revisions`] lists past versions and
+    /// [`RemoteStorage::download`] returns them, so a replaced write can be read.
+    pub keeps_revisions: bool,
+}
+
 /// Rewindable bytes, so a write can hash its content and retry a transfer.
 pub trait RemoteContent: Read + Seek {}
 impl<T: Read + Seek> RemoteContent for T {}
@@ -140,6 +154,9 @@ impl<T: Read + Seek> RemoteContent for T {}
 /// chosen by the caller (letters, digits, `-`, `_`; at most 64 bytes).
 /// Implementations are shared between threads and hold no Workspace state.
 pub trait RemoteStorage: Send + Sync {
+    /// What this storage guarantees. It does not change for the life of the value.
+    fn capabilities(&self) -> RemoteCapabilities;
+
     /// Workspace folders this app created in the account.
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError>;
 
