@@ -5,6 +5,8 @@ export function syncStatus(overrides: Partial<SyncStatus> = {}): SyncStatus {
   return {
     connection: "connected",
     account: "you@example.com",
+    provider: "google_drive",
+    s3: null,
     folder: { name: "ticketd · web-app" },
     state: "uploaded",
     // Ninety seconds reads as "1 min ago" whichever second the minute clock last ticked.

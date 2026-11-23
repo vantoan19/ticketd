@@ -34,7 +34,7 @@ versions), the Workspace's health (Format version, a SQLite integrity check, fil
 sizes, and the number of rows in each table), the kinds of warning and error with how
 often they happened, and the last 3 days of logs. Each log line is rebuilt from a short
 list of fields, so any other field is dropped, and your home folder, OS username,
-Workspace path and Drive account email are replaced wherever they appear. IDs are kept.
+Workspace path, Drive account email and AWS identity (its ARN and account ID) are replaced wherever they appear. IDs are kept.
 Nothing is uploaded: ticketd saves the file where you choose, and anything you attach to
 a public GitHub issue can be read by anyone.
 

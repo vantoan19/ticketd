@@ -107,6 +107,8 @@ pub struct KnownValues {
     pub os_username: Option<String>,
     pub workspace_path: Option<String>,
     pub drive_email: Option<String>,
+    /// The AWS identity (ARN) an S3 binding signs in as. Its account ID is replaced too.
+    pub aws_identity: Option<String>,
 }
 
 impl KnownValues {
@@ -120,7 +122,20 @@ impl KnownValues {
                 .find_map(|name| std::env::var(name).ok()),
             workspace_path: workspace_path.map(|path| path.display().to_string()),
             drive_email: drive_email.map(str::to_string),
+            aws_identity: None,
         }
+    }
+
+    /// These values with the AWS identity of an S3 binding added.
+    pub fn with_aws_identity(mut self, identity: Option<&str>) -> Self {
+        self.aws_identity = identity.map(str::to_string);
+        self
+    }
+
+    /// The 12-digit account ID of the ARN in `aws_identity`, as `arn:aws:sts::123456789012:…` has it.
+    fn aws_account_id(&self) -> Option<String> {
+        let id = self.aws_identity.as_deref()?.split(':').nth(4)?;
+        (id.len() == 12 && id.bytes().all(|byte| byte.is_ascii_digit())).then(|| id.to_string())
     }
 }
 
@@ -146,10 +161,13 @@ struct Redactor {
 impl Redactor {
     fn new(known: &KnownValues) -> Self {
         let mut replacements = Vec::new();
+        let aws_account = known.aws_account_id();
         for (value, with) in [
             (&known.workspace_path, "<workspace>"),
             (&known.home, "~"),
             (&known.drive_email, "<drive-account>"),
+            (&known.aws_identity, "<aws-identity>"),
+            (&aws_account, "<aws-account>"),
         ] {
             if let Some(value) = value.as_deref().map(str::trim_end)
                 && !value.is_empty()
