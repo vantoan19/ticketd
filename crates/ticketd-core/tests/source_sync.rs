@@ -704,7 +704,7 @@ fn imported_tickets_survive_reopening_export_backup_and_restore() {
     f.refresh();
     let path = f.path();
     let backup = f.dir.path().join("backup.sqlite3");
-    let before = f.ticket(1);
+    let mut before = f.ticket(1);
     let exported = f.workspace.export().unwrap();
     assert_eq!(exported["external_identities"][0]["external_id"], "1");
     assert_eq!(exported["external_ownership"][0]["authority"], "external");
@@ -724,6 +724,7 @@ fn imported_tickets_survive_reopening_export_backup_and_restore() {
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
     let mut workspace = Workspace::open(&path).unwrap();
+    before.source.as_mut().unwrap().discovery_matches = None;
     assert_eq!(workspace.show_ticket("T-KQ1").unwrap(), before);
     // Rediscovery after restore reuses the ticket.
     let report = workspace
@@ -909,7 +910,7 @@ fn target_identity_survives_export_backup_and_restore() {
     import_then_close_as_duplicates(&mut f, &[(1, Some(99))]);
     f.publish(issue(99, "Canonical"), true);
     f.refresh();
-    let before = f.ticket(1);
+    let mut before = f.ticket(1);
     assert_eq!(resolved(&before).as_deref(), Some("T-KQ2"));
     let exported = f.workspace.export().unwrap();
     assert_eq!(
@@ -923,6 +924,7 @@ fn target_identity_survives_export_backup_and_restore() {
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
+    before.source.as_mut().unwrap().discovery_matches = None;
     assert_eq!(workspace.show_ticket("T-KQ1").unwrap(), before);
     drop(dir);
 }

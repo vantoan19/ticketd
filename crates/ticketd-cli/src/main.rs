@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
@@ -806,7 +808,7 @@ enum SourceCommand {
     },
     /// Operate on a saved connection by its ID
     #[command(external_subcommand)]
-    Connection(Vec<std::ffi::OsString>),
+    Connection(Vec<OsString>),
 }
 
 #[derive(Parser)]
@@ -1371,7 +1373,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         } => {
             let (id, args) = args.split_first().ok_or("provide a source connection ID")?;
             let id = id.to_str().ok_or("the source connection ID must be text")?;
-            let name = std::ffi::OsString::from(format!("ticketd source {id}"));
+            let name = OsString::from(format!("ticketd source {id}"));
             let operation =
                 SourceConnectionArgs::parse_from(std::iter::once(name).chain(args.iter().cloned()));
             Some((id.to_owned(), operation.command))

@@ -548,7 +548,7 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let report = cli.run(&["source", "github", "refresh", "--ticket", "T-KQ1"]);
     assert_eq!(report["updated"], json!(["T-KQ1"]));
     let shown = cli.run(&["show", "T-KQ1"]);
-    assert_eq!(shown["status", "github"], "Done");
+    assert_eq!(shown["status"], "Done");
     assert_eq!(shown["title"], "Real issue, renamed");
     // A failed refresh reports and fails, and leaves the saved content alone.
     let output = cli.command(
@@ -602,7 +602,7 @@ fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_it
     assert!(stderr.contains("GitHub"), "{stderr}");
 
     let changed = cli.run(&[&["change", "T-KQ1", "--status", "In progress"], &agent[..]].concat());
-    assert_eq!(changed["status", "github"], "In progress");
+    assert_eq!(changed["status"], "In progress");
     let activity = cli.run(
         &[
             &["activity", "add", "T-KQ1", "--brief", "Started"],
