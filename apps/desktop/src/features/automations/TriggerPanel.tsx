@@ -382,9 +382,11 @@ export function ConditionRows({
   onChange: (conditions: AutomationCondition[]) => void;
 }) {
   const { entries: sources } = useSources();
-  const providers = sources.map(({ connector }) => connector.provider);
+  const providers = [
+    ...new Set(sources.map(({ connector }) => connector.provider)),
+  ];
   const sourceNote = OR.format([
-    ...sources.map(({ connector }) => connector.name),
+    ...providers.map((provider) => sourceName(provider, sources)),
     "Local",
   ]);
   const set = (index: number, condition: AutomationCondition) =>

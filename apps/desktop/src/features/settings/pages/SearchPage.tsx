@@ -66,16 +66,17 @@ export function SearchPage() {
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
     const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
-    for (const { connector } of sources) {
+    for (const { connector, saved } of sources) {
+      const id = saved?.id ?? connector.provider;
       const section = sourceSection(
-        connector.provider,
-        connector.name,
+        id,
+        saved?.name ?? connector.name,
         connector.presentation?.icon_svg,
       );
       pages.set(section.id, section);
       entries.push(
         ...sourceEntries(
-          connector.provider,
+          id,
           connector.name,
           connector.schema.fields.map(({ label }) => label),
         ),
@@ -110,15 +111,15 @@ export function SearchPage() {
           "section",
           "sections",
         )}. Choose one to open its page.`;
-  const firstSource = sources[0]?.connector;
+  const firstSource = sources[0];
   const shortcuts: { id: SettingsPageId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "backups", label: "Backups" },
     ...(firstSource
       ? [
           {
-            id: `source-${firstSource.provider}` as const,
-            label: firstSource.name,
+            id: `source-${firstSource.saved?.id ?? firstSource.connector.provider}` as const,
+            label: firstSource.saved?.name ?? firstSource.connector.name,
           },
         ]
       : []),
