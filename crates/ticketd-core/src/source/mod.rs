@@ -685,7 +685,7 @@ impl Workspace {
         let derived_configuration = serde_json::to_string(&derived)?;
         let revision = uuid::Uuid::new_v4().to_string();
         let description = serde_json::to_string(&engine.description(provider)?)?;
-        let account_key = account_key(provider, &verified.account);
+        let account_key = verified.account_key();
         crate::write_scope::run(&self.connection, |transaction| {
             if let Some((_, name)) = add {
                 if next_connection_id(transaction, provider)? != id {
@@ -830,14 +830,6 @@ fn next_connection_id(connection: &Connection, provider: &str) -> Result<String,
     Err(Error::NotFound("an unused source connection ID".into()))
 }
 
-fn account_key(provider: &str, account: &str) -> String {
-    if provider == "github" {
-        account.to_ascii_lowercase()
-    } else {
-        account.to_owned()
-    }
-}
-
 // The public settings omit device-local check answers and the compare-and-write revision.
 #[derive(Clone)]
 struct ConfiguredSource {
@@ -845,6 +837,7 @@ struct ConfiguredSource {
     derived: DerivedConfiguration,
     revision: String,
     site: String,
+    account_key: String,
 }
 
 impl ConfiguredSource {
@@ -874,10 +867,7 @@ impl ConfiguredSource {
     }
 
     fn verify_account(&self, actual: &ConnectionInfo) -> Result<(), SourceError> {
-        let provider = &self.saved.provider;
-        if actual.site == self.site
-            && account_key(provider, &actual.account) == account_key(provider, &self.saved.account)
-        {
+        if actual.site == self.site && actual.account_key() == self.account_key {
             return Ok(());
         }
         Err(SourceError::Unauthenticated(format!(
@@ -887,7 +877,7 @@ impl ConfiguredSource {
     }
 }
 
-const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, account, saved_at, derived_configuration, revision, site
+const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, account, saved_at, derived_configuration, revision, site, account_key
      FROM source_connections WHERE (?1 IS NULL OR id = ?1) ORDER BY rowid";
 
 fn configured_source(connection: &Connection, id: &str) -> Result<Option<ConfiguredSource>, Error> {
@@ -928,6 +918,7 @@ fn configured_row(row: &rusqlite::Row<'_>) -> Result<ConfiguredSource, Error> {
         derived,
         revision: row.get(7)?,
         site: row.get(8)?,
+        account_key: row.get(9)?,
     })
 }
 

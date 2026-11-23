@@ -157,6 +157,35 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
 }
 
 #[test]
+fn a_provider_account_id_deduplicates_different_display_names() {
+    let remote = fake_source::FakeSource::default();
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.account_from_assignee = true;
+        remote.account_id = Some("stable-account-1".into());
+    }
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    let alice = values("alice", "owner/repository");
+    let renamed = values("alice-renamed", "owner/repository");
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &alice)
+        .unwrap();
+
+    let duplicate = workspace
+        .add_source_connection(&engine, "fake", None, None, &renamed)
+        .unwrap_err();
+    assert!(duplicate.to_string().contains("already connected"));
+    let updated = workspace
+        .update_source_connection(&engine, "fake", &renamed)
+        .unwrap();
+    assert_eq!(updated.source.account, "alice-renamed");
+    assert_eq!(workspace.saved_sources().unwrap().len(), 1);
+}
+
+#[test]
 fn refresh_prefers_discovery_then_the_first_local_connection_covering_the_part() {
     let remote = fake_source::FakeSource::default();
     {
