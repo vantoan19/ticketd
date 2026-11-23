@@ -115,6 +115,12 @@ test("assembles the release files the v0.1.0 draft had, with matching checksums"
     )
     .join("");
   assert.equal(readFileSync(join(out, "SHA256SUMS"), "utf8"), sums);
+  // The command the install guide gives users.
+  const check = spawnSync("shasum", ["-a", "256", "-c", "SHA256SUMS"], {
+    cwd: out,
+    encoding: "utf8",
+  });
+  assert.equal(check.status, 0, check.stdout + check.stderr);
 
   const manifest = JSON.parse(readFileSync(join(out, "latest.json"), "utf8"));
   assert.equal(manifest.version, version);
